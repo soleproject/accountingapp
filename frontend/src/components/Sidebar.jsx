@@ -9,32 +9,34 @@ import {
 import { TID } from "@/constants/testIds";
 import { useAuth } from "@/lib/auth";
 
+const NAV_COLOR = "#64748B"; // single unified slate color for all left-nav icons
+
 const NAV = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, color: "#6366F1" },
-  { to: "/invoices", label: "Invoices", icon: FileText, color: "#10B981" },
-  { to: "/bills", label: "Bills", icon: Receipt, color: "#F97316" },
-  { to: "/payments", label: "Payments", icon: CreditCard, color: "#10B981" },
-  { to: "/receipts", label: "Receipts", icon: ScrollText, color: "#F97316" },
-  { to: "/reports", label: "Reports", icon: BarChart3, color: "#6366F1" },
-  { to: "/contacts", label: "Contacts", icon: Users, color: "#64748B" },
-  { to: "/connections", label: "Connections", icon: Link2, color: "#3B82F6" },
-  { to: "/communications", label: "Communications", icon: Inbox, color: "#6366F1" },
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/invoices", label: "Invoices", icon: FileText },
+  { to: "/bills", label: "Bills", icon: Receipt },
+  { to: "/payments", label: "Payments", icon: CreditCard },
+  { to: "/receipts", label: "Receipts", icon: ScrollText },
+  { to: "/reports", label: "Reports", icon: BarChart3 },
+  { to: "/contacts", label: "Contacts", icon: Users },
+  { to: "/connections", label: "Connections", icon: Link2 },
+  { to: "/communications", label: "Communications", icon: Inbox },
 ];
 
 const ACCOUNTING = [
-  { to: "/accounting/transactions", label: "Transactions", icon: ArrowLeftRight, color: "#6366F1" },
-  { to: "/accounting/inventory", label: "Inventory", icon: Boxes, color: "#64748B" },
-  { to: "/accounting/assets", label: "Assets", icon: Building2, color: "#3B82F6" },
-  { to: "/accounting/loans", label: "Loans", icon: Wallet, color: "#F97316" },
-  { to: "/accounting/tags", label: "Tags", icon: Tags, color: "#64748B" },
-  { to: "/accounting/reconciliation", label: "Reconciliation", icon: CheckCheck, color: "#10B981" },
-  { to: "/accounting/book-review", label: "Book Review", icon: ClipboardCheck, color: "#F97316" },
-  { to: "/accounting/close-books", label: "Close the Books", icon: CalendarCheck, color: "#10B981" },
-  { to: "/accounting/year-end", label: "Year-End Close", icon: Calendar, color: "#10B981" },
-  { to: "/accounting/chart-of-accounts", label: "Chart of Accounts", icon: ListTree, color: "#3B82F6" },
-  { to: "/accounting/journal-entries", label: "Journal Entries", icon: BookOpen, color: "#6366F1" },
-  { to: "/accounting/general-ledger", label: "General Ledger", icon: Notebook, color: "#6366F1" },
-  { to: "/accounting/rules", label: "AI Rules", icon: Wand2, color: "#6366F1" },
+  { to: "/accounting/transactions", label: "Transactions", icon: ArrowLeftRight },
+  { to: "/accounting/inventory", label: "Inventory", icon: Boxes },
+  { to: "/accounting/assets", label: "Assets", icon: Building2 },
+  { to: "/accounting/loans", label: "Loans", icon: Wallet },
+  { to: "/accounting/tags", label: "Tags", icon: Tags },
+  { to: "/accounting/reconciliation", label: "Reconciliation", icon: CheckCheck },
+  { to: "/accounting/book-review", label: "Book Review", icon: ClipboardCheck },
+  { to: "/accounting/close-books", label: "Close the Books", icon: CalendarCheck },
+  { to: "/accounting/year-end", label: "Year-End Close", icon: Calendar },
+  { to: "/accounting/chart-of-accounts", label: "Chart of Accounts", icon: ListTree },
+  { to: "/accounting/journal-entries", label: "Journal Entries", icon: BookOpen },
+  { to: "/accounting/general-ledger", label: "General Ledger", icon: Notebook },
+  { to: "/accounting/rules", label: "AI Rules", icon: Wand2 },
 ];
 
 export default function Sidebar({ collapsed, onToggle }) {
@@ -42,7 +44,7 @@ export default function Sidebar({ collapsed, onToggle }) {
   const { user } = useAuth();
   const loc = useLocation();
 
-  const Item = ({ to, label, icon: Icon, color, indent = false }) => {
+  const Item = ({ to, label, icon: Icon, color = NAV_COLOR, indent = false }) => {
     const active = loc.pathname === to || loc.pathname.startsWith(to + "/");
     return (
       <NavLink
@@ -87,10 +89,10 @@ export default function Sidebar({ collapsed, onToggle }) {
 
       <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
         {user?.role === "superadmin" && (
-          <Item to="/admin" label="Superadmin" icon={Shield} color="#6366F1" />
+          <Item to="/admin" label="Superadmin" icon={Shield} />
         )}
         {(user?.role === "pro" || user?.role === "superadmin") && (
-          <Item to="/pro/clients" label="Clients" icon={Briefcase} color="#3B82F6" />
+          <Item to="/pro/clients" label="Clients" icon={Briefcase} />
         )}
 
         {NAV.map((n) => (
@@ -103,7 +105,7 @@ export default function Sidebar({ collapsed, onToggle }) {
             onClick={() => setAccOpen(!accOpen)}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-slate-50 text-slate-800"
           >
-            <ListTree size={17} style={{ color: "#3B82F6" }} />
+            <ListTree size={17} style={{ color: NAV_COLOR }} />
             {!collapsed && (
               <>
                 <span className="font-medium">Accounting</span>

@@ -5,6 +5,7 @@ import { TID } from "@/constants/testIds";
 import { Link } from "react-router-dom";
 import {
   Sparkles, Zap, AlertTriangle, TrendingUp, Wand2, FileCheck2, Bot, ArrowRight,
+  Wallet2, FileText, Receipt as ReceiptIcon, Activity,
 } from "lucide-react";
 
 const kindLabel = {
@@ -34,6 +35,7 @@ export default function Dashboard() {
   const [totals, setTotals] = useState(null);
   const [activity, setActivity] = useState([]);
   const [income, setIncome] = useState(null);
+  const [metrics, setMetrics] = useState(null);
 
   useEffect(() => {
     if (!currentId) return;
@@ -41,6 +43,7 @@ export default function Dashboard() {
       setTotals(r.data.totals); setActivity(r.data.activity);
     }).catch(() => {});
     api.get(`/companies/${currentId}/reports/income-statement`).then(r => setIncome(r.data)).catch(() => {});
+    api.get(`/companies/${currentId}/dashboard/metrics`).then(r => setMetrics(r.data)).catch(() => {});
   }, [currentId]);
 
   if (!current) return <div className="text-slate-500">Select a company to view your Dashboard.</div>;
@@ -118,6 +121,49 @@ export default function Dashboard() {
             <Link to="/reports/income-statement" className="text-xs text-slate-600 hover:text-slate-900 underline">Open income statement</Link>
             <Link to="/reports/balance-sheet" className="text-xs text-slate-600 hover:text-slate-900 underline">Balance sheet</Link>
           </div>
+
+          {metrics && (
+            <div className="mt-5 pt-4 border-t grid grid-cols-2 md:grid-cols-4 gap-3" data-testid="dashboard-metrics">
+              <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3">
+                <div className="text-[10px] uppercase tracking-wider text-emerald-700 font-semibold flex items-center gap-1">
+                  <Wallet2 size={11} /> Cash on hand
+                </div>
+                <div className="font-mono-num font-semibold text-emerald-700 text-lg mt-0.5">{fmtMoney(metrics.cash_on_hand)}</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">Across all bank accounts</div>
+              </div>
+              <Link to="/invoices" className="rounded-lg bg-indigo-50 border border-indigo-100 p-3 hover:border-indigo-300 transition">
+                <div className="text-[10px] uppercase tracking-wider text-indigo-700 font-semibold flex items-center gap-1">
+                  <FileText size={11} /> Outstanding A/R
+                </div>
+                <div className="font-mono-num font-semibold text-indigo-700 text-lg mt-0.5">{fmtMoney(metrics.outstanding_invoices)}</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  {metrics.invoice_count} open invoice{metrics.invoice_count === 1 ? "" : "s"}
+                  {metrics.overdue_invoices > 0 && <span className="text-red-600"> · {fmtMoney(metrics.overdue_invoices)} overdue</span>}
+                </div>
+              </Link>
+              <Link to="/bills" className="rounded-lg bg-orange-50 border border-orange-100 p-3 hover:border-orange-300 transition">
+                <div className="text-[10px] uppercase tracking-wider text-orange-700 font-semibold flex items-center gap-1">
+                  <ReceiptIcon size={11} /> Outstanding A/P
+                </div>
+                <div className="font-mono-num font-semibold text-orange-700 text-lg mt-0.5">{fmtMoney(metrics.outstanding_bills)}</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  {metrics.bill_count} open bill{metrics.bill_count === 1 ? "" : "s"}
+                  {metrics.overdue_bills > 0 && <span className="text-red-600"> · {fmtMoney(metrics.overdue_bills)} overdue</span>}
+                </div>
+              </Link>
+              <Link to="/accounting/transactions" className="rounded-lg bg-slate-50 border border-slate-200 p-3 hover:border-slate-400 transition">
+                <div className="text-[10px] uppercase tracking-wider text-slate-700 font-semibold flex items-center gap-1">
+                  <Activity size={11} /> Cash activity · 30d
+                </div>
+                <div className={`font-mono-num font-semibold text-lg mt-0.5 ${metrics.net_cash_30d >= 0 ? "text-emerald-700" : "text-orange-700"}`}>
+                  {metrics.net_cash_30d >= 0 ? "+" : ""}{fmtMoney(metrics.net_cash_30d)}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  {fmtMoney(metrics.cash_in_30d)} in · {fmtMoney(metrics.cash_out_30d)} out · {metrics.activity_count_30d} txns
+                </div>
+              </Link>
+            </div>
+          )}
         </div>
 
         <div className="rounded-xl border bg-white p-5">

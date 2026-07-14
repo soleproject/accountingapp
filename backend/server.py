@@ -342,6 +342,55 @@ async def pro_clients(user: dict = Depends(require_role("pro", "superadmin"))):
     return {"clients": result}
 
 
+class NewClientIn(BaseModel):
+    client_name: str
+    client_email: EmailStr
+    client_password: str
+    company_name: str
+    business_type: str = ""
+    business_description: str = ""
+    reporting_basis: str = "accrual"
+
+
+@api.post("/pro/clients")
+async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role("pro", "superadmin"))):
+    """Create a client user + their company + memberships, and seed default CoA."""
+    if await db.users.find_one({"email": inp.client_email.lower()}):
+        raise HTTPException(400, "A user with that email already exists")
+    now = now_iso()
+    client_id = str(uuid.uuid4())
+    company_id = str(uuid.uuid4())
+    await db.users.insert_one({
+        "id": client_id, "email": inp.client_email.lower(), "name": inp.client_name,
+        "password": hash_password(inp.client_password), "role": "client",
+        "created_at": now, "updated_at": now,
+    })
+    await db.companies.insert_one({
+        "id": company_id, "name": inp.company_name,
+        "business_type": inp.business_type, "business_description": inp.business_description,
+        "reporting_basis": inp.reporting_basis,
+        "owner_user_id": client_id, "pro_user_id": user["id"],
+        "onboarding_complete": False,
+        "created_at": now, "updated_at": now,
+    })
+    await db.memberships.insert_many([
+        {"id": str(uuid.uuid4()), "user_id": client_id, "company_id": company_id, "role": "owner", "created_at": now},
+        {"id": str(uuid.uuid4()), "user_id": user["id"], "company_id": company_id, "role": "pro", "created_at": now},
+    ])
+    from seed import DEFAULT_COA
+    for code, name, atype, subtype in DEFAULT_COA:
+        await db.accounts.insert_one({
+            "id": str(uuid.uuid4()), "company_id": company_id, "code": code, "name": name,
+            "type": atype, "subtype": subtype, "active": True, "balance": 0.0,
+            "created_at": now, "updated_at": now,
+        })
+    await db.onboarding_state.insert_one({
+        "id": str(uuid.uuid4()), "company_id": company_id, "step": 0, "total_steps": 6,
+        "complete": False, "answers": {}, "created_at": now, "updated_at": now,
+    })
+    return {"company_id": company_id, "client_id": client_id}
+
+
 # ----------------------- Companies -----------------------
 
 @api.get("/companies")
@@ -634,6 +683,74 @@ async def ai_activity(cid: str, user: dict = Depends(get_current_user)):
             "rules": rules_count, "ai_rules": ai_rules,
             "accuracy": round((posted / max(total_txns, 1)) * 100, 1),
         },
+    }
+
+
+@api.get("/companies/{cid}/dashboard/metrics")
+async def dashboard_metrics(cid: str, user: dict = Depends(get_current_user)):
+    """Cash-on-hand, outstanding A/R and A/P, and last-30-days cash activity."""
+    await _require_company(user, cid)
+    today = datetime.now(timezone.utc).date()
+    thirty_ago = (today - timedelta(days=30)).isoformat()
+    today_str = today.isoformat()
+
+    # Cash-on-hand: sum of postings against Cash / Bank accounts (asset, subtype current_asset,
+    # codes starting with '10')
+    cash_accts = await db.accounts.find({
+        "company_id": cid, "type": "asset",
+        "code": {"$in": ["1000", "1010", "1020"]},
+    }).to_list(100)
+    cash_ids = [a["id"] for a in cash_accts]
+    cash = 0.0
+    if cash_ids:
+        txns = await db.transactions.find({
+            "company_id": cid, "posted": True,
+            "bank_account_id": {"$in": cash_ids},
+        }).to_list(50000)
+        cash = sum(float(t.get("amount", 0)) for t in txns)
+
+    # Outstanding A/R: unpaid invoice balance_due
+    invs = await db.invoices.find({"company_id": cid}).to_list(20000)
+    outstanding_ar = sum(float(i.get("balance_due", 0)) for i in invs if i.get("status") != "paid")
+    overdue_ar = 0.0
+    for i in invs:
+        if i.get("status") == "paid":
+            continue
+        if i.get("due_date") and i["due_date"] < today_str:
+            overdue_ar += float(i.get("balance_due", 0))
+
+    # Outstanding A/P: unpaid bill balance_due
+    bills = await db.bills.find({"company_id": cid}).to_list(20000)
+    outstanding_ap = sum(float(b.get("balance_due", 0)) for b in bills if b.get("status") != "paid")
+    overdue_ap = 0.0
+    for b in bills:
+        if b.get("status") == "paid":
+            continue
+        if b.get("due_date") and b["due_date"] < today_str:
+            overdue_ap += float(b.get("balance_due", 0))
+
+    # Last 30 days cash activity: money in / out through bank accounts
+    recent = await db.transactions.find({
+        "company_id": cid, "posted": True,
+        "date": {"$gte": thirty_ago, "$lte": today_str},
+        "bank_account_id": {"$in": cash_ids} if cash_ids else {"$exists": True},
+    }).to_list(50000)
+    cash_in = sum(float(t["amount"]) for t in recent if float(t.get("amount", 0)) > 0)
+    cash_out = sum(-float(t["amount"]) for t in recent if float(t.get("amount", 0)) < 0)
+    net_30d = cash_in - cash_out
+
+    return {
+        "cash_on_hand": round(cash, 2),
+        "outstanding_invoices": round(outstanding_ar, 2),
+        "overdue_invoices": round(overdue_ar, 2),
+        "invoice_count": sum(1 for i in invs if i.get("status") != "paid"),
+        "outstanding_bills": round(outstanding_ap, 2),
+        "overdue_bills": round(overdue_ap, 2),
+        "bill_count": sum(1 for b in bills if b.get("status") != "paid"),
+        "cash_in_30d": round(cash_in, 2),
+        "cash_out_30d": round(cash_out, 2),
+        "net_cash_30d": round(net_30d, 2),
+        "activity_count_30d": len(recent),
     }
 
 
