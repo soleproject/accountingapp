@@ -1,0 +1,152 @@
+{
+  "project_name": "Axiom Ledger",
+  "app_type": "hybrid_fullstack",
+  "theme": "light",
+  "typography": {
+    "headings": "Manrope",
+    "body": "IBM Plex Sans",
+    "mono": "IBM Plex Mono",
+    "rules": [
+      "Use Manrope for all headings (H1-H4) to provide a wide, confident, enterprise look.",
+      "Use IBM Plex Sans for body text and table data for maximum legibility of dense financial information.",
+      "Use IBM Plex Mono for all numerical financial data, account numbers, and currency values to ensure perfect vertical alignment.",
+      "Avoid 'Inter' and generic default fonts.",
+      "Headings should have tight letter spacing (tracking-tight).",
+      "Data tables must use text-sm for density."
+    ]
+  },
+  "colors": {
+    "background": "#F5F6F8",
+    "surface": "#FFFFFF",
+    "text_primary": "#0A0A0A",
+    "text_secondary": "#52525B",
+    "border": "#E4E4E7",
+    "primary": "#0F172A",
+    "accents": {
+      "money_in": "#10B981",
+      "money_out": "#F97316",
+      "informational": "#3B82F6",
+      "warning": "#EAB308",
+      "ai_confidence_high": "#22C55E",
+      "ai_confidence_med": "#EAB308",
+      "ai_confidence_low": "#EF4444"
+    },
+    "nav_icons": {
+      "dashboard": "#6366F1",
+      "invoices": "#10B981",
+      "bills": "#F97316",
+      "reports": "#8B5CF6",
+      "contacts": "#F43F5E",
+      "connections": "#06B6D4",
+      "accounting": "#3B82F6"
+    },
+    "rules": [
+      "Never use pure black or pure gray. Always tint grays.",
+      "Avoid AI-slop purple gradients; use crisp, distinct colors.",
+      "Ensure all text over backgrounds meets APCA contrast ratios.",
+      "Each nav section uses its specific assigned quiet icon color."
+    ]
+  },
+  "visual_enhancers": {
+    "shadows": [
+      "Use subtle, layered ambient shadows (e.g., shadow-sm for cards, shadow-md for hover states).",
+      "Avoid harsh drop shadows."
+    ],
+    "borders": [
+      "Use 1px subtle borders (border-border) on all cards and table containers to provide a structured, crisp look.",
+      "Nested radii: inner elements should have a slightly smaller border-radius than their containers."
+    ],
+    "glassmorphism": [
+      "Use sparingly for sticky headers or dropdowns (backdrop-blur-md bg-white/80 border-b border-gray-200)."
+    ]
+  },
+  "component_name": "Various custom components leveraging Shadcn UI",
+  "component_path": "/app/frontend/src/components/ui",
+  "grids": {
+    "dashboard": "grid-cols-1 md:grid-cols-4 gap-6",
+    "reports": "grid-cols-1 md:grid-cols-3 gap-6",
+    "rules": [
+      "Use high-density grid for data-heavy sections.",
+      "Use subgrid where necessary for aligning nested table components.",
+      "Maintain 24px (gap-6) between major dashboard widgets."
+    ]
+  },
+  "layouts": {
+    "app_shell": "flex h-screen overflow-hidden bg-[#F5F6F8]",
+    "sidebar": "w-64 flex-shrink-0 border-r bg-white transition-all duration-300 collapsible",
+    "main_content": "flex-1 flex flex-col min-w-0 overflow-hidden",
+    "header": "h-16 border-b bg-white flex items-center justify-between px-6 shrink-0",
+    "ai_panel": "w-80 flex-shrink-0 border-l bg-white transition-all duration-300 collapsible shadow-[-4px_0_24px_rgba(0,0,0,0.02)]",
+    "content_area": "flex-1 overflow-auto p-6 md:p-8",
+    "rules": [
+      "Left sidebar and Right AI panel MUST be collapsible.",
+      "Top bar must contain the Multi-tenant company switcher.",
+      "Do NOT use transparent backgrounds for dropdowns or floating menus."
+    ]
+  },
+  "motion": {
+    "transitions": "transition-all duration-200 ease-in-out",
+    "hover_states": "subtle lift (-translate-y-0.5) and shadow enhancement",
+    "rules": [
+      "Use micro-interactions for feedback.",
+      "NEVER use 'transition: all' globally in CSS.",
+      "Respect prefers-reduced-motion."
+    ]
+  },
+  "accessibility": {
+    "rules": [
+      "All interactive and key informational elements MUST include a data-testid attribute.",
+      "Ensure keyboard navigation works for sidebars and tables.",
+      "Color-coded AI confidence chips MUST also include text or icons (e.g., 'High Confidence', 'Needs Review')."
+    ]
+  },
+  "media": {
+    "rules": [
+      "Images should be functional. Avoid placeholder graphics."
+    ]
+  },
+  "3d_libraries": {
+    "recommendation": "Not required for core accounting dashboard, prioritize D3.js or Recharts/Shadcn charts for financial data visualization."
+  },
+  "image_urls": {
+    "analytics_placeholder": {
+      "url": "https://images.unsplash.com/photo-1551288049-bebda4e38f71",
+      "description": "Graphs of performance analytics on a laptop screen (use as subtle background for auth/onboarding if needed)"
+    },
+    "documents_placeholder": {
+      "url": "https://images.pexels.com/photos/6779714/pexels-photo-6779714.jpeg",
+      "description": "Calculator and accounting documents (can be used in marketing/empty states)"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Build the dashboard using React, Tailwind CSS, and Shadcn UI primitives.",
+    "Implement a three-role architecture (Superadmin, Pro, Client) with distinct views.",
+    "Include a multi-tenant switcher in the top navigation header.",
+    "Create a collapsible left navigation panel that includes nested Accounting groups (Transactions, Inventory, Assets, Loans, Tags, Reconciliation, Book Review, Close the Books, Year-End Close, Chart of Accounts, Journal Entries, General Ledger). DO NOT include Real Estate/Rental Properties.",
+    "Create a collapsible right-side AI assistant chat panel that is context-aware.",
+    "Build an AI onboarding wizard (multi-step: business type -> QBO link -> auto CoA -> Plaid bank link -> Veryfi statement upload -> categorization review).",
+    "Develop a dense, highly functional Transactions table with split, link, AI confidence chips, needs-review flags, and bulk actions.",
+    "Create realistic Report templates (Trial Balance, Balance Sheet, Income Statement, etc.) that have an Accrual/Cash toggle and 'Export PDF' button. Ensure they look like real CPA statements.",
+    "Use Manrope for headings and IBM Plex Sans/Mono for body/data.",
+    "Assign distinct pastel accent colors to left nav icons as defined in the colors section.",
+    "Ensure all features support manual add/edit.",
+    "Add 'data-testid' to all interactive elements."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "Avoid generic 'AI slop' aesthetics. Make the design crisp, enterprise-ready, and highly functional.",
+    "Do not use dark colors as gradients.",
+    "Do not center align the app container. Left-align data and text.",
+    "Create depth through layered design elements with explicit z-index hierarchy.",
+    "Use modern pill-shaped or slightly rounded crisp buttons with interaction animations.",
+    "Never use AI assistant Emoji characters (like robot or brain) for icons. Use Phosphor or Lucide icons.",
+    "Prioritize using pre-existing Shadcn components, customizing their spacing and radii."
+  ],
+  "GENERAL UI UX DESIGN GUIDELINES": [
+    "Design for data density. Financial software requires seeing many records at once. Reduce padding in table cells compared to standard SaaS apps.",
+    "Focus on hierarchy. The most critical number should be top-left.",
+    "Color is meaning. Do not use red/green for decoration. Reserve them strictly for financial loss/gain or system errors/success.",
+    "Include clear empty states with calls to action.",
+    "Every table should support scrolling, sorting, and bulk actions naturally.",
+    "The AI panel should feel like a functional utility (like a calculator or notebook), not a chatbot toy."
+  ]
+}
