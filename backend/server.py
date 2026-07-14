@@ -1194,10 +1194,39 @@ async def ai_chat_stream(inp: ChatIn, user: dict = Depends(get_current_user)):
                 "confidence": t.get("ai_confidence"), "needs_review": t.get("needs_review"),
             }
 
+    # Always inject a snapshot of the books so the AI can answer real questions
+    company = await db.companies.find_one({"id": inp.company_id})
+    today = datetime.now(timezone.utc).date()
+    ytd_start = today.replace(month=1, day=1).isoformat()
+    ytd_end = today.isoformat()
+    inc = await R.compute_income_statement(inp.company_id, ytd_start, ytd_end,
+                                            company.get("reporting_basis", "accrual"))
+    bs = await R.compute_balance_sheet(inp.company_id, ytd_end,
+                                        company.get("reporting_basis", "accrual"))
+    txn_count = await db.transactions.count_documents({"company_id": inp.company_id})
+    flagged = await db.transactions.count_documents({"company_id": inp.company_id, "needs_review": True})
+    book_context = {
+        "company": company.get("name") if company else "",
+        "business_type": company.get("business_type") if company else "",
+        "reporting_basis": company.get("reporting_basis", "accrual") if company else "accrual",
+        "period": f"{ytd_start} to {ytd_end}",
+        "total_revenue_ytd": inc["total_revenue"],
+        "total_expenses_ytd": inc["total_expense"],
+        "net_income_ytd": inc["net_income"],
+        "total_assets": bs["total_assets"],
+        "total_liabilities": bs["total_liabilities"],
+        "total_equity": bs["total_equity"],
+        "transactions": txn_count,
+        "needs_review": flagged,
+    }
+    combined_context = {"books": book_context}
+    if context:
+        combined_context["focused_transaction"] = context
+
     full_reply = {"text": ""}
 
     async def event_gen():
-        async for chunk in chat_stream(session_id, inp.message, context):
+        async for chunk in chat_stream(session_id, inp.message, combined_context):
             full_reply["text"] += chunk
             yield f"data: {json.dumps({'delta': chunk})}\n\n"
         # save assistant msg
