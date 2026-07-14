@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, Any, List
 from pathlib import Path
 
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, Query
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, Response
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
@@ -26,6 +26,8 @@ from ai_service import (  # noqa: E402
     categorize_transaction, chat_stream, suggest_chart_of_accounts,
 )
 import reports as R  # noqa: E402
+import plaid_service  # noqa: E402
+import veryfi_service  # noqa: E402
 
 app = FastAPI(title="Axiom Ledger API")
 api = APIRouter(prefix="/api")
@@ -994,9 +996,98 @@ async def generate_coa(cid: str, user: dict = Depends(get_current_user)):
     return {"added": added, "suggestions": extras}
 
 
+@api.post("/companies/{cid}/onboarding/plaid/link-token")
+async def plaid_link_token(cid: str, user: dict = Depends(get_current_user)):
+    """Create a Plaid Link token for the user to link a bank account."""
+    await _require_company(user, cid)
+    try:
+        token = plaid_service.create_link_token(user_id=f"{user['id']}::{cid}",
+                                                 client_name="Axiom Ledger")
+    except Exception as e:
+        raise HTTPException(502, f"Plaid error: {e}")
+    return {"link_token": token}
+
+
+@api.post("/companies/{cid}/onboarding/plaid/exchange")
+async def plaid_exchange(cid: str, payload: dict, user: dict = Depends(get_current_user)):
+    """Exchange the public_token from Plaid Link for an access_token, persist Item, return accounts."""
+    await _require_company(user, cid)
+    public_token = payload.get("public_token")
+    if not public_token:
+        raise HTTPException(400, "public_token required")
+    try:
+        ex = plaid_service.exchange_public_token(public_token)
+        accounts = plaid_service.get_accounts(ex["access_token"])
+    except Exception as e:
+        raise HTTPException(502, f"Plaid error: {e}")
+    now = now_iso()
+    # Upsert Plaid item per company (single-item MVP: replace prior)
+    await db.plaid_items.update_one(
+        {"company_id": cid, "user_id": user["id"]},
+        {"$set": {
+            "id": str(uuid.uuid4()), "company_id": cid, "user_id": user["id"],
+            "item_id": ex["item_id"], "access_token": ex["access_token"],
+            "cursor": None, "accounts": accounts,
+            "created_at": now, "updated_at": now,
+        }},
+        upsert=True,
+    )
+    return {"accounts": accounts, "item_id": ex["item_id"]}
+
+
+@api.post("/companies/{cid}/onboarding/plaid/import")
+async def plaid_import(cid: str, payload: dict, user: dict = Depends(get_current_user)):
+    """Import transactions for the selected Plaid account IDs via /transactions/sync."""
+    await _require_company(user, cid)
+    selected: list[str] = payload.get("account_ids") or []
+    item = await db.plaid_items.find_one({"company_id": cid})
+    if not item:
+        raise HTTPException(400, "No linked Plaid item — link first")
+    try:
+        synced = plaid_service.sync_transactions(item["access_token"], item.get("cursor"))
+    except Exception as e:
+        raise HTTPException(502, f"Plaid sync error: {e}")
+    await db.plaid_items.update_one({"id": item["id"]}, {"$set": {"cursor": synced["next_cursor"], "updated_at": now_iso()}})
+
+    accts = await db.accounts.find({"company_id": cid}).to_list(2000)
+    coa = [{"code": a["code"], "name": a["name"], "type": a["type"]} for a in accts]
+    checking = next((a for a in accts if a["code"] == "1010"), None)
+    if not checking:
+        raise HTTPException(400, "Business Checking (1010) account not found")
+
+    now = now_iso()
+    imported = 0
+    for t in synced["added"]:
+        if selected and t["account_id"] not in selected:
+            continue
+        # Skip if we've already imported this Plaid transaction
+        if await db.transactions.find_one({"company_id": cid, "plaid_transaction_id": t["transaction_id"]}):
+            continue
+        merchant = t.get("merchant_name") or t.get("name") or "Unknown"
+        result = await categorize_transaction(merchant, t["amount"], t["name"], coa)
+        acct = next((a for a in accts if a["code"] == result["account_code"]), None) or checking
+        await db.transactions.insert_one({
+            "id": str(uuid.uuid4()), "company_id": cid, "date": t["date"],
+            "description": t["name"], "merchant": merchant, "amount": t["amount"],
+            "bank_account_id": checking["id"], "bank_account_name": checking["name"],
+            "category_account_id": acct["id"], "category_account_code": acct["code"],
+            "category_account_name": acct["name"],
+            "ai_confidence": round(result["confidence"], 2), "ai_reasoning": result["reasoning"],
+            "needs_review": result["confidence"] < 0.80, "human_reviewed": False,
+            "posted": result["confidence"] >= 0.80, "source": "plaid",
+            "plaid_transaction_id": t["transaction_id"], "plaid_account_id": t["account_id"],
+            "pending": t["pending"], "splits": [], "linked_invoice_id": None,
+            "linked_bill_id": None, "linked_payment_id": None, "tags": [],
+            "created_at": now, "updated_at": now,
+        })
+        imported += 1
+    await _log_ai(cid, "categorize", imported)
+    return {"imported": imported}
+
+
+# Legacy mock endpoint kept for backward compatibility with existing UI/tests
 @api.post("/companies/{cid}/onboarding/mock-plaid")
 async def mock_plaid(cid: str, user: dict = Depends(get_current_user)):
-    """Simulate Plaid link: returns 3 mock accounts to choose from."""
     return {"accounts": [
         {"id": "plaid_1", "name": "Business Checking ...4821", "type": "depository",
          "subtype": "checking", "balance": 18452.30, "institution": "Chase Business"},
@@ -1045,6 +1136,51 @@ async def import_plaid(cid: str, account_ids: List[str], user: dict = Depends(ge
         imported += 1
     await _log_ai(cid, "categorize", imported)
     return {"imported": imported}
+
+
+@api.post("/companies/{cid}/onboarding/veryfi/upload")
+async def veryfi_upload(cid: str, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    """Upload a bank/credit-card statement to Veryfi, OCR it, AI-categorize each line."""
+    await _require_company(user, cid)
+    file_bytes = await file.read()
+    if len(file_bytes) > 20 * 1024 * 1024:
+        raise HTTPException(400, "File too large (max 20MB)")
+    try:
+        veryfi_data = await veryfi_service.process_bank_statement(
+            file_bytes, file.filename or "statement.pdf",
+            file.content_type or "application/pdf",
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Veryfi error: {e}")
+
+    lines = veryfi_service.extract_transactions(veryfi_data)
+    accts = await db.accounts.find({"company_id": cid}).to_list(2000)
+    coa = [{"code": a["code"], "name": a["name"], "type": a["type"]} for a in accts]
+    checking = next((a for a in accts if a["code"] == "1010"), None)
+    if not checking:
+        raise HTTPException(400, "Business Checking (1010) account not found")
+
+    now = now_iso()
+    imported = 0
+    for ln in lines:
+        result = await categorize_transaction(ln["merchant"], ln["amount"], ln["description"], coa)
+        acct = next((a for a in accts if a["code"] == result["account_code"]), None) or checking
+        await db.transactions.insert_one({
+            "id": str(uuid.uuid4()), "company_id": cid, "date": ln["date"] or datetime.now(timezone.utc).date().isoformat(),
+            "description": f"{ln['description']} (Veryfi)", "merchant": ln["merchant"],
+            "amount": ln["amount"], "bank_account_id": checking["id"],
+            "bank_account_name": checking["name"], "category_account_id": acct["id"],
+            "category_account_code": acct["code"], "category_account_name": acct["name"],
+            "ai_confidence": round(result["confidence"], 2), "ai_reasoning": result["reasoning"],
+            "needs_review": result["confidence"] < 0.80, "human_reviewed": False,
+            "posted": result["confidence"] >= 0.80, "source": "veryfi",
+            "splits": [], "linked_invoice_id": None, "linked_bill_id": None,
+            "linked_payment_id": None, "tags": [],
+            "created_at": now, "updated_at": now,
+        })
+        imported += 1
+    await _log_ai(cid, "veryfi_ocr", imported)
+    return {"imported": imported, "veryfi_document_id": veryfi_data.get("id")}
 
 
 @api.post("/companies/{cid}/onboarding/mock-veryfi")

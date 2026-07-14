@@ -1,0 +1,25 @@
+{
+  "summary": "Iteration 2 tested new real Plaid Sandbox + real Veryfi integrations plus full regression. Backend: 43/43 pytest passed (added TestPlaidReal.link_token_returns_sandbox_token, exchange_missing_public_token_returns_400, TestVeryfiReal.upload_requires_auth, upload_valid_pdf_returns_imported_key). Live Plaid Sandbox returned link_token starting with 'link-sandbox-' and Veryfi upload returned 200 with 'imported' int key on a minimal valid PDF (no 500). Mock endpoints /mock-plaid and /mock-veryfi still work (backward compatible). Frontend: Connections page (/connections) renders 'Launch Plaid Link (Sandbox)' button with data-testid='onboarding-mock-plaid'. Onboarding wizard step 4 (Bank connection - Plaid) exposes the real Plaid button plus 'Or use mock accounts' fallback. Step 5 (Statement upload - Veryfi) exposes the real 'Upload real statement (PDF / image)' button (data-testid='onboarding-veryfi-upload') plus 'Or simulate Veryfi upload' fallback (data-testid='onboarding-mock-veryfi'). Regression endpoints (auth, companies, coa, transactions=90+, rules apply-to-existing, 5 report JSONs + 5 PDFs w/ %PDF header, journal entries, all generic list endpoints) all still pass.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Onboarding", "issues": ["Both the real Plaid button (PlaidLinkButton.jsx) AND the Connections page Launch button share the same data-testid 'onboarding-mock-plaid'. This is misleading naming since the button now launches the REAL Plaid Sandbox flow, not a mock. Consider renaming to TID.onboardingPlaidLink for clarity — non-blocking since the review request explicitly asks for this testid."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 1422 lines (was 1256) — recommend splitting onboarding, reports, transactions into dedicated routers.",
+    "veryfi_service.process_bank_statement fallback to /documents/ is sensible; response shape differs between endpoints but extract_transactions handles both — verified 200 on minimal PDF.",
+    "PlaidLinkButton uses TID.onboardingMockPlaid — semantically confusing (this is the real integration). Cosmetic naming issue only."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Uses /app/memory/test_credentials.md unchanged.",
+  "seed_data_creation": "One TEST_ prefixed transaction + one rule created on Skyward Sparks (as in iteration 1). Veryfi upload test hits real Veryfi API and may add lines to Bright Beans; count not asserted per spec.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression suite at /app/backend/tests/backend_test.py now has 43 tests including TestPlaidReal and TestVeryfiReal. Real Plaid Sandbox and real Veryfi API keys are in /app/backend/.env and confirmed live. Plaid Link modal cannot be automated (iframe) — verify link-token API + button rendering only. Frontend Onboarding wizard reads persisted step from DB, so click Back multiple times to reach earlier steps when testing Bright Beans (client2 seed is at step 6)."
+}

@@ -286,3 +286,58 @@ def test_list_endpoints(client_auth, client_company, path):
     r = requests.get(f"{API}/companies/{client_company['id']}/{path}",
                      headers=_hdr(client_auth), timeout=15)
     assert r.status_code == 200, f"{path}: {r.status_code} {r.text[:200]}"
+
+
+# ---------- Real Plaid (Sandbox) integration ----------
+class TestPlaidReal:
+    def test_link_token_returns_sandbox_token(self, client_auth, client_company):
+        cid = client_company["id"]
+        r = requests.post(f"{API}/companies/{cid}/onboarding/plaid/link-token",
+                          headers=_hdr(client_auth), json={}, timeout=30)
+        assert r.status_code == 200, r.text
+        j = r.json()
+        assert "link_token" in j
+        tok = j["link_token"]
+        assert isinstance(tok, str) and len(tok) > 10
+        assert tok.startswith("link-sandbox-"), f"Expected sandbox token, got: {tok[:40]}"
+
+    def test_exchange_missing_public_token_returns_400(self, client_auth, client_company):
+        cid = client_company["id"]
+        r = requests.post(f"{API}/companies/{cid}/onboarding/plaid/exchange",
+                          headers=_hdr(client_auth), json={}, timeout=30)
+        assert r.status_code == 400, f"Expected 400, got {r.status_code}: {r.text}"
+
+
+# ---------- Real Veryfi upload ----------
+# Minimal valid PDF (single blank page) - hex-safe
+MIN_PDF = (
+    b"%PDF-1.4\n"
+    b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+    b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+    b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R>>endobj\n"
+    b"4 0 obj<</Length 44>>stream\nBT /F1 12 Tf 72 720 Td (Test Statement) Tj ET\nendstream endobj\n"
+    b"xref\n0 5\n0000000000 65535 f \n0000000009 00000 n \n0000000052 00000 n \n"
+    b"0000000101 00000 n \n0000000178 00000 n \n"
+    b"trailer<</Size 5/Root 1 0 R>>\nstartxref\n270\n%%EOF\n"
+)
+
+
+class TestVeryfiReal:
+    def test_upload_requires_auth(self, client_company):
+        cid = client_company["id"]
+        files = {"file": ("test.pdf", MIN_PDF, "application/pdf")}
+        r = requests.post(f"{API}/companies/{cid}/onboarding/veryfi/upload",
+                          files=files, timeout=60)
+        assert r.status_code in (401, 403), f"Expected 401/403 without token, got {r.status_code}"
+
+    def test_upload_valid_pdf_returns_imported_key(self, client_auth, client_company):
+        cid = client_company["id"]
+        files = {"file": ("test_statement.pdf", MIN_PDF, "application/pdf")}
+        r = requests.post(f"{API}/companies/{cid}/onboarding/veryfi/upload",
+                          headers=_hdr(client_auth), files=files, timeout=120)
+        # Must NOT be 500 for a valid PDF
+        assert r.status_code != 500, f"Veryfi upload returned 500: {r.text[:500]}"
+        assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text[:500]}"
+        j = r.json()
+        assert "imported" in j, f"Missing 'imported' key in response: {j}"
+        assert isinstance(j["imported"], int), f"'imported' not int: {type(j['imported'])}"
