@@ -14,16 +14,19 @@ const kindLabel = {
   rule_created: "Rules Created",
   coa_generated: "CoA Accounts Suggested",
   veryfi_ocr: "Statement Lines OCR'd",
+  webhook_sync: "Webhook Auto-Syncs",
 };
 
 const kindIcon = {
   categorize: Zap, post_je: FileCheck2, flag_review: AlertTriangle,
   rule_created: Wand2, coa_generated: Sparkles, veryfi_ocr: Bot,
+  webhook_sync: Zap,
 };
 
 const kindColor = {
   categorize: "#6366F1", post_je: "#10B981", flag_review: "#F97316",
-  rule_created: "#8B5CF6", coa_generated: "#06B6D4", veryfi_ocr: "#3B82F6",
+  rule_created: "#6366F1", coa_generated: "#3B82F6", veryfi_ocr: "#3B82F6",
+  webhook_sync: "#6366F1",
 };
 
 export default function Dashboard() {
@@ -40,7 +43,7 @@ export default function Dashboard() {
     api.get(`/companies/${currentId}/reports/income-statement`).then(r => setIncome(r.data)).catch(() => {});
   }, [currentId]);
 
-  if (!current) return <div className="text-slate-500">Select a company to view your Pulse.</div>;
+  if (!current) return <div className="text-slate-500">Select a company to view your Dashboard.</div>;
 
   if (!current.onboarding_complete) {
     return (
@@ -79,7 +82,7 @@ export default function Dashboard() {
             ["Transactions", totals.transactions, "#6366F1"],
             ["Auto-posted", totals.posted, "#10B981"],
             ["Needs review", totals.flagged, "#F97316"],
-            ["AI accuracy", `${totals.accuracy}%`, "#22C55E"],
+            ["AI accuracy", `${totals.accuracy}%`, "#10B981"],
           ].map(([label, val, col]) => (
             <div key={label} className="rounded-xl border bg-white p-4">
               <div className="text-xs uppercase tracking-wider text-slate-500">{label}</div>
