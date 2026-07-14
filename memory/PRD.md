@@ -44,18 +44,38 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - ✅ 90 seeded sample transactions on primary demo company with realistic AI confidence
 - ✅ Transactions page: split, link to invoice/bill, bulk approve, bulk-create rules, per-row AI re-categorize
 - ✅ AI categorization (Claude Sonnet 4.5) with GAAP prompting + confidence + reasoning stored on each txn
-- ✅ Rules engine + AI rule candidates + apply-to-existing on rule creation
+- ✅ Rules engine + AI rule candidates + apply-to-existing on rule creation (skips closed-period txns)
 - ✅ Onboarding wizard (6 steps) — business profile, QBO toggle, AI CoA generation, real Plaid Sandbox link, real Veryfi statement upload, complete
 - ✅ Invoices / Bills / Payments (auto-updates balance_due) / Receipts / Contacts full CRUD
 - ✅ Journal Entries with debit=credit validation
 - ✅ Reconciliation, Book Review, Close-the-Books (month) and Year-End Close
 - ✅ Inventory / Assets / Loans / Tags / Communications / Connections generic CRUD
-- ✅ Reports (5 statements) with Accrual/Cash toggle + real PDF export (ReportLab)
+- ✅ Reports: Trial Balance, Balance Sheet, Income Statement, GL, Cash Flow, **Sales Tax Liability**, **1099 Summary** — all with PDF export
 - ✅ AI Chat SSE streaming panel with focused-transaction context + injected books snapshot
 - ✅ Collapsible sidebar + collapsible AI panel
 - ✅ Superadmin overview dashboard, Pro clients dashboard
-- ✅ **Real Plaid Sandbox integration** (plaid-python + react-plaid-link) with link-token → public-token exchange → /transactions/sync w/ cursor → AI-categorize each imported txn
-- ✅ **Real Veryfi document OCR** (bank-statements endpoint w/ /documents fallback) — file upload → OCR → AI-categorize each line
+- ✅ **Real Plaid Sandbox integration** (plaid-python + react-plaid-link) with link-token → public-token exchange → /transactions/sync w/ cursor
+- ✅ **Real Veryfi document OCR** (bank-statements endpoint w/ /documents fallback)
+- ✅ **Plaid webhooks** — `/api/plaid/webhook` (public) handles TRANSACTIONS: SYNC_UPDATES_AVAILABLE / DEFAULT_UPDATE / TRANSACTIONS_REMOVED, auto-imports and AI-categorizes; skips closed periods. Manual-sync fallback exposed on Connections page.
+- ✅ **Closed-period locks** — HTTP 423 on any transaction edit/delete/split/approve or JE create/delete whose date falls in a closed period. Applies to rule apply-to-existing too.
+
+## Prioritized Backlog
+
+### P1
+- Real QBO OAuth + entity sync
+- Voice interface for AI chat
+- Recurring transactions / bill scheduling
+- CSV / bank statement direct import UI
+- Plaid webhook signature verification (Plaid-Verification JWT)
+
+### P2
+- Firm branding / white-label for Pro accounts
+- Multi-currency support
+- Budget vs. actual reports
+- Notification hooks for flagged txns
+- Attachment upload on transactions (object storage)
+- Audit log
+- Stripe subscription billing for the SaaS itself
 
 ## Prioritized Backlog
 
