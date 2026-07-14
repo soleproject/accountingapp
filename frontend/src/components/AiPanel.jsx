@@ -1,17 +1,74 @@
 import { useEffect, useRef, useState } from "react";
-import { Send, Sparkles, X, MessageSquare } from "lucide-react";
+import { Send, Sparkles, X, MessageSquare, Mic, MicOff } from "lucide-react";
 import { api, BACKEND_URL } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
 import { useAiFocus } from "@/lib/aiFocus";
+import { toast } from "sonner";
+
+const getSR = () => window.SpeechRecognition || window.webkitSpeechRecognition;
 
 export default function AiPanel({ collapsed, onToggle }) {
   const { currentId, current } = useCompany();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [interim, setInterim] = useState("");
+  const recognitionRef = useRef(null);
   const scrollRef = useRef(null);
   const { focus } = useAiFocus();
+
+  // Set up SpeechRecognition once
+  useEffect(() => {
+    const SR = getSR();
+    if (!SR) return;
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = "en-US";
+    rec.onresult = (event) => {
+      let finalText = "";
+      let interimText = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const t = event.results[i][0].transcript;
+        if (event.results[i].isFinal) finalText += t;
+        else interimText += t;
+      }
+      if (finalText) {
+        setInput(prev => (prev + " " + finalText).replace(/\s+/g, " ").trim());
+      }
+      setInterim(interimText);
+    };
+    rec.onerror = (e) => {
+      console.warn("SpeechRecognition error", e);
+      setListening(false);
+    };
+    rec.onend = () => setListening(false);
+    recognitionRef.current = rec;
+    return () => { try { rec.stop(); } catch {} };
+  }, []);
+
+  const toggleMic = () => {
+    const rec = recognitionRef.current;
+    if (!rec) {
+      toast.error("Voice input isn't supported in this browser. Try Chrome/Edge.");
+      return;
+    }
+    if (listening) {
+      try { rec.stop(); } catch {}
+      setListening(false);
+      setInterim("");
+    } else {
+      setInterim("");
+      try {
+        rec.start();
+        setListening(true);
+      } catch (e) {
+        toast.error("Could not start microphone");
+      }
+    }
+  };
 
   useEffect(() => {
     if (!currentId) return;
@@ -34,6 +91,11 @@ export default function AiPanel({ collapsed, onToggle }) {
 
   const send = async () => {
     if (!input.trim() || streaming || !currentId) return;
+    // Stop mic on send
+    if (listening && recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch {}
+      setListening(false); setInterim("");
+    }
     const userMsg = input.trim();
     setInput("");
     setMessages(m => [...m, { role: "user", content: userMsg }, { role: "assistant", content: "" }]);
@@ -137,13 +199,33 @@ export default function AiPanel({ collapsed, onToggle }) {
       </div>
 
       <div className="border-t p-3">
+        {listening && (
+          <div className="mb-2 flex items-center gap-2 rounded-md bg-red-50 border border-red-200 px-2.5 py-1.5">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75 animate-ping" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
+            </span>
+            <span className="text-xs text-red-700">Listening… {interim && <span className="italic text-red-600">"{interim}"</span>}</span>
+          </div>
+        )}
         <div className="flex gap-2">
+          <button
+            data-testid="ai-chat-mic"
+            onClick={toggleMic}
+            disabled={streaming}
+            className={`w-9 h-9 flex items-center justify-center rounded-md border transition ${
+              listening ? "bg-red-500 border-red-500 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+            }`}
+            title={listening ? "Stop listening" : "Voice input"}
+          >
+            {listening ? <MicOff size={15} /> : <Mic size={15} />}
+          </button>
           <input
             data-testid={TID.aiChatInput}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && send()}
-            placeholder="Ask about a transaction, report, or anything..."
+            placeholder={listening ? "Speak now, or type…" : "Ask about a transaction, report, or anything..."}
             className="flex-1 rounded-md border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:border-slate-400"
             disabled={streaming}
           />
@@ -157,7 +239,7 @@ export default function AiPanel({ collapsed, onToggle }) {
           </button>
         </div>
         <div className="mt-2 text-[10px] text-slate-500">
-          Tip: hover a transaction row → it becomes context for your next question.
+          Tip: hover a transaction row → it becomes context for your next question. Try the mic and say "regarding the Walmart purchase on May 3rd…"
         </div>
       </div>
     </aside>

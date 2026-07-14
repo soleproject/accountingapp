@@ -10,30 +10,30 @@ import { TID } from "@/constants/testIds";
 import { useAuth } from "@/lib/auth";
 
 const NAV = [
-  { to: "/dashboard", label: "Pulse", icon: LayoutDashboard, color: "#6366F1" },
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, color: "#6366F1" },
   { to: "/invoices", label: "Invoices", icon: FileText, color: "#10B981" },
   { to: "/bills", label: "Bills", icon: Receipt, color: "#F97316" },
-  { to: "/payments", label: "Payments", icon: CreditCard, color: "#22C55E" },
+  { to: "/payments", label: "Payments", icon: CreditCard, color: "#10B981" },
   { to: "/receipts", label: "Receipts", icon: ScrollText, color: "#F97316" },
-  { to: "/reports", label: "Reports", icon: BarChart3, color: "#8B5CF6" },
-  { to: "/contacts", label: "Contacts", icon: Users, color: "#F43F5E" },
-  { to: "/connections", label: "Connections", icon: Link2, color: "#06B6D4" },
-  { to: "/communications", label: "Communications", icon: Inbox, color: "#8B5CF6" },
+  { to: "/reports", label: "Reports", icon: BarChart3, color: "#6366F1" },
+  { to: "/contacts", label: "Contacts", icon: Users, color: "#64748B" },
+  { to: "/connections", label: "Connections", icon: Link2, color: "#3B82F6" },
+  { to: "/communications", label: "Communications", icon: Inbox, color: "#6366F1" },
 ];
 
 const ACCOUNTING = [
-  { to: "/accounting/transactions", label: "Transactions", icon: ArrowLeftRight, color: "#8B5CF6" },
-  { to: "/accounting/inventory", label: "Inventory", icon: Boxes, color: "#8B5CF6" },
-  { to: "/accounting/assets", label: "Assets", icon: Building2, color: "#EAB308" },
+  { to: "/accounting/transactions", label: "Transactions", icon: ArrowLeftRight, color: "#6366F1" },
+  { to: "/accounting/inventory", label: "Inventory", icon: Boxes, color: "#64748B" },
+  { to: "/accounting/assets", label: "Assets", icon: Building2, color: "#3B82F6" },
   { to: "/accounting/loans", label: "Loans", icon: Wallet, color: "#F97316" },
-  { to: "/accounting/tags", label: "Tags", icon: Tags, color: "#10B981" },
+  { to: "/accounting/tags", label: "Tags", icon: Tags, color: "#64748B" },
   { to: "/accounting/reconciliation", label: "Reconciliation", icon: CheckCheck, color: "#10B981" },
   { to: "/accounting/book-review", label: "Book Review", icon: ClipboardCheck, color: "#F97316" },
   { to: "/accounting/close-books", label: "Close the Books", icon: CalendarCheck, color: "#10B981" },
   { to: "/accounting/year-end", label: "Year-End Close", icon: Calendar, color: "#10B981" },
   { to: "/accounting/chart-of-accounts", label: "Chart of Accounts", icon: ListTree, color: "#3B82F6" },
-  { to: "/accounting/journal-entries", label: "Journal Entries", icon: BookOpen, color: "#8B5CF6" },
-  { to: "/accounting/general-ledger", label: "General Ledger", icon: Notebook, color: "#8B5CF6" },
+  { to: "/accounting/journal-entries", label: "Journal Entries", icon: BookOpen, color: "#6366F1" },
+  { to: "/accounting/general-ledger", label: "General Ledger", icon: Notebook, color: "#6366F1" },
   { to: "/accounting/rules", label: "AI Rules", icon: Wand2, color: "#6366F1" },
 ];
 
@@ -87,7 +87,7 @@ export default function Sidebar({ collapsed, onToggle }) {
 
       <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
         {user?.role === "superadmin" && (
-          <Item to="/admin" label="Superadmin" icon={Shield} color="#EF4444" />
+          <Item to="/admin" label="Superadmin" icon={Shield} color="#6366F1" />
         )}
         {(user?.role === "pro" || user?.role === "superadmin") && (
           <Item to="/pro/clients" label="Clients" icon={Briefcase} color="#3B82F6" />

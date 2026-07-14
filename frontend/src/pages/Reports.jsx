@@ -3,13 +3,13 @@ import { TID } from "@/constants/testIds";
 import { FileText, Scale, TrendingUp, Notebook, Percent, DollarSign, ClipboardList, Receipt } from "lucide-react";
 
 const REPORTS = [
-  { key: "trial-balance", title: "Trial Balance", desc: "Verify debits = credits across all accounts", icon: Scale, color: "#8B5CF6", tint: "#F3E8FF" },
+  { key: "trial-balance", title: "Trial Balance", desc: "Verify debits = credits across all accounts", icon: Scale, color: "#6366F1", tint: "#E0E7FF" },
   { key: "balance-sheet", title: "Balance Sheet", desc: "Assets = Liabilities + Equity at a point in time", icon: ClipboardList, color: "#3B82F6", tint: "#DBEAFE" },
   { key: "income-statement", title: "Income Statement", desc: "Revenue, expenses, and net income for a period", icon: TrendingUp, color: "#10B981", tint: "#D1FAE5" },
   { key: "general-ledger", title: "General Ledger", desc: "Drill into entries by account and date range", icon: Notebook, color: "#6366F1", tint: "#E0E7FF" },
-  { key: "cash-flow", title: "Cash Flow", desc: "Operating, investing, and financing cash movements", icon: DollarSign, color: "#F59E0B", tint: "#FEF3C7" },
+  { key: "cash-flow", title: "Cash Flow", desc: "Operating, investing, and financing cash movements", icon: DollarSign, color: "#10B981", tint: "#D1FAE5" },
   { key: "sales-tax", title: "Sales Tax Liability", desc: "Sales tax collected vs. remitted and what you owe", icon: Percent, color: "#F97316", tint: "#FFEDD5" },
-  { key: "1099-summary", title: "1099 Summary", desc: "Contractors paid ≥ $600 · W-9 status · 1099-NEC prep", icon: Receipt, color: "#EF4444", tint: "#FEE2E2" },
+  { key: "1099-summary", title: "1099 Summary", desc: "Contractors paid ≥ $600 · W-9 status · 1099-NEC prep", icon: Receipt, color: "#3B82F6", tint: "#DBEAFE" },
 ];
 
 export default function Reports() {

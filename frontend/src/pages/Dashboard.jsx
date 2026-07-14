@@ -67,7 +67,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-6" data-testid={TID.aiPulseSection}>
       <div>
-        <h1 className="font-heading text-3xl font-bold tracking-tight">Pulse</h1>
+        <h1 className="font-heading text-3xl font-bold tracking-tight">Dashboard</h1>
         <p className="text-slate-500 text-sm mt-1">
           What the AI has done for {current.name} · {current.reporting_basis} basis
         </p>

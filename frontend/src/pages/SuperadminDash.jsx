@@ -11,7 +11,7 @@ export default function SuperadminDash() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <Shield className="text-red-500" size={22} />
+        <Shield className="text-indigo-500" size={22} />
         <h1 className="font-heading text-3xl font-bold tracking-tight">Superadmin</h1>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
