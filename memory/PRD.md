@@ -45,15 +45,17 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - ✅ Transactions page: split, link to invoice/bill, bulk approve, bulk-create rules, per-row AI re-categorize
 - ✅ AI categorization (Claude Sonnet 4.5) with GAAP prompting + confidence + reasoning stored on each txn
 - ✅ Rules engine + AI rule candidates + apply-to-existing on rule creation
-- ✅ Onboarding wizard (6 steps) — business profile, QBO toggle, AI CoA generation, mock Plaid, mock Veryfi, complete
+- ✅ Onboarding wizard (6 steps) — business profile, QBO toggle, AI CoA generation, real Plaid Sandbox link, real Veryfi statement upload, complete
 - ✅ Invoices / Bills / Payments (auto-updates balance_due) / Receipts / Contacts full CRUD
 - ✅ Journal Entries with debit=credit validation
 - ✅ Reconciliation, Book Review, Close-the-Books (month) and Year-End Close
 - ✅ Inventory / Assets / Loans / Tags / Communications / Connections generic CRUD
 - ✅ Reports (5 statements) with Accrual/Cash toggle + real PDF export (ReportLab)
-- ✅ AI Chat SSE streaming panel with focused-transaction context + injected books snapshot (revenue, expenses, net income, assets)
+- ✅ AI Chat SSE streaming panel with focused-transaction context + injected books snapshot
 - ✅ Collapsible sidebar + collapsible AI panel
 - ✅ Superadmin overview dashboard, Pro clients dashboard
+- ✅ **Real Plaid Sandbox integration** (plaid-python + react-plaid-link) with link-token → public-token exchange → /transactions/sync w/ cursor → AI-categorize each imported txn
+- ✅ **Real Veryfi document OCR** (bank-statements endpoint w/ /documents fallback) — file upload → OCR → AI-categorize each line
 
 ## Prioritized Backlog
 
