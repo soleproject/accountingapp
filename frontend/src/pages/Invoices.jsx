@@ -2,21 +2,45 @@ import { useEffect, useState } from "react";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X } from "lucide-react";
+import { Plus, Trash2, X, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
+
+const BUCKETS = [
+  { key: "current", label: "Current", desc: "Not yet due", color: "emerald" },
+  { key: "1_30", label: "1–30 days", desc: "Past due", color: "amber" },
+  { key: "31_60", label: "31–60 days", desc: "Late", color: "orange" },
+  { key: "61_90", label: "61–90 days", desc: "Very late", color: "red" },
+  { key: "over_90", label: "90+ days", desc: "Critical", color: "rose" },
+];
+
+const BAR = {
+  emerald: "bg-emerald-500", amber: "bg-amber-500", orange: "bg-orange-500",
+  red: "bg-red-500", rose: "bg-rose-600",
+};
+const TEXT = {
+  emerald: "text-emerald-700", amber: "text-amber-700", orange: "text-orange-700",
+  red: "text-red-700", rose: "text-rose-700",
+};
+const BG = {
+  emerald: "bg-emerald-50 border-emerald-100", amber: "bg-amber-50 border-amber-100",
+  orange: "bg-orange-50 border-orange-100", red: "bg-red-50 border-red-100",
+  rose: "bg-rose-50 border-rose-100",
+};
 
 export default function Invoices() {
   const { currentId } = useCompany();
   const [items, setItems] = useState([]);
   const [contacts, setContacts] = useState([]);
+  const [aging, setAging] = useState(null);
   const [creating, setCreating] = useState(false);
   const load = async () => {
     if (!currentId) return;
-    const [i, c] = await Promise.all([
+    const [i, c, a] = await Promise.all([
       api.get(`/companies/${currentId}/invoices`),
       api.get(`/companies/${currentId}/contacts`),
+      api.get(`/companies/${currentId}/reports/ar-aging`),
     ]);
-    setItems(i.data.invoices || []); setContacts(c.data.contacts || []);
+    setItems(i.data.invoices || []); setContacts(c.data.contacts || []); setAging(a.data);
   };
   useEffect(() => { load(); }, [currentId]);
   const del = async (id) => {
@@ -36,6 +60,57 @@ export default function Invoices() {
           <Plus size={13} /> New Invoice
         </button>
       </div>
+
+      {aging && aging.total > 0 && (
+        <div data-testid="ar-aging-widget" className="rounded-xl border bg-white p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <div className="font-heading font-semibold">A/R Aging</div>
+              <div className="text-xs text-slate-500">
+                Outstanding receivables as of {aging.as_of} · <span className="font-mono-num font-semibold text-slate-800">{fmtMoney(aging.total)}</span> total
+              </div>
+            </div>
+            {(aging.buckets["61_90"] + aging.buckets["over_90"]) > 0 && (
+              <div className="text-xs px-2 py-1 rounded-md bg-red-50 border border-red-200 text-red-700 flex items-center gap-1">
+                <AlertTriangle size={12} />
+                {fmtMoney(aging.buckets["61_90"] + aging.buckets["over_90"])} at collection risk
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+            {BUCKETS.map(b => {
+              const amt = aging.buckets[b.key] || 0;
+              const pct = aging.total ? (amt / aging.total) * 100 : 0;
+              return (
+                <div key={b.key} className={`rounded-lg border p-3 ${BG[b.color]}`}>
+                  <div className={`text-[10px] uppercase tracking-wider font-semibold ${TEXT[b.color]}`}>{b.label}</div>
+                  <div className={`font-mono-num text-lg font-semibold mt-0.5 ${TEXT[b.color]}`}>{fmtMoney(amt)}</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">{b.desc}</div>
+                  <div className="mt-2 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                    <div className={`h-full ${BAR[b.color]} transition-all`} style={{ width: `${pct}%` }} />
+                  </div>
+                  <div className={`text-[10px] mt-1 ${TEXT[b.color]}`}>{pct.toFixed(0)}% of A/R</div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Stacked visual bar */}
+          <div className="mt-4">
+            <div className="flex h-2.5 rounded-full overflow-hidden bg-slate-100">
+              {BUCKETS.map(b => {
+                const amt = aging.buckets[b.key] || 0;
+                const pct = aging.total ? (amt / aging.total) * 100 : 0;
+                if (pct === 0) return null;
+                return (
+                  <div key={b.key} className={BAR[b.color]} style={{ width: `${pct}%` }} title={`${b.label}: ${fmtMoney(amt)}`} />
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
       <div className="rounded-xl border bg-white overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500 border-b">

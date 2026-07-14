@@ -1,201 +1,348 @@
-"""Financial reports + PDF generation (ReportLab)."""
+"""Financial reports + PDF generation with a strict double-entry engine.
+
+Storage convention (debit-normal / signed):
+- Each transaction of amount `a` posts:
+    bank_account   += a          (a>0 = money in = debit to asset)
+    category_acct  += -a         (offsetting credit for a>0, or debit for a<0)
+- Splits, if present, replace the single category leg (each split posts -split_amount).
+- Journal entries post each line as (debit - credit) to that line's account_id.
+- Under this convention, sum(all account raw balances) is always 0.
+
+Display convention:
+- Asset / Expense accounts show + when raw balance > 0 (debit-normal).
+- Liability / Equity / Revenue accounts show + when raw balance < 0 (credit-normal),
+  so we NEGATE their raw balance for display.
+"""
 from __future__ import annotations
 from io import BytesIO
-from datetime import datetime
 from collections import defaultdict
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
-from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak,
-)
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
 from db import db
 
 
-async def _load_context(company_id: str, start: str, end: str, basis: str):
-    company = await db.companies.find_one({"id": company_id})
-    accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
-    txns = await db.transactions.find({
-        "company_id": company_id,
-        "date": {"$gte": start, "$lte": end},
-        "posted": True,
-    }).to_list(20000)
-    return company, accts, txns
+# ---------- Core: signed balance builder ----------
 
+CREDIT_NORMAL = {"liability", "equity", "revenue"}
+
+
+async def _signed_balances(company_id: str, start: str | None, end: str,
+                            include_pre_period: bool = False):
+    """Return {account_id: raw_signed_balance} for postings whose date is <= end
+    (and >= start if given and include_pre_period is False).
+
+    Includes both transactions and journal entries. Both must be balanced sources.
+    """
+    by = defaultdict(float)
+
+    txn_q = {"company_id": company_id, "posted": True, "date": {"$lte": end}}
+    if start and not include_pre_period:
+        txn_q["date"] = {"$gte": start, "$lte": end}
+    txns = await db.transactions.find(txn_q).to_list(100000)
+
+    for t in txns:
+        amt = float(t.get("amount", 0) or 0)
+        bank = t.get("bank_account_id")
+        if bank:
+            by[bank] += amt
+
+        splits = t.get("splits") or []
+        if splits:
+            split_total = 0.0
+            for s in splits:
+                sid = s.get("category_account_id")
+                s_amt = float(s.get("amount", 0) or 0)
+                split_total += s_amt
+                if sid:
+                    by[sid] += -s_amt
+            # If splits don't cover the full amount, the remainder falls to the
+            # primary category to keep the entry balanced.
+            residual = amt - split_total
+            aid_cat = t.get("category_account_id")
+            if aid_cat and abs(residual) > 0.001:
+                by[aid_cat] += -residual
+        else:
+            aid_cat = t.get("category_account_id")
+            if aid_cat:
+                by[aid_cat] += -amt
+
+    je_q = {"company_id": company_id, "date": {"$lte": end}}
+    if start and not include_pre_period:
+        je_q["date"] = {"$gte": start, "$lte": end}
+    jes = await db.journal_entries.find(je_q).to_list(100000)
+    for j in jes:
+        for line in j.get("lines", []):
+            aid = line.get("account_id")
+            d = float(line.get("debit", 0) or 0)
+            c = float(line.get("credit", 0) or 0)
+            if aid:
+                by[aid] += (d - c)
+
+    return by
+
+
+def _display_amount(acct: dict, raw: float) -> float:
+    """Return display amount (positive = normal balance)."""
+    if acct["type"] in CREDIT_NORMAL:
+        return -raw
+    return raw
+
+
+# ---------- Income Statement ----------
 
 async def compute_income_statement(company_id: str, start: str, end: str, basis: str = "accrual"):
-    company, accts, txns = await _load_context(company_id, start, end, basis)
-    by_acct = defaultdict(float)
-    for t in txns:
-        aid = t.get("category_account_id")
-        if aid:
-            by_acct[aid] += float(t.get("amount", 0.0))
+    company = await db.companies.find_one({"id": company_id})
+    accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
+    by = await _signed_balances(company_id, start, end)
 
-    revenue_rows = []
-    expense_rows = []
+    revenue_rows, expense_rows = [], []
     for a in sorted(accts, key=lambda x: x["code"]):
-        amt = by_acct.get(a["id"], 0.0)
-        if a["type"] == "revenue" and amt != 0:
-            revenue_rows.append({"code": a["code"], "name": a["name"], "amount": round(amt, 2)})
-        elif a["type"] == "expense" and amt != 0:
-            expense_rows.append({"code": a["code"], "name": a["name"], "amount": round(-amt, 2)})
+        raw = by.get(a["id"], 0.0)
+        disp = _display_amount(a, raw)
+        if abs(disp) < 0.005:
+            continue
+        if a["type"] == "revenue":
+            revenue_rows.append({"code": a["code"], "name": a["name"], "amount": round(disp, 2)})
+        elif a["type"] == "expense":
+            expense_rows.append({"code": a["code"], "name": a["name"], "amount": round(disp, 2)})
 
-    total_revenue = sum(r["amount"] for r in revenue_rows)
-    total_expense = sum(r["amount"] for r in expense_rows)
-    net_income = total_revenue - total_expense
+    total_revenue = round(sum(r["amount"] for r in revenue_rows), 2)
+    total_expense = round(sum(r["amount"] for r in expense_rows), 2)
+    net_income = round(total_revenue - total_expense, 2)
 
     return {
         "company_name": company["name"] if company else "",
         "period_start": start, "period_end": end, "basis": basis,
         "revenue": revenue_rows, "expenses": expense_rows,
-        "total_revenue": round(total_revenue, 2),
-        "total_expense": round(total_expense, 2),
-        "net_income": round(net_income, 2),
+        "total_revenue": total_revenue,
+        "total_expense": total_expense,
+        "net_income": net_income,
     }
 
+
+# ---------- Balance Sheet ----------
 
 async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accrual"):
     company = await db.companies.find_one({"id": company_id})
     accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
-    txns = await db.transactions.find({
-        "company_id": company_id, "date": {"$lte": as_of}, "posted": True,
-    }).to_list(50000)
+    by = await _signed_balances(company_id, start=None, end=as_of, include_pre_period=True)
 
-    by_acct = defaultdict(float)
-    for t in txns:
-        aid = t.get("category_account_id")
-        if aid:
-            by_acct[aid] += float(t.get("amount", 0.0))
-        bank = t.get("bank_account_id")
-        if bank:
-            by_acct[bank] += float(t.get("amount", 0.0))
-
-    groups = {"asset": [], "liability": [], "equity": []}
+    assets, liabilities, equity = [], [], []
+    net_income_current = 0.0
     for a in sorted(accts, key=lambda x: x["code"]):
-        amt = by_acct.get(a["id"], 0.0)
-        if a["type"] not in groups:
-            continue
-        if amt == 0 and a["type"] != "equity":
-            continue
-        groups[a["type"]].append({"code": a["code"], "name": a["name"], "amount": round(amt, 2)})
+        raw = by.get(a["id"], 0.0)
+        disp = _display_amount(a, raw)
+        if a["type"] == "asset":
+            if abs(disp) >= 0.005:
+                assets.append({"code": a["code"], "name": a["name"], "amount": round(disp, 2)})
+        elif a["type"] == "liability":
+            if abs(disp) >= 0.005:
+                liabilities.append({"code": a["code"], "name": a["name"], "amount": round(disp, 2)})
+        elif a["type"] == "equity":
+            if abs(disp) >= 0.005 or a["code"] == "3100":  # keep RE row visible even if 0
+                equity.append({"code": a["code"], "name": a["name"], "amount": round(disp, 2)})
+        elif a["type"] in ("revenue", "expense"):
+            # income accounts roll into current-period retained earnings
+            if a["type"] == "revenue":
+                net_income_current += disp
+            else:
+                net_income_current -= disp
 
-    # Compute retained earnings = revenue - expense to date
-    re_amount = 0.0
-    for a in accts:
-        amt = by_acct.get(a["id"], 0.0)
-        if a["type"] == "revenue":
-            re_amount += amt
-        elif a["type"] == "expense":
-            re_amount -= amt
-    groups["equity"].append({"code": "RE", "name": "Retained Earnings (period-to-date)", "amount": round(re_amount, 2)})
+    net_income_current = round(net_income_current, 2)
+    equity.append({
+        "code": "NI", "name": "Current Period Net Income",
+        "amount": net_income_current,
+    })
 
-    total_a = sum(x["amount"] for x in groups["asset"])
-    total_l = -sum(x["amount"] for x in groups["liability"])
-    total_e = -sum(x["amount"] for x in groups["equity"])
+    total_assets = round(sum(x["amount"] for x in assets), 2)
+    total_liabilities = round(sum(x["amount"] for x in liabilities), 2)
+    total_equity = round(sum(x["amount"] for x in equity), 2)
+    total_le = round(total_liabilities + total_equity, 2)
+    balanced = abs(total_assets - total_le) < 0.02
+
     return {
         "company_name": company["name"] if company else "", "as_of": as_of, "basis": basis,
-        "assets": groups["asset"], "liabilities": groups["liability"], "equity": groups["equity"],
-        "total_assets": round(total_a, 2),
-        "total_liabilities": round(total_l, 2),
-        "total_equity": round(total_e, 2),
-        "total_liabilities_equity": round(total_l + total_e, 2),
+        "assets": assets, "liabilities": liabilities, "equity": equity,
+        "total_assets": total_assets,
+        "total_liabilities": total_liabilities,
+        "total_equity": total_equity,
+        "total_liabilities_equity": total_le,
+        "balanced": balanced,
+        "imbalance": round(total_assets - total_le, 2),
     }
 
+
+# ---------- Trial Balance ----------
 
 async def compute_trial_balance(company_id: str, as_of: str):
     company = await db.companies.find_one({"id": company_id})
     accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
-    txns = await db.transactions.find({
-        "company_id": company_id, "date": {"$lte": as_of}, "posted": True,
-    }).to_list(50000)
-    by_acct = defaultdict(float)
-    for t in txns:
-        aid = t.get("category_account_id")
-        if aid:
-            by_acct[aid] += float(t.get("amount", 0.0))
-        bank = t.get("bank_account_id")
-        if bank:
-            by_acct[bank] += float(t.get("amount", 0.0))
+    by = await _signed_balances(company_id, start=None, end=as_of, include_pre_period=True)
+
     rows = []
     total_d = 0.0
     total_c = 0.0
     for a in sorted(accts, key=lambda x: x["code"]):
-        bal = by_acct.get(a["id"], 0.0)
-        if bal == 0:
+        raw = by.get(a["id"], 0.0)
+        if abs(raw) < 0.005:
             continue
-        # Normal balance: assets/expenses = debit positive; liabilities/equity/revenue = credit
-        if a["type"] in ("asset", "expense"):
-            debit = max(bal, 0.0)
-            credit = -min(bal, 0.0)
-        else:
-            debit = -min(bal, 0.0)
-            credit = max(bal, 0.0)
-        rows.append({"code": a["code"], "name": a["name"], "debit": round(debit, 2), "credit": round(credit, 2)})
+        debit = raw if raw > 0 else 0.0
+        credit = -raw if raw < 0 else 0.0
+        rows.append({"code": a["code"], "name": a["name"],
+                     "debit": round(debit, 2), "credit": round(credit, 2)})
         total_d += debit
         total_c += credit
-    return {"company_name": company["name"] if company else "", "as_of": as_of,
-            "rows": rows, "total_debit": round(total_d, 2), "total_credit": round(total_c, 2)}
+    return {
+        "company_name": company["name"] if company else "", "as_of": as_of,
+        "rows": rows, "total_debit": round(total_d, 2), "total_credit": round(total_c, 2),
+        "balanced": abs(total_d - total_c) < 0.02,
+    }
 
+
+# ---------- General Ledger ----------
 
 async def compute_general_ledger(company_id: str, start: str, end: str):
+    """List every posting per account with a running balance (signed, debit-normal)."""
     company = await db.companies.find_one({"id": company_id})
     accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
-    txns = await db.transactions.find({
-        "company_id": company_id, "date": {"$gte": start, "$lte": end}, "posted": True,
-    }).sort("date", 1).to_list(50000)
-    grouped = defaultdict(list)
-    for t in txns:
-        aid = t.get("category_account_id")
-        if aid:
-            grouped[aid].append(t)
     accts_by_id = {a["id"]: a for a in accts}
+
+    # Opening balances: signed balances as of the day BEFORE start
+    from datetime import date as _date
+    try:
+        d = _date.fromisoformat(start)
+        prev_end = (_date(d.year, d.month, d.day).fromordinal(d.toordinal() - 1)).isoformat()
+    except Exception:
+        prev_end = start
+    opening = await _signed_balances(company_id, start=None, end=prev_end, include_pre_period=True)
+
+    # Gather signed postings within [start, end]
+    postings: dict[str, list[dict]] = defaultdict(list)
+
+    txns = await db.transactions.find({
+        "company_id": company_id, "posted": True,
+        "date": {"$gte": start, "$lte": end},
+    }).sort("date", 1).to_list(100000)
+    for t in txns:
+        amt = float(t.get("amount", 0) or 0)
+        desc = t.get("description") or t.get("merchant") or ""
+        bank = t.get("bank_account_id")
+        if bank:
+            postings[bank].append({
+                "date": t["date"], "description": desc, "signed": amt,
+                "ref": f"Txn · {t.get('merchant', '')[:40]}",
+            })
+        splits = t.get("splits") or []
+        if splits:
+            split_total = 0.0
+            for s in splits:
+                sid = s.get("category_account_id")
+                s_amt = float(s.get("amount", 0) or 0)
+                split_total += s_amt
+                if sid:
+                    postings[sid].append({
+                        "date": t["date"], "description": s.get("description") or desc,
+                        "signed": -s_amt, "ref": f"Txn split · {t.get('merchant', '')[:30]}",
+                    })
+            residual = amt - split_total
+            aid_cat = t.get("category_account_id")
+            if aid_cat and abs(residual) > 0.001:
+                postings[aid_cat].append({
+                    "date": t["date"], "description": desc,
+                    "signed": -residual, "ref": f"Txn residual · {t.get('merchant', '')[:30]}",
+                })
+        else:
+            aid_cat = t.get("category_account_id")
+            if aid_cat:
+                postings[aid_cat].append({
+                    "date": t["date"], "description": desc, "signed": -amt,
+                    "ref": f"Txn · {t.get('merchant', '')[:40]}",
+                })
+
+    jes = await db.journal_entries.find({
+        "company_id": company_id, "date": {"$gte": start, "$lte": end},
+    }).sort("date", 1).to_list(100000)
+    for j in jes:
+        memo = j.get("memo") or "Journal Entry"
+        for line in j.get("lines", []):
+            aid = line.get("account_id")
+            if not aid:
+                continue
+            d = float(line.get("debit", 0) or 0)
+            c = float(line.get("credit", 0) or 0)
+            postings[aid].append({
+                "date": j["date"], "description": line.get("description") or memo,
+                "signed": (d - c), "ref": f"JE · {memo[:40]}",
+            })
+
     sections = []
-    for aid, entries in grouped.items():
+    for aid, entries in postings.items():
         a = accts_by_id.get(aid)
         if not a:
             continue
-        rows = []
-        run = 0.0
-        for t in entries:
-            amt = float(t.get("amount", 0.0))
-            run += amt
-            rows.append({
-                "date": t["date"], "description": t.get("description", ""),
-                "amount": round(amt, 2), "balance": round(run, 2),
-            })
-        sections.append({"code": a["code"], "name": a["name"], "entries": rows,
-                         "total": round(run, 2)})
-    sections.sort(key=lambda s: s["code"])
-    return {"company_name": company["name"] if company else "",
-            "period_start": start, "period_end": end, "sections": sections}
+        entries.sort(key=lambda x: x["date"])
+        credit_normal = a["type"] in CREDIT_NORMAL
+        opening_raw = opening.get(aid, 0.0)
+        opening_disp = -opening_raw if credit_normal else opening_raw
 
+        rows = []
+        run = opening_raw
+        for e in entries:
+            run += e["signed"]
+            disp_delta = -e["signed"] if credit_normal else e["signed"]
+            disp_run = -run if credit_normal else run
+            rows.append({
+                "date": e["date"], "description": e["description"][:80],
+                "reference": e["ref"],
+                "debit": round(e["signed"], 2) if e["signed"] > 0 else 0.0,
+                "credit": round(-e["signed"], 2) if e["signed"] < 0 else 0.0,
+                "amount": round(disp_delta, 2),
+                "balance": round(disp_run, 2),
+            })
+        sections.append({
+            "code": a["code"], "name": a["name"], "type": a["type"],
+            "opening_balance": round(opening_disp, 2),
+            "entries": rows,
+            "total": rows[-1]["balance"] if rows else round(opening_disp, 2),
+        })
+    sections.sort(key=lambda s: s["code"])
+    return {
+        "company_name": company["name"] if company else "",
+        "period_start": start, "period_end": end, "sections": sections,
+    }
+
+
+# ---------- Cash Flow ----------
 
 async def compute_cash_flow(company_id: str, start: str, end: str):
-    """Simple direct-method cash flow: change in bank + operating breakdown."""
     company = await db.companies.find_one({"id": company_id})
-    txns = await db.transactions.find({
-        "company_id": company_id, "date": {"$gte": start, "$lte": end}, "posted": True,
-    }).to_list(50000)
     accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
     accts_by_id = {a["id"]: a for a in accts}
+
+    txns = await db.transactions.find({
+        "company_id": company_id, "posted": True,
+        "date": {"$gte": start, "$lte": end},
+    }).to_list(100000)
 
     operating = 0.0
     investing = 0.0
     financing = 0.0
     for t in txns:
+        amt = float(t.get("amount", 0) or 0)
         aid = t.get("category_account_id")
         a = accts_by_id.get(aid) if aid else None
-        amt = float(t.get("amount", 0.0))
         if not a:
             operating += amt
             continue
         if a["type"] in ("revenue", "expense"):
             operating += amt
-        elif a["subtype"] == "fixed_asset":
+        elif a.get("subtype") == "fixed_asset":
             investing += amt
-        elif a["type"] == "liability" and "loan" in a["name"].lower():
+        elif a["type"] == "liability" and "loan" in (a.get("name") or "").lower():
             financing += amt
         else:
             operating += amt
@@ -210,7 +357,159 @@ async def compute_cash_flow(company_id: str, start: str, end: str):
     }
 
 
-# ---------- PDF rendering ----------
+# ---------- Sales Tax Liability ----------
+
+async def compute_sales_tax(company_id: str, start: str, end: str):
+    company = await db.companies.find_one({"id": company_id})
+    invs = await db.invoices.find({
+        "company_id": company_id, "issue_date": {"$gte": start, "$lte": end},
+    }).to_list(10000)
+    bills = await db.bills.find({
+        "company_id": company_id, "issue_date": {"$gte": start, "$lte": end},
+    }).to_list(10000)
+
+    collected = sum(float(i.get("tax", 0) or 0) for i in invs)
+    paid = sum(float(b.get("tax", 0) or 0) for b in bills)
+    taxable_sales = sum(float(i.get("subtotal", 0) or 0) for i in invs if float(i.get("tax", 0) or 0) > 0)
+    nontaxable_sales = sum(float(i.get("subtotal", 0) or 0) for i in invs if float(i.get("tax", 0) or 0) == 0)
+
+    settled_tax = 0.0
+    for i in invs:
+        total = float(i.get("total", 0) or 0)
+        bal = float(i.get("balance_due", total) or 0)
+        if total > 0:
+            paid_ratio = max(0.0, min(1.0, (total - bal) / total))
+            settled_tax += float(i.get("tax", 0) or 0) * paid_ratio
+
+    net_liability = collected - paid
+    rows = [
+        {"label": "Taxable sales", "amount": round(taxable_sales, 2)},
+        {"label": "Non-taxable sales", "amount": round(nontaxable_sales, 2)},
+        {"label": "Sales tax collected (invoiced)", "amount": round(collected, 2)},
+        {"label": "Sales tax collected & received", "amount": round(settled_tax, 2)},
+        {"label": "Sales tax paid on purchases", "amount": round(paid, 2)},
+    ]
+    return {
+        "company_name": company["name"] if company else "",
+        "period_start": start, "period_end": end,
+        "rows": rows,
+        "net_liability": round(net_liability, 2),
+        "invoices_count": len(invs),
+        "bills_count": len(bills),
+    }
+
+
+# ---------- 1099 Summary ----------
+
+async def compute_1099_summary(company_id: str, year: int):
+    company = await db.companies.find_one({"id": company_id})
+    start = f"{year}-01-01"; end = f"{year}-12-31"
+    contacts = await db.contacts.find({"company_id": company_id, "type": {"$in": ["vendor", "both"]}}).to_list(2000)
+    contact_by_id = {c["id"]: c for c in contacts}
+    contact_by_name = {(c.get("name") or "").lower(): c for c in contacts}
+
+    totals = {c["id"]: 0.0 for c in contacts}
+    bills = await db.bills.find({
+        "company_id": company_id, "issue_date": {"$gte": start, "$lte": end},
+    }).to_list(20000)
+    for b in bills:
+        cid = b.get("contact_id")
+        if not cid or cid not in totals:
+            continue
+        total = float(b.get("total", 0) or 0)
+        bal = float(b.get("balance_due", total) or 0)
+        paid_amt = max(0.0, total - bal)
+        totals[cid] += paid_amt
+
+    txns = await db.transactions.find({
+        "company_id": company_id, "posted": True,
+        "date": {"$gte": start, "$lte": end}, "amount": {"$lt": 0},
+    }).to_list(50000)
+    for t in txns:
+        merch = (t.get("merchant") or "").lower()
+        c = contact_by_name.get(merch)
+        if not c:
+            continue
+        totals[c["id"]] += abs(float(t.get("amount", 0) or 0))
+
+    rows = []
+    for cid_, amt in totals.items():
+        if amt < 600.0:
+            continue
+        c = contact_by_id[cid_]
+        rows.append({
+            "contact_id": cid_,
+            "contact_name": c.get("name"),
+            "contact_email": c.get("email", ""),
+            "tin": c.get("tin", ""),
+            "w9_on_file": bool(c.get("w9_on_file", False)),
+            "total_paid": round(amt, 2),
+        })
+    rows.sort(key=lambda r: r["total_paid"], reverse=True)
+    return {
+        "company_name": company["name"] if company else "",
+        "year": year,
+        "rows": rows,
+        "total_reportable": round(sum(r["total_paid"] for r in rows), 2),
+        "count": len(rows),
+    }
+
+
+# ---------- A/R Aging ----------
+
+async def compute_ar_aging(company_id: str, as_of: str):
+    """Bucket outstanding A/R (unpaid invoices) by days past due."""
+    from datetime import date as _date
+    company = await db.companies.find_one({"id": company_id})
+    invs = await db.invoices.find({"company_id": company_id}).to_list(10000)
+    buckets = {"current": 0.0, "1_30": 0.0, "31_60": 0.0, "61_90": 0.0, "over_90": 0.0}
+    lines = []
+    try:
+        today = _date.fromisoformat(as_of)
+    except Exception:
+        today = _date.today()
+    for i in invs:
+        if i.get("status") == "paid":
+            continue
+        bal = float(i.get("balance_due", 0) or 0)
+        if bal <= 0.005:
+            continue
+        due_str = i.get("due_date") or ""
+        try:
+            due = _date.fromisoformat(due_str)
+            days_past = (today - due).days
+        except Exception:
+            days_past = 0
+        if days_past <= 0:
+            bucket = "current"
+        elif days_past <= 30:
+            bucket = "1_30"
+        elif days_past <= 60:
+            bucket = "31_60"
+        elif days_past <= 90:
+            bucket = "61_90"
+        else:
+            bucket = "over_90"
+        buckets[bucket] += bal
+        lines.append({
+            "invoice_id": i["id"], "number": i.get("number"),
+            "contact_name": i.get("contact_name") or "",
+            "issue_date": i.get("issue_date"), "due_date": due_str,
+            "balance_due": round(bal, 2),
+            "days_past_due": days_past, "bucket": bucket,
+        })
+    lines.sort(key=lambda x: (-x["days_past_due"], x["contact_name"] or ""))
+    total = round(sum(buckets.values()), 2)
+    return {
+        "company_name": company["name"] if company else "",
+        "as_of": as_of,
+        "buckets": {k: round(v, 2) for k, v in buckets.items()},
+        "lines": lines,
+        "total": total,
+    }
+
+
+# ---------- PDF rendering helpers ----------
 
 def _pdf_styles():
     styles = getSampleStyleSheet()
@@ -285,6 +584,11 @@ def build_balance_sheet_pdf(data: dict) -> bytes:
         Spacer(1, 12),
         _money_table([], "TOTAL LIABILITIES & EQUITY", data["total_liabilities_equity"]),
     ]
+    if not data.get("balanced", True):
+        story.append(Spacer(1, 10))
+        story.append(Paragraph(
+            f"⚠ Imbalance detected: ${data['imbalance']:,.2f}", s["SubTitle"],
+        ))
     doc.build(story)
     return buf.getvalue()
 
@@ -333,11 +637,15 @@ def build_general_ledger_pdf(data: dict) -> bytes:
     ]
     for sec in data["sections"]:
         story.append(Paragraph(f"{sec['code']} — {sec['name']}", s["Section"]))
-        rows = [["Date", "Description", "Amount", "Balance"]]
+        rows = [["Date", "Description", "Debit", "Credit", "Balance"]]
+        rows.append(["", f"Opening balance", "", "", f"${sec['opening_balance']:,.2f}"])
         for e in sec["entries"]:
-            rows.append([e["date"], e["description"][:60], f"${e['amount']:,.2f}", f"${e['balance']:,.2f}"])
-        rows.append(["", "Ending Balance", "", f"${sec['total']:,.2f}"])
-        t = Table(rows, colWidths=[0.9 * inch, 3.4 * inch, 1.2 * inch, 1.4 * inch])
+            rows.append([e["date"], e["description"][:50],
+                         f"${e['debit']:,.2f}" if e["debit"] else "",
+                         f"${e['credit']:,.2f}" if e["credit"] else "",
+                         f"${e['balance']:,.2f}"])
+        rows.append(["", "Ending Balance", "", "", f"${sec['total']:,.2f}"])
+        t = Table(rows, colWidths=[0.9 * inch, 3.0 * inch, 1.0 * inch, 1.0 * inch, 1.1 * inch])
         t.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F1F5F9")),
@@ -381,53 +689,6 @@ def build_cash_flow_pdf(data: dict) -> bytes:
     return buf.getvalue()
 
 
-# ---------- Sales Tax Liability ----------
-
-async def compute_sales_tax(company_id: str, start: str, end: str):
-    """Sum tax collected (invoices) minus tax paid (bills) for the period.
-
-    Also breaks out by tax rate if line_items carry `tax_rate`.
-    """
-    company = await db.companies.find_one({"id": company_id})
-    invs = await db.invoices.find({
-        "company_id": company_id, "issue_date": {"$gte": start, "$lte": end},
-    }).to_list(10000)
-    bills = await db.bills.find({
-        "company_id": company_id, "issue_date": {"$gte": start, "$lte": end},
-    }).to_list(10000)
-
-    collected = sum(float(i.get("tax", 0) or 0) for i in invs)
-    paid = sum(float(b.get("tax", 0) or 0) for b in bills)
-    taxable_sales = sum(float(i.get("subtotal", 0) or 0) for i in invs if float(i.get("tax", 0) or 0) > 0)
-    nontaxable_sales = sum(float(i.get("subtotal", 0) or 0) for i in invs if float(i.get("tax", 0) or 0) == 0)
-
-    # Aggregate paid vs unpaid liability (invoices with balance_due still open aren't yet remitted)
-    settled_tax = 0.0
-    for i in invs:
-        total = float(i.get("total", 0) or 0)
-        bal = float(i.get("balance_due", total) or 0)
-        if total > 0:
-            paid_ratio = max(0.0, min(1.0, (total - bal) / total))
-            settled_tax += float(i.get("tax", 0) or 0) * paid_ratio
-
-    net_liability = collected - paid
-    rows = [
-        {"label": "Taxable sales", "amount": round(taxable_sales, 2)},
-        {"label": "Non-taxable sales", "amount": round(nontaxable_sales, 2)},
-        {"label": "Sales tax collected (invoiced)", "amount": round(collected, 2)},
-        {"label": "Sales tax collected & received", "amount": round(settled_tax, 2)},
-        {"label": "Sales tax paid on purchases", "amount": round(paid, 2)},
-    ]
-    return {
-        "company_name": company["name"] if company else "",
-        "period_start": start, "period_end": end,
-        "rows": rows,
-        "net_liability": round(net_liability, 2),
-        "invoices_count": len(invs),
-        "bills_count": len(bills),
-    }
-
-
 def build_sales_tax_pdf(data: dict) -> bytes:
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=LETTER, leftMargin=0.6 * inch, rightMargin=0.6 * inch,
@@ -453,68 +714,6 @@ def build_sales_tax_pdf(data: dict) -> bytes:
     story.append(t)
     doc.build(story)
     return buf.getvalue()
-
-
-# ---------- 1099 Summary ----------
-
-async def compute_1099_summary(company_id: str, year: int):
-    """List contractor payments (vendors) totaling ≥ $600 in the calendar year.
-
-    A "contractor" here = a contact of type=vendor. Amount = sum of payments linked to bills
-    for that vendor + direct expense transactions categorized to Legal & Professional Fees or
-    Payroll where the contact matches.
-    """
-    company = await db.companies.find_one({"id": company_id})
-    start = f"{year}-01-01"; end = f"{year}-12-31"
-    contacts = await db.contacts.find({"company_id": company_id, "type": {"$in": ["vendor", "both"]}}).to_list(2000)
-    contact_by_id = {c["id"]: c for c in contacts}
-    contact_by_name = {(c.get("name") or "").lower(): c for c in contacts}
-
-    # Sum bill totals paid within the year to each vendor
-    totals = {c["id"]: 0.0 for c in contacts}
-    bills = await db.bills.find({
-        "company_id": company_id, "issue_date": {"$gte": start, "$lte": end},
-    }).to_list(20000)
-    for b in bills:
-        cid = b.get("contact_id")
-        if not cid or cid not in totals:
-            continue
-        total = float(b.get("total", 0) or 0)
-        bal = float(b.get("balance_due", total) or 0)
-        paid_amt = max(0.0, total - bal)
-        totals[cid] += paid_amt
-
-    # Also include expense transactions with a matching merchant name (best-effort)
-    txns = await db.transactions.find({
-        "company_id": company_id, "posted": True,
-        "date": {"$gte": start, "$lte": end}, "amount": {"$lt": 0},
-    }).to_list(50000)
-    for t in txns:
-        merch = (t.get("merchant") or "").lower()
-        c = contact_by_name.get(merch)
-        if not c:
-            continue
-        totals[c["id"]] += abs(float(t.get("amount", 0) or 0))
-
-    rows = []
-    for cid_, amt in totals.items():
-        if amt < 600.0:
-            continue
-        c = contact_by_id[cid_]
-        rows.append({
-            "contact_name": c.get("name"),
-            "tin": c.get("tin", ""),
-            "w9_on_file": bool(c.get("w9_on_file", False)),
-            "total_paid": round(amt, 2),
-        })
-    rows.sort(key=lambda r: r["total_paid"], reverse=True)
-    return {
-        "company_name": company["name"] if company else "",
-        "year": year,
-        "rows": rows,
-        "total_reportable": round(sum(r["total_paid"] for r in rows), 2),
-        "count": len(rows),
-    }
 
 
 def build_1099_pdf(data: dict) -> bytes:

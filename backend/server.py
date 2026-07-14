@@ -502,12 +502,18 @@ async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depe
         reasoning = result["reasoning"]
         await _log_ai(cid, "categorize", 1)
     acct = accts_by_id.get(category_id) if category_id else None
-    bank = accts_by_id.get(inp.bank_account_id) if inp.bank_account_id else None
+    bank_id = inp.bank_account_id
+    if not bank_id:
+        # auto-default to Business Checking (code 1010) to preserve double-entry
+        checking = next((a for a in accts if a.get("code") == "1010"), None)
+        if checking:
+            bank_id = checking["id"]
+    bank = accts_by_id.get(bank_id) if bank_id else None
     doc = {
         "id": tid, "company_id": cid, "date": inp.date,
         "description": inp.description, "merchant": inp.merchant or inp.description,
         "amount": round(inp.amount, 2),
-        "bank_account_id": inp.bank_account_id,
+        "bank_account_id": bank_id,
         "bank_account_name": bank["name"] if bank else "",
         "category_account_id": category_id,
         "category_account_code": acct["code"] if acct else None,
@@ -1181,6 +1187,13 @@ async def rep_1099_pdf(cid: str, year: Optional[int] = None, user: dict = Depend
     data = await R.compute_1099_summary(cid, y)
     return Response(content=R.build_1099_pdf(data), media_type="application/pdf",
                     headers={"Content-Disposition": "attachment; filename=1099_summary.pdf"})
+
+
+@api.get("/companies/{cid}/reports/ar-aging")
+async def rep_ar_aging(cid: str, as_of: Optional[str] = None, user: dict = Depends(get_current_user)):
+    await _require_company(user, cid)
+    _, e = _default_range()
+    return await R.compute_ar_aging(cid, as_of or e)
 
 
 # ----------------------- Onboarding -----------------------

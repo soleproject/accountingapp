@@ -1,8 +1,8 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   LayoutDashboard, FileText, Receipt, CreditCard, ScrollText, BarChart3,
-  Users, Link2, Inbox, ChevronDown, ChevronRight, ArrowLeftRight, Boxes,
+  Users, Link2, Inbox, ChevronRight, ArrowLeft, ArrowLeftRight, Boxes,
   Building2, Wallet, Tags, CheckCheck, ClipboardCheck, CalendarCheck, Calendar,
   BookOpen, Notebook, ListTree, Sparkles, Shield, Briefcase, Wand2, PanelLeftClose, PanelLeft,
 } from "lucide-react";
@@ -40,9 +40,14 @@ const ACCOUNTING = [
 ];
 
 export default function Sidebar({ collapsed, onToggle }) {
-  const [accOpen, setAccOpen] = useState(true);
+  const [inAccounting, setInAccounting] = useState(false);
   const { user } = useAuth();
   const loc = useLocation();
+
+  // Auto-enter accounting view when navigating to an accounting route
+  useEffect(() => {
+    if (loc.pathname.startsWith("/accounting/")) setInAccounting(true);
+  }, [loc.pathname]);
 
   const Item = ({ to, label, icon: Icon, color = NAV_COLOR, indent = false }) => {
     const active = loc.pathname === to || loc.pathname.startsWith(to + "/");
@@ -88,39 +93,51 @@ export default function Sidebar({ collapsed, onToggle }) {
       </div>
 
       <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
-        {user?.role === "superadmin" && (
-          <Item to="/admin" label="Superadmin" icon={Shield} />
-        )}
-        {(user?.role === "pro" || user?.role === "superadmin") && (
-          <Item to="/pro/clients" label="Clients" icon={Briefcase} />
-        )}
-
-        {NAV.map((n) => (
-          <Item key={n.to} {...n} />
-        ))}
-
-        <div className="pt-2">
-          <button
-            data-testid={`${TID.navGroup}-accounting`}
-            onClick={() => setAccOpen(!accOpen)}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-slate-50 text-slate-800"
-          >
-            <ListTree size={17} style={{ color: NAV_COLOR }} />
+        {inAccounting ? (
+          <>
+            <button
+              data-testid="sidebar-back-btn"
+              onClick={() => setInAccounting(false)}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-slate-50 text-slate-700 border border-slate-200 mb-2"
+            >
+              <ArrowLeft size={15} style={{ color: NAV_COLOR }} />
+              {!collapsed && <span className="font-medium">Back to main menu</span>}
+            </button>
             {!collapsed && (
-              <>
-                <span className="font-medium">Accounting</span>
-                <span className="ml-auto">
-                  {accOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                </span>
-              </>
+              <div className="px-3 pb-1 pt-1 text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
+                Accounting
+              </div>
             )}
-          </button>
-          {accOpen && !collapsed && (
-            <div className="mt-0.5 space-y-0.5">
-              {ACCOUNTING.map((a) => <Item key={a.to} {...a} indent />)}
-            </div>
-          )}
-        </div>
+            {ACCOUNTING.map((a) => <Item key={a.to} {...a} />)}
+          </>
+        ) : (
+          <>
+            {user?.role === "superadmin" && (
+              <Item to="/admin" label="Superadmin" icon={Shield} />
+            )}
+            {(user?.role === "pro" || user?.role === "superadmin") && (
+              <Item to="/pro/clients" label="Clients" icon={Briefcase} />
+            )}
+
+            {NAV.map((n) => (
+              <Item key={n.to} {...n} />
+            ))}
+
+            <button
+              data-testid={`${TID.navGroup}-accounting`}
+              onClick={() => setInAccounting(true)}
+              className="mt-2 w-full flex items-center gap-3 px-3 py-2 text-sm rounded-md hover:bg-slate-50 text-slate-700"
+            >
+              <ListTree size={17} style={{ color: NAV_COLOR }} />
+              {!collapsed && (
+                <>
+                  <span className="font-medium">Accounting</span>
+                  <span className="ml-auto"><ChevronRight size={14} /></span>
+                </>
+              )}
+            </button>
+          </>
+        )}
       </nav>
 
       {!collapsed && (
