@@ -29,14 +29,17 @@ _config = plaid.Configuration(
 _client = plaid_api.PlaidApi(plaid.ApiClient(_config))
 
 
-def create_link_token(user_id: str, client_name: str = "Axiom Ledger") -> str:
-    req = LinkTokenCreateRequest(
-        products=[Products("transactions")],
-        client_name=client_name,
-        country_codes=[CountryCode("US")],
-        language="en",
-        user=LinkTokenCreateRequestUser(client_user_id=user_id),
-    )
+def create_link_token(user_id: str, client_name: str = "Axiom Ledger", webhook_url: str | None = None) -> str:
+    kwargs = {
+        "products": [Products("transactions")],
+        "client_name": client_name,
+        "country_codes": [CountryCode("US")],
+        "language": "en",
+        "user": LinkTokenCreateRequestUser(client_user_id=user_id),
+    }
+    if webhook_url:
+        kwargs["webhook"] = webhook_url
+    req = LinkTokenCreateRequest(**kwargs)
     resp = _client.link_token_create(req)
     return resp["link_token"]
 

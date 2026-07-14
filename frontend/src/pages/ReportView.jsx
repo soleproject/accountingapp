@@ -52,6 +52,8 @@ export default function ReportView() {
     "income-statement": "Income Statement",
     "general-ledger": "General Ledger",
     "cash-flow": "Statement of Cash Flows",
+    "sales-tax": "Sales Tax Liability",
+    "1099-summary": "1099 Summary",
   }[kind] || kind;
 
   return (
@@ -91,6 +93,8 @@ export default function ReportView() {
             <div className="text-xs text-slate-500 mt-1">
               {kind === "balance-sheet"
                 ? `As of ${data.as_of} · ${data.basis} basis`
+                : kind === "1099-summary"
+                ? `Tax year ${data.year}`
                 : `${data.period_start} to ${data.period_end}${data.basis ? ` · ${data.basis} basis` : ""}`}
             </div>
           </div>
@@ -109,6 +113,12 @@ export default function ReportView() {
           )}
           {kind === "cash-flow" && (
             <CashFlowBody data={data} />
+          )}
+          {kind === "sales-tax" && (
+            <SalesTaxBody data={data} />
+          )}
+          {kind === "1099-summary" && (
+            <Form1099Body data={data} />
           )}
         </div>
       )}
@@ -231,6 +241,62 @@ function CashFlowBody({ data }) {
       <div className="grid grid-cols-12 gap-2 px-3 py-2 border-t-2 border-slate-800 bg-slate-50 rounded mt-3">
         <div className="col-span-9 font-heading font-bold uppercase text-sm">Net Change in Cash</div>
         <div className="col-span-3 text-right font-mono-num font-bold">{fmtMoney(data.net_change)}</div>
+      </div>
+    </div>
+  );
+}
+
+function SalesTaxBody({ data }) {
+  return (
+    <div className="text-sm space-y-1">
+      {data.rows.map((r, i) => (
+        <div key={i} className="grid grid-cols-12 gap-2 px-3 py-2 border-b">
+          <div className="col-span-9">{r.label}</div>
+          <div className="col-span-3 text-right font-mono-num">{fmtMoney(r.amount)}</div>
+        </div>
+      ))}
+      <div className="grid grid-cols-12 gap-2 px-3 py-2 border-t-2 border-slate-800 bg-slate-50 rounded mt-3">
+        <div className="col-span-9 font-heading font-bold uppercase text-sm">Net sales tax liability owed</div>
+        <div className="col-span-3 text-right font-mono-num font-bold">{fmtMoney(data.net_liability)}</div>
+      </div>
+      <div className="mt-3 text-xs text-slate-500">
+        Based on {data.invoices_count} invoices and {data.bills_count} bills in the period.
+      </div>
+    </div>
+  );
+}
+
+function Form1099Body({ data }) {
+  if (!data.rows.length) {
+    return (
+      <div className="text-sm text-slate-500 py-6 text-center">
+        No contractors met the $600 reporting threshold in {data.year}.
+      </div>
+    );
+  }
+  return (
+    <div className="text-sm">
+      <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-slate-50 rounded text-xs uppercase tracking-wider font-semibold text-slate-600">
+        <div className="col-span-5">Contractor</div>
+        <div className="col-span-3">TIN / EIN</div>
+        <div className="col-span-2 text-center">W-9</div>
+        <div className="col-span-2 text-right">Total Paid</div>
+      </div>
+      {data.rows.map((r, i) => (
+        <div key={i} className="grid grid-cols-12 gap-2 px-3 py-1.5 border-b border-slate-100">
+          <div className="col-span-5">{r.contact_name}</div>
+          <div className="col-span-3 font-mono-num text-xs text-slate-600">{r.tin || "—"}</div>
+          <div className="col-span-2 text-center">
+            {r.w9_on_file
+              ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">Yes</span>
+              : <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">Missing</span>}
+          </div>
+          <div className="col-span-2 text-right font-mono-num">{fmtMoney(r.total_paid)}</div>
+        </div>
+      ))}
+      <div className="grid grid-cols-12 gap-2 px-3 py-2 border-t-2 border-slate-800 mt-2 font-semibold">
+        <div className="col-span-10">Total reportable</div>
+        <div className="col-span-2 text-right font-mono-num">{fmtMoney(data.total_reportable)}</div>
       </div>
     </div>
   );

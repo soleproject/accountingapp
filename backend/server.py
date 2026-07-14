@@ -205,6 +205,70 @@ async def _log_ai(company_id: str, kind: str, count: int = 1):
         })
 
 
+async def _is_period_closed(company_id: str, date_str: str) -> bool:
+    """True if the given ISO date falls within a closed period for the company."""
+    if not date_str:
+        return False
+    doc = await db.close_periods.find_one({
+        "company_id": company_id, "status": "closed",
+        "period_start": {"$lte": date_str},
+        "period_end": {"$gte": date_str},
+    })
+    return doc is not None
+
+
+async def _assert_open(company_id: str, date_str: str):
+    if await _is_period_closed(company_id, date_str):
+        raise HTTPException(423, f"Period covering {date_str} is closed. Reopen it to edit.")
+
+
+async def _sync_and_import(cid: str, item: dict, selected_account_ids: list[str] | None = None) -> int:
+    """Shared helper: run Plaid transactions_sync for a company's item and AI-categorize each new txn."""
+    try:
+        synced = plaid_service.sync_transactions(item["access_token"], item.get("cursor"))
+    except Exception:
+        return 0
+    await db.plaid_items.update_one({"id": item["id"]}, {"$set": {
+        "cursor": synced["next_cursor"], "updated_at": now_iso(),
+    }})
+    accts = await db.accounts.find({"company_id": cid}).to_list(2000)
+    coa = [{"code": a["code"], "name": a["name"], "type": a["type"]} for a in accts]
+    checking = next((a for a in accts if a["code"] == "1010"), None)
+    if not checking:
+        return 0
+    imported = 0
+    now = now_iso()
+    for t in synced["added"]:
+        if selected_account_ids and t["account_id"] not in selected_account_ids:
+            continue
+        if await db.transactions.find_one({"company_id": cid, "plaid_transaction_id": t["transaction_id"]}):
+            continue
+        if await _is_period_closed(cid, t["date"]):
+            continue  # skip closed-period activity
+        merchant = t.get("merchant_name") or t.get("name") or "Unknown"
+        result = await categorize_transaction(merchant, t["amount"], t["name"], coa)
+        acct = next((a for a in accts if a["code"] == result["account_code"]), None) or checking
+        await db.transactions.insert_one({
+            "id": str(uuid.uuid4()), "company_id": cid, "date": t["date"],
+            "description": t["name"], "merchant": merchant, "amount": t["amount"],
+            "bank_account_id": checking["id"], "bank_account_name": checking["name"],
+            "category_account_id": acct["id"], "category_account_code": acct["code"],
+            "category_account_name": acct["name"],
+            "ai_confidence": round(result["confidence"], 2), "ai_reasoning": result["reasoning"],
+            "needs_review": result["confidence"] < 0.80, "human_reviewed": False,
+            "posted": result["confidence"] >= 0.80, "source": "plaid",
+            "plaid_transaction_id": t["transaction_id"], "plaid_account_id": t["account_id"],
+            "pending": t["pending"], "splits": [], "linked_invoice_id": None,
+            "linked_bill_id": None, "linked_payment_id": None, "tags": [],
+            "created_at": now, "updated_at": now,
+        })
+        imported += 1
+    if imported:
+        await _log_ai(cid, "categorize", imported)
+        await _log_ai(cid, "webhook_sync", imported)
+    return imported
+
+
 # ----------------------- Auth endpoints -----------------------
 
 @api.post("/auth/login")
@@ -371,6 +435,7 @@ async def list_transactions(
 @api.post("/companies/{cid}/transactions")
 async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depends(get_current_user)):
     await _require_company(user, cid)
+    await _assert_open(cid, inp.date)
     now = now_iso()
     tid = str(uuid.uuid4())
     accts = await db.accounts.find({"company_id": cid}).to_list(2000)
@@ -419,6 +484,11 @@ async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depe
 @api.patch("/companies/{cid}/transactions/{tid}")
 async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: dict = Depends(get_current_user)):
     await _require_company(user, cid)
+    existing = await db.transactions.find_one({"id": tid, "company_id": cid})
+    if existing:
+        await _assert_open(cid, existing.get("date"))
+        if inp.date:
+            await _assert_open(cid, inp.date)
     upd = {k: v for k, v in inp.model_dump(exclude_unset=True).items() if v is not None}
     if "category_account_id" in upd:
         acct = await db.accounts.find_one({"id": upd["category_account_id"], "company_id": cid})
@@ -439,6 +509,7 @@ async def split_transaction(cid: str, tid: str, inp: SplitIn, user: dict = Depen
     txn = await db.transactions.find_one({"id": tid, "company_id": cid})
     if not txn:
         raise HTTPException(404, "Transaction not found")
+    await _assert_open(cid, txn.get("date"))
     total = sum(float(s.get("amount", 0)) for s in inp.splits)
     if abs(total - float(txn["amount"])) > 0.01:
         raise HTTPException(400, f"Splits must total {txn['amount']}, got {total}")
@@ -471,6 +542,9 @@ async def link_transaction(
 async def approve_transaction(cid: str, tid: str, user: dict = Depends(get_current_user)):
     """Mark human-reviewed & posted."""
     await _require_company(user, cid)
+    existing = await db.transactions.find_one({"id": tid, "company_id": cid})
+    if existing:
+        await _assert_open(cid, existing.get("date"))
     await db.transactions.update_one({"id": tid, "company_id": cid},
         {"$set": {"human_reviewed": True, "needs_review": False, "posted": True, "updated_at": now_iso()}})
     # Track approval count on merchant for rule suggestion
@@ -506,6 +580,9 @@ async def bulk_approve(cid: str, ids: List[str], user: dict = Depends(get_curren
 @api.delete("/companies/{cid}/transactions/{tid}")
 async def delete_transaction(cid: str, tid: str, user: dict = Depends(get_current_user)):
     await _require_company(user, cid)
+    existing = await db.transactions.find_one({"id": tid, "company_id": cid})
+    if existing:
+        await _assert_open(cid, existing.get("date"))
     await db.transactions.delete_one({"id": tid, "company_id": cid})
     return {"ok": True}
 
@@ -591,6 +668,8 @@ async def create_rule(cid: str, inp: RuleCreate, user: dict = Depends(get_curren
         }
         docs = await db.transactions.find(q).to_list(5000)
         for t in docs:
+            if await _is_period_closed(cid, t.get("date")):
+                continue  # rules never edit closed-period activity
             await db.transactions.update_one(
                 {"id": t["id"]},
                 {"$set": {
@@ -832,6 +911,7 @@ async def list_jes(cid: str, user: dict = Depends(get_current_user)):
 @api.post("/companies/{cid}/journal-entries")
 async def create_je(cid: str, inp: JECreate, user: dict = Depends(get_current_user)):
     await _require_company(user, cid)
+    await _assert_open(cid, inp.date)
     total_d = sum(float(l.get("debit", 0)) for l in inp.lines)
     total_c = sum(float(l.get("credit", 0)) for l in inp.lines)
     if abs(total_d - total_c) > 0.01:
@@ -848,6 +928,9 @@ async def create_je(cid: str, inp: JECreate, user: dict = Depends(get_current_us
 @api.delete("/companies/{cid}/journal-entries/{jid}")
 async def delete_je(cid: str, jid: str, user: dict = Depends(get_current_user)):
     await _require_company(user, cid)
+    existing = await db.journal_entries.find_one({"id": jid, "company_id": cid})
+    if existing:
+        await _assert_open(cid, existing.get("date"))
     await db.journal_entries.delete_one({"id": jid, "company_id": cid})
     return {"ok": True}
 
@@ -949,6 +1032,40 @@ async def rep_cf_pdf(cid: str, start: Optional[str] = None, end: Optional[str] =
                     headers={"Content-Disposition": "attachment; filename=cash_flow.pdf"})
 
 
+@api.get("/companies/{cid}/reports/sales-tax")
+async def rep_sales_tax(cid: str, start: Optional[str] = None, end: Optional[str] = None,
+                        user: dict = Depends(get_current_user)):
+    await _require_company(user, cid)
+    s, e = _default_range()
+    return await R.compute_sales_tax(cid, start or s, end or e)
+
+
+@api.get("/companies/{cid}/reports/sales-tax/pdf")
+async def rep_sales_tax_pdf(cid: str, start: Optional[str] = None, end: Optional[str] = None,
+                            user: dict = Depends(get_current_user)):
+    await _require_company(user, cid)
+    s, e = _default_range()
+    data = await R.compute_sales_tax(cid, start or s, end or e)
+    return Response(content=R.build_sales_tax_pdf(data), media_type="application/pdf",
+                    headers={"Content-Disposition": "attachment; filename=sales_tax_liability.pdf"})
+
+
+@api.get("/companies/{cid}/reports/1099-summary")
+async def rep_1099(cid: str, year: Optional[int] = None, user: dict = Depends(get_current_user)):
+    await _require_company(user, cid)
+    y = year or datetime.now(timezone.utc).year
+    return await R.compute_1099_summary(cid, y)
+
+
+@api.get("/companies/{cid}/reports/1099-summary/pdf")
+async def rep_1099_pdf(cid: str, year: Optional[int] = None, user: dict = Depends(get_current_user)):
+    await _require_company(user, cid)
+    y = year or datetime.now(timezone.utc).year
+    data = await R.compute_1099_summary(cid, y)
+    return Response(content=R.build_1099_pdf(data), media_type="application/pdf",
+                    headers={"Content-Disposition": "attachment; filename=1099_summary.pdf"})
+
+
 # ----------------------- Onboarding -----------------------
 
 @api.get("/companies/{cid}/onboarding")
@@ -1000,9 +1117,15 @@ async def generate_coa(cid: str, user: dict = Depends(get_current_user)):
 async def plaid_link_token(cid: str, user: dict = Depends(get_current_user)):
     """Create a Plaid Link token for the user to link a bank account."""
     await _require_company(user, cid)
+    # Build the public webhook URL from the backend's own public host if available
+    public_base = os.environ.get("PUBLIC_BACKEND_URL", "").rstrip("/")
+    webhook_url = f"{public_base}/api/plaid/webhook" if public_base else None
     try:
-        token = plaid_service.create_link_token(user_id=f"{user['id']}::{cid}",
-                                                 client_name="Axiom Ledger")
+        token = plaid_service.create_link_token(
+            user_id=f"{user['id']}::{cid}",
+            client_name="Axiom Ledger",
+            webhook_url=webhook_url,
+        )
     except Exception as e:
         raise HTTPException(502, f"Plaid error: {e}")
     return {"link_token": token}
@@ -1085,7 +1208,47 @@ async def plaid_import(cid: str, payload: dict, user: dict = Depends(get_current
     return {"imported": imported}
 
 
-# Legacy mock endpoint kept for backward compatibility with existing UI/tests
+# ----------------------- Plaid webhook -----------------------
+
+@api.post("/plaid/webhook")
+async def plaid_webhook(payload: dict):
+    """Receive Plaid webhook events (TRANSACTIONS: SYNC_UPDATES_AVAILABLE, DEFAULT_UPDATE, etc.).
+
+    Public endpoint (no auth) — Plaid signs with JWT via `Plaid-Verification` header in production;
+    for MVP we accept, look up the item_id, and trigger a background sync.
+    """
+    webhook_type = payload.get("webhook_type", "")
+    webhook_code = payload.get("webhook_code", "")
+    item_id = payload.get("item_id")
+    if webhook_type != "TRANSACTIONS" or not item_id:
+        return {"ok": True, "ignored": True}
+    item = await db.plaid_items.find_one({"item_id": item_id})
+    if not item:
+        return {"ok": True, "unknown_item": True}
+    if webhook_code in ("SYNC_UPDATES_AVAILABLE", "DEFAULT_UPDATE", "INITIAL_UPDATE", "HISTORICAL_UPDATE"):
+        imported = await _sync_and_import(item["company_id"], item)
+        return {"ok": True, "imported": imported, "webhook_code": webhook_code}
+    if webhook_code == "TRANSACTIONS_REMOVED":
+        removed_ids = payload.get("removed_transactions") or []
+        for tid in removed_ids:
+            await db.transactions.delete_one({
+                "company_id": item["company_id"], "plaid_transaction_id": tid,
+            })
+        return {"ok": True, "removed": len(removed_ids)}
+    return {"ok": True, "webhook_code": webhook_code}
+
+
+@api.post("/companies/{cid}/plaid/manual-sync")
+async def plaid_manual_sync(cid: str, user: dict = Depends(get_current_user)):
+    """Force a Plaid sync (useful for demoing webhooks locally)."""
+    await _require_company(user, cid)
+    item = await db.plaid_items.find_one({"company_id": cid})
+    if not item:
+        raise HTTPException(400, "No Plaid item linked for this company")
+    imported = await _sync_and_import(cid, item)
+    return {"imported": imported}
+
+
 @api.post("/companies/{cid}/onboarding/mock-plaid")
 async def mock_plaid(cid: str, user: dict = Depends(get_current_user)):
     return {"accounts": [

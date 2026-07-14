@@ -379,3 +379,174 @@ def build_cash_flow_pdf(data: dict) -> bytes:
     ]
     doc.build(story)
     return buf.getvalue()
+
+
+# ---------- Sales Tax Liability ----------
+
+async def compute_sales_tax(company_id: str, start: str, end: str):
+    """Sum tax collected (invoices) minus tax paid (bills) for the period.
+
+    Also breaks out by tax rate if line_items carry `tax_rate`.
+    """
+    company = await db.companies.find_one({"id": company_id})
+    invs = await db.invoices.find({
+        "company_id": company_id, "issue_date": {"$gte": start, "$lte": end},
+    }).to_list(10000)
+    bills = await db.bills.find({
+        "company_id": company_id, "issue_date": {"$gte": start, "$lte": end},
+    }).to_list(10000)
+
+    collected = sum(float(i.get("tax", 0) or 0) for i in invs)
+    paid = sum(float(b.get("tax", 0) or 0) for b in bills)
+    taxable_sales = sum(float(i.get("subtotal", 0) or 0) for i in invs if float(i.get("tax", 0) or 0) > 0)
+    nontaxable_sales = sum(float(i.get("subtotal", 0) or 0) for i in invs if float(i.get("tax", 0) or 0) == 0)
+
+    # Aggregate paid vs unpaid liability (invoices with balance_due still open aren't yet remitted)
+    settled_tax = 0.0
+    for i in invs:
+        total = float(i.get("total", 0) or 0)
+        bal = float(i.get("balance_due", total) or 0)
+        if total > 0:
+            paid_ratio = max(0.0, min(1.0, (total - bal) / total))
+            settled_tax += float(i.get("tax", 0) or 0) * paid_ratio
+
+    net_liability = collected - paid
+    rows = [
+        {"label": "Taxable sales", "amount": round(taxable_sales, 2)},
+        {"label": "Non-taxable sales", "amount": round(nontaxable_sales, 2)},
+        {"label": "Sales tax collected (invoiced)", "amount": round(collected, 2)},
+        {"label": "Sales tax collected & received", "amount": round(settled_tax, 2)},
+        {"label": "Sales tax paid on purchases", "amount": round(paid, 2)},
+    ]
+    return {
+        "company_name": company["name"] if company else "",
+        "period_start": start, "period_end": end,
+        "rows": rows,
+        "net_liability": round(net_liability, 2),
+        "invoices_count": len(invs),
+        "bills_count": len(bills),
+    }
+
+
+def build_sales_tax_pdf(data: dict) -> bytes:
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=LETTER, leftMargin=0.6 * inch, rightMargin=0.6 * inch,
+                            topMargin=0.6 * inch, bottomMargin=0.6 * inch)
+    s = _pdf_styles()
+    story = [
+        Paragraph(data["company_name"], s["Title2"]),
+        Paragraph("SALES TAX LIABILITY", s["SubTitle"]),
+        Paragraph(f"For the period {data['period_start']} to {data['period_end']}", s["SubTitle"]),
+        Spacer(1, 12),
+    ]
+    rows = [[r["label"], f"${r['amount']:,.2f}"] for r in data["rows"]]
+    rows.append(["Net sales tax liability owed", f"${data['net_liability']:,.2f}"])
+    t = Table(rows, colWidths=[4.5 * inch, 2 * inch])
+    t.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("LINEABOVE", (0, -1), (-1, -1), 0.5, colors.HexColor("#0F172A")),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(t)
+    doc.build(story)
+    return buf.getvalue()
+
+
+# ---------- 1099 Summary ----------
+
+async def compute_1099_summary(company_id: str, year: int):
+    """List contractor payments (vendors) totaling ≥ $600 in the calendar year.
+
+    A "contractor" here = a contact of type=vendor. Amount = sum of payments linked to bills
+    for that vendor + direct expense transactions categorized to Legal & Professional Fees or
+    Payroll where the contact matches.
+    """
+    company = await db.companies.find_one({"id": company_id})
+    start = f"{year}-01-01"; end = f"{year}-12-31"
+    contacts = await db.contacts.find({"company_id": company_id, "type": {"$in": ["vendor", "both"]}}).to_list(2000)
+    contact_by_id = {c["id"]: c for c in contacts}
+    contact_by_name = {(c.get("name") or "").lower(): c for c in contacts}
+
+    # Sum bill totals paid within the year to each vendor
+    totals = {c["id"]: 0.0 for c in contacts}
+    bills = await db.bills.find({
+        "company_id": company_id, "issue_date": {"$gte": start, "$lte": end},
+    }).to_list(20000)
+    for b in bills:
+        cid = b.get("contact_id")
+        if not cid or cid not in totals:
+            continue
+        total = float(b.get("total", 0) or 0)
+        bal = float(b.get("balance_due", total) or 0)
+        paid_amt = max(0.0, total - bal)
+        totals[cid] += paid_amt
+
+    # Also include expense transactions with a matching merchant name (best-effort)
+    txns = await db.transactions.find({
+        "company_id": company_id, "posted": True,
+        "date": {"$gte": start, "$lte": end}, "amount": {"$lt": 0},
+    }).to_list(50000)
+    for t in txns:
+        merch = (t.get("merchant") or "").lower()
+        c = contact_by_name.get(merch)
+        if not c:
+            continue
+        totals[c["id"]] += abs(float(t.get("amount", 0) or 0))
+
+    rows = []
+    for cid_, amt in totals.items():
+        if amt < 600.0:
+            continue
+        c = contact_by_id[cid_]
+        rows.append({
+            "contact_name": c.get("name"),
+            "tin": c.get("tin", ""),
+            "w9_on_file": bool(c.get("w9_on_file", False)),
+            "total_paid": round(amt, 2),
+        })
+    rows.sort(key=lambda r: r["total_paid"], reverse=True)
+    return {
+        "company_name": company["name"] if company else "",
+        "year": year,
+        "rows": rows,
+        "total_reportable": round(sum(r["total_paid"] for r in rows), 2),
+        "count": len(rows),
+    }
+
+
+def build_1099_pdf(data: dict) -> bytes:
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=LETTER, leftMargin=0.6 * inch, rightMargin=0.6 * inch,
+                            topMargin=0.6 * inch, bottomMargin=0.6 * inch)
+    s = _pdf_styles()
+    story = [
+        Paragraph(data["company_name"], s["Title2"]),
+        Paragraph("1099 SUMMARY", s["SubTitle"]),
+        Paragraph(f"Tax year {data['year']} · Contractors paid ≥ $600", s["SubTitle"]),
+        Spacer(1, 12),
+    ]
+    rows = [["Contractor", "TIN / EIN", "W-9 on file", "Total Paid"]]
+    for r in data["rows"]:
+        rows.append([r["contact_name"], r["tin"] or "—",
+                     "Yes" if r["w9_on_file"] else "No", f"${r['total_paid']:,.2f}"])
+    rows.append(["", "", "TOTAL", f"${data['total_reportable']:,.2f}"])
+    t = Table(rows, colWidths=[3.0 * inch, 1.5 * inch, 1.0 * inch, 1.4 * inch])
+    t.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F1F5F9")),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("LINEABOVE", (0, -1), (-1, -1), 0.5, colors.HexColor("#0F172A")),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("ALIGN", (3, 0), (3, -1), "RIGHT"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(t)
+    if not data["rows"]:
+        story.append(Spacer(1, 20))
+        story.append(Paragraph("No contractors met the $600 reporting threshold this year.",
+                               s["SubTitle"]))
+    doc.build(story)
+    return buf.getvalue()

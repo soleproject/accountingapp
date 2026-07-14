@@ -1,0 +1,33 @@
+{
+  "summary": "Iteration 3 backend + frontend testing complete. 57/57 pytest tests pass (was 43; added 14 new: 3 Plaid webhook, 1 manual-sync, 6 closed-period locks, 2 sales-tax, 2 1099-summary). Found & fixed one CRITICAL REGRESSION during testing: the new /companies/{cid}/plaid/manual-sync route insertion had clobbered the @api.post('/companies/{cid}/onboarding/mock-plaid') decorator (the decorator line was overwritten and mock_plaid became a decorator-less orphan function returning 404). Restored decorator with blank-line separation — all Bright Beans onboarding step 4 mock-plaid flow now works again. Verified: Plaid webhook is PUBLIC (accepts without auth), returns {ok:true,unknown_item:true} for unknown item_id and {ignored:true} for non-TRANSACTIONS. Manual sync returns 400 'No Plaid item linked' on Skyward Sparks (no linked item). Closed-period lock (May 2026): PATCH/DELETE/approve/split on May txn all return 423 with 'closed' detail; JE with May date returns 423; PATCH on July 2026 txn returns 200. Sales Tax report JSON shape correct (company_name/period_start/period_end/rows/net_liability/invoices_count/bills_count), PDF starts with %PDF. 1099 Summary for year=2026 returns 4 contractors (WeWork $3,750, State Farm $2,850, AWS $1,648.76, Delta $1,461) all ≥$600, total_reportable $9,709.76, PDF %PDF. Cleanup: fixture teardown removes close_periods + test txns via direct mongo. Frontend: /reports has exactly 7 tiles including 'Sales Tax Liability' and '1099 Summary'; /reports/sales-tax renders 'NET SALES TAX LIABILITY OWED $0.00' (seeded data legitimately has no tax); /reports/1099-summary renders the contractor table exactly matching backend rows; Connections page has [data-testid='plaid-manual-sync-btn'] labeled 'Manual Sync (webhook fallback)'.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "CAUTION for E1: the manual-sync insertion pattern (add new @api.post immediately above existing @api.post without a blank line) previously stripped the mock_plaid decorator. This was silently a 404 regression missed by the code author. Adding a lint step or requiring blank lines between route definitions would catch this. server.py is now ~1590 lines — still recommend splitting into routers (plaid_routes.py, reports_routes.py, txn_routes.py, close_periods_routes.py) since PRD keeps growing.",
+    "close-periods has no DELETE endpoint — tests clean up via direct mongo. Consider adding DELETE /companies/{cid}/close-periods/{id} for 'reopen period' UX (the 423 detail literally says 'Reopen it to edit' but there is no API to reopen).",
+    "TestClosedPeriodLock uses instance-method class-scoped fixture (PytestRemovedIn10Warning). Non-blocking; convert to @classmethod or module-scope in a future cleanup."
+  ],
+  "updated_files": [
+    "/app/backend/server.py (restored missing @api.post('/companies/{cid}/onboarding/mock-plaid') decorator that was clobbered by manual-sync insertion)",
+    "/app/backend/tests/backend_test.py (+14 tests across TestPlaidWebhook, TestPlaidManualSync, TestClosedPeriodLock, TestSalesTaxReport, Test1099Summary)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Used /app/memory/test_credentials.md unchanged.",
+  "seed_data_creation": "Class-scoped fixture creates 1 TEST_ClosedPeriodMay + 1 TEST_OpenPeriodJul txn on Skyward Sparks and 1 close_period (2026-05-01→2026-05-31). All three are torn down via direct mongo (pymongo) at end of TestClosedPeriodLock. Additionally TestJournalEntries seeds one balanced JE dated 2025-06-30 (from iteration 1, not cleaned).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression suite now at 57 tests. Run with `pytest backend/tests/backend_test.py -n 0` (or default -n 2 loadscope) — both work now. If tests fail with 423 on txn creation for TEST_ClosedPeriodMay, a previous run's cleanup was skipped; run `python -c \"import pymongo; pymongo.MongoClient('mongodb://localhost:27017')['test_database'].close_periods.delete_many({'period_start':'2026-05-01'})\"` to reset. mock_plaid decorator regression was caused by E1 inserting a new route directly above without a blank line — verify server.py:1249-1252 has blank line + @api.post before any future edits.",
+  "rca_of_the_issue": "Regression RCA — mock_plaid 404: E1 added @api.post('/companies/{cid}/plaid/manual-sync') at line 1241 by inserting immediately above @api.post('/companies/{cid}/onboarding/mock-plaid'). The insertion replaced the mock_plaid decorator line with the new function's `return {\"imported\": imported}`, leaving `async def mock_plaid(...)` at line 1250 without a decorator. Python parsed fine (just an unused module-level function) so no import error was raised; iteration 2's regression suite passed because it uses client2/Bright Beans onboarding which happens to POST to /onboarding/mock-plaid — but that assertion (`assert r.status_code == 200`) only ran once in test_mock_plaid_returns_3_accounts and started failing this iteration. Fix: added blank line + restored @api.post('/companies/{cid}/onboarding/mock-plaid') decorator above mock_plaid. Mitigation: E1 should ensure blank line separation between route defs; consider a pre-commit lint or a route-existence smoke test on all @api.* decorators."
+}

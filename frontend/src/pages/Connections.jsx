@@ -10,10 +10,22 @@ export default function Connections() {
   const [accounts, setAccounts] = useState([]);
   const [busy, setBusy] = useState(false);
   const [imported, setImported] = useState(0);
+  const [syncing, setSyncing] = useState(false);
 
   const onLinked = (accts) => {
     setAccounts(accts);
     toast.success(`Linked ${accts.length} bank accounts via Plaid`);
+  };
+
+  const manualSync = async () => {
+    setSyncing(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/plaid/manual-sync`);
+      toast.success(`Synced ${r.data.imported} new transactions from Plaid`);
+      setImported(v => v + r.data.imported);
+    } catch (e) {
+      toast.error(`Sync failed: ${e.response?.data?.detail || e.message}`);
+    } finally { setSyncing(false); }
   };
 
   const importAll = async () => {
@@ -43,6 +55,10 @@ export default function Connections() {
         <div className="flex items-center gap-2">
           <Link2 size={16} className="text-cyan-600" />
           <h3 className="font-heading font-semibold">Plaid — Bank &amp; Card Feeds</h3>
+          <button data-testid="plaid-manual-sync-btn" onClick={manualSync} disabled={syncing}
+                  className="ml-auto text-xs px-3 py-1 rounded-md border border-slate-300 hover:bg-slate-50 disabled:opacity-50">
+            {syncing ? "Syncing…" : "Manual Sync (webhook fallback)"}
+          </button>
         </div>
         <PlaidLinkButton companyId={currentId} onSuccess={onLinked} />
 
