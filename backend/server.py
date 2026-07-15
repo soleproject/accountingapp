@@ -451,6 +451,58 @@ async def create_company(inp: CompanyCreate, user: dict = Depends(get_current_us
     return {"company_id": cid}
 
 
+@api.patch("/companies/{cid}")
+async def update_company(cid: str, patch: dict, user: dict = Depends(get_current_user)):
+    await _require_company(user, cid)
+    allowed = {"name", "business_type", "business_description", "reporting_basis"}
+    updates = {k: v for k, v in (patch or {}).items() if k in allowed}
+    if not updates:
+        raise HTTPException(400, "No editable fields provided")
+    updates["updated_at"] = now_iso()
+    r = await db.companies.update_one({"id": cid}, {"$set": updates})
+    if r.matched_count == 0:
+        raise HTTPException(404, "Company not found")
+    doc = await db.companies.find_one({"id": cid})
+    return coerce(doc)
+
+
+@api.delete("/companies/{cid}")
+async def delete_company(cid: str, confirm: str = "", user: dict = Depends(get_current_user)):
+    """Hard-delete a company and every record scoped to it. Requires
+    `?confirm=<company_name>` in the query string as a safeguard against
+    accidental deletes. The requester must have an owner/pro/superadmin
+    membership on the company.
+    """
+    await _require_company(user, cid)
+    company = await db.companies.find_one({"id": cid})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not confirm or confirm.strip() != company.get("name", "").strip():
+        raise HTTPException(
+            400,
+            f"To confirm deletion, pass ?confirm=<exact company name>. Got: {confirm!r}",
+        )
+    # Every collection that carries a `company_id` field
+    per_company_collections = [
+        "accounts", "transactions", "journal_entries", "invoices", "bills",
+        "customers", "vendors", "payments", "onboarding_state",
+        "plaid_items", "veryfi_uploads", "ai_activity_log", "rules",
+        "audit_logs", "period_locks", "memberships",
+    ]
+    deleted: dict[str, int] = {}
+    for coll in per_company_collections:
+        try:
+            r = await db[coll].delete_many({"company_id": cid})
+            if r.deleted_count:
+                deleted[coll] = r.deleted_count
+        except Exception:
+            pass
+    # Finally the company itself
+    r = await db.companies.delete_one({"id": cid})
+    deleted["companies"] = r.deleted_count
+    return {"deleted": True, "company_id": cid, "records_removed": deleted}
+
+
 # ----------------------- Accounts (Chart of Accounts) -----------------------
 
 @api.get("/companies/{cid}/accounts")
