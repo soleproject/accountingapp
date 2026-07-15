@@ -565,14 +565,39 @@ async def split_transaction(cid: str, tid: str, inp: SplitIn, user: dict = Depen
     if not txn:
         raise HTTPException(404, "Transaction not found")
     await _assert_open(cid, txn.get("date"))
-    total = sum(float(s.get("amount", 0)) for s in inp.splits)
+
+    # Normalize splits: each must carry a resolvable category_account_id.
+    # Accept either 'category_account_id' or 'account_code' from clients.
+    accts = await db.accounts.find({"company_id": cid}).to_list(2000)
+    by_id = {a["id"]: a for a in accts}
+    by_code = {a["code"]: a for a in accts}
+    normalized: list[dict] = []
+    total = 0.0
+    for s in inp.splits:
+        amt = float(s.get("amount", 0) or 0)
+        cat_id = s.get("category_account_id") or s.get("account_id")
+        if not cat_id or cat_id not in by_id:
+            code = s.get("account_code") or s.get("code")
+            if code and code in by_code:
+                cat_id = by_code[code]["id"]
+            else:
+                raise HTTPException(400, f"Split is missing a valid category account (received {s})")
+        acct = by_id[cat_id]
+        normalized.append({
+            "amount": round(amt, 2),
+            "category_account_id": cat_id,
+            "category_account_code": acct["code"],
+            "category_account_name": acct["name"],
+            "description": s.get("description") or s.get("memo") or "",
+        })
+        total += amt
     if abs(total - float(txn["amount"])) > 0.01:
         raise HTTPException(400, f"Splits must total {txn['amount']}, got {total}")
     await db.transactions.update_one(
         {"id": tid, "company_id": cid},
-        {"$set": {"splits": inp.splits, "human_reviewed": True, "needs_review": False, "updated_at": now_iso()}},
+        {"$set": {"splits": normalized, "human_reviewed": True, "needs_review": False, "updated_at": now_iso()}},
     )
-    return {"ok": True}
+    return {"ok": True, "splits": normalized}
 
 
 @api.post("/companies/{cid}/transactions/{tid}/link")

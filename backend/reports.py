@@ -53,8 +53,9 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
         splits = t.get("splits") or []
         if splits:
             split_total = 0.0
+            fallback_cat = t.get("category_account_id")
             for s in splits:
-                sid = s.get("category_account_id")
+                sid = s.get("category_account_id") or s.get("account_id") or fallback_cat
                 s_amt = float(s.get("amount", 0) or 0)
                 split_total += s_amt
                 if sid:
@@ -240,8 +241,9 @@ async def compute_general_ledger(company_id: str, start: str, end: str):
         splits = t.get("splits") or []
         if splits:
             split_total = 0.0
+            fallback_cat = t.get("category_account_id")
             for s in splits:
-                sid = s.get("category_account_id")
+                sid = s.get("category_account_id") or s.get("account_id") or fallback_cat
                 s_amt = float(s.get("amount", 0) or 0)
                 split_total += s_amt
                 if sid:

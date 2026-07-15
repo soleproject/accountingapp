@@ -1,0 +1,22 @@
+{
+  "summary": "Iter8 hotfix VERIFIED. The critical iter7 regression is fixed. All 20 backend tests pass (100%). Confirmed on live Skyward Sparks data: Trial Balance total_debit=$69,800.00 == total_credit=$69,800.00 balanced=true; Balance Sheet total_assets=$44,910.23 == total_liabilities+equity=$44,910.23 imbalance=$0.00. Split endpoint now correctly (a) resolves account_code -> canonical category_account_id/code/name and persists all three fields, (b) accepts canonical category_account_id path unchanged, (c) rejects with HTTP 400 when neither category_account_id nor account_code is provided ('Split is missing a valid category account'), (d) validates total-vs-parent amount. reports.py defensive fallback (parent txn's category_account_id) confirmed present at reports.py:56 and :246 for legacy/broken splits. Regression sweep passes: 3-role login, all 7 reports (TB/BS/IS/GL/CF/Sales Tax/1099-Summary), GL Source column still shows Txn/Split/JE badges, invoices, AR aging, Plaid link-token, dashboard metrics, AI chat, new-client creation.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration8_split_fix.py",
+    "/app/test_reports/pytest/iter8_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:562-600 split_transaction normalization is clean: resolves via by_id then by_code, raises HTTP 400 with the offending split echoed for debuggability, stores id+code+name, and asserts split total == parent amount within $0.01. Good defensive shape.",
+    "reports.py:56 and :246 fallback_cat = t.get('category_account_id') correctly rescues legacy split docs that predate the normalization fix -- prevents silent debit/credit drift on old data.",
+    "Minor: SplitIn Pydantic model (server.py:82) is still typed as bare 'list' rather than list[SplitLine]; runtime validation via HTTP 400 covers it, but a typed model would give clearer 422s and OpenAPI schema."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration8_split_fix.py (new)"],
+  "success_rate": {"backend": "100% (20/20)", "frontend": "n/a (skipped per request)"},
+  "test_credentials": "client@axiom.ai/client123, pro@axiom.ai/pro123, admin@axiom.ai/admin123 -- all working. Login response uses 'token' (not access_token); GET /api/companies returns {companies:[...]}; accounts/transactions/invoices similarly wrapped.",
+  "seed_data_creation": "Test created 3 TEST_iter8 splittable txns on 2026-08-01 ($-30 each) via POST /transactions; 2 were successfully split (1 by account_code -> 6000/6100, 1 by canonical category_account_id -> 6000/6100). The 3rd (bad-payload test) had its split rejected so remains unsplit. Also created and immediately deleted TEST_iter8_newclient company. All test data remains on Skyward Sparks; TB stays balanced.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter7 split-persistence regression is fully resolved. If future iterations touch split_transaction or reports._signed_balances / compute_general_ledger, rerun test_iteration8_split_fix.py -- it exercises all three split payload shapes (code, id, missing) plus TB/BS balance assertions on live data. Note payload shapes learned: login returns 'token'; company list is {companies:[...]}; accounts/transactions/invoices are similarly wrapped. Dashboard is at /dashboard/metrics; Plaid link-token at /onboarding/plaid/link-token; 1099 report at /reports/1099-summary."
+}
