@@ -27,6 +27,7 @@ from ai_service import (  # noqa: E402
 )
 import reports as R  # noqa: E402
 import plaid_service  # noqa: E402
+import plaid_connect  # noqa: E402
 import veryfi_service  # noqa: E402
 
 app = FastAPI(title="Axiom Ledger API")
@@ -223,7 +224,10 @@ async def _assert_open(company_id: str, date_str: str):
 
 
 async def _sync_and_import(cid: str, item: dict, selected_account_ids: list[str] | None = None) -> int:
-    """Shared helper: run Plaid transactions_sync for a company's item and AI-categorize each new txn."""
+    """Shared helper: run Plaid transactions_sync for a company's item and AI-categorize each new txn.
+    Routes each Plaid txn to the mapped ledger bank account (falls back to 1010).
+    Applies source-of-truth dedup (QBO > Plaid > Veryfi).
+    """
     try:
         synced = plaid_service.sync_transactions(item["access_token"], item.get("cursor"))
     except Exception:
@@ -233,9 +237,12 @@ async def _sync_and_import(cid: str, item: dict, selected_account_ids: list[str]
     }})
     accts = await db.accounts.find({"company_id": cid}).to_list(2000)
     coa = [{"code": a["code"], "name": a["name"], "type": a["type"]} for a in accts]
-    checking = next((a for a in accts if a["code"] == "1010"), None)
-    if not checking:
+    fallback_bank = next((a for a in accts if a["code"] == "1010"), None)
+    if not fallback_bank:
         return 0
+    mappings = item.get("account_mappings") or {}
+    # Preload higher-source coverage per resolved ledger bank
+    range_cache: dict[str, list[tuple[str, str]]] = {}
     imported = 0
     now = now_iso()
     for t in synced["added"]:
@@ -245,13 +252,27 @@ async def _sync_and_import(cid: str, item: dict, selected_account_ids: list[str]
             continue
         if await _is_period_closed(cid, t["date"]):
             continue  # skip closed-period activity
+        # Route to per-account ledger if user has connected this Plaid account
+        mapping = mappings.get(t["account_id"])
+        if mapping:
+            ledger_bank_id = mapping["ledger_account_id"]
+            ledger_bank = next((a for a in accts if a["id"] == ledger_bank_id), fallback_bank)
+        else:
+            ledger_bank = fallback_bank
+        # Dedup vs higher-priority sources
+        ranges = range_cache.get(ledger_bank["id"])
+        if ranges is None:
+            ranges = await plaid_connect.higher_source_ranges(cid, ledger_bank["id"], "plaid")
+            range_cache[ledger_bank["id"]] = ranges
+        if plaid_connect.in_any_range(t["date"], ranges):
+            continue
         merchant = t.get("merchant_name") or t.get("name") or "Unknown"
         result = await categorize_transaction(merchant, t["amount"], t["name"], coa)
-        acct = next((a for a in accts if a["code"] == result["account_code"]), None) or checking
+        acct = next((a for a in accts if a["code"] == result["account_code"]), None) or ledger_bank
         await db.transactions.insert_one({
             "id": str(uuid.uuid4()), "company_id": cid, "date": t["date"],
             "description": t["name"], "merchant": merchant, "amount": t["amount"],
-            "bank_account_id": checking["id"], "bank_account_name": checking["name"],
+            "bank_account_id": ledger_bank["id"], "bank_account_name": ledger_bank["name"],
             "category_account_id": acct["id"], "category_account_code": acct["code"],
             "category_account_name": acct["name"],
             "ai_confidence": round(result["confidence"], 2), "ai_reasoning": result["reasoning"],
@@ -1336,9 +1357,12 @@ async def plaid_import(cid: str, payload: dict, user: dict = Depends(get_current
 
     accts = await db.accounts.find({"company_id": cid}).to_list(2000)
     coa = [{"code": a["code"], "name": a["name"], "type": a["type"]} for a in accts]
-    checking = next((a for a in accts if a["code"] == "1010"), None)
-    if not checking:
+    fallback_bank = next((a for a in accts if a["code"] == "1010"), None)
+    if not fallback_bank:
         raise HTTPException(400, "Business Checking (1010) account not found")
+
+    mappings = item.get("account_mappings") or {}
+    range_cache: dict[str, list[tuple[str, str]]] = {}
 
     now = now_iso()
     imported = 0
@@ -1348,13 +1372,29 @@ async def plaid_import(cid: str, payload: dict, user: dict = Depends(get_current
         # Skip if we've already imported this Plaid transaction
         if await db.transactions.find_one({"company_id": cid, "plaid_transaction_id": t["transaction_id"]}):
             continue
+        if await _is_period_closed(cid, t["date"]):
+            continue
+        # Route to mapped ledger account when the user has "connected" this Plaid account
+        mapping = mappings.get(t["account_id"])
+        if mapping:
+            ledger_bank_id = mapping["ledger_account_id"]
+            ledger_bank = next((a for a in accts if a["id"] == ledger_bank_id), fallback_bank)
+        else:
+            ledger_bank = fallback_bank
+        # Source-of-truth dedup
+        ranges = range_cache.get(ledger_bank["id"])
+        if ranges is None:
+            ranges = await plaid_connect.higher_source_ranges(cid, ledger_bank["id"], "plaid")
+            range_cache[ledger_bank["id"]] = ranges
+        if plaid_connect.in_any_range(t["date"], ranges):
+            continue
         merchant = t.get("merchant_name") or t.get("name") or "Unknown"
         result = await categorize_transaction(merchant, t["amount"], t["name"], coa)
-        acct = next((a for a in accts if a["code"] == result["account_code"]), None) or checking
+        acct = next((a for a in accts if a["code"] == result["account_code"]), None) or ledger_bank
         await db.transactions.insert_one({
             "id": str(uuid.uuid4()), "company_id": cid, "date": t["date"],
             "description": t["name"], "merchant": merchant, "amount": t["amount"],
-            "bank_account_id": checking["id"], "bank_account_name": checking["name"],
+            "bank_account_id": ledger_bank["id"], "bank_account_name": ledger_bank["name"],
             "category_account_id": acct["id"], "category_account_code": acct["code"],
             "category_account_name": acct["name"],
             "ai_confidence": round(result["confidence"], 2), "ai_reasoning": result["reasoning"],
@@ -1368,6 +1408,36 @@ async def plaid_import(cid: str, payload: dict, user: dict = Depends(get_current
         imported += 1
     await _log_ai(cid, "categorize", imported)
     return {"imported": imported}
+
+
+@api.post("/companies/{cid}/plaid/connect-account")
+async def plaid_connect_account(cid: str, payload: dict, user: dict = Depends(get_current_user)):
+    """Connect a single Plaid account to a ledger bank account. Auto-maps
+    the Plaid subtype to (or creates) the correct chart-of-accounts entry,
+    pulls full Plaid history for that account (skipping any date range already
+    covered by a higher-priority source per QBO > Plaid > Veryfi), and posts an
+    opening-balance JE derived from the current Plaid balance and the oldest
+    imported transaction.
+    """
+    await _require_company(user, cid)
+    plaid_account_id = payload.get("plaid_account_id")
+    if not plaid_account_id:
+        raise HTTPException(400, "plaid_account_id required")
+    item = await db.plaid_items.find_one({"company_id": cid})
+    if not item:
+        raise HTTPException(400, "No linked Plaid item — launch Plaid Link first")
+    try:
+        result = await plaid_connect.connect_plaid_account(
+            cid, item, plaid_account_id,
+            categorize_fn=categorize_transaction,
+            is_period_closed_fn=_is_period_closed,
+        )
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
+    await _log_ai(cid, "categorize", result["imported"])
+    return result
 
 
 # ----------------------- Plaid webhook -----------------------
@@ -1414,9 +1484,8 @@ async def plaid_manual_sync(cid: str, user: dict = Depends(get_current_user)):
 @api.get("/companies/{cid}/plaid/accounts")
 async def plaid_list_accounts(cid: str, user: dict = Depends(get_current_user)):
     """List every Plaid-linked account for this company along with its connection
-    status. An account is considered *connected* if at least one transaction has
-    been imported for it into the ledger. Accounts that appear on the Plaid item
-    but have no transactions yet are returned as *available to connect*.
+    status. An account is *connected* if it has been mapped to a ledger account
+    (via /plaid/connect-account) OR has at least one transaction in the ledger.
     """
     await _require_company(user, cid)
     item = await db.plaid_items.find_one({"company_id": cid})
@@ -1424,9 +1493,10 @@ async def plaid_list_accounts(cid: str, user: dict = Depends(get_current_user)):
         return {"connected": [], "available": [], "linked": False}
 
     accts = item.get("accounts") or []
-    # Determine which Plaid account_ids already have transactions in the ledger
+    mappings = item.get("account_mappings") or {}
     plaid_account_ids = [a["account_id"] for a in accts if a.get("account_id")]
-    connected_ids: set[str] = set()
+    # Aggregate ledger-side counts for each Plaid account_id
+    counts: dict[str, dict] = {}
     if plaid_account_ids:
         cur = db.transactions.aggregate([
             {"$match": {"company_id": cid, "plaid_account_id": {"$in": plaid_account_ids}}},
@@ -1434,8 +1504,6 @@ async def plaid_list_accounts(cid: str, user: dict = Depends(get_current_user)):
                         "last": {"$max": "$date"}}},
         ])
         counts = {row["_id"]: row async for row in cur}
-    else:
-        counts = {}
 
     connected, available = [], []
     for a in accts:
@@ -1450,12 +1518,24 @@ async def plaid_list_accounts(cid: str, user: dict = Depends(get_current_user)):
             "balance_current": a.get("balance_current"),
             "currency": a.get("currency", "USD"),
         }
+        mapping = mappings.get(aid)
         c = counts.get(aid)
-        if c:
-            connected.append({**row,
-                              "transaction_count": c.get("count", 0),
-                              "last_transaction_date": c.get("last")})
+        if mapping or c:
+            row.update({
+                "transaction_count": (c or {}).get("count", 0),
+                "last_transaction_date": (c or {}).get("last"),
+                "ledger_account_id": (mapping or {}).get("ledger_account_id"),
+                "ledger_account_code": (mapping or {}).get("ledger_account_code"),
+                "ledger_account_name": (mapping or {}).get("ledger_account_name"),
+                "opening_balance": (mapping or {}).get("opening_balance"),
+                "opening_as_of": (mapping or {}).get("opening_as_of"),
+            })
+            connected.append(row)
         else:
+            # Preview which ledger account this would map to when connected
+            code, name, _t, _st = plaid_connect.resolve_ledger_for_plaid(a)
+            row["suggested_ledger_code"] = code
+            row["suggested_ledger_name"] = name
             available.append(row)
 
     return {
@@ -1540,13 +1620,21 @@ async def veryfi_upload(cid: str, file: UploadFile = File(...), user: dict = Dep
     if not checking:
         raise HTTPException(400, "Business Checking (1010) account not found")
 
+    higher_ranges = await plaid_connect.higher_source_ranges(cid, checking["id"], "veryfi")
+
     now = now_iso()
     imported = 0
+    skipped = 0
     for ln in lines:
+        ln_date = ln["date"] or datetime.now(timezone.utc).date().isoformat()
+        # Source-of-truth dedup: QBO/Plaid supersede Veryfi in overlapping periods
+        if plaid_connect.in_any_range(ln_date, higher_ranges):
+            skipped += 1
+            continue
         result = await categorize_transaction(ln["merchant"], ln["amount"], ln["description"], coa)
         acct = next((a for a in accts if a["code"] == result["account_code"]), None) or checking
         await db.transactions.insert_one({
-            "id": str(uuid.uuid4()), "company_id": cid, "date": ln["date"] or datetime.now(timezone.utc).date().isoformat(),
+            "id": str(uuid.uuid4()), "company_id": cid, "date": ln_date,
             "description": f"{ln['description']} (Veryfi)", "merchant": ln["merchant"],
             "amount": ln["amount"], "bank_account_id": checking["id"],
             "bank_account_name": checking["name"], "category_account_id": acct["id"],
@@ -1560,7 +1648,7 @@ async def veryfi_upload(cid: str, file: UploadFile = File(...), user: dict = Dep
         })
         imported += 1
     await _log_ai(cid, "veryfi_ocr", imported)
-    return {"imported": imported, "veryfi_document_id": veryfi_data.get("id")}
+    return {"imported": imported, "skipped_duplicates": skipped, "veryfi_document_id": veryfi_data.get("id")}
 
 
 @api.post("/companies/{cid}/onboarding/mock-veryfi")

@@ -3,7 +3,7 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import PlaidLinkButton from "@/components/PlaidLinkButton";
 import { toast } from "sonner";
-import { Link2, CheckCircle2, ChevronDown, ChevronRight, PlugZap, CircleDashed } from "lucide-react";
+import { Link2, CheckCircle2, ChevronDown, ChevronRight, PlugZap, CircleDashed, Loader2 } from "lucide-react";
 
 export default function Connections() {
   const { currentId } = useCompany();
@@ -14,6 +14,7 @@ export default function Connections() {
   const [expanded, setExpanded] = useState(true);
   const [status, setStatus] = useState({ linked: false, connected: [], available: [] });
   const [loadingStatus, setLoadingStatus] = useState(false);
+  const [connecting, setConnecting] = useState(null); // plaid_account_id currently being connected
 
   const loadStatus = async () => {
     if (!currentId) return;
@@ -22,7 +23,7 @@ export default function Connections() {
       const r = await api.get(`/companies/${currentId}/plaid/accounts`);
       setStatus(r.data);
     } catch (e) {
-      // Endpoint may not exist yet on stale backend — ignore quietly.
+      // ignore
     } finally { setLoadingStatus(false); }
   };
 
@@ -44,6 +45,33 @@ export default function Connections() {
     } catch (e) {
       toast.error(`Sync failed: ${e.response?.data?.detail || e.message}`);
     } finally { setSyncing(false); }
+  };
+
+  const connectOne = async (plaidAccountId, label) => {
+    setConnecting(plaidAccountId);
+    try {
+      const r = await api.post(`/companies/${currentId}/plaid/connect-account`, {
+        plaid_account_id: plaidAccountId,
+      });
+      const d = r.data;
+      toast.success(
+        `${label} → ${d.ledger_account_code} ${d.ledger_account_name}. Opening $${Number(d.opening_balance).toLocaleString()} as of ${d.opening_as_of}. ${d.imported} txns imported${d.skipped ? `, ${d.skipped} skipped (dedup)` : ""}.`,
+        { duration: 7000 },
+      );
+      await loadStatus();
+    } catch (e) {
+      toast.error(`Connect failed: ${e.response?.data?.detail || e.message}`);
+    } finally { setConnecting(null); }
+  };
+
+  const connectAll = async () => {
+    if (!status.available?.length) return;
+    setBusy(true);
+    try {
+      for (const a of status.available) {
+        await connectOne(a.account_id, a.name);
+      }
+    } finally { setBusy(false); }
   };
 
   const importAll = async () => {
@@ -98,7 +126,7 @@ export default function Connections() {
             <button onClick={importAll} disabled={busy}
                     data-testid="plaid-import-btn"
                     className="px-3 py-1.5 rounded-md bg-emerald-600 text-white text-xs disabled:opacity-50">
-              Sync &amp; AI-categorize transactions
+              Sync &amp; AI-categorize transactions (legacy, all → 1010)
             </button>
             {imported > 0 && <div className="text-xs text-emerald-700">Synced {imported} new transactions.</div>}
           </>
@@ -110,39 +138,57 @@ export default function Connections() {
           status={status}
           loading={loadingStatus}
           onRefresh={loadStatus}
+          onConnectOne={connectOne}
+          onConnectAll={connectAll}
+          connecting={connecting}
+          busy={busy}
         />
       </div>
     </div>
   );
 }
 
-function PlaidAccountsDropdown({ expanded, onToggle, status, loading, onRefresh }) {
+function PlaidAccountsDropdown({ expanded, onToggle, status, loading, onRefresh, onConnectOne, onConnectAll, connecting, busy }) {
   const total = (status.connected?.length || 0) + (status.available?.length || 0);
+  const hasAvailable = (status.available?.length || 0) > 0;
 
   return (
     <div className="mt-3 border rounded-md" data-testid="plaid-accounts-dropdown">
-      <button
-        type="button"
-        onClick={onToggle}
-        data-testid="plaid-accounts-toggle"
-        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 rounded-md"
-      >
-        {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        <span className="text-sm font-medium">Linked accounts</span>
-        <span className="text-[11px] text-slate-500">
-          {status.linked
-            ? `${status.connected?.length || 0} connected · ${status.available?.length || 0} available`
-            : "No Plaid item linked yet"}
-        </span>
+      <div className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 rounded-md">
         <button
           type="button"
-          onClick={(e) => { e.stopPropagation(); onRefresh(); }}
-          className="ml-auto text-[11px] text-slate-500 hover:text-slate-800 underline"
+          onClick={onToggle}
+          data-testid="plaid-accounts-toggle"
+          className="flex items-center gap-2 flex-1 text-left"
+        >
+          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          <span className="text-sm font-medium">Linked accounts</span>
+          <span className="text-[11px] text-slate-500">
+            {status.linked
+              ? `${status.connected?.length || 0} connected · ${status.available?.length || 0} available`
+              : "No Plaid item linked yet"}
+          </span>
+        </button>
+        {hasAvailable && (
+          <button
+            type="button"
+            onClick={onConnectAll}
+            disabled={busy || connecting}
+            data-testid="plaid-connect-all-btn"
+            className="text-[11px] px-2 py-1 rounded-md bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50"
+          >
+            Connect all
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="text-[11px] text-slate-500 hover:text-slate-800 underline"
           data-testid="plaid-accounts-refresh"
         >
           {loading ? "Refreshing…" : "Refresh"}
         </button>
-      </button>
+      </div>
 
       {expanded && (
         <div className="border-t px-3 py-3 space-y-4">
@@ -174,12 +220,19 @@ function PlaidAccountsDropdown({ expanded, onToggle, status, loading, onRefresh 
               </div>
               <div className="space-y-1.5">
                 {status.available.map(a => (
-                  <AccountRow key={a.account_id} a={a} />
+                  <AccountRow
+                    key={a.account_id}
+                    a={a}
+                    onConnect={() => onConnectOne(a.account_id, a.name)}
+                    connecting={connecting === a.account_id}
+                    anyConnecting={!!connecting}
+                  />
                 ))}
               </div>
               <div className="mt-2 text-[11px] text-slate-500">
-                Tip: hit <span className="font-medium">Sync &amp; AI-categorize transactions</span> above to pull
-                these into the ledger.
+                Connecting will auto-map to the suggested ledger account, import full Plaid history
+                (skipping periods already covered by QBO), and post the opening balance from the
+                earliest transaction.
               </div>
             </div>
           )}
@@ -193,7 +246,11 @@ function PlaidAccountsDropdown({ expanded, onToggle, status, loading, onRefresh 
   );
 }
 
-function AccountRow({ a, connected = false }) {
+function AccountRow({ a, connected = false, onConnect, connecting = false, anyConnecting = false }) {
+  const ledgerBadge = connected
+    ? (a.ledger_account_code ? `${a.ledger_account_code} ${a.ledger_account_name}` : null)
+    : (a.suggested_ledger_code ? `→ ${a.suggested_ledger_code} ${a.suggested_ledger_name}` : null);
+
   return (
     <div
       className={`flex items-center gap-3 px-3 py-2 rounded-md border ${connected ? "bg-emerald-50/40 border-emerald-100" : "bg-slate-50/60 border-slate-200"}`}
@@ -207,13 +264,26 @@ function AccountRow({ a, connected = false }) {
           {a.name}
           {a.mask && <span className="text-slate-400 ml-1">···{a.mask}</span>}
         </div>
-        <div className="text-[11px] text-slate-500">
-          {(a.type || "").replace(/_/g, " ")}
-          {a.subtype ? ` / ${(a.subtype || "").replace(/_/g, " ")}` : ""}
+        <div className="text-[11px] text-slate-500 flex items-center gap-2 flex-wrap">
+          <span>
+            {(a.type || "").replace(/AccountType\('|'\)/g, "").replace(/_/g, " ")}
+            {a.subtype ? ` / ${(a.subtype || "").replace(/AccountSubtype\('|'\)/g, "").replace(/_/g, " ")}` : ""}
+          </span>
+          {ledgerBadge && (
+            <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono-num ${connected ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"}`}>
+              {ledgerBadge}
+            </span>
+          )}
           {connected && a.transaction_count > 0 && (
-            <span className="ml-2 text-emerald-700">
+            <span className="text-emerald-700">
               · {a.transaction_count} txn{a.transaction_count === 1 ? "" : "s"}
               {a.last_transaction_date ? ` · last ${a.last_transaction_date}` : ""}
+            </span>
+          )}
+          {connected && a.opening_balance != null && (
+            <span className="text-slate-500">
+              · opening ${Number(a.opening_balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {a.opening_as_of ? ` as of ${a.opening_as_of}` : ""}
             </span>
           )}
         </div>
@@ -222,6 +292,19 @@ function AccountRow({ a, connected = false }) {
         <div className="font-mono-num text-sm text-slate-700">
           ${Number(a.balance_current || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         </div>
+      )}
+      {!connected && onConnect && (
+        <button
+          type="button"
+          onClick={onConnect}
+          disabled={connecting || anyConnecting}
+          data-testid={`plaid-connect-account-btn-${a.account_id}`}
+          className="text-[11px] px-2.5 py-1 rounded-md bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50 inline-flex items-center gap-1"
+        >
+          {connecting
+            ? <><Loader2 size={11} className="animate-spin" /> Connecting…</>
+            : "Connect"}
+        </button>
       )}
     </div>
   );
