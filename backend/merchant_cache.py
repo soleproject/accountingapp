@@ -130,6 +130,9 @@ async def upsert(company_id: str, merchant_raw: str, account_code: str,
         # overwrite it — cache is authoritative in that direction.
         if existing.get("source") == "user" and source == "llm":
             return
+        # Never let a low-confidence LLM guess overwrite anything either
+        if source == "llm" and confidence < 0.85:
+            return
         await db.merchant_cache.update_one(
             {"_id": existing["_id"]},
             {"$set": {
@@ -141,6 +144,10 @@ async def upsert(company_id: str, merchant_raw: str, account_code: str,
                 "updated_at": now_iso(),
             }},
         )
+        return
+    # Don't seed the cache with a low-confidence LLM guess — it would propagate
+    # a bad first-impression to every future txn from the same merchant.
+    if source == "llm" and confidence < 0.85:
         return
     await db.merchant_cache.insert_one({
         "company_id": company_id,

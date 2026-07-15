@@ -278,7 +278,16 @@ async def _categorize_and_insert(
                 base[k] = c[k]
         docs.append(base)
     if docs:
-        await db.transactions.insert_many(docs)
+        # ordered=False → keep inserting past any DuplicateKeyError (raised
+        # by the unique index on plaid_transaction_id when a concurrent
+        # webhook already wrote the same txn).
+        try:
+            await db.transactions.insert_many(docs, ordered=False)
+        except Exception as e:  # noqa: BLE001
+            # Motor / pymongo raise BulkWriteError; count successful inserts anyway
+            written = getattr(e, "details", {}).get("nInserted", 0) if hasattr(e, "details") else 0
+            app_log = __import__("logging").getLogger("axiom.app")
+            app_log.info(f"insert_many partial: wrote {written}/{len(docs)} (dedup)")
         await _log_ai(cid, "categorize", len(docs))
     return len(docs)
 
@@ -294,6 +303,16 @@ async def _sync_and_import(cid: str, item: dict, selected_account_ids: list[str]
     await db.plaid_items.update_one({"id": item["id"]}, {"$set": {
         "cursor": synced["next_cursor"], "updated_at": now_iso(),
     }})
+
+    # Plaid marks pending→posted transitions via `removed`. Drop those rows so
+    # we don't keep the stale pending version.
+    for rt in synced.get("removed") or []:
+        rid = rt.get("transaction_id") if isinstance(rt, dict) else rt
+        if rid:
+            await db.transactions.delete_one({
+                "company_id": cid, "plaid_transaction_id": rid,
+            })
+
     accts = await db.accounts.find({"company_id": cid}).to_list(2000)
     coa = [{"code": a["code"], "name": a["name"], "type": a["type"]} for a in accts]
     fallback_bank = next((a for a in accts if a["code"] == "1010"), None)
@@ -2127,6 +2146,18 @@ async def startup():
                                        sparse=True, name="company_plaid_acct")
     await db.transactions.create_index([("company_id", 1), ("needs_review", 1), ("date", -1)],
                                        name="company_review_date")
+    # UNIQUE index on (company_id, plaid_transaction_id) prevents concurrent
+    # webhooks from double-inserting the same txn. Partial-index filter so
+    # non-Plaid rows (manual, veryfi, JEs) don't collide on `null`.
+    try:
+        await db.transactions.create_index(
+            [("company_id", 1), ("plaid_transaction_id", 1)],
+            unique=True,
+            partialFilterExpression={"plaid_transaction_id": {"$type": "string"}},
+            name="company_plaid_txn_uniq",
+        )
+    except Exception:  # noqa: BLE001 — index may already exist under different name
+        pass
     await db.journal_entries.create_index([("company_id", 1), ("date", -1)])
     await db.invoices.create_index([("company_id", 1), ("status", 1), ("issue_date", -1)],
                                    name="company_inv_status_date")

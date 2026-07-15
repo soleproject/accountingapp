@@ -266,7 +266,10 @@ async def sync_plaid_history_for_account(
             "created_at": now, "updated_at": now,
         })
     if inserted:
-        await db.transactions.insert_many(inserted)
+        try:
+            await db.transactions.insert_many(inserted, ordered=False)
+        except Exception:  # noqa: BLE001 — DuplicateKeyError under race
+            pass
     return inserted, skipped
 
 
