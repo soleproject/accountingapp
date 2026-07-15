@@ -248,11 +248,13 @@ async def connect_plaid_account(
     categorize_fn, is_period_closed_fn,
 ) -> dict:
     """1) Resolve/create ledger bank account
-    2) Pull full Plaid history for this account (with dedup)
-    3) Compute opening balance from oldest imported txn and post OBE JE
-    4) Persist mapping on plaid_item
+    2) Re-route any already-imported Plaid txns for this account_id (from a
+       legacy bulk-import) onto the correct ledger account
+    3) Pull full Plaid history via /transactions/sync (with dedup)
+    4) Compute opening balance from the union of pre-existing + newly imported
+       txns, then post OBE JE dated the day before the oldest one
+    5) Persist mapping on plaid_item
     """
-    # Find the Plaid account entry
     plaid_accts = item.get("accounts") or []
     plaid_acct = next((a for a in plaid_accts if a.get("account_id") == plaid_account_id), None)
     if not plaid_acct:
@@ -261,7 +263,19 @@ async def connect_plaid_account(
     # Ledger side
     ledger_bank = await get_ledger_for_plaid_account(cid, plaid_acct)
 
-    # Preload CoA
+    # --- Re-route pre-existing legacy txns for this Plaid account_id --------
+    reroute_res = await db.transactions.update_many(
+        {"company_id": cid, "plaid_account_id": plaid_account_id,
+         "bank_account_id": {"$ne": ledger_bank["id"]}},
+        {"$set": {
+            "bank_account_id": ledger_bank["id"],
+            "bank_account_name": ledger_bank["name"],
+            "updated_at": now_iso(),
+        }},
+    )
+    rerouted = reroute_res.modified_count
+
+    # Preload CoA (after any auto-create)
     accts = await db.accounts.find({"company_id": cid}).to_list(2000)
     coa = [{"code": a["code"], "name": a["name"], "type": a["type"]} for a in accts]
 
@@ -270,15 +284,13 @@ async def connect_plaid_account(
         categorize_fn, is_period_closed_fn,
     )
 
-    # Opening balance = current Plaid balance − net movement from imported txns.
-    # For ASSET accounts: Plaid `balance_current` is the positive cash balance.
-    #   Sum of signed txn amounts (positive = inflow) => opening = current − sum.
-    # For LIABILITY (credit card): Plaid returns the AMOUNT OWED as positive.
-    #   Our txn amounts are negative for charges (outflows), positive for payments.
-    #   opening_amount_owed = current_owed + sum(txn.amount) because each charge
-    #   (negative amount) INCREASED the amount owed since opening.
+    # --- Opening balance -----------------------------------------------------
+    # Consider ALL current txns for this Plaid account (rerouted legacy + freshly imported)
+    all_for_acct = await db.transactions.find(
+        {"company_id": cid, "plaid_account_id": plaid_account_id}
+    ).to_list(10000)
+    net_movement = sum(float(t.get("amount") or 0) for t in all_for_acct)
     plaid_current = float(plaid_acct.get("balance_current") or 0.0)
-    net_movement = sum(float(t.get("amount") or 0) for t in inserted)
 
     is_liability = ledger_bank["type"] == "liability"
     if is_liability:
@@ -287,15 +299,14 @@ async def connect_plaid_account(
         opening = plaid_current - net_movement
     opening = round(opening, 2)
 
-    # As-of date for opening JE: day BEFORE the oldest imported txn.
-    # If we imported nothing, use today.
-    if inserted:
-        oldest_date = min(t["date"] for t in inserted)
+    # As-of date = day before the oldest txn (any source) for this Plaid account
+    if all_for_acct:
+        oldest_date = min(t["date"] for t in all_for_acct)
         opening_as_of = _yesterday_iso(oldest_date)
     else:
         opening_as_of = datetime.now(timezone.utc).date().isoformat()
 
-    # Do not double-post opening if we've already stored one for this account
+    # Do not double-post opening if one already exists for this ledger account
     existing = await db.journal_entries.find_one({
         "company_id": cid, "source": "opening_balance",
         "lines.account_id": ledger_bank["id"],
@@ -331,6 +342,7 @@ async def connect_plaid_account(
         "opening_as_of": opening_as_of,
         "opening_je_id": je_id,
         "imported": len(inserted),
+        "rerouted": rerouted,
         "skipped": len(skipped),
         "skipped_reasons": [s["reason"] for s in skipped],
     }
