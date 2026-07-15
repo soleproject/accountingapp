@@ -29,6 +29,7 @@ import reports as R  # noqa: E402
 import plaid_service  # noqa: E402
 import plaid_connect  # noqa: E402
 import veryfi_service  # noqa: E402
+import merchant_cache  # noqa: E402
 
 app = FastAPI(title="Axiom Ledger API")
 api = APIRouter(prefix="/api")
@@ -227,6 +228,7 @@ async def _sync_and_import(cid: str, item: dict, selected_account_ids: list[str]
     """Shared helper: run Plaid transactions_sync for a company's item and AI-categorize each new txn.
     Routes each Plaid txn to the mapped ledger bank account (falls back to 1010).
     Applies source-of-truth dedup (QBO > Plaid > Veryfi).
+    Uses per-company merchant cache + 10-way concurrent LLM categorization.
     """
     try:
         synced = plaid_service.sync_transactions(item["access_token"], item.get("cursor"))
@@ -241,25 +243,23 @@ async def _sync_and_import(cid: str, item: dict, selected_account_ids: list[str]
     if not fallback_bank:
         return 0
     mappings = item.get("account_mappings") or {}
-    # Preload higher-source coverage per resolved ledger bank
     range_cache: dict[str, list[tuple[str, str]]] = {}
-    imported = 0
+
+    # ---- Pre-filter candidates (skip duplicates, closed periods, dedup) ----
     now = now_iso()
+    candidates: list[dict] = []
     for t in synced["added"]:
         if selected_account_ids and t["account_id"] not in selected_account_ids:
             continue
         if await db.transactions.find_one({"company_id": cid, "plaid_transaction_id": t["transaction_id"]}):
             continue
         if await _is_period_closed(cid, t["date"]):
-            continue  # skip closed-period activity
-        # Route to per-account ledger if user has connected this Plaid account
+            continue
         mapping = mappings.get(t["account_id"])
         if mapping:
-            ledger_bank_id = mapping["ledger_account_id"]
-            ledger_bank = next((a for a in accts if a["id"] == ledger_bank_id), fallback_bank)
+            ledger_bank = next((a for a in accts if a["id"] == mapping["ledger_account_id"]), fallback_bank)
         else:
             ledger_bank = fallback_bank
-        # Dedup vs higher-priority sources
         ranges = range_cache.get(ledger_bank["id"])
         if ranges is None:
             ranges = await plaid_connect.higher_source_ranges(cid, ledger_bank["id"], "plaid")
@@ -267,27 +267,43 @@ async def _sync_and_import(cid: str, item: dict, selected_account_ids: list[str]
         if plaid_connect.in_any_range(t["date"], ranges):
             continue
         merchant = t.get("merchant_name") or t.get("name") or "Unknown"
-        result = await categorize_transaction(merchant, t["amount"], t["name"], coa)
-        acct = next((a for a in accts if a["code"] == result["account_code"]), None) or ledger_bank
-        await db.transactions.insert_one({
+        candidates.append({"plaid_txn": t, "ledger_bank": ledger_bank,
+                            "merchant": merchant, "description": t["name"], "amount": t["amount"]})
+
+    if not candidates:
+        return 0
+
+    # ---- Batch categorize (cache first, 10-way parallel LLM for misses) ----
+    results = await merchant_cache.categorize_batch(
+        cid, candidates, coa, categorize_transaction, concurrency=10,
+    )
+
+    # ---- Bulk insert ----
+    docs = []
+    for cand, r in zip(candidates, results):
+        acct = next((a for a in accts if a["code"] == r["account_code"]), None) or cand["ledger_bank"]
+        t = cand["plaid_txn"]
+        docs.append({
             "id": str(uuid.uuid4()), "company_id": cid, "date": t["date"],
-            "description": t["name"], "merchant": merchant, "amount": t["amount"],
-            "bank_account_id": ledger_bank["id"], "bank_account_name": ledger_bank["name"],
+            "description": t["name"], "merchant": cand["merchant"], "amount": t["amount"],
+            "bank_account_id": cand["ledger_bank"]["id"], "bank_account_name": cand["ledger_bank"]["name"],
             "category_account_id": acct["id"], "category_account_code": acct["code"],
             "category_account_name": acct["name"],
-            "ai_confidence": round(result["confidence"], 2), "ai_reasoning": result["reasoning"],
-            "needs_review": result["confidence"] < 0.80, "human_reviewed": False,
-            "posted": result["confidence"] >= 0.80, "source": "plaid",
+            "ai_confidence": round(float(r.get("confidence") or 0.85), 2),
+            "ai_reasoning": r.get("reasoning", ""),
+            "needs_review": float(r.get("confidence") or 0.85) < 0.80, "human_reviewed": False,
+            "posted": float(r.get("confidence") or 0.85) >= 0.80, "source": "plaid",
             "plaid_transaction_id": t["transaction_id"], "plaid_account_id": t["account_id"],
             "pending": t["pending"], "splits": [], "linked_invoice_id": None,
             "linked_bill_id": None, "linked_payment_id": None, "tags": [],
+            "cache_hit": r.get("cache_hit", False),
             "created_at": now, "updated_at": now,
         })
-        imported += 1
-    if imported:
-        await _log_ai(cid, "categorize", imported)
-        await _log_ai(cid, "webhook_sync", imported)
-    return imported
+    if docs:
+        await db.transactions.insert_many(docs)
+        await _log_ai(cid, "categorize", len(docs))
+        await _log_ai(cid, "webhook_sync", len(docs))
+    return len(docs)
 
 
 # ----------------------- Auth endpoints -----------------------
@@ -671,6 +687,16 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
     upd["updated_at"] = now_iso()
     await db.transactions.update_one({"id": tid, "company_id": cid}, {"$set": upd})
     doc = await db.transactions.find_one({"id": tid, "company_id": cid})
+    # Persist merchant→category override into cache (user is authoritative)
+    if "category_account_id" in upd and doc:
+        merch = (doc.get("merchant") or "").strip()
+        code = doc.get("category_account_code")
+        if merch and code:
+            await merchant_cache.upsert(
+                cid, merch, code,
+                account_name=doc.get("category_account_name") or "",
+                confidence=1.0, source="user",
+            )
     return {"transaction": coerce(doc)}
 
 
@@ -743,12 +769,18 @@ async def approve_transaction(cid: str, tid: str, user: dict = Depends(get_curre
         await _assert_open(cid, existing.get("date"))
     await db.transactions.update_one({"id": tid, "company_id": cid},
         {"$set": {"human_reviewed": True, "needs_review": False, "posted": True, "updated_at": now_iso()}})
-    # Track approval count on merchant for rule suggestion
+    # Track approval count on merchant for rule suggestion + upsert merchant cache
     txn = await db.transactions.find_one({"id": tid, "company_id": cid})
     if txn:
         merch = (txn.get("merchant") or "").strip()
         acct = txn.get("category_account_code")
         if merch and acct:
+            # Upsert merchant cache as authoritative (user-approved)
+            await merchant_cache.upsert(
+                cid, merch, acct,
+                account_name=txn.get("category_account_name") or "",
+                confidence=1.0, source="user",
+            )
             key = f"{merch}::{acct}"
             existing = await db.rule_candidates.find_one({"company_id": cid, "key": key})
             if existing:
@@ -1483,24 +1515,21 @@ async def plaid_import(cid: str, payload: dict, user: dict = Depends(get_current
     mappings = item.get("account_mappings") or {}
     range_cache: dict[str, list[tuple[str, str]]] = {}
 
+    # Pre-filter to a candidate list (skip already-imported / closed / dedup)
     now = now_iso()
-    imported = 0
+    candidates: list[dict] = []
     for t in synced["added"]:
         if selected and t["account_id"] not in selected:
             continue
-        # Skip if we've already imported this Plaid transaction
         if await db.transactions.find_one({"company_id": cid, "plaid_transaction_id": t["transaction_id"]}):
             continue
         if await _is_period_closed(cid, t["date"]):
             continue
-        # Route to mapped ledger account when the user has "connected" this Plaid account
         mapping = mappings.get(t["account_id"])
         if mapping:
-            ledger_bank_id = mapping["ledger_account_id"]
-            ledger_bank = next((a for a in accts if a["id"] == ledger_bank_id), fallback_bank)
+            ledger_bank = next((a for a in accts if a["id"] == mapping["ledger_account_id"]), fallback_bank)
         else:
             ledger_bank = fallback_bank
-        # Source-of-truth dedup
         ranges = range_cache.get(ledger_bank["id"])
         if ranges is None:
             ranges = await plaid_connect.higher_source_ranges(cid, ledger_bank["id"], "plaid")
@@ -1508,25 +1537,38 @@ async def plaid_import(cid: str, payload: dict, user: dict = Depends(get_current
         if plaid_connect.in_any_range(t["date"], ranges):
             continue
         merchant = t.get("merchant_name") or t.get("name") or "Unknown"
-        result = await categorize_transaction(merchant, t["amount"], t["name"], coa)
-        acct = next((a for a in accts if a["code"] == result["account_code"]), None) or ledger_bank
-        await db.transactions.insert_one({
+        candidates.append({"plaid_txn": t, "ledger_bank": ledger_bank,
+                           "merchant": merchant, "description": t["name"], "amount": t["amount"]})
+
+    if not candidates:
+        return {"imported": 0}
+
+    results = await merchant_cache.categorize_batch(
+        cid, candidates, coa, categorize_transaction, concurrency=10,
+    )
+    docs = []
+    for cand, r in zip(candidates, results):
+        acct = next((a for a in accts if a["code"] == r["account_code"]), None) or cand["ledger_bank"]
+        t = cand["plaid_txn"]
+        docs.append({
             "id": str(uuid.uuid4()), "company_id": cid, "date": t["date"],
-            "description": t["name"], "merchant": merchant, "amount": t["amount"],
-            "bank_account_id": ledger_bank["id"], "bank_account_name": ledger_bank["name"],
+            "description": t["name"], "merchant": cand["merchant"], "amount": t["amount"],
+            "bank_account_id": cand["ledger_bank"]["id"], "bank_account_name": cand["ledger_bank"]["name"],
             "category_account_id": acct["id"], "category_account_code": acct["code"],
             "category_account_name": acct["name"],
-            "ai_confidence": round(result["confidence"], 2), "ai_reasoning": result["reasoning"],
-            "needs_review": result["confidence"] < 0.80, "human_reviewed": False,
-            "posted": result["confidence"] >= 0.80, "source": "plaid",
+            "ai_confidence": round(float(r.get("confidence") or 0.85), 2),
+            "ai_reasoning": r.get("reasoning", ""),
+            "needs_review": float(r.get("confidence") or 0.85) < 0.80, "human_reviewed": False,
+            "posted": float(r.get("confidence") or 0.85) >= 0.80, "source": "plaid",
             "plaid_transaction_id": t["transaction_id"], "plaid_account_id": t["account_id"],
             "pending": t["pending"], "splits": [], "linked_invoice_id": None,
             "linked_bill_id": None, "linked_payment_id": None, "tags": [],
+            "cache_hit": r.get("cache_hit", False),
             "created_at": now, "updated_at": now,
         })
-        imported += 1
-    await _log_ai(cid, "categorize", imported)
-    return {"imported": imported}
+    await db.transactions.insert_many(docs)
+    await _log_ai(cid, "categorize", len(docs))
+    return {"imported": len(docs)}
 
 
 @api.post("/companies/{cid}/plaid/connect-account")
@@ -2001,6 +2043,20 @@ async def startup():
     await db.users.create_index("email", unique=True)
     await db.transactions.create_index([("company_id", 1), ("date", -1)])
     await db.accounts.create_index([("company_id", 1), ("code", 1)])
+    # Hot-path indexes added Feb 2026 for scale (cache lookups, per-item plaid)
+    await db.transactions.create_index([("company_id", 1), ("plaid_transaction_id", 1)],
+                                       sparse=True, name="company_plaid_txn")
+    await db.transactions.create_index([("company_id", 1), ("plaid_account_id", 1)],
+                                       sparse=True, name="company_plaid_acct")
+    await db.transactions.create_index([("company_id", 1), ("needs_review", 1), ("date", -1)],
+                                       name="company_review_date")
+    await db.journal_entries.create_index([("company_id", 1), ("date", -1)])
+    await db.invoices.create_index([("company_id", 1), ("status", 1), ("issue_date", -1)],
+                                   name="company_inv_status_date")
+    await db.bills.create_index([("company_id", 1), ("status", 1), ("issue_date", -1)],
+                                name="company_bill_status_date")
+    await db.memberships.create_index([("user_id", 1), ("company_id", 1)])
+    await merchant_cache.ensure_indexes()
 
 
 @app.on_event("shutdown")

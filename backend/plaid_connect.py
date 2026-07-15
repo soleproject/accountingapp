@@ -178,66 +178,75 @@ async def sync_plaid_history_for_account(
 ) -> tuple[list[dict], list[dict]]:
     """Pull all Plaid transactions for the given account_id via /transactions/sync,
     dedup against the ledger + higher-priority sources, and insert survivors.
-
-    Returns (inserted_docs, skipped_docs). Does NOT post the opening JE — the
-    caller will use `inserted_docs` to compute and post that separately.
+    Uses the merchant cache + parallel LLM.
     """
+    import merchant_cache  # local import to avoid cycles
     try:
-        synced = plaid_service.sync_transactions(item["access_token"], None)  # from cursor=None to get history
+        synced = plaid_service.sync_transactions(item["access_token"], None)
     except Exception as e:  # noqa: BLE001
         raise RuntimeError(f"Plaid sync error: {e}") from e
 
-    # Persist the new cursor so subsequent syncs are incremental
     await db.plaid_items.update_one({"id": item["id"]}, {"$set": {
         "cursor": synced["next_cursor"], "updated_at": now_iso(),
     }})
 
     higher_ranges = await higher_source_ranges(cid, ledger_bank["id"], "plaid")
-
-    inserted: list[dict] = []
-    skipped: list[dict] = []
     now = now_iso()
 
+    # Build candidate list first
+    candidates: list[dict] = []
+    skipped: list[dict] = []
     for t in synced["added"]:
         if t["account_id"] != plaid_account_id:
             continue
-        # Skip if already imported
         if await db.transactions.find_one({
             "company_id": cid, "plaid_transaction_id": t["transaction_id"],
         }):
             continue
-        # Skip closed periods
         if await is_period_closed_fn(cid, t["date"]):
             skipped.append({"reason": "closed_period", "txn": t})
             continue
-        # Source-of-truth dedup — superior source covers this date range
         if in_any_range(t["date"], higher_ranges):
             skipped.append({"reason": "superseded_by_higher_source", "txn": t})
             continue
-
         merchant = t.get("merchant_name") or t.get("name") or "Unknown"
-        result = await categorize_fn(merchant, t["amount"], t["name"], coa)
-        acct = next((a for a in accts if a["code"] == result["account_code"]), None) or ledger_bank
+        candidates.append({"plaid_txn": t, "merchant": merchant,
+                           "description": t["name"], "amount": t["amount"]})
+
+    if not candidates:
+        return [], skipped
+
+    results = await merchant_cache.categorize_batch(
+        cid, candidates, coa, categorize_fn, concurrency=10,
+    )
+
+    inserted: list[dict] = []
+    for cand, r in zip(candidates, results):
+        t = cand["plaid_txn"]
+        acct = next((a for a in accts if a["code"] == r["account_code"]), None) or ledger_bank
         doc = {
-            "id": str(uuid.uuid4()), "company_id": cid, "date": t["date"],
-            "description": t["name"], "merchant": merchant, "amount": t["amount"],
+            "id": str(__import__("uuid").uuid4()), "company_id": cid, "date": t["date"],
+            "description": t["name"], "merchant": cand["merchant"], "amount": t["amount"],
             "bank_account_id": ledger_bank["id"],
             "bank_account_name": ledger_bank["name"],
             "category_account_id": acct["id"],
             "category_account_code": acct["code"],
             "category_account_name": acct["name"],
-            "ai_confidence": round(result["confidence"], 2),
-            "ai_reasoning": result["reasoning"],
-            "needs_review": result["confidence"] < 0.80, "human_reviewed": False,
-            "posted": result["confidence"] >= 0.80, "source": "plaid",
+            "ai_confidence": round(float(r.get("confidence") or 0.85), 2),
+            "ai_reasoning": r.get("reasoning", ""),
+            "needs_review": float(r.get("confidence") or 0.85) < 0.80,
+            "human_reviewed": False,
+            "posted": float(r.get("confidence") or 0.85) >= 0.80, "source": "plaid",
             "plaid_transaction_id": t["transaction_id"],
             "plaid_account_id": t["account_id"],
             "pending": t["pending"], "splits": [], "linked_invoice_id": None,
             "linked_bill_id": None, "linked_payment_id": None, "tags": [],
+            "cache_hit": r.get("cache_hit", False),
             "created_at": now, "updated_at": now,
         }
-        await db.transactions.insert_one(doc)
         inserted.append(doc)
+    if inserted:
+        await db.transactions.insert_many(inserted)
     return inserted, skipped
 
 
