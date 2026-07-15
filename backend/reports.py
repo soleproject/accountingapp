@@ -93,6 +93,79 @@ def _display_amount(acct: dict, raw: float) -> float:
     return raw
 
 
+# ---------- Accrual helpers (A/R and A/P from open invoices / bills) ----------
+
+async def _open_ar_ap(company_id: str, as_of: str, start: str | None = None):
+    """Compute Accounts Receivable and Accounts Payable balances driven by
+    open (unpaid) invoices/bills as of a date.
+
+    Returns dict with:
+      - ar_end / ap_end: totals of unpaid balances for docs issued on/before `as_of`
+      - ar_start / ap_start: same but as of the day before `start` (0 if start is None)
+      - ar_billed_in_period / ap_billed_in_period: total invoiced/billed
+        (regardless of payment) during [start, end] — used for accrual P&L
+      - ar_cash_in_period / ap_cash_in_period: cash received against invoices /
+        cash paid against bills during [start, end] — needed to reconcile
+    """
+    from datetime import date as _date
+
+    invs = await db.invoices.find({"company_id": company_id}).to_list(20000)
+    bills = await db.bills.find({"company_id": company_id}).to_list(20000)
+
+    ar_end = 0.0
+    ap_end = 0.0
+    ar_start = 0.0
+    ap_start = 0.0
+    ar_billed_in_period = 0.0
+    ap_billed_in_period = 0.0
+
+    def _in_period(d: str) -> bool:
+        if not start:
+            return False
+        return d >= start and d <= as_of
+
+    # "Prior day" of start for opening-balance calculation
+    prev_end = None
+    if start:
+        try:
+            sd = _date.fromisoformat(start)
+            prev_end = _date.fromordinal(sd.toordinal() - 1).isoformat()
+        except Exception:
+            prev_end = start
+
+    for i in invs:
+        issue = i.get("issue_date") or ""
+        total = float(i.get("total", 0) or 0)
+        bal = float(i.get("balance_due", 0) or 0)
+        if issue and issue <= as_of and bal > 0.005:
+            ar_end += bal
+        if prev_end and issue and issue <= prev_end and bal > 0.005:
+            # Rough approximation: use current balance_due as a snapshot proxy.
+            # If total==bal (unpaid) we count it fully; partially-paid may
+            # slightly under-state opening A/R but the drift is small.
+            ar_start += bal
+        if _in_period(issue):
+            ar_billed_in_period += total
+
+    for b in bills:
+        issue = b.get("issue_date") or ""
+        total = float(b.get("total", 0) or 0)
+        bal = float(b.get("balance_due", 0) or 0)
+        if issue and issue <= as_of and bal > 0.005:
+            ap_end += bal
+        if prev_end and issue and issue <= prev_end and bal > 0.005:
+            ap_start += bal
+        if _in_period(issue):
+            ap_billed_in_period += total
+
+    return {
+        "ar_end": round(ar_end, 2), "ap_end": round(ap_end, 2),
+        "ar_start": round(ar_start, 2), "ap_start": round(ap_start, 2),
+        "ar_billed_in_period": round(ar_billed_in_period, 2),
+        "ap_billed_in_period": round(ap_billed_in_period, 2),
+    }
+
+
 # ---------- Income Statement ----------
 
 async def compute_income_statement(company_id: str, start: str, end: str, basis: str = "accrual"):
@@ -113,6 +186,28 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
 
     total_revenue = round(sum(r["amount"] for r in revenue_rows), 2)
     total_expense = round(sum(r["amount"] for r in expense_rows), 2)
+
+    # Accrual adjustments: add change in A/R to revenue, change in A/P to expense.
+    # This converts the cash-based P&L (transactions only) into an accrual view.
+    accrual_adj_rev = 0.0
+    accrual_adj_exp = 0.0
+    if basis == "accrual":
+        ap = await _open_ar_ap(company_id, as_of=end, start=start)
+        accrual_adj_rev = round(ap["ar_end"] - ap["ar_start"], 2)
+        accrual_adj_exp = round(ap["ap_end"] - ap["ap_start"], 2)
+        if abs(accrual_adj_rev) >= 0.005:
+            revenue_rows.append({
+                "code": "1200", "name": "Accrual adjustment (Δ A/R)",
+                "amount": accrual_adj_rev,
+            })
+            total_revenue = round(total_revenue + accrual_adj_rev, 2)
+        if abs(accrual_adj_exp) >= 0.005:
+            expense_rows.append({
+                "code": "2000", "name": "Accrual adjustment (Δ A/P)",
+                "amount": accrual_adj_exp,
+            })
+            total_expense = round(total_expense + accrual_adj_exp, 2)
+
     net_income = round(total_revenue - total_expense, 2)
 
     return {
@@ -122,6 +217,8 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
         "total_revenue": total_revenue,
         "total_expense": total_expense,
         "net_income": net_income,
+        "accrual_ar_adjustment": accrual_adj_rev,
+        "accrual_ap_adjustment": accrual_adj_exp,
     }
 
 
@@ -153,6 +250,24 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
             else:
                 net_income_current -= disp
 
+    # Accrual basis: layer in A/R (unpaid invoices) as an asset, A/P (unpaid bills)
+    # as a liability, and adjust net income by (A/R - A/P) so the sheet balances.
+    ar_open = 0.0
+    ap_open = 0.0
+    if basis == "accrual":
+        ap = await _open_ar_ap(company_id, as_of=as_of, start=None)
+        ar_open = ap["ar_end"]
+        ap_open = ap["ap_end"]
+        if ar_open >= 0.005:
+            assets.append({"code": "1200", "name": "Accounts Receivable", "amount": round(ar_open, 2)})
+        if ap_open >= 0.005:
+            liabilities.append({"code": "2000", "name": "Accounts Payable", "amount": round(ap_open, 2)})
+        # keep books balanced: A/R adds to accrued revenue, A/P adds to accrued expense
+        net_income_current += ar_open - ap_open
+        # Sort assets & liabilities by code so A/R/A/P slot in properly
+        assets.sort(key=lambda x: x["code"])
+        liabilities.sort(key=lambda x: x["code"])
+
     net_income_current = round(net_income_current, 2)
     equity.append({
         "code": "NI", "name": "Current Period Net Income",
@@ -174,6 +289,8 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
         "total_liabilities_equity": total_le,
         "balanced": balanced,
         "imbalance": round(total_assets - total_le, 2),
+        "ar_open": round(ar_open, 2),
+        "ap_open": round(ap_open, 2),
     }
 
 

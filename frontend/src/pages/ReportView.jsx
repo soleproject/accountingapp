@@ -61,10 +61,11 @@ export default function ReportView() {
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="font-heading text-3xl font-bold tracking-tight">{title}</h1>
         <div className="ml-auto flex items-center gap-2">
-          {kind !== "balance-sheet" && kind !== "trial-balance" && (
+          {kind !== "trial-balance" && (
             <div className="inline-flex rounded-md border bg-white text-xs" data-testid={TID.reportBasisToggle}>
               {["accrual", "cash"].map(b => (
                 <button key={b} onClick={() => setBasis(b)}
+                        data-testid={`report-basis-${b}`}
                         className={`px-3 py-1.5 ${basis === b ? "bg-slate-900 text-white" : "text-slate-600"}`}>
                   {b[0].toUpperCase() + b.slice(1)}
                 </button>
