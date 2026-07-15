@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
@@ -21,6 +22,18 @@ export default function JournalEntries() {
     setAccts(a.data.accounts || []);
   };
   useEffect(() => { load(); }, [currentId]);
+
+  const [params] = useSearchParams();
+  useEffect(() => {
+    const hl = params.get("highlight");
+    if (!hl || !entries.length) return;
+    setTimeout(() => {
+      const row = document.querySelector(`[data-je-id="${hl}"]`);
+      row?.scrollIntoView({ behavior: "smooth", block: "center" });
+      row?.classList.add("bg-amber-50");
+      setTimeout(() => row?.classList.remove("bg-amber-50"), 3000);
+    }, 200);
+  }, [params, entries]);
 
   const del = async (id) => {
     if (!confirm("Delete this JE?")) return;
@@ -54,7 +67,7 @@ export default function JournalEntries() {
           </thead>
           <tbody>
             {entries.map(e => (
-              <tr key={e.id} className="border-b hover:bg-slate-50">
+              <tr key={e.id} data-je-id={e.id} className="border-b hover:bg-slate-50 transition-colors">
                 <td className="px-3 py-2 font-mono-num text-slate-600">{fmtDate(e.date)}</td>
                 <td className="px-3 py-2">{e.memo}</td>
                 <td className="px-3 py-2 text-xs text-slate-500">{e.lines.length} lines</td>

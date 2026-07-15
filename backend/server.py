@@ -1221,6 +1221,13 @@ async def rep_ar_aging(cid: str, as_of: Optional[str] = None, user: dict = Depen
     return await R.compute_ar_aging(cid, as_of or e)
 
 
+@api.get("/companies/{cid}/reports/ap-aging")
+async def rep_ap_aging(cid: str, as_of: Optional[str] = None, user: dict = Depends(get_current_user)):
+    await _require_company(user, cid)
+    _, e = _default_range()
+    return await R.compute_ap_aging(cid, as_of or e)
+
+
 # ----------------------- Onboarding -----------------------
 
 @api.get("/companies/{cid}/onboarding")

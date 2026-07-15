@@ -235,7 +235,7 @@ async def compute_general_ledger(company_id: str, start: str, end: str):
         if bank:
             postings[bank].append({
                 "date": t["date"], "description": desc, "signed": amt,
-                "source": "Txn",
+                "source": "Txn", "txn_id": t["id"],
                 "ref": f"Txn · {t.get('merchant', '')[:40]}",
             })
         splits = t.get("splits") or []
@@ -249,17 +249,15 @@ async def compute_general_ledger(company_id: str, start: str, end: str):
                 if sid:
                     postings[sid].append({
                         "date": t["date"], "description": s.get("description") or desc,
-                        "signed": -s_amt,
-                        "source": "Split",
+                        "signed": -s_amt, "source": "Split", "txn_id": t["id"],
                         "ref": f"Txn split · {t.get('merchant', '')[:30]}",
                     })
             residual = amt - split_total
             aid_cat = t.get("category_account_id")
             if aid_cat and abs(residual) > 0.001:
                 postings[aid_cat].append({
-                    "date": t["date"], "description": desc,
-                    "signed": -residual,
-                    "source": "Txn",
+                    "date": t["date"], "description": desc, "signed": -residual,
+                    "source": "Txn", "txn_id": t["id"],
                     "ref": f"Txn residual · {t.get('merchant', '')[:30]}",
                 })
         else:
@@ -267,7 +265,7 @@ async def compute_general_ledger(company_id: str, start: str, end: str):
             if aid_cat:
                 postings[aid_cat].append({
                     "date": t["date"], "description": desc, "signed": -amt,
-                    "source": "Txn",
+                    "source": "Txn", "txn_id": t["id"],
                     "ref": f"Txn · {t.get('merchant', '')[:40]}",
                 })
 
@@ -284,8 +282,7 @@ async def compute_general_ledger(company_id: str, start: str, end: str):
             c = float(line.get("credit", 0) or 0)
             postings[aid].append({
                 "date": j["date"], "description": line.get("description") or memo,
-                "signed": (d - c),
-                "source": "JE",
+                "signed": (d - c), "source": "JE", "je_id": j["id"],
                 "ref": f"JE · {memo[:40]}",
             })
 
@@ -309,6 +306,8 @@ async def compute_general_ledger(company_id: str, start: str, end: str):
                 "date": e["date"], "description": e["description"][:80],
                 "reference": e["ref"],
                 "source": e.get("source", "Txn"),
+                "txn_id": e.get("txn_id"),
+                "je_id": e.get("je_id"),
                 "debit": round(e["signed"], 2) if e["signed"] > 0 else 0.0,
                 "credit": round(-e["signed"], 2) if e["signed"] < 0 else 0.0,
                 "amount": round(disp_delta, 2),
@@ -469,17 +468,26 @@ async def compute_1099_summary(company_id: str, year: int):
 # ---------- A/R Aging ----------
 
 async def compute_ar_aging(company_id: str, as_of: str):
-    """Bucket outstanding A/R (unpaid invoices) by days past due."""
+    return await _aging(company_id, as_of, kind="ar")
+
+
+async def compute_ap_aging(company_id: str, as_of: str):
+    return await _aging(company_id, as_of, kind="ap")
+
+
+async def _aging(company_id: str, as_of: str, kind: str):
+    """Bucket outstanding A/R (invoices) or A/P (bills) by days past due."""
     from datetime import date as _date
     company = await db.companies.find_one({"id": company_id})
-    invs = await db.invoices.find({"company_id": company_id}).to_list(10000)
+    coll = "invoices" if kind == "ar" else "bills"
+    docs = await db[coll].find({"company_id": company_id}).to_list(10000)
     buckets = {"current": 0.0, "1_30": 0.0, "31_60": 0.0, "61_90": 0.0, "over_90": 0.0}
     lines = []
     try:
         today = _date.fromisoformat(as_of)
     except Exception:
         today = _date.today()
-    for i in invs:
+    for i in docs:
         if i.get("status") == "paid":
             continue
         bal = float(i.get("balance_due", 0) or 0)
@@ -503,7 +511,7 @@ async def compute_ar_aging(company_id: str, as_of: str):
             bucket = "over_90"
         buckets[bucket] += bal
         lines.append({
-            "invoice_id": i["id"], "number": i.get("number"),
+            "id": i["id"], "number": i.get("number"),
             "contact_name": i.get("contact_name") or "",
             "issue_date": i.get("issue_date"), "due_date": due_str,
             "balance_due": round(bal, 2),

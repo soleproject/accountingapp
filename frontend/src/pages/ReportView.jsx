@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { api, fmtMoney, BACKEND_URL } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
@@ -205,13 +205,15 @@ function TrialBalanceBody({ data }) {
 }
 
 function GeneralLedgerBody({ data }) {
-  const badge = (src) => {
-    const map = {
-      Txn:   "bg-indigo-100 text-indigo-700",
-      Split: "bg-violet-100 text-violet-700",
-      JE:    "bg-amber-100 text-amber-800",
-    };
-    return `text-[10px] font-medium px-1.5 py-0.5 rounded ${map[src] || "bg-slate-100 text-slate-600"}`;
+  const nav = useNavigate();
+  const map = {
+    Txn:   "bg-indigo-100 text-indigo-700 hover:bg-indigo-200",
+    Split: "bg-violet-100 text-violet-700 hover:bg-violet-200",
+    JE:    "bg-amber-100 text-amber-800 hover:bg-amber-200",
+  };
+  const goToSource = (e) => {
+    if (e.source === "JE") nav(`/accounting/journal-entries?highlight=${e.je_id || ""}`);
+    else nav(`/accounting/transactions?highlight=${e.txn_id || ""}${e.source === "Split" ? "&open=split" : ""}`);
   };
   return (
     <div className="text-sm space-y-4">
@@ -237,7 +239,12 @@ function GeneralLedgerBody({ data }) {
             <div key={i} className="grid grid-cols-12 gap-2 px-3 py-1 border-b border-slate-100 text-[13px] hover:bg-slate-50">
               <div className="col-span-2 font-mono-num text-xs text-slate-500">{e.date}</div>
               <div className="col-span-1">
-                <span className={badge(e.source)}>{e.source}</span>
+                <button data-testid={`gl-source-${e.source.toLowerCase()}`}
+                        onClick={() => goToSource(e)}
+                        className={`text-[10px] font-medium px-1.5 py-0.5 rounded transition ${map[e.source] || "bg-slate-100 text-slate-600"}`}
+                        title="Open source">
+                  {e.source}
+                </button>
               </div>
               <div className="col-span-4 truncate" title={e.reference}>{e.description}</div>
               <div className="col-span-2 text-right font-mono-num">{e.debit ? fmtMoney(e.debit) : ""}</div>

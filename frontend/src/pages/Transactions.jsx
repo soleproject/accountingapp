@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useAiFocus } from "@/lib/aiFocus";
@@ -51,6 +52,24 @@ export default function Transactions() {
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter]);
+
+  const [params] = useSearchParams();
+  useEffect(() => {
+    const hl = params.get("highlight");
+    const opn = params.get("open");
+    if (!hl || !txns.length) return;
+    const target = txns.find(t => t.id === hl);
+    if (target) {
+      // Scroll to the row
+      setTimeout(() => {
+        const row = document.querySelector(`[data-txn-id="${hl}"]`);
+        row?.scrollIntoView({ behavior: "smooth", block: "center" });
+        row?.classList.add("bg-amber-50");
+        setTimeout(() => row?.classList.remove("bg-amber-50"), 3000);
+      }, 200);
+      if (opn === "split") setSplitting(target);
+    }
+  }, [params, txns]);
 
   const acctById = useMemo(() => Object.fromEntries(accts.map(a => [a.id, a])), [accts]);
 
@@ -180,10 +199,10 @@ export default function Transactions() {
             </thead>
             <tbody>
               {txns.map(t => (
-                <tr key={t.id} data-testid={TID.txnRow}
+                <tr key={t.id} data-testid={TID.txnRow} data-txn-id={t.id}
                     onMouseEnter={() => setFocus({ id: t.id, merchant: t.merchant, amount: t.amount, date: t.date })}
                     onMouseLeave={() => setFocus(null)}
-                    className="border-b hover:bg-slate-50">
+                    className="border-b hover:bg-slate-50 transition-colors">
                   <td className="px-3 py-2">
                     <input type="checkbox" data-testid={TID.txnRowCheckbox}
                       checked={selected.has(t.id)} onChange={() => toggleSel(t.id)} />
@@ -216,17 +235,17 @@ export default function Transactions() {
                     {t.human_reviewed && <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">Reviewed</span>}
                   </td>
                   <td className="px-3 py-2">
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 justify-end">
+                    <div className="flex items-center gap-1 justify-end">
                       <button title="Approve" data-testid={TID.txnApprove} onClick={() => approve(t.id)}
-                              className="p-1 rounded hover:bg-slate-200"><Check size={13} /></button>
+                              className="p-1 rounded hover:bg-emerald-100 text-emerald-600"><Check size={14} /></button>
                       <button title="AI re-categorize" data-testid={TID.txnRecategorize} onClick={() => recategorize(t.id)}
-                              className="p-1 rounded hover:bg-slate-200"><RotateCw size={13} /></button>
+                              className="p-1 rounded hover:bg-indigo-100 text-indigo-600"><RotateCw size={14} /></button>
                       <button title="Split" data-testid={TID.txnSplit} onClick={() => setSplitting(t)}
-                              className="p-1 rounded hover:bg-slate-200"><Split size={13} /></button>
+                              className="p-1 rounded hover:bg-violet-100 text-violet-600"><Split size={14} /></button>
                       <button title="Link to invoice/bill" data-testid={TID.txnLink} onClick={() => setLinking(t)}
-                              className="p-1 rounded hover:bg-slate-200"><LinkIcon size={13} /></button>
+                              className="p-1 rounded hover:bg-blue-100 text-blue-600"><LinkIcon size={14} /></button>
                       <button title="Delete" data-testid={TID.deleteBtn} onClick={() => del(t.id)}
-                              className="p-1 rounded hover:bg-slate-200 text-red-600"><Trash2 size={13} /></button>
+                              className="p-1 rounded hover:bg-red-100 text-red-500"><Trash2 size={14} /></button>
                     </div>
                   </td>
                 </tr>

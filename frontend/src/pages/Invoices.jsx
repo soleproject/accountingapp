@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, X, AlertTriangle, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
 const BUCKETS = [
@@ -33,6 +33,7 @@ export default function Invoices() {
   const [contacts, setContacts] = useState([]);
   const [aging, setAging] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState(null);
   const load = async () => {
     if (!currentId) return;
     const [i, c, a] = await Promise.all([
@@ -135,7 +136,13 @@ export default function Invoices() {
                 <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(inv.total)}</td>
                 <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(inv.balance_due)}</td>
                 <td className="px-3 py-2"><span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-100">{inv.status}</span></td>
-                <td className="px-3 py-2 text-right"><button onClick={() => del(inv.id)} className="text-red-500 p-1"><Trash2 size={13} /></button></td>
+                <td className="px-3 py-2 text-right">
+                  <div className="inline-flex items-center gap-1">
+                    <button data-testid="invoice-edit-btn" onClick={() => setEditing(inv)}
+                            className="p-1 rounded hover:bg-indigo-100 text-indigo-600"><Pencil size={13} /></button>
+                    <button onClick={() => del(inv.id)} className="p-1 rounded hover:bg-red-100 text-red-500"><Trash2 size={13} /></button>
+                  </div>
+                </td>
               </tr>
             ))}
             {!items.length && <tr><td colSpan={8} className="text-center py-8 text-slate-500">No invoices.</td></tr>}
@@ -143,37 +150,56 @@ export default function Invoices() {
         </table>
       </div>
       {creating && <InvoiceModal contacts={contacts} currentId={currentId} onClose={() => { setCreating(false); load(); }} />}
+      {editing && <InvoiceModal contacts={contacts} currentId={currentId} invoice={editing} onClose={() => { setEditing(null); load(); }} />}
     </div>
   );
 }
 
-function InvoiceModal({ contacts, currentId, onClose }) {
-  const [contact, setContact] = useState("");
-  const [issue, setIssue] = useState(new Date().toISOString().slice(0, 10));
-  const [due, setDue] = useState(new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10));
-  const [lines, setLines] = useState([{ description: "", quantity: 1, rate: 0, amount: 0 }]);
-  const [tax, setTax] = useState(0);
+function InvoiceModal({ contacts, currentId, invoice, onClose }) {
+  const editMode = !!invoice;
+  const [contact, setContact] = useState(invoice?.contact_id || "");
+  const [issue, setIssue] = useState(invoice?.issue_date || new Date().toISOString().slice(0, 10));
+  const [due, setDue] = useState(invoice?.due_date || new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10));
+  const [lines, setLines] = useState(invoice?.line_items?.length
+    ? invoice.line_items.map(l => ({ ...l }))
+    : [{ description: "", quantity: 1, rate: 0, amount: 0 }]);
+  const [tax, setTax] = useState(invoice?.tax || 0);
+  const [status, setStatus] = useState(invoice?.status || "sent");
   const upd = (i, patch) => setLines(lines.map((x, j) => j === i ? { ...x, ...patch, amount: (patch.quantity !== undefined ? patch.quantity : x.quantity) * (patch.rate !== undefined ? patch.rate : x.rate) } : x));
   const total = lines.reduce((s, l) => s + Number(l.amount || 0), 0) + Number(tax);
   const save = async () => {
     const c = contacts.find(x => x.id === contact);
-    await api.post(`/companies/${currentId}/invoices`, {
-      contact_id: contact || null, contact_name: c?.name || "",
-      issue_date: issue, due_date: due, line_items: lines, tax: Number(tax), status: "sent",
-    });
-    toast.success("Invoice created"); onClose();
+    const body = {
+      contact_id: contact || null, contact_name: c?.name || invoice?.contact_name || "",
+      issue_date: issue, due_date: due, line_items: lines, tax: Number(tax), status,
+    };
+    if (editMode) {
+      await api.patch(`/companies/${currentId}/invoices/${invoice.id}`, body);
+      toast.success("Invoice updated");
+    } else {
+      await api.post(`/companies/${currentId}/invoices`, body);
+      toast.success("Invoice created");
+    }
+    onClose();
   };
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl p-5 space-y-3">
-        <div className="flex items-center justify-between"><h3 className="font-heading font-semibold">New Invoice</h3><button onClick={onClose}><X size={16} /></button></div>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="flex items-center justify-between">
+          <h3 className="font-heading font-semibold">{editMode ? `Edit Invoice ${invoice.number}` : "New Invoice"}</h3>
+          <button onClick={onClose}><X size={16} /></button>
+        </div>
+        <div className="grid grid-cols-4 gap-2">
           <select value={contact} onChange={(e) => setContact(e.target.value)} className="border rounded px-2 py-1.5 text-sm">
             <option value="">Customer…</option>
-            {contacts.filter(c => c.type === "customer").map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {contacts.filter(c => c.type === "customer" || c.type === "both").map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
           <input type="date" value={issue} onChange={(e) => setIssue(e.target.value)} className="border rounded px-2 py-1.5 text-sm" />
           <input type="date" value={due} onChange={(e) => setDue(e.target.value)} className="border rounded px-2 py-1.5 text-sm" />
+          <select value={status} onChange={(e) => setStatus(e.target.value)} className="border rounded px-2 py-1.5 text-sm">
+            <option value="draft">Draft</option><option value="sent">Sent</option>
+            <option value="partial">Partial</option><option value="paid">Paid</option>
+          </select>
         </div>
         <div className="space-y-2">
           {lines.map((l, i) => (
@@ -191,7 +217,9 @@ function InvoiceModal({ contacts, currentId, onClose }) {
         <div className="flex justify-end gap-4 items-center border-t pt-3">
           <div className="text-sm">Tax: <input type="number" value={tax} onChange={(e) => setTax(e.target.value)} className="w-24 border rounded px-2 py-1 text-sm font-mono-num" /></div>
           <div className="text-lg font-mono-num font-semibold">Total: {fmtMoney(total)}</div>
-          <button data-testid={TID.saveBtn} onClick={save} className="px-4 py-2 rounded-md bg-slate-900 text-white text-sm">Save Invoice</button>
+          <button data-testid={TID.saveBtn} onClick={save} className="px-4 py-2 rounded-md bg-slate-900 text-white text-sm">
+            {editMode ? "Save changes" : "Save Invoice"}
+          </button>
         </div>
       </div>
     </div>
