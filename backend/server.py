@@ -366,26 +366,57 @@ async def pro_clients(user: dict = Depends(require_role("pro", "superadmin"))):
 class NewClientIn(BaseModel):
     client_name: str
     client_email: EmailStr
-    client_password: str
+    client_password: str = ""  # required only when the email is new
     company_name: str
     business_type: str = ""
     business_description: str = ""
     reporting_basis: str = "accrual"
 
 
+@api.get("/pro/clients/lookup")
+async def pro_lookup_client(email: str, user: dict = Depends(require_role("pro", "superadmin"))):
+    """Lightweight probe used by the New-Client dialog to detect whether the
+    given email already belongs to a client user. Only reveals name — never
+    password / other PII. Returns {exists: bool, name: str|null}.
+    """
+    u = await db.users.find_one({"email": (email or "").strip().lower(), "role": "client"})
+    if not u:
+        return {"exists": False, "name": None}
+    return {"exists": True, "name": u.get("name")}
+
+
 @api.post("/pro/clients")
 async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role("pro", "superadmin"))):
-    """Create a client user + their company + memberships, and seed default CoA."""
-    if await db.users.find_one({"email": inp.client_email.lower()}):
-        raise HTTPException(400, "A user with that email already exists")
+    """Create (or reuse) a client user + a new company + memberships, and seed
+    the default CoA. If the email already belongs to a `client` user, we reuse
+    that user and just add a fresh membership for the new company — this lets
+    one owner login switch between multiple companies they own via the company
+    dropdown at the top-left.
+    """
     now = now_iso()
-    client_id = str(uuid.uuid4())
+    email = inp.client_email.lower()
+    existing = await db.users.find_one({"email": email})
+    reused = False
+    if existing:
+        if existing.get("role") != "client":
+            raise HTTPException(
+                400,
+                "That email belongs to a non-client account (pro/superadmin) and cannot be reused as a client.",
+            )
+        client_id = existing["id"]
+        reused = True
+        # Do NOT overwrite their password — they already have credentials.
+    else:
+        if not inp.client_password:
+            raise HTTPException(400, "Password required — this is a new client email.")
+        client_id = str(uuid.uuid4())
+        await db.users.insert_one({
+            "id": client_id, "email": email, "name": inp.client_name,
+            "password": hash_password(inp.client_password), "role": "client",
+            "created_at": now, "updated_at": now,
+        })
+
     company_id = str(uuid.uuid4())
-    await db.users.insert_one({
-        "id": client_id, "email": inp.client_email.lower(), "name": inp.client_name,
-        "password": hash_password(inp.client_password), "role": "client",
-        "created_at": now, "updated_at": now,
-    })
     await db.companies.insert_one({
         "id": company_id, "name": inp.company_name,
         "business_type": inp.business_type, "business_description": inp.business_description,
@@ -394,10 +425,14 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
         "onboarding_complete": False,
         "created_at": now, "updated_at": now,
     })
-    await db.memberships.insert_many([
+
+    # Add memberships (avoid duplicates just in case)
+    mems = [
         {"id": str(uuid.uuid4()), "user_id": client_id, "company_id": company_id, "role": "owner", "created_at": now},
         {"id": str(uuid.uuid4()), "user_id": user["id"], "company_id": company_id, "role": "pro", "created_at": now},
-    ])
+    ]
+    await db.memberships.insert_many(mems)
+
     from seed import DEFAULT_COA
     for code, name, atype, subtype in DEFAULT_COA:
         await db.accounts.insert_one({
@@ -409,7 +444,15 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
         "id": str(uuid.uuid4()), "company_id": company_id, "step": 0, "total_steps": 6,
         "complete": False, "answers": {}, "created_at": now, "updated_at": now,
     })
-    return {"company_id": company_id, "client_id": client_id}
+
+    # How many companies does this owner now have access to?
+    total = await db.memberships.count_documents({"user_id": client_id, "role": "owner"})
+    return {
+        "company_id": company_id,
+        "client_id": client_id,
+        "reused_existing_user": reused,
+        "owner_company_count": total,
+    }
 
 
 # ----------------------- Companies -----------------------
