@@ -30,6 +30,7 @@ import plaid_service  # noqa: E402
 import plaid_connect  # noqa: E402
 import veryfi_service  # noqa: E402
 import merchant_cache  # noqa: E402
+import contact_resolver  # noqa: E402
 
 app = FastAPI(title="Axiom Ledger API")
 api = APIRouter(prefix="/api")
@@ -224,11 +225,67 @@ async def _assert_open(company_id: str, date_str: str):
         raise HTTPException(423, f"Period covering {date_str} is closed. Reopen it to edit.")
 
 
+async def _categorize_and_insert(
+    cid: str, candidates: list[dict], accts: list[dict], coa: list[dict],
+    source: str,
+) -> int:
+    """Shared: resolve contacts + group-categorize + decide posting + bulk insert.
+    Each candidate dict must supply at least: plaid_txn(optional), merchant,
+    merchant_name(optional), description, amount, date, and optionally pfc / pfc_primary,
+    plus bank_account_id + bank_account_name for the ledger side, and any
+    source-specific pass-through fields like plaid_transaction_id, plaid_account_id, pending.
+    """
+    import categorizer
+    from ai_service import resolve_contact_ai
+    if not candidates:
+        return 0
+
+    # Contacts (parallel, fast path skips AI)
+    contact_res = await contact_resolver.resolve_contacts_batch(
+        cid, candidates, ai_fallback_fn=resolve_contact_ai, concurrency=5,
+    )
+    for c, r in zip(candidates, contact_res):
+        c["contact_id"] = r.get("contact_id")
+        c["contact_name"] = r.get("contact_name")
+
+    # Categorize (grouped)
+    cat_res = await categorizer.categorize_batch_grouped(
+        cid, candidates, coa, categorize_transaction, concurrency=10,
+    )
+
+    # Uncat + threshold
+    uncat_exp, uncat_inc = await categorizer.ensure_uncategorized_accounts(cid)
+    accts = await db.accounts.find({"company_id": cid}).to_list(2000)
+    threshold = await categorizer.get_auto_post_threshold(cid)
+
+    now = now_iso()
+    docs = []
+    for c, r in zip(candidates, cat_res):
+        post = categorizer.decide_posting(r, threshold, uncat_exp, uncat_inc, accts, c["amount"])
+        base = {
+            "id": str(uuid.uuid4()), "company_id": cid, "date": c["date"],
+            "description": c["description"], "merchant": c["merchant"], "amount": c["amount"],
+            "bank_account_id": c["bank_account_id"], "bank_account_name": c["bank_account_name"],
+            "contact_id": c.get("contact_id"), "contact_name": c.get("contact_name"),
+            **post, "human_reviewed": False, "source": source,
+            "splits": [], "linked_invoice_id": None, "linked_bill_id": None,
+            "linked_payment_id": None, "tags": [],
+            "cache_hit": r.get("cache_hit", False),
+            "created_at": now, "updated_at": now,
+        }
+        for k in ("plaid_transaction_id", "plaid_account_id", "pending"):
+            if k in c:
+                base[k] = c[k]
+        docs.append(base)
+    if docs:
+        await db.transactions.insert_many(docs)
+        await _log_ai(cid, "categorize", len(docs))
+    return len(docs)
+
+
 async def _sync_and_import(cid: str, item: dict, selected_account_ids: list[str] | None = None) -> int:
-    """Shared helper: run Plaid transactions_sync for a company's item and AI-categorize each new txn.
-    Routes each Plaid txn to the mapped ledger bank account (falls back to 1010).
-    Applies source-of-truth dedup (QBO > Plaid > Veryfi).
-    Uses per-company merchant cache + 10-way concurrent LLM categorization.
+    """Shared helper: run Plaid transactions_sync and route each new txn to its
+    mapped ledger + auto-create contacts + group-categorize + Uncategorized bucketing.
     """
     try:
         synced = plaid_service.sync_transactions(item["access_token"], item.get("cursor"))
@@ -245,8 +302,6 @@ async def _sync_and_import(cid: str, item: dict, selected_account_ids: list[str]
     mappings = item.get("account_mappings") or {}
     range_cache: dict[str, list[tuple[str, str]]] = {}
 
-    # ---- Pre-filter candidates (skip duplicates, closed periods, dedup) ----
-    now = now_iso()
     candidates: list[dict] = []
     for t in synced["added"]:
         if selected_account_ids and t["account_id"] not in selected_account_ids:
@@ -256,54 +311,30 @@ async def _sync_and_import(cid: str, item: dict, selected_account_ids: list[str]
         if await _is_period_closed(cid, t["date"]):
             continue
         mapping = mappings.get(t["account_id"])
-        if mapping:
-            ledger_bank = next((a for a in accts if a["id"] == mapping["ledger_account_id"]), fallback_bank)
-        else:
-            ledger_bank = fallback_bank
+        ledger_bank = next((a for a in accts if a["id"] == mapping["ledger_account_id"]), fallback_bank) if mapping else fallback_bank
         ranges = range_cache.get(ledger_bank["id"])
         if ranges is None:
             ranges = await plaid_connect.higher_source_ranges(cid, ledger_bank["id"], "plaid")
             range_cache[ledger_bank["id"]] = ranges
         if plaid_connect.in_any_range(t["date"], ranges):
             continue
-        merchant = t.get("merchant_name") or t.get("name") or "Unknown"
-        candidates.append({"plaid_txn": t, "ledger_bank": ledger_bank,
-                            "merchant": merchant, "description": t["name"], "amount": t["amount"]})
-
-    if not candidates:
-        return 0
-
-    # ---- Batch categorize (cache first, 10-way parallel LLM for misses) ----
-    results = await merchant_cache.categorize_batch(
-        cid, candidates, coa, categorize_transaction, concurrency=10,
-    )
-
-    # ---- Bulk insert ----
-    docs = []
-    for cand, r in zip(candidates, results):
-        acct = next((a for a in accts if a["code"] == r["account_code"]), None) or cand["ledger_bank"]
-        t = cand["plaid_txn"]
-        docs.append({
-            "id": str(uuid.uuid4()), "company_id": cid, "date": t["date"],
-            "description": t["name"], "merchant": cand["merchant"], "amount": t["amount"],
-            "bank_account_id": cand["ledger_bank"]["id"], "bank_account_name": cand["ledger_bank"]["name"],
-            "category_account_id": acct["id"], "category_account_code": acct["code"],
-            "category_account_name": acct["name"],
-            "ai_confidence": round(float(r.get("confidence") or 0.85), 2),
-            "ai_reasoning": r.get("reasoning", ""),
-            "needs_review": float(r.get("confidence") or 0.85) < 0.80, "human_reviewed": False,
-            "posted": float(r.get("confidence") or 0.85) >= 0.80, "source": "plaid",
-            "plaid_transaction_id": t["transaction_id"], "plaid_account_id": t["account_id"],
-            "pending": t["pending"], "splits": [], "linked_invoice_id": None,
-            "linked_bill_id": None, "linked_payment_id": None, "tags": [],
-            "cache_hit": r.get("cache_hit", False),
-            "created_at": now, "updated_at": now,
+        pfc = t.get("personal_finance_category")
+        candidates.append({
+            "date": t["date"], "description": t["name"],
+            "merchant": t.get("merchant_name") or t.get("name") or "Unknown",
+            "merchant_name": t.get("merchant_name"),
+            "amount": t["amount"],
+            "bank_account_id": ledger_bank["id"],
+            "bank_account_name": ledger_bank["name"],
+            "plaid_transaction_id": t["transaction_id"],
+            "plaid_account_id": t["account_id"],
+            "pending": t.get("pending", False),
+            "pfc": pfc, "pfc_primary": (pfc or {}).get("primary"),
         })
-    if docs:
-        await db.transactions.insert_many(docs)
-        await _log_ai(cid, "categorize", len(docs))
-        await _log_ai(cid, "webhook_sync", len(docs))
-    return len(docs)
+    imported = await _categorize_and_insert(cid, candidates, accts, coa, source="plaid")
+    if imported:
+        await _log_ai(cid, "webhook_sync", imported)
+    return imported
 
 
 # ----------------------- Auth endpoints -----------------------
@@ -510,8 +541,85 @@ async def create_company(inp: CompanyCreate, user: dict = Depends(get_current_us
     return {"company_id": cid}
 
 
+@api.post("/companies/{cid}/contacts/backfill")
+async def contacts_backfill(cid: str, user: dict = Depends(get_current_user)):
+    """One-time migration: resolve + assign contacts on every transaction that
+    doesn't yet have one. Uses the fast merchant_name path when available,
+    Claude Haiku otherwise. Idempotent — running twice is safe.
+    """
+    await _require_company(user, cid)
+    from ai_service import resolve_contact_ai
+    # Find txns missing contact_id (either field absent or explicit null)
+    missing = await db.transactions.find({
+        "company_id": cid,
+        "$or": [{"contact_id": None}, {"contact_id": {"$exists": False}}],
+    }).to_list(20000)
+    if not missing:
+        return {"scanned": 0, "resolved": 0, "created": 0, "left_null": 0}
+
+    items = [{
+        "merchant_name": t.get("merchant"),
+        "description": t.get("description"),
+        "amount": t.get("amount"),
+    } for t in missing]
+    results = await contact_resolver.resolve_contacts_batch(
+        cid, items, ai_fallback_fn=resolve_contact_ai, concurrency=5,
+    )
+    resolved = 0
+    created = 0
+    left_null = 0
+    created_ids: set[str] = set()
+    now = now_iso()
+    for t, r in zip(missing, results):
+        if r.get("contact_id"):
+            await db.transactions.update_one(
+                {"id": t["id"], "company_id": cid},
+                {"$set": {"contact_id": r["contact_id"],
+                          "contact_name": r["contact_name"],
+                          "updated_at": now}},
+            )
+            resolved += 1
+            if r.get("source") in ("merchant_name", "ai_new") and r["contact_id"] not in created_ids:
+                created += 1
+                created_ids.add(r["contact_id"])
+        else:
+            left_null += 1
+    return {"scanned": len(missing), "resolved": resolved,
+            "created": created, "left_null": left_null}
+
+
+@api.patch("/companies/{cid}/settings/auto-post-threshold")
+async def set_auto_post_threshold(cid: str, payload: dict, user: dict = Depends(get_current_user)):
+    """Per-company AI auto-post threshold (default 0.80)."""
+    await _require_company(user, cid)
+    try:
+        v = float(payload.get("threshold"))
+    except Exception:
+        raise HTTPException(400, "threshold must be a number 0.0-1.0")
+    if not (0.0 <= v <= 1.0):
+        raise HTTPException(400, "threshold must be between 0.0 and 1.0")
+    await db.companies.update_one({"id": cid}, {"$set": {
+        "auto_post_threshold": v, "updated_at": now_iso(),
+    }})
+    return {"auto_post_threshold": v}
+
+
 @api.patch("/companies/{cid}")
 async def update_company(cid: str, patch: dict, user: dict = Depends(get_current_user)):
+    await _require_company(user, cid)
+    allowed = {"name", "business_type", "business_description", "reporting_basis", "auto_post_threshold"}
+    updates = {k: v for k, v in (patch or {}).items() if k in allowed}
+    if not updates:
+        raise HTTPException(400, "No editable fields provided")
+    updates["updated_at"] = now_iso()
+    r = await db.companies.update_one({"id": cid}, {"$set": updates})
+    if r.matched_count == 0:
+        raise HTTPException(404, "Company not found")
+    doc = await db.companies.find_one({"id": cid})
+    return coerce(doc)
+
+
+
     await _require_company(user, cid)
     allowed = {"name", "business_type", "business_description", "reporting_basis"}
     updates = {k: v for k, v in (patch or {}).items() if k in allowed}
@@ -1515,8 +1623,6 @@ async def plaid_import(cid: str, payload: dict, user: dict = Depends(get_current
     mappings = item.get("account_mappings") or {}
     range_cache: dict[str, list[tuple[str, str]]] = {}
 
-    # Pre-filter to a candidate list (skip already-imported / closed / dedup)
-    now = now_iso()
     candidates: list[dict] = []
     for t in synced["added"]:
         if selected and t["account_id"] not in selected:
@@ -1526,49 +1632,28 @@ async def plaid_import(cid: str, payload: dict, user: dict = Depends(get_current
         if await _is_period_closed(cid, t["date"]):
             continue
         mapping = mappings.get(t["account_id"])
-        if mapping:
-            ledger_bank = next((a for a in accts if a["id"] == mapping["ledger_account_id"]), fallback_bank)
-        else:
-            ledger_bank = fallback_bank
+        ledger_bank = next((a for a in accts if a["id"] == mapping["ledger_account_id"]), fallback_bank) if mapping else fallback_bank
         ranges = range_cache.get(ledger_bank["id"])
         if ranges is None:
             ranges = await plaid_connect.higher_source_ranges(cid, ledger_bank["id"], "plaid")
             range_cache[ledger_bank["id"]] = ranges
         if plaid_connect.in_any_range(t["date"], ranges):
             continue
-        merchant = t.get("merchant_name") or t.get("name") or "Unknown"
-        candidates.append({"plaid_txn": t, "ledger_bank": ledger_bank,
-                           "merchant": merchant, "description": t["name"], "amount": t["amount"]})
-
-    if not candidates:
-        return {"imported": 0}
-
-    results = await merchant_cache.categorize_batch(
-        cid, candidates, coa, categorize_transaction, concurrency=10,
-    )
-    docs = []
-    for cand, r in zip(candidates, results):
-        acct = next((a for a in accts if a["code"] == r["account_code"]), None) or cand["ledger_bank"]
-        t = cand["plaid_txn"]
-        docs.append({
-            "id": str(uuid.uuid4()), "company_id": cid, "date": t["date"],
-            "description": t["name"], "merchant": cand["merchant"], "amount": t["amount"],
-            "bank_account_id": cand["ledger_bank"]["id"], "bank_account_name": cand["ledger_bank"]["name"],
-            "category_account_id": acct["id"], "category_account_code": acct["code"],
-            "category_account_name": acct["name"],
-            "ai_confidence": round(float(r.get("confidence") or 0.85), 2),
-            "ai_reasoning": r.get("reasoning", ""),
-            "needs_review": float(r.get("confidence") or 0.85) < 0.80, "human_reviewed": False,
-            "posted": float(r.get("confidence") or 0.85) >= 0.80, "source": "plaid",
-            "plaid_transaction_id": t["transaction_id"], "plaid_account_id": t["account_id"],
-            "pending": t["pending"], "splits": [], "linked_invoice_id": None,
-            "linked_bill_id": None, "linked_payment_id": None, "tags": [],
-            "cache_hit": r.get("cache_hit", False),
-            "created_at": now, "updated_at": now,
+        pfc = t.get("personal_finance_category")
+        candidates.append({
+            "date": t["date"], "description": t["name"],
+            "merchant": t.get("merchant_name") or t.get("name") or "Unknown",
+            "merchant_name": t.get("merchant_name"),
+            "amount": t["amount"],
+            "bank_account_id": ledger_bank["id"],
+            "bank_account_name": ledger_bank["name"],
+            "plaid_transaction_id": t["transaction_id"],
+            "plaid_account_id": t["account_id"],
+            "pending": t.get("pending", False),
+            "pfc": pfc, "pfc_primary": (pfc or {}).get("primary"),
         })
-    await db.transactions.insert_many(docs)
-    await _log_ai(cid, "categorize", len(docs))
-    return {"imported": len(docs)}
+    imported = await _categorize_and_insert(cid, candidates, accts, coa, source="plaid")
+    return {"imported": imported}
 
 
 @api.post("/companies/{cid}/plaid/connect-account")
@@ -1783,31 +1868,23 @@ async def veryfi_upload(cid: str, file: UploadFile = File(...), user: dict = Dep
 
     higher_ranges = await plaid_connect.higher_source_ranges(cid, checking["id"], "veryfi")
 
-    now = now_iso()
-    imported = 0
+    candidates: list[dict] = []
     skipped = 0
     for ln in lines:
         ln_date = ln["date"] or datetime.now(timezone.utc).date().isoformat()
-        # Source-of-truth dedup: QBO/Plaid supersede Veryfi in overlapping periods
         if plaid_connect.in_any_range(ln_date, higher_ranges):
             skipped += 1
             continue
-        result = await categorize_transaction(ln["merchant"], ln["amount"], ln["description"], coa)
-        acct = next((a for a in accts if a["code"] == result["account_code"]), None) or checking
-        await db.transactions.insert_one({
-            "id": str(uuid.uuid4()), "company_id": cid, "date": ln_date,
-            "description": f"{ln['description']} (Veryfi)", "merchant": ln["merchant"],
-            "amount": ln["amount"], "bank_account_id": checking["id"],
-            "bank_account_name": checking["name"], "category_account_id": acct["id"],
-            "category_account_code": acct["code"], "category_account_name": acct["name"],
-            "ai_confidence": round(result["confidence"], 2), "ai_reasoning": result["reasoning"],
-            "needs_review": result["confidence"] < 0.80, "human_reviewed": False,
-            "posted": result["confidence"] >= 0.80, "source": "veryfi",
-            "splits": [], "linked_invoice_id": None, "linked_bill_id": None,
-            "linked_payment_id": None, "tags": [],
-            "created_at": now, "updated_at": now,
+        candidates.append({
+            "date": ln_date,
+            "description": f"{ln['description']} (Veryfi)",
+            "merchant": ln["merchant"],
+            "merchant_name": ln["merchant"],  # Veryfi's vendor name is trusted
+            "amount": ln["amount"],
+            "bank_account_id": checking["id"],
+            "bank_account_name": checking["name"],
         })
-        imported += 1
+    imported = await _categorize_and_insert(cid, candidates, accts, coa, source="veryfi")
     await _log_ai(cid, "veryfi_ocr", imported)
     return {"imported": imported, "skipped_duplicates": skipped, "veryfi_document_id": veryfi_data.get("id")}
 
@@ -2057,6 +2134,7 @@ async def startup():
                                 name="company_bill_status_date")
     await db.memberships.create_index([("user_id", 1), ("company_id", 1)])
     await merchant_cache.ensure_indexes()
+    await contact_resolver.ensure_contact_index()
 
 
 @app.on_event("shutdown")

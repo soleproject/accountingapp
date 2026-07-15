@@ -8,7 +8,7 @@ from db import db, now_iso
 import plaid_connect
 
 
-async def _fake_categorize(merchant, amount, desc, coa):
+async def _fake_categorize(merchant, amount, desc, coa, pfc=None):
     return {"account_code": "9999", "confidence": 0.9,
             "reasoning": "test-fake", "needs_review": False}
 

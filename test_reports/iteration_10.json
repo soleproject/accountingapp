@@ -1,0 +1,32 @@
+{
+  "summary": "Iter10 backend testing: contact resolver + backfill endpoint + per-org auto-post threshold + regression checks. 15/15 new integration tests + 3/3 existing unit test suites pass. Backfill on Clean Set was already applied (0 missing → all 131 txns have contact_id; 131 AI-created contacts). Idempotency verified. Corp-suffix dedup verified (GitHub/GitHub Inc. collapse). Merchant cache upsert on approve verified with source='user'. Uncategorized 6999/4999 auto-create verified. No AI calls billed — fast-path only.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/companies/{cid}/settings/auto-post-threshold", "issue": "Review request specified POST but server implements PATCH. Endpoint works correctly under PATCH; either update review doc or add POST alias."},
+      {"endpoint": "GET /api/companies/{cid}/transactions", "issue": "No pagination metadata returned (no total, page, next_cursor). Only a `limit` query param + flat `{transactions: [...]}`. Review asked to 'verify pagination fields' — none exist. May be by design; flagging for confirmation."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration10_contacts.py",
+    "/app/test_reports/pytest/iter10.xml"
+  ],
+  "action_items": [
+    "Decide POST vs PATCH for /settings/auto-post-threshold — align server or review doc.",
+    "Confirm whether GET /transactions should return pagination fields; if yes add total/next_cursor."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 2143 lines — exceeds 700-line guideline; consider splitting into routers (companies, transactions, contacts, plaid, reports).",
+    "contacts_backfill loads up to 20000 txns into memory in one to_list — fine for now but will need chunking as tenants grow.",
+    "approve_transaction fetches the transaction twice (once for _assert_open, once after update). Minor perf; could reuse the first fetch."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration10_contacts.py"],
+  "success_rate": {"backend": "100%", "frontend": "not tested (per request)"},
+  "test_credentials": "pro@axiom.ai / pro123",
+  "seed_data_creation": "Test creates and cleans up 1 TEST_ITER10 txn + 1 GitHub, Inc. contact + 1 TEST_MERCH_* txn on Marketing Co, LLC (id 2f8153a1). All test data deleted at end of each test.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iter10 test file at /app/backend/tests/test_iteration10_contacts.py is stable and safe to rerun (idempotent cleanup, no AI billing). Clean Set (1360f004-...) already had contact backfill applied — 131 contacts, 0 missing. To retest backfill's create path, either use a fresh company or delete_many on db.contacts+txn.contact_id first. Note the DEMO_ID const in the test file was named 'Skyward Sparks' in the review request but the actual company name is 'Marketing Co, LLC' — id is correct.",
+  "rca_of_the_issue": "N/A — no functional bugs found. Two minor doc/API-shape mismatches flagged as minor."
+}

@@ -117,5 +117,10 @@ def _serialize_txn(t) -> dict:
         "amount": -float(t["amount"]),
         "pending": bool(t.get("pending", False)),
         "category": list(t.get("category") or []),
+        "personal_finance_category": (lambda pfc: {
+            "primary": pfc.get("primary") if pfc else None,
+            "detailed": pfc.get("detailed") if pfc else None,
+            "confidence_level": pfc.get("confidence_level") if pfc else None,
+        } if pfc else None)(t.get("personal_finance_category")),
         "iso_currency_code": t.get("iso_currency_code", "USD"),
     }

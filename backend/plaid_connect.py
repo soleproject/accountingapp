@@ -176,11 +176,13 @@ async def sync_plaid_history_for_account(
     cid: str, item: dict, plaid_account_id: str, ledger_bank: dict,
     coa: list[dict], accts: list[dict], categorize_fn, is_period_closed_fn,
 ) -> tuple[list[dict], list[dict]]:
-    """Pull all Plaid transactions for the given account_id via /transactions/sync,
-    dedup against the ledger + higher-priority sources, and insert survivors.
-    Uses the merchant cache + parallel LLM.
+    """Pull all Plaid txns for the given account_id, dedup, batch-categorize
+    with merchant grouping + contact resolution, and insert survivors.
     """
     import merchant_cache  # local import to avoid cycles
+    import categorizer
+    import contact_resolver
+    from ai_service import resolve_contact_ai
     try:
         synced = plaid_service.sync_transactions(item["access_token"], None)
     except Exception as e:  # noqa: BLE001
@@ -193,7 +195,7 @@ async def sync_plaid_history_for_account(
     higher_ranges = await higher_source_ranges(cid, ledger_bank["id"], "plaid")
     now = now_iso()
 
-    # Build candidate list first
+    # Candidates ----
     candidates: list[dict] = []
     skipped: list[dict] = []
     for t in synced["added"]:
@@ -210,41 +212,59 @@ async def sync_plaid_history_for_account(
             skipped.append({"reason": "superseded_by_higher_source", "txn": t})
             continue
         merchant = t.get("merchant_name") or t.get("name") or "Unknown"
-        candidates.append({"plaid_txn": t, "merchant": merchant,
-                           "description": t["name"], "amount": t["amount"]})
+        pfc = t.get("personal_finance_category") if isinstance(t, dict) else None
+        candidates.append({
+            "plaid_txn": t, "merchant": merchant, "description": t["name"],
+            "amount": t["amount"], "merchant_name": t.get("merchant_name"),
+            "pfc": pfc, "pfc_primary": (pfc or {}).get("primary"),
+            "date": t["date"],
+        })
 
     if not candidates:
         return [], skipped
 
-    results = await merchant_cache.categorize_batch(
+    # Resolve contacts in parallel (fast-path skips AI for merchant_name rows)
+    contact_results = await contact_resolver.resolve_contacts_batch(
+        cid, candidates, ai_fallback_fn=resolve_contact_ai, concurrency=5,
+    )
+    for cand, cr in zip(candidates, contact_results):
+        cand["contact_id"] = cr.get("contact_id")
+        cand["contact_name"] = cr.get("contact_name")
+        cand["contact_source"] = cr.get("source")
+
+    # Group by (contact OR normalized merchant, direction) → 1 LLM per group
+    per_item_result = await categorizer.categorize_batch_grouped(
         cid, candidates, coa, categorize_fn, concurrency=10,
     )
 
+    # Ensure Uncategorized buckets + per-org threshold
+    uncat_exp, uncat_inc = await categorizer.ensure_uncategorized_accounts(cid)
+    accts = await db.accounts.find({"company_id": cid}).to_list(2000)  # refresh (uncats may be new)
+    threshold = await categorizer.get_auto_post_threshold(cid)
+
     inserted: list[dict] = []
-    for cand, r in zip(candidates, results):
+    for cand, r in zip(candidates, per_item_result):
         t = cand["plaid_txn"]
-        acct = next((a for a in accts if a["code"] == r["account_code"]), None) or ledger_bank
-        doc = {
+        post = categorizer.decide_posting(
+            r, threshold, uncat_exp, uncat_inc, accts, cand["amount"],
+        )
+        inserted.append({
             "id": str(__import__("uuid").uuid4()), "company_id": cid, "date": t["date"],
             "description": t["name"], "merchant": cand["merchant"], "amount": t["amount"],
             "bank_account_id": ledger_bank["id"],
             "bank_account_name": ledger_bank["name"],
-            "category_account_id": acct["id"],
-            "category_account_code": acct["code"],
-            "category_account_name": acct["name"],
-            "ai_confidence": round(float(r.get("confidence") or 0.85), 2),
-            "ai_reasoning": r.get("reasoning", ""),
-            "needs_review": float(r.get("confidence") or 0.85) < 0.80,
+            "contact_id": cand.get("contact_id"),
+            "contact_name": cand.get("contact_name"),
+            **post,
             "human_reviewed": False,
-            "posted": float(r.get("confidence") or 0.85) >= 0.80, "source": "plaid",
+            "source": "plaid",
             "plaid_transaction_id": t["transaction_id"],
             "plaid_account_id": t["account_id"],
             "pending": t["pending"], "splits": [], "linked_invoice_id": None,
             "linked_bill_id": None, "linked_payment_id": None, "tags": [],
             "cache_hit": r.get("cache_hit", False),
             "created_at": now, "updated_at": now,
-        }
-        inserted.append(doc)
+        })
     if inserted:
         await db.transactions.insert_many(inserted)
     return inserted, skipped
