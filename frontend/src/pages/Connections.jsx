@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import PlaidLinkButton from "@/components/PlaidLinkButton";
+import PlaidBackfillButton from "@/components/PlaidBackfillButton";
 import { toast } from "sonner";
 import { Link2, CheckCircle2, ChevronDown, ChevronRight, PlugZap, CircleDashed, Loader2 } from "lucide-react";
 
@@ -102,6 +103,9 @@ export default function Connections() {
         <div className="flex items-center gap-2">
           <Link2 size={16} className="text-cyan-600" />
           <h3 className="font-heading font-semibold">Plaid — Bank &amp; Card Feeds</h3>
+          {status.linked && (
+            <PlaidBackfillButton companyId={currentId} onDone={loadStatus} />
+          )}
           <button data-testid="plaid-manual-sync-btn" onClick={manualSync} disabled={syncing}
                   className="ml-auto text-xs px-3 py-1 rounded-md border border-slate-300 hover:bg-slate-50 disabled:opacity-50">
             {syncing ? "Syncing…" : "Manual Sync (webhook fallback)"}

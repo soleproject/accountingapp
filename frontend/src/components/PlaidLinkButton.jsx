@@ -43,7 +43,7 @@ export default function PlaidLinkButton({ companyId, onSuccess, disabled }) {
       className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50"
     >
       {loading ? <Loader2 size={13} className="animate-spin" /> : <Link2 size={13} />}
-      Launch Plaid Link (Sandbox)
+      Launch Plaid Link
     </button>
   );
 }

@@ -1409,6 +1409,30 @@ async def plaid_link_token(cid: str, user: dict = Depends(get_current_user)):
     return {"link_token": token}
 
 
+@api.post("/companies/{cid}/plaid/backfill-history-token")
+async def plaid_backfill_history_token(cid: str, user: dict = Depends(get_current_user)):
+    """Mint a Plaid Link **update-mode** token for the company's existing Plaid
+    item, requesting 730 days of history. When the user completes Link, Plaid
+    will backfill older transactions and fire a HISTORICAL_UPDATE webhook.
+    """
+    await _require_company(user, cid)
+    item = await db.plaid_items.find_one({"company_id": cid})
+    if not item:
+        raise HTTPException(400, "No Plaid item linked for this company")
+    public_base = os.environ.get("PUBLIC_BACKEND_URL", "").rstrip("/")
+    webhook_url = f"{public_base}/api/plaid/webhook" if public_base else None
+    try:
+        token = plaid_service.create_link_token(
+            user_id=f"{user['id']}::{cid}",
+            client_name="Axiom Ledger",
+            webhook_url=webhook_url,
+            access_token_for_update=item["access_token"],
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Plaid error: {e}")
+    return {"link_token": token, "item_id": item.get("item_id")}
+
+
 @api.post("/companies/{cid}/onboarding/plaid/exchange")
 async def plaid_exchange(cid: str, payload: dict, user: dict = Depends(get_current_user)):
     """Exchange the public_token from Plaid Link for an access_token, persist Item, return accounts."""
