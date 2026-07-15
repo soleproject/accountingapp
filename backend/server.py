@@ -1411,6 +1411,61 @@ async def plaid_manual_sync(cid: str, user: dict = Depends(get_current_user)):
     return {"imported": imported}
 
 
+@api.get("/companies/{cid}/plaid/accounts")
+async def plaid_list_accounts(cid: str, user: dict = Depends(get_current_user)):
+    """List every Plaid-linked account for this company along with its connection
+    status. An account is considered *connected* if at least one transaction has
+    been imported for it into the ledger. Accounts that appear on the Plaid item
+    but have no transactions yet are returned as *available to connect*.
+    """
+    await _require_company(user, cid)
+    item = await db.plaid_items.find_one({"company_id": cid})
+    if not item:
+        return {"connected": [], "available": [], "linked": False}
+
+    accts = item.get("accounts") or []
+    # Determine which Plaid account_ids already have transactions in the ledger
+    plaid_account_ids = [a["account_id"] for a in accts if a.get("account_id")]
+    connected_ids: set[str] = set()
+    if plaid_account_ids:
+        cur = db.transactions.aggregate([
+            {"$match": {"company_id": cid, "plaid_account_id": {"$in": plaid_account_ids}}},
+            {"$group": {"_id": "$plaid_account_id", "count": {"$sum": 1},
+                        "last": {"$max": "$date"}}},
+        ])
+        counts = {row["_id"]: row async for row in cur}
+    else:
+        counts = {}
+
+    connected, available = [], []
+    for a in accts:
+        aid = a.get("account_id")
+        row = {
+            "account_id": aid,
+            "name": a.get("name") or a.get("official_name") or "Account",
+            "official_name": a.get("official_name"),
+            "type": a.get("type"),
+            "subtype": a.get("subtype"),
+            "mask": a.get("mask"),
+            "balance_current": a.get("balance_current"),
+            "currency": a.get("currency", "USD"),
+        }
+        c = counts.get(aid)
+        if c:
+            connected.append({**row,
+                              "transaction_count": c.get("count", 0),
+                              "last_transaction_date": c.get("last")})
+        else:
+            available.append(row)
+
+    return {
+        "linked": True,
+        "item_id": item.get("item_id"),
+        "connected": connected,
+        "available": available,
+    }
+
+
 @api.post("/companies/{cid}/onboarding/mock-plaid")
 async def mock_plaid(cid: str, user: dict = Depends(get_current_user)):
     return {"accounts": [
