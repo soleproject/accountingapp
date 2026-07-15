@@ -234,6 +234,7 @@ async def compute_general_ledger(company_id: str, start: str, end: str):
         if bank:
             postings[bank].append({
                 "date": t["date"], "description": desc, "signed": amt,
+                "source": "Txn",
                 "ref": f"Txn · {t.get('merchant', '')[:40]}",
             })
         splits = t.get("splits") or []
@@ -246,20 +247,25 @@ async def compute_general_ledger(company_id: str, start: str, end: str):
                 if sid:
                     postings[sid].append({
                         "date": t["date"], "description": s.get("description") or desc,
-                        "signed": -s_amt, "ref": f"Txn split · {t.get('merchant', '')[:30]}",
+                        "signed": -s_amt,
+                        "source": "Split",
+                        "ref": f"Txn split · {t.get('merchant', '')[:30]}",
                     })
             residual = amt - split_total
             aid_cat = t.get("category_account_id")
             if aid_cat and abs(residual) > 0.001:
                 postings[aid_cat].append({
                     "date": t["date"], "description": desc,
-                    "signed": -residual, "ref": f"Txn residual · {t.get('merchant', '')[:30]}",
+                    "signed": -residual,
+                    "source": "Txn",
+                    "ref": f"Txn residual · {t.get('merchant', '')[:30]}",
                 })
         else:
             aid_cat = t.get("category_account_id")
             if aid_cat:
                 postings[aid_cat].append({
                     "date": t["date"], "description": desc, "signed": -amt,
+                    "source": "Txn",
                     "ref": f"Txn · {t.get('merchant', '')[:40]}",
                 })
 
@@ -276,7 +282,9 @@ async def compute_general_ledger(company_id: str, start: str, end: str):
             c = float(line.get("credit", 0) or 0)
             postings[aid].append({
                 "date": j["date"], "description": line.get("description") or memo,
-                "signed": (d - c), "ref": f"JE · {memo[:40]}",
+                "signed": (d - c),
+                "source": "JE",
+                "ref": f"JE · {memo[:40]}",
             })
 
     sections = []
@@ -298,6 +306,7 @@ async def compute_general_ledger(company_id: str, start: str, end: str):
             rows.append({
                 "date": e["date"], "description": e["description"][:80],
                 "reference": e["ref"],
+                "source": e.get("source", "Txn"),
                 "debit": round(e["signed"], 2) if e["signed"] > 0 else 0.0,
                 "credit": round(-e["signed"], 2) if e["signed"] < 0 else 0.0,
                 "amount": round(disp_delta, 2),
@@ -637,21 +646,21 @@ def build_general_ledger_pdf(data: dict) -> bytes:
     ]
     for sec in data["sections"]:
         story.append(Paragraph(f"{sec['code']} — {sec['name']}", s["Section"]))
-        rows = [["Date", "Description", "Debit", "Credit", "Balance"]]
-        rows.append(["", f"Opening balance", "", "", f"${sec['opening_balance']:,.2f}"])
+        rows = [["Date", "Source", "Description", "Debit", "Credit", "Balance"]]
+        rows.append(["", "", f"Opening balance", "", "", f"${sec['opening_balance']:,.2f}"])
         for e in sec["entries"]:
-            rows.append([e["date"], e["description"][:50],
+            rows.append([e["date"], e.get("source", "Txn"), e["description"][:45],
                          f"${e['debit']:,.2f}" if e["debit"] else "",
                          f"${e['credit']:,.2f}" if e["credit"] else "",
                          f"${e['balance']:,.2f}"])
-        rows.append(["", "Ending Balance", "", "", f"${sec['total']:,.2f}"])
-        t = Table(rows, colWidths=[0.9 * inch, 3.0 * inch, 1.0 * inch, 1.0 * inch, 1.1 * inch])
+        rows.append(["", "", "Ending Balance", "", "", f"${sec['total']:,.2f}"])
+        t = Table(rows, colWidths=[0.75 * inch, 0.55 * inch, 2.6 * inch, 0.9 * inch, 0.9 * inch, 1.0 * inch])
         t.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F1F5F9")),
             ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, -1), 8),
-            ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
+            ("ALIGN", (3, 0), (-1, -1), "RIGHT"),
         ]))
         story.append(t)
         story.append(Spacer(1, 8))

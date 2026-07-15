@@ -205,6 +205,14 @@ function TrialBalanceBody({ data }) {
 }
 
 function GeneralLedgerBody({ data }) {
+  const badge = (src) => {
+    const map = {
+      Txn:   "bg-indigo-100 text-indigo-700",
+      Split: "bg-violet-100 text-violet-700",
+      JE:    "bg-amber-100 text-amber-800",
+    };
+    return `text-[10px] font-medium px-1.5 py-0.5 rounded ${map[src] || "bg-slate-100 text-slate-600"}`;
+  };
   return (
     <div className="text-sm space-y-4">
       {data.sections.map(sec => (
@@ -212,15 +220,34 @@ function GeneralLedgerBody({ data }) {
           <div className="uppercase text-xs tracking-widest font-semibold text-slate-700 bg-slate-50 px-3 py-1.5 rounded">
             {sec.code} · {sec.name}
           </div>
+          <div className="grid grid-cols-12 gap-2 px-3 py-1 text-[10px] uppercase tracking-wider text-slate-500 font-semibold border-b">
+            <div className="col-span-2">Date</div>
+            <div className="col-span-1">Source</div>
+            <div className="col-span-4">Description</div>
+            <div className="col-span-2 text-right">Debit</div>
+            <div className="col-span-1 text-right">Credit</div>
+            <div className="col-span-2 text-right">Balance</div>
+          </div>
+          <div className="grid grid-cols-12 gap-2 px-3 py-1 border-b border-slate-100 text-[12px] text-slate-500 italic">
+            <div className="col-span-7">Opening balance</div>
+            <div className="col-span-3 text-right"></div>
+            <div className="col-span-2 text-right font-mono-num">{fmtMoney(sec.opening_balance)}</div>
+          </div>
           {sec.entries.map((e, i) => (
-            <div key={i} className="grid grid-cols-12 gap-2 px-3 py-1 border-b border-slate-100 text-[13px]">
+            <div key={i} className="grid grid-cols-12 gap-2 px-3 py-1 border-b border-slate-100 text-[13px] hover:bg-slate-50">
               <div className="col-span-2 font-mono-num text-xs text-slate-500">{e.date}</div>
-              <div className="col-span-6 truncate">{e.description}</div>
-              <div className="col-span-2 text-right font-mono-num">{fmtMoney(e.amount)}</div>
-              <div className="col-span-2 text-right font-mono-num text-slate-500">{fmtMoney(e.balance)}</div>
+              <div className="col-span-1">
+                <span className={badge(e.source)}>{e.source}</span>
+              </div>
+              <div className="col-span-4 truncate" title={e.reference}>{e.description}</div>
+              <div className="col-span-2 text-right font-mono-num">{e.debit ? fmtMoney(e.debit) : ""}</div>
+              <div className="col-span-1 text-right font-mono-num">{e.credit ? fmtMoney(e.credit) : ""}</div>
+              <div className="col-span-2 text-right font-mono-num text-slate-600">{fmtMoney(e.balance)}</div>
             </div>
           ))}
-          <div className="text-right px-3 py-1 font-semibold">Ending: <span className="font-mono-num">{fmtMoney(sec.total)}</span></div>
+          <div className="text-right px-3 py-1.5 font-semibold border-t border-slate-800">
+            Ending: <span className="font-mono-num">{fmtMoney(sec.total)}</span>
+          </div>
         </div>
       ))}
     </div>

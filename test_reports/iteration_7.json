@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 7 (GL 'Source' column enhancement) testing. NEW ENHANCEMENT ITSELF WORKS: (a) GL JSON entries all carry 'source' ∈ {Txn, Split, JE}; (b) posting a JE and splitting a transaction produces the correct badges; (c) GL PDF export returns application/pdf; (d) frontend /reports/general-ledger renders 6-col header (Date/Source/Description/Debit/Credit/Balance) with color-coded pills (178 Txn, 2 Split, 2 JE observed) and Opening/Ending rows per section (15 sections). However, a REGRESSION was uncovered: after posting a balanced JE (2026-06-15) and splitting a txn (2026-07-13) via the documented APIs, Trial Balance and Balance Sheet on Skyward Sparks are NOT balanced (imbalance = -$32.10). Root cause: POST /transactions/{tid}/split stores the raw payload verbatim (server.py:571-574), so when the client sends splits with 'account_code' but no 'category_account_id' (which iter6 tests also do), reports.compute_general_ledger reads only s.get('category_account_id') and skips the category posting entirely -- bank posting is booked but category side is dropped, unbalancing books by the split amount. Iter6 test_iteration6_balance.py used the same payload shape and claimed balanced=True, so this is either a regression in the iter7 reports.py rewrite or the iter6 test was previously masked; either way it's now broken on real data. 4/5 iter7 backend tests pass; frontend is 100% pass.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/companies/{cid}/transactions/{tid}/split  +  GET /reports/trial-balance & /reports/balance-sheet", "issue": "Splitting a txn using {account_code, amount, memo} (the same payload iter6 used and the review-request implies) leaves TB/BS unbalanced by the split amount. server.py:573 does $set: {splits: inp.splits} verbatim without resolving account_code -> category_account_id; reports.py:244 only reads s.get('category_account_id'), so those splits contribute zero category-side postings while the bank side (-amt) is still booked. Skyward Sparks now shows TB total_debit=69767.9 vs total_credit=69800.0 (diff -32.10) and BS imbalance=-32.10 -- exactly equal to the newly-split $-32.10 Uber txn. Two txns are affected: iter7 split of Uber -$32.10 (mine) and iter6 leftover TEST_iter6_split -$100 (which would be $-100 unbalance except the residual/other data masks part of it).", "priority": "CRITICAL"}
+    ],
+    "minor": [
+      {"endpoint": "reports.compute_general_ledger", "issue": "For split rows where category_account_id is missing, GL silently drops the category posting instead of falling back to account_code lookup or raising. Suggest either (a) resolve account_code -> account_id in split endpoint before persisting, or (b) look up by account_code as fallback in GL code."},
+      {"endpoint": "reports.compute_general_ledger (splits, txns with null bank_account_id)", "issue": "For splits whose bank_account_id is None and category_account_id also None, both sides are dropped -- silent data loss. iter6's TEST_iter6_NoBank txn (auto-defaulted to 1010 per iter6 fix) worked; but the pattern is fragile."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration7_gl_source.py",
+    "/app/test_reports/pytest/iter7_results.xml"
+  ],
+  "action_items": [
+    "In backend/server.py split_transaction (~line 561): before $set-ing inp.splits, resolve each split's account_code (or category_account_code) to category_account_id via the accounts collection; persist both. Then the balance regression disappears and iter6/iter7 splits both post correctly.",
+    "Add a data-repair migration or delete the two stale broken splits on Skyward Sparks (txn ids a44b467b-... $-32.10 Uber 2026-07-13 and 606be51f-... TEST_iter6_split $-100 2025-06-22) OR patch reports.compute_general_ledger to fallback-resolve category_account_id from split.account_code.",
+    "Consider tightening SplitIn Pydantic model (server.py:82) to require either category_account_id or account_code, instead of the freeform 'list' type."
+  ],
+  "critical_code_review_comments": [
+    "server.py:82 SplitIn.splits is typed as bare 'list' -- no field validation. This allowed the schema drift between what iter6 tests send (account_code) and what compute_general_ledger reads (category_account_id).",
+    "server.py:571-574 persists inp.splits verbatim without normalization. Any downstream consumer that expects category_account_id will silently misbehave.",
+    "reports.py:244-262 GL code only checks category_account_id on splits; when None it skips posting silently -- no warning, no raise. Add a defensive fallback (accts_by_code lookup) or an assertion.",
+    "The new 'source' field addition (reports.py: 237/251/260/268/286 and rows 309) is clean and consistent; ReportView.jsx GeneralLedgerBody rewrite is well done (color-coded badges, correct 12-col grid math, opening/ending rows in place). Enhancement itself is production-quality."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration7_gl_source.py (new)"
+  ],
+  "success_rate": {"backend": "80% (4/5 iter7 tests; enhancement passes, but balance regression fails)", "frontend": "100%"},
+  "test_credentials": "client@axiom.ai / client123 (Skyward Sparks LLC); pro@axiom.ai / pro123; admin@axiom.ai / admin123 -- all confirmed working.",
+  "seed_data_creation": "Test posted (a) balanced JE 2026-06-15 $150 dr 6500 / $150 cr 1010 memo 'TEST_iter7 JE legal fee'; (b) split of Uber -$32.10 txn on 2026-07-13 into $-16.05 to 6000 (Meals) + $-16.05 to 6100 (Travel). Both remain in DB (no cleanup fixture).",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter7 'Source' column enhancement is correct end-to-end. The failing TB/BS balance is a pre-existing SPLIT storage bug uncovered here, not caused by the reports.py source additions. Once split_transaction is patched to store category_account_id (or GL falls back on account_code), rerun /app/backend/tests/test_iteration7_gl_source.py -- test_trial_balance_still_balanced and test_balance_sheet_still_balanced should then pass. Also delete leftover Skyward split docs a44b467b-610d-4447-9ee7-e854a659906f and 606be51f-7299-4a0c-a484-e5b82a4e5527 (or backfill category_account_id on them) before retest so books re-balance.",
+  "rca of the issue": "Trigger: iter7's split_transaction call {account_code, amount, memo}. Path: server.py split_transaction persists splits array as-is -> transaction doc has splits[i].category_account_id = undefined. Then reports.compute_general_ledger (reports.py L242-253) reads sid = s.get('category_account_id') and guards `if sid: postings[sid].append(...)`. sid is None -> the category-side posting is dropped. Bank-side posting (signed=amt) still booked. Result: aggregate debit/credit differ by exactly the split total (~$32.10 for the Uber txn). Reproduction: (1) POST /transactions with amount=-32.10; (2) POST /transactions/{id}/split {splits:[{account_code:'6000',amount:-16.05},{account_code:'6100',amount:-16.05}]}; (3) GET /reports/trial-balance -> balanced=false, total_debit less than total_credit by 32.10. Mitigation: in split_transaction, look up account_id from company accounts by account_code for each split before persisting, e.g. `for s in inp.splits: if not s.get('category_account_id') and s.get('account_code'): a = await db.accounts.find_one({'company_id': cid, 'code': s['account_code']}); s['category_account_id'] = a['id']`."
+}
