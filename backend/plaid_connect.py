@@ -216,14 +216,12 @@ async def categorize_and_insert_plaid_txns(
         candidates.append({
             "plaid_txn": t, "merchant": merchant, "description": t["name"],
             "amount": t["amount"],
-            # Rocketbooks-style contact resolution: forward Plaid's clean
-            # merchant_name only. When null (common for wires, Zelle, ATM,
-            # "Recurring Payment authorized on…" rows), the AI path handles
-            # extraction with clean rules (Zelle recipient not the app,
-            # wire /Org= not the bank, etc). NEVER pass raw description as
-            # merchant_name — that's how we ended up with 501 contacts on
-            # 607 LLC where each was some ATM/wire noise variant.
-            "merchant_name": t.get("merchant_name"),
+            # Forward the derived merchant (same field the Transactions page
+            # renders) — for ~70% of rows this is already a clean name like
+            # 'Walmart' / 'AT&T'. Only ACH/wire/Zelle/CHECKCARD rows where
+            # Plaid returned the raw memo are routed to the AI path via
+            # contact_resolver.looks_noisy() detection.
+            "merchant_name": merchant,
             "pfc": pfc, "pfc_primary": (pfc or {}).get("primary"),
             "pfc_detailed": pfc_detailed,
             "date": t["date"],

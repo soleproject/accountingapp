@@ -23,6 +23,29 @@ CORP_SUFFIXES = re.compile(
 )
 
 
+# Signals that the "merchant" field is really a raw ACH/wire/Zelle/CHECKCARD
+# memo carrying per-row noise. When any of these hit we route to the AI path
+# so it can extract the clean counterparty ("Citi Card" from
+# "CITI CARD ONLINE DES:PAYMENT ID:… INDN:… CO ID:CITICTP WEB"). Rows that
+# don't match take the fast path — no LLM call, sub-millisecond.
+_NOISY_MERCHANT = re.compile(
+    r"\b(DES:|INDN:|CO ID|WT Fed#|WIRE TYPE|Recurring Payment authorized|"
+    r"CHECKCARD\b|Zelle payment.*Conf#|Online Banking transfer|"
+    r"ATM.*#[X\d]{3,}|#XXXXX\d)",
+    re.I,
+)
+
+
+def looks_noisy(merchant: str | None) -> bool:
+    """True when the merchant string is really a raw bank memo that the AI
+    resolver should extract from (not treated as a clean name)."""
+    if not merchant:
+        return False
+    if len(merchant) > 45:      # clean names are almost always short
+        return True
+    return bool(_NOISY_MERCHANT.search(merchant))
+
+
 def normalize_contact_name(name: str | None) -> str:
     """Match-key builder. Collapses corporate suffix variants so
     'GitHub' and 'GitHub, Inc.' hash to the same key.
@@ -128,15 +151,12 @@ async def resolve_contact(
       batch may not appear in the snapshot but will still dedupe via the
       unique index + `_find_by_normalized`.
     """
-    # ---- Fast path: Plaid supplied a clean merchant_name ------------------
-    # Rocketbooks approach — trust Plaid's `merchant_name` when present.
-    # Any row with null merchant_name (wires, Zelle, ATM, "Recurring Payment
-    # authorized on…") routes to the AI path which has smart extraction
-    # rules for those cases. We deliberately DO NOT fall back to the raw
-    # description here — that's how we ended up with 500+ per-row-noise
-    # contacts on 607 LLC.
+    # ---- Fast path: merchant is a clean name we can trust ---------------
+    # Any Plaid `merchant_name` OR a `name`-derived merchant that doesn't
+    # match the raw-memo signature (`looks_noisy`). ~70% of rows on our
+    # data hit this path — instant lookup, zero LLM calls.
     merch = (merchant_name or "").strip()
-    if merch:
+    if merch and not looks_noisy(merch):
         existing = await _find_by_normalized(company_id, merch)
         if existing:
             return {"contact_id": existing["id"], "contact_name": existing["name"],
@@ -145,8 +165,11 @@ async def resolve_contact(
         return {"contact_id": created["id"], "contact_name": created["name"],
                 "source": "merchant_name"}
 
-    # ---- AI path: extract counterparty from description --------------------
-    desc = (description or "").strip()
+    # ---- AI path: merchant looked noisy OR was absent -------------------
+    # `description` is what we hand to the LLM. Fall back to the noisy
+    # merchant string when description is empty (some banks put everything
+    # in `merchant_name` on ACH rows).
+    desc = (description or merchant_name or "").strip()
     if not desc or ai_fallback_fn is None:
         return {"contact_id": None, "contact_name": None, "source": "no_counterparty"}
 
@@ -217,10 +240,11 @@ async def resolve_contacts_batch(
 
     async def one(idx: int, it: dict) -> tuple[int, dict]:
         pfc = it.get("pfc_primary")
-        # Fast path (Plaid gave us merchant_name) never contends for the
-        # semaphore. Only rows with no merchant_name go to the LLM.
         merch_raw = (it.get("merchant_name") or "").strip()
-        if merch_raw:
+        # Fast path (clean merchant) never contends for the semaphore.
+        # `looks_noisy` catches ACH/wire/Zelle/CHECKCARD memos and routes
+        # them to the AI path for proper counterparty extraction.
+        if merch_raw and not looks_noisy(merch_raw):
             r = await resolve_contact(
                 company_id, merch_raw, it.get("description"),
                 ai_fallback_fn=None, pfc_primary=pfc,
@@ -230,7 +254,7 @@ async def resolve_contacts_batch(
         # AI path — bounded concurrency for cost + Anthropic rate limits
         async with sem:
             r = await resolve_contact(
-                company_id, None, it.get("description"),
+                company_id, merch_raw or None, it.get("description"),
                 ai_fallback_fn=ai_fallback_fn,
                 pfc_primary=pfc,
                 existing_snapshot=snapshot,
