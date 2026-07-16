@@ -1,0 +1,39 @@
+{
+  "summary": "Tested iter17 sync-status endpoint + 15s micro-cache + SyncPill UI + adaptive polling. All 8 backend pytest cases pass. Frontend SyncPill correctly renders idle/syncing/failed states with data-state attribute, adaptive 5s polling activates while syncing, and heavy refetch fires exactly once on syncing→idle transition (3 calls, one per heavy endpoint). Tab visibilitychange re-triggers both sync-status and heavy endpoints. Worker _emit calls at 'downloading' and 'categorizing' stage transitions are code-reviewed and correct.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration17_sync_status.py",
+    "/app/test_reports/pytest/iter17.xml"
+  ],
+  "action_items": [
+    "DATA MISMATCH (non-blocking): problem statement references companies 254, LLC / 418, LLC / 400, LLC with IDs (dea036e7..., 456a49e4..., f9c8af4d...) and 1871 txns each. None of those exist in test_database. Tests were adapted to use 'Marketing Co, LLC' (2f8153a1..., 134 txns) which pro@axiom.ai has access to. Main agent may want to re-seed the specific companies referenced, or update the problem statement/plan to reflect the current DB state.",
+    "Minor code review: server.py:722-733 contains an orphaned duplicate PATCH /companies/{cid} implementation (unreachable — no @api.patch decorator but leftover indented body). Cosmetic; does not affect runtime."
+  ],
+  "critical_code_review_comments": [
+    "worker.py _emit correctly called at both stage transitions ('downloading' at line 179 before Plaid pull, 'categorizing' at line 215 before bank loop and 225 after each batch).",
+    "server.py sync-status endpoint uses find_one with sort — assumes index on (company_id, status, created_at). At 3k users, verify compound index exists.",
+    "ReportCache in infra.py has a single global TTL; per-key TTL is ignored. Fine for current usage (all 3 endpoints use 15s), but not fully self-documenting.",
+    "Dashboard.jsx cleanup correctly cancels heavyInterval, statusTimer, both listeners on unmount/CID change — no stacked pollers.",
+    "server.py:722-733 has an orphaned function body (leftover duplicate patch_company impl) after `update_company` — unreachable code, should be deleted."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration17_sync_status.py"
+  ],
+  "success_rate": {
+    "backend": "100% (8/8)",
+    "frontend": "100% (SyncPill states + adaptive polling + heavy refetch on flip + visibilitychange all verified)"
+  },
+  "test_credentials": "pro@axiom.ai / pro123",
+  "seed_data_creation": "Tests insert & clean up transient docs in db.sync_jobs to simulate running/failed jobs. No permanent data changes.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter17 sync-status + SyncPill + micro-cache + adaptive polling are all working correctly on Marketing Co, LLC (cid=2f8153a1-84bc-4ccb-bf1a-83893bffe956, 134 txns). Problem-statement CIDs (254/418/400 LLC) don't exist in DB. To simulate a running sync: mongosh test_database → db.sync_jobs.insertOne({id, company_id, kind:'plaid_reset_resync', status:'running', progress:{stage:'categorizing',current:1543,total:1900}, created_at, started_at, finished_at:null}). Delete when done. Frontend selector: [data-testid=sync-pill][data-state=syncing|idle|failed]."
+}

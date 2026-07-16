@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
@@ -7,6 +7,7 @@ import {
   Sparkles, Zap, AlertTriangle, TrendingUp, Wand2, FileCheck2, Bot, ArrowRight,
   Wallet2, FileText, Receipt as ReceiptIcon, Activity,
 } from "lucide-react";
+import SyncPill from "@/components/SyncPill";
 
 const kindLabel = {
   categorize: "Transactions Categorized",
@@ -36,11 +37,19 @@ export default function Dashboard() {
   const [activity, setActivity] = useState([]);
   const [income, setIncome] = useState(null);
   const [metrics, setMetrics] = useState(null);
+  const [syncStatus, setSyncStatus] = useState(null);
+  // Track the last-observed sync status so we can trigger a heavy refetch
+  // exactly once when a background sync transitions from `syncing → idle`.
+  const prevStatusRef = useRef(null);
 
   useEffect(() => {
     if (!currentId) return;
     let cancelled = false;
-    const fetchAll = () => {
+
+    // -------- Heavy fetch (ai/activity + reports + metrics) ------------
+    // Server responses are already 15s-cached, so this is safe to call
+    // fairly often, but we still gate it — see poll strategy below.
+    const fetchHeavy = () => {
       api.get(`/companies/${currentId}/ai/activity`).then(r => {
         if (cancelled) return;
         setTotals(r.data.totals); setActivity(r.data.activity);
@@ -50,18 +59,55 @@ export default function Dashboard() {
       api.get(`/companies/${currentId}/dashboard/metrics`)
         .then(r => { if (!cancelled) setMetrics(r.data); }).catch(() => {});
     };
-    fetchAll();
-    // Poll every 30s so late-arriving Plaid webhook data (a full 24-month
-    // backfill can take 1–3 minutes after the initial ~100-txn sync) surfaces
-    // without requiring a hard refresh. Also refetch immediately when the tab
-    // regains focus — the most common "why does it still say 101?" case.
-    const interval = setInterval(fetchAll, 30_000);
-    const onFocus = () => { if (document.visibilityState === "visible") fetchAll(); };
+
+    // -------- Cheap sync-status poll (single Mongo lookup) -------------
+    // Also drives the heavy refetch when a sync completes.
+    const fetchStatus = async () => {
+      try {
+        const r = await api.get(`/companies/${currentId}/sync-status`);
+        if (cancelled) return;
+        const next = r.data;
+        const prev = prevStatusRef.current;
+        setSyncStatus(next);
+        // Fire a heavy refetch on `syncing → idle` transition so the
+        // moment the Plaid backfill finishes, the tiles update.
+        if (prev && prev.status === "syncing" && next.status !== "syncing") {
+          fetchHeavy();
+        }
+        prevStatusRef.current = next;
+      } catch { /* ignore */ }
+    };
+
+    // Initial burst
+    fetchHeavy();
+    fetchStatus();
+
+    // Adaptive polling: cheap pill every 5s while syncing, 15s while idle;
+    // heavy re-fetch runs only when the pill flips syncing→idle, on tab
+    // focus, or as a slow 120s safety net.
+    const heavyEvery = 120_000;
+    const heavyInterval = setInterval(fetchHeavy, heavyEvery);
+    let statusTimer;
+    const tickStatus = () => {
+      fetchStatus();
+      const delay = prevStatusRef.current?.status === "syncing" ? 5_000 : 15_000;
+      statusTimer = setTimeout(tickStatus, delay);
+    };
+    statusTimer = setTimeout(tickStatus, 5_000);
+
+    // Immediate refresh when the tab regains focus.
+    const onFocus = () => {
+      if (document.visibilityState !== "visible") return;
+      fetchStatus();
+      fetchHeavy();
+    };
     document.addEventListener("visibilitychange", onFocus);
     window.addEventListener("focus", onFocus);
+
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      clearInterval(heavyInterval);
+      clearTimeout(statusTimer);
       document.removeEventListener("visibilitychange", onFocus);
       window.removeEventListener("focus", onFocus);
     };
@@ -93,11 +139,14 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6" data-testid={TID.aiPulseSection}>
-      <div>
-        <h1 className="font-heading text-3xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-slate-500 text-sm mt-1">
-          What the AI has done for {current.name} · {current.reporting_basis} basis
-        </p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="font-heading text-3xl font-bold tracking-tight">Dashboard</h1>
+          <p className="text-slate-500 text-sm mt-1">
+            What the AI has done for {current.name} · {current.reporting_basis} basis
+          </p>
+        </div>
+        <SyncPill status={syncStatus} />
       </div>
 
       {totals && (

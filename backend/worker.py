@@ -74,7 +74,7 @@ async def plaid_manual_sync(ctx: dict, job_id: str, company_id: str) -> None:
         if not item:
             await _mark_failed(job_id, "No Plaid item linked")
             return
-        imported = await _run_sync(company_id, item, reset_cursor=False)
+        imported = await _run_sync(company_id, item, reset_cursor=False, job_id=job_id)
         await _mark_done(job_id, {"imported": imported})
     except Exception:  # noqa: BLE001
         await _mark_failed(job_id, traceback.format_exc())
@@ -96,7 +96,7 @@ async def plaid_reset_resync(ctx: dict, job_id: str, company_id: str) -> None:
         if not item:
             await _mark_failed(job_id, "No Plaid item linked")
             return
-        imported = await _run_sync(company_id, item, reset_cursor=True)
+        imported = await _run_sync(company_id, item, reset_cursor=True, job_id=job_id)
         await _mark_done(job_id, {"reset": True, "imported": imported})
     except Exception:  # noqa: BLE001
         await _mark_failed(job_id, traceback.format_exc())
@@ -155,16 +155,28 @@ async def _run_contact_backfill_inline(company_id: str) -> int:
 # Shared sync body — used by both manual_sync + reset_resync
 # ---------------------------------------------------------------------------
 
-async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool) -> int:
+async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool,
+                    job_id: str | None = None) -> int:
     """Pull txns from Plaid + route through the PFC pipeline. Returns count
     of inserted rows. Reuses the exact same helpers the API used inline —
     just now runs off the request thread.
+
+    Emits progress updates to `sync_jobs.progress` at stage boundaries so the
+    Dashboard Sync Pill can display "Downloading…" / "Categorizing X of Y".
     """
+    async def _emit(stage: str, current: int, total: int | None) -> None:
+        if job_id:
+            await job_queue.update_job(job_id, progress={
+                "stage": stage, "current": current, "total": total,
+            })
+
     if reset_cursor:
         await db.plaid_items.update_one(
             {"id": item["id"]}, {"$set": {"cursor": None, "updated_at": now_iso()}},
         )
         item = await db.plaid_items.find_one({"id": item["id"]})
+
+    await _emit("downloading", 0, None)
 
     cursor = item.get("cursor") if not reset_cursor else None
     synced = plaid_service.sync_transactions(item["access_token"], cursor)
@@ -199,6 +211,9 @@ async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool) -> int:
         )
         by_bank.setdefault(ledger_bank["id"], []).append(t)
 
+    total_target = len(synced["added"])
+    await _emit("categorizing", 0, total_target)
+
     imported = 0
     for bank_id, txns in by_bank.items():
         ledger_bank = next(a for a in accts if a["id"] == bank_id)
@@ -207,6 +222,7 @@ async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool) -> int:
             categorize_fn=_categorize_fn, is_period_closed_fn=_is_period_closed,
         )
         imported += len(inserted)
+        await _emit("categorizing", imported, total_target)
     return imported
 
 

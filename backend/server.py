@@ -32,6 +32,12 @@ import plaid_connect  # noqa: E402
 import veryfi_service  # noqa: E402
 import merchant_cache  # noqa: E402
 import contact_resolver  # noqa: E402
+from infra import get_cache  # noqa: E402  – 15s micro-cache for hot Dashboard endpoints
+
+# Global TTL for Dashboard endpoints. Short enough that stale reads clear
+# within one poll interval, long enough that ~200 tabs on the same company
+# collapse into a single Mongo hit.
+_DASH_CACHE_TTL = 15
 
 app = FastAPI(title="Axiom Ledger API")
 api = APIRouter(prefix="/api")
@@ -1092,98 +1098,109 @@ async def ai_recategorize(cid: str, tid: str, user: dict = Depends(get_current_u
 @api.get("/companies/{cid}/ai/activity")
 async def ai_activity(cid: str, user: dict = Depends(get_current_user)):
     await _require_company(user, cid)
-    docs = await db.ai_activity.find({"company_id": cid}).to_list(100)
-    total_txns = await db.transactions.count_documents({"company_id": cid})
-    posted = await db.transactions.count_documents({"company_id": cid, "posted": True})
-    flagged = await db.transactions.count_documents({"company_id": cid, "needs_review": True})
-    rules_count = await db.rules.count_documents({"company_id": cid})
-    ai_rules = await db.rules.count_documents({"company_id": cid, "created_by": "ai"})
-    return {
-        "activity": [coerce(d) for d in docs],
-        "totals": {
-            "transactions": total_txns, "posted": posted, "flagged": flagged,
-            "rules": rules_count, "ai_rules": ai_rules,
-            "accuracy": round((posted / max(total_txns, 1)) * 100, 1),
-        },
-    }
+    cache = get_cache()
+    key = cache.key("ai_activity", company_id=cid)
+
+    async def compute():
+        docs = await db.ai_activity.find({"company_id": cid}).to_list(100)
+        total_txns = await db.transactions.count_documents({"company_id": cid})
+        posted = await db.transactions.count_documents({"company_id": cid, "posted": True})
+        flagged = await db.transactions.count_documents({"company_id": cid, "needs_review": True})
+        rules_count = await db.rules.count_documents({"company_id": cid})
+        ai_rules = await db.rules.count_documents({"company_id": cid, "created_by": "ai"})
+        return {
+            "activity": [coerce(d) for d in docs],
+            "totals": {
+                "transactions": total_txns, "posted": posted, "flagged": flagged,
+                "rules": rules_count, "ai_rules": ai_rules,
+                "accuracy": round((posted / max(total_txns, 1)) * 100, 1),
+            },
+        }
+    return await cache.get_or_compute(key, _DASH_CACHE_TTL, compute)
 
 
 @api.get("/companies/{cid}/dashboard/metrics")
 async def dashboard_metrics(cid: str, user: dict = Depends(get_current_user)):
     """Cash-on-hand, outstanding A/R and A/P, and last-30-days cash activity."""
     await _require_company(user, cid)
+    cache = get_cache()
+    # Include today's date in the cache key so a midnight rollover invalidates
+    # naturally without hitting the TTL wait.
     today = datetime.now(timezone.utc).date()
-    thirty_ago = (today - timedelta(days=30)).isoformat()
-    today_str = today.isoformat()
+    key = cache.key("dash_metrics", company_id=cid, day=today.isoformat())
 
-    # Cash-on-hand: sum of postings against Cash / Bank accounts (asset, subtype current_asset,
-    # codes starting with '10'). Both transactions AND journal-entry lines
-    # contribute — otherwise the opening-balance JE (posted at Plaid connect)
-    # is silently excluded and cash-on-hand undercounts by the opening amount.
-    cash_accts = await db.accounts.find({
-        "company_id": cid, "type": "asset",
-        "code": {"$in": ["1000", "1010", "1020"]},
-    }).to_list(100)
-    cash_ids = [a["id"] for a in cash_accts]
-    cash = 0.0
-    if cash_ids:
-        txns = await db.transactions.find({
+    async def compute():
+        thirty_ago = (today - timedelta(days=30)).isoformat()
+        today_str = today.isoformat()
+
+        # Cash-on-hand: sum of postings against Cash / Bank accounts (asset,
+        # subtype current_asset, codes starting with '10'). Both transactions
+        # AND journal-entry lines contribute — otherwise the opening-balance
+        # JE (posted at Plaid connect) is silently excluded and cash-on-hand
+        # undercounts by the opening amount.
+        cash_accts = await db.accounts.find({
+            "company_id": cid, "type": "asset",
+            "code": {"$in": ["1000", "1010", "1020"]},
+        }).to_list(100)
+        cash_ids = [a["id"] for a in cash_accts]
+        cash = 0.0
+        if cash_ids:
+            txns = await db.transactions.find({
+                "company_id": cid, "posted": True,
+                "bank_account_id": {"$in": cash_ids},
+            }).to_list(50000)
+            cash = sum(float(t.get("amount", 0)) for t in txns)
+            # Add JE lines hitting these cash accounts.
+            jes = await db.journal_entries.find({"company_id": cid}).to_list(50000)
+            for j in jes:
+                for l in j.get("lines", []):
+                    if l.get("account_id") in cash_ids:
+                        cash += float(l.get("debit", 0) or 0) - float(l.get("credit", 0) or 0)
+
+        # Outstanding A/R: unpaid invoice balance_due
+        invs = await db.invoices.find({"company_id": cid}).to_list(20000)
+        outstanding_ar = sum(float(i.get("balance_due", 0)) for i in invs if i.get("status") != "paid")
+        overdue_ar = 0.0
+        for i in invs:
+            if i.get("status") == "paid":
+                continue
+            if i.get("due_date") and i["due_date"] < today_str:
+                overdue_ar += float(i.get("balance_due", 0))
+
+        # Outstanding A/P: unpaid bill balance_due
+        bills = await db.bills.find({"company_id": cid}).to_list(20000)
+        outstanding_ap = sum(float(b.get("balance_due", 0)) for b in bills if b.get("status") != "paid")
+        overdue_ap = 0.0
+        for b in bills:
+            if b.get("status") == "paid":
+                continue
+            if b.get("due_date") and b["due_date"] < today_str:
+                overdue_ap += float(b.get("balance_due", 0))
+
+        # Last 30 days cash activity: money in / out through bank accounts
+        recent = await db.transactions.find({
             "company_id": cid, "posted": True,
-            "bank_account_id": {"$in": cash_ids},
+            "date": {"$gte": thirty_ago, "$lte": today_str},
+            "bank_account_id": {"$in": cash_ids} if cash_ids else {"$exists": True},
         }).to_list(50000)
-        cash = sum(float(t.get("amount", 0)) for t in txns)
-        # Add journal-entry lines hitting these cash accounts (opening balance,
-        # manual JEs, reclassifications). For an asset the natural signed
-        # balance is debit − credit.
-        jes = await db.journal_entries.find({"company_id": cid}).to_list(50000)
-        for j in jes:
-            for l in j.get("lines", []):
-                if l.get("account_id") in cash_ids:
-                    cash += float(l.get("debit", 0) or 0) - float(l.get("credit", 0) or 0)
+        cash_in = sum(float(t["amount"]) for t in recent if float(t.get("amount", 0)) > 0)
+        cash_out = sum(-float(t["amount"]) for t in recent if float(t.get("amount", 0)) < 0)
+        net_30d = cash_in - cash_out
 
-    # Outstanding A/R: unpaid invoice balance_due
-    invs = await db.invoices.find({"company_id": cid}).to_list(20000)
-    outstanding_ar = sum(float(i.get("balance_due", 0)) for i in invs if i.get("status") != "paid")
-    overdue_ar = 0.0
-    for i in invs:
-        if i.get("status") == "paid":
-            continue
-        if i.get("due_date") and i["due_date"] < today_str:
-            overdue_ar += float(i.get("balance_due", 0))
-
-    # Outstanding A/P: unpaid bill balance_due
-    bills = await db.bills.find({"company_id": cid}).to_list(20000)
-    outstanding_ap = sum(float(b.get("balance_due", 0)) for b in bills if b.get("status") != "paid")
-    overdue_ap = 0.0
-    for b in bills:
-        if b.get("status") == "paid":
-            continue
-        if b.get("due_date") and b["due_date"] < today_str:
-            overdue_ap += float(b.get("balance_due", 0))
-
-    # Last 30 days cash activity: money in / out through bank accounts
-    recent = await db.transactions.find({
-        "company_id": cid, "posted": True,
-        "date": {"$gte": thirty_ago, "$lte": today_str},
-        "bank_account_id": {"$in": cash_ids} if cash_ids else {"$exists": True},
-    }).to_list(50000)
-    cash_in = sum(float(t["amount"]) for t in recent if float(t.get("amount", 0)) > 0)
-    cash_out = sum(-float(t["amount"]) for t in recent if float(t.get("amount", 0)) < 0)
-    net_30d = cash_in - cash_out
-
-    return {
-        "cash_on_hand": round(cash, 2),
-        "outstanding_invoices": round(outstanding_ar, 2),
-        "overdue_invoices": round(overdue_ar, 2),
-        "invoice_count": sum(1 for i in invs if i.get("status") != "paid"),
-        "outstanding_bills": round(outstanding_ap, 2),
-        "overdue_bills": round(overdue_ap, 2),
-        "bill_count": sum(1 for b in bills if b.get("status") != "paid"),
-        "cash_in_30d": round(cash_in, 2),
-        "cash_out_30d": round(cash_out, 2),
-        "net_cash_30d": round(net_30d, 2),
-        "activity_count_30d": len(recent),
-    }
+        return {
+            "cash_on_hand": round(cash, 2),
+            "outstanding_invoices": round(outstanding_ar, 2),
+            "overdue_invoices": round(overdue_ar, 2),
+            "invoice_count": sum(1 for i in invs if i.get("status") != "paid"),
+            "outstanding_bills": round(outstanding_ap, 2),
+            "overdue_bills": round(overdue_ap, 2),
+            "bill_count": sum(1 for b in bills if b.get("status") != "paid"),
+            "cash_in_30d": round(cash_in, 2),
+            "cash_out_30d": round(cash_out, 2),
+            "net_cash_30d": round(net_30d, 2),
+            "activity_count_30d": len(recent),
+        }
+    return await cache.get_or_compute(key, _DASH_CACHE_TTL, compute)
 
 
 # ----------------------- Rules -----------------------
@@ -1497,7 +1514,13 @@ async def rep_income(cid: str, start: Optional[str] = None, end: Optional[str] =
                      basis: str = "accrual", user: dict = Depends(get_current_user)):
     await _require_company(user, cid)
     s, e = _default_range()
-    return await R.compute_income_statement(cid, start or s, end or e, basis)
+    start_eff, end_eff = start or s, end or e
+    cache = get_cache()
+    key = cache.key("income_stmt", company_id=cid, s=start_eff, e=end_eff, b=basis)
+    return await cache.get_or_compute(
+        key, _DASH_CACHE_TTL,
+        lambda: R.compute_income_statement(cid, start_eff, end_eff, basis),
+    )
 
 
 @api.get("/companies/{cid}/reports/income-statement/pdf")
@@ -1955,6 +1978,57 @@ async def list_sync_jobs(cid: str, limit: int = 10,
             "triggered_by_name":     (u or {}).get("name"),
         })
     return {"count": len(rows), "jobs": rows}
+
+
+@api.get("/companies/{cid}/sync-status")
+async def sync_status(cid: str, user: dict = Depends(get_current_user)):
+    """Cheap poll endpoint (~2 Mongo lookups) for the Dashboard Sync Pill.
+
+    Returns just enough state for the pill to decide idle vs. syncing vs.
+    complete, plus the numbers to render `Importing 1,543 of ~1,900 · 82%`.
+    Safe to poll every 5s per tab at 3k+ users because each call is a single
+    indexed find_one + one count_documents.
+    """
+    await _require_company(user, cid)
+    # Most-recent in-flight job (queued or running) — deterministic ordering.
+    active = await db.sync_jobs.find_one(
+        {"company_id": cid, "status": {"$in": ["queued", "running"]}},
+        sort=[("created_at", -1)],
+    )
+    # Most-recent completed job (any kind), for `last_sync_at` display.
+    last = await db.sync_jobs.find_one(
+        {"company_id": cid, "status": {"$in": ["completed", "failed"]}},
+        sort=[("finished_at", -1)],
+    )
+    total_txns = await db.transactions.count_documents({"company_id": cid})
+
+    if active:
+        prog = active.get("progress") or {}
+        imported = int(prog.get("current") or 0)
+        target = prog.get("total")   # None if unknown yet
+        pct = None
+        if target and int(target) > 0:
+            pct = round((imported / int(target)) * 100, 1)
+        return {
+            "status":       "syncing",
+            "kind":         active.get("kind"),
+            "job_id":       active.get("id"),
+            "started_at":   active.get("started_at") or active.get("created_at"),
+            "imported":     imported,
+            "target":       int(target) if target else None,
+            "percent":      pct,
+            "stage":        prog.get("stage"),
+            "total_txns":   total_txns,
+            "last_sync_at": (last or {}).get("finished_at"),
+        }
+
+    return {
+        "status":       "idle",
+        "total_txns":   total_txns,
+        "last_sync_at": (last or {}).get("finished_at"),
+        "last_kind":    (last or {}).get("kind"),
+        "last_status":  (last or {}).get("status"),
+    }
 
 
 @api.get("/companies/{cid}/plaid/accounts")

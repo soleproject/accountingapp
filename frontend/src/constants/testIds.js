@@ -43,6 +43,7 @@ export const TID = {
   txnDateFrom: "txn-date-from",
   txnDateTo: "txn-date-to",
   txnFiltersClear: "txn-filters-clear",
+  syncPill: "sync-pill",
 
   // Reports
   reportTile: "report-tile",
