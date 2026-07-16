@@ -173,6 +173,27 @@ def decide_posting(
     code = str(result.get("account_code") or "")
     acct = next((a for a in accts if a["code"] == code), None)
 
+    # Reject bank/cash asset accounts (code 10xx) as a category — otherwise the
+    # LLM will happily categorize "Online Banking transfer to CHK 6278" as the
+    # bank account itself, producing a self-cancelling JE that inflates the
+    # ledger balance. Force these to review in the Uncategorized bucket.
+    if acct and str(acct.get("code", "")).startswith("10") and len(str(acct.get("code", ""))) == 4:
+        bucket = uncat_inc if amount >= 0 else uncat_exp
+        return {
+            "category_account_id": bucket["id"],
+            "category_account_code": bucket["code"],
+            "category_account_name": bucket["name"],
+            "ai_confidence": round(conf, 2),
+            "ai_reasoning": (
+                f"LLM picked bank/cash account {acct['code']} {acct['name']} — "
+                f"rejected to avoid self-cancelling JE. Original reason: "
+                f"{result.get('reasoning', '')}"
+            ),
+            "needs_review": True,
+            "posted": True,
+            "ai_source": "uncategorized",
+        }
+
     # Confidence below threshold OR no matching account → Uncategorized bucket
     if conf < threshold or not acct:
         bucket = uncat_inc if amount >= 0 else uncat_exp

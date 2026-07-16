@@ -234,9 +234,22 @@ async def categorize_and_insert_plaid_txns(
             cid, cand.get("pfc_detailed"), bank_account_id=ledger_bank["id"],
         )
         cand["pfc_resolved"] = resolved
-        if resolved and resolved.get("category_account_id") \
-                and resolved.get("source") in ("primary", "override"):
-            pfc_results[id(cand)] = resolved
+        # useResolved gate: PFC is treated as final when source is primary or
+        # override AND category_account_id is non-null. Additionally, when the
+        # classification itself signals a transfer or an inherently unresolvable
+        # row (asset_movement / transfer_review / uncategorized), we always
+        # honour the resolver's fallback_uncategorized target rather than
+        # deferring to the LLM — which would otherwise be tempted to categorize
+        # "Online Banking transfer to CHK 6278" as bank account 1010 and create
+        # a self-cancelling JE.
+        if resolved and resolved.get("category_account_id"):
+            take_it = resolved["source"] in ("primary", "override") or (
+                resolved.get("classification") in
+                ("asset_movement", "transfer_review", "uncategorized")
+                and resolved["source"] == "fallback_uncategorized"
+            )
+            if take_it:
+                pfc_results[id(cand)] = resolved
 
     deferred = [c for c in candidates if id(c) not in pfc_results]
 
