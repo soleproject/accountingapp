@@ -39,11 +39,32 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!currentId) return;
-    api.get(`/companies/${currentId}/ai/activity`).then(r => {
-      setTotals(r.data.totals); setActivity(r.data.activity);
-    }).catch(() => {});
-    api.get(`/companies/${currentId}/reports/income-statement`).then(r => setIncome(r.data)).catch(() => {});
-    api.get(`/companies/${currentId}/dashboard/metrics`).then(r => setMetrics(r.data)).catch(() => {});
+    let cancelled = false;
+    const fetchAll = () => {
+      api.get(`/companies/${currentId}/ai/activity`).then(r => {
+        if (cancelled) return;
+        setTotals(r.data.totals); setActivity(r.data.activity);
+      }).catch(() => {});
+      api.get(`/companies/${currentId}/reports/income-statement`)
+        .then(r => { if (!cancelled) setIncome(r.data); }).catch(() => {});
+      api.get(`/companies/${currentId}/dashboard/metrics`)
+        .then(r => { if (!cancelled) setMetrics(r.data); }).catch(() => {});
+    };
+    fetchAll();
+    // Poll every 30s so late-arriving Plaid webhook data (a full 24-month
+    // backfill can take 1–3 minutes after the initial ~100-txn sync) surfaces
+    // without requiring a hard refresh. Also refetch immediately when the tab
+    // regains focus — the most common "why does it still say 101?" case.
+    const interval = setInterval(fetchAll, 30_000);
+    const onFocus = () => { if (document.visibilityState === "visible") fetchAll(); };
+    document.addEventListener("visibilitychange", onFocus);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onFocus);
+      window.removeEventListener("focus", onFocus);
+    };
   }, [currentId]);
 
   if (!current) return <div className="text-slate-500">Select a company to view your Dashboard.</div>;

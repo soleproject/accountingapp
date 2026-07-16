@@ -1,0 +1,24 @@
+{
+  "summary": "Verified Dashboard auto-refresh fix for 418, LLC. All 4 checks pass: (1) initial tiles show 1,871 / 1,871 / 198 for pro@axiom.ai viewing 418, LLC; (2) visibilitychange event triggers immediate refetch of /ai/activity + /dashboard/metrics + /reports/income-statement (all 3 fired within 6ms); (3) window focus event also triggers immediate refetch; (4) after PATCH /transactions/{id} needs_review=false, waiting 33s auto-poll updates Needs review tile 198 -> 197 with no navigation; (5) after unmount+remount, only 1 ai/activity call fires in 35s -> no stacked intervals.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Dashboard.jsx L40-68: useEffect properly guards with `cancelled` flag against stale state, sets 30s interval, and cleanly removes visibilitychange + focus listeners on unmount. Verified no stacked pollers on remount.",
+    "onFocus handler correctly gates on document.visibilityState === 'visible' so it doesn't double-fire when the tab is background.",
+    "Consider extracting the fetch trio into a custom hook (e.g. useDashboardData) if the same 3-endpoint refresh pattern gets reused elsewhere. Not blocking."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "n/a (frontend-only)", "frontend": "100%" },
+  "test_credentials": "pro@axiom.ai / pro123",
+  "seed_data_creation": "None. Flipped one txn (id 35406a57-d8b7-4be2-b53f-cc8904d01988) needs_review false during test, then restored to true.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Pro user lands on /pro/clients — to switch context to 418, LLC use [data-testid=company-switcher] top bar dropdown then get_by_text('418, LLC', exact=True). JWT token key in localStorage is 'axiom_token'. GET /api/companies/{cid}/transactions returns {transactions, pagination}. The Dashboard fix is verified working: 30s setInterval + visibilitychange + window focus listeners all refetch, and cleanup properly clears all three on unmount.",
+  "rca of the issue": "Dashboard previously fetched only when currentId changed, so if the user was viewing during initial ~100-txn Plaid sync, the tiles stuck at 101 until manual refresh. Fix at Dashboard.jsx L40-68 adds 30s setInterval + visibilitychange + focus listeners with proper cleanup. Verified end-to-end with pro@axiom.ai on 418, LLC (1,871 real txns)."
+}
