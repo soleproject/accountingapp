@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import json
 import re
+import hashlib
 from typing import AsyncGenerator, Optional
 from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
 
@@ -156,7 +157,11 @@ async def resolve_contact_ai(
         f"Existing contacts in this org (id :: name):\n{contact_list}\n\n"
         f"Resolve this transaction's counterparty per the rules. Output strict JSON only."
     )
-    chat = _new_chat(CONTACT_EXTRACTION_SYSTEM, f"contact-{hash(description)}", model_name=MODEL_HAIKU)
+    # Stable hash so identical descriptions in the same batch share a
+    # session_id — lets the LLM cache reuse anything reusable, and makes
+    # debugging simpler (session id maps to a specific description string).
+    sid = hashlib.md5(description.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
+    chat = _new_chat(CONTACT_EXTRACTION_SYSTEM, f"contact-{sid}", model_name=MODEL_HAIKU)
     text = ""
     try:
         async for ev in chat.stream_message(UserMessage(text=user_prompt)):

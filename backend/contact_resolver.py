@@ -115,12 +115,18 @@ async def resolve_contact(
     description: str | None,
     ai_fallback_fn: Callable[..., Awaitable[dict]] | None = None,
     pfc_primary: str | None = None,
+    existing_snapshot: list[dict] | None = None,
 ) -> dict:
     """Return {'contact_id': str|None, 'contact_name': str|None, 'source': str}.
 
     - source ∈ {'merchant_name' | 'ai_match' | 'ai_new' | 'no_counterparty'}
     - contact_id is None when the transaction has no real counterparty
       (internal transfer, bank fee, interest).
+    - `existing_snapshot` — when caller has already loaded the full contacts
+      list (batch resolver does this once per batch), pass it in to avoid a
+      per-row Mongo scan. Reads only; freshly-inserted rows during this same
+      batch may not appear in the snapshot but will still dedupe via the
+      unique index + `_find_by_normalized`.
     """
     # ---- Fast path: Plaid supplied a clean merchant_name ------------------
     # Rocketbooks approach — trust Plaid's `merchant_name` when present.
@@ -144,9 +150,13 @@ async def resolve_contact(
     if not desc or ai_fallback_fn is None:
         return {"contact_id": None, "contact_name": None, "source": "no_counterparty"}
 
-    existing_contacts = await db.contacts.find(
-        {"company_id": company_id},
-    ).to_list(5000)
+    # Prefer batch-scope snapshot; fall back to a fresh scan for one-off callers.
+    if existing_snapshot is not None:
+        existing_contacts = existing_snapshot
+    else:
+        existing_contacts = await db.contacts.find(
+            {"company_id": company_id},
+        ).to_list(5000)
     ctx = [{"id": c["id"], "name": c["name"]} for c in existing_contacts]
 
     try:
@@ -193,8 +203,17 @@ async def resolve_contacts_batch(
 ) -> list[dict]:
     """Resolve contacts for many txns in parallel. Fast-path hits skip the
     semaphore altogether. Same-order output.
+
+    Perf: loads the company's contact list ONCE up front and passes the
+    snapshot to every AI-path call. Without this we'd re-scan the collection
+    for each of up to 1,800 AI-path rows on a fresh-24-month sync (that was
+    hidden under a 9.5-minute wall-clock in iter22 — this cache cuts DB round
+    trips by an order of magnitude while remaining safe: any brand-new
+    contact inserted mid-batch still dedupes via the `_find_by_normalized`
+    call and the unique index.)
     """
     sem = asyncio.Semaphore(concurrency)
+    snapshot = await db.contacts.find({"company_id": company_id}).to_list(5000)
 
     async def one(idx: int, it: dict) -> tuple[int, dict]:
         pfc = it.get("pfc_primary")
@@ -205,6 +224,7 @@ async def resolve_contacts_batch(
             r = await resolve_contact(
                 company_id, merch_raw, it.get("description"),
                 ai_fallback_fn=None, pfc_primary=pfc,
+                existing_snapshot=snapshot,
             )
             return idx, r
         # AI path — bounded concurrency for cost + Anthropic rate limits
@@ -213,6 +233,7 @@ async def resolve_contacts_batch(
                 company_id, None, it.get("description"),
                 ai_fallback_fn=ai_fallback_fn,
                 pfc_primary=pfc,
+                existing_snapshot=snapshot,
             )
             return idx, r
 
