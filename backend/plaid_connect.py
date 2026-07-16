@@ -215,7 +215,14 @@ async def categorize_and_insert_plaid_txns(
         pfc_detailed = (pfc or {}).get("detailed")
         candidates.append({
             "plaid_txn": t, "merchant": merchant, "description": t["name"],
-            "amount": t["amount"], "merchant_name": t.get("merchant_name"),
+            "amount": t["amount"],
+            # Contact resolver uses this as the "clean name" key. Fall back to
+            # the derived merchant when Plaid returns null merchant_name (very
+            # common — sandbox data, wire transfers, checks). Previously we
+            # only forwarded Plaid's raw merchant_name, which meant 100% of
+            # rows on some banks dropped to the AI path and never earned a
+            # contact_id → A/P by-vendor + 1099 tracking silently broke again.
+            "merchant_name": t.get("merchant_name") or merchant,
             "pfc": pfc, "pfc_primary": (pfc or {}).get("primary"),
             "pfc_detailed": pfc_detailed,
             "date": t["date"],

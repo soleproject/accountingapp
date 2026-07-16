@@ -1878,6 +1878,19 @@ async def plaid_webhook(payload: dict):
         #      which is what the Dashboard Sync-Pill listens to; without it the
         #      pill stays "idle" while a 1,700-txn HISTORICAL_UPDATE lands and
         #      the user sees stale tiles.
+        # Dedupe: Plaid frequently fires DEFAULT_UPDATE + HISTORICAL_UPDATE
+        # 50–200ms apart on first connect. Without this guard we'd run TWO
+        # parallel workers on the same 1,700-row backfill — both burn LLM
+        # credits categorizing identical rows even though the plaid_txn_id
+        # dedup keeps the DB clean. Skip if a sync is already in flight.
+        existing = await db.sync_jobs.find_one({
+            "company_id": item["company_id"],
+            "kind": "plaid_manual_sync",
+            "status": {"$in": ["queued", "running"]},
+        })
+        if existing:
+            return {"ok": True, "queued_job": existing["id"],
+                    "webhook_code": webhook_code, "dedup": True}
         from job_queue import enqueue_job
         job_id = await enqueue_job(
             "plaid_manual_sync", item["company_id"], user_id=None,

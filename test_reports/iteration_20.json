@@ -1,0 +1,25 @@
+{
+  "summary": "Verified iter20 backend fixes: (1) concurrent Plaid webhook dedup and (2) contact_resolver merchant_name fallback in plaid_connect. Plus 535 LLC backfill regression + Dashboard tile regression on 535/501 LLC.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration20_webhook_dedup_and_contact.py",
+    "/app/test_reports/pytest/iter20_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "plaid_connect.py L225: `t.get('merchant_name') or merchant` — correct fallback; also handles empty-string case implicitly since Plaid returns None or non-empty string. Good.",
+    "server.py L1886-1893: webhook dedup uses find_one on {company_id, kind, status ∈ [queued,running]}. Verified with 5 concurrent requests: exactly 1 new sync_jobs row inserted, all 5 responses point at the same queued_job id, 4/5 carry dedup:true. Small ~ms race window exists per code comment but plaid_transaction_id unique guard at insert-time protects the DB.",
+    "Test confirms AI contact-resolver is NOT invoked when merchant_name falls back — monkeypatch of ai_service.resolve_contact_ai to raise AssertionError passed cleanly, i.e. no LLM calls burned for well-named merchants.",
+    "Minor: webhook dedup query is not scoped to item_id — if a company has 2 Plaid items, a sync running for item A will suppress an enqueue for item B. Acceptable for MVP (single-item companies) but flag for future multi-item support.",
+    "501 LLC SyncPill data-state=failed on Dashboard (last sync 3 hr ago) — pre-existing from iter19 notes, NOT part of this iter's scope; 535 LLC pill correctly shows idle 'All caught up · 1 min ago'."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration20_webhook_dedup_and_contact.py"],
+  "success_rate": {"backend": "100% (3/3 pytest)", "frontend": "100% (Dashboard tiles verified on 535 + 501 LLC)"},
+  "test_credentials": "pro@axiom.ai / pro123",
+  "seed_data_creation": "Transient test company (test-iter20-<uuid>) with 2 CoA rows + 10 mock Plaid txns + 5 contacts; fully torn down in fixture finally block. Left 1 pre-existing sync_jobs 'queued' row on 535 LLC from the concurrent-webhook test (job_queue worker will drain it — 535 LLC is up-to-date so it's a no-op sync).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend tests live at /app/backend/tests/test_iteration20_webhook_dedup_and_contact.py. Run with: cd /app/backend && python -m pytest tests/test_iteration20_webhook_dedup_and_contact.py -v -o asyncio_mode=auto -n 0. Uses python-dotenv to load /app/backend/.env and /app/frontend/.env at import time. Key selectors verified: [data-testid=sync-pill] data-state='idle' on 535 LLC. Dashboard route /dashboard reads localStorage.axiom_company_id.",
+  "rca of the issue": "N/A — both fixes verified working. RCA from main agent: (1) plaid_connect.py L213 computes `merchant = t.get('merchant_name') or t.get('name') or 'Unknown'` but old candidate dict only passed raw `t.get('merchant_name')` to contact_resolver at L225 → resolver's merch was empty → dropped to AI path → AI returned no_counterparty → 0 contacts created for 1871 txns. Fix: pass `t.get('merchant_name') or merchant`. (2) Plaid fires DEFAULT_UPDATE and HISTORICAL_UPDATE ~100ms apart on first connect → 2 concurrent sync_jobs. Fix: pre-enqueue find_one guard on (company_id, kind, status∈[queued,running]) short-circuits to return the existing job id with dedup:true."
+}
