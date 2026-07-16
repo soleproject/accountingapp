@@ -623,6 +623,83 @@ async def set_auto_post_threshold(cid: str, payload: dict, user: dict = Depends(
     return {"auto_post_threshold": v}
 
 
+# ---------------------------------------------------------------------------
+# Plaid PFC → Chart-of-Accounts overrides (per Rocketbooks' pfc_org_overrides)
+# ---------------------------------------------------------------------------
+
+@api.get("/companies/{cid}/pfc-overrides")
+async def list_pfc_overrides(cid: str, user: dict = Depends(get_current_user)):
+    """List every Plaid PFCv2 detailed code alongside:
+      - the default mapping (from `pfc_mapping.PFC_COA_MAPPINGS`)
+      - the org's override, if pinned
+    Used to render the PFC-mapping settings page.
+    """
+    await _require_company(user, cid)
+    import pfc_mapping as _pfcm
+    overrides = await db.pfc_org_overrides.find({"company_id": cid}).to_list(500)
+    by_pfc = {o["pfc_detailed"]: o for o in overrides}
+    accts = await db.accounts.find({"company_id": cid, "is_active": {"$ne": False}}).to_list(2000)
+    by_id = {a["id"]: a for a in accts}
+    by_code = {a["code"]: a for a in accts}
+    rows = []
+    for m in _pfcm.PFC_COA_MAPPINGS:
+        default_acct = by_code.get(m.account_code)
+        ov = by_pfc.get(m.pfc_detailed)
+        ov_acct = by_id.get(ov["category_account_id"]) if ov else None
+        rows.append({
+            "pfc_primary": m.pfc_primary,
+            "pfc_detailed": m.pfc_detailed,
+            "classification": m.classification,
+            "description": m.description_v2,
+            "default_account_code": m.account_code,
+            "default_account_name": (default_acct or {}).get("name"),
+            "override_account_id": (ov or {}).get("category_account_id"),
+            "override_account_code": (ov_acct or {}).get("code"),
+            "override_account_name": (ov_acct or {}).get("name"),
+            "override_source": (ov or {}).get("source"),
+            "override_confidence": (ov or {}).get("confidence"),
+        })
+    return {"count": len(rows), "rows": rows}
+
+
+@api.put("/companies/{cid}/pfc-overrides/{pfc_detailed}")
+async def set_pfc_override(cid: str, pfc_detailed: str, payload: dict,
+                           user: dict = Depends(get_current_user)):
+    """Pin a Plaid PFCv2 code to a specific chart-of-accounts row for this org.
+    Body: {"category_account_id": "<coa-id>"}. `source` defaults to 'user'.
+    """
+    await _require_company(user, cid)
+    import pfc_mapping as _pfcm
+    import pfc_resolver as _pfcr
+    if not _pfcm.get_pfc_mapping(pfc_detailed):
+        raise HTTPException(400, f"Unknown PFC detailed code: {pfc_detailed}")
+    account_id = (payload or {}).get("category_account_id")
+    if not account_id:
+        raise HTTPException(400, "category_account_id is required")
+    acct = await db.accounts.find_one({"company_id": cid, "id": account_id})
+    if not acct:
+        raise HTTPException(404, "Account not found on this company")
+    saved = await _pfcr.set_pfc_override(
+        cid, pfc_detailed, account_id,
+        source=payload.get("source", "user"),
+        confidence=payload.get("confidence"),
+        reasoning=payload.get("reasoning"),
+        ai_model=payload.get("ai_model"),
+    )
+    return {"ok": True, "override": saved}
+
+
+@api.delete("/companies/{cid}/pfc-overrides/{pfc_detailed}")
+async def delete_pfc_override(cid: str, pfc_detailed: str,
+                              user: dict = Depends(get_current_user)):
+    """Remove an override; the PFC falls back to the default mapping."""
+    await _require_company(user, cid)
+    r = await db.pfc_org_overrides.delete_one({
+        "company_id": cid, "pfc_detailed": pfc_detailed,
+    })
+    return {"ok": True, "deleted": r.deleted_count}
+
+
 @api.patch("/companies/{cid}")
 async def update_company(cid: str, patch: dict, user: dict = Depends(get_current_user)):
     await _require_company(user, cid)
@@ -2166,6 +2243,8 @@ async def startup():
     await db.memberships.create_index([("user_id", 1), ("company_id", 1)])
     await merchant_cache.ensure_indexes()
     await contact_resolver.ensure_contact_index()
+    import pfc_resolver
+    await pfc_resolver.ensure_pfc_override_indexes()
 
 
 @app.on_event("shutdown")

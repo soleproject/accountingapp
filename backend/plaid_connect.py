@@ -183,6 +183,7 @@ async def sync_plaid_history_for_account(
     import categorizer
     import contact_resolver
     import merchant_rules
+    import pfc_resolver
     from ai_service import resolve_contact_ai
     try:
         synced = plaid_service.sync_transactions(item["access_token"], None)
@@ -214,50 +215,82 @@ async def sync_plaid_history_for_account(
             continue
         merchant = t.get("merchant_name") or t.get("name") or "Unknown"
         pfc = t.get("personal_finance_category") if isinstance(t, dict) else None
-        is_xfer = merchant_rules.is_internal_transfer(t.get("name") or "")
+        pfc_detailed = (pfc or {}).get("detailed")
         candidates.append({
             "plaid_txn": t, "merchant": merchant, "description": t["name"],
             "amount": t["amount"], "merchant_name": t.get("merchant_name"),
             "pfc": pfc, "pfc_primary": (pfc or {}).get("primary"),
-            "date": t["date"], "is_transfer": is_xfer,
+            "pfc_detailed": pfc_detailed,
+            "date": t["date"],
         })
 
     if not candidates:
         return [], skipped
 
-    # Split transfers from real categorization work — transfers skip contact
-    # resolution AND LLM categorization entirely (they post to Bank Transfer
-    # Clearing with needs_review=True).
-    transfer_cands = [c for c in candidates if c.get("is_transfer")]
-    real_cands = [c for c in candidates if not c.get("is_transfer")]
+    # Ensure PFC-support accounts (Owner's Draw/Contribution, Undeposited Funds)
+    # exist on this org before the resolver runs — the resolver hits them via
+    # primary-slot lookup.
+    await categorizer.ensure_pfc_support_accounts(cid)
+    uncat_exp, uncat_inc = await categorizer.ensure_uncategorized_accounts(cid)
 
-    # Resolve contacts in parallel (fast-path skips AI for merchant_name rows)
-    if real_cands:
-        contact_results = await contact_resolver.resolve_contacts_batch(
-            cid, real_cands, ai_fallback_fn=resolve_contact_ai, concurrency=5,
+    # ------ Stage 1: PFC resolver (Rocketbooks' resolvePfcCoa) ------
+    # For each candidate, try the PFC path first. When PFC yields a primary or
+    # override match (with a non-null category_account_id), we use it directly —
+    # no merchant rules, no cache, no LLM. This is the biggest single lever.
+    pfc_results: dict[int, dict] = {}
+    for cand in candidates:
+        resolved = await pfc_resolver.resolve_pfc_coa(
+            cid, cand.get("pfc_detailed"), bank_account_id=ledger_bank["id"],
         )
-        for cand, cr in zip(real_cands, contact_results):
+        cand["pfc_resolved"] = resolved
+        # useResolved gate: PFC is treated as final only when source is
+        # 'primary' or 'override' AND category_account_id is non-null. Fallback
+        # + unmapped rows are deliberately deferred to Stage 2.
+        if resolved and resolved.get("category_account_id") \
+                and resolved.get("source") in ("primary", "override"):
+            pfc_results[id(cand)] = resolved
+
+    # Candidates whose PFC didn't resolve to a final target — defer them to
+    # the classic merchant-rules → cache → LLM chain.
+    deferred = [c for c in candidates if id(c) not in pfc_results]
+
+    # ------ Resolve contacts on deferred rows in parallel ------
+    if deferred:
+        contact_results = await contact_resolver.resolve_contacts_batch(
+            cid, deferred, ai_fallback_fn=resolve_contact_ai, concurrency=5,
+        )
+        for cand, cr in zip(deferred, contact_results):
             cand["contact_id"] = cr.get("contact_id")
             cand["contact_name"] = cr.get("contact_name")
             cand["contact_source"] = cr.get("source")
 
-    # Group by (contact OR normalized merchant, direction) → 1 LLM per group
+    # ------ Stage 2: merchant rules → cache → LLM for deferred rows ------
     per_item_result = await categorizer.categorize_batch_grouped(
-        cid, real_cands, coa, categorize_fn, concurrency=10,
-    ) if real_cands else []
-    result_by_id = {id(c): r for c, r in zip(real_cands, per_item_result)}
+        cid, deferred, coa, categorize_fn, concurrency=10,
+    ) if deferred else []
+    result_by_id = {id(c): r for c, r in zip(deferred, per_item_result)}
 
-    # Ensure Uncategorized buckets + per-org threshold + transfer clearing
-    uncat_exp, uncat_inc = await categorizer.ensure_uncategorized_accounts(cid)
-    transfer_acct = await categorizer.ensure_transfer_clearing_account(cid)
-    accts = await db.accounts.find({"company_id": cid}).to_list(2000)  # refresh (uncats may be new)
+    accts = await db.accounts.find({"company_id": cid}).to_list(2000)  # refresh
     threshold = await categorizer.get_auto_post_threshold(cid)
 
     inserted: list[dict] = []
     for cand in candidates:
         t = cand["plaid_txn"]
-        if cand.get("is_transfer"):
-            post = categorizer.decide_posting_transfer(transfer_acct)
+        pfc_res = pfc_results.get(id(cand))
+        if pfc_res:
+            # PFC-resolved path — post directly to the resolved account.
+            post = {
+                "category_account_id":   pfc_res["category_account_id"],
+                "category_account_code": pfc_res["category_account_code"],
+                "category_account_name": pfc_res["category_account_name"],
+                "ai_confidence": 0.95,
+                "ai_reasoning": f"Plaid PFC {cand['pfc_detailed']} → "
+                                f"{pfc_res['category_account_name']} "
+                                f"(classification={pfc_res['classification']}, source={pfc_res['source']})",
+                "needs_review": not pfc_res["reviewed_by_default"],
+                "posted": True,
+                "ai_source": f"pfc_{pfc_res['source']}",
+            }
             r = {"cache_hit": False}
         else:
             r = result_by_id[id(cand)]
@@ -271,6 +304,10 @@ async def sync_plaid_history_for_account(
             "bank_account_name": ledger_bank["name"],
             "contact_id": cand.get("contact_id"),
             "contact_name": cand.get("contact_name"),
+            "pfc_detailed": cand.get("pfc_detailed"),
+            "pfc_primary": cand.get("pfc_primary"),
+            "pfc_classification": (pfc_res or {}).get("classification") if pfc_res
+                                  else (cand.get("pfc_resolved") or {}).get("classification"),
             **post,
             "human_reviewed": False,
             "source": "plaid",

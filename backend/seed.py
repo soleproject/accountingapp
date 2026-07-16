@@ -15,6 +15,7 @@ DEFAULT_COA = [
     ("1200", "Accounts Receivable", "asset", "current_asset"),
     ("1300", "Inventory", "asset", "current_asset"),
     ("1500", "Prepaid Expenses", "asset", "current_asset"),
+    ("1100", "Undeposited Funds", "asset", "current_asset"),
     ("1600", "Equipment", "asset", "fixed_asset"),
     ("1700", "Accumulated Depreciation", "asset", "fixed_asset"),
     # Liabilities
@@ -25,6 +26,8 @@ DEFAULT_COA = [
     # Equity
     ("3000", "Owner's Equity", "equity", "equity"),
     ("3100", "Retained Earnings", "equity", "equity"),
+    ("3300", "Owner's Draw", "equity", "equity"),
+    ("3400", "Owner's Contribution", "equity", "equity"),
     # Revenue
     ("4000", "Service Revenue", "revenue", "operating_revenue"),
     ("4100", "Product Sales", "revenue", "operating_revenue"),

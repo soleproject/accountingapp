@@ -68,6 +68,19 @@ async def ensure_transfer_clearing_account(company_id: str) -> dict:
     )
 
 
+async def ensure_pfc_support_accounts(company_id: str) -> None:
+    """Lazy-create the accounts our PFC mapping table references but that
+    weren't in earlier seed versions: Owner's Draw, Owner's Contribution,
+    Undeposited Funds. Idempotent — a no-op after the first call.
+
+    Called at the top of every Plaid sync so pre-existing orgs pick these up
+    without a manual migration.
+    """
+    await _ensure_account(company_id, "3300", "Owner's Draw", "equity", "equity")
+    await _ensure_account(company_id, "3400", "Owner's Contribution", "equity", "equity")
+    await _ensure_account(company_id, "1100", "Undeposited Funds", "asset", "current_asset")
+
+
 # ---- Grouping --------------------------------------------------------------
 
 def _group_key(item: dict) -> str:
