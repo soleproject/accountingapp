@@ -7,6 +7,7 @@ Called from server.py. All DB access goes through the shared `db` motor client.
 from __future__ import annotations
 import uuid
 from datetime import date, timedelta, datetime, timezone
+from typing import Optional
 
 from db import db, now_iso
 import plaid_service
@@ -172,37 +173,33 @@ async def post_opening_balance_je(
 
 # ---------- Full history sync for a single Plaid account ----------
 
-async def sync_plaid_history_for_account(
-    cid: str, item: dict, plaid_account_id: str, ledger_bank: dict,
-    coa: list[dict], accts: list[dict], categorize_fn, is_period_closed_fn,
+async def categorize_and_insert_plaid_txns(
+    cid: str, plaid_txns: list[dict], ledger_bank: dict, coa: list[dict],
+    accts: list[dict], categorize_fn, is_period_closed_fn,
+    higher_ranges: Optional[list[tuple[str, str]]] = None,
 ) -> tuple[list[dict], list[dict]]:
-    """Pull all Plaid txns for the given account_id, dedup, batch-categorize
-    with merchant grouping + contact resolution, and insert survivors.
+    """Categorize + insert a set of already-fetched Plaid txns through the full
+    Rocketbooks pipeline (PFC resolver → contact resolution → merchant rules →
+    merchant cache → LLM → Uncategorized).
+
+    Shared between:
+      - the initial per-account history import (`sync_plaid_history_for_account`)
+      - webhook/manual re-syncs from `server._sync_and_import`
+    so both paths get identical PFC-primary categorization.
     """
-    import merchant_cache  # local import to avoid cycles
+    import merchant_cache  # noqa: F401 — kept for parity/log symmetry
     import categorizer
     import contact_resolver
-    import merchant_rules
     import pfc_resolver
     from ai_service import resolve_contact_ai
-    try:
-        synced = plaid_service.sync_transactions(item["access_token"], None)
-    except Exception as e:  # noqa: BLE001
-        raise RuntimeError(f"Plaid sync error: {e}") from e
 
-    await db.plaid_items.update_one({"id": item["id"]}, {"$set": {
-        "cursor": synced["next_cursor"], "updated_at": now_iso(),
-    }})
+    if higher_ranges is None:
+        higher_ranges = await higher_source_ranges(cid, ledger_bank["id"], "plaid")
 
-    higher_ranges = await higher_source_ranges(cid, ledger_bank["id"], "plaid")
     now = now_iso()
-
-    # Candidates ----
     candidates: list[dict] = []
     skipped: list[dict] = []
-    for t in synced["added"]:
-        if t["account_id"] != plaid_account_id:
-            continue
+    for t in plaid_txns:
         if await db.transactions.find_one({
             "company_id": cid, "plaid_transaction_id": t["transaction_id"],
         }):
@@ -227,34 +224,22 @@ async def sync_plaid_history_for_account(
     if not candidates:
         return [], skipped
 
-    # Ensure PFC-support accounts (Owner's Draw/Contribution, Undeposited Funds)
-    # exist on this org before the resolver runs — the resolver hits them via
-    # primary-slot lookup.
     await categorizer.ensure_pfc_support_accounts(cid)
     uncat_exp, uncat_inc = await categorizer.ensure_uncategorized_accounts(cid)
 
     # ------ Stage 1: PFC resolver (Rocketbooks' resolvePfcCoa) ------
-    # For each candidate, try the PFC path first. When PFC yields a primary or
-    # override match (with a non-null category_account_id), we use it directly —
-    # no merchant rules, no cache, no LLM. This is the biggest single lever.
     pfc_results: dict[int, dict] = {}
     for cand in candidates:
         resolved = await pfc_resolver.resolve_pfc_coa(
             cid, cand.get("pfc_detailed"), bank_account_id=ledger_bank["id"],
         )
         cand["pfc_resolved"] = resolved
-        # useResolved gate: PFC is treated as final only when source is
-        # 'primary' or 'override' AND category_account_id is non-null. Fallback
-        # + unmapped rows are deliberately deferred to Stage 2.
         if resolved and resolved.get("category_account_id") \
                 and resolved.get("source") in ("primary", "override"):
             pfc_results[id(cand)] = resolved
 
-    # Candidates whose PFC didn't resolve to a final target — defer them to
-    # the classic merchant-rules → cache → LLM chain.
     deferred = [c for c in candidates if id(c) not in pfc_results]
 
-    # ------ Resolve contacts on deferred rows in parallel ------
     if deferred:
         contact_results = await contact_resolver.resolve_contacts_batch(
             cid, deferred, ai_fallback_fn=resolve_contact_ai, concurrency=5,
@@ -264,7 +249,6 @@ async def sync_plaid_history_for_account(
             cand["contact_name"] = cr.get("contact_name")
             cand["contact_source"] = cr.get("source")
 
-    # ------ Stage 2: merchant rules → cache → LLM for deferred rows ------
     per_item_result = await categorizer.categorize_batch_grouped(
         cid, deferred, coa, categorize_fn, concurrency=10,
     ) if deferred else []
@@ -278,7 +262,6 @@ async def sync_plaid_history_for_account(
         t = cand["plaid_txn"]
         pfc_res = pfc_results.get(id(cand))
         if pfc_res:
-            # PFC-resolved path — post directly to the resolved account.
             post = {
                 "category_account_id":   pfc_res["category_account_id"],
                 "category_account_code": pfc_res["category_account_code"],
@@ -313,7 +296,7 @@ async def sync_plaid_history_for_account(
             "source": "plaid",
             "plaid_transaction_id": t["transaction_id"],
             "plaid_account_id": t["account_id"],
-            "pending": t["pending"], "splits": [], "linked_invoice_id": None,
+            "pending": t.get("pending", False), "splits": [], "linked_invoice_id": None,
             "linked_bill_id": None, "linked_payment_id": None, "tags": [],
             "cache_hit": r.get("cache_hit", False),
             "created_at": now, "updated_at": now,
@@ -324,6 +307,30 @@ async def sync_plaid_history_for_account(
         except Exception:  # noqa: BLE001 — DuplicateKeyError under race
             pass
     return inserted, skipped
+
+
+async def sync_plaid_history_for_account(
+    cid: str, item: dict, plaid_account_id: str, ledger_bank: dict,
+    coa: list[dict], accts: list[dict], categorize_fn, is_period_closed_fn,
+) -> tuple[list[dict], list[dict]]:
+    """Pull all Plaid txns for the given account_id, dedup, batch-categorize
+    with merchant grouping + contact resolution, and insert survivors.
+    """
+    try:
+        synced = plaid_service.sync_transactions(item["access_token"], None)
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"Plaid sync error: {e}") from e
+
+    await db.plaid_items.update_one({"id": item["id"]}, {"$set": {
+        "cursor": synced["next_cursor"], "updated_at": now_iso(),
+    }})
+
+    # Filter to just this account's txns
+    account_txns = [t for t in synced["added"] if t["account_id"] == plaid_account_id]
+    return await categorize_and_insert_plaid_txns(
+        cid, account_txns, ledger_bank, coa, accts,
+        categorize_fn, is_period_closed_fn,
+    )
 
 
 # ---------- Whole flow: connect a single Plaid account ----------

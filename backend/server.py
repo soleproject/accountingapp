@@ -293,8 +293,10 @@ async def _categorize_and_insert(
 
 
 async def _sync_and_import(cid: str, item: dict, selected_account_ids: list[str] | None = None) -> int:
-    """Shared helper: run Plaid transactions_sync and route each new txn to its
-    mapped ledger + auto-create contacts + group-categorize + Uncategorized bucketing.
+    """Shared helper: run Plaid transactions_sync (cursor-based delta) and route
+    each new txn through the Rocketbooks PFC pipeline (PFC resolver → contact
+    → merchant rules → cache → LLM → uncategorized). Used by both the Plaid
+    webhook handler and the manual-sync endpoint.
     """
     try:
         synced = plaid_service.sync_transactions(item["access_token"], item.get("cursor"))
@@ -304,8 +306,8 @@ async def _sync_and_import(cid: str, item: dict, selected_account_ids: list[str]
         "cursor": synced["next_cursor"], "updated_at": now_iso(),
     }})
 
-    # Plaid marks pending→posted transitions via `removed`. Drop those rows so
-    # we don't keep the stale pending version.
+    # Plaid marks pending→posted transitions via `removed`. Drop stale pending
+    # rows so we don't keep the pending version alongside the posted one.
     for rt in synced.get("removed") or []:
         rid = rt.get("transaction_id") if isinstance(rt, dict) else rt
         if rid:
@@ -319,38 +321,29 @@ async def _sync_and_import(cid: str, item: dict, selected_account_ids: list[str]
     if not fallback_bank:
         return 0
     mappings = item.get("account_mappings") or {}
-    range_cache: dict[str, list[tuple[str, str]]] = {}
 
-    candidates: list[dict] = []
+    # Group added txns by their mapped ledger bank account, so we run the PFC
+    # pipeline per-bank (each pipeline call needs a single bank_account_id).
+    by_bank: dict[str, list[dict]] = {}
     for t in synced["added"]:
         if selected_account_ids and t["account_id"] not in selected_account_ids:
             continue
-        if await db.transactions.find_one({"company_id": cid, "plaid_transaction_id": t["transaction_id"]}):
-            continue
-        if await _is_period_closed(cid, t["date"]):
-            continue
         mapping = mappings.get(t["account_id"])
-        ledger_bank = next((a for a in accts if a["id"] == mapping["ledger_account_id"]), fallback_bank) if mapping else fallback_bank
-        ranges = range_cache.get(ledger_bank["id"])
-        if ranges is None:
-            ranges = await plaid_connect.higher_source_ranges(cid, ledger_bank["id"], "plaid")
-            range_cache[ledger_bank["id"]] = ranges
-        if plaid_connect.in_any_range(t["date"], ranges):
-            continue
-        pfc = t.get("personal_finance_category")
-        candidates.append({
-            "date": t["date"], "description": t["name"],
-            "merchant": t.get("merchant_name") or t.get("name") or "Unknown",
-            "merchant_name": t.get("merchant_name"),
-            "amount": t["amount"],
-            "bank_account_id": ledger_bank["id"],
-            "bank_account_name": ledger_bank["name"],
-            "plaid_transaction_id": t["transaction_id"],
-            "plaid_account_id": t["account_id"],
-            "pending": t.get("pending", False),
-            "pfc": pfc, "pfc_primary": (pfc or {}).get("primary"),
-        })
-    imported = await _categorize_and_insert(cid, candidates, accts, coa, source="plaid")
+        ledger_bank = (
+            next((a for a in accts if a["id"] == mapping["ledger_account_id"]), fallback_bank)
+            if mapping else fallback_bank
+        )
+        by_bank.setdefault(ledger_bank["id"], []).append(t)
+
+    imported = 0
+    from ai_service import categorize_transaction as _cat
+    for bank_id, txns in by_bank.items():
+        ledger_bank = next(a for a in accts if a["id"] == bank_id)
+        inserted, _skipped = await plaid_connect.categorize_and_insert_plaid_txns(
+            cid, txns, ledger_bank, coa, accts,
+            categorize_fn=_cat, is_period_closed_fn=_is_period_closed,
+        )
+        imported += len(inserted)
     if imported:
         await _log_ai(cid, "webhook_sync", imported)
     return imported
@@ -1810,6 +1803,30 @@ async def plaid_webhook(payload: dict):
             })
         return {"ok": True, "removed": len(removed_ids)}
     return {"ok": True, "webhook_code": webhook_code}
+
+
+@api.post("/companies/{cid}/plaid/reset-and-resync")
+async def plaid_reset_and_resync(cid: str, user: dict = Depends(get_current_user)):
+    """Nuclear option for stuck Plaid items — reset the stored cursor to null and
+    re-run `/transactions/sync` from Plaid's earliest available point.
+
+    Use case: on initial link the institution had only 30 days ready; Plaid's
+    HISTORICAL_UPDATE webhook was missed (webhook_url unset, or firewall
+    dropped it) so we're stuck at page 1. Resetting the cursor forces Plaid to
+    re-page the full 730-day history it has now compiled. Dedup guards on
+    `(company_id, plaid_transaction_id)` prevent duplicate inserts.
+    """
+    await _require_company(user, cid)
+    item = await db.plaid_items.find_one({"company_id": cid})
+    if not item:
+        raise HTTPException(400, "No Plaid item linked for this company")
+    await db.plaid_items.update_one(
+        {"id": item["id"]}, {"$set": {"cursor": None, "updated_at": now_iso()}},
+    )
+    # Reload with cursor=None
+    item = await db.plaid_items.find_one({"id": item["id"]})
+    imported = await _sync_and_import(cid, item)
+    return {"reset": True, "imported": imported}
 
 
 @api.post("/companies/{cid}/plaid/manual-sync")
