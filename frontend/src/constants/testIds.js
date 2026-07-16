@@ -34,6 +34,10 @@ export const TID = {
   txnFilterReview: "txn-filter-review",
   txnBulkApprove: "txn-bulk-approve",
   txnBulkCreateRules: "txn-bulk-create-rules",
+  txnPageSize: "txn-page-size",
+  txnPagePrev: "txn-page-prev",
+  txnPageNext: "txn-page-next",
+  txnPageIndicator: "txn-page-indicator",
 
   // Reports
   reportTile: "report-tile",

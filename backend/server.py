@@ -804,14 +804,35 @@ async def delete_account(cid: str, aid: str, user: dict = Depends(get_current_us
 @api.get("/companies/{cid}/transactions")
 async def list_transactions(
     cid: str, user: dict = Depends(get_current_user),
-    needs_review: Optional[bool] = None, limit: int = 500,
+    needs_review: Optional[bool] = None,
+    page: int = 1, limit: int = 250,
 ):
     await _require_company(user, cid)
     q = {"company_id": cid}
     if needs_review is not None:
         q["needs_review"] = needs_review
-    docs = await db.transactions.find(q).sort("date", -1).to_list(limit)
-    return {"transactions": [coerce(d) for d in docs]}
+    # Clamp inputs to sane bounds. limit=0 returns everything (used by exports
+    # and legacy callers that expect the full list).
+    page = max(1, int(page or 1))
+    limit = max(0, min(int(limit or 0), 5000))
+    total = await db.transactions.count_documents(q)
+    cursor = db.transactions.find(q).sort("date", -1)
+    if limit > 0:
+        skip = (page - 1) * limit
+        cursor = cursor.skip(skip).limit(limit)
+        pages = max(1, (total + limit - 1) // limit)
+    else:
+        pages = 1
+    docs = await cursor.to_list(length=None)
+    return {
+        "transactions": [coerce(d) for d in docs],
+        "pagination": {
+            "total": total,
+            "page": page,
+            "pages": pages,
+            "limit": limit,
+        },
+    }
 
 
 @api.post("/companies/{cid}/transactions")

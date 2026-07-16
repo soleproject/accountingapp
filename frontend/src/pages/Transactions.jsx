@@ -7,7 +7,10 @@ import { TID } from "@/constants/testIds";
 import { toast } from "sonner";
 import {
   Check, Wand2, Split, Link as LinkIcon, RotateCw, Plus, X, Trash2, AlertTriangle, ShieldCheck,
+  ChevronLeft, ChevronRight,
 } from "lucide-react";
+
+const PAGE_SIZE_OPTIONS = [50, 100, 250, 500];
 
 function ConfidenceChip({ conf, needs_review }) {
   const v = Number(conf || 0);
@@ -45,23 +48,34 @@ export default function Transactions() {
   const [linking, setLinking] = useState(null);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(250);
+  const [pagination, setPagination] = useState({ total: 0, page: 1, pages: 1, limit: 250 });
 
   const load = async () => {
     if (!currentId) return;
-    const q = filter === "review" ? "?needs_review=true" : "";
+    const params = new URLSearchParams();
+    if (filter === "review") params.set("needs_review", "true");
+    params.set("page", String(page));
+    params.set("limit", String(pageSize));
+    const qs = `?${params.toString()}`;
     const [t, a, i, b] = await Promise.all([
-      api.get(`/companies/${currentId}/transactions${q}`),
+      api.get(`/companies/${currentId}/transactions${qs}`),
       api.get(`/companies/${currentId}/accounts`),
       api.get(`/companies/${currentId}/invoices`),
       api.get(`/companies/${currentId}/bills`),
     ]);
     setTxns(t.data.transactions || []);
+    setPagination(t.data.pagination || { total: (t.data.transactions || []).length, page: 1, pages: 1, limit: pageSize });
     setAccts(a.data.accounts || []);
     setInvoices(i.data.invoices || []);
     setBills(b.data.bills || []);
+    setSelected(new Set());
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize]);
+  // Reset to page 1 whenever the filter or page size changes.
+  useEffect(() => { setPage(1); /* eslint-disable-next-line */ }, [filter, pageSize, currentId]);
 
   const [params] = useSearchParams();
   useEffect(() => {
@@ -162,7 +176,7 @@ export default function Transactions() {
                 {filter === f && (
                   <span data-testid={`txn-filter-count-${f}`}
                         className="ml-1.5 px-1.5 py-0.5 rounded bg-white/20 font-mono-num">
-                    {txns.length}
+                    {pagination.total}
                   </span>
                 )}
               </button>
@@ -272,11 +286,76 @@ export default function Transactions() {
             </tbody>
           </table>
         </div>
+        <PaginationBar
+          pagination={pagination}
+          pageSize={pageSize}
+          setPageSize={setPageSize}
+          page={page}
+          setPage={setPage}
+          visibleCount={txns.length}
+        />
       </div>
 
       {creating && <ManualTxnModal accts={accts} currentId={currentId} onClose={() => { setCreating(false); load(); }} />}
       {splitting && <SplitModal txn={splitting} accts={accts} currentId={currentId} onClose={() => { setSplitting(null); load(); }} />}
       {linking && <LinkModal txn={linking} invoices={invoices} bills={bills} currentId={currentId} onClose={() => { setLinking(null); load(); }} />}
+    </div>
+  );
+}
+
+function PaginationBar({ pagination, pageSize, setPageSize, page, setPage, visibleCount }) {
+  const total = pagination?.total || 0;
+  const pages = Math.max(1, pagination?.pages || 1);
+  const currentPage = Math.min(pages, Math.max(1, pagination?.page || page));
+  const startIdx = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const endIdx = total === 0 ? 0 : (currentPage - 1) * pageSize + visibleCount;
+
+  const canPrev = currentPage > 1;
+  const canNext = currentPage < pages;
+
+  return (
+    <div className="flex items-center justify-between gap-3 flex-wrap border-t bg-slate-50/60 px-4 py-2.5">
+      <div className="flex items-center gap-2 text-xs text-slate-600">
+        <span data-testid={TID.txnPageIndicator}>
+          {total === 0
+            ? "No transactions"
+            : <>Showing <span className="font-mono-num font-medium text-slate-900">{startIdx.toLocaleString()}</span>–<span className="font-mono-num font-medium text-slate-900">{endIdx.toLocaleString()}</span> of <span className="font-mono-num font-medium text-slate-900">{total.toLocaleString()}</span></>
+          }
+        </span>
+        <span className="text-slate-300">·</span>
+        <label className="inline-flex items-center gap-1.5">
+          <span className="text-slate-500">Rows</span>
+          <select
+            data-testid={TID.txnPageSize}
+            value={pageSize}
+            onChange={(e) => setPageSize(parseInt(e.target.value, 10))}
+            className="border rounded px-1.5 py-0.5 bg-white text-xs font-mono-num"
+          >
+            {PAGE_SIZE_OPTIONS.map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </label>
+      </div>
+      <div className="flex items-center gap-1">
+        <button
+          data-testid={TID.txnPagePrev}
+          disabled={!canPrev}
+          onClick={() => setPage(currentPage - 1)}
+          className="inline-flex items-center gap-1 px-2 py-1 rounded border bg-white text-xs disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100"
+        >
+          <ChevronLeft size={14} /> Prev
+        </button>
+        <span className="px-2 text-xs text-slate-600 font-mono-num">
+          Page {currentPage} of {pages}
+        </span>
+        <button
+          data-testid={TID.txnPageNext}
+          disabled={!canNext}
+          onClick={() => setPage(currentPage + 1)}
+          className="inline-flex items-center gap-1 px-2 py-1 rounded border bg-white text-xs disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100"
+        >
+          Next <ChevronRight size={14} />
+        </button>
+      </div>
     </div>
   );
 }
