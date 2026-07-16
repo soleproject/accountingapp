@@ -314,12 +314,47 @@ async def categorize_and_insert_plaid_txns(
             "cache_hit": r.get("cache_hit", False),
             "created_at": now, "updated_at": now,
         })
+
+    # ------ Compute running bank balance ("bank_balance_after") ---------
+    # Merges each newly-inserted row with any already-posted rows for the
+    # same bank account, then computes a running balance seeded by the
+    # opening-balance JE. This is what powers the "Bank Balance" column
+    # on the Transactions page.
     if inserted:
         try:
             await db.transactions.insert_many(inserted, ordered=False)
         except Exception:  # noqa: BLE001 — DuplicateKeyError under race
             pass
+        await _refresh_bank_balances_for_account(cid, ledger_bank["id"])
     return inserted, skipped
+
+
+async def _refresh_bank_balances_for_account(company_id: str, bank_id: str) -> None:
+    """Recompute `bank_balance_after` for every txn on this bank account.
+
+    Order: `date` ascending, then `created_at` ascending as tie-breaker.
+    Seed: sum of journal-entry lines hitting this account (opening balance,
+    manual reclassifications). This matches how Cash-on-Hand is calculated in
+    `dashboard_metrics`, so the running balance on the last row equals the
+    Cash-on-Hand card. Idempotent — safe to re-run.
+    """
+    # Seed from JEs (opening balance + any manual adjustments)
+    seed = 0.0
+    async for j in db.journal_entries.find({"company_id": company_id}):
+        for l in j.get("lines", []):
+            if l.get("account_id") == bank_id:
+                seed += float(l.get("debit", 0) or 0) - float(l.get("credit", 0) or 0)
+
+    # Order + accumulate
+    running = seed
+    async for t in db.transactions.find(
+        {"company_id": company_id, "bank_account_id": bank_id, "posted": True},
+    ).sort([("date", 1), ("created_at", 1)]):
+        running += float(t.get("amount", 0) or 0)
+        await db.transactions.update_one(
+            {"id": t["id"]},
+            {"$set": {"bank_balance_after": round(running, 2)}},
+        )
 
 
 async def sync_plaid_history_for_account(
