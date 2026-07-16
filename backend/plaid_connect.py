@@ -311,8 +311,9 @@ async def categorize_and_insert_plaid_txns(
             "description": t["name"], "merchant": cand["merchant"], "amount": t["amount"],
             "bank_account_id": ledger_bank["id"],
             "bank_account_name": ledger_bank["name"],
-            "contact_id": cand.get("contact_id"),
-            "contact_name": cand.get("contact_name"),
+            "contact_id":     cand.get("contact_id"),
+            "contact_name":   cand.get("contact_name"),
+            "contact_source": cand.get("contact_source"),
             "pfc_detailed": cand.get("pfc_detailed"),
             "pfc_primary": cand.get("pfc_primary"),
             "pfc_classification": (pfc_res or {}).get("classification") if pfc_res
