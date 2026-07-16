@@ -1,0 +1,39 @@
+---
+# Redis 7 — Arq queue. Single replica is fine (job state is Mongo-backed
+# via `sync_jobs`, so a Redis outage costs at most a re-enqueue, never data).
+# For higher availability move to a managed offering (Upstash / ElastiCache).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: axiom-redis
+spec:
+  serviceName: axiom-redis
+  replicas: 1
+  selector: { matchLabels: { app: axiom-redis } }
+  template:
+    metadata: { labels: { app: axiom-redis } }
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          args: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+          ports: [{ containerPort: 6379 }]
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "384Mi" }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 1Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: axiom-redis
+spec:
+  clusterIP: None
+  selector: { app: axiom-redis }
+  ports: [{ port: 6379, targetPort: 6379 }]

@@ -185,6 +185,7 @@ export default function Connections() {
         <CoverageBanner coverage={status.coverage}
                         balanceSnapshotAt={status.balance_snapshot_at}
                         connected={status.connected} />
+        <SyncHistoryPanel companyId={currentId} refreshKey={activeJob?.status} />
 
         <PlaidLinkButton companyId={currentId} onSuccess={onLinked} />
 
@@ -316,6 +317,101 @@ function _relTime(iso) {
     if (h < 24) return `${h}h ago`;
     return `${Math.floor(h / 24)}d ago`;
   } catch { return ""; }
+}
+
+
+/**
+ * Recent sync jobs (last 10 by default). Auto-refreshes when a job's status
+ * flips (via `refreshKey`). Gives accountants a per-firm audit trail of who
+ * synced when + result.
+ */
+function SyncHistoryPanel({ companyId, refreshKey }) {
+  const [jobs, setJobs] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const load = async () => {
+    if (!companyId) return;
+    setLoading(true);
+    try {
+      const r = await api.get(`/companies/${companyId}/plaid/sync-jobs?limit=10`);
+      setJobs(r.data.jobs || []);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [companyId, refreshKey]);
+  if (!jobs.length && !loading) return null;
+
+  return (
+    <div data-testid="plaid-sync-history"
+         className="rounded-lg border border-slate-200 bg-white text-sm">
+      <button onClick={() => setOpen(o => !o)}
+              className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-slate-50">
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        <span className="font-medium text-slate-700">Sync history</span>
+        <span className="text-xs text-slate-500">last {jobs.length}</span>
+        <span className="ml-auto text-xs text-slate-400">
+          {jobs[0] && jobs[0].created_at ? _relTime(jobs[0].created_at) : ""}
+        </span>
+      </button>
+      {open && (
+        <div className="border-t border-slate-100 divide-y divide-slate-50">
+          {jobs.map(j => (
+            <SyncHistoryRow key={j.id} job={j} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function SyncHistoryRow({ job }) {
+  const kindLabel = {
+    plaid_manual_sync:      "Delta sync",
+    plaid_reset_resync:     "Full re-sync",
+    plaid_contact_backfill: "Contact backfill",
+  }[job.kind] || job.kind;
+  const statusColor = {
+    completed: "text-emerald-700 bg-emerald-50 border-emerald-200",
+    running:   "text-cyan-700   bg-cyan-50   border-cyan-200",
+    queued:    "text-slate-600  bg-slate-50  border-slate-200",
+    failed:    "text-rose-700   bg-rose-50   border-rose-200",
+  }[job.status] || "text-slate-600 bg-slate-50 border-slate-200";
+  const duration = job.duration_ms != null
+    ? (job.duration_ms >= 1000
+        ? `${(job.duration_ms / 1000).toFixed(1)}s`
+        : `${job.duration_ms}ms`)
+    : "—";
+  const imported = job.imported ?? 0;
+  return (
+    <div data-testid={`sync-history-row-${job.id}`}
+         className="grid grid-cols-[auto_1fr_auto_auto_auto] gap-3 items-center px-3 py-2 text-xs">
+      <span className={`px-2 py-0.5 rounded border font-mono-num ${statusColor}`}>
+        {job.status}
+      </span>
+      <span className="text-slate-700 font-medium">
+        {kindLabel}
+        {job.reset && <span className="ml-1.5 text-amber-700">· cursor reset</span>}
+      </span>
+      <span className="text-slate-500 font-mono-num" title="Transactions imported">
+        {imported.toLocaleString()} txns
+      </span>
+      <span className="text-slate-500 font-mono-num" title="End-to-end run time">
+        {duration}
+      </span>
+      <span className="text-slate-400 text-[10px] whitespace-nowrap"
+            title={`Triggered by ${job.triggered_by_email || "system"} · ${job.created_at}`}>
+        {job.triggered_by_email ? job.triggered_by_email.split("@")[0] : "system"}
+        {" · "}
+        {_relTime(job.created_at)}
+      </span>
+      {job.error && (
+        <div className="col-span-5 text-rose-600 text-[11px] font-mono truncate" title={job.error}>
+          error: {job.error}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function PlaidAccountsDropdown({ expanded, onToggle, status, loading, onRefresh, onConnectOne, onConnectAll, connecting, busy }) {

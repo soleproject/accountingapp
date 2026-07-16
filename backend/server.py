@@ -1863,6 +1863,58 @@ async def get_job_status(job_id: str, user: dict = Depends(get_current_user)):
     return doc
 
 
+@api.get("/companies/{cid}/plaid/sync-jobs")
+async def list_sync_jobs(cid: str, limit: int = 10,
+                         user: dict = Depends(get_current_user)):
+    """Return the most recent N sync jobs for this company — used by the
+    Connections page's Sync History panel. Each row: kind, status,
+    started_at, finished_at, duration_ms, imported, error, triggered_by_email.
+    """
+    await _require_company(user, cid)
+    limit = max(1, min(int(limit), 50))
+    docs = await db.sync_jobs.find({"company_id": cid}).sort(
+        "created_at", -1,
+    ).limit(limit).to_list(limit)
+
+    # Resolve `triggered_by` email once per job.
+    user_ids = list({d.get("user_id") for d in docs if d.get("user_id")})
+    users = {}
+    if user_ids:
+        async for u in db.users.find({"id": {"$in": user_ids}}, {"id": 1, "email": 1, "name": 1}):
+            users[u["id"]] = u
+
+    rows = []
+    for d in docs:
+        d.pop("_id", None)
+        s, f = d.get("started_at"), d.get("finished_at")
+        duration_ms = None
+        if s and f:
+            try:
+                from datetime import datetime
+                duration_ms = int(
+                    (datetime.fromisoformat(f) - datetime.fromisoformat(s))
+                    .total_seconds() * 1000
+                )
+            except Exception:  # noqa: BLE001
+                duration_ms = None
+        u = users.get(d.get("user_id"))
+        rows.append({
+            "id":                    d["id"],
+            "kind":                  d["kind"],
+            "status":                d["status"],
+            "created_at":            d.get("created_at"),
+            "started_at":            s,
+            "finished_at":           f,
+            "duration_ms":           duration_ms,
+            "imported":              (d.get("result") or {}).get("imported"),
+            "reset":                 (d.get("result") or {}).get("reset", False),
+            "error":                 (d.get("error") or "").split("\n")[-2:-1][0] if d.get("error") else None,
+            "triggered_by_email":    (u or {}).get("email"),
+            "triggered_by_name":     (u or {}).get("name"),
+        })
+    return {"count": len(rows), "jobs": rows}
+
+
 @api.get("/companies/{cid}/plaid/accounts")
 async def plaid_list_accounts(cid: str, user: dict = Depends(get_current_user)):
     """List every Plaid-linked account for this company along with its connection

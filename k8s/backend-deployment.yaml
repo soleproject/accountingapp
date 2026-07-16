@@ -1,0 +1,42 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: axiom-backend
+  labels: { app: axiom-backend }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: axiom-backend } }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  template:
+    metadata:
+      labels: { app: axiom-backend }
+    spec:
+      containers:
+        - name: backend
+          image: ghcr.io/axiom-ledger/backend:latest
+          ports: [{ containerPort: 8001 }]
+          envFrom:
+            - secretRef: { name: axiom-secrets }
+          # Resource requests/limits — required for CPU-based HPA.
+          resources:
+            requests: { cpu: "500m",  memory: "512Mi" }
+            limits:   { cpu: "2000m", memory: "1Gi"   }
+          readinessProbe:
+            httpGet: { path: /api/, port: 8001 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /api/, port: 8001 }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: axiom-backend
+spec:
+  selector: { app: axiom-backend }
+  ports: [{ port: 80, targetPort: 8001 }]

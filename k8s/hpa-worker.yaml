@@ -1,0 +1,44 @@
+---
+# Worker HPA — scales the Arq worker replicas from 1 to 8 based on load.
+# Uses BOTH CPU utilization AND (optionally) Redis queue depth as a custom
+# metric. Queue-depth scaling requires Prometheus Adapter installed with a
+# rule that exposes `arq_queue_depth` on `axiom-redis`.
+#
+# If you don't have Prometheus Adapter yet, delete the second `metrics`
+# block and keep only the CPU one — it's the safest default.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: axiom-worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: axiom-worker
+  minReplicas: 1
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70    # +1 replica when CPU > 70% for 5 min
+    # ─── OPTIONAL: queue-depth scaling (Prometheus Adapter required) ─────
+    # - type: Pods
+    #   pods:
+    #     metric:
+    #       name: arq_queue_depth
+    #     target:
+    #       type: AverageValue
+    #       averageValue: "10"     # +1 replica when avg pending jobs > 10
+  behavior:
+    # Slow scale-down so we don't thrash between 1 and 2 replicas during bursts.
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - { type: Pods,    value: 1, periodSeconds: 60 }
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - { type: Pods,    value: 2, periodSeconds: 30 }
