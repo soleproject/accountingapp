@@ -26,9 +26,22 @@ async def _mark_started(job_id: str) -> None:
 
 
 async def _mark_done(job_id: str, result: dict) -> None:
+    # Fetch the job so we know which company's caches to invalidate.
+    doc = await db.sync_jobs.find_one({"id": job_id}, {"company_id": 1})
     await job_queue.update_job(
         job_id, status="completed", result=result, finished_at=now_iso(),
     )
+    # Purge every cache entry scoped to this company (dashboard/metrics,
+    # ai/activity, income-statement, balance-sheet, …) so the Dashboard
+    # sees fresh numbers the moment the client refetches — otherwise the
+    # 15 s TTL would leave tiles showing "0" for up to 2 minutes after a
+    # first-connect sync finishes.
+    if doc and doc.get("company_id"):
+        try:
+            from infra import get_cache
+            get_cache().invalidate(doc["company_id"])
+        except Exception:  # noqa: BLE001 — cache miss is safe
+            pass
 
 
 async def _mark_failed(job_id: str, err: str) -> None:

@@ -7,7 +7,6 @@ import {
   Sparkles, Zap, AlertTriangle, TrendingUp, Wand2, FileCheck2, Bot, ArrowRight,
   Wallet2, FileText, Receipt as ReceiptIcon, Activity,
 } from "lucide-react";
-import SyncPill from "@/components/SyncPill";
 import FirstConnectWelcome from "@/components/FirstConnectWelcome";
 
 const kindLabel = {
@@ -159,7 +158,6 @@ export default function Dashboard() {
             What the AI has done for {current.name} · {current.reporting_basis} basis
           </p>
         </div>
-        <SyncPill status={syncStatus} />
       </div>
 
       {totals && (
