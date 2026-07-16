@@ -70,11 +70,17 @@ export default function Dashboard() {
         const next = r.data;
         const prev = prevStatusRef.current;
         setSyncStatus(next);
-        // Fire a heavy refetch on `syncing → idle` transition so the
-        // moment the Plaid backfill finishes, the tiles update.
-        if (prev && prev.status === "syncing" && next.status !== "syncing") {
-          fetchHeavy();
-        }
+        // Fire a heavy refetch whenever any of these signals fire:
+        //   • the pill flips syncing → idle (existing behavior), OR
+        //   • total_txns changed (new webhook rows landed even without a
+        //     visible syncing state — e.g. a very fast sync that finishes
+        //     between two 5-second polls).
+        // Second condition is what fixed the "Dashboard is slow to
+        // populate right after Plaid Link" complaint — without it, we'd
+        // sit on stale zeros for up to 120s (the safety-net interval).
+        const flipped = prev && prev.status === "syncing" && next.status !== "syncing";
+        const rowsChanged = (prev?.total_txns ?? -1) !== (next.total_txns ?? -1);
+        if (flipped || rowsChanged) fetchHeavy();
         prevStatusRef.current = next;
       } catch { /* ignore */ }
     };

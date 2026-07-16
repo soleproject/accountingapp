@@ -1,0 +1,43 @@
+{
+  "summary": "Iter21 verified: NO_COUNTERPARTY_PFC gate + clean_merchant_name scrubber + Dashboard rowsChanged trigger + arq_worker --watch. 10/11 pytest pass (91%). 607 LLC live counts EXACTLY match spec (contacts=267, no_counterparty=360, merchant_name=1511, total=1871). One noisy contact name leaked from a Zelle merchant_name row — real edge case in _NOISE_PATTERNS.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "contact_resolver.clean_merchant_name / _NOISE_PATTERNS",
+        "issue": "1/267 contacts on 607 LLC still carries noise: name='Zelle payment to Dad & Babe for \"iPad Refund\"; Conf# x3x3y0o2p' (source=merchant_name). The CONF regex `\\s+CONF\\s*#?\\s*\\d+` requires digits after CONF#, but Plaid emits alphanumeric conf codes (x3x3y0o2p). Also `#\\s*[X\\d]{3,}` requires digits/X after #, missing lowercase alnum. Suggested: broaden to `#\\s*[A-Za-z0-9]{3,}` and `(?:CONF|REF|TRACE)\\s*#?\\s*[A-Za-z0-9]+`."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration21_no_counterparty_and_scrub.py",
+    "/app/test_reports/pytest/iter21_results.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: broaden _NOISE_PATTERNS to strip alphanumeric conf/ref codes (see backend_issues.minor). Impact: 1/267 contacts on 607; not user-facing critical."
+  ],
+  "critical_code_review_comments": [
+    "contact_resolver.py L26-36: NO_COUNTERPARTY_PFC is a frozenset — correct immutability. Gate at L165 runs BEFORE fast path — verified via unit test that TRANSFER_IN + scrubbable merchant_name returns no_counterparty, not a bogus contact.",
+    "contact_resolver.py L44-64: clean_merchant_name is idempotent (verified) and correctly collapses '07/16 #XXXXX3176' and '07/21 #XXXXX5967' descriptions to identical output. Good design.",
+    "contact_resolver.py L245: resolve_contacts_batch pre-evaluates PFC gate outside semaphore — no wasted concurrency slots for no-counterparty rows.",
+    "server.py L590-620: backfill endpoint now passes pfc_primary and persists contact_source. Idempotent (only touches rows with contact_id=None). Backfill successfully produced spec-exact counts on 607 LLC.",
+    "Dashboard.jsx L82-83: `rowsChanged = (prev?.total_txns ?? -1) !== (next.total_txns ?? -1)` — correct trigger for fetchHeavy on total_txns delta, fixes the 120s-fallback stall on fast-sync paths. Nullish coalescing avoids first-poll flip-firing when prev is null.",
+    "supervisord_workers.conf: `arq worker.WorkerSettings --watch /app/backend` verified functional — touching contact_resolver.py triggered SIGUSR1 shutdown + 'Starting worker' pair within 2s. Slight concern: chatty log — the worker restarts on every .py edit even in tests folder; consider `--watch /app/backend --exclude tests` if this creates noise in prod. Non-blocking.",
+    "test_iteration14 filter tests fail with 403 for pro user against CID 254 — expected per iter21 note (pro lacks legacy company membership). Only the unit test in iter14 still runs, and it passes."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration21_no_counterparty_and_scrub.py"
+  ],
+  "success_rate": {"backend": "91% (10/11 pytest)", "frontend": "100% (607 Dashboard tiles render correctly: 1871/1871/198/100%)"},
+  "test_credentials": "pro@axiom.ai / pro123 — has 607 LLC membership; lacks 254/400/418/501/535/554 (legacy).",
+  "seed_data_creation": "Two transient test companies (test-iter21-collapse-<uuid>, test-iter21-starbucks-<uuid>, test-iter21-gate-all) — all cleaned up in test try/finally.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run backend tests: cd /app/backend && python -m pytest tests/test_iteration21_no_counterparty_and_scrub.py -v -o asyncio_mode=auto. Uses pymongo (sync) for DB reads to avoid motor cross-loop rebinding — do NOT convert to @pytest.mark.asyncio + `from db import db` unless you consolidate all async DB touches under a single asyncio.run block. 607 LLC id=b8dd2b57-6719-44ee-af39-68731a55963d. Frontend Dashboard immediate-populate is code-verified (Dashboard.jsx:82-83); to fully e2e test, insert into db.transactions {company_id:CID_607, id:uuid, ...} then poll page.body for the new count within 20s, then delete the seed row.",
+  "rca of the issue": "Iter20 introduced merchant_name-fallback (use raw description when Plaid merchant_name is null) which created 501 contacts on 607 LLC — one per ATM/transfer/fee row because each carried unique date/#ref noise. Iter21 fix: (1) NO_COUNTERPARTY_PFC frozenset short-circuits BEFORE fast path for TRANSFER_IN/OUT, BANK_FEES, INTEREST, LOAN_PAYMENTS — 360 rows on 607 correctly returned no_counterparty. (2) clean_merchant_name applied BEFORE normalize_contact_name so ATM date/#ref variants collide on normalized_name → 267 contacts (was 501). Verified live counts match spec exactly. Dashboard second complaint fixed with total_txns-delta trigger instead of syncing→idle-flip only."
+}

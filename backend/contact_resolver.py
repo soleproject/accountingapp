@@ -23,6 +23,47 @@ CORP_SUFFIXES = re.compile(
 )
 
 
+# PFC classifications that have no real counterparty. These MUST short-circuit
+# BEFORE the fast path — otherwise a raw ATM/transfer description like
+# "BKOFAMERICA ATM 07/16 #XXXXX3176" (fed in as merchant_name fallback) would
+# scrub down to "BofA ATM" and create a contact even though there's no vendor
+# to track for a self-transfer.
+NO_COUNTERPARTY_PFC = frozenset({
+    "TRANSFER_IN", "TRANSFER_OUT",     # inter-account movements
+    "BANK_FEES",                       # bank / overdraft / ATM fees
+    "INTEREST",                        # interest income / expense
+    "LOAN_PAYMENTS",                   # loan principal / self-owned liability
+})
+
+
+# Per-row noise patterns. When we fall back to Plaid's raw `name` field
+# because `merchant_name` is null, that string typically carries dates, PPD
+# IDs, ref numbers, and ATM location codes — one per transaction. Without
+# stripping, every "BofA ATM 07/16 #XXXXX3176" becomes its own contact.
+# These are conservative — anything that doesn't match passes through.
+_NOISE_PATTERNS = [
+    re.compile(r"\s*\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b\s*"),   # dates 07/16 / 07/16/26
+    re.compile(r"\s*#\s*[X\d]{3,}\s*"),                       # #XXXXX3176 or #12345
+    re.compile(r"\s+PPD\s+ID\s*:?\s*\d+", re.I),              # ACH PPD ID:12345
+    re.compile(r"\s+CO\s+ID\s*:?\s*\d+", re.I),               # CO ID 12345
+    re.compile(r"\s+TRACE\s*#?\s*\d+", re.I),                 # TRACE #123456
+    re.compile(r"\s+REF\s*#?\s*\d+", re.I),                   # REF#123
+    re.compile(r"\s+CONF\s*#?\s*\d+", re.I),                  # CONF#123
+    re.compile(r"\s+\d{8,}\s*"),                              # bare 8+ digit runs
+]
+
+
+def clean_merchant_name(raw: str | None) -> str:
+    """Strip noisy per-row artefacts so different-looking rows for the same
+    vendor collapse into one contact. Idempotent."""
+    if not raw:
+        return ""
+    s = raw
+    for p in _NOISE_PATTERNS:
+        s = p.sub(" ", s)
+    return " ".join(s.split()).rstrip(",.;: -").strip()
+
+
 def normalize_contact_name(name: str | None) -> str:
     """Match-key builder. Collapses corporate suffix variants so
     'GitHub' and 'GitHub, Inc.' hash to the same key.
@@ -117,8 +158,18 @@ async def resolve_contact(
     - contact_id is None when the transaction has no real counterparty
       (internal transfer, bank fee, interest).
     """
-    # ---- Fast path: Plaid gave us a clean merchant_name --------------------
-    merch = (merchant_name or "").strip()
+    # ---- Gate 1: no-counterparty PFCs always short-circuit ----------------
+    # This MUST come before the fast path — otherwise the raw description
+    # for a transfer/ATM/fee (which we now scrub and use as a merchant name
+    # fallback) would create a bogus contact for a self-transfer.
+    if pfc_primary in NO_COUNTERPARTY_PFC:
+        return {"contact_id": None, "contact_name": None, "source": "no_counterparty"}
+
+    # ---- Fast path: Plaid gave us a clean merchant_name (or scrubbed desc) --
+    # Scrub noisy artefacts (dates, ref#, PPD IDs) BEFORE normalization so
+    # "BofA ATM 07/16 #XXXXX3176" and "BofA ATM 07/21 #XXXXX9821" collapse
+    # into one contact instead of one per row.
+    merch = clean_merchant_name(merchant_name)
     if merch:
         existing = await _find_by_normalized(company_id, merch)
         if existing:
@@ -186,12 +237,15 @@ async def resolve_contacts_batch(
     sem = asyncio.Semaphore(concurrency)
 
     async def one(idx: int, it: dict) -> tuple[int, dict]:
-        # Fast path never contends for the semaphore
-        merch = (it.get("merchant_name") or "").strip()
-        if merch:
+        pfc = it.get("pfc_primary")
+        # Fast path never contends for the semaphore. We route through
+        # resolve_contact so the PFC no-counterparty gate + description
+        # scrubbing apply uniformly (they only exist in one place).
+        merch_raw = it.get("merchant_name")
+        if pfc in NO_COUNTERPARTY_PFC or clean_merchant_name(merch_raw):
             r = await resolve_contact(
-                company_id, merch, it.get("description"),
-                ai_fallback_fn=None,
+                company_id, merch_raw, it.get("description"),
+                ai_fallback_fn=None, pfc_primary=pfc,
             )
             return idx, r
         # AI path — bounded concurrency for cost + Anthropic rate limits
@@ -199,7 +253,7 @@ async def resolve_contacts_batch(
             r = await resolve_contact(
                 company_id, None, it.get("description"),
                 ai_fallback_fn=ai_fallback_fn,
-                pfc_primary=it.get("pfc_primary"),
+                pfc_primary=pfc,
             )
             return idx, r
 

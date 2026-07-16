@@ -584,6 +584,10 @@ async def contacts_backfill(cid: str, user: dict = Depends(get_current_user)):
         "merchant_name": t.get("merchant"),
         "description": t.get("description"),
         "amount": t.get("amount"),
+        # Pass PFC so the new NO_COUNTERPARTY_PFC gate can filter out
+        # transfers/ATM/fees/interest — otherwise the backfill would create
+        # a bogus "BofA ATM 07/16 ..." contact for every self-transfer.
+        "pfc_primary": t.get("pfc_primary"),
     } for t in missing]
     results = await contact_resolver.resolve_contacts_batch(
         cid, items, ai_fallback_fn=resolve_contact_ai, concurrency=5,
@@ -599,6 +603,7 @@ async def contacts_backfill(cid: str, user: dict = Depends(get_current_user)):
                 {"id": t["id"], "company_id": cid},
                 {"$set": {"contact_id": r["contact_id"],
                           "contact_name": r["contact_name"],
+                          "contact_source": r.get("source"),
                           "updated_at": now}},
             )
             resolved += 1
@@ -606,6 +611,13 @@ async def contacts_backfill(cid: str, user: dict = Depends(get_current_user)):
                 created += 1
                 created_ids.add(r["contact_id"])
         else:
+            # Explicit no_counterparty marker so we know we've evaluated
+            # this row (vs "never scanned yet") and can skip it next time.
+            await db.transactions.update_one(
+                {"id": t["id"], "company_id": cid},
+                {"$set": {"contact_source": r.get("source") or "no_counterparty",
+                          "updated_at": now}},
+            )
             left_null += 1
     return {"scanned": len(missing), "resolved": resolved,
             "created": created, "left_null": left_null}
