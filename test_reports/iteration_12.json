@@ -1,0 +1,27 @@
+{
+  "summary": "Verified UI clarity fix for 254 LLC Needs Review flow + sidebar reorder. Backend /api/companies/{254_id}/transactions?needs_review=true returns exactly 198. Dashboard shows 'Needs Review: 198'. Transactions page: 'Needs Review' tab badge shows 198, 'All' badge shows 500 (paginated), amber banner with 'Why are these already posted?' explanatory text visible with data-testid='txn-review-banner'. Sidebar top-level order verified: Communications(idx 9) < Transactions(idx 10, href=/accounting/transactions) < Settings(idx 11). Clicking Transactions correctly routes to /accounting/transactions. Also validated Marketing Co, LLC (11 review / 134 all) for regression.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Transactions - 'All' tab count badge", "issues": ["Badge shows txns.length (500, capped by backend pagination limit) instead of the true total (1871 for 254 LLC per dashboard). Cosmetic — the specific 'Needs Review' count (198) is correct because it fits within the page limit. Consider surfacing a real total count from backend if accuracy on the 'All' badge matters."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "OPTIONAL: 'All' tab count badge is upper-bounded by backend page size (500). For 254 LLC true total is 1871 but badge shows 500. Consider returning a total count from GET /api/companies/{id}/transactions or use dashboard metric.",
+    "OPTIONAL: nav-link route for Transactions points to /accounting/transactions which triggers auto-enter of the Accounting sub-menu (loc.pathname.startsWith('/accounting/') in Sidebar.jsx effect), so clicking Transactions from the top-level nav collapses the top-level nav into the Accounting drilldown. Works functionally but user may expect top-level nav to stay visible."
+  ],
+  "critical_code_review_comments": [
+    "Sidebar.jsx useEffect auto-switches to Accounting drilldown whenever pathname starts with /accounting/. Because the new top-level 'Transactions' entry routes to /accounting/transactions, clicking it flips the sidebar into Accounting mode and hides the main nav. Consider either using a non-/accounting route, or excluding /accounting/transactions from the auto-enter effect.",
+    "Transactions.jsx: count badge shows txns.length instead of an actual total. When backend paginates (limit=500) this is misleading for large datasets."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "pro@axiom.ai / pro123; 254 LLC id dea036e7-1b29-4589-bc7a-482e9771c22d",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Use company switcher dropdown (top-left button with current company name) to switch companies; the /pro/clients 'Open books' button also works. 254 LLC is a 'Ready' company with 1871 total transactions and 198 needs_review."
+}

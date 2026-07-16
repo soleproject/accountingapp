@@ -21,6 +21,7 @@ const NAV = [
   { to: "/contacts", label: "Contacts", icon: Users },
   { to: "/connections", label: "Connections", icon: Link2 },
   { to: "/communications", label: "Communications", icon: Inbox },
+  { to: "/accounting/transactions", label: "Transactions", icon: ArrowLeftRight },
   { to: "/settings", label: "Settings", icon: Settings2 },
 ];
 

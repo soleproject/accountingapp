@@ -149,6 +149,12 @@ export default function Transactions() {
                 className={`px-3 py-1.5 text-xs font-medium ${filter === f ? "bg-slate-900 text-white" : "text-slate-600"}`}
               >
                 {f === "all" ? "All" : "Needs Review"}
+                {filter === f && (
+                  <span data-testid={`txn-filter-count-${f}`}
+                        className="ml-1.5 px-1.5 py-0.5 rounded bg-white/20 font-mono-num">
+                    {txns.length}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -161,6 +167,18 @@ export default function Transactions() {
           </button>
         </div>
       </div>
+
+      {filter === "review" && (
+        <div data-testid="txn-review-banner"
+             className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <span className="font-semibold">Why are these already posted?</span>{" "}
+          Transfers and other ambiguous Plaid rows are auto-posted to{" "}
+          <span className="font-mono">6999 Uncategorized Expense</span> or{" "}
+          <span className="font-mono">4999 Uncategorized Income</span> so the
+          ledger stays balanced. Reclassify each to a real account (or split it)
+          — the reclassification will reverse the Uncategorized entry and post a new one.
+        </div>
+      )}
 
       {selected.size > 0 && (
         <div className="rounded-md border bg-slate-900 text-white px-4 py-2.5 flex items-center gap-3 flex-wrap">
