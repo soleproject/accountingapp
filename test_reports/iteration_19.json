@@ -1,0 +1,33 @@
+{
+  "summary": "Verified iter19 First-Connect Welcome overlay end-to-end. All 6 acceptance sub-cases (a-f) plus per-company reset pass. (a) Overlay NOT rendered on 501 LLC/254/400/418 (idle or non-accessible → status !== syncing). (b) Overlay renders on freshly-created empty company with a running sync_jobs row, containing 'Welcome', 'setting up your books', and all 3 step badges (Bank connected / Downloading history / AI categorizing). (c) stage=downloading → DL badge amber-active (bg-amber-50 border-amber-200 text-amber-800), AI cat slate-pending; after mongosh updates stage=categorizing (current=120,total=300), DL flips to emerald-done and AI cat to amber-active, verified within ~5s adaptive poll. (d) Progress bar width: null target → width:8% (min fill); percent=40 (from 120/300) → width:40%. (e) Marking sync_jobs.status='completed' → overlay auto-dismisses within ~6s (well under 14s), and stays hidden after full-page reload (sessionStorage axiom.welcome.dismissed.<cid>=1). (f) Manual [data-testid=first-connect-dismiss] click hides overlay immediately and persists across reload. Per-company: after dismissing CIDB, a fresh CIDC with running sync_jobs still renders its own overlay (dismissal flag is per-cid).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/companies/{cid}/sync-status", "issue": "Returns 403 for pro user on companies 254/400/418 (dea036e7…, f9c8af4d…, 456a49e4…) — _require_company denies. This didn't affect overlay logic (pill shows 'failed'), but the SyncPill data-state=failed on companies the pro doesn't own is a UX side-effect worth noting. Not part of this iter's scope."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_19.json"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "FirstConnectWelcome.jsx L40-45: auto-persists dismissal on total_txns>=500 OR status==='idle'. Note: on the very first mount (before any /sync-status response, status is null → status?.status is undefined, not 'idle'), so the flag is NOT falsely set. Good.",
+    "L47-50: correctly short-circuits render when dismissed or when !(isSyncing && total_txns<500). Prevents overlay from appearing on already-populated companies.",
+    "L100-104: progress bar width uses percent when available, else imported/target, else static 8%. Min-clamped at 4% (Math.max(4,…)). Matches spec.",
+    "L109-113: StepBadge stage transitions are correct — DL: done when stage!=='downloading', active when stage==='downloading'; AI: never done in current impl (done={false}), active only when stage==='categorizing'. The 'AI categorizing' badge will never turn emerald in the overlay itself — completion is signaled by overlay auto-hiding when status becomes idle. Acceptable design; noted for future.",
+    "Dashboard.jsx L143-147: FirstConnectWelcome mounted with status/companyId/companyName above the h1 title row — matches spec.",
+    "index.css shimmer keyframes drive the animate-[shimmer_2.4s_ease-in-out_infinite] band on L63 — subtle warm effect, no jank observed.",
+    "SessionStorage key axiom.welcome.dismissed.<cid> correctly namespaced per company; switching companies re-reads the flag via useEffect on [key]."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only)", "frontend": "100% (14/14 assertions across a-f + per-company reset)"},
+  "test_credentials": "pro@axiom.ai / pro123",
+  "seed_data_creation": "Transient: 2 companies (TEST-ITER19-A/B-<ts>) + memberships + default CoA rows + sync_jobs 'running' docs; plus 1 CIDC created mid-test for the per-company reset check. All deleted at end of test (verified: db.companies.find({id:/^TEST-ITER19-/}) returned 0).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "First-Connect Welcome overlay lives at /app/frontend/src/components/FirstConnectWelcome.jsx, rendered in Dashboard.jsx L143. Selectors: [data-testid=first-connect-welcome], [data-testid=first-connect-dismiss]. Route is /dashboard (not /accounting/dashboard). To reproduce: insert sync_jobs {status:'running',progress:{stage:'downloading',current:0,total:null}} for a company with <500 txns, then switch via localStorage.axiom_company_id=<cid> and goto /dashboard. Adaptive poll cadence is 5s syncing / 15s idle. Auto-dismiss uses sessionStorage key axiom.welcome.dismissed.<cid> = '1' — triggered on total_txns>=500 OR status==='idle', OR manual click on dismiss button.",
+  "rca of the issue": "N/A — enhancement verified working as designed."
+}

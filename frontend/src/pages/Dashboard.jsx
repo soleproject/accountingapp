@@ -8,6 +8,7 @@ import {
   Wallet2, FileText, Receipt as ReceiptIcon, Activity,
 } from "lucide-react";
 import SyncPill from "@/components/SyncPill";
+import FirstConnectWelcome from "@/components/FirstConnectWelcome";
 
 const kindLabel = {
   categorize: "Transactions Categorized",
@@ -139,6 +140,12 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6" data-testid={TID.aiPulseSection}>
+      <FirstConnectWelcome
+        status={syncStatus}
+        companyId={currentId}
+        companyName={current?.name}
+      />
+
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="font-heading text-3xl font-bold tracking-tight">Dashboard</h1>

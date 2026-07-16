@@ -44,6 +44,8 @@ export const TID = {
   txnDateTo: "txn-date-to",
   txnFiltersClear: "txn-filters-clear",
   syncPill: "sync-pill",
+  firstConnectWelcome: "first-connect-welcome",
+  firstConnectDismiss: "first-connect-dismiss",
 
   // Reports
   reportTile: "report-tile",

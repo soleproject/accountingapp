@@ -20,6 +20,12 @@ body {
 .font-heading { font-family: 'Manrope', system-ui, sans-serif; letter-spacing: -0.02em; }
 .font-mono-num { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
 
+/* Shimmer used by FirstConnectWelcome — cheap Tailwind-adjacent keyframe */
+@keyframes shimmer {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(400%); }
+}
+
 @layer base {
   :root {
     --background: 220 14% 97%;
