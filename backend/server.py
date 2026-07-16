@@ -2531,7 +2531,16 @@ async def startup():
     import pfc_resolver
     await pfc_resolver.ensure_pfc_override_indexes()
     import job_queue
+    import sync_tasks
     await job_queue.ensure_jobs_indexes()
+    sync_tasks.register_all()
+    # Any job left in queued/running from a previous process is stuck —
+    # mark as failed so the Sync Pill doesn't display "syncing forever".
+    # Retries are idempotent (Plaid dedupe key), so the user can just click
+    # Re-sync again.
+    stuck = await job_queue.reconcile_stuck_jobs()
+    if stuck:
+        print(f"[startup] reconciled {stuck} stuck sync job(s) from prior process")
 
 
 @app.on_event("shutdown")

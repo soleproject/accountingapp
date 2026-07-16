@@ -1,32 +1,20 @@
-"""Arq worker — executes long-running Plaid tasks off the API request thread.
+"""In-process sync tasks — executed by `job_queue.enqueue_job()`.
 
-Tasks are named to match `job_queue.enqueue_job(kind=...)`. Every task follows
-the same shape:
-    1. mark job status='running' + stamp started_at
-    2. do the work — may push progress updates
-    3. on success → status='completed', result=<payload>, finished_at
-       on failure → status='failed', error=<msg>, finished_at (arq will retry)
+Replaces the previous `worker.py` arq module. Same task functions, just no
+`ctx` first argument (no arq redis pool) and no `WorkerSettings` class.
 
-Idempotency: our writes dedupe on (company_id, plaid_transaction_id) unique
-index, so a retry after a mid-flight worker crash never double-posts.
+Every task manages its own status transitions via `job_queue.update_job`;
+the enqueue wrapper only catches un-caught exceptions as a safety net.
 """
 from __future__ import annotations
-import os
-import asyncio
 import traceback
-from typing import Any
-
-from arq.connections import RedisSettings
 
 from db import db, now_iso
 import job_queue
 import plaid_service
 import plaid_connect
-import categorizer
 import contact_resolver
 from ai_service import categorize_transaction as _categorize_fn, resolve_contact_ai
-
-_REDIS_URL = os.environ["REDIS_URL"]
 
 
 # ---------------------------------------------------------------------------
@@ -63,7 +51,7 @@ async def _is_period_closed(company_id: str, txn_date: str) -> bool:
 # Task: run one Plaid sync cycle (cursor-based delta)
 # ---------------------------------------------------------------------------
 
-async def plaid_manual_sync(ctx: dict, job_id: str, company_id: str) -> None:
+async def plaid_manual_sync(job_id: str, company_id: str) -> None:
     """Cursor-based delta sync — the "hey, anything new since last time?"
     version. Fast, typically <2 seconds. Runs the PFC-first pipeline for
     every new row.
@@ -85,7 +73,7 @@ async def plaid_manual_sync(ctx: dict, job_id: str, company_id: str) -> None:
 # Task: reset cursor + full re-pull (used to rescue stuck items)
 # ---------------------------------------------------------------------------
 
-async def plaid_reset_resync(ctx: dict, job_id: str, company_id: str) -> None:
+async def plaid_reset_resync(job_id: str, company_id: str) -> None:
     """Nuclear option — nulls the stored Plaid cursor and re-pages the entire
     730-day history through the pipeline. Dedupes on
     `(company_id, plaid_transaction_id)`, so it's safe to re-run.
@@ -107,15 +95,15 @@ async def plaid_reset_resync(ctx: dict, job_id: str, company_id: str) -> None:
 # Task: contact backfill (rare — used after a schema/rule change)
 # ---------------------------------------------------------------------------
 
-async def plaid_contact_backfill(ctx: dict, job_id: str, company_id: str) -> None:
+async def plaid_contact_backfill(job_id: str, company_id: str) -> None:
     await _mark_started(job_id)
     try:
-        # Import lazily so the worker doesn't drag in FastAPI middleware.
+        # Import lazily so the task doesn't pull in FastAPI middleware at
+        # module import time.
         from server import _run_contact_backfill  # type: ignore
         summary = await _run_contact_backfill(company_id)
         await _mark_done(job_id, summary)
     except ImportError:
-        # Fallback: run inline via contact_resolver
         assigned = await _run_contact_backfill_inline(company_id)
         await _mark_done(job_id, {"assigned_contact_id": assigned})
     except Exception:  # noqa: BLE001
@@ -158,8 +146,7 @@ async def _run_contact_backfill_inline(company_id: str) -> int:
 async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool,
                     job_id: str | None = None) -> int:
     """Pull txns from Plaid + route through the PFC pipeline. Returns count
-    of inserted rows. Reuses the exact same helpers the API used inline —
-    just now runs off the request thread.
+    of inserted rows.
 
     Emits progress updates to `sync_jobs.progress` at stage boundaries so the
     Dashboard Sync Pill can display "Downloading…" / "Categorizing X of Y".
@@ -201,7 +188,6 @@ async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool,
         return 0
     mappings = item.get("account_mappings") or {}
 
-    # Group by mapped ledger bank
     by_bank: dict[str, list[dict]] = {}
     for t in synced["added"]:
         mapping = mappings.get(t["account_id"])
@@ -227,25 +213,19 @@ async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool,
 
 
 # ---------------------------------------------------------------------------
-# Arq worker settings
+# Registration — called from FastAPI startup
 # ---------------------------------------------------------------------------
 
-async def _on_startup(ctx: dict) -> None:
-    await job_queue.ensure_jobs_indexes()
+def register_all() -> None:
+    """Register every task with the in-process job queue. Idempotent."""
+    job_queue.register_task("plaid_manual_sync", plaid_manual_sync)
+    job_queue.register_task("plaid_reset_resync", plaid_reset_resync)
+    job_queue.register_task("plaid_contact_backfill", plaid_contact_backfill)
 
 
-class WorkerSettings:
-    """Consumed by `arq worker.WorkerSettings` via supervisor."""
-    functions = [
-        plaid_manual_sync,
-        plaid_reset_resync,
-        plaid_contact_backfill,
-    ]
-    on_startup = _on_startup
-    redis_settings = RedisSettings.from_dsn(_REDIS_URL)
-    # Concurrency: 20 tasks per worker. Under load add more replicas rather
-    # than raise this — MongoDB has ~100 connections/pod default.
-    max_jobs = 20
-    # Retries — task lasting >600s is likely deadlocked.
-    job_timeout = 600
-    max_tries = 3
+__all__ = [
+    "plaid_manual_sync",
+    "plaid_reset_resync",
+    "plaid_contact_backfill",
+    "register_all",
+]
