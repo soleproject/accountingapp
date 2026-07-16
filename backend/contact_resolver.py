@@ -94,6 +94,71 @@ async def ensure_contact_index() -> None:
         )
     except Exception:  # noqa: BLE001 — likely already exists with same spec
         pass
+    # Learning cache — every AI extraction gets remembered by a signature so
+    # future rows with the same shape skip the LLM. Unique per (company, sig).
+    try:
+        await db.contact_learning_cache.create_index(
+            [("company_id", 1), ("signature", 1)],
+            unique=True, name="learning_cache_uniq",
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _cache_signature(text: str | None) -> str:
+    """Stable key for the learning cache.
+
+    Strips digits + per-row punctuation so identical bank memos with different
+    ref numbers hash to the same key. E.g.
+        'CITI CARD ONLINE DES:PAYMENT ID:XXX INDN:X CO ID:CITICTP WEB'
+        'CITI CARD ONLINE DES:PAYMENT ID:YYY INDN:Y CO ID:CITICTP WEB'
+    both → 'citi card online despayment'
+    """
+    if not text:
+        return ""
+    s = re.sub(r"\d+", "", text.lower())
+    s = re.sub(r"[^a-z\s]+", " ", s)
+    return " ".join(s.split()[:4])[:40]
+
+
+async def _lookup_learning_cache(company_id: str, signature: str) -> dict | None:
+    if not signature:
+        return None
+    doc = await db.contact_learning_cache.find_one(
+        {"company_id": company_id, "signature": signature},
+    )
+    if not doc:
+        return None
+    cid = doc.get("contact_id")
+    # Sentinel for "AI decided no counterparty" — cache it too so repeat rows
+    # don't burn LLM calls (e.g. "Monthly Maintenance Fee" seen 24 times/yr).
+    if cid == "__none__":
+        return {"contact_id": None, "contact_name": None}
+    contact = await db.contacts.find_one({"id": cid, "company_id": company_id})
+    if not contact:
+        return None
+    return {"contact_id": contact["id"], "contact_name": contact["name"]}
+
+
+async def _save_to_learning_cache(company_id: str, signature: str,
+                                  contact_id: str, contact_name: str) -> None:
+    if not signature or not contact_id:
+        return
+    now = now_iso()
+    try:
+        await db.contact_learning_cache.update_one(
+            {"company_id": company_id, "signature": signature},
+            {"$set": {
+                "contact_id": contact_id, "contact_name": contact_name,
+                "updated_at": now,
+             },
+             "$inc": {"hit_count": 1},
+             "$setOnInsert": {"created_at": now},
+            },
+            upsert=True,
+        )
+    except Exception:  # noqa: BLE001 — cache miss is safe, don't kill the sync
+        pass
 
 
 async def _insert_contact(company_id: str, contact_name: str, source: str) -> dict:
@@ -173,6 +238,22 @@ async def resolve_contact(
     if not desc or ai_fallback_fn is None:
         return {"contact_id": None, "contact_name": None, "source": "no_counterparty"}
 
+    # Learning-cache lookup — every prior AI extraction for this company
+    # was saved under a digit-stripped signature. Cache hit = skip LLM.
+    signature = _cache_signature(desc)
+    cached = await _lookup_learning_cache(company_id, signature)
+    if cached is not None:
+        # Bump hit counter (fire-and-forget).
+        cid_val = cached["contact_id"] or "__none__"
+        await _save_to_learning_cache(
+            company_id, signature, cid_val, cached.get("contact_name") or "",
+        )
+        if cached["contact_id"]:
+            return {"contact_id": cached["contact_id"],
+                    "contact_name": cached["contact_name"],
+                    "source": "cache"}
+        return {"contact_id": None, "contact_name": None, "source": "no_counterparty"}
+
     # Prefer batch-scope snapshot; fall back to a fresh scan for one-off callers.
     if existing_snapshot is not None:
         existing_contacts = existing_snapshot
@@ -188,17 +269,23 @@ async def resolve_contact(
         return {"contact_id": None, "contact_name": None, "source": "no_counterparty"}
 
     if not ai.get("has_counterparty"):
+        # Cache the negative result too — otherwise every future
+        # "Monthly Maintenance Fee" row would burn another LLM call.
+        await _save_to_learning_cache(company_id, signature, "__none__", "")
         return {"contact_id": None, "contact_name": None, "source": "no_counterparty"}
 
-    # AI matched an existing contact by id
+    # AI matched an existing contact by id — save to learning cache too so
+    # future rows with the same signature bypass the LLM.
     if ai.get("match_existing_id"):
         matched = next((c for c in existing_contacts if c["id"] == ai["match_existing_id"]), None)
         if matched:
+            await _save_to_learning_cache(company_id, signature, matched["id"], matched["name"])
             return {"contact_id": matched["id"], "contact_name": matched["name"],
                     "source": "ai_match"}
 
     extracted = ai.get("extracted_name")
     if not extracted:
+        await _save_to_learning_cache(company_id, signature, "__none__", "")
         return {"contact_id": None, "contact_name": None, "source": "no_counterparty"}
 
     # Deterministic normalized-key match BEFORE inserting (defense against
@@ -206,10 +293,12 @@ async def resolve_contact(
     # identical). This is the single source of truth for "same vendor?".
     existing = await _find_by_normalized(company_id, extracted)
     if existing:
+        await _save_to_learning_cache(company_id, signature, existing["id"], existing["name"])
         return {"contact_id": existing["id"], "contact_name": existing["name"],
                 "source": "ai_match"}
 
     created = await _insert_contact(company_id, extracted, source="ai_new")
+    await _save_to_learning_cache(company_id, signature, created["id"], created["name"])
     return {"contact_id": created["id"], "contact_name": created["name"],
             "source": "ai_new"}
 
