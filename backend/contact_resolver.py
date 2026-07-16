@@ -42,14 +42,12 @@ NO_COUNTERPARTY_PFC = frozenset({
 # stripping, every "BofA ATM 07/16 #XXXXX3176" becomes its own contact.
 # These are conservative — anything that doesn't match passes through.
 _NOISE_PATTERNS = [
-    re.compile(r"\s*\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b\s*"),   # dates 07/16 / 07/16/26
-    re.compile(r"\s*#\s*[X\d]{3,}\s*"),                       # #XXXXX3176 or #12345
-    re.compile(r"\s+PPD\s+ID\s*:?\s*\d+", re.I),              # ACH PPD ID:12345
-    re.compile(r"\s+CO\s+ID\s*:?\s*\d+", re.I),               # CO ID 12345
-    re.compile(r"\s+TRACE\s*#?\s*\d+", re.I),                 # TRACE #123456
-    re.compile(r"\s+REF\s*#?\s*\d+", re.I),                   # REF#123
-    re.compile(r"\s+CONF\s*#?\s*\d+", re.I),                  # CONF#123
-    re.compile(r"\s+\d{8,}\s*"),                              # bare 8+ digit runs
+    re.compile(r"\s*\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b\s*"),      # dates 07/16 / 07/16/26
+    re.compile(r"\s*#\s*[A-Za-z0-9]{3,}\s*"),                    # #XXXXX3176, #x3x3y0o2p, #12345
+    re.compile(r"\s+PPD\s+ID\s*:?\s*\d+", re.I),                 # ACH PPD ID:12345
+    re.compile(r"\s+CO\s+ID\s*:?\s*\d+", re.I),                  # CO ID 12345
+    re.compile(r"\s+(?:CONF|REF|TRACE)\s*#?\s*[A-Za-z0-9]+", re.I),  # CONF# / REF# / TRACE# — alphanumeric
+    re.compile(r"\s+\d{8,}\s*"),                                 # bare 8+ digit runs
 ]
 
 
