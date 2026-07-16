@@ -74,8 +74,9 @@ export default function Transactions() {
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize]);
-  // Reset to page 1 whenever the filter or page size changes.
-  useEffect(() => { setPage(1); /* eslint-disable-next-line */ }, [filter, pageSize, currentId]);
+  // Reset page when switching company (single-purpose, no duplicate fetch when
+  // page is already 1).
+  useEffect(() => { setPage(p => (p === 1 ? p : 1)); }, [currentId]);
 
   const [params] = useSearchParams();
   useEffect(() => {
@@ -169,7 +170,7 @@ export default function Transactions() {
               <button
                 key={f}
                 data-testid={f === "review" ? TID.txnFilterReview : `txn-filter-${f}`}
-                onClick={() => setFilter(f)}
+                onClick={() => { setFilter(f); setPage(1); }}
                 className={`px-3 py-1.5 text-xs font-medium ${filter === f ? "bg-slate-900 text-white" : "text-slate-600"}`}
               >
                 {f === "all" ? "All" : "Needs Review"}
@@ -328,7 +329,7 @@ function PaginationBar({ pagination, pageSize, setPageSize, page, setPage, visib
           <select
             data-testid={TID.txnPageSize}
             value={pageSize}
-            onChange={(e) => setPageSize(parseInt(e.target.value, 10))}
+            onChange={(e) => { setPageSize(parseInt(e.target.value, 10)); setPage(1); }}
             className="border rounded px-1.5 py-0.5 bg-white text-xs font-mono-num"
           >
             {PAGE_SIZE_OPTIONS.map(n => <option key={n} value={n}>{n}</option>)}

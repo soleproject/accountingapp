@@ -816,7 +816,7 @@ async def list_transactions(
     page = max(1, int(page or 1))
     limit = max(0, min(int(limit or 0), 5000))
     total = await db.transactions.count_documents(q)
-    cursor = db.transactions.find(q).sort("date", -1)
+    cursor = db.transactions.find(q).sort([("date", -1), ("_id", -1)])
     if limit > 0:
         skip = (page - 1) * limit
         cursor = cursor.skip(skip).limit(limit)
