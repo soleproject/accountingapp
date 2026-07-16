@@ -19,6 +19,7 @@ from typing import Awaitable, Callable
 
 from db import db, now_iso
 import merchant_cache
+import merchant_rules
 from plaid_connect import _ensure_account  # reuse
 
 
@@ -53,6 +54,18 @@ async def ensure_uncategorized_accounts(company_id: str) -> tuple[dict, dict]:
         company_id, "4999", "Uncategorized Income", "revenue", "operating_revenue",
     )
     return exp, inc
+
+
+async def ensure_transfer_clearing_account(company_id: str) -> dict:
+    """Bank-to-bank transfer clearing/suspense account. Internal transfers
+    (Online Banking transfer, WELLS FARGO DDA TO DDA, etc.) post here until an
+    accountant manually pairs the two legs. This prevents ~10-20% of raw Plaid
+    volume from being mis-tagged as revenue or expense (which was skewing
+    355 LLC's balance sheet by $15K–$20K/month).
+    """
+    return await _ensure_account(
+        company_id, "1099", "Bank Transfer Clearing", "asset", "current_asset",
+    )
 
 
 # ---- Grouping --------------------------------------------------------------
@@ -172,6 +185,24 @@ def decide_posting(
         "needs_review": force_review,
         "posted": True,
         "ai_source": "memory" if result.get("cache_hit") else "ai",
+    }
+
+
+def decide_posting_transfer(transfer_acct: dict) -> dict:
+    """Doc-fragment for internal bank-to-bank transfers. Posts to a suspense
+    clearing account with needs_review=True so an accountant pairs the two
+    legs. Keeps transfers out of income/expense — the single biggest source
+    of report skew on raw Plaid data.
+    """
+    return {
+        "category_account_id": transfer_acct["id"],
+        "category_account_code": transfer_acct["code"],
+        "category_account_name": transfer_acct["name"],
+        "ai_confidence": 1.00,
+        "ai_reasoning": "Internal bank transfer — pair with matching leg.",
+        "needs_review": True,
+        "posted": True,
+        "ai_source": "rule",
     }
 
 

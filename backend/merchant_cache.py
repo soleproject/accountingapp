@@ -14,6 +14,7 @@ import re
 from typing import Awaitable, Callable
 
 from db import db, now_iso
+import merchant_rules
 
 
 # ---------- Normalization -----------------------------------------------------
@@ -186,7 +187,21 @@ async def categorize_with_cache(
 ) -> dict:
     """Cache-first categorization. On cache hit, no LLM call. On miss, calls the
     supplied LLM function and caches the result before returning.
+
+    Precedence:
+      1. Deterministic merchant/regex rules (`merchant_rules.rules_lookup`) —
+         zero-cost, 100% confidence, no LLM. This is Rocketbooks' core lever.
+      2. Per-org learned cache (`lookup`) — user overrides + prior LLM results.
+      3. LLM fallback — only when the first two miss.
     """
+    # 1) Rules-first — deterministic, no cost, no cache pollution.
+    rule = merchant_rules.rules_lookup(merchant, description, amount)
+    if rule:
+        # Verify the target account exists in this org's COA; if not, fall
+        # through so we don't return a code the caller can't use.
+        if any(a["code"] == rule["account_code"] for a in coa):
+            return rule
+
     hit = await lookup(company_id, merchant)
     if hit:
         return hit

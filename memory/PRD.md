@@ -75,6 +75,7 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   - **Per-org `auto_post_threshold`** (default 0.80, editable via PATCH `/settings/auto-post-threshold`).
   - **Meal-cap guard**: Any meal >$150 auto-flags for review even at 0.98 confidence — catches Plaid mis-tags of supplier payments as meals.
   - **`POST /contacts/backfill`** idempotent one-time migration for existing txns. Ran on Clean Set: **131/131 txns now have `contact_id`**, 131 unique contacts created, zero AI cost (fast-path only). Tests: 15/15 integration + 8/8 unit + 8/8 plaid_connect regression pass.
+- ✅ **Rocketbooks-style deterministic merchant rules (Feb 2026)** — New `merchant_rules.py` module with a 200+ entry curated US-merchant → GAAP-code dictionary and regex patterns for bank fees, interest, and internal transfers. Wired into the categorization pipeline as **rules → cache → LLM → uncategorized-bucket** precedence. Measured against real Rocketbooks-labeled Plaid CSV (2,363 txns): **82.8% deterministic match rate at 0.95 confidence with zero LLM cost**. `is_internal_transfer()` detects "Online Banking transfer…", "WELLS FARGO DDA TO DDA", "TFR TO/FROM" patterns and routes those to a new `1099 Bank Transfer Clearing` asset account with `needs_review=true` — fixes the 355 LLC balance-sheet skew where $15-20K internal transfers were being mis-tagged as income/expense. New tests in `tests/test_merchant_rules_vs_rocketbooks.py` (43 spot checks + baseline coverage regression at ≥75%).
 
 ## Prioritized Backlog
 

@@ -182,6 +182,7 @@ async def sync_plaid_history_for_account(
     import merchant_cache  # local import to avoid cycles
     import categorizer
     import contact_resolver
+    import merchant_rules
     from ai_service import resolve_contact_ai
     try:
         synced = plaid_service.sync_transactions(item["access_token"], None)
@@ -213,41 +214,56 @@ async def sync_plaid_history_for_account(
             continue
         merchant = t.get("merchant_name") or t.get("name") or "Unknown"
         pfc = t.get("personal_finance_category") if isinstance(t, dict) else None
+        is_xfer = merchant_rules.is_internal_transfer(t.get("name") or "")
         candidates.append({
             "plaid_txn": t, "merchant": merchant, "description": t["name"],
             "amount": t["amount"], "merchant_name": t.get("merchant_name"),
             "pfc": pfc, "pfc_primary": (pfc or {}).get("primary"),
-            "date": t["date"],
+            "date": t["date"], "is_transfer": is_xfer,
         })
 
     if not candidates:
         return [], skipped
 
+    # Split transfers from real categorization work — transfers skip contact
+    # resolution AND LLM categorization entirely (they post to Bank Transfer
+    # Clearing with needs_review=True).
+    transfer_cands = [c for c in candidates if c.get("is_transfer")]
+    real_cands = [c for c in candidates if not c.get("is_transfer")]
+
     # Resolve contacts in parallel (fast-path skips AI for merchant_name rows)
-    contact_results = await contact_resolver.resolve_contacts_batch(
-        cid, candidates, ai_fallback_fn=resolve_contact_ai, concurrency=5,
-    )
-    for cand, cr in zip(candidates, contact_results):
-        cand["contact_id"] = cr.get("contact_id")
-        cand["contact_name"] = cr.get("contact_name")
-        cand["contact_source"] = cr.get("source")
+    if real_cands:
+        contact_results = await contact_resolver.resolve_contacts_batch(
+            cid, real_cands, ai_fallback_fn=resolve_contact_ai, concurrency=5,
+        )
+        for cand, cr in zip(real_cands, contact_results):
+            cand["contact_id"] = cr.get("contact_id")
+            cand["contact_name"] = cr.get("contact_name")
+            cand["contact_source"] = cr.get("source")
 
     # Group by (contact OR normalized merchant, direction) → 1 LLM per group
     per_item_result = await categorizer.categorize_batch_grouped(
-        cid, candidates, coa, categorize_fn, concurrency=10,
-    )
+        cid, real_cands, coa, categorize_fn, concurrency=10,
+    ) if real_cands else []
+    result_by_id = {id(c): r for c, r in zip(real_cands, per_item_result)}
 
-    # Ensure Uncategorized buckets + per-org threshold
+    # Ensure Uncategorized buckets + per-org threshold + transfer clearing
     uncat_exp, uncat_inc = await categorizer.ensure_uncategorized_accounts(cid)
+    transfer_acct = await categorizer.ensure_transfer_clearing_account(cid)
     accts = await db.accounts.find({"company_id": cid}).to_list(2000)  # refresh (uncats may be new)
     threshold = await categorizer.get_auto_post_threshold(cid)
 
     inserted: list[dict] = []
-    for cand, r in zip(candidates, per_item_result):
+    for cand in candidates:
         t = cand["plaid_txn"]
-        post = categorizer.decide_posting(
-            r, threshold, uncat_exp, uncat_inc, accts, cand["amount"],
-        )
+        if cand.get("is_transfer"):
+            post = categorizer.decide_posting_transfer(transfer_acct)
+            r = {"cache_hit": False}
+        else:
+            r = result_by_id[id(cand)]
+            post = categorizer.decide_posting(
+                r, threshold, uncat_exp, uncat_inc, accts, cand["amount"],
+            )
         inserted.append({
             "id": str(__import__("uuid").uuid4()), "company_id": cid, "date": t["date"],
             "description": t["name"], "merchant": cand["merchant"], "amount": t["amount"],
