@@ -1,0 +1,24 @@
+{
+  "summary": "Verified bug fix: switching companies now resets ALL toolbar filters (search, date range, needs-review chip) and returns to page 1. Also verified the amber 'filtered' badge feature (appears on any active filter, disappears when cleared, and shows an inline 'clear' link when total=0). All 8 UI assertions passed; backend confirms 400,LLC has 1,871 txns.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Company-switch effect at Transactions.jsx:102-106 correctly resets all filter state; useEffect deps on [currentId] is correct.",
+    "Note: the required_credentials list mentions '254, LLC (id dea036e7-...)' but that company does NOT exist in the pro@axiom.ai account (available: Marketing Co LLC, NextGen LLC, Bright Beans, 400 LLC, TEST_*). Testing used Marketing Co,LLC → 400,LLC which validates the same flow. Not a bug in the fix itself — worth clarifying in future test specs or seeding the referenced company.",
+    "Transactions.jsx is 583 lines — still under the 700 line guideline but the sub-modals (ManualTxnModal, SplitModal, LinkModal) could be extracted for maintainability."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "100%", "frontend": "100%" },
+  "test_credentials": "pro@axiom.ai / pro123",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Filter-reset-on-company-switch fix works. Pro user does not have '254, LLC' — the test flow substituted 'Marketing Co, LLC' as the pre-switch company (134 txns, filtered down to 2 with search='starbucks' + date range Jun 2026 + Needs Review) then switched to '400, LLC' via [data-testid=company-switcher] → get_by_text('400, LLC', exact=True). After switch: search='', date_from='', date_to='', filter chip='All', indicator='Showing 1–250 of 1,871'. The amber 'filtered' badge behaves correctly (present when any of search/date/review active; absent otherwise; renders inline 'clear' button when total=0).",
+  "rca of the issue": "Original bug: sticky filters across company switches. Fix at Transactions.jsx lines 102-106 adds a useEffect on [currentId] that resets search/debouncedSearch/dateFrom/dateTo/filter/page. Verified in-browser end-to-end."
+}

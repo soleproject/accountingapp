@@ -93,8 +93,17 @@ export default function Transactions() {
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize, debouncedSearch, dateFrom, dateTo]);
-  // Reset page when switching company or when the filter set narrows/widens.
-  useEffect(() => { setPage(p => (p === 1 ? p : 1)); }, [currentId, debouncedSearch, dateFrom, dateTo]);
+  // Reset page when filters narrow/widen.
+  useEffect(() => { setPage(p => (p === 1 ? p : 1)); }, [debouncedSearch, dateFrom, dateTo]);
+  // Reset ALL filter state on company switch — otherwise sticky filters from
+  // the previous company (e.g. a date range) hide most rows on the new one
+  // and users think the sync failed. (Real bug: 400 LLC had 1871 rows but a
+  // sticky "last month" date filter from a prior company was masking them.)
+  useEffect(() => {
+    setSearch(""); setDebouncedSearch("");
+    setDateFrom(""); setDateTo("");
+    setFilter("all"); setPage(1);
+  }, [currentId]);
 
   const clearFilters = () => {
     setSearch(""); setDateFrom(""); setDateTo(""); setFilter("all");
@@ -370,6 +379,8 @@ export default function Transactions() {
           page={page}
           setPage={setPage}
           visibleCount={txns.length}
+          filtersActive={filtersActive}
+          onClearFilters={clearFilters}
         />
       </div>
 
@@ -380,7 +391,7 @@ export default function Transactions() {
   );
 }
 
-function PaginationBar({ pagination, pageSize, setPageSize, page, setPage, visibleCount }) {
+function PaginationBar({ pagination, pageSize, setPageSize, page, setPage, visibleCount, filtersActive, onClearFilters }) {
   const total = pagination?.total || 0;
   const pages = Math.max(1, pagination?.pages || 1);
   const currentPage = Math.min(pages, Math.max(1, pagination?.page || page));
@@ -392,13 +403,21 @@ function PaginationBar({ pagination, pageSize, setPageSize, page, setPage, visib
 
   return (
     <div className="flex items-center justify-between gap-3 flex-wrap border-t bg-slate-50/60 px-4 py-2.5">
-      <div className="flex items-center gap-2 text-xs text-slate-600">
+      <div className="flex items-center gap-2 text-xs text-slate-600 flex-wrap">
         <span data-testid={TID.txnPageIndicator}>
           {total === 0
-            ? "No transactions"
+            ? (filtersActive ? "No transactions match these filters" : "No transactions")
             : <>Showing <span className="font-mono-num font-medium text-slate-900">{startIdx.toLocaleString()}</span>–<span className="font-mono-num font-medium text-slate-900">{endIdx.toLocaleString()}</span> of <span className="font-mono-num font-medium text-slate-900">{total.toLocaleString()}</span></>
           }
         </span>
+        {filtersActive && (
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-medium">
+            filtered
+            {onClearFilters && total === 0 && (
+              <button onClick={onClearFilters} className="ml-1 underline">clear</button>
+            )}
+          </span>
+        )}
         <span className="text-slate-300">·</span>
         <label className="inline-flex items-center gap-1.5">
           <span className="text-slate-500">Rows</span>
