@@ -1821,37 +1821,46 @@ async def plaid_webhook(payload: dict):
 
 @api.post("/companies/{cid}/plaid/reset-and-resync")
 async def plaid_reset_and_resync(cid: str, user: dict = Depends(get_current_user)):
-    """Nuclear option for stuck Plaid items — reset the stored cursor to null and
-    re-run `/transactions/sync` from Plaid's earliest available point.
-
-    Use case: on initial link the institution had only 30 days ready; Plaid's
-    HISTORICAL_UPDATE webhook was missed (webhook_url unset, or firewall
-    dropped it) so we're stuck at page 1. Resetting the cursor forces Plaid to
-    re-page the full 730-day history it has now compiled. Dedup guards on
-    `(company_id, plaid_transaction_id)` prevent duplicate inserts.
+    """Enqueue a full-history re-pull. Returns immediately with a job_id so the
+    HTTP request never exceeds the ingress timeout. Poll `GET /jobs/{job_id}`
+    for progress. Idempotent — dedupes on `(company_id, plaid_transaction_id)`.
     """
     await _require_company(user, cid)
     item = await db.plaid_items.find_one({"company_id": cid})
     if not item:
         raise HTTPException(400, "No Plaid item linked for this company")
-    await db.plaid_items.update_one(
-        {"id": item["id"]}, {"$set": {"cursor": None, "updated_at": now_iso()}},
+    from job_queue import enqueue_job
+    job_id = await enqueue_job(
+        "plaid_reset_resync", cid, user_id=user["id"],
     )
-    # Reload with cursor=None
-    item = await db.plaid_items.find_one({"id": item["id"]})
-    imported = await _sync_and_import(cid, item)
-    return {"reset": True, "imported": imported}
+    return {"job_id": job_id, "status": "queued"}
 
 
 @api.post("/companies/{cid}/plaid/manual-sync")
 async def plaid_manual_sync(cid: str, user: dict = Depends(get_current_user)):
-    """Force a Plaid sync (useful for demoing webhooks locally)."""
+    """Enqueue a cursor-based delta sync. Returns immediately with job_id."""
     await _require_company(user, cid)
     item = await db.plaid_items.find_one({"company_id": cid})
     if not item:
         raise HTTPException(400, "No Plaid item linked for this company")
-    imported = await _sync_and_import(cid, item)
-    return {"imported": imported}
+    from job_queue import enqueue_job
+    job_id = await enqueue_job(
+        "plaid_manual_sync", cid, user_id=user["id"],
+    )
+    return {"job_id": job_id, "status": "queued"}
+
+
+@api.get("/jobs/{job_id}")
+async def get_job_status(job_id: str, user: dict = Depends(get_current_user)):
+    """Return the current status of an async job. Accountants can see progress
+    of the manual-sync / reset-and-resync they kicked off. Company access is
+    enforced so a user can't peek at another tenant's job."""
+    from job_queue import get_job
+    doc = await get_job(job_id)
+    if not doc:
+        raise HTTPException(404, "Job not found")
+    await _require_company(user, doc["company_id"])
+    return doc
 
 
 @api.get("/companies/{cid}/plaid/accounts")
@@ -2319,6 +2328,8 @@ async def startup():
     await contact_resolver.ensure_contact_index()
     import pfc_resolver
     await pfc_resolver.ensure_pfc_override_indexes()
+    import job_queue
+    await job_queue.ensure_jobs_indexes()
 
 
 @app.on_event("shutdown")

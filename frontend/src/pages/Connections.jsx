@@ -36,15 +36,42 @@ export default function Connections() {
     loadStatus();
   };
 
+  const [activeJob, setActiveJob] = useState(null);   // {job_id, status, kind, result?}
+
+  // Poll active job every 2s until it completes/fails.
+  useEffect(() => {
+    if (!activeJob?.job_id || activeJob.status === "completed" || activeJob.status === "failed") {
+      return undefined;
+    }
+    const t = setInterval(async () => {
+      try {
+        const r = await api.get(`/jobs/${activeJob.job_id}`);
+        setActiveJob(r.data);
+        if (r.data.status === "completed") {
+          toast.success(
+            `${r.data.kind === "plaid_reset_resync" ? "Full re-sync" : "Sync"} complete — ` +
+            `imported ${r.data.result?.imported ?? 0} transaction(s)`
+          );
+          loadStatus();
+          clearInterval(t);
+        } else if (r.data.status === "failed") {
+          toast.error(`Sync failed — ${(r.data.error || "").split(String.fromCharCode(10)).slice(-2, -1)[0] || "check backend logs"}`);
+          clearInterval(t);
+        }
+      } catch (e) { /* keep polling; transient errors are OK */ }
+    }, 2000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeJob?.job_id, activeJob?.status]);
+
   const manualSync = async () => {
     setSyncing(true);
     try {
       const r = await api.post(`/companies/${currentId}/plaid/manual-sync`);
-      toast.success(`Synced ${r.data.imported} new transactions from Plaid`);
-      setImported(v => v + r.data.imported);
-      loadStatus();
+      setActiveJob({ job_id: r.data.job_id, status: "queued", kind: "plaid_manual_sync" });
+      toast.info("Sync queued — running in the background");
     } catch (e) {
-      toast.error(`Sync failed: ${e.response?.data?.detail || e.message}`);
+      toast.error(`Failed to queue sync: ${e.response?.data?.detail || e.message}`);
     } finally { setSyncing(false); }
   };
 
@@ -53,15 +80,16 @@ export default function Connections() {
       "Reset Plaid cursor and re-pull the entire transaction history?\n\n" +
       "Use this if your initial connection only imported the last ~30 days " +
       "(happens when Plaid's HISTORICAL_UPDATE webhook is missed). Duplicates " +
-      "are auto-deduped, so this is safe."
+      "are auto-deduped, so this is safe. Runs in the background — you can " +
+      "keep working while it processes."
     )) return;
     setSyncing(true);
     try {
       const r = await api.post(`/companies/${currentId}/plaid/reset-and-resync`);
-      toast.success(`Re-imported ${r.data.imported} transactions from full history`);
-      loadStatus();
+      setActiveJob({ job_id: r.data.job_id, status: "queued", kind: "plaid_reset_resync" });
+      toast.info("Full re-sync queued — this may take up to a minute");
     } catch (e) {
-      toast.error(`Reset-and-resync failed: ${e.response?.data?.detail || e.message}`);
+      toast.error(`Failed to queue re-sync: ${e.response?.data?.detail || e.message}`);
     } finally { setSyncing(false); }
   };
 
@@ -128,13 +156,31 @@ export default function Connections() {
             {syncing ? "Syncing…" : "Manual Sync (webhook fallback)"}
           </button>
           {status.linked && (
-            <button data-testid="plaid-reset-resync-btn" onClick={resetResync} disabled={syncing}
+            <button data-testid="plaid-reset-resync-btn" onClick={resetResync} disabled={syncing || (activeJob && activeJob.status !== "completed" && activeJob.status !== "failed")}
                     className="text-xs px-3 py-1 rounded-md border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-50"
                     title="Nulls the stored cursor and re-pulls Plaid's entire 730-day history. Use when only ~30 days imported at connect time.">
               Re-sync full history
             </button>
           )}
         </div>
+
+        {activeJob && activeJob.status !== "completed" && activeJob.status !== "failed" && (
+          <div data-testid="plaid-active-job"
+               className="flex items-center gap-2 text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-md px-3 py-1.5">
+            <Loader2 size={14} className="animate-spin text-cyan-600" />
+            <span className="font-medium">
+              {activeJob.kind === "plaid_reset_resync"
+                ? "Full history re-sync"
+                : "Syncing transactions"}
+            </span>
+            <span className="text-slate-500">
+              · status <span className="font-mono-num">{activeJob.status}</span>
+            </span>
+            <span className="ml-auto text-slate-400 font-mono-num text-[10px]">
+              {activeJob.job_id?.slice(0, 8)}
+            </span>
+          </div>
+        )}
 
         <CoverageBanner coverage={status.coverage}
                         balanceSnapshotAt={status.balance_snapshot_at}
