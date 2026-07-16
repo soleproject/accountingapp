@@ -216,13 +216,14 @@ async def categorize_and_insert_plaid_txns(
         candidates.append({
             "plaid_txn": t, "merchant": merchant, "description": t["name"],
             "amount": t["amount"],
-            # Contact resolver uses this as the "clean name" key. Fall back to
-            # the derived merchant when Plaid returns null merchant_name (very
-            # common — sandbox data, wire transfers, checks). Previously we
-            # only forwarded Plaid's raw merchant_name, which meant 100% of
-            # rows on some banks dropped to the AI path and never earned a
-            # contact_id → A/P by-vendor + 1099 tracking silently broke again.
-            "merchant_name": t.get("merchant_name") or merchant,
+            # Rocketbooks-style contact resolution: forward Plaid's clean
+            # merchant_name only. When null (common for wires, Zelle, ATM,
+            # "Recurring Payment authorized on…" rows), the AI path handles
+            # extraction with clean rules (Zelle recipient not the app,
+            # wire /Org= not the bank, etc). NEVER pass raw description as
+            # merchant_name — that's how we ended up with 501 contacts on
+            # 607 LLC where each was some ATM/wire noise variant.
+            "merchant_name": t.get("merchant_name"),
             "pfc": pfc, "pfc_primary": (pfc or {}).get("primary"),
             "pfc_detailed": pfc_detailed,
             "date": t["date"],
@@ -267,7 +268,7 @@ async def categorize_and_insert_plaid_txns(
     # deferred rows was a regression introduced with the PFC pipeline — it
     # dropped contact_id on ~95% of Plaid txns for well-mapped merchants.
     contact_results = await contact_resolver.resolve_contacts_batch(
-        cid, candidates, ai_fallback_fn=resolve_contact_ai, concurrency=5,
+        cid, candidates, ai_fallback_fn=resolve_contact_ai, concurrency=8,
     )
     for cand, cr in zip(candidates, contact_results):
         cand["contact_id"] = cr.get("contact_id")

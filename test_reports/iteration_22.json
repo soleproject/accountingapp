@@ -1,0 +1,36 @@
+{
+  "summary": "Iter22 verified: full Rocketbooks contact-resolver port on 653 LLC. 16/16 pytest pass (100%). Live DB counts match spec exactly (contacts=185, no_counterparty=180, with_contact_id=1691, total=1871). AI-path extraction verified on 4 real-world descriptions via Claude Haiku 4.5. Fast path skips LLM as designed. plaid_connect concurrency=8 confirmed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration22_rocketbooks_port.py",
+    "/app/test_reports/pytest/iter22_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "contact_resolver.py L125-181: 2-path pipeline is clean. Fast path deterministically routes on Plaid merchant_name; AI path fetches ALL existing contacts per call (O(n) per row) — noted as acceptable at 185-500 scale, but at scale >2k contacts this becomes a hot loop. Consider caching the ctx list once per batch rather than re-fetching in each resolve_contact() call.",
+    "contact_resolver.py L147-150: `db.contacts.find(...).to_list(5000)` inside per-row resolve is called once per AI-path candidate. For 1691 AI rows on 653 LLC that's 1691 x contact-collection scans. On the backfill script this was hidden behind 9.5 min wall-clock, but any future re-backfill or dense sync would benefit from batch-scoped contact snapshot.",
+    "ai_service.py L43-69: CONTACT_EXTRACTION_SYSTEM prompt is well-structured with concrete examples. Junk guards at L177-199 correctly catch Card####, Recurring Payment, Conf#/Trn#/Srf#, long-name-equals-description patterns. Good defense-in-depth.",
+    "ai_service.py L159: `session_id=f'contact-{hash(description)}'` uses Python's non-deterministic hash — two identical descriptions in same session get different session_ids. Not a correctness bug (each is a fresh chat) but wastes any potential session cache. Consider stable hashlib.md5 if session reuse is a goal.",
+    "plaid_connect.py L226: `merchant_name=t.get('merchant_name')` — pure Plaid forwarding, no fallback. Verified matches iteration spec.",
+    "plaid_connect.py L270-272: concurrency=8 verified via source regex. Semaphore only wraps AI path in resolve_contacts_batch (contact_resolver.py L211), so fast-path rows never block on LLM slots — clean design.",
+    "backfill_653.py L27: one-off script uses concurrency=8. Correct."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration22_rocketbooks_port.py"
+  ],
+  "success_rate": {"backend": "100% (16/16 pytest)", "frontend": "N/A (backend-only per request)"},
+  "test_credentials": "pro@axiom.ai / pro123 (not required — tests read Mongo directly and shim AI via emergentintegrations)",
+  "seed_data_creation": "One transient company 'test-iter22-fastpath-<uuid>' created and cleaned up in TestFastPath.test_starbucks_fast_path try/finally.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app/backend && python -m pytest tests/test_iteration22_rocketbooks_port.py -v. 653 LLC id=b81dd049-9018-47b6-b485-83fe5ff8a2c3. All AI-path tests use real Claude Haiku 4.5 via EMERGENT_LLM_KEY; expect ~2s per case. If AI counts drift a bit on re-backfill (non-deterministic LLM), the DB-state assertions use +/-5 slack bands (contacts 175-200, no_counterparty 170-200, with_contact_id 1670-1700).",
+  "rca of the issue": "Iter21 approach used NO_COUNTERPARTY_PFC gate + clean_merchant_name scrubber — worked but was brittle to alphanumeric conf codes and depended on Plaid PFC being present. Iter22 (this port) removed both gates and relies entirely on the enriched LLM prompt for transfer/fee detection. Result on 653 LLC: 185 clean contacts (down from prior 267 and pre-fix 502). No junk regex fragments present. All expected merchants (Amazon, Audi Financial, AT&T, BoA, Capital One, Costco, CVS, AWS) resolved correctly. Zero forbidden truncated/raw-desc names."
+}
