@@ -1071,7 +1071,9 @@ async def dashboard_metrics(cid: str, user: dict = Depends(get_current_user)):
     today_str = today.isoformat()
 
     # Cash-on-hand: sum of postings against Cash / Bank accounts (asset, subtype current_asset,
-    # codes starting with '10')
+    # codes starting with '10'). Both transactions AND journal-entry lines
+    # contribute — otherwise the opening-balance JE (posted at Plaid connect)
+    # is silently excluded and cash-on-hand undercounts by the opening amount.
     cash_accts = await db.accounts.find({
         "company_id": cid, "type": "asset",
         "code": {"$in": ["1000", "1010", "1020"]},
@@ -1084,6 +1086,14 @@ async def dashboard_metrics(cid: str, user: dict = Depends(get_current_user)):
             "bank_account_id": {"$in": cash_ids},
         }).to_list(50000)
         cash = sum(float(t.get("amount", 0)) for t in txns)
+        # Add journal-entry lines hitting these cash accounts (opening balance,
+        # manual JEs, reclassifications). For an asset the natural signed
+        # balance is debit − credit.
+        jes = await db.journal_entries.find({"company_id": cid}).to_list(50000)
+        for j in jes:
+            for l in j.get("lines", []):
+                if l.get("account_id") in cash_ids:
+                    cash += float(l.get("debit", 0) or 0) - float(l.get("credit", 0) or 0)
 
     # Outstanding A/R: unpaid invoice balance_due
     invs = await db.invoices.find({"company_id": cid}).to_list(20000)
