@@ -38,6 +38,11 @@ export const TID = {
   txnPagePrev: "txn-page-prev",
   txnPageNext: "txn-page-next",
   txnPageIndicator: "txn-page-indicator",
+  txnSearch: "txn-search",
+  txnSearchClear: "txn-search-clear",
+  txnDateFrom: "txn-date-from",
+  txnDateTo: "txn-date-to",
+  txnFiltersClear: "txn-filters-clear",
 
   // Reports
   reportTile: "report-tile",

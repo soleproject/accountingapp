@@ -1,0 +1,23 @@
+{
+  "summary": "Verified iter14 contact-fix + new q/date_from/date_to filters. Backend: 6/6 pytest passed — (1) live 254,LLC contact_id coverage on Plaid rows is now well above the 90% bar (post-backfill), (2) q='starbucks' returns 41 rows all containing 'starbucks' in merchant/description/contact, (3) regex specials 'AT&T', '$5.00', '(*', '[abc]', '.*', '\\d+' all return 200 (re.escape works), (4) date_from/date_to bounds honored, (5) q + needs_review + pagination composes and pagination.total is stable across pages with disjoint row ids, (6) unit test with monkeypatched pipeline confirms contact_resolver.resolve_contacts_batch is called ONCE with ALL 3 candidates (both PFC-primary + LLM-deferred) and every inserted doc carries non-null contact_id/contact_name. Frontend: on 254,LLC Transactions page, initial 'Showing 1–250 of 1,871'; typing 'starbucks' → 'Showing 1–41 of 41' (debounced ~300ms); X-clear resets both input and results; date range 2024-06-01..2024-06-30 filters correctly; 'Clear filters' button appears only when filters active and resets search+dates; regex-special 'AT&T' returns 47 rows without error, '$5.00' returns 0 without error.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration14_contact_and_filters.py",
+    "/app/test_reports/pytest/iter14.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py list_transactions: date range clause uses lexicographic string comparison on ISO dates — fine as long as ALL rows store dates as 'YYYY-MM-DD'. Consider adding a stored index on {company_id: 1, date: -1} if not already present; count_documents + find + skip on 1871+ rows can become slow as the corpus grows.",
+    "plaid_connect.categorize_and_insert_plaid_txns: contact_resolver.resolve_contacts_batch is invoked once with ALL candidates before per-item DB inserts — good. However when a Plaid txn has empty merchant_name the fast path is still skipped but the AI fallback path is bounded by semaphore=5 which is reasonable.",
+    "Transactions.jsx has two useEffects that both depend on debouncedSearch/dateFrom/dateTo — the reset-to-page-1 effect fires on the same trigger as the load effect. Race is benign because setPage no-ops when already 1, but consolidating page-reset into the setter (setSearch/setDateFrom callers) would eliminate a duplicate GET whenever the user paginates then edits a filter.",
+    "Search input has no minimum length: a single-character query hits the API 300ms after each keystroke. Consider gating fetch until debouncedSearch.length===0 or >=2 to reduce load on very large corpora."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration14_contact_and_filters.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "pro@axiom.ai / pro123; 254 LLC id dea036e7-1b29-4589-bc7a-482e9771c22d",
+  "seed_data_creation": "Unit test creates a throwaway company id 'test-<uuid>' with 4 seeded accounts, then tears everything down in finally.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Note: navigating directly to /transactions before switching company redirects to /dashboard. To land on 254,LLC Transactions: (1) login, (2) header company-switcher → click get_by_text('254, LLC', exact=True).first, (3) then click sidebar 'Transactions' link. Path lands at /accounting/transactions. Search debounce is ~300ms; wait 1.2s+ after fill() before asserting on indicator. 'Clear filters' button only rendered when filtersActive is true."
+}

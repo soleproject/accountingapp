@@ -253,14 +253,19 @@ async def categorize_and_insert_plaid_txns(
 
     deferred = [c for c in candidates if id(c) not in pfc_results]
 
-    if deferred:
-        contact_results = await contact_resolver.resolve_contacts_batch(
-            cid, deferred, ai_fallback_fn=resolve_contact_ai, concurrency=5,
-        )
-        for cand, cr in zip(deferred, contact_results):
-            cand["contact_id"] = cr.get("contact_id")
-            cand["contact_name"] = cr.get("contact_name")
-            cand["contact_source"] = cr.get("source")
+    # ------ Stage 2: contact resolution (every candidate, not just deferred) ------
+    # Contact resolution is independent of category resolution: even a
+    # perfectly PFC-mapped Starbucks charge must still carry a contact_id so
+    # A/P reports, GL by-vendor, and 1099 tracking work. Running this only on
+    # deferred rows was a regression introduced with the PFC pipeline — it
+    # dropped contact_id on ~95% of Plaid txns for well-mapped merchants.
+    contact_results = await contact_resolver.resolve_contacts_batch(
+        cid, candidates, ai_fallback_fn=resolve_contact_ai, concurrency=5,
+    )
+    for cand, cr in zip(candidates, contact_results):
+        cand["contact_id"] = cr.get("contact_id")
+        cand["contact_name"] = cr.get("contact_name")
+        cand["contact_source"] = cr.get("source")
 
     per_item_result = await categorizer.categorize_batch_grouped(
         cid, deferred, coa, categorize_fn, concurrency=10,

@@ -7,7 +7,7 @@ import { TID } from "@/constants/testIds";
 import { toast } from "sonner";
 import {
   Check, Wand2, Split, Link as LinkIcon, RotateCw, Plus, X, Trash2, AlertTriangle, ShieldCheck,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, Search, Calendar, XCircle,
 } from "lucide-react";
 
 const PAGE_SIZE_OPTIONS = [50, 100, 250, 500];
@@ -51,11 +51,25 @@ export default function Transactions() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(250);
   const [pagination, setPagination] = useState({ total: 0, page: 1, pages: 1, limit: 250 });
+  // Toolbar filters
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
+  // Debounce free-text search so a fast typist doesn't hammer the API.
+  useEffect(() => {
+    const h = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(h);
+  }, [search]);
 
   const load = async () => {
     if (!currentId) return;
     const params = new URLSearchParams();
     if (filter === "review") params.set("needs_review", "true");
+    if (debouncedSearch) params.set("q", debouncedSearch);
+    if (dateFrom) params.set("date_from", dateFrom);
+    if (dateTo) params.set("date_to", dateTo);
     params.set("page", String(page));
     params.set("limit", String(pageSize));
     const qs = `?${params.toString()}`;
@@ -73,10 +87,14 @@ export default function Transactions() {
     setSelected(new Set());
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize]);
-  // Reset page when switching company (single-purpose, no duplicate fetch when
-  // page is already 1).
-  useEffect(() => { setPage(p => (p === 1 ? p : 1)); }, [currentId]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize, debouncedSearch, dateFrom, dateTo]);
+  // Reset page when switching company or when the filter set narrows/widens.
+  useEffect(() => { setPage(p => (p === 1 ? p : 1)); }, [currentId, debouncedSearch, dateFrom, dateTo]);
+
+  const clearFilters = () => {
+    setSearch(""); setDateFrom(""); setDateTo(""); setFilter("all");
+  };
+  const filtersActive = Boolean(debouncedSearch || dateFrom || dateTo || filter === "review");
 
   const [params] = useSearchParams();
   useEffect(() => {
@@ -193,9 +211,62 @@ export default function Transactions() {
         </div>
       </div>
 
+      {/* Filter toolbar: search + date range */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-[240px] max-w-md">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            data-testid={TID.txnSearch}
+            type="text"
+            placeholder="Search merchant, description, or contact…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-8 pr-8 py-1.5 text-sm border rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+          />
+          {search && (
+            <button
+              data-testid={TID.txnSearchClear}
+              onClick={() => setSearch("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+              aria-label="Clear search"
+            >
+              <XCircle size={14} />
+            </button>
+          )}
+        </div>
+        <div className="inline-flex items-center gap-1 border rounded-md bg-white px-2 py-1">
+          <Calendar size={13} className="text-slate-400" />
+          <input
+            data-testid={TID.txnDateFrom}
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="text-xs bg-transparent focus:outline-none font-mono-num text-slate-700"
+            aria-label="From date"
+          />
+          <span className="text-slate-400 text-xs">–</span>
+          <input
+            data-testid={TID.txnDateTo}
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="text-xs bg-transparent focus:outline-none font-mono-num text-slate-700"
+            aria-label="To date"
+          />
+        </div>
+        {filtersActive && (
+          <button
+            data-testid={TID.txnFiltersClear}
+            onClick={clearFilters}
+            className="inline-flex items-center gap-1 px-2 py-1 text-xs text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-200 rounded"
+          >
+            <X size={12} /> Clear filters
+          </button>
+        )}
+      </div>
+
       {selected.size > 0 && (
-        <div className="rounded-md border bg-slate-900 text-white px-4 py-2.5 flex items-center gap-3 flex-wrap">
-          <span className="text-sm font-medium">{selected.size} selected</span>
+        <div className="rounded-md border bg-slate-900 text-white px-4 py-2.5 flex items-center gap-3 flex-wrap">          <span className="text-sm font-medium">{selected.size} selected</span>
           <button data-testid={TID.txnBulkApprove} disabled={busy} onClick={bulkApprove}
                   className="inline-flex items-center gap-1 px-3 py-1 rounded bg-white text-slate-900 text-xs font-medium">
             <Check size={12} /> Approve all

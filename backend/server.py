@@ -1,6 +1,7 @@
 """Axiom Ledger — Enterprise AI Accounting SaaS backend."""
 from __future__ import annotations
 import os
+import re
 import uuid
 import json
 import random
@@ -806,17 +807,37 @@ async def list_transactions(
     cid: str, user: dict = Depends(get_current_user),
     needs_review: Optional[bool] = None,
     page: int = 1, limit: int = 250,
+    q: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
 ):
     await _require_company(user, cid)
-    q = {"company_id": cid}
+    query: dict = {"company_id": cid}
     if needs_review is not None:
-        q["needs_review"] = needs_review
+        query["needs_review"] = needs_review
+    if date_from or date_to:
+        date_clause: dict = {}
+        if date_from:
+            date_clause["$gte"] = date_from
+        if date_to:
+            date_clause["$lte"] = date_to
+        query["date"] = date_clause
+    if q and q.strip():
+        # Simple case-insensitive substring search across merchant, description,
+        # and contact_name. Escape regex specials so user input like "$5.00" or
+        # "AT&T" doesn't blow up.
+        pattern = re.escape(q.strip())
+        query["$or"] = [
+            {"merchant":     {"$regex": pattern, "$options": "i"}},
+            {"description":  {"$regex": pattern, "$options": "i"}},
+            {"contact_name": {"$regex": pattern, "$options": "i"}},
+        ]
     # Clamp inputs to sane bounds. limit=0 returns everything (used by exports
     # and legacy callers that expect the full list).
     page = max(1, int(page or 1))
     limit = max(0, min(int(limit or 0), 5000))
-    total = await db.transactions.count_documents(q)
-    cursor = db.transactions.find(q).sort([("date", -1), ("_id", -1)])
+    total = await db.transactions.count_documents(query)
+    cursor = db.transactions.find(query).sort([("date", -1), ("_id", -1)])
     if limit > 0:
         skip = (page - 1) * limit
         cursor = cursor.skip(skip).limit(limit)
