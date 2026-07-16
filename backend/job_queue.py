@@ -97,6 +97,25 @@ async def ensure_jobs_indexes() -> None:
         )
     except Exception:  # noqa: BLE001
         pass
+    # Covers the Dashboard Sync-Pill hot path
+    # `find_one({company_id, status ∈ [queued, running]}, sort=created_at DESC)`
+    # and its companion `find_one({company_id, status ∈ [completed, failed]},
+    # sort=finished_at DESC)`. Two focused compound indexes avoid a full
+    # collection scan even under 3k+ concurrent pill polls.
+    try:
+        await db.sync_jobs.create_index(
+            [("company_id", 1), ("status", 1), ("created_at", -1)],
+            name="jobs_by_company_status_created",
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        await db.sync_jobs.create_index(
+            [("company_id", 1), ("status", 1), ("finished_at", -1)],
+            name="jobs_by_company_status_finished",
+        )
+    except Exception:  # noqa: BLE001
+        pass
     # Auto-expire finished jobs 7 days after completion.
     try:
         await db.sync_jobs.create_index(
