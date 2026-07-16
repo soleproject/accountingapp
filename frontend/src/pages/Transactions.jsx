@@ -58,8 +58,13 @@ export default function Transactions() {
   const [dateTo, setDateTo] = useState("");
 
   // Debounce free-text search so a fast typist doesn't hammer the API.
+  // Single-char searches are almost never useful (returns 20K+ matches) and
+  // scan the whole corpus, so we require ≥2 chars before firing.
   useEffect(() => {
-    const h = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    const h = setTimeout(() => {
+      const s = search.trim();
+      setDebouncedSearch(s.length >= 2 ? s : "");
+    }, 300);
     return () => clearTimeout(h);
   }, [search]);
 
