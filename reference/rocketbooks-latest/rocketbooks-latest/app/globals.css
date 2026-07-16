@@ -1,0 +1,232 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* When the AI assistant is pinned to the right edge, reserve its width on
+   <body> so nothing flows underneath. The sidecar itself is fixed-positioned
+   relative to the viewport so it ignores body padding. */
+body.rs-sidecar-side {
+  padding-right: 380px;
+}
+
+/* Floating-bar mode: the sidecar updates --rs-sidecar-bar-height on <body>
+   to the bar's measured height (via ResizeObserver). Pages that have their
+   own internal scroll container and would otherwise have content sitting
+   under the bar can opt in with:
+     paddingBottom: calc(var(--rs-sidecar-bar-height, 0px) + 1rem)
+   on their scroll container. body.rs-sidecar-bar is set as a hook for
+   pages that prefer a CSS selector over reading the variable directly. */
+
+/* Site-wide opt-in: while a floating bar is visible, give the main scroll
+   container enough bottom room that page content doesn't sit underneath
+   the bar. Without this, tall pages (e.g. /ai-chat's OnboardingPanel) get
+   their last few rows covered. */
+body.rs-sidecar-bar main {
+  padding-bottom: calc(var(--rs-sidecar-bar-height, 0px) + 1rem);
+}
+
+/* Animated spectrum-rotating border for the AI assistant FAB and floating
+   bar. The element gets a transparent 2px border; two background layers
+   render a solid inner fill (clipped to padding-box) and the rotating
+   conic-gradient (clipped to border-box) so only the border ring shows
+   color — the interior is untouched. */
+@property --rs-rb-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes rs-rainbow-spin {
+  to {
+    --rs-rb-angle: 360deg;
+  }
+}
+.rs-rainbow-border {
+  --rs-rb-fill: #ffffff;
+  border: 2px solid transparent;
+  background-color: transparent;
+  background-image:
+    linear-gradient(var(--rs-rb-fill), var(--rs-rb-fill)),
+    conic-gradient(
+      from var(--rs-rb-angle),
+      #ef4444,
+      #f59e0b,
+      #eab308,
+      #22c55e,
+      #14b8a6,
+      #06b6d4,
+      #3b82f6,
+      #8b5cf6,
+      #d946ef,
+      #ec4899,
+      #ef4444
+    );
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
+  background-repeat: no-repeat, no-repeat;
+  animation: rs-rainbow-spin 6s linear infinite;
+}
+.dark .rs-rainbow-border {
+  --rs-rb-fill: #0a0a0a;
+}
+
+/* Cool-tour focus ring: applied via JS to a [data-tour="..."] element while
+   the assistant narrates that section, then removed when the narration ends.
+   No dimmer — just a glowing ring + soft outer halo so the user's eye lands
+   on the right card without the rest of the page going dark. */
+.rs-tour-highlight {
+  border-radius: 0.75rem;
+  box-shadow:
+    0 0 0 3px rgb(59 130 246 / 0.65),
+    0 0 24px 4px rgb(59 130 246 / 0.35);
+  transition: box-shadow 320ms ease;
+}
+.dark .rs-tour-highlight {
+  box-shadow:
+    0 0 0 3px rgb(96 165 250 / 0.75),
+    0 0 28px 4px rgb(96 165 250 / 0.4);
+}
+
+/* Regular-tour sidebar spotlight: while the assistant narrates a step, dim
+   every nav child EXCEPT the link/button matching the current step's path.
+   The page content itself stays untouched — only the sidebar dims. The
+   spotlighted item also gets a subtle bg tint so it reads as "this is the
+   one I'm talking about" even on routes where it isn't the active link
+   yet (router.push lands a moment before the active highlight repaints). */
+.rs-tour-nav-dimmed > * {
+  opacity: 0.25;
+  transition: opacity 240ms ease;
+}
+.rs-tour-nav-dimmed .rs-tour-nav-spotlight,
+.rs-tour-nav-dimmed .rs-tour-nav-spotlight * {
+  opacity: 1;
+}
+.rs-tour-nav-dimmed > *:has(.rs-tour-nav-spotlight) {
+  opacity: 1;
+}
+.rs-tour-nav-spotlight {
+  background-color: rgb(59 130 246 / 0.12);
+  /* Inset for the outline so the nav's overflow-x-hidden can't clip the
+     left/right edges. Outset for a soft halo that bleeds top/bottom. */
+  box-shadow:
+    inset 0 0 0 1.5px rgb(59 130 246 / 0.7),
+    inset 0 0 10px 0 rgb(59 130 246 / 0.35),
+    0 0 14px 2px rgb(59 130 246 / 0.35);
+  transition: background-color 240ms ease, box-shadow 240ms ease;
+}
+.dark .rs-tour-nav-spotlight {
+  background-color: rgb(96 165 250 / 0.18);
+  box-shadow:
+    inset 0 0 0 1.5px rgb(96 165 250 / 0.8),
+    inset 0 0 12px 0 rgb(96 165 250 / 0.4),
+    0 0 16px 2px rgb(96 165 250 / 0.4);
+}
+
+/* ── Per-enterprise white-label theming (Theme Studio) ────────────────────
+   A .rs-themed wrapper carries the firm's theme tokens as inline --th-* CSS
+   vars (ONLY the tokens they customized). The scoped overrides below remap the
+   relevant Tailwind utilities to those vars. They use var(--th-…) with NO
+   fallback, so any token the firm didn't set leaves the original RocketBooks
+   classes untouched; !important makes a set token win in both light and dark.
+   Reset to RocketBooks = clear the vars. Scoped to .rs-themed (private label
+   only) so the rest of the app is never affected. */
+.rs-themed { --th-accentBtnStrong: color-mix(in srgb, var(--th-accentBtn) 82%, black); }
+
+/* Accents — scoped to the content area (main) so they never bleed into the
+   sidebar/topbar/chat. Those surfaces are controlled only by their own tokens,
+   so menu + icon colors revert to original whenever the sidebar tokens are
+   unset (e.g. after "Reset to RocketBooks"). */
+.rs-themed main .bg-blue-600 { background-color: var(--th-accentBtn) !important; }
+.rs-themed main .bg-blue-700 { background-color: var(--th-accentBtnStrong) !important; }
+.rs-themed main .hover\:bg-blue-700:hover { background-color: var(--th-accentBtnStrong) !important; }
+.rs-themed main .hover\:bg-blue-600:hover { background-color: var(--th-accentBtn) !important; }
+.rs-themed main .text-blue-600,
+.rs-themed main .text-blue-700 { color: var(--th-accentLink) !important; }
+.rs-themed main .hover\:text-blue-700:hover { color: var(--th-accentLink) !important; }
+.rs-themed main .dark\:text-blue-300:where(.dark, .dark *),
+.rs-themed main .dark\:text-blue-400:where(.dark, .dark *) { color: var(--th-accentLink) !important; }
+.rs-themed main .border-blue-600 { border-color: var(--th-accentBtn) !important; }
+.rs-themed main .ring-blue-600 { --tw-ring-color: var(--th-accentRing) !important; }
+.rs-themed main .accent-blue-600 { accent-color: var(--th-accentCheckbox) !important; }
+
+/* Sidebar surface (marker: data-surface="sidebar") */
+.rs-themed [data-surface="sidebar"] { background-color: var(--th-sidebarBg) !important; }
+.rs-themed [data-surface="sidebar"] .text-zinc-700,
+.rs-themed [data-surface="sidebar"] .text-zinc-600,
+.rs-themed [data-surface="sidebar"] .text-zinc-500 { color: var(--th-sidebarText) !important; }
+/* Nav icons (the only colored text in the sidebar) → one icon color */
+.rs-themed [data-surface="sidebar"] .text-blue-600,
+.rs-themed [data-surface="sidebar"] .text-violet-600,
+.rs-themed [data-surface="sidebar"] .text-emerald-600,
+.rs-themed [data-surface="sidebar"] .text-sky-600,
+.rs-themed [data-surface="sidebar"] .text-amber-600,
+.rs-themed [data-surface="sidebar"] .text-rose-600,
+.rs-themed [data-surface="sidebar"] .text-green-600,
+.rs-themed [data-surface="sidebar"] .text-indigo-600,
+.rs-themed [data-surface="sidebar"] .text-orange-600,
+.rs-themed [data-surface="sidebar"] .text-pink-600,
+.rs-themed [data-surface="sidebar"] .text-cyan-600,
+.rs-themed [data-surface="sidebar"] .text-teal-600,
+.rs-themed [data-surface="sidebar"] .text-purple-600,
+.rs-themed [data-surface="sidebar"] .text-yellow-600,
+.rs-themed [data-surface="sidebar"] .text-slate-600 { color: var(--th-sidebarIcon) !important; }
+.rs-themed [data-surface="sidebar"] .bg-zinc-200,
+.rs-themed [data-surface="sidebar"] .bg-emerald-50 { background-color: var(--th-sidebarActiveBg) !important; }
+.rs-themed [data-surface="sidebar"] .text-zinc-900,
+.rs-themed [data-surface="sidebar"] .text-emerald-700 { color: var(--th-sidebarActiveText) !important; }
+
+/* Topbar surface (marker: data-surface="topbar") */
+.rs-themed [data-surface="topbar"] { background-color: var(--th-topbarBg) !important; }
+.rs-themed [data-surface="topbar"] .text-zinc-800,
+.rs-themed [data-surface="topbar"] .text-zinc-500 { color: var(--th-topbarText) !important; }
+
+/* Chat sidecar surface (marker: data-surface="chat") */
+.rs-themed [data-surface="chat"] { background-color: var(--th-chatPanelBg) !important; }
+.rs-themed [data-surface="chat"] [data-chat-user-bubble] { background-color: var(--th-chatUserBubble) !important; }
+.rs-themed [data-surface="chat"] .text-zinc-800 { color: var(--th-chatText) !important; }
+
+/* AI client-review spotlight: a blue glow pulse on the focused client's row. */
+.rs-spotlight {
+  animation: rs-spotlight-glow 4.5s ease-out forwards;
+  position: relative;
+  z-index: 1;
+  /* Leave breathing room above the row when scrollIntoView lands it, so the
+     spotlighted client isn't jammed against the top of the viewport. */
+  scroll-margin-top: 140px;
+}
+@keyframes rs-spotlight-glow {
+  0% {
+    background-color: rgba(59, 130, 246, 0.28);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.9), 0 0 18px 4px rgba(37, 99, 235, 0.55);
+  }
+  60% {
+    background-color: rgba(59, 130, 246, 0.14);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.5), 0 0 12px 3px rgba(37, 99, 235, 0.3);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+  }
+}

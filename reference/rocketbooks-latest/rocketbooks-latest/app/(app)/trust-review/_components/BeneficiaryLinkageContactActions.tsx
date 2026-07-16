@@ -1,0 +1,205 @@
+'use client';
+
+import Link from 'next/link';
+import { useEffect, useRef, useState, useTransition } from 'react';
+import { approveContactBeneficiaryLinkage } from '../_actions/approveContactBeneficiaryLinkage';
+import { recategorizeContactBeneficiaryLinkage } from '../_actions/recategorizeContactBeneficiaryLinkage';
+import type { AccountPick } from './RecategorizeNonTrustButton';
+import type { BeneficiaryOption } from './BeneficiaryPickerInline';
+
+interface Props {
+	contactId?: string;
+	contactName: string;
+	findingIds: string[];
+	beneficiaries: readonly BeneficiaryOption[];
+	allAccounts: readonly AccountPick[];
+	onPendingChange?: (pending: boolean) => void;
+	muted?: boolean;
+}
+
+const ICON_BASE = 'inline-flex h-7 w-7 items-center justify-center rounded-md border transition-colors disabled:cursor-not-allowed disabled:opacity-50';
+const ICON_ORANGE_FULL = 'border-orange-300 bg-orange-50 text-orange-700 hover:bg-orange-100 dark:border-orange-800 dark:bg-orange-900/30 dark:text-orange-300 dark:hover:bg-orange-900/50';
+const ICON_ORANGE_MUTED = 'border-zinc-200 bg-transparent text-zinc-400 hover:border-orange-300 hover:bg-orange-50 hover:text-orange-700 dark:border-zinc-700 dark:text-zinc-500 dark:hover:border-orange-800 dark:hover:bg-orange-900/30 dark:hover:text-orange-300';
+const ICON_VIOLET_FULL = 'border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-900/30 dark:text-violet-300 dark:hover:bg-violet-900/50';
+const ICON_VIOLET_MUTED = 'border-zinc-200 bg-transparent text-zinc-400 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 dark:border-zinc-700 dark:text-zinc-500 dark:hover:border-violet-800 dark:hover:bg-violet-900/30 dark:hover:text-violet-300';
+const ICON_EMERALD_FULL = 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 dark:hover:bg-emerald-900/50';
+const ICON_EMERALD_MUTED = 'border-zinc-200 bg-transparent text-zinc-400 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-500 dark:hover:border-emerald-800 dark:hover:bg-emerald-900/30 dark:hover:text-emerald-300';
+
+/**
+ * Per-contact action trio for TRUST_BENEFICIARY_LINKAGE_REQUIRED and
+ * TRUST_635_RECIPIENT_REQUIRED.
+ *
+ *   ⊘ Not Per-Beneficiary  — Other → CoA picker + Link to /chart-of-accounts/new
+ *   👤 Pick Beneficiary    — bene dropdown; "+ Add new" deep-links to /trust-beneficiaries/new
+ *   ✓ Approve              — sets line.beneficiary_id, drops audit, dismisses
+ */
+export function BeneficiaryLinkageContactActions({
+	contactName,
+	findingIds,
+	beneficiaries,
+	allAccounts,
+	onPendingChange,
+	muted = false,
+}: Props) {
+	const [pickedBeneId, setPickedBeneId] = useState<string>('');
+	const [pending, startTransition] = useTransition();
+	const [error, setError] = useState<string | null>(null);
+	const [notOpen, setNotOpen] = useState(false);
+	const [pickOpen, setPickOpen] = useState(false);
+	const [otherCoaOpen, setOtherCoaOpen] = useState(false);
+
+	const notRef = useRef<HTMLDivElement>(null);
+	const pickRef = useRef<HTMLDivElement>(null);
+
+	useEffect(() => { onPendingChange?.(pending); }, [pending, onPendingChange]);
+
+	useEffect(() => {
+		if (!notOpen && !pickOpen) return;
+		const handler = (e: MouseEvent) => {
+			const t = e.target as Node | null;
+			if (notOpen && notRef.current && t && !notRef.current.contains(t)) {
+				setNotOpen(false);
+				setOtherCoaOpen(false);
+			}
+			if (pickOpen && pickRef.current && t && !pickRef.current.contains(t)) {
+				setPickOpen(false);
+			}
+		};
+		window.addEventListener('mousedown', handler);
+		return () => window.removeEventListener('mousedown', handler);
+	}, [notOpen, pickOpen]);
+
+	const disabled = pending || findingIds.length === 0;
+
+	const runRecategorize = (targetAccountId: string) => {
+		setError(null);
+		setNotOpen(false);
+		setOtherCoaOpen(false);
+		startTransition(async () => {
+			const r = await recategorizeContactBeneficiaryLinkage({
+				findingIds,
+				targetAccountId,
+			});
+			if (!r.ok) setError(r.error ?? `${r.processed} ok, ${r.failed.length} failed`);
+		});
+	};
+
+	const runApprove = () => {
+		if (!pickedBeneId) { setError('Pick a beneficiary first'); return; }
+		setError(null);
+		startTransition(async () => {
+			const r = await approveContactBeneficiaryLinkage({
+				findingIds,
+				beneficiaryId: pickedBeneId,
+			});
+			if (!r.ok) setError(r.error ?? `${r.processed} ok, ${r.failed.length} failed`);
+		});
+	};
+
+	const pickedBene = beneficiaries.find((b) => b.id === pickedBeneId);
+
+	return (
+		<div className="flex items-center gap-2">
+			{pickedBene && (
+				<span className="hidden truncate rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 sm:inline dark:bg-emerald-900/30 dark:text-emerald-300">
+					{pickedBene.fullName}
+				</span>
+			)}
+
+			<div ref={notRef} className="relative">
+				<button
+					type="button"
+					onClick={() => { setNotOpen((v) => !v); setPickOpen(false); }}
+					disabled={disabled}
+					title={`Not per-beneficiary — recategorize all ${findingIds.length} finding${findingIds.length === 1 ? '' : 's'} for ${contactName}`}
+					className={`${ICON_BASE} ${muted ? ICON_ORANGE_MUTED : ICON_ORANGE_FULL}`}
+				>
+					<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+						<circle cx="12" cy="12" r="10" /><line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+					</svg>
+				</button>
+				{notOpen && (
+					<div className="absolute right-0 z-20 mt-1 w-64 rounded-md border border-zinc-200 bg-white p-1 text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+						<div className="flex items-center gap-1 rounded-md px-1 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+							<button type="button" onClick={() => setOtherCoaOpen((v) => !v)} className="flex flex-1 items-center gap-1 px-2 py-1.5 text-left" aria-expanded={otherCoaOpen}>
+								<span>Other</span><span className="text-zinc-400">→</span>
+							</button>
+							<Link href="/chart-of-accounts/new" title="Create a new account" aria-label="Add new CoA"
+								className="inline-flex h-6 w-6 items-center justify-center rounded border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50">
+								<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+									<line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+								</svg>
+							</Link>
+						</div>
+						{otherCoaOpen && (
+							<div className="mt-1 max-h-72 overflow-y-auto rounded-md border border-zinc-200 dark:border-zinc-800">
+								{allAccounts.map((a) => (
+									<button key={a.id} type="button" onClick={() => runRecategorize(a.id)} className="block w-full px-3 py-1 text-left text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800">
+										<span className="font-mono">{a.accountNumber}</span> {a.accountName}
+									</button>
+								))}
+							</div>
+						)}
+						<button type="button" onClick={() => { setNotOpen(false); setOtherCoaOpen(false); }} className="mt-1 block w-full rounded-md border-t border-zinc-200 px-3 py-1.5 text-left text-xs text-zinc-500 hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-800">
+							✕ Close
+						</button>
+					</div>
+				)}
+			</div>
+
+			<div ref={pickRef} className="relative">
+				<button
+					type="button"
+					onClick={() => { setPickOpen((v) => !v); setNotOpen(false); }}
+					disabled={disabled}
+					title={beneficiaries.length === 0 ? 'No beneficiaries on file — add one on /trust-beneficiaries' : pickedBene ? `Picked: ${pickedBene.fullName}` : 'Pick beneficiary'}
+					className={`${ICON_BASE} ${muted ? ICON_VIOLET_MUTED : ICON_VIOLET_FULL}`}
+				>
+					<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+						<circle cx="12" cy="8" r="4" /><path d="M4 21v-2a4 4 0 014-4h8a4 4 0 014 4v2" />
+					</svg>
+				</button>
+				{pickOpen && (
+					<div className="absolute right-0 z-20 mt-1 w-72 rounded-md border border-zinc-200 bg-white p-1 text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+						{beneficiaries.length === 0 && (
+							<div className="px-3 py-2 text-xs text-zinc-500">
+								No beneficiaries.{' '}
+								<Link href="/trust-beneficiaries" className="text-blue-600 hover:underline">Add one →</Link>
+							</div>
+						)}
+						{beneficiaries.map((b) => (
+							<button key={b.id} type="button" onClick={() => { setPickedBeneId(b.id); setPickOpen(false); }}
+								className={`block w-full rounded-md px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 ${b.id === pickedBeneId ? 'bg-violet-50 dark:bg-violet-900/20' : ''}`}>
+								<div className="font-medium">{b.fullName}</div>
+								<div className="text-xs text-zinc-500">{b.ageNote}{b.qualifies ? ' · qualifying' : ''}</div>
+							</button>
+						))}
+						<Link href="/trust-beneficiaries" className="block rounded-md border-t border-zinc-200 px-3 py-1.5 text-left text-xs text-blue-600 hover:bg-zinc-100 hover:underline dark:border-zinc-800 dark:hover:bg-zinc-800">
+							+ Add new beneficiary
+						</Link>
+					</div>
+				)}
+			</div>
+
+			<button
+				type="button"
+				onClick={runApprove}
+				disabled={disabled || !pickedBeneId}
+				title={pickedBeneId ? `Tag all ${findingIds.length} with ${pickedBene?.fullName}` : 'Pick a beneficiary first'}
+				className={`${ICON_BASE} ${muted ? ICON_EMERALD_MUTED : ICON_EMERALD_FULL}`}
+			>
+				{pending ? (
+					<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin" aria-hidden="true">
+						<path d="M21 12a9 9 0 11-6.219-8.56" />
+					</svg>
+				) : (
+					<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+						<polyline points="20 6 9 17 4 12" />
+					</svg>
+				)}
+			</button>
+
+			{error && <span className="text-xs text-red-600 dark:text-red-400" title={error}>{error.length > 40 ? error.slice(0, 40) + '…' : error}</span>}
+		</div>
+	);
+}

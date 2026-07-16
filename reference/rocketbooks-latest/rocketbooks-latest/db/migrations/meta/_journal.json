@@ -1,0 +1,62 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1777769889578,
+      "tag": "0000_tranquil_junta",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1777894495497,
+      "tag": "0001_imports_veryfi_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777895070800,
+      "tag": "0002_org_business_description",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1777981490619,
+      "tag": "0003_plaid_accounts_in_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1778017492396,
+      "tag": "0004_plaid_raw_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1778018112716,
+      "tag": "0005_journal_entry_reversal_of_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1778042000000,
+      "tag": "0006_transactions_plaid_ref_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1778150898928,
+      "tag": "0007_regular_gamma_corps",
+      "breakpoints": true
+    }
+  ]
+}
