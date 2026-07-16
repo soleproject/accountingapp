@@ -1897,11 +1897,51 @@ async def plaid_list_accounts(cid: str, user: dict = Depends(get_current_user)):
             row["suggested_ledger_name"] = name
             available.append(row)
 
+    # ---- Per-item coverage summary (proof of import completeness) ----
+    # Cheapest single-pass aggregate: earliest date, latest date, total count,
+    # unique-day count, and PFC-source breakdown across all connected accounts.
+    coverage = None
+    if plaid_account_ids:
+        cur = db.transactions.aggregate([
+            {"$match": {"company_id": cid,
+                        "plaid_account_id": {"$in": plaid_account_ids}}},
+            {"$group": {
+                "_id": None,
+                "count":         {"$sum": 1},
+                "first_date":    {"$min": "$date"},
+                "last_date":     {"$max": "$date"},
+                "unique_dates":  {"$addToSet": "$date"},
+                "pfc_primary":   {"$sum": {"$cond": [
+                    {"$eq": ["$ai_source", "pfc_primary"]}, 1, 0]}},
+                "pfc_override":  {"$sum": {"$cond": [
+                    {"$eq": ["$ai_source", "pfc_override"]}, 1, 0]}},
+                "ai":            {"$sum": {"$cond": [
+                    {"$eq": ["$ai_source", "ai"]}, 1, 0]}},
+                "uncategorized": {"$sum": {"$cond": [
+                    {"$eq": ["$ai_source", "uncategorized"]}, 1, 0]}},
+                "needs_review":  {"$sum": {"$cond": ["$needs_review", 1, 0]}},
+            }},
+        ])
+        rows = [r async for r in cur]
+        if rows:
+            r = rows[0]
+            coverage = {
+                "total_txns":     r["count"],
+                "first_date":     r["first_date"],
+                "last_date":      r["last_date"],
+                "unique_days":    len(r["unique_dates"]),
+                "pfc_deterministic": r["pfc_primary"] + r["pfc_override"],
+                "ai_fallback":    r["ai"],
+                "uncategorized":  r["uncategorized"],
+                "needs_review":   r["needs_review"],
+            }
+
     return {
         "linked": True,
         "item_id": item.get("item_id"),
         "connected": connected,
         "available": available,
+        "coverage": coverage,
     }
 
 

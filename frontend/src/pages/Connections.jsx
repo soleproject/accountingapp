@@ -48,6 +48,23 @@ export default function Connections() {
     } finally { setSyncing(false); }
   };
 
+  const resetResync = async () => {
+    if (!window.confirm(
+      "Reset Plaid cursor and re-pull the entire transaction history?\n\n" +
+      "Use this if your initial connection only imported the last ~30 days " +
+      "(happens when Plaid's HISTORICAL_UPDATE webhook is missed). Duplicates " +
+      "are auto-deduped, so this is safe."
+    )) return;
+    setSyncing(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/plaid/reset-and-resync`);
+      toast.success(`Re-imported ${r.data.imported} transactions from full history`);
+      loadStatus();
+    } catch (e) {
+      toast.error(`Reset-and-resync failed: ${e.response?.data?.detail || e.message}`);
+    } finally { setSyncing(false); }
+  };
+
   const connectOne = async (plaidAccountId, label) => {
     setConnecting(plaidAccountId);
     try {
@@ -110,7 +127,17 @@ export default function Connections() {
                   className="ml-auto text-xs px-3 py-1 rounded-md border border-slate-300 hover:bg-slate-50 disabled:opacity-50">
             {syncing ? "Syncing…" : "Manual Sync (webhook fallback)"}
           </button>
+          {status.linked && (
+            <button data-testid="plaid-reset-resync-btn" onClick={resetResync} disabled={syncing}
+                    className="text-xs px-3 py-1 rounded-md border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                    title="Nulls the stored cursor and re-pulls Plaid's entire 730-day history. Use when only ~30 days imported at connect time.">
+              Re-sync full history
+            </button>
+          )}
         </div>
+
+        <CoverageBanner coverage={status.coverage} />
+
         <PlaidLinkButton companyId={currentId} onSuccess={onLinked} />
 
         {accounts.length > 0 && (
@@ -147,6 +174,68 @@ export default function Connections() {
           connecting={connecting}
           busy={busy}
         />
+      </div>
+    </div>
+  );
+}
+
+
+/**
+ * Shows aggregate coverage stats for the company's Plaid feed:
+ * date range, unique-day count, total txns, and PFC deterministic %.
+ * Instant proof to the client that the import was complete.
+ */
+function CoverageBanner({ coverage }) {
+  if (!coverage || !coverage.total_txns) return null;
+  const {
+    total_txns, first_date, last_date, unique_days,
+    pfc_deterministic, ai_fallback, uncategorized, needs_review,
+  } = coverage;
+  const detPct = Math.round((pfc_deterministic / total_txns) * 100);
+  const reviewPct = Math.round((needs_review / total_txns) * 100);
+  return (
+    <div data-testid="plaid-coverage-banner"
+         className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 text-sm">
+      <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+        <div className="text-emerald-900 font-semibold">Bank sync coverage</div>
+        <div className="text-emerald-900">
+          <span className="font-mono-num">{first_date}</span>
+          <span className="mx-1.5 text-emerald-600">→</span>
+          <span className="font-mono-num">{last_date}</span>
+        </div>
+        <div className="text-emerald-800">
+          <span className="font-mono-num font-semibold">
+            {total_txns.toLocaleString()}
+          </span> txns across{" "}
+          <span className="font-mono-num font-semibold">{unique_days}</span> days
+        </div>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-700">
+        <span title="Categorized deterministically via Plaid PFC → Chart of Accounts">
+          <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 mr-1.5 align-middle" />
+          PFC deterministic:{" "}
+          <span className="font-mono-num font-semibold">{pfc_deterministic.toLocaleString()}</span>{" "}
+          <span className="text-slate-500">({detPct}%)</span>
+        </span>
+        {ai_fallback > 0 && (
+          <span title="Categorized by LLM fallback when Plaid PFC was ambiguous">
+            <span className="inline-block w-2 h-2 rounded-full bg-blue-500 mr-1.5 align-middle" />
+            AI fallback:{" "}
+            <span className="font-mono-num font-semibold">{ai_fallback.toLocaleString()}</span>
+          </span>
+        )}
+        {uncategorized > 0 && (
+          <span title="Uncategorized bucket — needs accountant review">
+            <span className="inline-block w-2 h-2 rounded-full bg-slate-400 mr-1.5 align-middle" />
+            Uncategorized:{" "}
+            <span className="font-mono-num font-semibold">{uncategorized.toLocaleString()}</span>
+          </span>
+        )}
+        <span className="ml-auto text-slate-600" title="Transactions flagged for accountant review">
+          Needs review:{" "}
+          <span className="font-mono-num font-semibold">{needs_review.toLocaleString()}</span>{" "}
+          <span className="text-slate-500">({reviewPct}%)</span>
+        </span>
       </div>
     </div>
   );
