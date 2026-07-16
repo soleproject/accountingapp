@@ -136,7 +136,9 @@ export default function Connections() {
           )}
         </div>
 
-        <CoverageBanner coverage={status.coverage} />
+        <CoverageBanner coverage={status.coverage}
+                        balanceSnapshotAt={status.balance_snapshot_at}
+                        connected={status.connected} />
 
         <PlaidLinkButton companyId={currentId} onSuccess={onLinked} />
 
@@ -185,7 +187,7 @@ export default function Connections() {
  * date range, unique-day count, total txns, and PFC deterministic %.
  * Instant proof to the client that the import was complete.
  */
-function CoverageBanner({ coverage }) {
+function CoverageBanner({ coverage, balanceSnapshotAt, connected }) {
   if (!coverage || !coverage.total_txns) return null;
   const {
     total_txns, first_date, last_date, unique_days,
@@ -193,6 +195,12 @@ function CoverageBanner({ coverage }) {
   } = coverage;
   const detPct = Math.round((pfc_deterministic / total_txns) * 100);
   const reviewPct = Math.round((needs_review / total_txns) * 100);
+  // Aggregate current-balance snapshot reported by Plaid (free, comes with
+  // every /transactions/sync call — not the per-call-billed /accounts/balance/get)
+  const plaidBalance = (connected || []).reduce(
+    (sum, c) => sum + (Number(c.balance_current) || 0), 0,
+  );
+  const relTime = balanceSnapshotAt ? _relTime(balanceSnapshotAt) : null;
   return (
     <div data-testid="plaid-coverage-banner"
          className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 text-sm">
@@ -209,6 +217,16 @@ function CoverageBanner({ coverage }) {
           </span> txns across{" "}
           <span className="font-mono-num font-semibold">{unique_days}</span> days
         </div>
+        {balanceSnapshotAt && (
+          <div className="ml-auto text-xs text-emerald-800"
+               title="Balance reported by Plaid at last sync. Uses the free bundled snapshot — no per-call /accounts/balance/get charges.">
+            Plaid balance:{" "}
+            <span className="font-mono-num font-semibold">
+              ${plaidBalance.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+            </span>
+            <span className="text-emerald-600 ml-1.5">· {relTime}</span>
+          </div>
+        )}
       </div>
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-700">
         <span title="Categorized deterministically via Plaid PFC → Chart of Accounts">
@@ -239,6 +257,19 @@ function CoverageBanner({ coverage }) {
       </div>
     </div>
   );
+}
+
+
+function _relTime(iso) {
+  try {
+    const ms = Date.now() - new Date(iso).getTime();
+    const min = Math.floor(ms / 60000);
+    if (min < 1) return "just now";
+    if (min < 60) return `${min} min ago`;
+    const h = Math.floor(min / 60);
+    if (h < 24) return `${h}h ago`;
+    return `${Math.floor(h / 24)}d ago`;
+  } catch { return ""; }
 }
 
 function PlaidAccountsDropdown({ expanded, onToggle, status, loading, onRefresh, onConnectOne, onConnectAll, connecting, busy }) {

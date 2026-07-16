@@ -323,6 +323,43 @@ async def categorize_and_insert_plaid_txns(
     return inserted, skipped
 
 
+async def _apply_sync_balance_snapshot(item: dict, synced_accounts: list[dict]) -> None:
+    """Merge the fresh balance snapshot Plaid ships back on every `/transactions/sync`
+    call into the corresponding rows on `plaid_items.accounts`. Called after
+    every sync so the UI sees up-to-date bank balances without incurring the
+    per-call `/accounts/balance/get` charge. The Plaid `balances.current` value
+    is the last-refreshed balance from the bank — typically < 4 hours old.
+
+    Fallback: when the sync response's `accounts` array is empty (Plaid does
+    this whenever the cursor is already at end-of-history), fall back to the
+    free `/accounts/get` endpoint via `plaid_service.get_accounts_balance_snapshot`.
+    """
+    if not synced_accounts:
+        # Free fallback: /accounts/get (not the paid /accounts/balance/get).
+        try:
+            synced_accounts = plaid_service.get_accounts_balance_snapshot(item["access_token"])
+        except Exception:  # noqa: BLE001 — never let a snapshot fetch break sync
+            synced_accounts = []
+    if not synced_accounts:
+        return
+    by_id = {a["account_id"]: a for a in synced_accounts}
+    for row in item.get("accounts") or []:
+        fresh = by_id.get(row.get("account_id"))
+        if not fresh:
+            continue
+        for k in ("balance_current", "balance_available", "balance_limit"):
+            if fresh.get(k) is not None:
+                row[k] = fresh[k]
+    # Always update the snapshot timestamp — records that we just heard back
+    # from Plaid, whether or not any numeric value moved. Useful for the UI
+    # to render "Plaid confirmed balance N minutes ago".
+    await db.plaid_items.update_one({"id": item["id"]}, {"$set": {
+        "accounts": item["accounts"],
+        "balance_snapshot_at": now_iso(),
+        "updated_at": now_iso(),
+    }})
+
+
 async def sync_plaid_history_for_account(
     cid: str, item: dict, plaid_account_id: str, ledger_bank: dict,
     coa: list[dict], accts: list[dict], categorize_fn, is_period_closed_fn,
@@ -338,6 +375,8 @@ async def sync_plaid_history_for_account(
     await db.plaid_items.update_one({"id": item["id"]}, {"$set": {
         "cursor": synced["next_cursor"], "updated_at": now_iso(),
     }})
+    # Persist the free balance snapshot Plaid returned with this sync.
+    await _apply_sync_balance_snapshot(item, synced.get("accounts") or [])
 
     # Filter to just this account's txns
     account_txns = [t for t in synced["added"] if t["account_id"] == plaid_account_id]

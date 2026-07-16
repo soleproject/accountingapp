@@ -84,10 +84,17 @@ def get_accounts(access_token: str) -> list[dict]:
 
 
 def sync_transactions(access_token: str, cursor: str | None = None) -> dict:
-    """Return {added, modified, removed, next_cursor, has_more}. Handles pagination."""
+    """Return {added, modified, removed, next_cursor, accounts}.
+
+    `accounts` is the fresh balance snapshot that Plaid ships back with every
+    `/transactions/sync` call — free of charge, no separate `/accounts/balance/get`
+    hit. We capture it so the UI can show "Plaid reported balance $X at
+    <timestamp>" without paying for a real-time balance refresh.
+    """
     all_added, all_modified, all_removed = [], [], []
     current = cursor
     has_more = True
+    last_accounts = []
     while has_more:
         kwargs = {"access_token": access_token}
         if current:
@@ -96,6 +103,8 @@ def sync_transactions(access_token: str, cursor: str | None = None) -> dict:
         all_added.extend(resp["added"])
         all_modified.extend(resp["modified"])
         all_removed.extend(resp["removed"])
+        # Balance snapshot from the last page reflects the most recent state.
+        last_accounts = list(resp.get("accounts") or [])
         current = resp["next_cursor"]
         has_more = resp["has_more"]
     return {
@@ -103,7 +112,42 @@ def sync_transactions(access_token: str, cursor: str | None = None) -> dict:
         "modified": [_serialize_txn(t) for t in all_modified],
         "removed": [{"transaction_id": t["transaction_id"]} for t in all_removed],
         "next_cursor": current,
+        "accounts": [_serialize_account_balances(a) for a in last_accounts],
     }
+
+
+def _serialize_account_balances(a) -> dict:
+    """Extract only the balance fields — everything else (name, mask, etc.)
+    is already stored on `plaid_items.accounts` at Link time and doesn't
+    change between syncs.
+    """
+    bals = a.get("balances") or {}
+    return {
+        "account_id": a["account_id"],
+        "balance_current":   bals.get("current"),
+        "balance_available": bals.get("available"),
+        "balance_limit":     bals.get("limit"),
+        "iso_currency_code": bals.get("iso_currency_code", "USD"),
+    }
+
+
+def get_accounts_balance_snapshot(access_token: str) -> list[dict]:
+    """Free `/accounts/get` (via `get_accounts`) — returns Plaid's cached account
+    balances (last refreshed by Plaid, typically < 4h old). Used as the
+    balance-snapshot fallback when a `/transactions/sync` call returns an empty
+    `accounts` array (which Plaid does whenever the cursor is at end-of-history).
+
+    Explicitly NOT `/accounts/balance/get` — that endpoint forces a live pull
+    from the bank and is billed per call.
+    """
+    return [
+        {"account_id": a["account_id"],
+         "balance_current": a.get("balance_current"),
+         "balance_available": a.get("balance_available"),
+         "balance_limit": None,
+         "iso_currency_code": a.get("currency", "USD")}
+        for a in get_accounts(access_token)
+    ]
 
 
 def _serialize_txn(t) -> dict:

@@ -305,6 +305,10 @@ async def _sync_and_import(cid: str, item: dict, selected_account_ids: list[str]
     await db.plaid_items.update_one({"id": item["id"]}, {"$set": {
         "cursor": synced["next_cursor"], "updated_at": now_iso(),
     }})
+    # Persist the free balance snapshot Plaid returned with this sync.
+    # Reload the item so subsequent code sees the fresh balances.
+    await plaid_connect._apply_sync_balance_snapshot(item, synced.get("accounts") or [])
+    item = await db.plaid_items.find_one({"id": item["id"]}) or item
 
     # Plaid marks pending→posted transitions via `removed`. Drop stale pending
     # rows so we don't keep the pending version alongside the posted one.
@@ -1952,6 +1956,9 @@ async def plaid_list_accounts(cid: str, user: dict = Depends(get_current_user)):
         "connected": connected,
         "available": available,
         "coverage": coverage,
+        # When Plaid last shipped us a balance snapshot (free, bundled with
+        # each /transactions/sync call — no /accounts/balance/get charges).
+        "balance_snapshot_at": item.get("balance_snapshot_at"),
     }
 
 
