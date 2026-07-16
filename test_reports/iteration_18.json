@@ -1,0 +1,37 @@
+{
+  "summary": "Verified iter18 fixes end-to-end on real '501, LLC' (cid=6aa07a68-488a-407c-9782-c3f309b08606, 1871 txns). Backend: POST /api/plaid/webhook now enqueues a plaid_manual_sync sync_jobs row for all 4 TRANSACTIONS webhook_codes (SYNC_UPDATES_AVAILABLE, HISTORICAL_UPDATE, INITIAL_UPDATE, DEFAULT_UPDATE), returns queued_job UUID within <500ms, and correctly skips enqueue for unknown/non-TRANSACTIONS payloads. 7/7 pytest cases pass. Frontend: (a) Dashboard SyncPill flips idle→syncing at ~2s of inserting a running sync_jobs doc and back to idle at ~14s of marking it completed, tiles remain 1871/1871/198/100% (heavy refetch fires but numbers unchanged as expected). (b) Transactions page auto-refresh: after inserting 5 fake txns, txn-page-indicator + filter-count-all chip both update from 1,871 → 1,876 within ~25s (next idle 15s poll picks up rowsChanged and triggers load()). All test docs cleaned up.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration18_webhook_enqueue.py",
+    "/app/test_reports/pytest/iter18.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:1874-1893 webhook handler is clean: fast return + enqueue for the 4 canonical codes, unknown_item/ignored branches, TRANSACTIONS_REMOVED path. Idempotency of dedupe on plaid_transaction_id is handled by the downstream worker so double-firing webhooks won't create duplicates.",
+    "Transactions.jsx auto-refresh useEffect (lines 107-142) uses paginationTotalRef to detect rowsChanged without stale-closure — correct pattern. Poll cadence adapts 5s syncing / 15s idle. Cleanup cancels timer and both listeners on CID change.",
+    "Dashboard.jsx heavy-refetch on syncing→idle transition (lines 74-76) fires exactly once per flip via prevStatusRef. No stacked pollers on CID change (verified via cleanup returning cancelled=true).",
+    "sync-status endpoint (server.py:1992-2040) hits Mongo directly with 2 find_one + 1 count. No cache — confirmed by 14s observed flip after DB update (5s adaptive poll cadence, no cache TTL to expire).",
+    "Minor: /accounting/transactions is the actual route path (App.js:60), not /transactions. Previous iteration test report referred to '/transactions' — worth clarifying in docs so future test agents don't waste cycles."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration18_webhook_enqueue.py"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7)",
+    "frontend": "100% (Dashboard flip syncing→idle + tile refetch verified; Transactions auto-refresh chip+indicator from 1871→1876 verified)"
+  },
+  "test_credentials": "pro@axiom.ai / pro123",
+  "seed_data_creation": "Transient: db.sync_jobs docs (running→completed cycle) and 5 TEST_ITER18_* transactions on 501,LLC — all deleted at end of each script run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter18 (webhook-enqueue + Transactions auto-refresh) fully green on real Plaid company 501,LLC (id 6aa07a68-488a-407c-9782-c3f309b08606, 1871 txns). Route path is /accounting/transactions (NOT /transactions). To repro Dashboard flip: mongosh test_database → db.sync_jobs.insertOne({id, company_id, kind:'plaid_manual_sync', status:'running', progress:{stage:'categorizing',current:X,total:Y}, created_at:new Date(), started_at:new Date(), finished_at:null}), then updateOne to status:'completed', finished_at:new Date(). Selectors: [data-testid=sync-pill][data-state], [data-testid=txn-page-indicator], [data-testid=txn-filter-count-all]. NOTE: total numbers in indicator/chip contain comma thousand-separators (e.g. '1,876') — use int(re.sub(r'[^0-9]','',text)) rather than substring matching.",
+  "rca of the issue": "Original bug: Plaid webhook _sync_and_import ran inline so no sync_jobs record was ever created — Dashboard SyncPill (which watches sync_jobs) never observed a syncing→idle transition and its heavy refetch effect never fired, leaving tiles stuck on the initial mount snapshot ($0/0/0/0%). Transactions page had no auto-refresh so filter chip stayed at whatever count was live during initial mount. Fix (verified): (1) server.py:1874-1885 replaces inline _sync_and_import with enqueue_job('plaid_manual_sync',...) — worker creates the sync_jobs row and emits progress; (2) Transactions.jsx:107-142 adds a sync-status poller (5s syncing / 15s idle) plus visibilitychange/focus handlers that call load() on rowsChanged or syncing→idle flip."
+}

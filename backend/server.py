@@ -1872,8 +1872,17 @@ async def plaid_webhook(payload: dict):
     if not item:
         return {"ok": True, "unknown_item": True}
     if webhook_code in ("SYNC_UPDATES_AVAILABLE", "DEFAULT_UPDATE", "INITIAL_UPDATE", "HISTORICAL_UPDATE"):
-        imported = await _sync_and_import(item["company_id"], item)
-        return {"ok": True, "imported": imported, "webhook_code": webhook_code}
+        # Enqueue instead of running inline so:
+        #   1) Plaid always gets a fast 200 (avoids retry storms + duplicate imports)
+        #   2) the sync creates a sync_jobs record with progress emissions —
+        #      which is what the Dashboard Sync-Pill listens to; without it the
+        #      pill stays "idle" while a 1,700-txn HISTORICAL_UPDATE lands and
+        #      the user sees stale tiles.
+        from job_queue import enqueue_job
+        job_id = await enqueue_job(
+            "plaid_manual_sync", item["company_id"], user_id=None,
+        )
+        return {"ok": True, "queued_job": job_id, "webhook_code": webhook_code}
     if webhook_code == "TRANSACTIONS_REMOVED":
         removed_ids = payload.get("removed_transactions") or []
         for tid in removed_ids:

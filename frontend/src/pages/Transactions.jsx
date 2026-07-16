@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
@@ -103,6 +103,42 @@ export default function Transactions() {
     setSearch(""); setDebouncedSearch("");
     setDateFrom(""); setDateTo("");
     setFilter("all"); setPage(1);
+  }, [currentId]);
+  // Auto-refresh when webhooks silently backfill new rows in the background:
+  //   • poll sync-status every 5s while syncing, 15s while idle, and
+  //   • whenever pagination.total ≠ status.total_txns (i.e. new rows landed),
+  //     re-fetch the current view so counts + rows update without a manual reload.
+  //   • also refetch on tab visibility / focus (mirrors Dashboard behavior).
+  const paginationTotalRef = useRef(0);
+  useEffect(() => { paginationTotalRef.current = pagination.total || 0; }, [pagination.total]);
+  useEffect(() => {
+    if (!currentId) return;
+    let cancelled = false, timer;
+    let lastSyncStatus = null;
+    const poll = async () => {
+      try {
+        const r = await api.get(`/companies/${currentId}/sync-status`);
+        if (cancelled) return;
+        const s = r.data;
+        const rowsChanged = (s.total_txns || 0) !== paginationTotalRef.current;
+        const flippedIdle = lastSyncStatus === "syncing" && s.status !== "syncing";
+        if (rowsChanged || flippedIdle) load();
+        lastSyncStatus = s.status;
+      } catch { /* ignore */ }
+      const delay = lastSyncStatus === "syncing" ? 5_000 : 15_000;
+      timer = setTimeout(poll, delay);
+    };
+    timer = setTimeout(poll, 5_000);
+    const onFocus = () => { if (document.visibilityState === "visible") load(); };
+    document.addEventListener("visibilitychange", onFocus);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onFocus);
+      window.removeEventListener("focus", onFocus);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentId]);
 
   const clearFilters = () => {
