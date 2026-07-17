@@ -1,0 +1,32 @@
+{
+  "summary": "Iter23 verified cash_on_hand fix. Live /api endpoint for 317 LLC now returns cash_on_hand=5662.93 (was -1418.17), matching ticket spec exactly. 5/5 pytest pass (100%): live 317 LLC check, live spot-check on Bright Beans, legacy 1010 regression, non-cash A/R+Inventory+Prepaid+Fixed no-leak, resolver-shape reproduction with subtype='Bank' rows at both 1011 (in range) and 1075 (in range but flagged both ways).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter23_cash_on_hand_live.py",
+    "/app/test_reports/pytest/iter23_results.xml"
+  ],
+  "action_items": [
+    "Ticket referenced 602/531/444 LLC as spot-check targets, but none of those cids exist in this preview DB (only 317 LLC and Bright Beans Coffee Co. have real data). Substituted Bright Beans for the regression spot-check.",
+    "Consider migrating the pre-existing /app/backend/tests/test_cash_on_hand.py to pytest naming (`_run_*` functions are private and never collected by pytest — they only run under `python test_cash_on_hand.py`). Not a functional bug, just dead test coverage in CI."
+  ],
+  "critical_code_review_comments": [
+    "server.py L1234-1241: `$or` includes both code-range and subtype='Bank'. Redundancy is intentional (defense-in-depth) but the code range 1000-1099 already covers 1011 in 317 LLC's real data; subtype clause is what saves us if a future resolver picks a code >=1100. Confirmed both paths tested.",
+    "server.py L1248/1251: transactions and journal_entries fetched with to_list(50000) — could be a memory hazard for large companies. 317 LLC has 1874 txns, well under; but consider streaming/aggregation once companies grow past ~10k JE lines.",
+    "server.py L1237: string range comparison `{'$gte':'1000','$lte':'1099'}` is lexicographic, not numeric — works correctly here because all account codes are 4-digit strings, but any 3- or 5-digit code (e.g., '999' or '10999') would sort unexpectedly. Add a defensive comment or enforce 4-digit codes at write time.",
+    "test_cash_on_hand.py L106/L136: async functions prefixed with '_run_' aren't collected by pytest — file only runs via `python test_cash_on_hand.py` main-block. Rename to `test_*` for CI visibility (or remove; iter23 supersedes)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter23_cash_on_hand_live.py (new)"
+  ],
+  "success_rate": {"backend": "100% (5/5 pytest)", "frontend": "N/A (backend-only per request)"},
+  "test_credentials": "admin@axiom.ai / admin123 (superadmin login endpoint returns key 'token', NOT 'access_token' — test uses fallback).",
+  "seed_data_creation": "3 transient companies seeded and cleaned up in try/finally: cash-legacy-*, cash-noncash-*, cash-resolver-*.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app/backend && python -m pytest tests/test_iter23_cash_on_hand_live.py -v. 317 LLC cid=043aaac7-5ad5-4e8d-9e1c-ede2ed975bdf. Expected cash_on_hand=5662.93 (=11.04 txn-sum + 5651.89 JE-sum across 1000/1010/1011/1020/1100). If it drifts, first invalidate infra.get_cache().invalidate(cid) or wait 15s TTL. Auth endpoint returns 'token' not 'access_token'.",
+  "rca of the issue": "Before fix: cash_accts query used hard-coded `code $in ['1000','1010','1020']`. After statement_account_resolver started auto-creating rows like `1011 Bank of America Checking ···6084` with subtype='Bank', 317 LLC's 1874 auto-posted txns landed on 1011 (excluded) while only the residual -1418.17 net on legacy 1010 was counted. Fix broadens the filter to (code in 1000-1099 range OR code=1100 OR subtype='Bank'), catching all resolver-created rows. Verified live: 317 LLC now returns 5662.93 = 11.04 txn-sum + 5651.89 JE-sum (opening balance JE on 1011). Non-cash assets (1200 A/R, 1300 Inventory, 1500 Prepaid, 1600 Fixed) confirmed excluded via seeded regression."
+}

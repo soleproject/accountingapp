@@ -1216,9 +1216,28 @@ async def dashboard_metrics(cid: str, user: dict = Depends(get_current_user)):
         # AND journal-entry lines contribute — otherwise the opening-balance
         # JE (posted at Plaid connect) is silently excluded and cash-on-hand
         # undercounts by the opening amount.
+        # Cash on hand: sum of BOTH raw txn postings AND JE lines against every
+        # cash/bank-flavored asset account. Range covers:
+        #   1000 Cash and Bank (legacy default)
+        #   1010 Business Checking / 1020 Savings / 1030 Money Market / 1040 CD /
+        #     1050 PayPal (legacy shared subtype rows)
+        #   1011+ Bank of America Checking ···6084 (new-style per-account rows
+        #     created by `statement_account_resolver`)
+        #   1090 Other Bank Account, 1100 Undeposited Funds
+        # A/R (1200), Inventory (1300), Prepaid (1500), Fixed (1600+) are
+        # explicitly excluded — those aren't cash even though they're assets.
+        # Feb 17, 2026: pre-fix this list was hard-coded to
+        # ["1000","1010","1020"] which excluded every account the new Plaid/
+        # Veryfi resolver auto-created, so cash-on-hand collapsed to just the
+        # 30-day activity that happened to still live on legacy 1010. Now we
+        # match by code range so any resolver-created row is included.
         cash_accts = await db.accounts.find({
             "company_id": cid, "type": "asset",
-            "code": {"$in": ["1000", "1010", "1020"]},
+            "$or": [
+                {"code": {"$gte": "1000", "$lte": "1099"}},
+                {"code": "1100"},  # Undeposited Funds
+                {"subtype": "Bank"},  # resolver-flagged bank rows
+            ],
         }).to_list(100)
         cash_ids = [a["id"] for a in cash_accts]
         cash = 0.0
