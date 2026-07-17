@@ -26,6 +26,10 @@ export default function Contacts() {
   const [modal, setModal] = useState(null); // null | { mode, contact? }
   const [selected, setSelected] = useState(new Set());
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [view, setView] = useState(() =>
+    localStorage.getItem("contacts_view") === "details" ? "details" : "analytics"
+  );
+  useEffect(() => { localStorage.setItem("contacts_view", view); }, [view]);
 
   const load = async () => {
     if (!currentId) return;
@@ -65,6 +69,29 @@ export default function Contacts() {
           <p className="text-slate-500 text-sm mt-1">Customers &amp; vendors.</p>
         </div>
         <div className="flex items-center gap-2">
+          <div
+            className="inline-flex rounded-md border border-slate-300 overflow-hidden text-xs"
+            data-testid="contacts-view-toggle"
+          >
+            <button
+              onClick={() => setView("analytics")}
+              data-testid="contacts-view-analytics"
+              className={`px-3 py-1.5 ${view === "analytics"
+                ? "bg-slate-900 text-white"
+                : "bg-white text-slate-700 hover:bg-slate-50"}`}
+            >
+              Analytics
+            </button>
+            <button
+              onClick={() => setView("details")}
+              data-testid="contacts-view-details"
+              className={`px-3 py-1.5 border-l border-slate-300 ${view === "details"
+                ? "bg-slate-900 text-white"
+                : "bg-white text-slate-700 hover:bg-slate-50"}`}
+            >
+              Details
+            </button>
+          </div>
           {selected.size >= 2 && (
             <button
               data-testid="contacts-merge-btn"
@@ -87,17 +114,29 @@ export default function Contacts() {
       <div className="rounded-xl border bg-white overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500 border-b">
-            <tr>
-              <th className="w-8 px-3 py-2"></th>
-              <th className="px-3 py-2 text-left">Contact</th>
-              <th className="px-3 py-2 text-right">Hits</th>
-              <th className="px-3 py-2 text-right">YTD In</th>
-              <th className="px-3 py-2 text-right">YTD Out</th>
-              <th className="px-3 py-2 text-right">Net</th>
-              <th className="px-3 py-2 text-left">Last Seen</th>
-              <th className="px-3 py-2 text-left">Type</th>
-              <th></th>
-            </tr>
+            {view === "analytics" ? (
+              <tr>
+                <th className="w-8 px-3 py-2"></th>
+                <th className="px-3 py-2 text-left">Contact</th>
+                <th className="px-3 py-2 text-right">Hits</th>
+                <th className="px-3 py-2 text-right">YTD In</th>
+                <th className="px-3 py-2 text-right">YTD Out</th>
+                <th className="px-3 py-2 text-right">Net</th>
+                <th className="px-3 py-2 text-left">Last Seen</th>
+                <th className="px-3 py-2 text-left">Type</th>
+                <th></th>
+              </tr>
+            ) : (
+              <tr>
+                <th className="w-8 px-3 py-2"></th>
+                <th className="px-3 py-2 text-left">Name</th>
+                <th className="px-3 py-2 text-left">Type</th>
+                <th className="px-3 py-2 text-left">Email</th>
+                <th className="px-3 py-2 text-left">Phone</th>
+                <th className="px-3 py-2 text-left">Address</th>
+                <th></th>
+              </tr>
+            )}
           </thead>
           <tbody>
             {items.map(c => (
@@ -116,34 +155,52 @@ export default function Contacts() {
                     className="cursor-pointer"
                   />
                 </td>
-                <td className="px-3 py-2 font-medium">
-                  <div>{c.name}</div>
-                  {(c.email || c.phone) && (
-                    <div className="text-[11px] text-slate-500 truncate">
-                      {[c.email, c.phone].filter(Boolean).join(" · ")}
-                    </div>
-                  )}
-                </td>
-                <td className="px-3 py-2 text-right text-slate-500 tabular-nums">{c.hits ?? 0}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-emerald-700">
-                  {(c.ytd_in ?? 0) > 0 ? fmtMoney(c.ytd_in) : ""}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-800">
-                  {(c.ytd_out ?? 0) > 0 ? fmtMoney(c.ytd_out) : ""}
-                </td>
-                <td className={`px-3 py-2 text-right tabular-nums font-medium ${
-                  (c.net ?? 0) < 0 ? "text-rose-600" : "text-slate-900"
-                }`}>
-                  {(c.net ?? 0) === 0 ? "" : fmtMoney(c.net)}
-                </td>
-                <td className="px-3 py-2 text-slate-500 text-xs whitespace-nowrap">
-                  {fmtDate(c.last_seen)}
-                </td>
-                <td className="px-3 py-2">
-                  {c.type && (
-                    <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-100">{c.type}</span>
-                  )}
-                </td>
+                {view === "analytics" ? (
+                  <>
+                    <td className="px-3 py-2 font-medium">
+                      <div>{c.name}</div>
+                      {(c.email || c.phone) && (
+                        <div className="text-[11px] text-slate-500 truncate">
+                          {[c.email, c.phone].filter(Boolean).join(" · ")}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right text-slate-500 tabular-nums">{c.hits ?? 0}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-emerald-700">
+                      {(c.ytd_in ?? 0) > 0 ? fmtMoney(c.ytd_in) : ""}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-800">
+                      {(c.ytd_out ?? 0) > 0 ? fmtMoney(c.ytd_out) : ""}
+                    </td>
+                    <td className={`px-3 py-2 text-right tabular-nums font-medium ${
+                      (c.net ?? 0) < 0 ? "text-rose-600" : "text-slate-900"
+                    }`}>
+                      {(c.net ?? 0) === 0 ? "" : fmtMoney(c.net)}
+                    </td>
+                    <td className="px-3 py-2 text-slate-500 text-xs whitespace-nowrap">
+                      {fmtDate(c.last_seen)}
+                    </td>
+                    <td className="px-3 py-2">
+                      {c.type && (
+                        <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-100">{c.type}</span>
+                      )}
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td className="px-3 py-2 font-medium">{c.name}</td>
+                    <td className="px-3 py-2">
+                      {c.type && (
+                        <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-100">{c.type}</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-slate-600">{c.email || ""}</td>
+                    <td className="px-3 py-2 text-slate-600">{c.phone || ""}</td>
+                    <td className="px-3 py-2 text-slate-600 truncate max-w-[280px]" title={c.address || ""}>
+                      {c.address || ""}
+                    </td>
+                  </>
+                )}
                 <td className="px-3 py-2 text-right whitespace-nowrap">
                   <button
                     onClick={(e) => { e.stopPropagation(); setModal({ mode: "edit", contact: c }); }}
@@ -165,7 +222,7 @@ export default function Contacts() {
               </tr>
             ))}
             {!items.length && (
-              <tr><td colSpan={9} className="text-center py-8 text-slate-500">No contacts.</td></tr>
+              <tr><td colSpan={view === "analytics" ? 9 : 7} className="text-center py-8 text-slate-500">No contacts.</td></tr>
             )}
           </tbody>
         </table>
