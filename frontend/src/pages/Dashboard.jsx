@@ -5,7 +5,7 @@ import { TID } from "@/constants/testIds";
 import { Link } from "react-router-dom";
 import {
   Sparkles, Zap, AlertTriangle, TrendingUp, Wand2, FileCheck2, Bot, ArrowRight,
-  Wallet2, FileText, Receipt as ReceiptIcon, Activity,
+  Wallet2, FileText, Receipt as ReceiptIcon, Activity, BellRing, ScrollText,
 } from "lucide-react";
 import FirstConnectWelcome from "@/components/FirstConnectWelcome";
 
@@ -37,6 +37,7 @@ export default function Dashboard() {
   const [activity, setActivity] = useState([]);
   const [income, setIncome] = useState(null);
   const [metrics, setMetrics] = useState(null);
+  const [attention, setAttention] = useState(null);
   const [syncStatus, setSyncStatus] = useState(null);
   // Track the last-observed sync status so we can trigger a heavy refetch
   // exactly once when a background sync transitions from `syncing → idle`.
@@ -58,6 +59,8 @@ export default function Dashboard() {
         .then(r => { if (!cancelled) setIncome(r.data); }).catch(() => {});
       api.get(`/companies/${currentId}/dashboard/metrics`)
         .then(r => { if (!cancelled) setMetrics(r.data); }).catch(() => {});
+      api.get(`/companies/${currentId}/dashboard/attention`)
+        .then(r => { if (!cancelled) setAttention(r.data); }).catch(() => {});
     };
 
     // -------- Cheap sync-status poll (single Mongo lookup) -------------
@@ -272,6 +275,8 @@ export default function Dashboard() {
         </div>
       </div>
 
+      <AttentionTile attention={attention} />
+
       <div className="rounded-xl border bg-white p-5">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-heading font-semibold">Next steps</h2>
@@ -294,3 +299,111 @@ export default function Dashboard() {
     </div>
   );
 }
+
+function AttentionTile({ attention }) {
+  if (!attention) return null;
+  const {
+    flagged_count: flagged = 0,
+    suggested_rules_count: rules = 0,
+    unreconciled_accounts_count: unrecon = 0,
+    unreconciled_accounts = [],
+    staleness_days = 45,
+  } = attention;
+
+  const total = flagged + rules + unrecon;
+  if (total === 0) {
+    return (
+      <div
+        className="rounded-xl border bg-emerald-50/60 border-emerald-200 p-4 flex items-center gap-3"
+        data-testid="attention-tile-empty"
+      >
+        <FileCheck2 size={18} className="text-emerald-600" />
+        <div className="text-sm text-emerald-900">
+          <b>All clear.</b> No transactions to review, no pending rule suggestions,
+          and every bank account was reconciled within the last {staleness_days} days.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border bg-white overflow-hidden" data-testid="attention-tile">
+      <div className="px-5 py-3 border-b bg-amber-50/60 flex items-center gap-2">
+        <BellRing size={16} className="text-amber-700" />
+        <h2 className="font-heading font-semibold text-sm">Needs your attention</h2>
+        <span className="text-[11px] text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded-full ml-1">
+          {total} item{total === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x">
+        <AttentionCard
+          testid="attention-flagged"
+          to="/accounting/transactions?filter=review"
+          icon={AlertTriangle}
+          tone={flagged > 0 ? "amber" : "muted"}
+          count={flagged}
+          label="Flagged for review"
+          hint="AI wants your call before posting"
+        />
+        <AttentionCard
+          testid="attention-rules"
+          to="/accounting/rules"
+          icon={Wand2}
+          tone={rules > 0 ? "indigo" : "muted"}
+          count={rules}
+          label="Suggested rules"
+          hint={rules > 0 ? "1-click accept to auto-categorize repeats" : "None pending"}
+        />
+        <AttentionCard
+          testid="attention-reconcile"
+          to="/accounting/reconciliation"
+          icon={ScrollText}
+          tone={unrecon > 0 ? "rose" : "muted"}
+          count={unrecon}
+          label="Unreconciled accounts"
+          hint={
+            unrecon > 0
+              ? unreconciled_accounts.slice(0, 2)
+                  .map(a => `${a.code} ${a.name}`).join(", ")
+                  + (unreconciled_accounts.length > 2
+                      ? ` +${unreconciled_accounts.length - 2} more` : "")
+              : `Reconciled within ${staleness_days} days`
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
+const TONE_CLS = {
+  amber:  { bg: "hover:bg-amber-50",  fg: "text-amber-700",  ring: "bg-amber-100" },
+  indigo: { bg: "hover:bg-indigo-50", fg: "text-indigo-700", ring: "bg-indigo-100" },
+  rose:   { bg: "hover:bg-rose-50",   fg: "text-rose-700",   ring: "bg-rose-100" },
+  muted:  { bg: "hover:bg-slate-50",  fg: "text-slate-500",  ring: "bg-slate-100" },
+};
+
+function AttentionCard({ testid, to, icon: Icon, tone, count, label, hint }) {
+  const t = TONE_CLS[tone] || TONE_CLS.muted;
+  return (
+    <Link
+      to={to}
+      data-testid={testid}
+      className={`px-5 py-4 flex items-start gap-3 transition ${t.bg}`}
+    >
+      <div className={`w-9 h-9 rounded-full flex items-center justify-center ${t.ring}`}>
+        <Icon size={16} className={t.fg} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-baseline gap-2">
+          <span className={`text-2xl font-bold tabular-nums ${count > 0 ? "text-slate-900" : "text-slate-400"}`}>
+            {count}
+          </span>
+          <span className="text-sm font-medium text-slate-700">{label}</span>
+        </div>
+        <div className="text-xs text-slate-500 mt-0.5 truncate" title={hint}>{hint}</div>
+      </div>
+      <ArrowRight size={14} className="text-slate-400 mt-2 flex-shrink-0" />
+    </Link>
+  );
+}
+

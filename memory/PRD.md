@@ -86,6 +86,17 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   cleanup preview ("would clean up N un-reviewed txns"). `POST /rules` now auto-consumes the
   matching `rule_candidate` after promotion so the panel stays clean, and invalidates the
   report cache.
+- **2026-02-17**: Dashboard — added **"Needs your attention"** widget. New
+  `GET /companies/{cid}/dashboard/attention` returns `{flagged_count, suggested_rules_count,
+  unreconciled_accounts_count, unreconciled_accounts[]}` computed in parallel via
+  `asyncio.gather`. Un-reconciled = bank/credit-card accounts with posted txns but no
+  reconciliation record within `staleness_days=45`. Cached per-company at the same TTL
+  as `/dashboard/metrics` and keyed by day so midnight-rollover refreshes naturally.
+  UI shows a three-card row (Flagged / Suggested rules / Unreconciled) with tone-coded
+  icons (amber / indigo / rose), counts, per-card hints (e.g. names of the first 2 stale
+  accounts), and one-click deep-links to `/accounting/transactions?filter=review`,
+  `/accounting/rules`, `/accounting/reconciliation`. Renders an "All clear" success state
+  when everything is zero.
 - **2026-02-17**: Verified 317 LLC Plaid vs Veryfi source-of-truth dedup for account ···6084:
   Veryfi statement `eStmt_2026-05-20.pdf` mapped to existing `1011 Bank of America Checking ···6084`
   (no duplicate CoA), all 94 lines skipped as duplicates against Plaid's coverage window

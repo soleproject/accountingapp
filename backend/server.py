@@ -1430,6 +1430,88 @@ async def dashboard_metrics(cid: str, user: dict = Depends(get_current_user)):
     return await cache.get_or_compute(key, _DASH_CACHE_TTL, compute)
 
 
+UNRECONCILED_STALENESS_DAYS = 45
+
+
+@api.get("/companies/{cid}/dashboard/attention")
+async def dashboard_attention(cid: str, user: dict = Depends(get_current_user)):
+    """Compact CPA "needs your attention" summary for the Dashboard.
+
+    Aggregates the three most common daily-review signals into a single
+    fast response (per-company cached at the same TTL as `/dashboard/metrics`):
+      • `flagged_count`             — un-reviewed AI-categorized txns
+      • `suggested_rules_count`     — rule_candidates crossing approvals >= 2
+      • `unreconciled_accounts_count` — bank/CC ledger accounts that have
+        transactions but no reconciliation in the last 45 days
+      • `unreconciled_accounts`     — short list `[{id, code, name, last_as_of}]`
+        so the UI can offer a one-click drill-down.
+
+    All counts are computed in parallel via `asyncio.gather` and rely on
+    existing indexes (`(company_id, needs_review, date)`, `(company_id, code)`).
+    """
+    await _require_company(user, cid)
+    cache = get_cache()
+    today = datetime.now(timezone.utc).date()
+    key = cache.key("dash_attention", company_id=cid, day=today.isoformat())
+
+    async def compute():
+        flagged_task = db.transactions.count_documents(
+            {"company_id": cid, "needs_review": True}
+        )
+        suggested_task = db.rule_candidates.count_documents(
+            {"company_id": cid, "approvals": {"$gte": 2}}
+        )
+        # Bank/credit-card accounts that back real cash flow. We only care about
+        # those that actually have posted transactions — an empty account is
+        # not "un-reconciled", it's just unused.
+        accts_task = db.accounts.find({
+            "company_id": cid, "type": {"$in": ["asset", "liability"]},
+            "$or": [
+                {"code": {"$gte": "1000", "$lte": "1099"}},
+                {"code": {"$regex": "^21"}},  # 2100 Credit Card Payable etc.
+                {"subtype": "Bank"},
+            ],
+        }).to_list(200)
+
+        flagged_count, suggested_rules_count, bank_accts = await asyncio.gather(
+            flagged_task, suggested_task, accts_task,
+        )
+
+        cutoff = (today - timedelta(days=UNRECONCILED_STALENESS_DAYS)).isoformat()
+
+        async def _stale(a):
+            has_txn = await db.transactions.count_documents({
+                "company_id": cid, "bank_account_id": a["id"],
+                "posted": True,
+            })
+            if not has_txn:
+                return None
+            latest = await db.reconciliations.find_one(
+                {"company_id": cid, "bank_account_id": a["id"]},
+                sort=[("as_of", -1)],
+            )
+            last_as_of = latest.get("as_of") if latest else None
+            if last_as_of and last_as_of >= cutoff:
+                return None
+            return {
+                "id": a["id"], "code": a.get("code"), "name": a.get("name"),
+                "last_as_of": last_as_of,
+            }
+
+        stale_results = await asyncio.gather(*[_stale(a) for a in bank_accts]) if bank_accts else []
+        unreconciled = [x for x in stale_results if x]
+
+        return {
+            "flagged_count": flagged_count,
+            "suggested_rules_count": suggested_rules_count,
+            "unreconciled_accounts_count": len(unreconciled),
+            "unreconciled_accounts": unreconciled,
+            "staleness_days": UNRECONCILED_STALENESS_DAYS,
+        }
+
+    return await cache.get_or_compute(key, _DASH_CACHE_TTL, compute)
+
+
 # ----------------------- Rules -----------------------
 
 @api.get("/companies/{cid}/rules")
