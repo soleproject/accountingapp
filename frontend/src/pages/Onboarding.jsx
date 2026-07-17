@@ -52,12 +52,31 @@ export default function Onboarding() {
     await api.patch(`/companies/${currentId}/onboarding`, patch);
   };
 
+  const mode = answers.onboarding_mode === "simple" ? "simple" : "guided";
+  const isInterviewStep = (s) => s === 2;
+
   const next = async () => {
-    await persist({ step: step + 1, answers });
-    setStep(step + 1);
+    let target = step + 1;
+    if (mode === "simple" && isInterviewStep(target)) target += 1;
+    await persist({ step: target, answers });
+    setStep(target);
   };
   const back = async () => {
-    if (step > 0) { await persist({ step: step - 1 }); setStep(step - 1); }
+    if (step <= 0) return;
+    let target = step - 1;
+    if (mode === "simple" && isInterviewStep(target)) target -= 1;
+    if (target < 0) target = 0;
+    await persist({ step: target });
+    setStep(target);
+  };
+  const setMode = async (m) => {
+    const nextAns = { ...answers, onboarding_mode: m };
+    setAnswers(nextAns);
+    // If flipping to simple while on the Interview step, hop forward.
+    let nextStep = step;
+    if (m === "simple" && isInterviewStep(step)) nextStep = step + 1;
+    await persist({ answers: nextAns, step: nextStep });
+    if (nextStep !== step) setStep(nextStep);
   };
   const finish = async () => {
     await persist({ complete: true, step: STEPS.length, answers });
@@ -218,18 +237,46 @@ export default function Onboarding() {
         <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center">
           <Sparkles className="text-indigo-600" size={20} />
         </div>
-        <div>
+        <div className="flex-1">
           <h1 className="font-heading text-2xl font-bold">AI-assisted onboarding</h1>
           <p className="text-slate-500 text-sm">Getting {current.name} ready for the books.</p>
+        </div>
+        <div
+          className="inline-flex rounded-md border border-slate-300 overflow-hidden text-xs"
+          data-testid="onboarding-mode-toggle"
+        >
+          <button
+            onClick={() => setMode("guided")}
+            data-testid="onboarding-mode-guided"
+            title="Include a 30-second AI interview that tailors the CoA and seeds bank-feed rules."
+            className={`px-3 py-1.5 flex items-center gap-1 ${
+              mode === "guided" ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            <Sparkles size={11} /> AI-guided
+          </button>
+          <button
+            onClick={() => setMode("simple")}
+            data-testid="onboarding-mode-simple"
+            title="Skip the AI interview. Just business profile + CoA + bank + statements."
+            className={`px-3 py-1.5 border-l border-slate-300 ${
+              mode === "simple" ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            Simple
+          </button>
         </div>
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
-        {STEPS.map((s, i) => (
-          <div key={i} className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full border ${i < step ? "bg-emerald-50 border-emerald-300 text-emerald-700" : i === step ? "bg-slate-900 text-white" : "bg-white text-slate-500"}`}>
-            {i < step && <CheckCircle2 size={12} />} {i + 1}. {s}
-          </div>
-        ))}
+        {STEPS.map((s, i) => {
+          if (mode === "simple" && isInterviewStep(i)) return null;
+          return (
+            <div key={i} className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full border ${i < step ? "bg-emerald-50 border-emerald-300 text-emerald-700" : i === step ? "bg-slate-900 text-white" : "bg-white text-slate-500"}`}>
+              {i < step && <CheckCircle2 size={12} />} {i + 1}. {s}
+            </div>
+          );
+        })}
       </div>
 
       <div className="rounded-xl border bg-white p-6">

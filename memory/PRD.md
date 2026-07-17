@@ -139,6 +139,11 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   methods, sales-tax nexus, annual vs monthly prepaids) with rationale; synthesis on a
   Retail/F&B answered set returned 11 accounts + 8 seed rules including Square → Clearing
   Account, Cafe Imports → COGS Green Coffee, Nashville Coffee → Wholesale Sales.
+- **2026-02-17**: **Onboarding mode toggle** — pill at the top of the onboarding page lets
+  the user pick **AI-guided** (default; includes the AI Interview step) or **Simple** (skips
+  it). Choice is persisted to `company.onboarding.answers.onboarding_mode`. In Simple mode
+  the AI-Interview step chip is hidden and `next()`/`back()` navigation transparently skips
+  the interview index — so either flow is a natural, uninterrupted click-through.
 - **2026-02-17**: Verified 317 LLC Plaid vs Veryfi source-of-truth dedup for account ···6084:
   Veryfi statement `eStmt_2026-05-20.pdf` mapped to existing `1011 Bank of America Checking ···6084`
   (no duplicate CoA), all 94 lines skipped as duplicates against Plaid's coverage window
