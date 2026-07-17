@@ -10,6 +10,7 @@ import PlaidLinkButton from "@/components/PlaidLinkButton";
 const STEPS = [
   "Business profile",
   "QuickBooks link",
+  "AI Interview",
   "AI Chart of Accounts",
   "Bank connection (Plaid)",
   "Statement upload (Veryfi)",
@@ -27,6 +28,12 @@ export default function Onboarding() {
   const [previewing, setPreviewing] = useState(false);
   const [adding, setAdding] = useState(false);
   const [addedCount, setAddedCount] = useState(0);
+  // AI Interview
+  const [interviewQs, setInterviewQs] = useState([]);
+  const [interviewAns, setInterviewAns] = useState({}); // {id: answer}
+  const [interviewLoading, setInterviewLoading] = useState(false);
+  const [interviewApplying, setInterviewApplying] = useState(false);
+  const [interviewResult, setInterviewResult] = useState(null); // {accounts, rules, inserted_accounts, inserted_rules, rules_applied_to_transactions}
   const [plaidAccts, setPlaidAccts] = useState([]);
   const [selectedPlaid, setSelectedPlaid] = useState(new Set());
   const [imported, setImported] = useState({ plaid: 0, veryfi: 0 });
@@ -58,6 +65,49 @@ export default function Onboarding() {
     toast.success("Onboarding complete! Welcome to Axiom Ledger.");
     nav("/accounting/transactions");
   };
+
+  const loadInterview = async () => {
+    setInterviewLoading(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/onboarding/interview/questions`);
+      setInterviewQs(r.data.questions || []);
+    } catch {
+      toast.error("AI couldn't generate interview questions. You can skip.");
+    } finally {
+      setInterviewLoading(false);
+    }
+  };
+
+  const applyInterview = async () => {
+    if (!interviewQs.length) return;
+    setInterviewApplying(true);
+    try {
+      const answers = interviewQs.map(q => ({
+        id: q.id, question: q.question,
+        answer: interviewAns[q.id] ?? "",
+      }));
+      const r = await api.post(
+        `/companies/${currentId}/onboarding/interview/synthesize`,
+        { answers, apply: true },
+      );
+      setInterviewResult(r.data);
+      toast.success(
+        `Added ${r.data.inserted_accounts} account${r.data.inserted_accounts === 1 ? "" : "s"}`
+        + ` and ${r.data.inserted_rules} rule${r.data.inserted_rules === 1 ? "" : "s"}`
+        + (r.data.rules_applied_to_transactions
+            ? ` · back-filled ${r.data.rules_applied_to_transactions} txns`
+            : "")
+      );
+    } catch {
+      toast.error("Failed to apply interview answers.");
+    } finally {
+      setInterviewApplying(false);
+    }
+  };
+
+  const setInterviewAnswer = (id, val) =>
+    setInterviewAns(p => ({ ...p, [id]: val }));
+
 
   const generateCoa = async () => {
     setPreviewing(true);
@@ -232,6 +282,147 @@ export default function Onboarding() {
 
         {step === 2 && (
           <div className="space-y-3">
+            <h2 className="font-heading text-xl font-semibold">Quick AI interview</h2>
+            <p className="text-sm text-slate-500">
+              5 targeted questions (under 30 seconds). Claude uses your answers to sharpen the
+              chart of accounts and pre-configure bank-feed rules for your exact business.
+            </p>
+
+            {interviewQs.length === 0 && !interviewLoading && (
+              <button
+                onClick={loadInterview}
+                data-testid="onboarding-interview-start"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-slate-900 text-white text-sm"
+              >
+                <Sparkles size={13} /> Start AI interview
+              </button>
+            )}
+            {interviewLoading && (
+              <div className="text-sm text-slate-500 inline-flex items-center gap-2">
+                <Loader2 size={14} className="animate-spin" />
+                Preparing questions tailored to your business…
+              </div>
+            )}
+
+            {interviewQs.length > 0 && !interviewResult && (
+              <div className="space-y-3 mt-2">
+                {interviewQs.map((q, idx) => (
+                  <div
+                    key={q.id}
+                    data-testid={`interview-q-${q.id}`}
+                    className="rounded-md border bg-white p-3"
+                  >
+                    <div className="text-sm font-medium mb-1">
+                      <span className="text-slate-400 mr-1">{idx + 1}.</span>{q.question}
+                    </div>
+                    {q.why && <div className="text-[11px] text-slate-500 mb-2">{q.why}</div>}
+                    {q.answer_type === "yes_no" ? (
+                      <div className="flex gap-2">
+                        {["Yes", "No"].map(v => (
+                          <button
+                            key={v}
+                            onClick={() => setInterviewAnswer(q.id, v)}
+                            data-testid={`interview-a-${q.id}-${v.toLowerCase()}`}
+                            className={`px-3 py-1 rounded-md border text-xs ${
+                              interviewAns[q.id] === v
+                                ? "bg-slate-900 text-white border-slate-900"
+                                : "bg-white hover:bg-slate-50"
+                            }`}
+                          >
+                            {v}
+                          </button>
+                        ))}
+                      </div>
+                    ) : q.answer_type === "multi_choice" ? (
+                      <div className="flex flex-wrap gap-2">
+                        {(q.options || []).map(opt => (
+                          <button
+                            key={opt}
+                            onClick={() => setInterviewAnswer(q.id, opt)}
+                            data-testid={`interview-a-${q.id}-${opt.substring(0,12)}`}
+                            className={`px-3 py-1 rounded-md border text-xs ${
+                              interviewAns[q.id] === opt
+                                ? "bg-slate-900 text-white border-slate-900"
+                                : "bg-white hover:bg-slate-50"
+                            }`}
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <input
+                        placeholder="Type your answer…"
+                        value={interviewAns[q.id] || ""}
+                        onChange={(e) => setInterviewAnswer(q.id, e.target.value)}
+                        data-testid={`interview-a-${q.id}-text`}
+                        className="w-full border rounded px-2 py-1.5 text-sm"
+                      />
+                    )}
+                  </div>
+                ))}
+                <button
+                  onClick={applyInterview}
+                  disabled={interviewApplying
+                    || interviewQs.some(q => !interviewAns[q.id])}
+                  data-testid="onboarding-interview-apply"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-emerald-600 text-white text-sm disabled:opacity-50"
+                >
+                  {interviewApplying && <Loader2 size={14} className="animate-spin" />}
+                  Apply AI recommendations
+                </button>
+              </div>
+            )}
+
+            {interviewResult && (
+              <div className="mt-3 space-y-3">
+                <div className="rounded-md bg-emerald-50 border border-emerald-200 px-3 py-2 text-sm">
+                  ✓ Added <b>{interviewResult.inserted_accounts}</b> account{interviewResult.inserted_accounts === 1 ? "" : "s"}
+                  {" "}and <b>{interviewResult.inserted_rules}</b> rule{interviewResult.inserted_rules === 1 ? "" : "s"}.
+                  {interviewResult.rules_applied_to_transactions > 0 && (
+                    <> Back-filled <b>{interviewResult.rules_applied_to_transactions}</b> un-reviewed transaction{interviewResult.rules_applied_to_transactions === 1 ? "" : "s"}.</>
+                  )}
+                </div>
+                {interviewResult.accounts?.length > 0 && (
+                  <div className="rounded-md border bg-white">
+                    <div className="px-3 py-2 border-b text-xs uppercase tracking-wide text-slate-500 bg-slate-50">
+                      New accounts
+                    </div>
+                    <div className="divide-y max-h-56 overflow-y-auto">
+                      {interviewResult.accounts.map(a => (
+                        <div key={a.code} className="px-3 py-2 text-sm">
+                          <span className="font-mono-num text-slate-500 tabular-nums mr-2">{a.code}</span>
+                          <span className="font-medium">{a.name}</span>
+                          <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 ml-2">{a.type}</span>
+                          {a.rationale && <div className="text-[11px] text-slate-500 mt-0.5">{a.rationale}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {interviewResult.rules?.length > 0 && (
+                  <div className="rounded-md border bg-white">
+                    <div className="px-3 py-2 border-b text-xs uppercase tracking-wide text-slate-500 bg-slate-50">
+                      Seed rules
+                    </div>
+                    <div className="divide-y max-h-56 overflow-y-auto">
+                      {interviewResult.rules.map((r, i) => (
+                        <div key={i} className="px-3 py-2 text-sm">
+                          When merchant contains <b>{r.merchant}</b> → <b className="font-mono-num tabular-nums">{r.account_code}</b> {r.account_name}
+                          {r.why && <div className="text-[11px] text-slate-500 mt-0.5">{r.why}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+
+        {step === 3 && (
+          <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">AI-tailored Chart of Accounts</h2>
             <p className="text-sm text-slate-500">
               We seed a GAAP baseline. Claude Sonnet reads your business type + description and
@@ -318,7 +509,7 @@ export default function Onboarding() {
           </div>
         )}
 
-        {step === 3 && (
+        {step === 4 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Connect your bank via Plaid</h2>
             <p className="text-sm text-slate-500">
@@ -362,7 +553,7 @@ export default function Onboarding() {
           </div>
         )}
 
-        {step === 4 && (
+        {step === 5 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Upload statements Plaid couldn't reach</h2>
             <p className="text-sm text-slate-500">Veryfi OCR pulls transactions off PDFs and images. AI categorizes the same way.</p>
@@ -386,7 +577,7 @@ export default function Onboarding() {
           </div>
         )}
 
-        {step === 5 && (
+        {step === 6 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">You're set.</h2>
             <p className="text-sm text-slate-500">

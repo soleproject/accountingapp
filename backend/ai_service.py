@@ -308,3 +308,192 @@ async def suggest_chart_of_accounts(
             "rationale": (x.get("rationale") or "").strip(),
         })
     return out
+
+
+async def onboarding_interview_questions(
+    business_type: str, description: str,
+) -> list[dict]:
+    """Ask Claude Sonnet to design 4-5 targeted onboarding questions that will
+    sharpen the CoA and seed default rules for THIS specific business.
+
+    Returns a list of `{id, question, answer_type, options?, why}` items.
+    `answer_type` is one of: "yes_no", "multi_choice", "short_text".
+    """
+    prompt = (
+        f"You are a CPA onboarding a new small business into an accounting system.\n"
+        f"Business type: {business_type}\n"
+        f"Description: {description or '(none provided)'}\n\n"
+        "Design 4-5 short, targeted questions whose answers will let you (a) pick "
+        "the RIGHT industry-specific accounts and (b) pre-configure common "
+        "categorization rules for this business's likely bank feed.\n\n"
+        "Rules:\n"
+        "- Each question is answerable in under 5 seconds.\n"
+        "- Prefer yes_no or 3-option multi_choice; only use short_text when unavoidable.\n"
+        "- Skip anything that's already obvious from the business type/description.\n"
+        "- Skip generic questions (business address, EIN, etc.).\n"
+        "- Focus on: revenue streams, physical inventory, gift cards, subscription "
+        "  billing, payment processors used, tips/gratuity handling, contractor "
+        "  vs employee split, sales-tax nexus, retainage, etc — only what's relevant.\n"
+        "- `why` field: one short sentence on what the answer affects.\n\n"
+        "Respond with ONLY a JSON array (no wrapper, no markdown). Item shape:\n"
+        '  {"id": "<snake_case>", "question": "<one sentence>", '
+        '"answer_type": "yes_no" | "multi_choice" | "short_text", '
+        '"options": ["opt1","opt2","opt3"] (only for multi_choice), '
+        '"why": "<affects which CoA/rule>"}'
+    )
+    chat = _new_chat(
+        "You are a CPA designing an onboarding interview. Return ONLY a JSON array.",
+        f"interview-{business_type}-{hashlib.md5((description or '').encode()).hexdigest()[:6]}",
+    )
+    text = ""
+    try:
+        async for ev in chat.stream_message(UserMessage(text=prompt)):
+            if isinstance(ev, TextDelta):
+                text += ev.content
+            elif isinstance(ev, StreamDone):
+                break
+    except Exception:
+        return []
+    m = re.search(r"\[[\s\S]*\]", text)
+    if not m:
+        return []
+    try:
+        arr = json.loads(m.group(0))
+    except Exception:
+        return []
+    out = []
+    for x in arr:
+        if not isinstance(x, dict) or "question" not in x:
+            continue
+        qid = str(x.get("id") or f"q{len(out)+1}").strip()
+        ans_type = (x.get("answer_type") or "short_text").strip().lower()
+        if ans_type not in ("yes_no", "multi_choice", "short_text"):
+            ans_type = "short_text"
+        item = {
+            "id": qid,
+            "question": str(x["question"]).strip(),
+            "answer_type": ans_type,
+            "why": str(x.get("why") or "").strip(),
+        }
+        if ans_type == "multi_choice":
+            opts = x.get("options") or []
+            item["options"] = [str(o).strip() for o in opts if str(o).strip()]
+            if len(item["options"]) < 2:
+                continue  # bad multi-choice — drop
+        out.append(item)
+    return out[:6]  # hard cap so we never overwhelm the user
+
+
+async def onboarding_interview_synthesize(
+    business_type: str, description: str,
+    answers: list[dict], existing_codes: list[str],
+    existing_accounts: list[dict],
+) -> dict:
+    """Given interview answers, ask Claude to produce (a) refined CoA additions
+    and (b) suggested categorization rules (merchant → account_code).
+
+    Args:
+        answers: list of `{id, question, answer}` from the frontend.
+        existing_codes: codes already on the CoA (dedup for suggestions).
+        existing_accounts: `[{code, name}]` — the AI must reference codes it
+            actually knows exist when proposing rules. We pass BOTH existing
+            and freshly-suggested accounts (post-merge) to keep the rules valid.
+
+    Returns `{"accounts": [...], "rules": [{merchant, account_code, why}]}`.
+    """
+    qa_lines = "\n".join(
+        f"- {a.get('question','?')}\n    answer: {a.get('answer','(no answer)')}"
+        for a in (answers or [])
+    ) or "(no answers)"
+
+    coa_lines = "\n".join(
+        f"  {a['code']}  {a['name']}  ({a.get('type','?')})"
+        for a in existing_accounts[:120]
+    )
+
+    prompt = (
+        f"Business type: {business_type}\n"
+        f"Description: {description or '(none)'}\n\n"
+        f"Onboarding interview answers:\n{qa_lines}\n\n"
+        f"CURRENT chart of accounts (do NOT re-suggest these codes for the accounts array):\n"
+        f"{coa_lines}\n\n"
+        "Return ONLY a JSON object with two top-level keys, no prose:\n"
+        '{\n'
+        '  "accounts": [  // 5-15 items — new industry accounts refined by the answers above\n'
+        '    {"code": "<4-digit>", "name": "<Title Case>",\n'
+        '     "type": "asset|liability|equity|revenue|cogs|expense",\n'
+        '     "subtype": "<one_word>", "rationale": "<one sentence>"}\n'
+        '  ],\n'
+        '  "rules": [    // 4-12 items — starter categorization rules\n'
+        '    {"merchant": "<substring the bank feed will match>",\n'
+        '     "account_code": "<code from CURRENT list OR from the accounts array above>",\n'
+        '     "why": "<one sentence>"}\n'
+        '  ]\n'
+        '}\n\n'
+        "Rules for the rules array:\n"
+        "- Use realistic merchant substrings ('Stripe', 'Uber Eats', 'ADP', 'Shopify', 'Costco').\n"
+        "- Only propose rules that clearly fit the interview answers (e.g. don't suggest a\n"
+        "  gift-card rule if the business said no to gift cards).\n"
+        "- account_code MUST reference either an existing account OR one you're proposing in\n"
+        "  the accounts array above — never invent a code that appears in neither."
+    )
+    chat = _new_chat(
+        "You are a CPA refining a chart of accounts + seeding categorization rules based on "
+        "onboarding interview answers. Return ONLY a JSON object with keys 'accounts' and 'rules'.",
+        f"synth-{business_type}-{hashlib.md5(str(answers).encode()).hexdigest()[:6]}",
+    )
+    text = ""
+    try:
+        async for ev in chat.stream_message(UserMessage(text=prompt)):
+            if isinstance(ev, TextDelta):
+                text += ev.content
+            elif isinstance(ev, StreamDone):
+                break
+    except Exception:
+        return {"accounts": [], "rules": []}
+
+    m = re.search(r"\{[\s\S]*\}", text)
+    if not m:
+        return {"accounts": [], "rules": []}
+    try:
+        data = json.loads(m.group(0))
+    except Exception:
+        return {"accounts": [], "rules": []}
+
+    # Normalize accounts
+    existing_set = set(existing_codes)
+    accts_out = []
+    for x in (data.get("accounts") or []):
+        if not isinstance(x, dict) or not x.get("code") or not x.get("name"):
+            continue
+        code = str(x["code"]).strip()
+        if not code or code in existing_set:
+            continue
+        existing_set.add(code)
+        accts_out.append({
+            "code": code, "name": str(x["name"]).strip(),
+            "type": (x.get("type") or "expense").strip().lower(),
+            "subtype": (x.get("subtype") or "operating_expense").strip().lower(),
+            "rationale": (x.get("rationale") or "").strip(),
+        })
+
+    # Normalize rules — reference either an existing account or a freshly-proposed one
+    allowed_codes = {a["code"] for a in existing_accounts} | {a["code"] for a in accts_out}
+    rules_out = []
+    for x in (data.get("rules") or []):
+        if not isinstance(x, dict):
+            continue
+        merch = str(x.get("merchant") or "").strip()
+        code = str(x.get("account_code") or "").strip()
+        if not merch or not code or code not in allowed_codes:
+            continue
+        # name & type for display convenience
+        acct = next((a for a in existing_accounts + accts_out if a["code"] == code), None)
+        rules_out.append({
+            "merchant": merch, "account_code": code,
+            "account_name": (acct or {}).get("name", ""),
+            "why": str(x.get("why") or "").strip(),
+        })
+
+    return {"accounts": accts_out, "rules": rules_out}
+

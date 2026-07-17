@@ -26,6 +26,7 @@ from auth import (  # noqa: E402
 )
 from ai_service import (  # noqa: E402
     categorize_transaction, chat_stream, suggest_chart_of_accounts,
+    onboarding_interview_questions, onboarding_interview_synthesize,
 )
 import reports as R  # noqa: E402
 import plaid_service  # noqa: E402
@@ -2247,7 +2248,6 @@ async def update_onboarding(cid: str, inp: OnboardingUpdate, user: dict = Depend
 @api.post("/companies/{cid}/onboarding/coa/suggest")
 async def suggest_coa(cid: str, user: dict = Depends(get_current_user)):
     """Preview an AI-tailored chart of accounts without writing anything.
-
     Returns a list of `{code, name, type, subtype, rationale, already_exists}`
     so the UI can render a review-and-select screen before insertion.
     """
@@ -2313,6 +2313,153 @@ async def generate_coa(cid: str, payload: dict | None = None,
     except Exception:  # noqa: BLE001
         pass
     return {"added": added, "suggestions": extras, "inserted": inserted}
+
+
+
+@api.post("/companies/{cid}/onboarding/interview/questions")
+async def onboarding_interview(cid: str, user: dict = Depends(get_current_user)):
+    """Return 4-5 targeted onboarding questions tailored to the business type."""
+    company = await _require_company(user, cid)
+    questions = await onboarding_interview_questions(
+        company.get("business_type", ""),
+        company.get("business_description", ""),
+    )
+    return {"business_type": company.get("business_type", ""), "questions": questions}
+
+
+@api.post("/companies/{cid}/onboarding/interview/synthesize")
+async def onboarding_interview_apply(
+    cid: str, payload: dict, user: dict = Depends(get_current_user),
+):
+    """Take the interview answers and produce refined CoA + starter rules.
+
+    Body: `{answers: [{id, question, answer}, ...], apply: bool}`
+    - `apply=false` (default): preview mode — nothing written.
+    - `apply=true`: insert every returned account + create every returned rule
+      (rules run `apply_to_existing=true` so historic un-reviewed txns are
+      back-filled). Returns counts.
+
+    Persists the raw answers on the company so we can retrain later.
+    """
+    company = await _require_company(user, cid)
+    answers = payload.get("answers") or []
+    apply = bool(payload.get("apply", False))
+
+    existing = await db.accounts.find({"company_id": cid}).to_list(2000)
+    existing_min = [{"code": a["code"], "name": a["name"],
+                     "type": a.get("type", "")} for a in existing]
+    existing_codes = [a["code"] for a in existing]
+
+    result = await onboarding_interview_synthesize(
+        company.get("business_type", ""),
+        company.get("business_description", ""),
+        answers=answers,
+        existing_codes=existing_codes,
+        existing_accounts=existing_min,
+    )
+    # Persist raw answers even in preview mode — useful for auditing +
+    # future re-runs when the AI improves.
+    await db.companies.update_one(
+        {"id": cid},
+        {"$set": {"onboarding_interview_answers": answers,
+                  "onboarding_interview_at": now_iso()}},
+    )
+
+    if not apply:
+        return {"apply": False, **result}
+
+    now = now_iso()
+    # 1) Insert every new account
+    inserted_accounts = 0
+    inserted_codes: dict[str, dict] = {}
+    for a in result.get("accounts", []):
+        exists = await db.accounts.find_one({"company_id": cid, "code": a["code"]})
+        if exists:
+            inserted_codes[a["code"]] = exists
+            continue
+        aid = str(uuid.uuid4())
+        doc = {
+            "id": aid, "company_id": cid, "code": a["code"], "name": a["name"],
+            "type": a.get("type", "expense"),
+            "subtype": a.get("subtype", "operating_expense"),
+            "active": True, "balance": 0.0,
+            "created_at": now, "updated_at": now,
+        }
+        await db.accounts.insert_one(doc)
+        inserted_codes[a["code"]] = doc
+        inserted_accounts += 1
+
+    # 2) Create every rule + back-fill matching un-reviewed txns
+    inserted_rules = 0
+    rules_applied = 0
+    for r in result.get("rules", []):
+        acct = await db.accounts.find_one(
+            {"company_id": cid, "code": r["account_code"]}
+        )
+        if not acct:
+            continue
+        # Skip if a matching rule already exists
+        dup = await db.rules.find_one({
+            "company_id": cid, "match_type": "merchant_contains",
+            "match_value": r["merchant"], "account_code": r["account_code"],
+        })
+        if dup:
+            continue
+        rid = str(uuid.uuid4())
+        await db.rules.insert_one({
+            "id": rid, "company_id": cid,
+            "match_type": "merchant_contains",
+            "match_value": r["merchant"],
+            "account_code": r["account_code"],
+            "account_name": acct["name"],
+            "created_by": "ai_interview",
+            "hits": 0, "created_at": now, "updated_at": now,
+        })
+        inserted_rules += 1
+
+        # Back-fill any historic un-reviewed txns that match
+        q = {
+            "company_id": cid, "human_reviewed": False,
+            "merchant": {"$regex": re.escape(r["merchant"]), "$options": "i"},
+        }
+        docs = await db.transactions.find(q).to_list(5000)
+        applied_here = 0
+        for t in docs:
+            if await _is_period_closed(cid, t.get("date")):
+                continue
+            await db.transactions.update_one(
+                {"id": t["id"]},
+                {"$set": {
+                    "category_account_id": acct["id"],
+                    "category_account_code": acct["code"],
+                    "category_account_name": acct["name"],
+                    "ai_confidence": 0.99,
+                    "ai_reasoning": f"Onboarding rule: {r['merchant']} → {acct['name']}",
+                    "needs_review": False, "posted": True,
+                    "updated_at": now_iso(),
+                }},
+            )
+            applied_here += 1
+        if applied_here:
+            await db.rules.update_one({"id": rid}, {"$set": {"hits": applied_here}})
+        rules_applied += applied_here
+
+    await _log_ai(cid, "onboarding_interview", inserted_accounts + inserted_rules)
+
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {
+        "apply": True,
+        "accounts": result.get("accounts", []),
+        "rules": result.get("rules", []),
+        "inserted_accounts": inserted_accounts,
+        "inserted_rules": inserted_rules,
+        "rules_applied_to_transactions": rules_applied,
+    }
 
 
 @api.post("/companies/{cid}/onboarding/plaid/link-token")
