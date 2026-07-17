@@ -105,6 +105,7 @@ python-multipart==0.0.32
 pytokens==0.4.1
 PyYAML==6.0.3
 redis==5.3.1
+fakeredis==2.36.2  # dev-only; enables Redis cache tests without a running redis-server
 referencing==0.37.0
 regex==2026.7.10
 reportlab==4.2.5

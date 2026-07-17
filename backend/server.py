@@ -43,6 +43,40 @@ app = FastAPI(title="Axiom Ledger API")
 api = APIRouter(prefix="/api")
 
 
+# ----------------------- Health & readiness probes -----------------------
+
+@api.get("/health")
+async def health():
+    """Liveness probe — cheap; only asserts the process is alive.
+    Wired to the K8s livenessProbe on port 8001.
+    """
+    return {"status": "ok"}
+
+
+@api.get("/ready")
+async def ready():
+    """Readiness probe — asserts Mongo is reachable AND our in-process
+    task registry is populated. K8s uses this to decide whether to route
+    traffic to the pod. Returning 503 while starting up prevents a client
+    from hitting a pod before `sync_tasks.register_all()` has run.
+    """
+    from db import db as _db
+    import job_queue as _jq
+    try:
+        await _db.command({"ping": 1})
+    except Exception as e:  # noqa: BLE001
+        return Response(
+            content=json.dumps({"status": "unready", "reason": f"mongo: {e}"}),
+            media_type="application/json", status_code=503,
+        )
+    if not _jq._TASK_REGISTRY:
+        return Response(
+            content=json.dumps({"status": "unready", "reason": "tasks not registered"}),
+            media_type="application/json", status_code=503,
+        )
+    return {"status": "ready", "task_kinds": list(_jq._TASK_REGISTRY.keys())}
+
+
 # ----------------------- Models -----------------------
 
 class LoginIn(BaseModel):

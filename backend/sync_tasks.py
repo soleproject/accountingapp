@@ -39,7 +39,7 @@ async def _mark_done(job_id: str, result: dict) -> None:
     if doc and doc.get("company_id"):
         try:
             from infra import get_cache
-            get_cache().invalidate(doc["company_id"])
+            await get_cache().ainvalidate(doc["company_id"])
         except Exception:  # noqa: BLE001 — cache miss is safe
             pass
 

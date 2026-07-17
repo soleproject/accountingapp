@@ -100,12 +100,17 @@ def _configure_sentry() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Report cache: in-process TTLCache, Redis-swappable via REDIS_URL
+# Report cache: auto-selects Redis when reachable, falls back to in-process
+# TTLCache. Same public API — invalidations and TTLs are honored either way.
 # ---------------------------------------------------------------------------
 
 class ReportCache:
-    """TTL cache keyed by (namespace, key). ~5-15 ms hits, auto-expires.
+    """In-process TTL cache keyed by (namespace, key). ~5-15 ms hits, auto-expires.
     Invalidation is coarse per-company via `invalidate(company_id)`.
+
+    Used when `REDIS_URL` is unset OR unreachable. See `RedisReportCache`
+    below for the multi-pod-safe variant that keeps caches in sync across
+    replicas.
     """
 
     def __init__(self, maxsize: int = 4096, default_ttl: int = 300):
@@ -129,7 +134,11 @@ class ReportCache:
         return val
 
     def invalidate(self, company_id: str) -> int:
-        """Remove all cache entries scoped to a company."""
+        """Remove all cache entries scoped to a company. Kept sync for
+        backwards compat with existing call sites, and to match the shape
+        of `RedisReportCache.invalidate`, which can be awaited transparently
+        via the `_invalidate_async_or_sync` helper used by callers.
+        """
         prefix_match = f"company_id={company_id}"
         removed = 0
         for k in list(self._store.keys()):
@@ -138,15 +147,144 @@ class ReportCache:
                 removed += 1
         return removed
 
+    # Async alias so callers can uniformly `await cache.ainvalidate(cid)`
+    # regardless of backend, keeping the sync `invalidate` for legacy calls.
+    async def ainvalidate(self, company_id: str) -> int:
+        return self.invalidate(company_id)
 
-_cache_singleton: ReportCache | None = None
+
+class RedisReportCache:
+    """Redis-backed cache with the same public API as `ReportCache`.
+
+    Rationale (Feb 2026 — 3k-user hardening):
+      - When the backend runs on N pods behind K8s HPA, an in-process cache
+        creates cross-pod inconsistency. `sync_tasks._mark_done` invalidates
+        cache on pod-A, but pod-B keeps serving the stale entry for up to
+        15 s if a user's next request lands on pod-B (round-robin).
+      - This class stores every entry in Redis so `invalidate(cid)` is
+        visible to all pods immediately.
+      - Uses async `redis.asyncio.Redis`; the client is lazily created and
+        connection failures degrade to a no-op (caller re-computes from
+        Mongo) rather than raising.
+    """
+
+    _NAMESPACE = "axiom:cache"
+
+    def __init__(self, redis_client, *, default_ttl: int = 300):
+        self._r = redis_client
+        self._default_ttl = default_ttl
+
+    def key(self, namespace: str, **parts) -> str:
+        p = "|".join(f"{k}={parts[k]}" for k in sorted(parts))
+        return f"{namespace}::{p}"
+
+    def _rkey(self, key: str) -> str:
+        return f"{self._NAMESPACE}:{key}"
+
+    async def get_or_compute(
+        self, key: str, ttl: int,
+        compute: Callable[[], Awaitable[dict]],
+    ) -> dict:
+        rkey = self._rkey(key)
+        try:
+            raw = await self._r.get(rkey)
+        except Exception:  # noqa: BLE001 — degrade gracefully
+            raw = None
+        if raw is not None:
+            try:
+                return json.loads(raw)
+            except (ValueError, TypeError):
+                pass  # corrupt entry — recompute below
+        val = await compute()
+        try:
+            await self._r.set(rkey, json.dumps(val, default=str),
+                              ex=ttl or self._default_ttl)
+        except Exception:  # noqa: BLE001
+            pass
+        return val
+
+    async def invalidate(self, company_id: str) -> int:
+        """Delete every key whose value stored a scope-marker for the
+        given company. Uses non-blocking SCAN so it stays cheap even at
+        10k+ keys per company.
+        """
+        removed = 0
+        pattern = f"{self._NAMESPACE}:*company_id={company_id}*"
+        try:
+            cursor = 0
+            while True:
+                cursor, keys = await self._r.scan(cursor=cursor, match=pattern, count=200)
+                if keys:
+                    removed += await self._r.delete(*keys)
+                if cursor == 0:
+                    break
+        except Exception:  # noqa: BLE001
+            pass
+        return removed
+
+    # Alias so callers can uniformly `await cache.ainvalidate(cid)` across
+    # both backends without knowing which is active.
+    async def ainvalidate(self, company_id: str) -> int:
+        return await self.invalidate(company_id)
 
 
-def get_cache() -> ReportCache:
+_cache_singleton: "ReportCache | RedisReportCache | None" = None
+
+
+def get_cache():
+    """Return the active cache backend.
+
+    Selection at first call:
+      1. If `REDIS_URL` is set → issue a sync `PING` (1 s timeout) against
+         the target Redis. If it succeeds → `RedisReportCache` (multi-pod
+         safe, invalidations visible to every pod).
+      2. Any failure OR unset var → `ReportCache` (in-process TTLCache).
+
+    Memoized so we don't reconnect on every request.
+    """
     global _cache_singleton
-    if _cache_singleton is None:
-        _cache_singleton = ReportCache()
+    if _cache_singleton is not None:
+        return _cache_singleton
+
+    redis_url = os.environ.get("REDIS_URL", "").strip()
+    if redis_url and redis_url != "memory://":
+        try:
+            import redis as _sync_redis
+            import redis.asyncio as aioredis
+            # Cheap sync ping — determines backend before we ever return.
+            sync_client = _sync_redis.Redis.from_url(
+                redis_url, socket_connect_timeout=1.0, socket_timeout=1.0,
+            )
+            sync_client.ping()  # raises ConnectionError if unreachable
+            sync_client.close()
+            async_client = aioredis.from_url(
+                redis_url, decode_responses=True,
+                socket_connect_timeout=1.0, socket_timeout=1.0,
+                # Keep the pool small — the cache is not the primary
+                # consumer of Redis; the rate limiter shares this instance.
+                max_connections=20,
+            )
+            _cache_singleton = RedisReportCache(async_client)
+            app_log.info("cache backend=redis", extra={"route": "startup"})
+            return _cache_singleton
+        except Exception as e:  # noqa: BLE001
+            app_log.warning(
+                f"redis unreachable ({e}) — cache falling back to in-process",
+                extra={"route": "startup"},
+            )
+    _cache_singleton = ReportCache()
+    app_log.info("cache backend=memory", extra={"route": "startup"})
     return _cache_singleton
+
+
+async def _check_and_maybe_downgrade(client) -> None:
+    """DEPRECATED — kept only to avoid breaking import in older callers.
+
+    The sync ping inside `get_cache()` supersedes this async health-check
+    task. Left as a no-op so any lingering `create_task` reference doesn't
+    crash on old process invocations.
+    """
+    return None
 
 
 # ---------------------------------------------------------------------------

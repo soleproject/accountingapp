@@ -13,8 +13,10 @@ Design (Feb 2026 rewrite):
     coroutine is now spawned with `asyncio.create_task` inside the FastAPI
     event loop. Motor/Plaid/LLM work is fully IO-bound so the loop is not
     blocked; API requests continue to be served in parallel.
-  - Global `_semaphore` caps concurrent syncs at `MAX_CONCURRENT_SYNCS` (20)
-    to protect the Motor connection pool and Anthropic rate limits.
+  - Global `_semaphore` caps concurrent syncs at `MAX_CONCURRENT_SYNCS`
+    (env-overridable, default 20) to protect the Motor connection pool and
+    Anthropic rate limits. Bump this in prod when running 3k+ users: set
+    `MAX_CONCURRENT_SYNCS=40` per pod × 3 pods = 120 parallel syncs.
   - On FastAPI startup, `reconcile_stuck_jobs()` marks any `queued`/`running`
     row from a previous process as failed — its retry is idempotent
     (dedupe on `(company_id, plaid_transaction_id)` unique index).
@@ -25,6 +27,7 @@ Task registration:
 """
 from __future__ import annotations
 import asyncio
+import os
 import traceback
 import uuid
 from typing import Any, Awaitable, Callable
@@ -32,7 +35,7 @@ from typing import Any, Awaitable, Callable
 from db import db, now_iso
 
 
-MAX_CONCURRENT_SYNCS = 20
+MAX_CONCURRENT_SYNCS = int(os.environ.get("MAX_CONCURRENT_SYNCS", "20"))
 _TASK_REGISTRY: dict[str, Callable[..., Awaitable[Any]]] = {}
 _active_tasks: set[asyncio.Task] = set()
 _semaphore: asyncio.Semaphore | None = None

@@ -1,11 +1,29 @@
 ---
+# Axiom Ledger — backend deployment (3k-user hardening, Feb 2026)
+#
+# Sizing rationale:
+#   • 3 replicas × 200 Mongo pool × 40 concurrent syncs per pod =
+#     120 parallel Plaid syncs + 600 concurrent Mongo ops available.
+#   • CPU request 500m keeps HPA responsive; limit 2000m allows burst
+#     when a company hits Plaid's first-connect + PFC pipeline.
+#   • Readiness probe uses `/api/ready` which asserts Mongo is reachable
+#     AND `sync_tasks.register_all()` has completed — so K8s won't send
+#     traffic to a pod that would 500 on the first Plaid webhook.
+#   • Liveness probe uses `/api/health` (cheap; no Mongo touch) to avoid
+#     restart loops during transient Mongo blips.
+#
+# Env expected in `axiom-secrets`:
+#   MONGO_URL, DB_NAME, REDIS_URL, PLAID_CLIENT_ID, PLAID_SECRET,
+#   PLAID_ENV, VERYFI_CLIENT_ID, VERYFI_CLIENT_SECRET,
+#   VERYFI_USERNAME, VERYFI_API_KEY, EMERGENT_LLM_KEY, SENTRY_DSN,
+#   JWT_SECRET, MAX_CONCURRENT_SYNCS, MONGO_MAX_POOL_SIZE.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: axiom-backend
   labels: { app: axiom-backend }
 spec:
-  replicas: 2
+  replicas: 3
   selector: { matchLabels: { app: axiom-backend } }
   strategy:
     type: RollingUpdate
@@ -14,24 +32,43 @@ spec:
     metadata:
       labels: { app: axiom-backend }
     spec:
+      # 60s grace so in-flight `asyncio.create_task` sync jobs can finish.
+      # After grace expires, `reconcile_stuck_jobs()` on the next pod's
+      # startup will mark any survivor as failed for user-initiated retry.
+      terminationGracePeriodSeconds: 60
       containers:
         - name: backend
           image: ghcr.io/axiom-ledger/backend:latest
           ports: [{ containerPort: 8001 }]
           envFrom:
             - secretRef: { name: axiom-secrets }
-          # Resource requests/limits — required for CPU-based HPA.
+          env:
+            # 3k-user tuning overrides — override in Secret when needed.
+            - name: MAX_CONCURRENT_SYNCS
+              value: "40"
+            - name: MONGO_MAX_POOL_SIZE
+              value: "200"
+            - name: LOG_LEVEL
+              value: "INFO"
           resources:
             requests: { cpu: "500m",  memory: "512Mi" }
             limits:   { cpu: "2000m", memory: "1Gi"   }
           readinessProbe:
-            httpGet: { path: /api/, port: 8001 }
-            initialDelaySeconds: 5
+            httpGet: { path: /api/ready, port: 8001 }
+            initialDelaySeconds: 3
             periodSeconds: 5
+            failureThreshold: 3
           livenessProbe:
-            httpGet: { path: /api/, port: 8001 }
-            initialDelaySeconds: 30
+            httpGet: { path: /api/health, port: 8001 }
+            initialDelaySeconds: 20
             periodSeconds: 15
+            failureThreshold: 3
+          # Graceful drain: SIGTERM triggers uvicorn shutdown, which waits
+          # for in-flight requests + tasks to finish before exiting.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
 ---
 apiVersion: v1
 kind: Service

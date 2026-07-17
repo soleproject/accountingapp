@@ -13,7 +13,16 @@ load_dotenv(Path(__file__).parent / ".env")
 MONGO_URL = os.environ["MONGO_URL"]
 DB_NAME = os.environ["DB_NAME"]
 
-_client = AsyncIOMotorClient(MONGO_URL)
+_client = AsyncIOMotorClient(
+    MONGO_URL,
+    # Pool sized for 3k-user hardening: default is 100 which caps concurrent
+    # Mongo ops per pod. At scale we run ~40 concurrent Plaid syncs plus
+    # ~200 concurrent API requests → 200 conns leaves headroom for burst.
+    # Override via env for even bigger pods.
+    maxPoolSize=int(os.environ.get("MONGO_MAX_POOL_SIZE", "200")),
+    minPoolSize=int(os.environ.get("MONGO_MIN_POOL_SIZE", "10")),
+    serverSelectionTimeoutMS=5000,
+)
 db = _client[DB_NAME]
 
 

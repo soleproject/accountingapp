@@ -1,7 +1,25 @@
 ---
-# Redis 7 — Arq queue. Single replica is fine (job state is Mongo-backed
-# via `sync_jobs`, so a Redis outage costs at most a re-enqueue, never data).
-# For higher availability move to a managed offering (Upstash / ElastiCache).
+# Redis 7 — shared cache + slowapi rate-limiter storage (Feb 2026).
+#
+# Previously used as an Arq queue; the queue has moved to in-process
+# `asyncio.create_task`, so Redis is no longer on the critical path. It now
+# serves two secondary roles that only matter at multi-pod scale:
+#   1. `RedisReportCache` (infra.py) — cross-pod dashboard/report cache.
+#      Every pod sees the same invalidations, so a sync completing on
+#      pod-A immediately clears the stale zeros for a user's next request
+#      on pod-B.
+#   2. slowapi rate limiter — otherwise a client hitting 3 pods would get
+#      3× their per-IP quota.
+#
+# Redis outages are non-fatal:
+#   • Cache: infra.py degrades to in-process `ReportCache` at pod startup.
+#   • Rate limiter: slowapi falls back to `memory://` (per-pod counters).
+#   • Job state: 100% Mongo (`sync_jobs`), so a Redis outage doesn't
+#     touch the sync pipeline at all.
+#
+# Single replica is fine because everything cached here is regenerable
+# from Mongo. For higher availability move to a managed offering
+# (Upstash / ElastiCache).
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -16,11 +34,19 @@ spec:
       containers:
         - name: redis
           image: redis:7-alpine
-          args: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+          # allkeys-lru is safer than noeviction now that we cache
+          # dashboard results — under memory pressure, evict cold entries
+          # instead of OOM'ing.
+          args:
+            - "redis-server"
+            - "--maxmemory"
+            - "512mb"
+            - "--maxmemory-policy"
+            - "allkeys-lru"
           ports: [{ containerPort: 6379 }]
           resources:
             requests: { cpu: "100m", memory: "128Mi" }
-            limits:   { cpu: "500m", memory: "384Mi" }
+            limits:   { cpu: "500m", memory: "640Mi" }
           volumeMounts:
             - { name: data, mountPath: /data }
   volumeClaimTemplates:
