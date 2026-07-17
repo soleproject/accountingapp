@@ -97,6 +97,8 @@ export default function AiPanel({ collapsed, onToggle }) {
   const silenceTimerRef = useRef(null);
   const lastFinalRef = useRef({ text: "", at: 0 });
   const errorLogRef = useRef([]);      // timestamps of recent recognizer errors
+  const inputRef = useRef("");
+  const submitInFlightRef = useRef(false);
 
   const clearSilenceTimer = () => {
     if (silenceTimerRef.current) {
@@ -115,15 +117,19 @@ export default function AiPanel({ collapsed, onToggle }) {
       // while AI was still speaking.
       if (ttsSpeakingRef.current) return;
       if (Date.now() < ttsTailUntilRef.current) return;
-      // Only submit if we've captured something.
-      // (setInput is React state — read via callback to avoid stale closures.)
-      setInput(prev => {
-        if (prev.trim()) {
-          // Defer send() to the next tick so we're outside the setter.
-          setTimeout(() => sendRef.current && sendRef.current(), 0);
-        }
-        return prev;
-      });
+      // Read input via ref (not via setInput callback) so React StrictMode's
+      // double-invocation of setter callbacks can't fire send() twice.
+      const current = (inputRef.current || "").trim();
+      if (!current) return;
+      // Idempotency guard: if a submit is already in flight, don't dispatch
+      // another one from a re-arm race.
+      if (submitInFlightRef.current) return;
+      submitInFlightRef.current = true;
+      // Defer so React can commit any pending state before send() reads it.
+      setTimeout(() => {
+        try { sendRef.current && sendRef.current(); }
+        finally { submitInFlightRef.current = false; }
+      }, 0);
     }, SILENCE_MS);
   };
 
@@ -275,6 +281,9 @@ export default function AiPanel({ collapsed, onToggle }) {
 
   // Expose the latest send() to the silence timer via ref.
   useEffect(() => { sendRef.current = send; });
+  // Mirror `input` state into a ref so refs-only code paths (silence timer,
+  // barge-in handler) can read it without React StrictMode double-invoke.
+  useEffect(() => { inputRef.current = input; }, [input]);
 
   const send = async () => {
     if (!input.trim() || streaming || !currentId) return;
