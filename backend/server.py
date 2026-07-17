@@ -5,6 +5,7 @@ import re
 import uuid
 import json
 import random
+import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Any, List
 from pathlib import Path
@@ -1435,8 +1436,39 @@ async def dashboard_metrics(cid: str, user: dict = Depends(get_current_user)):
 async def list_rules(cid: str, user: dict = Depends(get_current_user)):
     await _require_company(user, cid)
     docs = await db.rules.find({"company_id": cid}).sort("created_at", -1).to_list(500)
-    candidates = await db.rule_candidates.find({"company_id": cid, "approvals": {"$gte": 2}}).to_list(100)
-    return {"rules": [coerce(d) for d in docs], "candidates": [coerce(c) for c in candidates]}
+    candidates = await db.rule_candidates.find(
+        {"company_id": cid, "approvals": {"$gte": 2}}
+    ).sort("approvals", -1).to_list(200)
+
+    # For each candidate compute how many CURRENT un-reviewed transactions
+    # would be back-filled if the rule is accepted. The list is short
+    # (typically < 30) and the regex is anchored, so parallel count_documents
+    # calls are cheap. This is what powers the "would clean up N txns" preview
+    # on the Rules page.
+    async def _preview(c):
+        try:
+            n = await db.transactions.count_documents({
+                "company_id": cid,
+                "human_reviewed": False,
+                "merchant": {"$regex": re.escape(c["merchant"]), "$options": "i"},
+            })
+        except Exception:  # noqa: BLE001
+            n = 0
+        return c["id"], n
+
+    if candidates:
+        pairs = await asyncio.gather(*[_preview(c) for c in candidates])
+        preview_by_id = dict(pairs)
+    else:
+        preview_by_id = {}
+
+    out_candidates = []
+    for c in candidates:
+        d = coerce(c)
+        d["applies_to_count"] = preview_by_id.get(c["id"], 0)
+        out_candidates.append(d)
+
+    return {"rules": [coerce(d) for d in docs], "candidates": out_candidates}
 
 
 @api.post("/companies/{cid}/rules")
@@ -1476,6 +1508,17 @@ async def create_rule(cid: str, inp: RuleCreate, user: dict = Depends(get_curren
             )
             applied += 1
         await db.rules.update_one({"id": rid}, {"$set": {"hits": applied}})
+    # Consume any matching candidate — once promoted to a rule it should not
+    # keep surfacing on the "Suggested rules" panel.
+    await db.rule_candidates.delete_many({
+        "company_id": cid,
+        "key": f"{inp.match_value}::{inp.account_code}",
+    })
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
     await _log_ai(cid, "rule_created", 1)
     return {"id": rid, "applied": applied}
 
@@ -1485,6 +1528,19 @@ async def delete_rule(cid: str, rid: str, user: dict = Depends(get_current_user)
     await _require_company(user, cid)
     await db.rules.delete_one({"id": rid, "company_id": cid})
     return {"ok": True}
+
+
+@api.delete("/companies/{cid}/rule-candidates/{candidate_id}")
+async def dismiss_rule_candidate(cid: str, candidate_id: str,
+                                  user: dict = Depends(get_current_user)):
+    """Remove a suggested rule so it stops surfacing on the Rules page.
+
+    Note: the underlying `(merchant, account_code)` pair may be re-created
+    by future manual reclassifies — that's the intended feedback loop.
+    """
+    await _require_company(user, cid)
+    r = await db.rule_candidates.delete_one({"id": candidate_id, "company_id": cid})
+    return {"ok": True, "deleted": r.deleted_count}
 
 
 # ----------------------- Contacts -----------------------

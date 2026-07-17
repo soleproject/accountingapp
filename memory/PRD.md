@@ -79,6 +79,13 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   above the toolbar when the backend returns a candidate crossing the `approvals >= 2`
   threshold. Both the Contacts drawer and the Transactions page now hit the same
   `POST /transactions/bulk-reclassify` endpoint.
+- **2026-02-17**: Rules page — upgraded **Suggested Rules** panel. `GET /rules` now includes
+  `applies_to_count` per candidate (parallel `count_documents` for
+  `human_reviewed=false, merchant ~ /X/i` — capped at 200 candidates). Added an "Accept all"
+  bulk action + per-card dismiss (`DELETE /rule-candidates/{id}`). Panel header shows total
+  cleanup preview ("would clean up N un-reviewed txns"). `POST /rules` now auto-consumes the
+  matching `rule_candidate` after promotion so the panel stays clean, and invalidates the
+  report cache.
 - **2026-02-17**: Verified 317 LLC Plaid vs Veryfi source-of-truth dedup for account ···6084:
   Veryfi statement `eStmt_2026-05-20.pdf` mapped to existing `1011 Bank of America Checking ···6084`
   (no duplicate CoA), all 94 lines skipped as duplicates against Plaid's coverage window

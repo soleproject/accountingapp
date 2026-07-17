@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Wand2, Trash2, Plus, X, Sparkles } from "lucide-react";
+import { Wand2, Trash2, Plus, X, Sparkles, Check, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Rules() {
@@ -11,6 +11,9 @@ export default function Rules() {
   const [candidates, setCandidates] = useState([]);
   const [accts, setAccts] = useState([]);
   const [creating, setCreating] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+
   const load = async () => {
     if (!currentId) return;
     const [r, a] = await Promise.all([
@@ -28,14 +31,55 @@ export default function Rules() {
     await api.delete(`/companies/${currentId}/rules/${id}`);
     load();
   };
+
   const promoteCandidate = async (c) => {
-    await api.post(`/companies/${currentId}/rules`, {
-      match_type: "merchant_contains", match_value: c.merchant,
-      account_code: c.account_code, apply_to_existing: true,
-    });
-    toast.success(`Rule created: ${c.merchant} → ${c.account_name}`);
+    try {
+      const r = await api.post(`/companies/${currentId}/rules`, {
+        match_type: "merchant_contains", match_value: c.merchant,
+        account_code: c.account_code, apply_to_existing: true,
+      });
+      toast.success(
+        `Rule created: "${c.merchant}" → ${c.account_name}`
+        + (r.data.applied ? ` (applied to ${r.data.applied} txn${r.data.applied === 1 ? "" : "s"})` : "")
+      );
+      load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to create rule");
+    }
+  };
+
+  const dismissCandidate = async (c) => {
+    await api.delete(`/companies/${currentId}/rule-candidates/${c.id}`);
+    toast.success(`Dismissed suggestion for "${c.merchant}"`);
     load();
   };
+
+  const acceptAll = async () => {
+    if (!candidates.length) return;
+    setBusy(true);
+    let ok = 0, fail = 0, applied = 0;
+    for (const c of candidates) {
+      try {
+        const r = await api.post(`/companies/${currentId}/rules`, {
+          match_type: "merchant_contains", match_value: c.merchant,
+          account_code: c.account_code, apply_to_existing: true,
+        });
+        ok += 1;
+        applied += r.data.applied || 0;
+      } catch {
+        fail += 1;
+      }
+    }
+    setBusy(false);
+    toast.success(
+      `Accepted ${ok} rule${ok === 1 ? "" : "s"}`
+      + (applied ? ` · back-filled ${applied} txn${applied === 1 ? "" : "s"}` : "")
+      + (fail ? ` · ${fail} failed` : "")
+    );
+    load();
+  };
+
+  const totalCleanup = candidates.reduce((s, c) => s + (c.applies_to_count || 0), 0);
 
   return (
     <div className="space-y-4">
@@ -51,23 +95,77 @@ export default function Rules() {
       </div>
 
       {candidates.length > 0 && (
-        <div className="rounded-xl border bg-indigo-50 border-indigo-200 p-4">
-          <div className="flex items-center gap-2 mb-2">
+        <div className="rounded-xl border bg-indigo-50 border-indigo-200" data-testid="suggested-rules">
+          <button
+            onClick={() => setExpanded(v => !v)}
+            className="w-full px-4 py-3 flex items-center gap-2 text-left"
+            data-testid="suggested-rules-toggle"
+          >
             <Sparkles size={14} className="text-indigo-600" />
-            <h3 className="font-heading font-semibold text-sm">AI suggests {candidates.length} new rule{candidates.length === 1 ? "" : "s"}</h3>
-          </div>
-          <div className="space-y-2">
-            {candidates.map(c => (
-              <div key={c.id} className="flex items-center gap-2 bg-white rounded-md px-3 py-2 border">
-                <div className="text-sm">
-                  When merchant contains <b>{c.merchant}</b> → <b>{c.account_code} {c.account_name}</b>
-                  <span className="ml-2 text-[11px] text-slate-500">approved {c.approvals}×</span>
+            <h3 className="font-heading font-semibold text-sm">
+              AI suggests {candidates.length} new rule{candidates.length === 1 ? "" : "s"}
+            </h3>
+            {totalCleanup > 0 && (
+              <span className="text-[11px] text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded">
+                would clean up {totalCleanup} un-reviewed txn{totalCleanup === 1 ? "" : "s"}
+              </span>
+            )}
+            <div className="ml-auto flex items-center gap-2">
+              {candidates.length > 1 && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); acceptAll(); }}
+                  disabled={busy}
+                  data-testid="suggested-rules-accept-all"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-md bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50"
+                >
+                  <Check size={12} /> Accept all
+                </button>
+              )}
+              <ChevronDown
+                size={16}
+                className={`text-indigo-600 transition-transform ${expanded ? "" : "-rotate-90"}`}
+              />
+            </div>
+          </button>
+
+          {expanded && (
+            <div className="px-4 pb-4 space-y-2">
+              {candidates.map(c => (
+                <div
+                  key={c.id}
+                  className="flex items-center gap-3 bg-white rounded-md px-3 py-2 border"
+                  data-testid={`suggested-rule-${c.id}`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm truncate">
+                      When merchant contains <b>{c.merchant}</b> → <b className="tabular-nums">{c.account_code}</b> {c.account_name}
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">
+                      approved {c.approvals}×
+                      {(c.applies_to_count ?? 0) > 0 && (
+                        <> · would back-fill <b className="text-indigo-700">{c.applies_to_count}</b> un-reviewed txn{c.applies_to_count === 1 ? "" : "s"}</>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => promoteCandidate(c)}
+                    data-testid={`suggested-rule-accept-${c.id}`}
+                    className="text-xs px-2.5 py-1 rounded-md bg-slate-900 text-white hover:bg-slate-800"
+                  >
+                    Create rule
+                  </button>
+                  <button
+                    onClick={() => dismissCandidate(c)}
+                    data-testid={`suggested-rule-dismiss-${c.id}`}
+                    className="text-xs p-1 text-slate-500 hover:text-rose-600"
+                    title="Dismiss"
+                  >
+                    <X size={14} />
+                  </button>
                 </div>
-                <button onClick={() => promoteCandidate(c)}
-                        className="ml-auto text-xs px-2 py-1 rounded bg-slate-900 text-white">Create rule</button>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
