@@ -19,6 +19,7 @@ import Payments from "@/pages/Payments";
 import Receipts from "@/pages/Receipts";
 import Contacts from "@/pages/Contacts";
 import Connections from "@/pages/Connections";
+import StatementImportDetail from "@/pages/StatementImportDetail";
 import CompanySettings from "@/pages/CompanySettings";
 import Communications from "@/pages/Communications";
 import GenericList from "@/pages/GenericList";
@@ -53,6 +54,7 @@ function App() {
               <Route path="/receipts" element={<Receipts />} />
               <Route path="/contacts" element={<Contacts />} />
               <Route path="/connections" element={<Connections />} />
+              <Route path="/connections/imports/:importId" element={<StatementImportDetail />} />
               <Route path="/settings" element={<CompanySettings />} />
               <Route path="/communications" element={<Communications />} />
               <Route path="/reports" element={<Reports />} />

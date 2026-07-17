@@ -2371,6 +2371,59 @@ async def mock_veryfi(cid: str, user: dict = Depends(get_current_user)):
     return {"imported": imported}
 
 
+# ----------------------- Bank-statement Imports (Veryfi tab) -----------------------
+# Backed by /app/backend/statements.py — auto-promote flow that OCRs a
+# bank-statement PDF, resolves (or creates) the matching CoA asset row,
+# then routes every extracted line through the same PFC + AI pipeline as
+# Plaid so the resulting rows land on the Transactions page with full
+# categorization + contact resolution.
+
+@api.post("/companies/{cid}/statements/upload")
+async def statements_upload(
+    cid: str,
+    file: UploadFile = File(...),
+    account_id: str | None = Form(None),
+    user: dict = Depends(get_current_user),
+):
+    await _require_company(user, cid)
+    import statements
+    return await statements.upload_statement(
+        cid, file, account_id or None,
+        categorize_fn=categorize_transaction,
+        is_period_closed_fn=_is_period_closed,
+    )
+
+
+@api.get("/companies/{cid}/statements/imports")
+async def statements_list(
+    cid: str, limit: int = 50, offset: int = 0,
+    user: dict = Depends(get_current_user),
+):
+    await _require_company(user, cid)
+    import statements
+    return await statements.list_imports(cid, limit=limit, offset=offset)
+
+
+@api.get("/companies/{cid}/statements/imports/{import_id}")
+async def statements_detail(
+    cid: str, import_id: str,
+    user: dict = Depends(get_current_user),
+):
+    await _require_company(user, cid)
+    import statements
+    return await statements.get_import_detail(cid, import_id)
+
+
+@api.delete("/companies/{cid}/statements/imports/{import_id}")
+async def statements_delete(
+    cid: str, import_id: str, cascade: bool = True,
+    user: dict = Depends(get_current_user),
+):
+    await _require_company(user, cid)
+    import statements
+    return await statements.delete_import(cid, import_id, cascade=cascade)
+
+
 # ----------------------- Reconciliation / Book Review / Close periods -----------------------
 
 @api.get("/companies/{cid}/reconciliations")
@@ -2598,7 +2651,9 @@ async def startup():
     await pfc_resolver.ensure_pfc_override_indexes()
     import job_queue
     import sync_tasks
+    import statements
     await job_queue.ensure_jobs_indexes()
+    await statements.ensure_indexes()
     sync_tasks.register_all()
     # Any job left in queued/running from a previous process is stuck —
     # mark as failed so the Sync Pill doesn't display "syncing forever".
