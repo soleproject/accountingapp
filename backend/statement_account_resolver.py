@@ -86,6 +86,11 @@ async def _next_account_code(company_id: str, start: int = 1010) -> str:
 def _statement_fields(veryfi_doc: dict) -> dict:
     """Extract the fields we care about from a Veryfi doc, tolerant of both
     the bank-statement product shape and the fallback documents shape.
+
+    Veryfi's bank-statement product (Feb 2026) puts the primary account under
+    `accounts[0]` with fields `{number, beginning_balance, ending_balance,
+    summaries, transactions}`. Older docs used top-level `account_number`
+    + `starting_balance` — we accept both.
     """
     bank_name = (
         veryfi_doc.get("bank_name")
@@ -93,21 +98,30 @@ def _statement_fields(veryfi_doc: dict) -> dict:
         or ""
     ).strip() or None
 
-    # Statement may have a top-level account_number OR an accounts[] array.
     acct = None
     accts = veryfi_doc.get("accounts") or []
     if accts and isinstance(accts, list):
         acct = accts[0] if isinstance(accts[0], dict) else None
+
     account_number = (
         veryfi_doc.get("account_number")
         or (acct or {}).get("account_number")
+        or (acct or {}).get("number")  # current Veryfi shape
         or None
     )
-    account_type = (acct or {}).get("account_type") or veryfi_doc.get("account_type")
+    account_type = (
+        (acct or {}).get("account_type")
+        or veryfi_doc.get("account_type")
+    )
 
-    starting_balance = veryfi_doc.get("starting_balance")
-    if starting_balance is None and acct:
-        starting_balance = acct.get("starting_balance")
+    # `starting_balance` (older shape) OR `beginning_balance` (current shape),
+    # checked at both top-level and inside accounts[0].
+    starting_balance = (
+        veryfi_doc.get("starting_balance")
+        or veryfi_doc.get("beginning_balance")
+        or (acct or {}).get("starting_balance")
+        or (acct or {}).get("beginning_balance")
+    )
 
     return {
         "bank_name": bank_name,

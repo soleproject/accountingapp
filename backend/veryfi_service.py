@@ -47,14 +47,19 @@ async def process_generic_document(file_bytes: bytes, filename: str, content_typ
 def extract_transactions(veryfi_data: dict) -> list[dict]:
     """Normalize Veryfi output → list of {date, description, amount, merchant} rows.
 
-    Handles both bank-statements response (transactions[] with credit/debit)
-    and documents response (line_items[] with total).
+    Handles all three Veryfi response shapes we've observed in production:
+      1. Top-level `transactions[]` (older bank-statement shape).
+      2. `accounts[i].transactions[]` (current bank-statement shape — Feb 2026;
+         Veryfi's new product returns one accounts[] entry per account with
+         nested transactions. Empty top-level transactions[] is normal here).
+      3. `line_items[]` (fallback documents endpoint for receipts).
     """
     result: list[dict] = []
-    # Bank statement shape
-    for t in (veryfi_data.get("transactions") or []):
-        date = t.get("date") or t.get("date_of_transaction") or ""
-        desc = t.get("description") or t.get("description_text") or t.get("line_item_as_text") or ""
+
+    def _add_from_txn_shape(t: dict) -> None:
+        date = t.get("date") or t.get("date_of_transaction") or t.get("posted_date") or ""
+        desc = (t.get("description") or t.get("description_text")
+                or t.get("line_item_as_text") or t.get("text") or "").strip()
         credit = t.get("credit_amount") or t.get("credit")
         debit = t.get("debit_amount") or t.get("debit")
         try:
@@ -64,21 +69,35 @@ def extract_transactions(veryfi_data: dict) -> list[dict]:
                 amt = -abs(float(debit))
             else:
                 amt = float(t.get("amount") or 0)
-        except Exception:
+        except Exception:  # noqa: BLE001
             amt = 0.0
         if not desc and amt == 0:
-            continue
+            return
+        # Collapse Veryfi's `text` field which sometimes has tabs + newlines
+        clean = " ".join(desc.split())
         result.append({
             "date": str(date)[:10],
-            "description": desc.strip(),
-            "merchant": desc.strip().split()[0] if desc else "Statement Line",
+            "description": clean,
+            "merchant": clean.split()[0] if clean else "Statement Line",
             "amount": round(amt, 2),
         })
-    # Documents shape — treat each line item as an expense
+
+    # Shape 1: top-level transactions
+    for t in (veryfi_data.get("transactions") or []):
+        _add_from_txn_shape(t)
+
+    # Shape 2: nested inside each account
+    for acct in (veryfi_data.get("accounts") or []):
+        if not isinstance(acct, dict):
+            continue
+        for t in (acct.get("transactions") or []):
+            _add_from_txn_shape(t)
+
+    # Shape 3: documents-endpoint line_items fallback
     for li in (veryfi_data.get("line_items") or []):
         try:
             amt = -abs(float(li.get("total") or 0))
-        except Exception:
+        except Exception:  # noqa: BLE001
             amt = 0.0
         desc = li.get("description") or li.get("full_description") or ""
         if not desc and amt == 0:
@@ -86,7 +105,8 @@ def extract_transactions(veryfi_data: dict) -> list[dict]:
         result.append({
             "date": (veryfi_data.get("date") or "")[:10],
             "description": desc.strip(),
-            "merchant": (veryfi_data.get("vendor") or {}).get("name") or desc.split()[0] if desc else "Vendor",
+            "merchant": (veryfi_data.get("vendor") or {}).get("name")
+                        or (desc.split()[0] if desc else "Vendor"),
             "amount": round(amt, 2),
         })
     return result
