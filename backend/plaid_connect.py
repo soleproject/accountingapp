@@ -332,6 +332,18 @@ async def categorize_and_insert_plaid_txns(
             await db.transactions.insert_many(inserted, ordered=False)
         except Exception:  # noqa: BLE001 — DuplicateKeyError under race
             pass
+        # Emit AI-activity counters so the Dashboard "AI Activity" widget
+        # renders real counters instead of just "Transactions Categorized".
+        # `post_je` = auto-posted (posted=True), `flag_review` = flagged for
+        # manual review. `categorize` is emitted by the caller so we don't
+        # double-count here.
+        from ai_activity import log_ai_event
+        posted_count = sum(1 for r in inserted if r.get("posted"))
+        flagged_count = sum(1 for r in inserted if r.get("needs_review"))
+        if posted_count:
+            await log_ai_event(cid, "post_je", posted_count)
+        if flagged_count:
+            await log_ai_event(cid, "flag_review", flagged_count)
     return inserted, skipped
 
 

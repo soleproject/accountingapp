@@ -1120,8 +1120,40 @@ async def ai_activity(cid: str, user: dict = Depends(get_current_user)):
         flagged = await db.transactions.count_documents({"company_id": cid, "needs_review": True})
         rules_count = await db.rules.count_documents({"company_id": cid})
         ai_rules = await db.rules.count_documents({"company_id": cid, "created_by": "ai"})
+        veryfi_docs = await db.veryfi_uploads.count_documents({"company_id": cid})
+        # Synthesize activity rows from live truth so the Dashboard widget
+        # always mirrors the current DB state. `db.ai_activity` remains the
+        # source for kinds that aren't derivable from `transactions` (e.g.
+        # `coa_generated`, `webhook_sync`), but for `categorize` / `post_je` /
+        # `flag_review` / `rule_created` / `veryfi_ocr` we prefer the live
+        # count — this backfills existing customers who imported txns before
+        # the sync pipeline started emitting per-event counters. Kinds with
+        # a truth-derived count of 0 are omitted so the widget stays clean.
+        derived = {
+            "categorize":   total_txns,
+            "post_je":      posted,
+            "flag_review":  flagged,
+            "rule_created": rules_count,
+            "veryfi_ocr":   veryfi_docs,
+        }
+        by_kind = {d.get("type"): coerce(d) for d in docs}
+        activity: list[dict] = []
+        for kind, count in derived.items():
+            if count <= 0:
+                continue
+            row = by_kind.pop(kind, None) or {
+                "id": None, "company_id": cid, "type": kind,
+                "created_at": now_iso(), "updated_at": now_iso(),
+            }
+            row["count"] = count
+            activity.append(row)
+        # Preserve any remaining (non-derived) kinds already logged
+        # (`coa_generated`, `webhook_sync`, …).
+        for row in by_kind.values():
+            if (row.get("count") or 0) > 0:
+                activity.append(row)
         return {
-            "activity": [coerce(d) for d in docs],
+            "activity": activity,
             "totals": {
                 "transactions": total_txns, "posted": posted, "flagged": flagged,
                 "rules": rules_count, "ai_rules": ai_rules,
