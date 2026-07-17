@@ -19,6 +19,10 @@ export default function AiPanel({ collapsed, onToggle }) {
   const [voiceName, setVoiceName] = useState(() => localStorage.getItem("axiom_tts_voice") || "Google UK English Female");
   const [voices, setVoices] = useState([]);
   const [voiceMenuOpen, setVoiceMenuOpen] = useState(false);
+  const [voiceRate, setVoiceRate] = useState(() => {
+    const v = parseFloat(localStorage.getItem("axiom_tts_rate") || "1.05");
+    return isFinite(v) ? v : 1.05;
+  });
   const recognitionRef = useRef(null);
   const scrollRef = useRef(null);
   // TTS pointers: how much of the current assistant reply we've already
@@ -27,6 +31,7 @@ export default function AiPanel({ collapsed, onToggle }) {
   const spokenIdxRef = useRef(0);
   const voiceOnRef = useRef(voiceOn);
   const voiceNameRef = useRef(voiceName);
+  const voiceRateRef = useRef(voiceRate);
   useEffect(() => {
     voiceOnRef.current = voiceOn;
     localStorage.setItem("axiom_tts", voiceOn ? "1" : "0");
@@ -36,6 +41,10 @@ export default function AiPanel({ collapsed, onToggle }) {
     voiceNameRef.current = voiceName;
     localStorage.setItem("axiom_tts_voice", voiceName || "");
   }, [voiceName]);
+  useEffect(() => {
+    voiceRateRef.current = voiceRate;
+    localStorage.setItem("axiom_tts_rate", String(voiceRate));
+  }, [voiceRate]);
   // Populate voices — Chrome loads them asynchronously so we subscribe to
   // the `voiceschanged` event as well as reading once on mount.
   useEffect(() => {
@@ -220,7 +229,7 @@ export default function AiPanel({ collapsed, onToggle }) {
       const v = (window.speechSynthesis.getVoices() || []).find(x => x.name === wanted);
       if (v) { u.voice = v; u.lang = v.lang; }
     }
-    u.rate = 1.05;
+    u.rate = Math.max(0.5, Math.min(2.0, voiceRateRef.current || 1.05));
     u.pitch = 1.0;
     u.volume = 1.0;
     window.speechSynthesis.speak(u);
@@ -300,6 +309,8 @@ export default function AiPanel({ collapsed, onToggle }) {
               setVoiceOn={setVoiceOn}
               voiceName={voiceName}
               setVoiceName={setVoiceName}
+              voiceRate={voiceRate}
+              setVoiceRate={setVoiceRate}
               speakOne={speakOne}
               onClose={() => setVoiceMenuOpen(false)}
             />
@@ -383,7 +394,7 @@ export default function AiPanel({ collapsed, onToggle }) {
   );
 }
 
-function VoicePicker({ voices, voiceOn, setVoiceOn, voiceName, setVoiceName, speakOne, onClose }) {
+function VoicePicker({ voices, voiceOn, setVoiceOn, voiceName, setVoiceName, voiceRate, setVoiceRate, speakOne, onClose }) {
   // Prefer English voices at the top of the list — everything else follows,
   // grouped by language. Keeps "Google UK English Female" easy to find on a
   // machine with 60+ voices installed.
@@ -430,6 +441,22 @@ function VoicePicker({ voices, voiceOn, setVoiceOn, voiceName, setVoiceName, spe
               </option>
             ))}
           </select>
+        </div>
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-[11px] uppercase tracking-wider text-slate-500">Rate</label>
+            <span className="text-[11px] tabular-nums text-slate-600">{voiceRate.toFixed(2)}×</span>
+          </div>
+          <input
+            type="range"
+            min="0.8"
+            max="1.4"
+            step="0.05"
+            value={voiceRate}
+            onChange={(e) => setVoiceRate(parseFloat(e.target.value))}
+            data-testid="ai-tts-rate-slider"
+            className="w-full accent-slate-900 cursor-pointer"
+          />
         </div>
         <button
           onClick={preview}
