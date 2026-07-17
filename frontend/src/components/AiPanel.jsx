@@ -14,6 +14,13 @@ export default function AiPanel({ collapsed, onToggle }) {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [listening, setListening] = useState(false);
+  // Mic mode: "off" | "ptt" (push-to-talk, hold to speak) | "open" (open-mic
+  // with silence auto-submit + TTS echo protection). Persisted so a user's
+  // preferred conversation mode survives reloads.
+  const [micMode, setMicMode] = useState(() => localStorage.getItem("axiom_mic_mode") || "off");
+  useEffect(() => { localStorage.setItem("axiom_mic_mode", micMode); }, [micMode]);
+  const micModeRef = useRef(micMode);
+  useEffect(() => { micModeRef.current = micMode; }, [micMode]);
   const [interim, setInterim] = useState("");
   const [voiceOn, setVoiceOn] = useState(() => localStorage.getItem("axiom_tts") === "1");
   const [voiceName, setVoiceName] = useState(() => localStorage.getItem("axiom_tts_voice") || "Google UK English Female");
@@ -70,15 +77,72 @@ export default function AiPanel({ collapsed, onToggle }) {
   }, []);
   const { focus } = useAiFocus();
 
-  // Set up SpeechRecognition once
-  useEffect(() => {
+  // ------------------------- Open-mic + TTS-echo protection -------------------------
+  // Rules (see architecture doc in PR):
+  //   1. Recognizer is continuous + self-heals on `onend` while a "listening" flag holds.
+  //   2. In "open" mode a silence timer auto-submits after SILENCE_MS of no speech
+  //      events, but only when the AI isn't talking (ttsSpeaking gate).
+  //   3. Transcripts arriving while TTS is speaking are dropped entirely.
+  //   4. A short TAIL_MS grace after TTS ends continues to drop transcripts so
+  //      hardware audio tail can't leak into the user's next turn.
+  //   5. Barge-in: recognizer's own `onspeechstart` past the tail grace during
+  //      TTS is treated as the user cutting in — cancel TTS, drop the flag,
+  //      and let subsequent transcripts flow through normally.
+  const SILENCE_MS = 1800;
+  const TAIL_MS = 300;
+  const ERROR_WINDOW_MS = 5000;
+  const ERROR_MAX = 3;
+  const ttsSpeakingRef = useRef(false);
+  const ttsTailUntilRef = useRef(0);
+  const silenceTimerRef = useRef(null);
+  const lastFinalRef = useRef({ text: "", at: 0 });
+  const errorLogRef = useRef([]);      // timestamps of recent recognizer errors
+
+  const clearSilenceTimer = () => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+  };
+
+  const armSilenceTimer = () => {
+    // In "open" mode only — refuses to arm while TTS is talking.
+    if (micModeRef.current !== "open") return;
+    if (ttsSpeakingRef.current) return;
+    clearSilenceTimer();
+    silenceTimerRef.current = setTimeout(() => {
+      // Re-check TTS state at fire-time — user may have started listening
+      // while AI was still speaking.
+      if (ttsSpeakingRef.current) return;
+      if (Date.now() < ttsTailUntilRef.current) return;
+      // Only submit if we've captured something.
+      // (setInput is React state — read via callback to avoid stale closures.)
+      setInput(prev => {
+        if (prev.trim()) {
+          // Defer send() to the next tick so we're outside the setter.
+          setTimeout(() => sendRef.current && sendRef.current(), 0);
+        }
+        return prev;
+      });
+    }, SILENCE_MS);
+  };
+
+  // Kept as a ref so the timer callback can call the latest `send`.
+  const sendRef = useRef(null);
+
+  const startRecognizer = () => {
     const SR = getSR();
-    if (!SR) return;
+    if (!SR) return null;
     const rec = new SR();
     rec.continuous = true;
     rec.interimResults = true;
     rec.lang = "en-US";
     rec.onresult = (event) => {
+      // LAYER 1: while TTS is playing, drop transcripts entirely.
+      if (ttsSpeakingRef.current) return;
+      // LAYER 2: within the TAIL_MS grace after TTS ends, still drop.
+      if (Date.now() < ttsTailUntilRef.current) return;
+
       let finalText = "";
       let interimText = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -87,39 +151,108 @@ export default function AiPanel({ collapsed, onToggle }) {
         else interimText += t;
       }
       if (finalText) {
-        setInput(prev => (prev + " " + finalText).replace(/\s+/g, " ").trim());
+        // Chrome sometimes fires the same final result twice around onend
+        // restarts — dedupe identical strings within 500ms.
+        const cleaned = finalText.trim();
+        const last = lastFinalRef.current;
+        if (cleaned && !(cleaned === last.text && Date.now() - last.at < 500)) {
+          setInput(prev => (prev + " " + cleaned).replace(/\s+/g, " ").trim());
+          lastFinalRef.current = { text: cleaned, at: Date.now() };
+        }
       }
       setInterim(interimText);
+      // Any speech event re-arms the silence timer.
+      armSilenceTimer();
     };
+
+    rec.onspeechstart = () => {
+      // LAYER 3 (barge-in): if the user starts speaking while TTS is playing
+      // (past the tail grace so we don't self-trigger from AI's own audio),
+      // cancel TTS and open the gate so the incoming transcript is kept.
+      if (ttsSpeakingRef.current && Date.now() >= ttsTailUntilRef.current) {
+        if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+        ttsSpeakingRef.current = false;
+      }
+      armSilenceTimer();
+    };
+
     rec.onerror = (e) => {
-      console.warn("SpeechRecognition error", e);
+      const now = Date.now();
+      errorLogRef.current = errorLogRef.current
+        .filter(t => now - t < ERROR_WINDOW_MS)
+        .concat(now);
+      if (errorLogRef.current.length >= ERROR_MAX) {
+        toast.error("Mic keeps failing — switched to manual push-to-talk.");
+        setMicMode("ptt");
+        setListening(false);
+      }
+    };
+
+    rec.onend = () => {
+      // Self-heal: if we're still supposed to be listening (open-mic or a
+      // long ptt press), restart. Otherwise clear listening state.
+      if (micModeRef.current === "open") {
+        try { rec.start(); return; } catch { /* fall through */ }
+      }
       setListening(false);
     };
-    rec.onend = () => setListening(false);
-    recognitionRef.current = rec;
-    return () => { try { rec.stop(); } catch {} };
+
+    try {
+      rec.start();
+      return rec;
+    } catch (e) {
+      toast.error("Could not start microphone");
+      return null;
+    }
+  };
+
+  // Set up SpeechRecognition once — but the *instance* is (re)created inside
+  // startRecognizer so we always get a fresh state machine.
+  useEffect(() => {
+    return () => {
+      const rec = recognitionRef.current;
+      if (rec) { try { rec.stop(); } catch {} }
+      clearSilenceTimer();
+    };
   }, []);
 
-  const toggleMic = () => {
-    const rec = recognitionRef.current;
-    if (!rec) {
+  const startListening = () => {
+    if (!getSR()) {
       toast.error("Voice input isn't supported in this browser. Try Chrome/Edge.");
       return;
     }
-    if (listening) {
-      try { rec.stop(); } catch {}
-      setListening(false);
-      setInterim("");
-    } else {
-      setInterim("");
-      try {
-        rec.start();
-        setListening(true);
-      } catch (e) {
-        toast.error("Could not start microphone");
-      }
+    setInterim("");
+    const rec = startRecognizer();
+    if (rec) {
+      recognitionRef.current = rec;
+      setListening(true);
     }
   };
+  const stopListening = () => {
+    const rec = recognitionRef.current;
+    if (rec) { try { rec.stop(); } catch {} }
+    clearSilenceTimer();
+    setListening(false);
+    setInterim("");
+  };
+
+  // Push-to-talk handlers (space bar OR hold on the mic button)
+  const pttStart = () => {
+    if (micModeRef.current !== "ptt") return;
+    if (!listening) startListening();
+  };
+  const pttEnd = () => {
+    if (micModeRef.current !== "ptt") return;
+    if (listening) stopListening();
+  };
+
+  // Whenever micMode flips, open the mic (open) or close it (off).
+  useEffect(() => {
+    if (micMode === "open" && !listening) startListening();
+    if (micMode === "off"  &&  listening) stopListening();
+    // "ptt" mode: don't auto-start — wait for user to press-and-hold.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [micMode]);
 
   useEffect(() => {
     if (!currentId) return;
@@ -140,13 +273,17 @@ export default function AiPanel({ collapsed, onToggle }) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages]);
 
+  // Expose the latest send() to the silence timer via ref.
+  useEffect(() => { sendRef.current = send; });
+
   const send = async () => {
     if (!input.trim() || streaming || !currentId) return;
-    // Stop mic on send
-    if (listening && recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch {}
-      setListening(false); setInterim("");
+    // In open-mic mode we deliberately keep the recognizer alive across
+    // turns so the user never re-taps. In ptt/off modes, stop.
+    if (listening && micModeRef.current !== "open") {
+      stopListening();
     }
+    clearSilenceTimer();
     const userMsg = input.trim();
     setInput("");
     setMessages(m => [...m, { role: "user", content: userMsg }, { role: "assistant", content: "" }]);
@@ -154,6 +291,8 @@ export default function AiPanel({ collapsed, onToggle }) {
     // read overlapping messages.
     spokenIdxRef.current = 0;
     if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    ttsSpeakingRef.current = false;
+    ttsTailUntilRef.current = 0;
     setStreaming(true);
     try {
       const token = localStorage.getItem("axiom_token");
@@ -232,6 +371,20 @@ export default function AiPanel({ collapsed, onToggle }) {
     u.rate = Math.max(0.5, Math.min(2.0, voiceRateRef.current || 1.05));
     u.pitch = 1.0;
     u.volume = 1.0;
+    u.onstart = () => { ttsSpeakingRef.current = true; };
+    const finish = () => {
+      // Only clear the flag when the browser queue is genuinely empty —
+      // otherwise the NEXT chunked utterance (which fires start slightly
+      // after this one's end) would race with a stale-false flag.
+      const ss = window.speechSynthesis;
+      const idle = !ss.speaking && !ss.pending;
+      if (idle) {
+        ttsSpeakingRef.current = false;
+        ttsTailUntilRef.current = Date.now() + TAIL_MS;
+      }
+    };
+    u.onend = finish;
+    u.onerror = finish;
     window.speechSynthesis.speak(u);
   };
   const speakNewSentences = (full) => {
@@ -353,21 +506,27 @@ export default function AiPanel({ collapsed, onToggle }) {
               <span className="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75 animate-ping" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
             </span>
-            <span className="text-xs text-red-700">Listening… {interim && <span className="italic text-red-600">"{interim}"</span>}</span>
+            <span className="text-xs text-red-700 flex-1">
+              {ttsSpeakingRef.current
+                ? <>AI speaking — mic muted <span className="opacity-60">(barge in to interrupt)</span></>
+                : <>Listening {micMode === "open" ? "· open-mic" : ""} {interim && <span className="italic">"{interim}"</span>}</>
+              }
+            </span>
           </div>
         )}
         <div className="flex gap-2">
-          <button
-            data-testid="ai-chat-mic"
-            onClick={toggleMic}
-            disabled={streaming}
-            className={`w-9 h-9 flex items-center justify-center rounded-md border transition ${
-              listening ? "bg-red-500 border-red-500 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"
-            }`}
-            title={listening ? "Stop listening" : "Voice input"}
-          >
-            {listening ? <MicOff size={15} /> : <Mic size={15} />}
-          </button>
+          <MicButton
+            mode={micMode}
+            listening={listening}
+            streaming={streaming}
+            ttsSpeaking={ttsSpeakingRef.current}
+            onCycle={() => {
+              const nextMode = micMode === "off" ? "ptt" : micMode === "ptt" ? "open" : "off";
+              setMicMode(nextMode);
+            }}
+            onPttStart={pttStart}
+            onPttEnd={pttEnd}
+          />
           <input
             data-testid={TID.aiChatInput}
             value={input}
@@ -473,6 +632,81 @@ function VoicePicker({ voices, voiceOn, setVoiceOn, voiceName, setVoiceName, voi
         )}
       </div>
     </>
+  );
+}
+
+
+function MicButton({ mode, listening, streaming, ttsSpeaking, onCycle, onPttStart, onPttEnd }) {
+  // Visual states:
+  //   off      — grey mic
+  //   ptt idle — indigo outline mic (hint the button is "armed")
+  //   ptt held — red mic (currently listening)
+  //   open     — red mic with dot indicator
+  //   speaking-back (any mode, ttsSpeaking) — dimmed with distinctive tint
+  const isOpen = mode === "open";
+  const isPtt = mode === "ptt";
+  const armed = (isOpen && listening) || (isPtt && listening);
+  const cls = ttsSpeaking
+    ? "border-slate-200 bg-slate-100 text-slate-400"
+    : armed
+      ? "bg-red-500 border-red-500 text-white"
+      : isPtt
+        ? "border-indigo-300 text-indigo-600 hover:bg-indigo-50"
+        : isOpen
+          ? "border-red-300 text-red-600 hover:bg-red-50"
+          : "border-slate-200 text-slate-600 hover:bg-slate-50";
+  const title =
+    mode === "off" ? "Voice input off — click to enable push-to-talk"
+    : mode === "ptt" ? "Click to switch to open-mic · hold to speak"
+    : "Click to turn off · open-mic is on";
+  // Tap-vs-hold discriminator: press-hold ≥ HOLD_MS triggers PTT; a quick
+  // press-release (< HOLD_MS) is treated as a click and cycles the mode.
+  // This avoids the classic mousedown+click race on a dual-purpose button.
+  const HOLD_MS = 220;
+  const holdRef = useRef({ timer: null, held: false });
+  const pointerDown = (e) => {
+    e.preventDefault();
+    holdRef.current.held = false;
+    holdRef.current.timer = setTimeout(() => {
+      holdRef.current.held = true;
+      if (mode === "ptt") onPttStart();
+    }, HOLD_MS);
+  };
+  const pointerUp = () => {
+    clearTimeout(holdRef.current.timer);
+    if (holdRef.current.held) {
+      if (mode === "ptt") onPttEnd();
+    } else {
+      onCycle();
+    }
+    holdRef.current.held = false;
+  };
+  return (
+    <div className="relative">
+      <button
+        data-testid="ai-chat-mic"
+        onPointerDown={pointerDown}
+        onPointerUp={pointerUp}
+        onPointerLeave={() => {
+          clearTimeout(holdRef.current.timer);
+          if (holdRef.current.held && mode === "ptt") onPttEnd();
+          holdRef.current.held = false;
+        }}
+        disabled={streaming}
+        className={`relative w-9 h-9 flex items-center justify-center rounded-md border transition select-none ${cls}`}
+        title={title}
+      >
+        {armed ? <MicOff size={15} /> : <Mic size={15} />}
+      </button>
+      {isOpen && !ttsSpeaking && (
+        <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" />
+      )}
+      {isPtt && !armed && !ttsSpeaking && (
+        <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 text-[8px] text-indigo-500 font-semibold uppercase tracking-wider">
+          Hold
+        </span>
+      )}
+    </div>
   );
 }
 

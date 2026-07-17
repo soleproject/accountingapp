@@ -160,6 +160,22 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   order: `Google UK English Female` → any `en-GB` female voice → any English voice → OS
   default. Subscribes to the `voiceschanged` event so voices that load asynchronously in
   Chrome are picked up automatically.
+- **2026-02-17**: **Open-mic + PTT + TTS-echo protection**. Redesigned the AI panel mic
+  as a three-way mode toggle (Off / Push-to-Talk / Open-mic), persisted to
+  `localStorage.axiom_mic_mode`. Same button uses a tap-vs-hold discriminator (220ms
+  threshold) — tap cycles modes, hold engages PTT — avoiding the classic mousedown+click
+  race. **Open-mic** mode: continuous recognizer self-heals on `onend`, 1800ms silence
+  timer auto-submits, and three-layer TTS echo defense: (1) `ttsSpeaking` flag drops
+  transcripts entirely while `speechSynthesis.speak()` is active (tracked via
+  `utterance.onstart/onend/onerror`), (2) 300ms `TAIL_MS` grace after TTS ends keeps
+  transcripts blocked while hardware audio drains, (3) silence-submit refuses to arm/fire
+  during TTS. **Barge-in** uses the recognizer's own `onspeechstart` event — if it fires
+  past the tail grace while TTS is playing, it cancels TTS and drops the flag, letting the
+  user's next words flow through immediately (no separate VAD library needed). Chrome's
+  "final duplicate on restart" bug is deduped by suppressing identical finals within 500ms.
+  If the recognizer errors ≥3 times within 5s, mode auto-drops to PTT with a toast. Mic
+  status pill in the UI reflects the current state (Listening… / open-mic / AI speaking —
+  mic muted). No new server-side cost.
 - **2026-02-17**: Verified 317 LLC Plaid vs Veryfi source-of-truth dedup for account ···6084:
   Veryfi statement `eStmt_2026-05-20.pdf` mapped to existing `1011 Bank of America Checking ···6084`
   (no duplicate CoA), all 94 lines skipped as duplicates against Plaid's coverage window
