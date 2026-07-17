@@ -7,8 +7,9 @@ import { TID } from "@/constants/testIds";
 import { toast } from "sonner";
 import {
   Check, Wand2, Split, Link as LinkIcon, RotateCw, Plus, X, Trash2, AlertTriangle, ShieldCheck,
-  ChevronLeft, ChevronRight, Search, Calendar, XCircle,
+  ChevronLeft, ChevronRight, Search, Calendar, XCircle, Tag, Sparkles,
 } from "lucide-react";
+import ReclassifyPicker from "@/components/ReclassifyPicker";
 
 const PAGE_SIZE_OPTIONS = [50, 100, 250, 500];
 
@@ -48,6 +49,8 @@ export default function Transactions() {
   const [linking, setLinking] = useState(null);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [reclassOpen, setReclassOpen] = useState(false);
+  const [ruleSuggestion, setRuleSuggestion] = useState(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(250);
   const [pagination, setPagination] = useState({ total: 0, page: 1, pages: 1, limit: 250 });
@@ -204,6 +207,52 @@ export default function Transactions() {
     load();
   };
 
+  const bulkReclassify = async (categoryAccountId) => {
+    if (!selected.size) return;
+    setBusy(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
+        transaction_ids: [...selected],
+        category_account_id: categoryAccountId,
+      });
+      const acct = accts.find(a => a.id === categoryAccountId);
+      toast.success(
+        `Reclassified ${r.data.updated} txn(s) → ${acct?.name || "category"}`
+        + (r.data.skipped_closed?.length
+            ? `. Skipped ${r.data.skipped_closed.length} (closed period).`
+            : "")
+      );
+      setReclassOpen(false);
+      setSelected(new Set());
+      if (r.data.rule_suggestion) setRuleSuggestion(r.data.rule_suggestion);
+      load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Reclassify failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const acceptRuleSuggestion = async () => {
+    if (!ruleSuggestion) return;
+    try {
+      const r = await api.post(`/companies/${currentId}/rules`, {
+        match_type: "merchant_contains",
+        match_value: ruleSuggestion.merchant,
+        account_code: ruleSuggestion.account_code,
+        apply_to_existing: true,
+      });
+      toast.success(
+        `Rule created: "${ruleSuggestion.merchant}" → ${ruleSuggestion.account_name}`
+        + (r.data.applied ? ` (applied to ${r.data.applied} existing txns)` : "")
+      );
+      setRuleSuggestion(null);
+      load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to create rule");
+    }
+  };
+
   const approve = async (id) => {
     await api.post(`/companies/${currentId}/transactions/${id}/approve`);
     load();
@@ -315,11 +364,47 @@ export default function Transactions() {
         )}
       </div>
 
+      {ruleSuggestion && (
+        <div
+          className="rounded-md border border-amber-200 bg-amber-50 px-4 py-2.5 flex items-center gap-3"
+          data-testid="txn-rule-suggestion-banner"
+        >
+          <Sparkles size={16} className="text-amber-700 flex-shrink-0" />
+          <div className="flex-1 text-xs text-amber-900">
+            You've reclassified <b>{ruleSuggestion.merchant}</b> to{" "}
+            <b>{ruleSuggestion.account_name}</b> {ruleSuggestion.approvals} times.{" "}
+            Turn this into an automatic rule?
+          </div>
+          <button
+            onClick={acceptRuleSuggestion}
+            data-testid="txn-rule-suggestion-accept"
+            className="px-2.5 py-1 text-xs rounded-md bg-amber-700 text-white hover:bg-amber-800"
+          >
+            Create rule
+          </button>
+          <button
+            onClick={() => setRuleSuggestion(null)}
+            data-testid="txn-rule-suggestion-dismiss"
+            className="px-2.5 py-1 text-xs rounded-md hover:bg-amber-100 text-amber-900"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {selected.size > 0 && (
         <div className="rounded-md border bg-slate-900 text-white px-4 py-2.5 flex items-center gap-3 flex-wrap">          <span className="text-sm font-medium">{selected.size} selected</span>
           <button data-testid={TID.txnBulkApprove} disabled={busy} onClick={bulkApprove}
                   className="inline-flex items-center gap-1 px-3 py-1 rounded bg-white text-slate-900 text-xs font-medium">
             <Check size={12} /> Approve all
+          </button>
+          <button
+            data-testid="txn-bulk-reclassify"
+            disabled={busy}
+            onClick={() => setReclassOpen(true)}
+            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-emerald-500 text-xs font-medium hover:bg-emerald-600"
+          >
+            <Tag size={12} /> Reclassify
           </button>
           <button data-testid={TID.txnBulkCreateRules} disabled={busy} onClick={bulkCreateRules}
                   className="inline-flex items-center gap-1 px-3 py-1 rounded bg-indigo-500 text-xs font-medium">
@@ -327,6 +412,15 @@ export default function Transactions() {
           </button>
           <button onClick={() => setSelected(new Set())} className="ml-auto text-xs opacity-70 hover:opacity-100">Clear</button>
         </div>
+      )}
+
+      {reclassOpen && (
+        <ReclassifyPicker
+          accounts={accts}
+          count={selected.size}
+          onCancel={() => setReclassOpen(false)}
+          onApply={bulkReclassify}
+        />
       )}
 
       <div className="rounded-xl border bg-white overflow-hidden">

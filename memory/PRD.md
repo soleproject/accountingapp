@@ -73,6 +73,12 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   returns a `rule_suggestion` and the drawer shows an amber banner "You've reclassified X
   to Y N times. Turn this into a rule?" — one click POSTs to `/rules` with
   `apply_to_existing=true` so historic un-reviewed txns are back-filled.
+- **2026-02-17**: Extracted `ReclassifyPicker` to `/app/frontend/src/components/ReclassifyPicker.jsx`
+  and added **Bulk Reclassify** to the main Transactions page toolbar (green "Reclassify" button
+  between "Approve all" and "Make these rules"). Same amber rule-suggestion banner appears
+  above the toolbar when the backend returns a candidate crossing the `approvals >= 2`
+  threshold. Both the Contacts drawer and the Transactions page now hit the same
+  `POST /transactions/bulk-reclassify` endpoint.
 - **2026-02-17**: Verified 317 LLC Plaid vs Veryfi source-of-truth dedup for account ···6084:
   Veryfi statement `eStmt_2026-05-20.pdf` mapped to existing `1011 Bank of America Checking ···6084`
   (no duplicate CoA), all 94 lines skipped as duplicates against Plaid's coverage window
