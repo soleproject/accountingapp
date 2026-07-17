@@ -164,8 +164,13 @@ PFC_COA_MAPPINGS: list[PfcMapping] = [
        "General inbound transfers from another account",
        "General inbound transfers from another account",
        "Bank→bank; resolver's bank-account guard forces this to fallback (review)."),
-    _M("TRANSFER_IN", "TRANSFER_IN_DEPOSIT",                         "1100", "asset_movement",
-       "Cash/check/ATM deposits into a bank account"),
+    _M("TRANSFER_IN", "TRANSFER_IN_DEPOSIT",                         "4999", "transfer_review",
+       "Cash/check/ATM deposits into a bank account", None,
+       "Bank-side of a deposit — the source is ambiguous (revenue vs owner "
+       "contribution vs loan proceeds vs A/R payment). Route to 4999 "
+       "Uncategorized Income for the CPA to reclassify. Never post to 1100 "
+       "Undeposited Funds — Plaid txns already land ON the bank, so pairing "
+       "with Undeposited would leave 1100 with an impossible negative balance."),
     _M("TRANSFER_IN", "TRANSFER_IN_INVESTMENT_AND_RETIREMENT_FUNDS", "3400", "personal",
        "Money transferred in from an investment/retirement account",
        equity_kind="contribution"),

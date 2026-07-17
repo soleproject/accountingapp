@@ -43,12 +43,18 @@ def _is_uncategorized_account(name: Optional[str]) -> bool:
 
 
 def _is_bank_account(acct: dict) -> bool:
-    """A bank/cash asset account. Matches our seed convention: type='asset' and
-    subtype in ('current_asset',) with a name that looks bank-ish. Simpler and
-    more portable: rely on the code range 1000-1099 (cash & equivalents).
+    """A bank/cash-flavored asset account — either the 1000-1099 code range
+    (per seed convention) OR `1100 Undeposited Funds` (Feb 17, 2026: added
+    to the guard because TRANSFER_IN_DEPOSIT used to auto-route to 1100 and
+    produced impossible negative balances there). Extended: any account with
+    subtype='Bank' (resolver-created rows like `1011 BofA Checking ···6084`).
     """
     code = str(acct.get("code") or "")
     if code.startswith("10") and len(code) == 4:  # 1000-1099
+        return True
+    if code == "1100":
+        return True
+    if (acct.get("subtype") or "").lower() == "bank":
         return True
     return False
 

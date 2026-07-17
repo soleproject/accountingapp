@@ -1,0 +1,31 @@
+{
+  "summary": "Verified iter24 fix: Dashboard cash_on_hand and Balance Sheet total_assets for 317 LLC both reconcile to $5,662.93. TRANSFER_IN_DEPOSIT PFC mapping now routes to 4999 (transfer_review, needs review) — never 1100. _is_bank_account guard extended to recognize 1100 and subtype='Bank'. 317 LLC now shows a single active bank row (1011 BofA ···6084); legacy 1010 deactivated (0 txns), 1100 has 0 txns as bank_account_id. All 6 backend tests pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/companies/1829a9eb-.../reports/balance-sheet & /dashboard/metrics", "issue": "Bright Beans Coffee Co. dashboard cash_on_hand=$6,599.86 vs BS total_assets=-$1,000.14 (diff $7,600). This is NOT caused by iter24 fix (unrelated pre-existing state — company is 'onboarding in progress' per test_credentials.md) and is outside review scope, but worth main agent's attention."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter24_dashboard_bs_reconcile.py",
+    "/app/test_reports/pytest/iter24_results.xml"
+  ],
+  "action_items": [
+    "Investigate Bright Beans Coffee Co. BS total_assets showing negative — likely unrelated to iter24 but should confirm no other companies are silently misreporting."
+  ],
+  "critical_code_review_comments": [
+    "pfc_mapping.py line 167 note is excellent — documents WHY 1100 is avoided (Plaid txns already land on bank; pairing would leave 1100 negative). Good.",
+    "pfc_resolver._is_bank_account correctly extended (1000-1099 range + explicit 1100 + subtype='Bank'). Consider centralizing this predicate — it's currently duplicated conceptually in server.py cash_on_hand query ($or: code range + '1100' + subtype='Bank'). Refactor risk is low; noted for future."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter24_dashboard_bs_reconcile.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "skipped"},
+  "test_credentials": "admin@axiom.ai / admin123",
+  "seed_data_creation": "None — tests hit live 317 LLC data as instructed.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "iter24 fix is verified end-to-end. 317 LLC assertions: cash_on_hand==total_assets==5662.93 to the cent, BS shows single row 1011 BofA ···6084, 1010 inactive, 1100 with 0 bank txns. TRANSFER_IN_DEPOSIT resolver test uses live 317 LLC COA and confirms routing to 4999/transfer_review/needs_review. Only Bright Beans (onboarding in progress) and 317 LLC exist as real companies in DB; 602/531/444 LLC referenced in ticket aren't in this env, so those regressions were skipped as instructed.",
+  "rca of the issue": "Original bug had 3 root causes: (A) pfc_mapping TRANSFER_IN_DEPOSIT was pointing at 1100 Undeposited Funds asset_movement — but Plaid deposit txns already sit on the bank leg, so using 1100 as the paired category account left 1100 with impossible negatives. Fixed by remapping to 4999 transfer_review. (B) pfc_resolver._is_bank_account did not consider 1100 or resolver-created rows with subtype='Bank' as bank/cash — the guard failed to block auto-routing to them. Fixed by extending the predicate. (C) 102 legacy txns on 1010 pre-existed the auto-created 1011 row (mid-sync race). One-off backfill script reclassified 5 mis-mapped 1100 deposit txns → 4999 (needs_review=True), migrated 102 txns from 1010 → 1011, deactivated 1010, rewired plaid_item mappings. Post-fix live values confirmed: Dashboard $5662.93 == BS $5662.93. Ledger-vs-Plaid drift ($1,429.21 vs live $4,233.72) is expected per agent note."
+}
