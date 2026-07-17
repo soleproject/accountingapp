@@ -49,6 +49,13 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   auto-picks the keeper with the most transactions (radio-selectable), shows per-contact txn counts,
   and displays a live "N contact(s) will be merged into X. About Y transaction(s) will be reassigned."
   preview.
+- **2026-02-17**: Contacts page — added **Hits / YTD In / YTD Out / Net / Last Seen** columns.
+  Single Mongo `$group` aggregation over `transactions` computes all four in one pass
+  (uses existing `(company_id, date)` index). Response is wrapped in the shared `ReportCache`
+  (`contacts_list::company_id=…`, 45s TTL) — Redis-backed with in-memory fallback — so at 3K
+  concurrent users each refreshing every ~30s the DB sees ≤ ~70 aggregations/sec worst-case,
+  most requests are cache hits. Create/update/delete/merge/sync-completion all invalidate the
+  cache. Cold ~68ms, warm ~57ms on 317 LLC (210 contacts / 1,874 txns).
 - **2026-02-17**: Verified 317 LLC Plaid vs Veryfi source-of-truth dedup for account ···6084:
   Veryfi statement `eStmt_2026-05-20.pdf` mapped to existing `1011 Bank of America Checking ···6084`
   (no duplicate CoA), all 94 lines skipped as duplicates against Plaid's coverage window

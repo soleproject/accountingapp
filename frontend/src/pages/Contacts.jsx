@@ -7,6 +7,19 @@ import { toast } from "sonner";
 
 const EMPTY_FORM = { name: "", type: "customer", email: "", phone: "", address: "" };
 
+const fmtMoney = (n) => {
+  const v = Number(n) || 0;
+  const abs = Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return v < 0 ? `-$${abs}` : `$${abs}`;
+};
+
+const fmtDate = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+};
+
 export default function Contacts() {
   const { currentId } = useCompany();
   const [items, setItems] = useState([]);
@@ -73,14 +86,16 @@ export default function Contacts() {
 
       <div className="rounded-xl border bg-white overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-xs uppercase text-slate-500 border-b">
+          <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500 border-b">
             <tr>
               <th className="w-8 px-3 py-2"></th>
-              <th className="px-3 py-2 text-left">Name</th>
+              <th className="px-3 py-2 text-left">Contact</th>
+              <th className="px-3 py-2 text-right">Hits</th>
+              <th className="px-3 py-2 text-right">YTD In</th>
+              <th className="px-3 py-2 text-right">YTD Out</th>
+              <th className="px-3 py-2 text-right">Net</th>
+              <th className="px-3 py-2 text-left">Last Seen</th>
               <th className="px-3 py-2 text-left">Type</th>
-              <th className="px-3 py-2 text-left">Email</th>
-              <th className="px-3 py-2 text-left">Phone</th>
-              <th className="px-3 py-2 text-right">Txns</th>
               <th></th>
             </tr>
           </thead>
@@ -101,15 +116,34 @@ export default function Contacts() {
                     className="cursor-pointer"
                   />
                 </td>
-                <td className="px-3 py-2 font-medium">{c.name}</td>
+                <td className="px-3 py-2 font-medium">
+                  <div>{c.name}</div>
+                  {(c.email || c.phone) && (
+                    <div className="text-[11px] text-slate-500 truncate">
+                      {[c.email, c.phone].filter(Boolean).join(" · ")}
+                    </div>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-right text-slate-500 tabular-nums">{c.hits ?? 0}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-emerald-700">
+                  {(c.ytd_in ?? 0) > 0 ? fmtMoney(c.ytd_in) : ""}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums text-slate-800">
+                  {(c.ytd_out ?? 0) > 0 ? fmtMoney(c.ytd_out) : ""}
+                </td>
+                <td className={`px-3 py-2 text-right tabular-nums font-medium ${
+                  (c.net ?? 0) < 0 ? "text-rose-600" : "text-slate-900"
+                }`}>
+                  {(c.net ?? 0) === 0 ? "" : fmtMoney(c.net)}
+                </td>
+                <td className="px-3 py-2 text-slate-500 text-xs whitespace-nowrap">
+                  {fmtDate(c.last_seen)}
+                </td>
                 <td className="px-3 py-2">
                   {c.type && (
                     <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-100">{c.type}</span>
                   )}
                 </td>
-                <td className="px-3 py-2 text-slate-500">{c.email}</td>
-                <td className="px-3 py-2 text-slate-500">{c.phone}</td>
-                <td className="px-3 py-2 text-right text-slate-500 tabular-nums">{c.txn_count ?? 0}</td>
                 <td className="px-3 py-2 text-right whitespace-nowrap">
                   <button
                     onClick={(e) => { e.stopPropagation(); setModal({ mode: "edit", contact: c }); }}
@@ -131,7 +165,7 @@ export default function Contacts() {
               </tr>
             ))}
             {!items.length && (
-              <tr><td colSpan={7} className="text-center py-8 text-slate-500">No contacts.</td></tr>
+              <tr><td colSpan={9} className="text-center py-8 text-slate-500">No contacts.</td></tr>
             )}
           </tbody>
         </table>
@@ -228,11 +262,12 @@ function ContactModal({ currentId, mode, contact, onClose }) {
 }
 
 function MergeModal({ currentId, contacts, onClose }) {
-  // Default keeper = contact with the most transactions (ties → first alpha).
+  // Default keeper = contact with the most hits (ties → first alpha).
   const defaultKeeper = useMemo(() => {
     if (!contacts.length) return null;
     return [...contacts].sort((a, b) =>
-      (b.txn_count ?? 0) - (a.txn_count ?? 0) || a.name.localeCompare(b.name)
+      (b.hits ?? b.txn_count ?? 0) - (a.hits ?? a.txn_count ?? 0)
+      || a.name.localeCompare(b.name)
     )[0].id;
   }, [contacts]);
   const [keeperId, setKeeperId] = useState(defaultKeeper);
@@ -240,7 +275,7 @@ function MergeModal({ currentId, contacts, onClose }) {
 
   const keeper = contacts.find(c => c.id === keeperId);
   const losers = contacts.filter(c => c.id !== keeperId);
-  const totalTxns = losers.reduce((s, c) => s + (c.txn_count ?? 0), 0);
+  const totalTxns = losers.reduce((s, c) => s + (c.hits ?? c.txn_count ?? 0), 0);
 
   const doMerge = async () => {
     if (!keeperId || losers.length === 0) return;
@@ -301,7 +336,7 @@ function MergeModal({ currentId, contacts, onClose }) {
                 </div>
               </div>
               <div className="text-xs text-slate-500 tabular-nums whitespace-nowrap">
-                {c.txn_count ?? 0} txns
+                {c.hits ?? c.txn_count ?? 0} txns
               </div>
               {keeperId === c.id && (
                 <span className="text-[10px] uppercase font-semibold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">

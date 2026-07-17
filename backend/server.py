@@ -1363,21 +1363,63 @@ async def delete_rule(cid: str, rid: str, user: dict = Depends(get_current_user)
 @api.get("/companies/{cid}/contacts")
 async def list_contacts(cid: str, user: dict = Depends(get_current_user)):
     await _require_company(user, cid)
-    docs = await db.contacts.find({"company_id": cid}).sort("name", 1).to_list(1000)
-    # Enrich with a fast txn_count per contact — single aggregation over transactions.
-    counts: dict[str, int] = {}
-    pipeline = [
-        {"$match": {"company_id": cid, "contact_id": {"$nin": [None, ""]}}},
-        {"$group": {"_id": "$contact_id", "n": {"$sum": 1}}},
-    ]
-    async for row in db.transactions.aggregate(pipeline):
-        counts[row["_id"]] = row["n"]
-    out = []
-    for d in docs:
-        c = coerce(d)
-        c["txn_count"] = counts.get(c["id"], 0)
-        out.append(c)
-    return {"contacts": out}
+
+    # Cache the enriched response briefly. For 3k concurrent users each
+    # refreshing every ~30 s, this drops the aggregation load on Mongo by
+    # ~40x while staying fresh enough for a UI list. The cache is
+    # invalidated in all contact-mutating endpoints AND by sync completion
+    # (see sync_tasks._mark_done → get_cache().ainvalidate).
+    from infra import get_cache
+    cache = get_cache()
+    ckey = cache.key("contacts_list", company_id=cid)
+
+    async def _compute() -> dict:
+        docs = await db.contacts.find({"company_id": cid}).sort("name", 1).to_list(2000)
+        ytd_start = f"{datetime.now(timezone.utc).year}-01-01"
+        pipeline = [
+            {"$match": {"company_id": cid, "contact_id": {"$nin": [None, ""]}}},
+            {"$group": {
+                "_id": "$contact_id",
+                "hits": {"$sum": 1},
+                "last_seen": {"$max": "$date"},
+                "ytd_in": {"$sum": {"$cond": [
+                    {"$and": [{"$gt": ["$amount", 0]},
+                              {"$gte": ["$date", ytd_start]}]},
+                    "$amount", 0]}},
+                "ytd_out_neg": {"$sum": {"$cond": [
+                    {"$and": [{"$lt": ["$amount", 0]},
+                              {"$gte": ["$date", ytd_start]}]},
+                    "$amount", 0]}},
+            }},
+        ]
+        stats: dict[str, dict] = {}
+        async for row in db.transactions.aggregate(pipeline):
+            ytd_in = round(row.get("ytd_in") or 0.0, 2)
+            ytd_out = round(-(row.get("ytd_out_neg") or 0.0), 2)
+            stats[row["_id"]] = {
+                "hits": row.get("hits") or 0,
+                "last_seen": row.get("last_seen"),
+                "ytd_in": ytd_in,
+                "ytd_out": ytd_out,
+                "net": round(ytd_in - ytd_out, 2),
+            }
+        out = []
+        empty = {"hits": 0, "last_seen": None, "ytd_in": 0.0,
+                 "ytd_out": 0.0, "net": 0.0}
+        for d in docs:
+            c = coerce(d)
+            s = stats.get(c["id"], empty)
+            c["hits"] = s["hits"]
+            c["last_seen"] = s["last_seen"]
+            c["ytd_in"] = s["ytd_in"]
+            c["ytd_out"] = s["ytd_out"]
+            c["net"] = s["net"]
+            # Back-compat alias: older UI referenced `txn_count`.
+            c["txn_count"] = s["hits"]
+            out.append(c)
+        return {"contacts": out}
+
+    return await cache.get_or_compute(ckey, ttl=45, compute=_compute)
 
 
 @api.post("/companies/{cid}/contacts")
@@ -1388,6 +1430,11 @@ async def create_contact(cid: str, inp: ContactCreate, user: dict = Depends(get_
         "id": xid, "company_id": cid, **inp.model_dump(),
         "created_at": now, "updated_at": now,
     })
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
     return {"id": xid}
 
 
@@ -1396,6 +1443,11 @@ async def update_contact(cid: str, xid: str, payload: dict, user: dict = Depends
     await _require_company(user, cid)
     payload["updated_at"] = now_iso()
     await db.contacts.update_one({"id": xid, "company_id": cid}, {"$set": payload})
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True}
 
 
@@ -1403,6 +1455,11 @@ async def update_contact(cid: str, xid: str, payload: dict, user: dict = Depends
 async def delete_contact(cid: str, xid: str, user: dict = Depends(get_current_user)):
     await _require_company(user, cid)
     await db.contacts.delete_one({"id": xid, "company_id": cid})
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True}
 
 
