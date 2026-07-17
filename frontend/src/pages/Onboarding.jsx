@@ -23,6 +23,10 @@ export default function Onboarding() {
   const [answers, setAnswers] = useState({});
   const [busy, setBusy] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
+  const [coaSelected, setCoaSelected] = useState(new Set());
+  const [previewing, setPreviewing] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [addedCount, setAddedCount] = useState(0);
   const [plaidAccts, setPlaidAccts] = useState([]);
   const [selectedPlaid, setSelectedPlaid] = useState(new Set());
   const [imported, setImported] = useState({ plaid: 0, veryfi: 0 });
@@ -56,12 +60,48 @@ export default function Onboarding() {
   };
 
   const generateCoa = async () => {
-    setBusy(true);
-    const r = await api.post(`/companies/${currentId}/onboarding/generate-coa`);
-    setSuggestions(r.data.suggestions || []);
-    setBusy(false);
-    toast.success(`AI added ${r.data.added} industry-specific accounts`);
+    setPreviewing(true);
+    setSuggestions([]);
+    setAddedCount(0);
+    try {
+      const r = await api.post(`/companies/${currentId}/onboarding/coa/suggest`);
+      const list = (r.data.suggestions || []).filter(s => !s.already_exists);
+      setSuggestions(list);
+      // Default: select all
+      setCoaSelected(new Set(list.map(s => s.code)));
+      if (!list.length) toast.info("No additional accounts needed — your CoA is already tailored.");
+    } catch (err) {
+      toast.error("AI could not generate suggestions. Try again.");
+    } finally {
+      setPreviewing(false);
+    }
   };
+
+  const applyCoa = async () => {
+    if (coaSelected.size === 0) return;
+    setAdding(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/onboarding/generate-coa`, {
+        codes: [...coaSelected],
+      });
+      setAddedCount(r.data.added || 0);
+      // Remove inserted from the pending list
+      const insertedCodes = new Set((r.data.inserted || []).map(s => s.code));
+      setSuggestions(prev => prev.filter(s => !insertedCodes.has(s.code)));
+      setCoaSelected(new Set());
+      toast.success(`Added ${r.data.added} industry-specific account${r.data.added === 1 ? "" : "s"}`);
+    } catch (err) {
+      toast.error("Failed to add accounts.");
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const toggleCoaSelected = (code) => setCoaSelected(prev => {
+    const n = new Set(prev);
+    n.has(code) ? n.delete(code) : n.add(code);
+    return n;
+  });
   const mockPlaid = async () => {
     setBusy(true);
     const r = await api.post(`/companies/${currentId}/onboarding/mock-plaid`);
@@ -192,20 +232,85 @@ export default function Onboarding() {
 
         {step === 2 && (
           <div className="space-y-3">
-            <h2 className="font-heading text-xl font-semibold">AI-generated Chart of Accounts</h2>
+            <h2 className="font-heading text-xl font-semibold">AI-tailored Chart of Accounts</h2>
             <p className="text-sm text-slate-500">
-              We seed a GAAP-compliant baseline. AI adds industry-specific accounts based on what your business does.
+              We seed a GAAP baseline. Claude Sonnet reads your business type + description and
+              proposes 15-25 industry-specific accounts you can review before adding.
             </p>
-            <button data-testid={TID.onboardingCoaGenerate} onClick={generateCoa} disabled={busy}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-slate-900 text-white text-sm">
-              {busy && <Loader2 size={13} className="animate-spin" />} Generate industry accounts with AI
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                data-testid={TID.onboardingCoaGenerate}
+                onClick={generateCoa}
+                disabled={previewing || adding}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50"
+              >
+                {previewing && <Loader2 size={13} className="animate-spin" />}
+                {previewing ? "Analyzing…" : suggestions.length ? "Re-analyze" : "Suggest tailored accounts"}
+              </button>
+              {suggestions.length > 0 && (
+                <button
+                  onClick={applyCoa}
+                  disabled={adding || coaSelected.size === 0}
+                  data-testid="onboarding-coa-apply"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-emerald-600 text-white text-sm disabled:opacity-50"
+                >
+                  {adding && <Loader2 size={13} className="animate-spin" />}
+                  Add {coaSelected.size} selected
+                </button>
+              )}
+            </div>
+
+            {addedCount > 0 && (
+              <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-3 py-2">
+                ✓ Added {addedCount} account{addedCount === 1 ? "" : "s"} to your chart of accounts.
+              </div>
+            )}
+
             {suggestions.length > 0 && (
-              <div className="mt-3 rounded-md border bg-slate-50 p-3">
-                <div className="text-xs uppercase tracking-wide text-slate-500 mb-2">AI added</div>
-                <div className="space-y-1">
-                  {suggestions.map((s, i) => (
-                    <div key={i} className="text-sm"><span className="font-mono-num text-slate-500">{s.code}</span> {s.name} <span className="text-xs text-slate-500">({s.type})</span></div>
+              <div className="mt-2 rounded-md border bg-white">
+                <div className="flex items-center gap-2 px-3 py-2 border-b bg-slate-50">
+                  <input
+                    type="checkbox"
+                    checked={coaSelected.size === suggestions.length && suggestions.length > 0}
+                    onChange={() => setCoaSelected(
+                      coaSelected.size === suggestions.length
+                        ? new Set()
+                        : new Set(suggestions.map(s => s.code))
+                    )}
+                    data-testid="onboarding-coa-select-all"
+                  />
+                  <div className="text-xs text-slate-600">
+                    <b>{coaSelected.size}</b> of {suggestions.length} selected
+                  </div>
+                </div>
+                <div className="divide-y max-h-[360px] overflow-y-auto">
+                  {suggestions.map(s => (
+                    <label
+                      key={s.code}
+                      data-testid={`onboarding-coa-option-${s.code}`}
+                      className={`flex items-start gap-3 px-3 py-2 cursor-pointer ${
+                        coaSelected.has(s.code) ? "bg-emerald-50/40" : "hover:bg-slate-50"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={coaSelected.has(s.code)}
+                        onChange={() => toggleCoaSelected(s.code)}
+                        className="mt-1"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm flex items-baseline gap-2 flex-wrap">
+                          <span className="font-mono-num text-slate-500 tabular-nums">{s.code}</span>
+                          <span className="font-medium">{s.name}</span>
+                          <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                            {s.type}
+                          </span>
+                        </div>
+                        {s.rationale && (
+                          <div className="text-[11px] text-slate-500 mt-0.5">{s.rationale}</div>
+                        )}
+                      </div>
+                    </label>
                   ))}
                 </div>
               </div>

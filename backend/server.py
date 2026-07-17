@@ -2244,27 +2244,75 @@ async def update_onboarding(cid: str, inp: OnboardingUpdate, user: dict = Depend
     return {"ok": True}
 
 
-@api.post("/companies/{cid}/onboarding/generate-coa")
-async def generate_coa(cid: str, user: dict = Depends(get_current_user)):
-    """AI-suggest additional industry-specific accounts."""
+@api.post("/companies/{cid}/onboarding/coa/suggest")
+async def suggest_coa(cid: str, user: dict = Depends(get_current_user)):
+    """Preview an AI-tailored chart of accounts without writing anything.
+
+    Returns a list of `{code, name, type, subtype, rationale, already_exists}`
+    so the UI can render a review-and-select screen before insertion.
+    """
     company = await _require_company(user, cid)
-    extras = await suggest_chart_of_accounts(company.get("business_type", ""),
-                                             company.get("business_description", ""))
-    # Filter out duplicates
+    existing = await db.accounts.find({"company_id": cid}).to_list(2000)
+    existing_codes = [a["code"] for a in existing]
+    suggestions = await suggest_chart_of_accounts(
+        company.get("business_type", ""),
+        company.get("business_description", ""),
+        existing_codes=existing_codes,
+    )
+    existing_set = set(existing_codes)
+    for s in suggestions:
+        s["already_exists"] = s["code"] in existing_set
+    return {"business_type": company.get("business_type", ""),
+            "suggestions": suggestions}
+
+
+@api.post("/companies/{cid}/onboarding/generate-coa")
+async def generate_coa(cid: str, payload: dict | None = None,
+                       user: dict = Depends(get_current_user)):
+    """Insert AI-suggested industry-specific accounts.
+
+    Body (optional): `{codes: ["4110", "5210", ...]}` — insert ONLY these
+    codes from the current AI suggestion. If omitted, inserts every
+    non-duplicate suggestion (legacy behavior).
+    """
+    company = await _require_company(user, cid)
+    extras = await suggest_chart_of_accounts(
+        company.get("business_type", ""),
+        company.get("business_description", ""),
+        existing_codes=[a["code"] for a in
+                        await db.accounts.find({"company_id": cid}).to_list(2000)],
+    )
+    wanted_codes = None
+    if isinstance(payload, dict) and payload.get("codes"):
+        wanted_codes = {str(c).strip() for c in payload["codes"] if c}
+    # Refresh existing set to make the insert idempotent even if a concurrent
+    # call added a code between the AI call and the write.
     existing = await db.accounts.find({"company_id": cid}).to_list(2000)
     codes = {a["code"] for a in existing}
     added = 0
+    inserted = []
     for x in extras:
         if x["code"] in codes:
             continue
+        if wanted_codes is not None and x["code"] not in wanted_codes:
+            continue
         await db.accounts.insert_one({
-            "id": str(uuid.uuid4()), "company_id": cid, "code": x["code"], "name": x["name"],
-            "type": x.get("type", "expense"), "subtype": x.get("subtype", "operating_expense"),
-            "active": True, "balance": 0.0, "created_at": now_iso(), "updated_at": now_iso(),
+            "id": str(uuid.uuid4()), "company_id": cid,
+            "code": x["code"], "name": x["name"],
+            "type": x.get("type", "expense"),
+            "subtype": x.get("subtype", "operating_expense"),
+            "active": True, "balance": 0.0,
+            "created_at": now_iso(), "updated_at": now_iso(),
         })
         added += 1
+        inserted.append(x)
     await _log_ai(cid, "coa_generated", added)
-    return {"added": added, "suggestions": extras}
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"added": added, "suggestions": extras, "inserted": inserted}
 
 
 @api.post("/companies/{cid}/onboarding/plaid/link-token")

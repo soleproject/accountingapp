@@ -227,19 +227,53 @@ async def chat_stream(
         yield f"[AI error: {e}]"
 
 
-async def suggest_chart_of_accounts(business_type: str, description: str) -> list[dict]:
-    """Ask AI to suggest additional industry-specific accounts on top of defaults."""
+async def suggest_chart_of_accounts(
+    business_type: str,
+    description: str,
+    existing_codes: Optional[list[str]] = None,
+) -> list[dict]:
+    """Ask Claude Sonnet to design an industry-tailored chart of accounts.
+
+    Args:
+        business_type: e.g. "SaaS", "Restaurant", "Construction", "eCommerce".
+        description: free-text description of the business activities.
+        existing_codes: list of account codes already on the books — the AI
+            avoids re-suggesting these so we get pure additions.
+
+    Returns: a JSON array of accounts, each:
+        {"code": "5210", "name": "Merchant Processing Fees", "type": "expense",
+         "subtype": "operating_expense", "rationale": "why this fits ..."}
+    """
+    existing_codes = existing_codes or []
+    existing_hint = (
+        f"\nThese codes already exist — DO NOT re-suggest them: {sorted(existing_codes)}"
+        if existing_codes else ""
+    )
     prompt = (
-        f"For a US small business of type: {business_type}\n"
-        f"Description: {description}\n\n"
-        "Suggest 4-8 ADDITIONAL industry-specific GAAP accounts (beyond a standard baseline) "
-        "as a JSON array. Each item: {\"code\": \"6xxx or 4xxx\", \"name\": \"Account Name\", "
-        "\"type\": \"asset|liability|equity|revenue|expense\", \"subtype\": \"operating_expense|...\"}. "
-        "Return ONLY the JSON array."
+        f"Design an industry-tailored GAAP chart-of-accounts addition for a US small business.\n"
+        f"Business type: {business_type}\n"
+        f"Description: {description or '(none provided)'}\n"
+        f"{existing_hint}\n\n"
+        "Return 15-25 NEW industry-specific accounts that will meaningfully improve reporting "
+        "clarity for this exact business — not generic filler.\n\n"
+        "Rules:\n"
+        "- Use standard AICPA-style numbering:\n"
+        "    1xxx assets · 2xxx liabilities · 3xxx equity ·\n"
+        "    4xxx revenue · 5xxx COGS · 6xxx-7xxx operating expenses · 8xxx-9xxx other\n"
+        "- Prefer the 4-digit range (e.g. 4110, 5210, 6220).\n"
+        "- Cover at least: revenue streams, direct COGS if applicable, key operating expenses,\n"
+        "  industry-specific liabilities (deferred revenue for SaaS, tips payable for restaurants,\n"
+        "  retainage for construction, sales tax nexus, gift-card liabilities, etc).\n"
+        "- Each rationale is one short sentence explaining WHY this account matters for THIS business.\n\n"
+        "Respond with ONLY a JSON array (no prose, no markdown fence). Each item:\n"
+        '  {"code": "<4-digit>", "name": "<Title Case>", '
+        '"type": "asset|liability|equity|revenue|cogs|expense", '
+        '"subtype": "<one_word>", "rationale": "<one sentence>"}'
     )
     chat = _new_chat(
-        "You are a CPA designing a GAAP chart of accounts. Return ONLY valid JSON array.",
-        f"coa-{business_type}",
+        "You are a CPA designing a GAAP chart of accounts tailored to a specific US business. "
+        "You return ONLY a valid JSON array of account objects — no wrapper, no prose.",
+        f"coa-{business_type}-{hashlib.md5((description or '').encode()).hexdigest()[:6]}",
     )
     text = ""
     try:
@@ -255,6 +289,22 @@ async def suggest_chart_of_accounts(business_type: str, description: str) -> lis
         return []
     try:
         arr = json.loads(m.group(0))
-        return [x for x in arr if isinstance(x, dict) and "code" in x and "name" in x]
     except Exception:
         return []
+    out = []
+    seen_codes = set(existing_codes)
+    for x in arr:
+        if not isinstance(x, dict) or "code" not in x or "name" not in x:
+            continue
+        code = str(x["code"]).strip()
+        if not code or code in seen_codes:
+            continue
+        seen_codes.add(code)
+        out.append({
+            "code": code,
+            "name": str(x["name"]).strip(),
+            "type": (x.get("type") or "expense").strip().lower(),
+            "subtype": (x.get("subtype") or "operating_expense").strip().lower(),
+            "rationale": (x.get("rationale") or "").strip(),
+        })
+    return out

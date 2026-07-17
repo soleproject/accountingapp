@@ -111,6 +111,18 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   books" header + 5 aggregate stats + a **"Filter to action needed"** toggle. Client
   cards now show a `BellRing` action-count badge and chips summarizing what's due per
   client (`6 flag · 1 recon`). 70ms cold / 81ms warm on 7 clients.
+- **2026-02-17**: **AI-assisted onboarding — auto-tailored CoA per business type** (P1 shipped).
+  Rewrote `ai_service.suggest_chart_of_accounts(business_type, description, existing_codes)`
+  to request 15-25 industry-specific accounts with per-account `rationale` from Claude Sonnet
+  4.5, dedup-safe against existing codes. New `POST /companies/{cid}/onboarding/coa/suggest`
+  returns a preview (no writes) with `already_exists` flags. Reworked
+  `POST /companies/{cid}/onboarding/generate-coa` to accept `{codes: [...]}` for selective
+  insertion + invalidate report cache. Two entry points: **Onboarding step 2** is now
+  a two-phase Suggest → Review-with-checkboxes → Apply flow; **CoA page** has a new
+  "Suggest with AI" button that opens a modal with the same review flow. Verified on
+  Bright Beans (Retail / F&B) — 20 accounts generated in ~21s including Green Coffee Bean
+  Inventory, Wholesale Coffee Sales, Gift Cards Outstanding, Espresso Machines, COGS
+  breakdowns, etc.
 - **2026-02-17**: Verified 317 LLC Plaid vs Veryfi source-of-truth dedup for account ···6084:
   Veryfi statement `eStmt_2026-05-20.pdf` mapped to existing `1011 Bank of America Checking ···6084`
   (no duplicate CoA), all 94 lines skipped as duplicates against Plaid's coverage window
