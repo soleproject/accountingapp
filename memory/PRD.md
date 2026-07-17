@@ -144,6 +144,14 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   it). Choice is persisted to `company.onboarding.answers.onboarding_mode`. In Simple mode
   the AI-Interview step chip is hidden and `next()`/`back()` navigation transparently skips
   the interview index — so either flow is a natural, uninterrupted click-through.
+- **2026-02-17**: **Real-time TTS in Axiom Assistant panel**. Added a Volume2/VolumeX toggle
+  next to the collapse button — enabled state persists to `localStorage.axiom_tts`. When
+  active, the streaming SSE loop feeds newly-completed sentences to
+  `window.speechSynthesis` as soon as a sentence terminator (`.!?\n:`) appears in the
+  buffer, so the AI starts speaking within milliseconds of finishing its first sentence
+  (while it's still typing the next one). Uses the browser's native SpeechSynthesis API —
+  zero server latency, works offline, no API key. Speech is cancelled and the pointer
+  reset when the user sends a new message. Trailing text is flushed after stream end.
 - **2026-02-17**: Verified 317 LLC Plaid vs Veryfi source-of-truth dedup for account ···6084:
   Veryfi statement `eStmt_2026-05-20.pdf` mapped to existing `1011 Bank of America Checking ···6084`
   (no duplicate CoA), all 94 lines skipped as duplicates against Plaid's coverage window

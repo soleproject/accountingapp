@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Send, Sparkles, X, MessageSquare, Mic, MicOff } from "lucide-react";
+import { Send, Sparkles, X, MessageSquare, Mic, MicOff, Volume2, VolumeX } from "lucide-react";
 import { api, BACKEND_URL } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
@@ -15,8 +15,19 @@ export default function AiPanel({ collapsed, onToggle }) {
   const [streaming, setStreaming] = useState(false);
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState("");
+  const [voiceOn, setVoiceOn] = useState(() => localStorage.getItem("axiom_tts") === "1");
   const recognitionRef = useRef(null);
   const scrollRef = useRef(null);
+  // TTS pointers: how much of the current assistant reply we've already
+  // queued to the browser's speechSynthesis. Kept in a ref so streaming
+  // delta callbacks don't cause React re-renders on every chunk.
+  const spokenIdxRef = useRef(0);
+  const voiceOnRef = useRef(voiceOn);
+  useEffect(() => {
+    voiceOnRef.current = voiceOn;
+    localStorage.setItem("axiom_tts", voiceOn ? "1" : "0");
+    if (!voiceOn && "speechSynthesis" in window) window.speechSynthesis.cancel();
+  }, [voiceOn]);
   const { focus } = useAiFocus();
 
   // Set up SpeechRecognition once
@@ -99,6 +110,10 @@ export default function AiPanel({ collapsed, onToggle }) {
     const userMsg = input.trim();
     setInput("");
     setMessages(m => [...m, { role: "user", content: userMsg }, { role: "assistant", content: "" }]);
+    // Fresh reply → reset TTS pointer and stop any prior speech so we don't
+    // read overlapping messages.
+    spokenIdxRef.current = 0;
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     setStreaming(true);
     try {
       const token = localStorage.getItem("axiom_token");
@@ -127,7 +142,14 @@ export default function AiPanel({ collapsed, onToggle }) {
             if (j.delta) {
               setMessages(m => {
                 const copy = [...m];
-                copy[copy.length - 1] = { role: "assistant", content: copy[copy.length - 1].content + j.delta };
+                const prev = copy[copy.length - 1].content;
+                const next = prev + j.delta;
+                copy[copy.length - 1] = { role: "assistant", content: next };
+                // Feed newly-completed sentences to speechSynthesis
+                // immediately — this is what makes the voice "real-time":
+                // as soon as Claude finishes a sentence, we speak it while
+                // the next sentence is still being generated.
+                if (voiceOnRef.current) speakNewSentences(next);
                 return copy;
               });
             }
@@ -140,7 +162,55 @@ export default function AiPanel({ collapsed, onToggle }) {
         copy[copy.length - 1] = { role: "assistant", content: "[Error contacting AI]" };
         return copy;
       });
-    } finally { setStreaming(false); }
+    } finally {
+      // Flush any trailing text that didn't end in a sentence terminator.
+      if (voiceOnRef.current) {
+        setMessages(m => {
+          const last = m[m.length - 1];
+          if (last && last.role === "assistant") speakRemainder(last.content);
+          return m;
+        });
+      }
+      setStreaming(false);
+    }
+  };
+
+  // Split on sentence terminators (., !, ?, newline, colon) — speak completed
+  // sentences and keep the trailing partial buffered until it terminates. This
+  // yields the shortest possible time-to-first-word.
+  const SENTENCE_END = /([.!?\n:])\s+/;
+  const speakOne = (text) => {
+    const clean = text.replace(/\s+/g, " ").trim();
+    if (!clean) return;
+    if (!("speechSynthesis" in window)) return;
+    const u = new SpeechSynthesisUtterance(clean);
+    u.rate = 1.05;
+    u.pitch = 1.0;
+    u.volume = 1.0;
+    window.speechSynthesis.speak(u);
+  };
+  const speakNewSentences = (full) => {
+    let start = spokenIdxRef.current;
+    if (start >= full.length) return;
+    const pending = full.slice(start);
+    // Find the last sentence terminator in the pending text — everything up
+    // to (and including) that terminator is safe to speak. The remainder is
+    // held over for the next delta.
+    let match;
+    let lastEnd = -1;
+    const re = new RegExp(SENTENCE_END.source, "g");
+    while ((match = re.exec(pending)) !== null) lastEnd = match.index + match[0].length;
+    if (lastEnd <= 0) return;
+    const chunk = pending.slice(0, lastEnd);
+    speakOne(chunk);
+    spokenIdxRef.current = start + lastEnd;
+  };
+  const speakRemainder = (full) => {
+    const rest = (full || "").slice(spokenIdxRef.current);
+    if (rest.trim()) {
+      speakOne(rest);
+      spokenIdxRef.current = full.length;
+    }
   };
 
   if (collapsed) {
@@ -169,9 +239,19 @@ export default function AiPanel({ collapsed, onToggle }) {
           <div className="text-[11px] text-slate-500">Claude Sonnet 4.5 · GAAP-aware</div>
         </div>
         <button
+          onClick={() => setVoiceOn(v => !v)}
+          data-testid="ai-tts-toggle"
+          className={`ml-auto p-1.5 rounded hover:bg-slate-100 ${
+            voiceOn ? "text-emerald-600" : "text-slate-400"
+          }`}
+          title={voiceOn ? "Voice on — click to mute" : "Voice off — click to enable"}
+        >
+          {voiceOn ? <Volume2 size={16} /> : <VolumeX size={16} />}
+        </button>
+        <button
           data-testid={TID.aiPanelToggle}
           onClick={onToggle}
-          className="ml-auto p-1.5 rounded hover:bg-slate-100 text-slate-500"
+          className="p-1.5 rounded hover:bg-slate-100 text-slate-500"
           title="Collapse"
         >
           <X size={16} />
