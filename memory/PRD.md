@@ -38,6 +38,14 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - Collapsible left nav + collapsible right AI panel
 
 ## What's been implemented (Feb 2026)
+- **2026-02-17**: Contacts page — added inline **Edit Contact** flow (click row or pencil icon).
+  Backend `PATCH /api/companies/{cid}/contacts/{xid}` already existed; UI now reuses the modal
+  for create + edit with prefilled fields, sonner toasts, and empty-`type` handling.
+- **2026-02-17**: Verified 317 LLC Plaid vs Veryfi source-of-truth dedup for account ···6084:
+  Veryfi statement `eStmt_2026-05-20.pdf` mapped to existing `1011 Bank of America Checking ···6084`
+  (no duplicate CoA), all 94 lines skipped as duplicates against Plaid's coverage window
+  (SOURCE_PRIORITY: qbo > plaid > veryfi > manual). Zero `source=veryfi` transactions inserted.
+
 - ✅ Full auth (JWT, bcrypt, 3 roles, seeded demo accounts)
 - ✅ Multi-tenant Company switcher with owner/pro memberships
 - ✅ 30-account GAAP CoA auto-seeded per company
