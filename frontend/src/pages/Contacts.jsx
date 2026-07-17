@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, Pencil, GitMerge } from "lucide-react";
+import { Plus, Trash2, X, Pencil, GitMerge, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 
 const EMPTY_FORM = { name: "", type: "customer", email: "", phone: "", address: "" };
@@ -26,6 +26,7 @@ export default function Contacts() {
   const [modal, setModal] = useState(null); // null | { mode, contact? }
   const [selected, setSelected] = useState(new Set());
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [reportContact, setReportContact] = useState(null); // { contact } drilldown
   const [view, setView] = useState(() =>
     localStorage.getItem("contacts_view") === "details" ? "details" : "analytics"
   );
@@ -142,7 +143,9 @@ export default function Contacts() {
             {items.map(c => (
               <tr
                 key={c.id}
-                onClick={() => setModal({ mode: "edit", contact: c })}
+                onClick={() => view === "analytics"
+                  ? setReportContact(c)
+                  : setModal({ mode: "edit", contact: c })}
                 data-testid={`contact-row-${c.id}`}
                 className="border-b hover:bg-slate-50 cursor-pointer"
               >
@@ -242,6 +245,15 @@ export default function Contacts() {
           currentId={currentId}
           contacts={selectedContacts}
           onClose={(reload) => { setMergeOpen(false); if (reload) load(); }}
+        />
+      )}
+
+      {reportContact && (
+        <ContactReportDrawer
+          currentId={currentId}
+          contact={reportContact}
+          onClose={() => setReportContact(null)}
+          onEdit={() => { const c = reportContact; setReportContact(null); setModal({ mode: "edit", contact: c }); }}
         />
       )}
     </div>
@@ -429,6 +441,193 @@ function MergeModal({ currentId, contacts, onClose }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+function ContactReportDrawer({ currentId, contact, onClose, onEdit }) {
+  const [txns, setTxns] = useState(null);
+  const [total, setTotal] = useState(0);
+  const [filter, setFilter] = useState("ytd"); // "ytd" | "all"
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams({ contact_id: contact.id, limit: "1000" });
+        if (filter === "ytd") {
+          params.set("date_from", `${new Date().getFullYear()}-01-01`);
+        }
+        const r = await api.get(`/companies/${currentId}/transactions?${params.toString()}`);
+        if (cancelled) return;
+        setTxns(r.data.transactions || []);
+        setTotal(r.data.pagination?.total ?? (r.data.transactions?.length ?? 0));
+      } catch (err) {
+        if (!cancelled) toast.error("Failed to load transactions");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [currentId, contact.id, filter]);
+
+  // Summary from loaded rows
+  const totals = useMemo(() => {
+    const rows = txns || [];
+    let inc = 0, out = 0;
+    for (const t of rows) {
+      const amt = Number(t.amount) || 0;
+      if (amt > 0) inc += amt; else out += -amt;
+    }
+    return { inc, out, net: inc - out, count: rows.length };
+  }, [txns]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex" data-testid="contact-report-drawer">
+      <div className="flex-1 bg-black/40" onClick={onClose} />
+      <div className="w-full max-w-3xl h-full bg-white shadow-2xl flex flex-col">
+        {/* Header */}
+        <div className="px-5 py-4 border-b flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h3 className="font-heading font-semibold text-xl truncate">{contact.name}</h3>
+              {contact.type && (
+                <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-100">{contact.type}</span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Transaction report — {filter === "ytd" ? new Date().getFullYear() : "all time"}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={onEdit}
+              data-testid="report-edit-contact"
+              className="px-2 py-1 text-xs rounded-md border border-slate-300 hover:bg-slate-50 inline-flex items-center gap-1"
+              title="Edit contact"
+            >
+              <Pencil size={12} /> Edit
+            </button>
+            <button
+              onClick={onClose}
+              data-testid="report-close"
+              className="p-1 hover:bg-slate-100 rounded"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        {/* Summary + filter */}
+        <div className="px-5 py-3 border-b bg-slate-50/50 flex items-center gap-4">
+          <div className="inline-flex rounded-md border border-slate-300 overflow-hidden text-xs">
+            <button
+              onClick={() => setFilter("ytd")}
+              data-testid="report-filter-ytd"
+              className={`px-2.5 py-1 ${filter === "ytd" ? "bg-slate-900 text-white" : "bg-white hover:bg-slate-50"}`}
+            >YTD</button>
+            <button
+              onClick={() => setFilter("all")}
+              data-testid="report-filter-all"
+              className={`px-2.5 py-1 border-l border-slate-300 ${filter === "all" ? "bg-slate-900 text-white" : "bg-white hover:bg-slate-50"}`}
+            >All time</button>
+          </div>
+          <div className="flex-1 grid grid-cols-4 gap-2 text-center">
+            <SumTile label="Txns" value={totals.count} />
+            <SumTile label="In" value={fmtMoney(totals.inc)} tone="in" />
+            <SumTile label="Out" value={fmtMoney(totals.out)} tone="out" />
+            <SumTile label="Net" value={fmtMoney(totals.net)} tone={totals.net < 0 ? "neg" : "pos"} />
+          </div>
+        </div>
+
+        {/* Table */}
+        <div className="flex-1 overflow-y-auto">
+          {loading && !txns ? (
+            <div className="py-16 text-center text-sm text-slate-500">Loading…</div>
+          ) : !txns || txns.length === 0 ? (
+            <div className="py-16 text-center text-sm text-slate-500">
+              No transactions found for this contact{filter === "ytd" ? " this year" : ""}.
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500 border-b sticky top-0">
+                <tr>
+                  <th className="px-3 py-2 text-left">Date</th>
+                  <th className="px-3 py-2 text-left">Description</th>
+                  <th className="px-3 py-2 text-left">Category</th>
+                  <th className="px-3 py-2 text-left">Bank</th>
+                  <th className="px-3 py-2 text-right">Amount</th>
+                  <th className="px-3 py-2 text-left">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {txns.map(t => {
+                  const amt = Number(t.amount) || 0;
+                  return (
+                    <tr key={t.id} className="border-b hover:bg-slate-50" data-testid={`report-txn-${t.id}`}>
+                      <td className="px-3 py-2 text-slate-600 tabular-nums whitespace-nowrap">{t.date}</td>
+                      <td className="px-3 py-2 max-w-[220px] truncate" title={t.description}>{t.description}</td>
+                      <td className="px-3 py-2 text-slate-600 text-xs">
+                        {t.category_account_code ? `${t.category_account_code} · ${t.category_account_name || ""}` : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-slate-500 text-xs truncate max-w-[140px]" title={t.bank_account_name}>
+                        {t.bank_account_name || "—"}
+                      </td>
+                      <td className={`px-3 py-2 text-right font-medium tabular-nums whitespace-nowrap ${
+                        amt < 0 ? "text-slate-800" : "text-emerald-700"
+                      }`}>
+                        {fmtMoney(amt)}
+                      </td>
+                      <td className="px-3 py-2">
+                        {t.needs_review ? (
+                          <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">Review</span>
+                        ) : t.posted ? (
+                          <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">Posted</span>
+                        ) : (
+                          <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-3 border-t bg-slate-50/50 flex items-center justify-between text-xs text-slate-500">
+          <div>
+            Showing <b>{txns?.length ?? 0}</b> of <b>{total}</b> transactions
+            {total > (txns?.length ?? 0) && " (first 1,000)"}
+          </div>
+          <a
+            href={`/transactions?contact_id=${contact.id}`}
+            className="inline-flex items-center gap-1 text-slate-700 hover:text-slate-900"
+            data-testid="report-open-full"
+          >
+            Open in Transactions <ExternalLink size={11} />
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SumTile({ label, value, tone }) {
+  const toneCls = tone === "in" ? "text-emerald-700"
+    : tone === "out" ? "text-slate-800"
+    : tone === "neg" ? "text-rose-600"
+    : tone === "pos" ? "text-emerald-700"
+    : "text-slate-900";
+  return (
+    <div className="px-2">
+      <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
+      <div className={`text-sm font-semibold tabular-nums ${toneCls}`}>{value}</div>
     </div>
   );
 }

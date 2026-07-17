@@ -56,6 +56,12 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   concurrent users each refreshing every ~30s the DB sees ≤ ~70 aggregations/sec worst-case,
   most requests are cache hits. Create/update/delete/merge/sync-completion all invalidate the
   cache. Cold ~68ms, warm ~57ms on 317 LLC (210 contacts / 1,874 txns).
+- **2026-02-17**: Contacts page — added **View toggle** (Analytics ↔ Details) with localStorage
+  persistence, and a **Contact Transaction Report** drawer. Clicking any row in Analytics view
+  opens a right-side drawer scoped to that contact showing YTD/All-time toggle, summary tiles
+  (Txns/In/Out/Net), and a table of all transactions (Date/Description/Category/Bank/Amount/Status).
+  Detail view row-click still opens the Edit modal. Backend: `GET /transactions` now accepts a
+  `contact_id` filter.
 - **2026-02-17**: Verified 317 LLC Plaid vs Veryfi source-of-truth dedup for account ···6084:
   Veryfi statement `eStmt_2026-05-20.pdf` mapped to existing `1011 Bank of America Checking ···6084`
   (no duplicate CoA), all 94 lines skipped as duplicates against Plaid's coverage window
