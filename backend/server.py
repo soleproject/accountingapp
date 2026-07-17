@@ -1103,6 +1103,132 @@ async def bulk_approve(cid: str, ids: List[str], user: dict = Depends(get_curren
     return {"ok": True, "count": len(ids)}
 
 
+@api.post("/companies/{cid}/transactions/bulk-reclassify")
+async def bulk_reclassify(cid: str, payload: dict, user: dict = Depends(get_current_user)):
+    """Reclassify multiple transactions to a new category in one shot.
+
+    Body: {"transaction_ids": [str, ...], "category_account_id": str}
+
+    Because our reports compute the ledger directly from `transactions.posted=True`
+    (bank_account gets +amount, category_account gets -amount — see
+    `reports._signed_balances`), reclassifying is a single `category_account_*`
+    update. No manual JE reversal is required — the trial balance recalculates
+    automatically on the next report/dashboard fetch.
+
+    Side effects:
+    - Marks rows `human_reviewed=True`, `posted=True`, `needs_review=False`.
+    - Bumps `rule_candidates.approvals` for every distinct merchant→account pair
+      touched by the bulk op. When any candidate crosses the `approvals >= 2`
+      threshold the response includes a `rule_suggestion` so the UI can offer
+      "Turn this into a rule?".
+    - Logs an `ai_activity` `post_je` event with the count.
+    - Enforces closed-period lock per row.
+    """
+    await _require_company(user, cid)
+    ids = [x for x in (payload.get("transaction_ids") or []) if x]
+    cat_id = payload.get("category_account_id")
+    if not ids or not cat_id:
+        raise HTTPException(400, "transaction_ids and category_account_id are required")
+
+    acct = await db.accounts.find_one({"id": cat_id, "company_id": cid})
+    if not acct:
+        raise HTTPException(404, "Target category account not found in this company")
+
+    txns = await db.transactions.find(
+        {"id": {"$in": ids}, "company_id": cid}
+    ).to_list(len(ids))
+    if not txns:
+        raise HTTPException(404, "No matching transactions in this company")
+
+    # Closed-period guard: skip locked rows rather than failing the whole op.
+    skipped_closed: list[str] = []
+    editable: list[dict] = []
+    for t in txns:
+        if await _is_period_closed(cid, t.get("date")):
+            skipped_closed.append(t["id"])
+        else:
+            editable.append(t)
+
+    if not editable:
+        return {"ok": True, "updated": 0, "skipped_closed": skipped_closed,
+                "rule_suggestion": None}
+
+    now = now_iso()
+    editable_ids = [t["id"] for t in editable]
+    await db.transactions.update_many(
+        {"id": {"$in": editable_ids}, "company_id": cid},
+        {"$set": {
+            "category_account_id":   acct["id"],
+            "category_account_code": acct["code"],
+            "category_account_name": acct["name"],
+            "ai_confidence": 1.0,
+            "ai_reasoning": f"Manual bulk reclassify → {acct['name']}",
+            "ai_source": "manual_bulk",
+            "needs_review": False,
+            "human_reviewed": True,
+            "posted": True,
+            "updated_at": now,
+        }},
+    )
+    await _log_ai(cid, "post_je", len(editable))
+
+    # Bump rule_candidates per (merchant, account_code) pair, then look for a
+    # suggestion whose threshold just crossed (approvals >= 2).
+    merchant_counts: dict[str, int] = {}
+    for t in editable:
+        merch = (t.get("merchant") or t.get("contact_name") or "").strip()
+        if merch:
+            merchant_counts[merch] = merchant_counts.get(merch, 0) + 1
+
+    rule_suggestion = None
+    for merch, added in merchant_counts.items():
+        key = f"{merch}::{acct['code']}"
+        existing = await db.rule_candidates.find_one({"company_id": cid, "key": key})
+        if existing:
+            new_ct = int(existing.get("approvals", 0)) + added
+            await db.rule_candidates.update_one(
+                {"id": existing["id"]}, {"$set": {"approvals": new_ct}},
+            )
+            approvals = new_ct
+        else:
+            approvals = added
+            await db.rule_candidates.insert_one({
+                "id": str(uuid.uuid4()), "company_id": cid, "key": key,
+                "merchant": merch, "account_code": acct["code"],
+                "account_name": acct["name"],
+                "approvals": approvals, "created_at": now,
+            })
+        # Suggest the *strongest* candidate that isn't already a rule.
+        if approvals >= 2:
+            has_rule = await db.rules.find_one({
+                "company_id": cid,
+                "match_type": "merchant_contains",
+                "match_value": {"$regex": f"^{re.escape(merch)}$", "$options": "i"},
+                "account_code": acct["code"],
+            })
+            if not has_rule and (rule_suggestion is None
+                                  or approvals > rule_suggestion["approvals"]):
+                rule_suggestion = {
+                    "merchant": merch,
+                    "account_code": acct["code"],
+                    "account_name": acct["name"],
+                    "approvals": approvals,
+                }
+
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {
+        "ok": True,
+        "updated": len(editable),
+        "skipped_closed": skipped_closed,
+        "rule_suggestion": rule_suggestion,
+    }
+
+
 @api.delete("/companies/{cid}/transactions/{tid}")
 async def delete_transaction(cid: str, tid: str, user: dict = Depends(get_current_user)):
     await _require_company(user, cid)

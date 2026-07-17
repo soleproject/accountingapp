@@ -62,6 +62,17 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   (Txns/In/Out/Net), and a table of all transactions (Date/Description/Category/Bank/Amount/Status).
   Detail view row-click still opens the Edit modal. Backend: `GET /transactions` now accepts a
   `contact_id` filter.
+- **2026-02-17**: Contact Report Drawer — added **Bulk Reclassify + AI rule seed**. New
+  `POST /api/companies/{cid}/transactions/bulk-reclassify` accepts `{transaction_ids,
+  category_account_id}` and, since `reports._signed_balances` derives the ledger directly
+  from `transactions.posted=True`, performs the entire reclassify as a single `update_many`
+  (no JE reversal needed). Marks rows `human_reviewed=True/posted=True/needs_review=False`,
+  stamps `ai_source="manual_bulk"`, logs `post_je`, invalidates the report cache, and
+  enforces closed-period locks per row. Every reclassify bumps `rule_candidates.approvals`
+  per `(merchant, account_code)`; when any candidate crosses `approvals >= 2` the response
+  returns a `rule_suggestion` and the drawer shows an amber banner "You've reclassified X
+  to Y N times. Turn this into a rule?" — one click POSTs to `/rules` with
+  `apply_to_existing=true` so historic un-reviewed txns are back-filled.
 - **2026-02-17**: Verified 317 LLC Plaid vs Veryfi source-of-truth dedup for account ···6084:
   Veryfi statement `eStmt_2026-05-20.pdf` mapped to existing `1011 Bank of America Checking ···6084`
   (no duplicate CoA), all 94 lines skipped as duplicates against Plaid's coverage window

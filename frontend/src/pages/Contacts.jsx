@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, Pencil, GitMerge, ExternalLink } from "lucide-react";
+import { Plus, Trash2, X, Pencil, GitMerge, ExternalLink, Tag, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 const EMPTY_FORM = { name: "", type: "customer", email: "", phone: "", address: "" };
@@ -451,6 +451,11 @@ function ContactReportDrawer({ currentId, contact, onClose, onEdit }) {
   const [total, setTotal] = useState(0);
   const [filter, setFilter] = useState("ytd"); // "ytd" | "all"
   const [loading, setLoading] = useState(false);
+  const [accounts, setAccounts] = useState([]);
+  const [selected, setSelected] = useState(new Set());
+  const [reclassOpen, setReclassOpen] = useState(false);
+  const [ruleSuggestion, setRuleSuggestion] = useState(null);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -465,6 +470,7 @@ function ContactReportDrawer({ currentId, contact, onClose, onEdit }) {
         if (cancelled) return;
         setTxns(r.data.transactions || []);
         setTotal(r.data.pagination?.total ?? (r.data.transactions?.length ?? 0));
+        setSelected(new Set());
       } catch (err) {
         if (!cancelled) toast.error("Failed to load transactions");
       } finally {
@@ -473,9 +479,20 @@ function ContactReportDrawer({ currentId, contact, onClose, onEdit }) {
     };
     load();
     return () => { cancelled = true; };
-  }, [currentId, contact.id, filter]);
+  }, [currentId, contact.id, filter, reload]);
 
-  // Summary from loaded rows
+  // Load CoA once for the reclassify picker.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.get(`/companies/${currentId}/accounts`);
+        if (!cancelled) setAccounts(r.data.accounts || []);
+      } catch { /* non-fatal */ }
+    })();
+    return () => { cancelled = true; };
+  }, [currentId]);
+
   const totals = useMemo(() => {
     const rows = txns || [];
     let inc = 0, out = 0;
@@ -485,6 +502,58 @@ function ContactReportDrawer({ currentId, contact, onClose, onEdit }) {
     }
     return { inc, out, net: inc - out, count: rows.length };
   }, [txns]);
+
+  const toggleSel = (id) => setSelected(prev => {
+    const n = new Set(prev);
+    n.has(id) ? n.delete(id) : n.add(id);
+    return n;
+  });
+  const toggleAll = () => {
+    if (!txns) return;
+    if (selected.size === txns.length) setSelected(new Set());
+    else setSelected(new Set(txns.map(t => t.id)));
+  };
+
+  const applyReclassify = async (categoryAccountId) => {
+    try {
+      const r = await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
+        transaction_ids: [...selected],
+        category_account_id: categoryAccountId,
+      });
+      const acct = accounts.find(a => a.id === categoryAccountId);
+      toast.success(
+        `Reclassified ${r.data.updated} txn(s) → ${acct?.name || "category"}`
+        + (r.data.skipped_closed?.length
+            ? `. Skipped ${r.data.skipped_closed.length} (closed period).`
+            : "")
+      );
+      setReclassOpen(false);
+      if (r.data.rule_suggestion) setRuleSuggestion(r.data.rule_suggestion);
+      setReload(v => v + 1);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Reclassify failed");
+    }
+  };
+
+  const acceptRule = async () => {
+    if (!ruleSuggestion) return;
+    try {
+      const r = await api.post(`/companies/${currentId}/rules`, {
+        match_type: "merchant_contains",
+        match_value: ruleSuggestion.merchant,
+        account_code: ruleSuggestion.account_code,
+        apply_to_existing: true,
+      });
+      toast.success(
+        `Rule created: "${ruleSuggestion.merchant}" → ${ruleSuggestion.account_name}`
+        + (r.data.applied ? ` (applied to ${r.data.applied} existing txns)` : "")
+      );
+      setRuleSuggestion(null);
+      setReload(v => v + 1);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to create rule");
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex" data-testid="contact-report-drawer">
@@ -544,6 +613,58 @@ function ContactReportDrawer({ currentId, contact, onClose, onEdit }) {
           </div>
         </div>
 
+        {/* Rule suggestion banner */}
+        {ruleSuggestion && (
+          <div
+            className="px-5 py-2.5 bg-amber-50 border-b border-amber-200 flex items-center gap-3"
+            data-testid="rule-suggestion-banner"
+          >
+            <Sparkles size={16} className="text-amber-700 flex-shrink-0" />
+            <div className="flex-1 text-xs text-amber-900">
+              You've reclassified <b>{ruleSuggestion.merchant}</b> to{" "}
+              <b>{ruleSuggestion.account_name}</b> {ruleSuggestion.approvals} times.
+              <br/>Turn this into an automatic rule?
+            </div>
+            <button
+              onClick={acceptRule}
+              data-testid="rule-suggestion-accept"
+              className="px-2.5 py-1 text-xs rounded-md bg-amber-700 text-white hover:bg-amber-800"
+            >
+              Create rule
+            </button>
+            <button
+              onClick={() => setRuleSuggestion(null)}
+              data-testid="rule-suggestion-dismiss"
+              className="px-2.5 py-1 text-xs rounded-md hover:bg-amber-100 text-amber-900"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* Bulk-select toolbar */}
+        {selected.size > 0 && (
+          <div className="px-5 py-2 bg-slate-900 text-white flex items-center gap-3" data-testid="report-bulk-toolbar">
+            <span className="text-xs">
+              <b>{selected.size}</b> selected
+            </span>
+            <button
+              onClick={() => setReclassOpen(true)}
+              data-testid="report-reclassify-btn"
+              className="ml-auto inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-white text-slate-900 text-xs hover:bg-slate-100"
+            >
+              <Tag size={12} /> Reclassify
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="text-xs px-2 py-1 hover:bg-slate-800 rounded"
+              data-testid="report-clear-selection"
+            >
+              Clear
+            </button>
+          </div>
+        )}
+
         {/* Table */}
         <div className="flex-1 overflow-y-auto">
           {loading && !txns ? (
@@ -556,6 +677,14 @@ function ContactReportDrawer({ currentId, contact, onClose, onEdit }) {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500 border-b sticky top-0">
                 <tr>
+                  <th className="w-8 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={txns.length > 0 && selected.size === txns.length}
+                      onChange={toggleAll}
+                      data-testid="report-select-all"
+                    />
+                  </th>
                   <th className="px-3 py-2 text-left">Date</th>
                   <th className="px-3 py-2 text-left">Description</th>
                   <th className="px-3 py-2 text-left">Category</th>
@@ -568,7 +697,19 @@ function ContactReportDrawer({ currentId, contact, onClose, onEdit }) {
                 {txns.map(t => {
                   const amt = Number(t.amount) || 0;
                   return (
-                    <tr key={t.id} className="border-b hover:bg-slate-50" data-testid={`report-txn-${t.id}`}>
+                    <tr
+                      key={t.id}
+                      className={`border-b hover:bg-slate-50 ${selected.has(t.id) ? "bg-slate-50" : ""}`}
+                      data-testid={`report-txn-${t.id}`}
+                    >
+                      <td className="px-3 py-2">
+                        <input
+                          type="checkbox"
+                          checked={selected.has(t.id)}
+                          onChange={() => toggleSel(t.id)}
+                          data-testid={`report-txn-select-${t.id}`}
+                        />
+                      </td>
                       <td className="px-3 py-2 text-slate-600 tabular-nums whitespace-nowrap">{t.date}</td>
                       <td className="px-3 py-2 max-w-[220px] truncate" title={t.description}>{t.description}</td>
                       <td className="px-3 py-2 text-slate-600 text-xs">
@@ -612,6 +753,71 @@ function ContactReportDrawer({ currentId, contact, onClose, onEdit }) {
           >
             Open in Transactions <ExternalLink size={11} />
           </a>
+        </div>
+      </div>
+
+      {reclassOpen && (
+        <ReclassifyPicker
+          accounts={accounts}
+          count={selected.size}
+          onCancel={() => setReclassOpen(false)}
+          onApply={applyReclassify}
+        />
+      )}
+    </div>
+  );
+}
+
+function ReclassifyPicker({ accounts, count, onCancel, onApply }) {
+  const [q, setQ] = useState("");
+  // Filter to accounts a category can post to: exclude bank/AR/AP/OBE-style rows.
+  // Practical heuristic: show revenue, expense, cogs, and any *other* asset/liab
+  // rows the user might want to hit (like Uncategorized/Owner's Draw).
+  const options = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    return (accounts || [])
+      .filter(a => ["revenue", "expense", "cogs"].includes((a.type || "").toLowerCase())
+        || /uncategorized|owner|draw|contribution|refund|reimburs/i.test(a.name || ""))
+      .filter(a => !s || (a.name || "").toLowerCase().includes(s)
+                       || (a.code || "").includes(s))
+      .sort((a, b) => (a.code || "").localeCompare(b.code || ""));
+  }, [accounts, q]);
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col max-h-[80vh]">
+        <div className="px-5 py-4 border-b flex items-center justify-between">
+          <div>
+            <h3 className="font-heading font-semibold">Reclassify {count} transaction{count !== 1 ? "s" : ""}</h3>
+            <p className="text-xs text-slate-500 mt-0.5">Pick the target category account.</p>
+          </div>
+          <button onClick={onCancel} data-testid="reclassify-close"><X size={16} /></button>
+        </div>
+        <div className="px-5 py-3 border-b">
+          <input
+            autoFocus
+            placeholder="Search by name or code…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            data-testid="reclassify-search"
+            className="w-full border rounded-md px-2.5 py-1.5 text-sm"
+          />
+        </div>
+        <div className="overflow-y-auto flex-1 divide-y">
+          {options.length === 0 ? (
+            <div className="py-8 text-center text-sm text-slate-500">No matches.</div>
+          ) : options.map(a => (
+            <button
+              key={a.id}
+              onClick={() => onApply(a.id)}
+              data-testid={`reclassify-option-${a.code || a.id}`}
+              className="w-full text-left px-5 py-2.5 hover:bg-slate-50 flex items-center gap-3"
+            >
+              <span className="text-xs text-slate-500 tabular-nums w-12">{a.code || ""}</span>
+              <span className="flex-1 text-sm">{a.name}</span>
+              <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{a.type}</span>
+            </button>
+          ))}
         </div>
       </div>
     </div>
