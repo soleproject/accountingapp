@@ -1433,80 +1433,150 @@ async def dashboard_metrics(cid: str, user: dict = Depends(get_current_user)):
 UNRECONCILED_STALENESS_DAYS = 45
 
 
+async def _compute_attention(cid: str) -> dict:
+    """Compute the per-company "needs your attention" summary. Shared by
+    `/dashboard/attention` (single-company) and `/pro/firm-attention`
+    (firm-wide aggregate). Cheap: all counts run in parallel and rely on
+    existing indexes."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    cutoff = (datetime.now(timezone.utc).date()
+              - timedelta(days=UNRECONCILED_STALENESS_DAYS)).isoformat()
+
+    flagged_task = db.transactions.count_documents(
+        {"company_id": cid, "needs_review": True}
+    )
+    suggested_task = db.rule_candidates.count_documents(
+        {"company_id": cid, "approvals": {"$gte": 2}}
+    )
+    overdue_inv_task = db.invoices.count_documents({
+        "company_id": cid,
+        "status": {"$ne": "paid"},
+        "due_date": {"$lt": today, "$ne": None},
+    })
+    overdue_bill_task = db.bills.count_documents({
+        "company_id": cid,
+        "status": {"$ne": "paid"},
+        "due_date": {"$lt": today, "$ne": None},
+    })
+    accts_task = db.accounts.find({
+        "company_id": cid, "type": {"$in": ["asset", "liability"]},
+        "$or": [
+            {"code": {"$gte": "1000", "$lte": "1099"}},
+            {"code": {"$regex": "^21"}},
+            {"subtype": "Bank"},
+        ],
+    }).to_list(200)
+
+    (flagged_count, suggested_rules_count, overdue_invoices_count,
+     overdue_bills_count, bank_accts) = await asyncio.gather(
+        flagged_task, suggested_task, overdue_inv_task,
+        overdue_bill_task, accts_task,
+    )
+
+    async def _stale(a):
+        has_txn = await db.transactions.count_documents({
+            "company_id": cid, "bank_account_id": a["id"], "posted": True,
+        })
+        if not has_txn:
+            return None
+        latest = await db.reconciliations.find_one(
+            {"company_id": cid, "bank_account_id": a["id"]},
+            sort=[("as_of", -1)],
+        )
+        last_as_of = latest.get("as_of") if latest else None
+        if last_as_of and last_as_of >= cutoff:
+            return None
+        return {"id": a["id"], "code": a.get("code"), "name": a.get("name"),
+                "last_as_of": last_as_of}
+
+    stale_results = await asyncio.gather(*[_stale(a) for a in bank_accts]) if bank_accts else []
+    unreconciled = [x for x in stale_results if x]
+
+    return {
+        "flagged_count": flagged_count,
+        "suggested_rules_count": suggested_rules_count,
+        "overdue_invoices_count": overdue_invoices_count,
+        "overdue_bills_count": overdue_bills_count,
+        "unreconciled_accounts_count": len(unreconciled),
+        "unreconciled_accounts": unreconciled,
+        "staleness_days": UNRECONCILED_STALENESS_DAYS,
+    }
+
+
 @api.get("/companies/{cid}/dashboard/attention")
 async def dashboard_attention(cid: str, user: dict = Depends(get_current_user)):
-    """Compact CPA "needs your attention" summary for the Dashboard.
+    """Compact CPA "needs your attention" summary — single company.
 
-    Aggregates the three most common daily-review signals into a single
-    fast response (per-company cached at the same TTL as `/dashboard/metrics`):
-      • `flagged_count`             — un-reviewed AI-categorized txns
-      • `suggested_rules_count`     — rule_candidates crossing approvals >= 2
-      • `unreconciled_accounts_count` — bank/CC ledger accounts that have
-        transactions but no reconciliation in the last 45 days
-      • `unreconciled_accounts`     — short list `[{id, code, name, last_as_of}]`
-        so the UI can offer a one-click drill-down.
-
-    All counts are computed in parallel via `asyncio.gather` and rely on
-    existing indexes (`(company_id, needs_review, date)`, `(company_id, code)`).
+    Cached per-company (day-keyed) at the same TTL as `/dashboard/metrics`.
     """
     await _require_company(user, cid)
     cache = get_cache()
-    today = datetime.now(timezone.utc).date()
-    key = cache.key("dash_attention", company_id=cid, day=today.isoformat())
+    key = cache.key(
+        "dash_attention", company_id=cid,
+        day=datetime.now(timezone.utc).date().isoformat(),
+    )
+    return await cache.get_or_compute(key, _DASH_CACHE_TTL,
+                                       lambda: _compute_attention(cid))
+
+
+@api.get("/pro/firm-attention")
+async def firm_attention(user: dict = Depends(require_role("pro", "superadmin"))):
+    """Firm-wide roll-up for the current Pro (or all companies for superadmin).
+
+    Returns a per-client breakdown sorted by `action_count` desc plus the
+    aggregated totals across every book the Pro touches. Powers the "morning
+    glance" tile on `/pro/clients`. Cached per-user for the same TTL as
+    single-company dashboard metrics.
+    """
+    cache = get_cache()
+    key = cache.key(
+        "firm_attention", user_id=user["id"],
+        day=datetime.now(timezone.utc).date().isoformat(),
+    )
 
     async def compute():
-        flagged_task = db.transactions.count_documents(
-            {"company_id": cid, "needs_review": True}
-        )
-        suggested_task = db.rule_candidates.count_documents(
-            {"company_id": cid, "approvals": {"$gte": 2}}
-        )
-        # Bank/credit-card accounts that back real cash flow. We only care about
-        # those that actually have posted transactions — an empty account is
-        # not "un-reconciled", it's just unused.
-        accts_task = db.accounts.find({
-            "company_id": cid, "type": {"$in": ["asset", "liability"]},
-            "$or": [
-                {"code": {"$gte": "1000", "$lte": "1099"}},
-                {"code": {"$regex": "^21"}},  # 2100 Credit Card Payable etc.
-                {"subtype": "Bank"},
-            ],
-        }).to_list(200)
+        if user["role"] == "superadmin":
+            companies = await db.companies.find({}).to_list(1000)
+        else:
+            ms = await db.memberships.find(
+                {"user_id": user["id"], "role": "pro"}
+            ).to_list(1000)
+            cids = [m["company_id"] for m in ms]
+            companies = await db.companies.find({"id": {"$in": cids}}).to_list(1000)
 
-        flagged_count, suggested_rules_count, bank_accts = await asyncio.gather(
-            flagged_task, suggested_task, accts_task,
+        per_client_summaries = await asyncio.gather(
+            *[_compute_attention(c["id"]) for c in companies]
         )
 
-        cutoff = (today - timedelta(days=UNRECONCILED_STALENESS_DAYS)).isoformat()
-
-        async def _stale(a):
-            has_txn = await db.transactions.count_documents({
-                "company_id": cid, "bank_account_id": a["id"],
-                "posted": True,
+        clients_out = []
+        totals = {"flagged": 0, "suggested_rules": 0, "overdue_invoices": 0,
+                  "overdue_bills": 0, "unreconciled": 0}
+        for c, s in zip(companies, per_client_summaries):
+            action = (s["flagged_count"] + s["suggested_rules_count"]
+                      + s["overdue_invoices_count"] + s["overdue_bills_count"]
+                      + s["unreconciled_accounts_count"])
+            totals["flagged"] += s["flagged_count"]
+            totals["suggested_rules"] += s["suggested_rules_count"]
+            totals["overdue_invoices"] += s["overdue_invoices_count"]
+            totals["overdue_bills"] += s["overdue_bills_count"]
+            totals["unreconciled"] += s["unreconciled_accounts_count"]
+            clients_out.append({
+                "id": c["id"], "name": c["name"],
+                "business_type": c.get("business_type", ""),
+                "flagged_count": s["flagged_count"],
+                "suggested_rules_count": s["suggested_rules_count"],
+                "overdue_invoices_count": s["overdue_invoices_count"],
+                "overdue_bills_count": s["overdue_bills_count"],
+                "unreconciled_accounts_count": s["unreconciled_accounts_count"],
+                "action_count": action,
             })
-            if not has_txn:
-                return None
-            latest = await db.reconciliations.find_one(
-                {"company_id": cid, "bank_account_id": a["id"]},
-                sort=[("as_of", -1)],
-            )
-            last_as_of = latest.get("as_of") if latest else None
-            if last_as_of and last_as_of >= cutoff:
-                return None
-            return {
-                "id": a["id"], "code": a.get("code"), "name": a.get("name"),
-                "last_as_of": last_as_of,
-            }
-
-        stale_results = await asyncio.gather(*[_stale(a) for a in bank_accts]) if bank_accts else []
-        unreconciled = [x for x in stale_results if x]
-
+        clients_out.sort(key=lambda x: x["action_count"], reverse=True)
+        clients_needing_action = sum(1 for c in clients_out if c["action_count"] > 0)
         return {
-            "flagged_count": flagged_count,
-            "suggested_rules_count": suggested_rules_count,
-            "unreconciled_accounts_count": len(unreconciled),
-            "unreconciled_accounts": unreconciled,
-            "staleness_days": UNRECONCILED_STALENESS_DAYS,
+            "clients_total": len(clients_out),
+            "clients_needing_action": clients_needing_action,
+            "totals": totals,
+            "clients": clients_out,
         }
 
     return await cache.get_or_compute(key, _DASH_CACHE_TTL, compute)

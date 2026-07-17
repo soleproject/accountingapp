@@ -97,6 +97,20 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   accounts), and one-click deep-links to `/accounting/transactions?filter=review`,
   `/accounting/rules`, `/accounting/reconciliation`. Renders an "All clear" success state
   when everything is zero.
+- **2026-02-17**: Extended Attention widget to **5 cards** — added Overdue Invoices +
+  Overdue Bills. Backend `_compute_attention` helper now runs 5 parallel counts
+  (transactions, rule_candidates, invoices past due, bills past due, reconciliations).
+  Cards deep-link to `/invoices?filter=overdue` and `/bills?filter=overdue`.
+- **2026-02-17**: **Firm-wide "morning glance" tile** on `/pro/clients` (Pro role).
+  New `GET /pro/firm-attention` fans out `_compute_attention` across every book the
+  Pro owns via `asyncio.gather`, returns `{clients_total, clients_needing_action,
+  totals: {flagged, suggested_rules, overdue_invoices, overdue_bills, unreconciled},
+  clients: [{...per_client_counts, action_count}]}` sorted by `action_count` desc.
+  Cached per-user (day-keyed, same TTL as `/dashboard/metrics`). Superadmin sees all
+  companies. UI shows an amber "N of M clients need action today · X items across all
+  books" header + 5 aggregate stats + a **"Filter to action needed"** toggle. Client
+  cards now show a `BellRing` action-count badge and chips summarizing what's due per
+  client (`6 flag · 1 recon`). 70ms cold / 81ms warm on 7 clients.
 - **2026-02-17**: Verified 317 LLC Plaid vs Veryfi source-of-truth dedup for account ···6084:
   Veryfi statement `eStmt_2026-05-20.pdf` mapped to existing `1011 Bank of America Checking ···6084`
   (no duplicate CoA), all 94 lines skipped as duplicates against Plaid's coverage window

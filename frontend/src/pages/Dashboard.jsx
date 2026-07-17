@@ -6,6 +6,7 @@ import { Link } from "react-router-dom";
 import {
   Sparkles, Zap, AlertTriangle, TrendingUp, Wand2, FileCheck2, Bot, ArrowRight,
   Wallet2, FileText, Receipt as ReceiptIcon, Activity, BellRing, ScrollText,
+  FileWarning, ReceiptText,
 } from "lucide-react";
 import FirstConnectWelcome from "@/components/FirstConnectWelcome";
 
@@ -305,12 +306,14 @@ function AttentionTile({ attention }) {
   const {
     flagged_count: flagged = 0,
     suggested_rules_count: rules = 0,
+    overdue_invoices_count: ovInv = 0,
+    overdue_bills_count: ovBill = 0,
     unreconciled_accounts_count: unrecon = 0,
     unreconciled_accounts = [],
     staleness_days = 45,
   } = attention;
 
-  const total = flagged + rules + unrecon;
+  const total = flagged + rules + ovInv + ovBill + unrecon;
   if (total === 0) {
     return (
       <div
@@ -335,7 +338,7 @@ function AttentionTile({ attention }) {
           {total} item{total === 1 ? "" : "s"}
         </span>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 divide-y sm:divide-y-0 lg:divide-x">
         <AttentionCard
           testid="attention-flagged"
           to="/accounting/transactions?filter=review"
@@ -355,12 +358,30 @@ function AttentionTile({ attention }) {
           hint={rules > 0 ? "1-click accept to auto-categorize repeats" : "None pending"}
         />
         <AttentionCard
+          testid="attention-overdue-invoices"
+          to="/invoices?filter=overdue"
+          icon={FileWarning}
+          tone={ovInv > 0 ? "rose" : "muted"}
+          count={ovInv}
+          label="Overdue invoices"
+          hint={ovInv > 0 ? "Past-due customer invoices" : "All paid or current"}
+        />
+        <AttentionCard
+          testid="attention-overdue-bills"
+          to="/bills?filter=overdue"
+          icon={ReceiptText}
+          tone={ovBill > 0 ? "rose" : "muted"}
+          count={ovBill}
+          label="Overdue bills"
+          hint={ovBill > 0 ? "Past-due vendor bills" : "All paid or current"}
+        />
+        <AttentionCard
           testid="attention-reconcile"
           to="/accounting/reconciliation"
           icon={ScrollText}
           tone={unrecon > 0 ? "rose" : "muted"}
           count={unrecon}
-          label="Unreconciled accounts"
+          label="Unreconciled"
           hint={
             unrecon > 0
               ? unreconciled_accounts.slice(0, 2)
