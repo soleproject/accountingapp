@@ -71,20 +71,22 @@ async def _run_fuzzy_bank_match():
         await _cleanup(cid)
 
 
-# ---------- 3. Multiple bank-flavored candidates → no fuzzy match → create ----------
+# ---------- 3. Ambiguous fuzzy (multiple same-subtype candidates) creates new ----------
 
 async def _run_ambiguous_creates_new():
+    """Two Wells Fargo *checking* accounts already exist → fuzzy match sees
+    2 candidates → refuses to guess → creates a new dedicated row."""
     cid = _fresh_cid()
     try:
         await _seed_asset(cid, "1010", "Wells Fargo Business Checking")
-        await _seed_asset(cid, "1011", "Wells Fargo Savings")
+        await _seed_asset(cid, "1012", "Wells Fargo Personal Checking")
         veryfi_doc = {
             "bank_name": "Wells Fargo",
             "account_number": "4444333322225555",  # no last-4 collision
             "accounts": [{"account_type": "checking"}],
         }
         r = await sar.resolve_statement_account(cid, veryfi_doc)
-        assert r["matched"] is False, "expected new account when ambiguous"
+        assert r["matched"] is False, "expected new account when 2+ candidates"
         # Name should include institution + type + last4
         assert "Wells Fargo" in r["account_name"]
         assert "5555" in r["account_name"]
@@ -92,7 +94,30 @@ async def _run_ambiguous_creates_new():
         acct = await db.accounts.find_one({"id": r["account_id"]})
         assert acct["type"] == "asset"
         assert acct["source"] == "veryfi_statement"
-        assert acct["code"] not in ("1010", "1011")
+        assert acct["code"] not in ("1010", "1012")
+    finally:
+        await _cleanup(cid)
+
+
+# ---------- 3b. Subtype-aware fuzzy: savings statement won't hit checking row ----------
+
+async def _run_subtype_prevents_wrong_collapse():
+    """Regression guard for the "new Chase Savings statement collapses onto
+    existing Chase Checking" bug. Ensures the fuzzy match requires the
+    subtype keyword to also appear in the candidate name.
+    """
+    cid = _fresh_cid()
+    try:
+        await _seed_asset(cid, "1010", "Chase Business Checking")
+        veryfi_doc = {
+            "bank_name": "Chase",
+            "account_number": "9999888877776666",  # different last-4
+            "accounts": [{"account_type": "savings"}],
+        }
+        r = await sar.resolve_statement_account(cid, veryfi_doc)
+        assert r["matched"] is False, "savings statement wrongly collapsed onto checking"
+        assert "Savings" in r["account_name"], r["account_name"]
+        assert "6666" in r["account_name"]
     finally:
         await _cleanup(cid)
 
@@ -141,7 +166,8 @@ if __name__ == "__main__":
         await _run_last4_match()
         await _run_fuzzy_bank_match()
         await _run_ambiguous_creates_new()
+        await _run_subtype_prevents_wrong_collapse()
         await _run_create_from_scratch()
         await _run_credit_card_naming()
     asyncio.run(_all())
-    print("All 5 statement-CoA resolver tests passed.")
+    print("All 6 statement-CoA resolver tests passed.")

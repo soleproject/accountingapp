@@ -1829,6 +1829,7 @@ async def plaid_exchange(cid: str, payload: dict, user: dict = Depends(get_curre
     try:
         ex = plaid_service.exchange_public_token(public_token)
         accounts = plaid_service.get_accounts(ex["access_token"])
+        institution_name = plaid_service.get_institution_name(ex["access_token"])
     except Exception as e:
         raise HTTPException(502, f"Plaid error: {e}")
     now = now_iso()
@@ -1839,11 +1840,13 @@ async def plaid_exchange(cid: str, payload: dict, user: dict = Depends(get_curre
             "id": str(uuid.uuid4()), "company_id": cid, "user_id": user["id"],
             "item_id": ex["item_id"], "access_token": ex["access_token"],
             "cursor": None, "accounts": accounts,
+            "institution_name": institution_name,
             "created_at": now, "updated_at": now,
         }},
         upsert=True,
     )
-    return {"accounts": accounts, "item_id": ex["item_id"]}
+    return {"accounts": accounts, "item_id": ex["item_id"],
+            "institution_name": institution_name}
 
 
 @api.post("/companies/{cid}/onboarding/plaid/import")

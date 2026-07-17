@@ -74,9 +74,60 @@ def resolve_ledger_for_plaid(plaid_account: dict) -> tuple[str, str, str, str]:
     return ("1090", "Other Bank Account", "asset", "current_asset")
 
 
-async def get_ledger_for_plaid_account(cid: str, plaid_account: dict) -> dict:
-    code, name, t, st = resolve_ledger_for_plaid(plaid_account)
-    return await _ensure_account(cid, code, name, t, st)
+async def get_ledger_for_plaid_account(cid: str, plaid_account: dict,
+                                       institution_name: str | None = None) -> dict:
+    """Return (or create) the ledger account backing a given Plaid account.
+
+    Feb 2026: Rewritten to use the same shared resolver as Veryfi bank-
+    statement imports (`statement_account_resolver.resolve_or_create_bank_
+    account`). Every linked Plaid account now gets its own dedicated CoA
+    row — e.g. `1011 Bank of America Checking ···6084`, `2101 Chase Credit
+    Card ···5599` — instead of every "checking" account collapsing onto a
+    single `1010 Business Checking` row shared across companies + banks.
+
+    Resolution order (identical to Veryfi):
+      1. Last-4 substring match on existing accounts of the correct type.
+      2. Fuzzy institution-name match if exactly one candidate exists.
+      3. Create a new asset (or liability, for credit cards) account with
+         a Rocketsuite-style name and the next free numeric code.
+
+    Falls back to the legacy SUBTYPE_MAP behaviour only when we have neither
+    a mask nor an institution name — that's a synthetic Plaid sandbox row
+    where we'd otherwise blindly create thousands of "···None" accounts.
+    """
+    subtype_raw = (plaid_account.get("subtype") or "").strip()
+    subtype = subtype_raw.replace("AccountSubtype('", "").rstrip("')").lower()
+    is_liability = (
+        "credit" in subtype
+        or "credit" in (plaid_account.get("type") or "").lower()
+    )
+
+    mask = plaid_account.get("mask")
+    account_number = str(mask) if mask else None
+
+    # For the account-type keyword we prefer Plaid's `subtype`
+    # ("checking"/"savings"/"credit card"), which maps cleanly to the
+    # Rocketsuite naming conventions ("Checking"/"Savings"/"Credit Card").
+    # `name`/`official_name` are marketing strings (e.g. "Platinum Card")
+    # that would defeat the mapping.
+    account_type = subtype or plaid_account.get("name") or plaid_account.get("official_name")
+
+    if not account_number and not institution_name:
+        # Nothing to match on → old behaviour (shared subtype-mapped row).
+        code, name, t, st = resolve_ledger_for_plaid(plaid_account)
+        return await _ensure_account(cid, code, name, t, st)
+
+    from statement_account_resolver import resolve_or_create_bank_account
+    resolved = await resolve_or_create_bank_account(
+        cid,
+        bank_name=institution_name,
+        account_number=account_number,
+        account_type=account_type,
+        is_liability=is_liability,
+        source="plaid_link",
+    )
+    # Return the full CoA doc so callers get subtype + type fields.
+    return await db.accounts.find_one({"id": resolved["account_id"]})
 
 
 # ---------- Source-of-truth dedup ----------
@@ -429,8 +480,10 @@ async def connect_plaid_account(
     if not plaid_acct:
         raise ValueError("Plaid account not found on the linked item")
 
-    # Ledger side
-    ledger_bank = await get_ledger_for_plaid_account(cid, plaid_acct)
+    # Ledger side — resolver uses last-4 + institution name to match/create
+    # a dedicated CoA row per Plaid account (Rocketsuite-style).
+    institution_name = item.get("institution_name")
+    ledger_bank = await get_ledger_for_plaid_account(cid, plaid_acct, institution_name)
 
     # --- Re-route pre-existing legacy txns for this Plaid account_id --------
     reroute_res = await db.transactions.update_many(

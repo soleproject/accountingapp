@@ -132,87 +132,124 @@ def _statement_fields(veryfi_doc: dict) -> dict:
     }
 
 
-async def resolve_statement_account(
-    company_id: str, veryfi_doc: dict,
+async def resolve_or_create_bank_account(
+    company_id: str,
+    *,
+    bank_name: str | None,
+    account_number: str | None,
+    account_type: str | None,
+    starting_balance: float | None = None,
+    is_liability: bool = False,
+    source: str = "auto",
 ) -> dict:
-    """Match or create the CoA row for the account this statement belongs to.
+    """Match or create the CoA row for a bank/credit account, regardless of
+    whether the caller is Veryfi (bank statement OCR) or Plaid (live link).
+
+    Match heuristic (best → worst):
+      1. Existing account (of the matching `type`) whose name contains the
+         statement's last-4 digits.
+      2. Fuzzy: existing bank-flavored account with the institution name as
+         substring — but only if exactly one candidate exists.
+      3. Otherwise: create a new account with a Rocketsuite-style name
+         (e.g. "Bank of America Checking ···6084"). Assets number from 1010;
+         liabilities (credit cards) number from 2100.
 
     Returns `{account_id, account_name, account_code, matched, bank_name,
-    last4, starting_balance}`. `matched=True` means we found an existing
-    account; `False` means we created a new one.
+    last4, starting_balance}`. `matched=True` → we linked to an existing
+    row; `False` → we just inserted one.
     """
-    fields = _statement_fields(veryfi_doc)
-    last4 = fields["last4"]
-    bank_name = fields["bank_name"]
+    last4 = _last4(account_number)
+    kind_type = "liability" if is_liability else "asset"
 
-    # Pull all active asset accounts in one query.
-    assets: list[dict] = await db.accounts.find({
-        "company_id": company_id, "type": "asset", "active": True,
+    existing: list[dict] = await db.accounts.find({
+        "company_id": company_id, "type": kind_type, "active": True,
     }).to_list(1000)
 
-    # 1) Match on last-4 substring in the name — most specific.
+    # 1) Last-4 substring match on the account name (most specific).
     if last4:
-        for a in assets:
+        for a in existing:
             if last4 in (a.get("name") or ""):
                 return {
-                    "account_id": a["id"],
-                    "account_name": a["name"],
-                    "account_code": a["code"],
-                    "matched": True,
-                    "bank_name": bank_name,
-                    "last4": last4,
-                    "starting_balance": fields["starting_balance"],
+                    "account_id": a["id"], "account_name": a["name"],
+                    "account_code": a["code"], "matched": True,
+                    "bank_name": bank_name, "last4": last4,
+                    "starting_balance": starting_balance,
                 }
 
-    # 2) Fuzzy: bank name substring, only if exactly one bank-flavored match.
+    # 2) Fuzzy: institution-name substring on bank-flavored candidates.
+    # Also require the account-type keyword ("checking"/"savings"/"credit"/…)
+    # to appear in the candidate name — otherwise a new Chase Savings would
+    # wrongly collapse onto an existing Chase Checking row.
     if bank_name:
         bank_norm = _normalize(bank_name)
+        detail = _base_detail_from_type(account_type).lower()
+        detail_norm = _normalize(detail)
         candidates = [
-            a for a in assets
+            a for a in existing
             if BANK_KEYWORDS.search(a.get("name") or "")
             and bank_norm in _normalize(a.get("name"))
+            and detail_norm in _normalize(a.get("name"))
         ]
         if len(candidates) == 1:
             a = candidates[0]
             return {
-                "account_id": a["id"],
-                "account_name": a["name"],
-                "account_code": a["code"],
-                "matched": True,
-                "bank_name": bank_name,
-                "last4": last4,
-                "starting_balance": fields["starting_balance"],
+                "account_id": a["id"], "account_name": a["name"],
+                "account_code": a["code"], "matched": True,
+                "bank_name": bank_name, "last4": last4,
+                "starting_balance": starting_balance,
             }
 
-    # 3) No match → create a new asset account.
-    name = _build_account_name(bank_name, fields["account_type"], last4)
-    code = await _next_account_code(company_id)
+    # 3) No match — create a new account. Assets number from 1010,
+    # liabilities from 2100 (credit-card land).
+    name = _build_account_name(bank_name, account_type, last4)
+    code = await _next_account_code(company_id, 2100 if is_liability else 1010)
     account_id = str(uuid.uuid4())
+    subtype = ("current_liability" if is_liability
+               else ("Bank" if BANK_KEYWORDS.search(name)
+                     else "current_asset"))
     now = now_iso()
     await db.accounts.insert_one({
         "id": account_id,
         "company_id": company_id,
         "code": code,
         "name": name,
-        "type": "asset",
-        "subtype": "Bank",
+        "type": kind_type,
+        "subtype": subtype,
         "active": True,
         "balance": 0.0,
         "created_by_ai": True,
         "system_generated": True,
-        "source": "veryfi_statement",
+        "source": source,
         "created_at": now,
         "updated_at": now,
     })
     return {
-        "account_id": account_id,
-        "account_name": name,
-        "account_code": code,
-        "matched": False,
-        "bank_name": bank_name,
-        "last4": last4,
-        "starting_balance": fields["starting_balance"],
+        "account_id": account_id, "account_name": name,
+        "account_code": code, "matched": False,
+        "bank_name": bank_name, "last4": last4,
+        "starting_balance": starting_balance,
     }
 
 
-__all__ = ["resolve_statement_account"]
+async def resolve_statement_account(
+    company_id: str, veryfi_doc: dict,
+) -> dict:
+    """Veryfi-facing wrapper — pulls fields from the OCR doc, then delegates
+    to `resolve_or_create_bank_account` for the actual match/create logic
+    (shared with Plaid).
+    """
+    fields = _statement_fields(veryfi_doc)
+    acct_type = (fields.get("account_type") or "").lower()
+    is_liability = "credit" in acct_type
+    return await resolve_or_create_bank_account(
+        company_id,
+        bank_name=fields["bank_name"],
+        account_number=fields["account_number"],
+        account_type=fields["account_type"],
+        starting_balance=fields["starting_balance"],
+        is_liability=is_liability,
+        source="veryfi_statement",
+    )
+
+
+__all__ = ["resolve_statement_account", "resolve_or_create_bank_account"]

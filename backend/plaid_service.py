@@ -65,6 +65,30 @@ def exchange_public_token(public_token: str) -> dict:
     return {"access_token": resp["access_token"], "item_id": resp["item_id"]}
 
 
+def get_institution_name(access_token: str) -> str | None:
+    """Look up the human-readable institution name for a linked item.
+
+    Used at link time so each Plaid account can be created as its own
+    CoA row named `{institution} {subtype} ···{last4}` (Rocketsuite-style).
+    Falls back to None on any Plaid API error — the resolver then names
+    the account off the plaid `official_name` alone.
+    """
+    try:
+        from plaid.model.item_get_request import ItemGetRequest
+        from plaid.model.institutions_get_by_id_request import InstitutionsGetByIdRequest
+        from plaid.model.country_code import CountryCode
+        it = _client.item_get(ItemGetRequest(access_token=access_token))
+        inst_id = it["item"].get("institution_id")
+        if not inst_id:
+            return None
+        inst = _client.institutions_get_by_id(InstitutionsGetByIdRequest(
+            institution_id=inst_id, country_codes=[CountryCode("US")],
+        ))
+        return inst["institution"].get("name")
+    except Exception:  # noqa: BLE001 — non-fatal
+        return None
+
+
 def get_accounts(access_token: str) -> list[dict]:
     resp = _client.accounts_get(AccountsGetRequest(access_token=access_token))
     result = []
