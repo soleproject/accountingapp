@@ -152,6 +152,14 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   (while it's still typing the next one). Uses the browser's native SpeechSynthesis API —
   zero server latency, works offline, no API key. Speech is cancelled and the pointer
   reset when the user sends a new message. Trailing text is flushed after stream end.
+- **2026-02-17**: TTS **voice picker** — added a chevron next to the speaker icon that opens
+  a compact panel with (a) an "Read responses aloud automatically" checkbox mirroring the
+  main toggle, (b) a Voice dropdown listing every installed `SpeechSynthesis` voice sorted
+  with English voices first, (c) a Preview button that reads a sample sentence in the
+  chosen voice. Choice persists to `localStorage.axiom_tts_voice`. Default resolves in
+  order: `Google UK English Female` → any `en-GB` female voice → any English voice → OS
+  default. Subscribes to the `voiceschanged` event so voices that load asynchronously in
+  Chrome are picked up automatically.
 - **2026-02-17**: Verified 317 LLC Plaid vs Veryfi source-of-truth dedup for account ···6084:
   Veryfi statement `eStmt_2026-05-20.pdf` mapped to existing `1011 Bank of America Checking ···6084`
   (no duplicate CoA), all 94 lines skipped as duplicates against Plaid's coverage window

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Send, Sparkles, X, MessageSquare, Mic, MicOff, Volume2, VolumeX } from "lucide-react";
+import { Send, Sparkles, X, MessageSquare, Mic, MicOff, Volume2, VolumeX, ChevronDown } from "lucide-react";
 import { api, BACKEND_URL } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
@@ -16,6 +16,9 @@ export default function AiPanel({ collapsed, onToggle }) {
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState("");
   const [voiceOn, setVoiceOn] = useState(() => localStorage.getItem("axiom_tts") === "1");
+  const [voiceName, setVoiceName] = useState(() => localStorage.getItem("axiom_tts_voice") || "Google UK English Female");
+  const [voices, setVoices] = useState([]);
+  const [voiceMenuOpen, setVoiceMenuOpen] = useState(false);
   const recognitionRef = useRef(null);
   const scrollRef = useRef(null);
   // TTS pointers: how much of the current assistant reply we've already
@@ -23,11 +26,39 @@ export default function AiPanel({ collapsed, onToggle }) {
   // delta callbacks don't cause React re-renders on every chunk.
   const spokenIdxRef = useRef(0);
   const voiceOnRef = useRef(voiceOn);
+  const voiceNameRef = useRef(voiceName);
   useEffect(() => {
     voiceOnRef.current = voiceOn;
     localStorage.setItem("axiom_tts", voiceOn ? "1" : "0");
     if (!voiceOn && "speechSynthesis" in window) window.speechSynthesis.cancel();
   }, [voiceOn]);
+  useEffect(() => {
+    voiceNameRef.current = voiceName;
+    localStorage.setItem("axiom_tts_voice", voiceName || "");
+  }, [voiceName]);
+  // Populate voices — Chrome loads them asynchronously so we subscribe to
+  // the `voiceschanged` event as well as reading once on mount.
+  useEffect(() => {
+    if (!("speechSynthesis" in window)) return;
+    const load = () => {
+      const v = window.speechSynthesis.getVoices() || [];
+      setVoices(v);
+      // Auto-select the best default if the current pick isn't available:
+      // 1) Google UK English Female  2) any en-GB female  3) any en-* voice
+      //    4) whatever the OS gives us first.
+      if (v.length && !v.find(x => x.name === voiceNameRef.current)) {
+        const pick =
+          v.find(x => /google uk english female/i.test(x.name))
+          || v.find(x => /en-gb/i.test(x.lang) && /female/i.test(x.name))
+          || v.find(x => /^en(-|$)/i.test(x.lang))
+          || v[0];
+        if (pick) setVoiceName(pick.name);
+      }
+    };
+    load();
+    window.speechSynthesis.addEventListener("voiceschanged", load);
+    return () => window.speechSynthesis.removeEventListener("voiceschanged", load);
+  }, []);
   const { focus } = useAiFocus();
 
   // Set up SpeechRecognition once
@@ -184,6 +215,11 @@ export default function AiPanel({ collapsed, onToggle }) {
     if (!clean) return;
     if (!("speechSynthesis" in window)) return;
     const u = new SpeechSynthesisUtterance(clean);
+    const wanted = voiceNameRef.current;
+    if (wanted) {
+      const v = (window.speechSynthesis.getVoices() || []).find(x => x.name === wanted);
+      if (v) { u.voice = v; u.lang = v.lang; }
+    }
     u.rate = 1.05;
     u.pitch = 1.0;
     u.volume = 1.0;
@@ -248,6 +284,27 @@ export default function AiPanel({ collapsed, onToggle }) {
         >
           {voiceOn ? <Volume2 size={16} /> : <VolumeX size={16} />}
         </button>
+        <div className="relative">
+          <button
+            onClick={() => setVoiceMenuOpen(v => !v)}
+            data-testid="ai-tts-voice-menu"
+            className="p-1 rounded hover:bg-slate-100 text-slate-500"
+            title="Voice settings"
+          >
+            <ChevronDown size={14} />
+          </button>
+          {voiceMenuOpen && (
+            <VoicePicker
+              voices={voices}
+              voiceOn={voiceOn}
+              setVoiceOn={setVoiceOn}
+              voiceName={voiceName}
+              setVoiceName={setVoiceName}
+              speakOne={speakOne}
+              onClose={() => setVoiceMenuOpen(false)}
+            />
+          )}
+        </div>
         <button
           data-testid={TID.aiPanelToggle}
           onClick={onToggle}
@@ -325,3 +382,70 @@ export default function AiPanel({ collapsed, onToggle }) {
     </aside>
   );
 }
+
+function VoicePicker({ voices, voiceOn, setVoiceOn, voiceName, setVoiceName, speakOne, onClose }) {
+  // Prefer English voices at the top of the list — everything else follows,
+  // grouped by language. Keeps "Google UK English Female" easy to find on a
+  // machine with 60+ voices installed.
+  const sorted = [...voices].sort((a, b) => {
+    const aEn = /^en/i.test(a.lang) ? 0 : 1;
+    const bEn = /^en/i.test(b.lang) ? 0 : 1;
+    if (aEn !== bEn) return aEn - bEn;
+    return (a.lang + a.name).localeCompare(b.lang + b.name);
+  });
+  const preview = () => {
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    speakOne("Hi — this is your Axiom assistant. I'll read replies aloud in this voice.");
+  };
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <div
+        className="absolute right-0 top-full mt-1 z-50 w-72 rounded-md border bg-white shadow-lg p-3 space-y-2"
+        data-testid="ai-tts-voice-panel"
+      >
+        <label className="flex items-center gap-2 cursor-pointer text-sm">
+          <input
+            type="checkbox"
+            checked={voiceOn}
+            onChange={(e) => setVoiceOn(e.target.checked)}
+            data-testid="ai-tts-auto-checkbox"
+          />
+          Read responses aloud automatically
+        </label>
+        <div>
+          <label className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">
+            Voice
+          </label>
+          <select
+            value={voiceName}
+            onChange={(e) => setVoiceName(e.target.value)}
+            data-testid="ai-tts-voice-select"
+            className="w-full border rounded px-2 py-1.5 text-sm"
+          >
+            {sorted.length === 0 && <option value="">System default</option>}
+            {sorted.map(v => (
+              <option key={`${v.name}-${v.lang}`} value={v.name}>
+                {v.name} ({v.lang})
+              </option>
+            ))}
+          </select>
+        </div>
+        <button
+          onClick={preview}
+          data-testid="ai-tts-preview"
+          className="w-full text-xs px-2.5 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center justify-center gap-1"
+        >
+          <Volume2 size={12} /> Preview
+        </button>
+        {sorted.length === 0 && (
+          <p className="text-[11px] text-slate-500">
+            No voices detected yet — Chrome loads them asynchronously. Refresh the page or
+            check your OS voice settings.
+          </p>
+        )}
+      </div>
+    </>
+  );
+}
+
