@@ -41,6 +41,14 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - **2026-02-17**: Contacts page — added inline **Edit Contact** flow (click row or pencil icon).
   Backend `PATCH /api/companies/{cid}/contacts/{xid}` already existed; UI now reuses the modal
   for create + edit with prefilled fields, sonner toasts, and empty-`type` handling.
+- **2026-02-17**: Contacts page — added **Merge Contacts** action. New `POST /api/companies/{cid}/contacts/merge`
+  reassigns `contact_id`/`contact_name` across `transactions`, `invoices`, `bills`, `payments`,
+  `receipts`, and `contact_learning_cache` from losers → keeper, then deletes losers and invalidates
+  the report cache. `GET /contacts` now includes a `txn_count` per contact for merge previews.
+  UI adds checkboxes, a "Merge N" toolbar button (visible when ≥2 selected), and a modal that
+  auto-picks the keeper with the most transactions (radio-selectable), shows per-contact txn counts,
+  and displays a live "N contact(s) will be merged into X. About Y transaction(s) will be reassigned."
+  preview.
 - **2026-02-17**: Verified 317 LLC Plaid vs Veryfi source-of-truth dedup for account ···6084:
   Veryfi statement `eStmt_2026-05-20.pdf` mapped to existing `1011 Bank of America Checking ···6084`
   (no duplicate CoA), all 94 lines skipped as duplicates against Plaid's coverage window

@@ -1364,7 +1364,20 @@ async def delete_rule(cid: str, rid: str, user: dict = Depends(get_current_user)
 async def list_contacts(cid: str, user: dict = Depends(get_current_user)):
     await _require_company(user, cid)
     docs = await db.contacts.find({"company_id": cid}).sort("name", 1).to_list(1000)
-    return {"contacts": [coerce(d) for d in docs]}
+    # Enrich with a fast txn_count per contact — single aggregation over transactions.
+    counts: dict[str, int] = {}
+    pipeline = [
+        {"$match": {"company_id": cid, "contact_id": {"$nin": [None, ""]}}},
+        {"$group": {"_id": "$contact_id", "n": {"$sum": 1}}},
+    ]
+    async for row in db.transactions.aggregate(pipeline):
+        counts[row["_id"]] = row["n"]
+    out = []
+    for d in docs:
+        c = coerce(d)
+        c["txn_count"] = counts.get(c["id"], 0)
+        out.append(c)
+    return {"contacts": out}
 
 
 @api.post("/companies/{cid}/contacts")
@@ -1391,6 +1404,70 @@ async def delete_contact(cid: str, xid: str, user: dict = Depends(get_current_us
     await _require_company(user, cid)
     await db.contacts.delete_one({"id": xid, "company_id": cid})
     return {"ok": True}
+
+
+@api.post("/companies/{cid}/contacts/merge")
+async def merge_contacts(cid: str, payload: dict, user: dict = Depends(get_current_user)):
+    """Merge one or more "loser" contacts into a single "keeper".
+
+    Body: {"keeper_id": str, "loser_ids": [str, ...]}
+
+    - Reassigns contact_id + contact_name on every collection that references
+      contacts (transactions, invoices, bills, payments, receipts,
+      contact_learning_cache) from losers → keeper.
+    - Deletes the loser contact rows.
+    - Invalidates the report cache so dashboards refresh immediately.
+    """
+    await _require_company(user, cid)
+    keeper_id = payload.get("keeper_id")
+    loser_ids = [x for x in (payload.get("loser_ids") or []) if x and x != keeper_id]
+    if not keeper_id or not loser_ids:
+        raise HTTPException(400, "keeper_id and non-empty loser_ids required")
+
+    keeper = await db.contacts.find_one({"id": keeper_id, "company_id": cid})
+    if not keeper:
+        raise HTTPException(404, "Keeper contact not found in this company")
+    loser_docs = await db.contacts.find(
+        {"id": {"$in": loser_ids}, "company_id": cid}
+    ).to_list(1000)
+    if len(loser_docs) != len(loser_ids):
+        raise HTTPException(404, "One or more loser contacts not found in this company")
+
+    keeper_name = keeper.get("name")
+    reassignment = {"$set": {"contact_id": keeper_id, "contact_name": keeper_name,
+                             "updated_at": now_iso()}}
+    match = {"company_id": cid, "contact_id": {"$in": loser_ids}}
+
+    results = {}
+    for coll_name in ("transactions", "invoices", "bills", "payments", "receipts"):
+        r = await db[coll_name].update_many(match, reassignment)
+        results[coll_name] = r.modified_count
+
+    # Learning cache stores contact_id without contact_name; migrate too so
+    # future AI resolves land on the keeper.
+    lc = await db.contact_learning_cache.update_many(
+        {"company_id": cid, "contact_id": {"$in": loser_ids}},
+        {"$set": {"contact_id": keeper_id, "contact_name": keeper_name}},
+    )
+    results["contact_learning_cache"] = lc.modified_count
+
+    deleted = await db.contacts.delete_many(
+        {"id": {"$in": loser_ids}, "company_id": cid}
+    )
+
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {
+        "ok": True,
+        "keeper_id": keeper_id,
+        "keeper_name": keeper_name,
+        "merged_contacts": deleted.deleted_count,
+        "reassigned": results,
+    }
 
 
 # ----------------------- Invoices -----------------------

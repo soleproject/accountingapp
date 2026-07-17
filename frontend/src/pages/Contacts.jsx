@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, Pencil } from "lucide-react";
+import { Plus, Trash2, X, Pencil, GitMerge } from "lucide-react";
 import { toast } from "sonner";
 
 const EMPTY_FORM = { name: "", type: "customer", email: "", phone: "", address: "" };
@@ -10,12 +10,15 @@ const EMPTY_FORM = { name: "", type: "customer", email: "", phone: "", address: 
 export default function Contacts() {
   const { currentId } = useCompany();
   const [items, setItems] = useState([]);
-  const [modal, setModal] = useState(null); // null | { mode: "create" | "edit", contact?: obj }
+  const [modal, setModal] = useState(null); // null | { mode, contact? }
+  const [selected, setSelected] = useState(new Set());
+  const [mergeOpen, setMergeOpen] = useState(false);
 
   const load = async () => {
     if (!currentId) return;
     const r = await api.get(`/companies/${currentId}/contacts`);
     setItems(r.data.contacts || []);
+    setSelected(new Set());
   };
   useEffect(() => { load(); }, [currentId]);
 
@@ -27,6 +30,20 @@ export default function Contacts() {
     load();
   };
 
+  const toggleSel = (e, id) => {
+    e.stopPropagation();
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const selectedContacts = useMemo(
+    () => items.filter(c => selected.has(c.id)),
+    [items, selected]
+  );
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -34,23 +51,36 @@ export default function Contacts() {
           <h1 className="font-heading text-3xl font-bold tracking-tight">Contacts</h1>
           <p className="text-slate-500 text-sm mt-1">Customers &amp; vendors.</p>
         </div>
-        <button
-          data-testid={TID.addBtn}
-          onClick={() => setModal({ mode: "create" })}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs"
-        >
-          <Plus size={13} /> New Contact
-        </button>
+        <div className="flex items-center gap-2">
+          {selected.size >= 2 && (
+            <button
+              data-testid="contacts-merge-btn"
+              onClick={() => setMergeOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-900 text-xs hover:bg-slate-50"
+            >
+              <GitMerge size={13} /> Merge {selected.size}
+            </button>
+          )}
+          <button
+            data-testid={TID.addBtn}
+            onClick={() => setModal({ mode: "create" })}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs"
+          >
+            <Plus size={13} /> New Contact
+          </button>
+        </div>
       </div>
 
       <div className="rounded-xl border bg-white overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500 border-b">
             <tr>
+              <th className="w-8 px-3 py-2"></th>
               <th className="px-3 py-2 text-left">Name</th>
               <th className="px-3 py-2 text-left">Type</th>
               <th className="px-3 py-2 text-left">Email</th>
               <th className="px-3 py-2 text-left">Phone</th>
+              <th className="px-3 py-2 text-right">Txns</th>
               <th></th>
             </tr>
           </thead>
@@ -62,6 +92,15 @@ export default function Contacts() {
                 data-testid={`contact-row-${c.id}`}
                 className="border-b hover:bg-slate-50 cursor-pointer"
               >
+                <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(c.id)}
+                    onChange={(e) => toggleSel(e, c.id)}
+                    data-testid={`contact-select-${c.id}`}
+                    className="cursor-pointer"
+                  />
+                </td>
                 <td className="px-3 py-2 font-medium">{c.name}</td>
                 <td className="px-3 py-2">
                   {c.type && (
@@ -70,6 +109,7 @@ export default function Contacts() {
                 </td>
                 <td className="px-3 py-2 text-slate-500">{c.email}</td>
                 <td className="px-3 py-2 text-slate-500">{c.phone}</td>
+                <td className="px-3 py-2 text-right text-slate-500 tabular-nums">{c.txn_count ?? 0}</td>
                 <td className="px-3 py-2 text-right whitespace-nowrap">
                   <button
                     onClick={(e) => { e.stopPropagation(); setModal({ mode: "edit", contact: c }); }}
@@ -91,7 +131,7 @@ export default function Contacts() {
               </tr>
             ))}
             {!items.length && (
-              <tr><td colSpan={5} className="text-center py-8 text-slate-500">No contacts.</td></tr>
+              <tr><td colSpan={7} className="text-center py-8 text-slate-500">No contacts.</td></tr>
             )}
           </tbody>
         </table>
@@ -103,6 +143,14 @@ export default function Contacts() {
           mode={modal.mode}
           contact={modal.contact}
           onClose={(reload) => { setModal(null); if (reload) load(); }}
+        />
+      )}
+
+      {mergeOpen && (
+        <MergeModal
+          currentId={currentId}
+          contacts={selectedContacts}
+          onClose={(reload) => { setMergeOpen(false); if (reload) load(); }}
         />
       )}
     </div>
@@ -151,52 +199,143 @@ function ContactModal({ currentId, mode, contact, onClose }) {
           <h3 className="font-heading font-semibold">{title}</h3>
           <button onClick={() => onClose(false)} data-testid="contact-modal-close"><X size={16} /></button>
         </div>
-        <input
-          data-testid="contact-name-input"
-          placeholder="Name"
-          value={f.name}
+        <input data-testid="contact-name-input" placeholder="Name" value={f.name}
           onChange={(e) => setF({ ...f, name: e.target.value })}
-          className="w-full border rounded px-2 py-1.5 text-sm"
-        />
-        <select
-          data-testid="contact-type-select"
-          value={f.type}
+          className="w-full border rounded px-2 py-1.5 text-sm" />
+        <select data-testid="contact-type-select" value={f.type}
           onChange={(e) => setF({ ...f, type: e.target.value })}
-          className="w-full border rounded px-2 py-1.5 text-sm"
-        >
+          className="w-full border rounded px-2 py-1.5 text-sm">
           <option value="customer">Customer</option>
           <option value="vendor">Vendor</option>
           <option value="both">Both</option>
         </select>
-        <input
-          data-testid="contact-email-input"
-          placeholder="Email"
-          value={f.email}
+        <input data-testid="contact-email-input" placeholder="Email" value={f.email}
           onChange={(e) => setF({ ...f, email: e.target.value })}
-          className="w-full border rounded px-2 py-1.5 text-sm"
-        />
-        <input
-          data-testid="contact-phone-input"
-          placeholder="Phone"
-          value={f.phone}
+          className="w-full border rounded px-2 py-1.5 text-sm" />
+        <input data-testid="contact-phone-input" placeholder="Phone" value={f.phone}
           onChange={(e) => setF({ ...f, phone: e.target.value })}
-          className="w-full border rounded px-2 py-1.5 text-sm"
-        />
-        <input
-          data-testid="contact-address-input"
-          placeholder="Address"
-          value={f.address}
+          className="w-full border rounded px-2 py-1.5 text-sm" />
+        <input data-testid="contact-address-input" placeholder="Address" value={f.address}
           onChange={(e) => setF({ ...f, address: e.target.value })}
-          className="w-full border rounded px-2 py-1.5 text-sm"
-        />
-        <button
-          data-testid={TID.saveBtn}
-          onClick={save}
-          disabled={!f.name.trim() || saving}
-          className="w-full py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50"
-        >
+          className="w-full border rounded px-2 py-1.5 text-sm" />
+        <button data-testid={TID.saveBtn} onClick={save} disabled={!f.name.trim() || saving}
+          className="w-full py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50">
           {saving ? "Saving…" : (mode === "edit" ? "Save changes" : "Create contact")}
         </button>
+      </div>
+    </div>
+  );
+}
+
+function MergeModal({ currentId, contacts, onClose }) {
+  // Default keeper = contact with the most transactions (ties → first alpha).
+  const defaultKeeper = useMemo(() => {
+    if (!contacts.length) return null;
+    return [...contacts].sort((a, b) =>
+      (b.txn_count ?? 0) - (a.txn_count ?? 0) || a.name.localeCompare(b.name)
+    )[0].id;
+  }, [contacts]);
+  const [keeperId, setKeeperId] = useState(defaultKeeper);
+  const [saving, setSaving] = useState(false);
+
+  const keeper = contacts.find(c => c.id === keeperId);
+  const losers = contacts.filter(c => c.id !== keeperId);
+  const totalTxns = losers.reduce((s, c) => s + (c.txn_count ?? 0), 0);
+
+  const doMerge = async () => {
+    if (!keeperId || losers.length === 0) return;
+    setSaving(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/contacts/merge`, {
+        keeper_id: keeperId,
+        loser_ids: losers.map(c => c.id),
+      });
+      const re = r.data.reassigned || {};
+      const totalReassigned = Object.values(re).reduce((s, n) => s + n, 0);
+      toast.success(
+        `Merged ${r.data.merged_contacts} contact(s) into "${r.data.keeper_name}". ` +
+        `Reassigned ${totalReassigned} record(s).`
+      );
+      onClose(true);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Merge failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-heading font-semibold text-lg">Merge Contacts</h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Pick the contact to keep. All transactions, invoices, bills, payments, and receipts from
+              the others will be reassigned to it. The other contacts will be deleted.
+            </p>
+          </div>
+          <button onClick={() => onClose(false)} data-testid="merge-modal-close"><X size={16} /></button>
+        </div>
+
+        <div className="rounded-lg border divide-y max-h-72 overflow-y-auto">
+          {contacts.map(c => (
+            <label
+              key={c.id}
+              data-testid={`merge-option-${c.id}`}
+              className={`flex items-center gap-3 px-3 py-2 cursor-pointer ${
+                keeperId === c.id ? "bg-emerald-50" : "hover:bg-slate-50"
+              }`}
+            >
+              <input
+                type="radio"
+                name="keeper"
+                checked={keeperId === c.id}
+                onChange={() => setKeeperId(c.id)}
+                data-testid={`merge-keeper-radio-${c.id}`}
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">{c.name}</div>
+                <div className="text-[11px] text-slate-500 truncate">
+                  {[c.type, c.email, c.phone].filter(Boolean).join(" · ") || "—"}
+                </div>
+              </div>
+              <div className="text-xs text-slate-500 tabular-nums whitespace-nowrap">
+                {c.txn_count ?? 0} txns
+              </div>
+              {keeperId === c.id && (
+                <span className="text-[10px] uppercase font-semibold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">
+                  Keep
+                </span>
+              )}
+            </label>
+          ))}
+        </div>
+
+        {keeper && (
+          <div className="text-xs text-slate-600 bg-slate-50 rounded-md px-3 py-2 border">
+            <b>{losers.length}</b> contact(s) will be merged into <b>{keeper.name}</b>.
+            About <b>{totalTxns}</b> transaction(s) will be reassigned.
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={() => onClose(false)}
+            className="px-3 py-1.5 rounded-md text-sm border border-slate-300 hover:bg-slate-50"
+            data-testid="merge-cancel-btn"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={doMerge}
+            disabled={!keeperId || losers.length === 0 || saving}
+            data-testid="merge-confirm-btn"
+            className="px-3 py-1.5 rounded-md text-sm bg-slate-900 text-white disabled:opacity-50"
+          >
+            {saving ? "Merging…" : `Merge ${losers.length}`}
+          </button>
+        </div>
       </div>
     </div>
   );
