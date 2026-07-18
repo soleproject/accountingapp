@@ -249,6 +249,7 @@ const _endOfMonth = (y, m) => new Date(y, m, 0).getDate(); // m: 1-12
 function extractPeriod(text) {
   const yr = now().getFullYear();
   const t = text;
+  const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
   const monthAlt = "(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
 
@@ -261,6 +262,7 @@ function extractPeriod(text) {
       start: _ymd(y, m1, 1),
       end: _ymd(y, m2, _endOfMonth(y, m2)),
       stripped: t.replace(m[0], " "),
+      label: `${MONTH_NAMES[m1-1]}–${MONTH_NAMES[m2-1]} ${y}`,
     };
   }
 
@@ -269,12 +271,14 @@ function extractPeriod(text) {
   if (m) {
     const mo = MONTHS[m[1].toLowerCase()];
     const y = m[2] ? parseInt(m[2], 10) : yr;
-    return { start: _ymd(y, mo, 1), end: ymd(now()), stripped: t.replace(m[0], " ") };
+    return { start: _ymd(y, mo, 1), end: ymd(now()), stripped: t.replace(m[0], " "),
+             label: `since ${MONTH_NAMES[mo-1]} ${y}` };
   }
 
   // "since <year>"
   m = t.match(/\bsince\s+(\d{4})\b/i);
-  if (m) return { start: `${m[1]}-01-01`, end: ymd(now()), stripped: t.replace(m[0], " ") };
+  if (m) return { start: `${m[1]}-01-01`, end: ymd(now()), stripped: t.replace(m[0], " "),
+                  label: `since ${m[1]}` };
 
   // "in|for|during|from <month> [<year>]" — single-month window
   m = t.match(new RegExp(`\\b(?:in|for|during|from|of)\\s+${monthAlt}(?:\\s+(\\d{4}))?\\b`, "i"));
@@ -285,6 +289,7 @@ function extractPeriod(text) {
       start: _ymd(y, mo, 1),
       end: _ymd(y, mo, _endOfMonth(y, mo)),
       stripped: t.replace(m[0], " "),
+      label: `${MONTH_NAMES[mo-1]} ${y}`,
     };
   }
 
@@ -300,6 +305,7 @@ function extractPeriod(text) {
       start: _ymd(y, startMo, 1),
       end: _ymd(y, endMo, _endOfMonth(y, endMo)),
       stripped: t.replace(m[0], " "),
+      label: `Q${qNum} ${y}`,
     };
   }
 
@@ -309,34 +315,40 @@ function extractPeriod(text) {
     const d = now();
     let y = d.getFullYear();
     let q = Math.floor(d.getMonth() / 3) + 1;
-    if (/last|previous/i.test(m[1])) { q -= 1; if (q < 1) { q = 4; y -= 1; } }
+    const rel = /last|previous/i.test(m[1]) ? "last" : "this";
+    if (rel === "last") { q -= 1; if (q < 1) { q = 4; y -= 1; } }
     const startMo = (q - 1) * 3 + 1;
     const endMo = startMo + 2;
     return {
       start: _ymd(y, startMo, 1),
       end: _ymd(y, endMo, _endOfMonth(y, endMo)),
       stripped: t.replace(m[0], " "),
+      label: `${rel} quarter (Q${q} ${y})`,
     };
   }
 
   // "year to date" / "ytd" / "this year"
   m = t.match(/\b(?:year to date|ytd|(?:for|in)?\s*this year)\b/i);
-  if (m) return { start: `${yr}-01-01`, end: ymd(now()), stripped: t.replace(m[0], " ") };
+  if (m) return { start: `${yr}-01-01`, end: ymd(now()), stripped: t.replace(m[0], " "),
+                  label: `year to date` };
 
   // "last year"
   m = t.match(/\blast year\b/i);
-  if (m) return { start: `${yr - 1}-01-01`, end: `${yr - 1}-12-31`, stripped: t.replace(m[0], " ") };
+  if (m) return { start: `${yr - 1}-01-01`, end: `${yr - 1}-12-31`, stripped: t.replace(m[0], " "),
+                  label: `${yr - 1}` };
 
   // "this month" / "last month"
   m = t.match(/\b(this|last|previous)\s+month\b/i);
   if (m) {
     const d = now();
     let y = d.getFullYear(), mo = d.getMonth() + 1;
-    if (/last|previous/i.test(m[1])) { mo -= 1; if (mo < 1) { mo = 12; y -= 1; } }
+    const rel = /last|previous/i.test(m[1]) ? "last" : "this";
+    if (rel === "last") { mo -= 1; if (mo < 1) { mo = 12; y -= 1; } }
     return {
       start: _ymd(y, mo, 1),
       end: _ymd(y, mo, _endOfMonth(y, mo)),
       stripped: t.replace(m[0], " "),
+      label: `${rel} month (${MONTH_NAMES[mo-1]} ${y})`,
     };
   }
 
@@ -345,7 +357,8 @@ function extractPeriod(text) {
   if (m) {
     const n = parseInt(m[1], 10);
     const d = new Date(); d.setDate(d.getDate() - n);
-    return { start: ymd(d), end: ymd(now()), stripped: t.replace(m[0], " ") };
+    return { start: ymd(d), end: ymd(now()), stripped: t.replace(m[0], " "),
+             label: `last ${n} days` };
   }
 
   return null;
@@ -546,46 +559,83 @@ export function resolveVoiceCommand(text, ctx) {
     return { handled: true, say: "Hover a transaction first so I know which contact you mean." };
   }
 
+  // Compose a Transactions URL from a merchant text needle + optional
+  // date range extracted by `extractPeriod`. Also normalizes user filler
+  // like "and just", "and only" that connects the two clauses.
+  const navTxnFilter = (rawNeedle, period) => {
+    let needle = (rawNeedle || "")
+      .trim()
+      .replace(/[.?!]+$/, "")
+      .replace(/^(?:the|any|all|just|only|my|our)\s+/i, "")
+      .replace(/\s+(?:transactions?|txns?|purchases?|charges?|payments?|activity)\s*$/i, "")
+      // Drop trailing conjunctions ("Walmart and", "Uber and just")
+      .replace(/\s+(?:and|plus|,)\s*(?:just|only)?$/i, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const params = new URLSearchParams();
+    if (needle && needle.length >= 2) params.set("q", needle);
+    if (period) { params.set("date_from", period.start); params.set("date_to", period.end); }
+    const qs = params.toString();
+    if (!qs) return null;
+    ctx.navigate(`/accounting/transactions${qs ? `?${qs}` : ""}`);
+    const bits = [];
+    if (needle && needle.length >= 2) bits.push(needle);
+    if (period) bits.push(period.label || `${period.start} to ${period.end}`);
+    return { handled: true, say: `Filtering transactions${bits.length ? " by " + bits.join(" · ") : ""}` };
+  };
+
+  // Try to peel off a period phrase FIRST so patterns like "show me the
+  // Walmart transactions this month" or "filter by Uber and just Q1"
+  // capture both dimensions in a single utterance.
+  const _period = extractPeriod(t);
+  const _tNoPeriod = (_period ? _period.stripped : t).replace(/\s+/g, " ").trim();
+
   // "show me (all the) Walmart transactions"  — noun-adjective form where
   // the merchant/vendor name precedes 'transactions'. Also handles
   // "bring up the McDonald's transactions", "pull up Rocket Mortgage
   // charges", etc. Per user request, "show me" and "bring up" are treated
   // as synonyms of "filter by" in the Transactions context.
-  const txFilterAdj = t.match(
+  const txFilterAdj = _tNoPeriod.match(
     /^(?:show (?:me )?|bring (?:me )?up (?:the )?|pull (?:me )?up (?:the )?|find (?:me )?|display (?:me )?|view (?:me )?)(?:all\s+)?(?:the\s+)?(.+?)\s+(?:transactions?|txns?|purchases?|charges?|payments?|activity)\s*$/i
   );
   if (txFilterAdj) {
-    let needle = txFilterAdj[1].trim().replace(/[.?!]+$/, "").replace(/^(the|any|all|my|our)\s+/i, "");
-    // Skip if "merchant" is actually a status filter — let NAV_ROUTES
-    // handle "flagged transactions" / "for-review transactions" further down.
+    const needle = txFilterAdj[1].trim().replace(/[.?!]+$/, "").replace(/^(the|any|all|my|our)\s+/i, "");
     const isStatus = /^(?:the|a|an|all|any|my|our|flagged|needs? review|for review|reviewed|posted|new|recent|open|closed)$/i.test(needle);
     if (needle && needle.length >= 2 && !isStatus) {
-      ctx.navigate(`/accounting/transactions?q=${encodeURIComponent(needle)}`);
-      return { handled: true, say: `Filtering transactions by ${needle}` };
+      const r = navTxnFilter(needle, _period);
+      if (r) return r;
+    } else if (_period) {
+      // "show me the transactions this month" — no merchant, just period.
+      const r = navTxnFilter("", _period);
+      if (r) return r;
     }
   }
 
-  const txFilter = t.match(
-    /^(?:show (?:me )?(?:all )?(?:the )?)?(?:transactions? (?:for|from|with)|filter (?:transactions? )?(?:by|for)|search (?:transactions? )?for)\s+(.+)$/i
+  const txFilter = _tNoPeriod.match(
+    /^(?:show (?:me )?(?:all )?(?:the )?)?(?:(?:the\s+)?transactions? (?:for|from|with)|filter (?:(?:the\s+)?transactions? )?(?:by|for)|search (?:(?:the\s+)?transactions? )?for)\s+(.+)$/i
   );
   if (txFilter) {
-    let needle = txFilter[1].trim().replace(/[.?!]+$/, "");
-    // Strip filler ("the ", "any ") and trailing "transactions"
-    needle = needle.replace(/^(the|any|all|my)\s+/i, "").replace(/\s+transactions?$/i, "");
-    if (needle.length >= 2) {
-      ctx.navigate(`/accounting/transactions?q=${encodeURIComponent(needle)}`);
-      return { handled: true, say: `Filtering transactions by ${needle}` };
+    const r = navTxnFilter(txFilter[1], _period);
+    if (r) return r;
+    // Merchant-only leg was empty (e.g. "filter the transactions" with a
+    // period phrase already stripped) — still honor the period alone.
+    if (_period) {
+      const r2 = navTxnFilter("", _period);
+      if (r2) return r2;
     }
   }
   // Bare "filter by X" on any current page — still route to Transactions
   // since that's the most common filterable view.
-  const bareFilter = t.match(/^(?:filter|search)\s+(?:by |for )(.+)$/i);
+  const bareFilter = _tNoPeriod.match(/^(?:filter|search)\s+(?:by |for )(.+)$/i);
   if (bareFilter) {
-    const needle = bareFilter[1].trim().replace(/[.?!]+$/, "");
-    if (needle.length >= 2) {
-      ctx.navigate(`/accounting/transactions?q=${encodeURIComponent(needle)}`);
-      return { handled: true, say: `Filtering transactions by ${needle}` };
-    }
+    const r = navTxnFilter(bareFilter[1], _period);
+    if (r) return r;
+  }
+  // "filter the transactions [this month|last quarter|…]" — period only,
+  // no merchant. Handles the case where the ONLY signal is a time window.
+  if (_period && /^(?:filter|search|show(?:\s+me)?|bring\s+up|pull\s+up)\s+(?:the\s+)?(?:transactions?|txns?)\b/i.test(_tNoPeriod)) {
+    const r = navTxnFilter("", _period);
+    if (r) return r;
   }
   // Clear filters
   if (/^(clear|reset|remove)\s+(filters?|search)\b/i.test(t)) {
