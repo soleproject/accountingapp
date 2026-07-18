@@ -543,7 +543,7 @@ export function resolveVoiceCommand(text, ctx) {
   // Requires a focused transaction (hover-set from the Transactions grid or
   // sparkle-button on a row). Handled remotely because the caller needs the
   // company id + focused txn id to hit the approve-with-suggestion endpoint.
-  const APPROVE_RE = /^(?:yes,?\s+)?(?:let'?s\s+|please\s+)?approve(?:\s+(?:this|it|that|the|this\s+one|this\s+transaction))?\s*[.!]?$/i;
+  const APPROVE_RE = /^(?:(?:yes|yep|yeah|yup|ok|okay|sure|alright|great|so|well|and),?\s+)?(?:let'?s\s+|please\s+)?(?:approve|(?:this\s+)?(?:one\s+)?looks?\s+good|good\s+to\s+go|(?:this\s+is\s+)?correct|(?:this\s+is\s+)?right)(?:\s+(?:this|it|that|the|this\s+one|this\s+transaction|too|as\s+well|also))?\s*[.!]?$/i;
   const UNAPPROVE_RE = /^(?:un-?approve|reject|reverse\s+approve|undo\s+approve)(?:\s+(?:this|it|that))?\s*[.!]?$/i;
   if (APPROVE_RE.test(t)) {
     if (!ctx.focus?.id) {

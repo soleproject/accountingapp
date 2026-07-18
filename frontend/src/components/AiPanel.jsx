@@ -924,37 +924,25 @@ export default function AiPanel({ collapsed, onToggle }) {
         setMessages(m => [...m, { role: "user", content: userMsg }]);
         try {
           const sim = p.similar;
-          const r = await api.post(`/companies/${currentId}/transactions/apply-bulk-approve-rule`, {
-            txn_ids: sim.sample.map(x => x.id).length >= sim.count
-              ? sim.sample.map(x => x.id)
-              : undefined,
-            category_account_id: sim.category_account_id,
-            contact_id: sim.contact_id,
-            contact_name: sim.contact_name,
-            create_rule: !!p.create_rule,
-          });
-          // We may have needed to fetch the FULL id list if `sample.length < count`.
-          let updated = r.data?.updated || 0;
-          let ruleId = r.data?.rule_id || null;
-          if (sim.count > sim.sample.length) {
-            const full = await api.get(
-              `/companies/${currentId}/transactions?contact_id=${sim.contact_id}&limit=1000`
-            );
-            const ids = (full.data.transactions || [])
-              .filter(t => !t.human_reviewed)
-              .map(t => t.id);
-            if (ids.length) {
-              const r2 = await api.post(`/companies/${currentId}/transactions/apply-bulk-approve-rule`, {
-                txn_ids: ids,
-                category_account_id: sim.category_account_id,
-                contact_id: sim.contact_id,
-                contact_name: sim.contact_name,
-                create_rule: !!p.create_rule && !ruleId,
-              });
-              updated = r2.data?.updated || 0;
-              ruleId = ruleId || r2.data?.rule_id;
+          // Fetch every unapproved txn for this contact — sample caps at 5.
+          const full = await api.get(
+            `/companies/${currentId}/transactions?contact_id=${sim.contact_id}&limit=1000`
+          );
+          const ids = (full.data.transactions || [])
+            .filter((t) => !t.human_reviewed)
+            .map((t) => t.id);
+          const res = await api.post(
+            `/companies/${currentId}/transactions/apply-bulk-approve-rule`,
+            {
+              txn_ids: ids,
+              category_account_id: sim.category_account_id,
+              contact_id: sim.contact_id,
+              contact_name: sim.contact_name,
+              create_rule: !!p.create_rule,
             }
-          }
+          );
+          const updated = res.data?.updated || 0;
+          const ruleId = res.data?.rule_id;
           const reply = ruleId
             ? `Approved ${updated} transaction${updated === 1 ? "" : "s"} and created a rule for ${sim.contact_name}.`
             : `Approved ${updated} transaction${updated === 1 ? "" : "s"}.`;
@@ -997,11 +985,46 @@ export default function AiPanel({ collapsed, onToggle }) {
       return;
     }
     if (cmd.handled && cmd.pending) {
-      // Confirm requested but nothing pending — treat as a no-op.
+      // Confirm/cancel with nothing pending in a modal — but if there's a
+      // pinned focused transaction and the utterance is affirmative
+      // ("yes", "looks good"), treat it as an approve intent on that row.
+      if (cmd.pending === "confirm" && focus?.id) {
+        setMessages(m => [...m, { role: "user", content: userMsg }]);
+        try {
+          const r = await api.post(
+            `/companies/${currentId}/transactions/${focus.id}/approve-with-suggestion`
+          );
+          const { similar, rule_exists } = r.data || {};
+          if (!similar || !similar.count) {
+            const say = "Approved.";
+            setMessages(m => [...m, { role: "assistant", content: say }]);
+            if (voiceOnRef.current) speakOne(say);
+            emitAction("txns:changed");
+            return;
+          }
+          const catName = similar.category_account_name || similar.category_account_code || "the same category";
+          const prompt = `Approved. There ${similar.count === 1 ? "is" : "are"} ${similar.count} other unapproved transaction${similar.count === 1 ? "" : "s"} from **${similar.contact_name}**. Would you like me to categorize them all as **${catName}** and approve them${rule_exists ? "" : ", and create a rule for this contact"}?`;
+          pendingIntentRef.current = {
+            kind: "bulk-approve-contact",
+            similar,
+            create_rule: !rule_exists,
+          };
+          setMessages(m => [...m, {
+            role: "assistant",
+            content: prompt,
+            card: { kind: "bulk-approve-confirm", similar, create_rule: !rule_exists },
+          }]);
+          if (voiceOnRef.current) speakOne(prompt.replace(/\*\*/g, ""));
+          emitAction("txns:changed");
+        } catch (e) {
+          setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't approve that transaction." }]);
+        }
+        return;
+      }
       setMessages(m => [
         ...m,
         { role: "user", content: userMsg },
-        { role: "assistant", content: "Nothing pending to confirm." },
+        { role: "assistant", content: cmd.pending === "confirm" ? "Nothing pending to confirm." : "Nothing to cancel." },
       ]);
       return;
     }
