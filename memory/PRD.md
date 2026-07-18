@@ -289,6 +289,11 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ### P0 — none (MVP feature-complete)
 
+### Recently shipped (2026-07-18 evening — patch 4)
+- **Drilldown drawer sits BESIDE the AI chat**, not over it. Wrapper repositioned from `fixed inset-0` to `fixed inset-y-0 left-0 right-[24rem]` so the AI panel (w-96 = 24rem) stays visible and interactive while the user reviews / edits transactions in the drawer.
+- **Row checkboxes + select-all** in the drilldown. Every row now has an accent-indigo checkbox; header has a select-all checkbox that also shows an indeterminate state when a subset is selected. Selected rows highlight in `bg-indigo-50/40`. Button label + subtotal auto-update: *"Move all N…"* when everything's picked, *"Move X of N — sums to $Y"* when a subset is picked. Disabled when nothing selected.
+- **`Move X` payload** — bulk-reclassify now sends only the selected `transaction_ids`, not the full row list.
+
 ### Recently shipped (2026-07-18 evening — patch 3)
 - **Move-all bulk-reclassify** — from the balance-sheet drilldown drawer, click *"Move all N to another account"* → picker opens (all account types visible, source excluded) → one click moves the entire drilled-in transaction list via `bulk-reclassify`. Toast confirms the target account name. Balance sheet auto-refreshes on close so the emptied account disappears immediately.
 - **Extended ReclassifyPicker** with `allowedTypes` (null → all), `title` override, and `excludeIds` so it can be re-used as a general account picker.

@@ -37,7 +37,7 @@ export default function ReclassifyPicker({
   }, [accounts, q, allowedTypes, excludeIds]);
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[80] bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col max-h-[80vh]">
         <div className="px-5 py-4 border-b flex items-center justify-between">
           <div>

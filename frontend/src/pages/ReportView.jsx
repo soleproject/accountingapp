@@ -20,6 +20,7 @@ function AccountDrilldown({ currentId, account, onClose }) {
   const [accounts, setAccounts] = useState([]);
   const [moving, setMoving] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [selected, setSelected] = useState(() => new Set()); // txn ids
 
   useEffect(() => {
     if (!currentId || !account?.id) return;
@@ -36,6 +37,8 @@ function AccountDrilldown({ currentId, account, onClose }) {
         // Display newest first again.
         list.reverse();
         setRows(list);
+        // Default selection: everything (matches previous "move all" default).
+        setSelected(new Set(list.map(t => t.id)));
         setAccounts(acctsR.data.accounts || []);
       } catch {
         setRows([]);
@@ -43,18 +46,33 @@ function AccountDrilldown({ currentId, account, onClose }) {
     })();
   }, [currentId, account?.id]);
 
-  // "Move all →" — bulk-reclassify every row currently in this drawer into a
-  // different CoA account. One click from "found the problem" to "fixed it."
-  const doMoveAll = async (targetId) => {
-    if (!rows || !rows.length || !targetId) return;
+  const allSelected = rows && rows.length > 0 && selected.size === rows.length;
+  const someSelected = selected.size > 0 && !allSelected;
+  const toggleOne = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+  const toggleAll = () => {
+    if (!rows) return;
+    setSelected(prev =>
+      prev.size === rows.length ? new Set() : new Set(rows.map(t => t.id))
+    );
+  };
+
+  // Bulk-reclassify only the SELECTED rows.
+  const doMove = async (targetId) => {
+    if (!rows || selected.size === 0 || !targetId) return;
     setApplying(true);
     try {
       await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
-        transaction_ids: rows.map(r => r.id),
+        transaction_ids: Array.from(selected),
         category_account_id: targetId,
       });
       const to = accounts.find(a => a.id === targetId);
-      toast.success(`Moved ${rows.length} transaction${rows.length === 1 ? "" : "s"} to ${to?.name || "account"}`);
+      toast.success(`Moved ${selected.size} transaction${selected.size === 1 ? "" : "s"} to ${to?.name || "account"}`);
       setMoving(false);
       onClose(true);  // reload parent
     } catch (e) {
@@ -65,11 +83,16 @@ function AccountDrilldown({ currentId, account, onClose }) {
   };
 
   const total = rows ? rows.reduce((s, t) => s + -1 * (t.amount || 0), 0) : 0;
+  const selectedTotal = rows
+    ? rows.filter(t => selected.has(t.id)).reduce((s, t) => s + -1 * (t.amount || 0), 0)
+    : 0;
 
+  // Positioning: sit to the LEFT of the AI panel (w-96 = 24rem) so both are
+  // usable side-by-side. Backdrop stops at the panel edge too.
   return (
-    <div className="fixed inset-0 z-[70]" data-testid="account-drilldown">
+    <div className="fixed inset-y-0 left-0 right-[24rem] z-[70]" data-testid="account-drilldown">
       <div className="absolute inset-0 bg-black/40" onClick={() => onClose(false)} />
-      <aside className="absolute right-0 top-0 bottom-0 w-[600px] max-w-[94vw] bg-white shadow-2xl flex flex-col">
+      <aside className="absolute right-0 top-0 bottom-0 w-[640px] max-w-[calc(100%-2rem)] bg-white shadow-2xl flex flex-col">
         <div className="px-5 py-4 border-b flex items-center gap-3">
           <div className="flex-1 min-w-0">
             <div className="text-[11px] uppercase tracking-widest text-slate-500 font-semibold">
@@ -86,18 +109,22 @@ function AccountDrilldown({ currentId, account, onClose }) {
           </button>
         </div>
         {rows && rows.length > 0 && (
-          <div className="px-5 py-2 border-b bg-slate-50 flex items-center gap-2">
+          <div className="px-5 py-2 border-b bg-slate-50 flex items-center gap-2 flex-wrap">
             <button
-              data-testid="drilldown-move-all"
+              data-testid="drilldown-move-selected"
               onClick={() => setMoving(true)}
-              disabled={applying}
-              className="text-xs font-medium inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-indigo-300 bg-white text-indigo-800 hover:bg-indigo-50 disabled:opacity-50"
+              disabled={applying || selected.size === 0}
+              className="text-xs font-medium inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-indigo-300 bg-white text-indigo-800 hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <ArrowRightCircle size={13} />
-              Move all {rows.length} to another account
+              Move {selected.size === rows.length ? `all ${rows.length}` : selected.size} to another account
             </button>
             <span className="text-[11px] text-slate-500">
-              One click bulk-reclassify — sums to {fmtMoney(total)}.
+              {selected.size === 0
+                ? "Nothing selected."
+                : selected.size === rows.length
+                  ? `All ${rows.length} rows — sums to ${fmtMoney(total)}.`
+                  : `${selected.size} of ${rows.length} — sums to ${fmtMoney(selectedTotal)}.`}
             </span>
           </div>
         )}
@@ -110,28 +137,53 @@ function AccountDrilldown({ currentId, account, onClose }) {
             <div className="p-6 text-sm text-slate-500">No transactions have posted to this account yet.</div>
           ) : (
             <>
-              <div className="grid grid-cols-12 gap-2 px-4 py-2 bg-slate-50 border-b text-[11px] uppercase tracking-widest text-slate-600 font-semibold">
+              <div className="grid grid-cols-12 gap-2 px-4 py-2 bg-slate-50 border-b text-[11px] uppercase tracking-widest text-slate-600 font-semibold items-center">
+                <div className="col-span-1 flex items-center">
+                  <input
+                    type="checkbox"
+                    data-testid="drilldown-select-all"
+                    checked={!!allSelected}
+                    ref={el => { if (el) el.indeterminate = !!someSelected; }}
+                    onChange={toggleAll}
+                    className="h-3.5 w-3.5 accent-indigo-600 cursor-pointer"
+                    aria-label="Select all rows"
+                  />
+                </div>
                 <div className="col-span-2">Date</div>
-                <div className="col-span-5">Merchant / Description</div>
+                <div className="col-span-4">Merchant / Description</div>
                 <div className="col-span-2 text-right">Amount</div>
                 <div className="col-span-3 text-right">Running Balance</div>
               </div>
-              {rows.map(t => (
-                <div key={t.id}
-                     className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-slate-100 text-[13px] hover:bg-slate-50">
-                  <div className="col-span-2 font-mono-num text-slate-500">{t.date}</div>
-                  <div className="col-span-5 truncate" title={t.merchant || t.description}>
-                    {t.merchant || t.description || <span className="italic text-slate-400">—</span>}
-                    {t.needs_review && <span className="ml-2 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">review</span>}
-                  </div>
-                  <div className={`col-span-2 text-right font-mono-num ${(t.amount || 0) < 0 ? "text-slate-800" : "text-emerald-700"}`}>
-                    {fmtMoney(t.amount)}
-                  </div>
-                  <div className="col-span-3 text-right font-mono-num text-slate-600">
-                    {fmtMoney(t._running)}
-                  </div>
-                </div>
-              ))}
+              {rows.map(t => {
+                const isChecked = selected.has(t.id);
+                return (
+                  <label
+                    key={t.id}
+                    className={`grid grid-cols-12 gap-2 px-4 py-2 border-b border-slate-100 text-[13px] items-center cursor-pointer ${isChecked ? "bg-indigo-50/40" : "hover:bg-slate-50"}`}
+                  >
+                    <div className="col-span-1">
+                      <input
+                        type="checkbox"
+                        data-testid={`drilldown-row-check-${t.id}`}
+                        checked={isChecked}
+                        onChange={() => toggleOne(t.id)}
+                        className="h-3.5 w-3.5 accent-indigo-600 cursor-pointer"
+                      />
+                    </div>
+                    <div className="col-span-2 font-mono-num text-slate-500">{t.date}</div>
+                    <div className="col-span-4 truncate" title={t.merchant || t.description}>
+                      {t.merchant || t.description || <span className="italic text-slate-400">—</span>}
+                      {t.needs_review && <span className="ml-2 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">review</span>}
+                    </div>
+                    <div className={`col-span-2 text-right font-mono-num ${(t.amount || 0) < 0 ? "text-slate-800" : "text-emerald-700"}`}>
+                      {fmtMoney(t.amount)}
+                    </div>
+                    <div className="col-span-3 text-right font-mono-num text-slate-600">
+                      {fmtMoney(t._running)}
+                    </div>
+                  </label>
+                );
+              })}
               <div className="grid grid-cols-12 gap-2 px-4 py-2 border-t-2 border-slate-800 text-sm bg-slate-50">
                 <div className="col-span-7 font-semibold uppercase text-[11px] tracking-widest text-slate-600">
                   {rows.length} transaction{rows.length === 1 ? "" : "s"}
@@ -150,12 +202,12 @@ function AccountDrilldown({ currentId, account, onClose }) {
       {moving && (
         <ReclassifyPicker
           accounts={accounts}
-          count={rows?.length || 0}
-          title={`Move all ${rows?.length || 0} txns out of ${account.name}`}
+          count={selected.size}
+          title={`Move ${selected.size} txn${selected.size === 1 ? "" : "s"} out of ${account.name}`}
           allowedTypes={null}
           excludeIds={[account.id]}
           onCancel={() => setMoving(false)}
-          onApply={doMoveAll}
+          onApply={doMove}
         />
       )}
     </div>
