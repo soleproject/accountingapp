@@ -317,6 +317,23 @@ async def approve_transaction(cid: str, tid: str, user: dict = Depends(get_curre
     return {"ok": True}
 
 
+@router.post("/companies/{cid}/transactions/{tid}/unapprove")
+async def unapprove_transaction(cid: str, tid: str, user: dict = Depends(get_current_user)):
+    """Reverse a human approval — flips `human_reviewed` back to False so the
+    row loses its 'Reviewed' badge. Doesn't touch `posted` or `needs_review`;
+    if the user wants to re-flag it for review they can do that explicitly.
+    """
+    await require_company(user, cid)
+    existing = await db.transactions.find_one({"id": tid, "company_id": cid})
+    if existing:
+        await assert_open(cid, existing.get("date"))
+    await db.transactions.update_one(
+        {"id": tid, "company_id": cid},
+        {"$set": {"human_reviewed": False, "updated_at": now_iso()}},
+    )
+    return {"ok": True}
+
+
 @router.post("/companies/{cid}/transactions/bulk-approve")
 async def bulk_approve(cid: str, ids: List[str], user: dict = Depends(get_current_user)):
     await require_company(user, cid)

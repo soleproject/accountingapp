@@ -373,6 +373,11 @@ export default function Transactions() {
     await api.post(`/companies/${currentId}/transactions/${id}/approve`);
     load();
   };
+  const unapprove = async (id) => {
+    await api.post(`/companies/${currentId}/transactions/${id}/unapprove`);
+    load();
+  };
+  const toggleApprove = (t) => (t.human_reviewed ? unapprove(t.id) : approve(t.id));
   const recategorize = async (id) => {
     setBusy(true);
     await api.post(`/companies/${currentId}/ai/recategorize/${id}`);
@@ -602,8 +607,18 @@ export default function Transactions() {
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-1 justify-end">
-                      <button title="Approve" data-testid={TID.txnApprove} onClick={() => approve(t.id)}
-                              className="p-1 rounded hover:bg-emerald-100 text-emerald-600"><Check size={14} /></button>
+                      <button
+                        title={t.human_reviewed ? "Unapprove" : "Approve"}
+                        data-testid={TID.txnApprove}
+                        onClick={() => toggleApprove(t)}
+                        className={
+                          t.human_reviewed
+                            ? "p-1 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                            : "p-1 rounded hover:bg-emerald-100 text-emerald-600"
+                        }
+                      >
+                        <Check size={14} />
+                      </button>
                       <button
                         title="Ask AI about this transaction"
                         data-testid={`txn-ai-${t.id}`}
