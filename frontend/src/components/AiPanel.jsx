@@ -9,6 +9,61 @@ import { toast } from "sonner";
 import { resolveVoiceCommand } from "@/lib/voiceCommands";
 import { emitCreate, emitAction } from "@/lib/createBus";
 
+// --------------------- Report → one-sentence spoken summary ---------------------
+// Runs entirely on the client from the report API's JSON response so we never
+// spin up a chat LLM just to read numbers out loud.
+const _fmt$ = (n) => {
+  const v = Number(n || 0);
+  const abs = Math.abs(v);
+  if (abs >= 1_000_000) return `${v < 0 ? "-" : ""}$${(abs / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000)     return `${v < 0 ? "-" : ""}$${(abs / 1_000).toFixed(1)}K`;
+  return `${v < 0 ? "-" : ""}$${abs.toFixed(2)}`;
+};
+function summarizeReport(kind, name, data, filters = {}) {
+  if (!data) return `No data for ${name}.`;
+  const range = (filters.start && filters.end) ? ` from ${filters.start} to ${filters.end}` : "";
+  const basis = filters.basis ? ` on ${filters.basis} basis` : "";
+  const suffix = `${range}${basis}`;
+  try {
+    if (kind === "income-statement") {
+      const rev = data.total_revenue || 0;
+      const exp = data.total_expense || 0;
+      const ni  = data.net_income ?? (rev - exp);
+      const topExp = [...(data.expenses || [])]
+        .sort((a, b) => (b.amount || 0) - (a.amount || 0)).slice(0, 3)
+        .map(x => `${x.account_name || x.name} at ${_fmt$(x.amount)}`);
+      const topLine = topExp.length ? ` Top expenses: ${topExp.join(", ")}.` : "";
+      return `${name}${suffix}: revenue ${_fmt$(rev)}, expenses ${_fmt$(exp)}, net income ${_fmt$(ni)}.${topLine}`;
+    }
+    if (kind === "balance-sheet") {
+      const a = data.total_assets || 0;
+      const l = data.total_liabilities || 0;
+      const e = data.total_equity || 0;
+      return `${name}${suffix}: assets ${_fmt$(a)}, liabilities ${_fmt$(l)}, equity ${_fmt$(e)}.`;
+    }
+    if (kind === "cash-flow") {
+      const net = data.net_change || data.total || 0;
+      return `${name}${suffix}: net change in cash ${_fmt$(net)}.`;
+    }
+    if (kind === "trial-balance") {
+      const d = data.total_debit ?? data.total_debits ?? 0;
+      const c = data.total_credit ?? data.total_credits ?? 0;
+      const bal = Math.abs(d - c) < 0.01 ? "and in balance" : "out of balance";
+      return `${name}${suffix}: debits ${_fmt$(d)}, credits ${_fmt$(c)}, ${bal}.`;
+    }
+    if (kind === "general-ledger") {
+      const n = (data.rows || data.entries || []).length;
+      return `${name}${suffix}: ${n} ledger entries.`;
+    }
+    // Fallback: best-effort scalar hunt.
+    const t = data.total || data.net_income || data.total_revenue || null;
+    return t !== null ? `${name}${suffix}: ${_fmt$(t)}.` : `${name}${suffix}: report loaded.`;
+  } catch {
+    return `${name}${suffix}: report loaded.`;
+  }
+}
+
+
 const getSR = () => window.SpeechRecognition || window.webkitSpeechRecognition;
 
 export default function AiPanel({ collapsed, onToggle }) {
@@ -480,6 +535,33 @@ export default function AiPanel({ collapsed, onToggle }) {
       return;
     }
 
+    // --- Remote intent: report narration ---
+    if (cmd.handled && cmd.remote === "read-report") {
+      setMessages(m => [
+        ...m,
+        { role: "user", content: userMsg },
+        { role: "assistant", content: "Fetching numbers…" },
+      ]);
+      try {
+        const params = new URLSearchParams(cmd.filters || {});
+        const r = await api.get(`/companies/${currentId}/reports/${cmd.reportKind}?${params.toString()}`);
+        const summary = summarizeReport(cmd.reportKind, cmd.reportName, r.data, cmd.filters);
+        setMessages(m => {
+          const copy = [...m];
+          copy[copy.length - 1] = { role: "assistant", content: summary };
+          return copy;
+        });
+        if (voiceOnRef.current) speakOne(summary);
+      } catch (e) {
+        setMessages(m => {
+          const copy = [...m];
+          copy[copy.length - 1] = { role: "assistant", content: "Couldn't pull that report." };
+          return copy;
+        });
+      }
+      return;
+    }
+
     // --- Remote intent (backend parser for creates) ---
     if (cmd.handled && cmd.remote === "intent") {
       setMessages(m => [
@@ -836,19 +918,18 @@ function VoiceHintTape({ micMode }) {
   // wall-of-text tutorial. Only shows when the mic is engaged so it's
   // discoverable at the right moment.
   const HINTS = [
-    'Try: "show flagged transactions"',
-    'Try: "open 317 LLC"',
+    'Try: "read my P&L for Q2"',
+    'Try: "transactions for Walmart"',
+    'Try: "filter by meals"',
+    'Try: "open the July 15th McDonald\'s transaction"',
     'Try: "income statement for Q1 cash basis"',
     'Try: "create an invoice for John Doe for 500 dollars"',
-    'Try: "new contact"',
-    'Try: "go to chart of accounts"',
     'Try: "open contact Acme"',
     'Try: "overdue invoices"',
     'Try: "clear chat"',
-    'Try: "stop" — cancels the AI mid-speech',
-    'Say "confirm" to auto-save a draft I made',
+    'Say "looks good" or "confirm" to auto-save a draft',
+    'Say "stop" — cancels the AI mid-speech',
     'Tip: hover a transaction row to make it the AI\'s context',
-    'Tip: say "why" to get a deeper answer',
   ];
   const [idx, setIdx] = useState(0);
   useEffect(() => {

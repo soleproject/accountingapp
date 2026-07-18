@@ -150,10 +150,43 @@ export default function Transactions() {
   const filtersActive = Boolean(debouncedSearch || dateFrom || dateTo || filter === "review");
 
   const [params] = useSearchParams();
+  // Voice-command deep-link support: /accounting/transactions?q=Walmart or
+  // ?date_from=2026-07-15&date_to=2026-07-15. On mount / URL change, hydrate
+  // the toolbar state so the user sees a filtered view immediately.
+  const paramsKey = params.toString();
+  useEffect(() => {
+    const q       = params.get("q") || "";
+    const df      = params.get("date_from") || "";
+    const dt      = params.get("date_to") || "";
+    const flt     = params.get("filter") || "";
+    if (q)   setSearch(q);
+    if (df)  setDateFrom(df);
+    if (dt)  setDateTo(dt);
+    if (flt) setFilter(flt);
+    // No else-branch: URL params ADD filters; they don't clear existing ones.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paramsKey]);
+
   useEffect(() => {
     const hl = params.get("highlight");
     const opn = params.get("open");
-    if (!hl || !txns.length) return;
+    if (!txns.length) return;
+    // If the URL only has a search filter (no highlight id), auto-highlight
+    // the top row when exactly one transaction matches — a nice UX for
+    // "open the July 15th McDonald's transaction".
+    if (!hl) {
+      const wasVoiceLookup = params.get("q") || params.get("date_from");
+      if (wasVoiceLookup && txns.length === 1) {
+        const only = txns[0];
+        setTimeout(() => {
+          const row = document.querySelector(`[data-txn-id="${only.id}"]`);
+          row?.scrollIntoView({ behavior: "smooth", block: "center" });
+          row?.classList.add("bg-amber-50");
+          setTimeout(() => row?.classList.remove("bg-amber-50"), 3000);
+        }, 200);
+      }
+      return;
+    }
     const target = txns.find(t => t.id === hl);
     if (target) {
       // Scroll to the row

@@ -1766,8 +1766,14 @@ async def list_contacts(cid: str, user: dict = Depends(get_current_user)):
 async def create_contact(cid: str, inp: ContactCreate, user: dict = Depends(get_current_user)):
     await _require_company(user, cid)
     xid = str(uuid.uuid4()); now = now_iso()
+    payload = inp.model_dump()
+    # The `contacts` collection has a unique index on (company_id, normalized_name).
+    # Without this key set, every second manual contact creation in a given
+    # company would fail with a duplicate-null-key error.
+    from contact_resolver import normalize_contact_name  # local import to avoid cycle
+    payload["normalized_name"] = normalize_contact_name(payload.get("name"))
     await db.contacts.insert_one({
-        "id": xid, "company_id": cid, **inp.model_dump(),
+        "id": xid, "company_id": cid, **payload,
         "created_at": now, "updated_at": now,
     })
     try:

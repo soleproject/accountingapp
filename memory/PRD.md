@@ -290,9 +290,13 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 ### P0 — none (MVP feature-complete)
 
 ### Recently shipped (2026-07-18)
-- **Hybrid voice-driven CREATE flow** — parse-intent endpoint (Claude Haiku), pending confirmation banner in AI panel, modal auto-open with prefill for invoices/bills/contacts/CoA accounts. Backend fuzzy-matches contact names to existing contacts. Voice or button "confirm" submits via API. Session-scoped chat clear button with backend history wipe.
-- **Expanded voice router** — 25+ nav routes, quarter/YTD/last-month + cash/accrual filter extraction for reports, "open contact/invoice/bill X" lookups, company switch by name, meta commands (stop/clear/confirm/cancel).
-- **ReportView URL-driven filters** — /reports/{kind}?basis=cash&start=…&end=… now hydrates the toggle + date range and refetches automatically.
+- **TTS-narrated report summaries** — say *"read my P&L for Q2"* / *"narrate the balance sheet"* → fetches the report, composes a one-sentence summary (revenue, expenses, net income, top 3 categories) client-side and speaks it aloud. Zero LLM cost.
+- **Transaction voice filters & deep-links** — *"transactions for Walmart"*, *"filter by meals"*, *"open the July 15th McDonald's transaction for $26.99"* now navigate to `/accounting/transactions?q=…&date_from=…&date_to=…`. Transactions page hydrates its toolbar from URL params and auto-highlights the row if exactly one match.
+- **Confirm synonyms** — *"looks good"*, *"yep"*, *"sounds good"*, *"book it"*, *"post it"*, *"approve it"* all trigger the pending-intent save.
+- **Bug fix**: `POST /api/companies/{cid}/contacts` was inserting rows without `normalized_name`, tripping the `company_contact_uniq` unique index on the 2nd+ manual create per company. Now computes `normalize_contact_name(name)` on insert; also backfilled legacy null rows.
+- **Hybrid voice-driven CREATE flow** (yesterday) — parse-intent endpoint (Claude Haiku), pending confirmation banner, modal auto-open with prefill for invoices/bills/contacts/CoA accounts.
+- **Expanded voice router** (yesterday) — 25+ nav routes, quarter/YTD/last-month + cash/accrual filters, "open contact/invoice/bill X" lookups, company switch by name, meta commands.
+- **ReportView URL-driven filters** (yesterday) — /reports/{kind}?basis=cash&start=…&end=… hydrates + auto-refetches.
 
 ### P1
 - Refactor `server.py` (3300+ lines) into `/routes/` package for scalability

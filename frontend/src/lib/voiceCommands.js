@@ -121,8 +121,65 @@ function bestMatch(target, list, nameKey = "name") {
   return bestScore >= (words.length || 1) ? { record: best, score: bestScore } : null;
 }
 
-// Create-intent regexes — these DO NOT execute locally. They just tell the
-// caller "this is a create intent, ship it to the backend parser".
+// Try to parse an utterance like "open the July 15th McDonald's transaction
+// for $26.99" into structured filters. Returns null if the shape doesn't
+// look like a deep-link for a specific transaction (in which case the
+// caller falls through to normal nav / chat).
+const MONTHS = { january: 1, february: 2, march: 3, april: 4, may: 5, june: 6, july: 7, august: 8, september: 9, october: 10, november: 11, december: 12, jan: 1, feb: 2, mar: 3, apr: 4, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
+function tryParseTxnDeepLink(text) {
+  const t = text.trim();
+  // Must reference a specific transaction (word 'transaction'/'purchase'/'charge')
+  if (!/\b(transaction|purchase|charge|payment)\b/i.test(t)) return null;
+  // Must start with an "open"/"show"/"find" verb (avoids accidentally
+  // grabbing arbitrary chat questions).
+  if (!/^(open|show|find|pull up|bring up|view|display)\b/i.test(t)) return null;
+
+  // Extract date if present. Handles "July 15th", "Jul 15", "on 7/15",
+  // "yesterday", "today".
+  let date = null;
+  const yr = now().getFullYear();
+  const mDate = t.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b/i);
+  if (mDate) {
+    const mo = MONTHS[mDate[1].toLowerCase()];
+    const day = parseInt(mDate[2], 10);
+    if (mo && day) date = `${yr}-${String(mo).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  } else {
+    const slash = t.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
+    if (slash) {
+      const mo = parseInt(slash[1], 10), day = parseInt(slash[2], 10);
+      let y = slash[3] ? parseInt(slash[3], 10) : yr;
+      if (y < 100) y += 2000;
+      date = `${y}-${String(mo).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    } else if (/\byesterday\b/i.test(t)) {
+      const d = new Date(); d.setDate(d.getDate() - 1); date = ymd(d);
+    } else if (/\btoday\b/i.test(t)) {
+      date = ymd(new Date());
+    }
+  }
+
+  // Extract merchant name — the noun BEFORE 'transaction' after stripping
+  // date-y and money-y phrases. Not perfect, but good enough to seed a
+  // text search on the backend.
+  let stripped = t
+    .replace(/^(open|show|find|pull up|bring up|view|display)\b\s*(the\s+)?/i, "")
+    .replace(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2}(?:st|nd|rd|th)?\b/gi, "")
+    .replace(/\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/g, "")
+    .replace(/\b(yesterday|today|last (week|month))\b/gi, "")
+    .replace(/\bfor\s*\$?\d[\d,]*(?:\.\d{1,2})?\b/gi, "")
+    .replace(/\$\d[\d,]*(?:\.\d{1,2})?/g, "")
+    .replace(/\b(the|a|an|on|from|at|of)\b/gi, " ")
+    .replace(/\btransactions?|purchases?|charges?|payments?\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  // Strip possessive 's — "McDonald's" is still McDonald in Mongo docs.
+  stripped = stripped.replace(/'s\b/g, "");
+  const q = stripped.length >= 2 ? stripped : null;
+
+  if (!q && !date) return null;
+  return { q, date };
+}
+
+
 const CREATE_INTENT_RE = /\b(create|make|new|draft|add|start)\s+(?:an?\s+)?(invoice|bill|contact|customer|vendor|account|chart of account|payment|receipt)\b/i;
 
 // Explicit "open <entity> <name>" (contact/invoice/bill lookup by name/number)
@@ -160,15 +217,36 @@ export function resolveVoiceCommand(text, ctx) {
     if (typeof ctx.clearChat === "function") ctx.clearChat();
     return { handled: true, say: "Cleared" };
   }
-  if (/^(confirm|yes,? create it?|save it?|do it|go ahead)\b/i.test(t)) {
-    // Signal to caller to submit any pending intent.
+  // Confirm synonyms — covers casual affirmatives users actually say ("looks good", "yep")
+  if (/^(confirm|yes|yep|yeah|yup|sure|ok(ay)?|save it?|do it|go ahead|looks good|sounds good|that.?s good|create it|make it|book it|post it|approve it?)\b/i.test(t)) {
     return { handled: true, pending: "confirm" };
   }
-  if (/^(cancel|no,? don'?t|nevermind|never mind|forget it)\b/i.test(t)) {
+  if (/^(cancel|no,?\s*don'?t|nope|nah|nevermind|never mind|forget it|scrap that|discard)\b/i.test(t)) {
     return { handled: true, pending: "cancel" };
   }
 
-  // ---- 2. Report navigation with optional filters ----
+  // ---- 2. "read me the numbers" — TTS-narrated report summary ----
+  //   "read (me) (my|the) P&L (for) Q2"
+  //   "narrate the balance sheet"
+  //   "summarize the income statement year to date"
+  const readMatch = t.match(/^(?:read|narrate|summari[sz]e|tell me about|give me)(?:\s+me)?\s+(?:my |the )?(.+)$/i);
+  if (readMatch) {
+    const rest = readMatch[1];
+    for (const r of REPORT_ALIASES) {
+      if (r.pat.test(rest)) {
+        const filters = extractReportFilters(rest);
+        return {
+          handled: true,
+          remote: "read-report",
+          reportKind: r.kind,
+          reportName: r.name,
+          filters,
+        };
+      }
+    }
+  }
+
+  // ---- 3. Report navigation with optional filters ----
   // "show me the income statement for Q1 on cash basis"
   for (const r of REPORT_ALIASES) {
     if (r.pat.test(t)) {
@@ -191,7 +269,55 @@ export function resolveVoiceCommand(text, ctx) {
     return { handled: true, say: "Opening reports" };
   }
 
-  // ---- 3. Explicit "open <entity> <name>" ----
+  // ---- 4. Transaction filter / lookup commands ----
+  //   "show me all the transactions for Walmart"
+  //   "transactions for John Smith"
+  //   "filter by meals"      → text search
+  //   "filter transactions by Walmart"
+  //   "search transactions for Uber"
+  const txFilter = t.match(
+    /^(?:show (?:me )?(?:all )?(?:the )?)?(?:transactions? (?:for|from|with)|filter (?:transactions? )?(?:by|for)|search (?:transactions? )?for)\s+(.+)$/i
+  );
+  if (txFilter) {
+    let needle = txFilter[1].trim().replace(/[.?!]+$/, "");
+    // Strip filler ("the ", "any ") and trailing "transactions"
+    needle = needle.replace(/^(the|any|all|my)\s+/i, "").replace(/\s+transactions?$/i, "");
+    if (needle.length >= 2) {
+      ctx.navigate(`/accounting/transactions?q=${encodeURIComponent(needle)}`);
+      return { handled: true, say: `Filtering transactions by ${needle}` };
+    }
+  }
+  // Bare "filter by X" on any current page — still route to Transactions
+  // since that's the most common filterable view.
+  const bareFilter = t.match(/^(?:filter|search)\s+(?:by |for )(.+)$/i);
+  if (bareFilter) {
+    const needle = bareFilter[1].trim().replace(/[.?!]+$/, "");
+    if (needle.length >= 2) {
+      ctx.navigate(`/accounting/transactions?q=${encodeURIComponent(needle)}`);
+      return { handled: true, say: `Filtering transactions by ${needle}` };
+    }
+  }
+  // Clear filters
+  if (/^(clear|reset|remove)\s+(filters?|search)\b/i.test(t)) {
+    ctx.navigate(`/accounting/transactions`);
+    return { handled: true, say: "Filters cleared" };
+  }
+
+  // ---- 5. Deep-link a specific transaction ----
+  //   "open the July 15th McDonald's transaction for $26.99"
+  //   "open the Walmart transaction on July 15"
+  //   "open the $26.99 transaction from McDonald's"
+  const txDeepLink = tryParseTxnDeepLink(t);
+  if (txDeepLink) {
+    const params = new URLSearchParams();
+    if (txDeepLink.q)     params.set("q", txDeepLink.q);
+    if (txDeepLink.date)  { params.set("date_from", txDeepLink.date); params.set("date_to", txDeepLink.date); }
+    ctx.navigate(`/accounting/transactions?${params.toString()}`);
+    const bits = [txDeepLink.q, txDeepLink.date].filter(Boolean).join(" on ");
+    return { handled: true, say: `Looking up ${bits} transaction` };
+  }
+
+  // ---- 6. Explicit "open <entity> <name>" ----
   const openMatch = t.match(OPEN_ENTITY_RE);
   if (openMatch) {
     const entity = openMatch[1].toLowerCase();
