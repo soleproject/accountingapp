@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Send, Sparkles, X, MessageSquare, Mic, MicOff, Volume2, VolumeX, ChevronDown } from "lucide-react";
 import { api, BACKEND_URL } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
 import { useAiFocus } from "@/lib/aiFocus";
 import { toast } from "sonner";
+import { resolveVoiceCommand } from "@/lib/voiceCommands";
 
 const getSR = () => window.SpeechRecognition || window.webkitSpeechRecognition;
 
 export default function AiPanel({ collapsed, onToggle }) {
-  const { currentId, current } = useCompany();
+  const { currentId, current, companies, switchCompany } = useCompany();
+  const navigate = useNavigate();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -299,6 +302,26 @@ export default function AiPanel({ collapsed, onToggle }) {
     clearSilenceTimer();
     const userMsg = input.trim();
     setInput("");
+
+    // ------ Voice command dispatch (client-side, zero cost) ------
+    // If the user's utterance matches a local intent (route/company switch/
+    // meta), execute it immediately and skip the LLM round-trip.
+    const cmd = resolveVoiceCommand(userMsg, {
+      companies,
+      navigate,
+      switchCompany,
+      clearChat: () => setMessages([]),
+    });
+    if (cmd.handled) {
+      setMessages(m => [
+        ...m,
+        { role: "user", content: userMsg },
+        { role: "assistant", content: cmd.say || "Done." },
+      ]);
+      if (voiceOnRef.current && cmd.say) speakOne(cmd.say);
+      return;
+    }
+
     setMessages(m => [...m, { role: "user", content: userMsg }, { role: "assistant", content: "" }]);
     // Fresh reply → reset TTS pointer and stop any prior speech so we don't
     // read overlapping messages.
