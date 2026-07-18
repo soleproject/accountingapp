@@ -933,3 +933,109 @@ def build_1099_pdf(data: dict) -> bytes:
                                s["SubTitle"]))
     doc.build(story)
     return buf.getvalue()
+
+
+# =========================================================================
+#                        Account Detail (transaction report)
+# =========================================================================
+# A per-account transaction listing (used when the user drills into a
+# balance-sheet row). Same visual grammar as trial balance / general ledger
+# so it fits naturally alongside the other reports.
+
+async def compute_account_detail(company_id: str, account_id: str,
+                                 start: str | None = None, end: str | None = None):
+    company = await db.companies.find_one({"id": company_id})
+    account = await db.accounts.find_one({"id": account_id, "company_id": company_id})
+    if not account:
+        return {
+            "company_name": company["name"] if company else "",
+            "account": None, "rows": [], "count": 0, "sum_amount": 0.0, "balance": 0.0,
+        }
+
+    q: dict = {"company_id": company_id, "category_account_id": account_id}
+    if start:
+        q.setdefault("date", {})["$gte"] = start
+    if end:
+        q.setdefault("date", {})["$lte"] = end
+
+    txns = await db.transactions.find(q).sort([("date", 1), ("_id", 1)]).to_list(5000)
+
+    running = 0.0
+    rows: list[dict] = []
+    for t in txns:
+        # Liability / equity / revenue accounts have credit-normal balances,
+        # so an outflow (negative amount) *raises* the balance. We use
+        # `-amount` as the ledger delta to match the balance-sheet display.
+        delta = -1 * (t.get("amount") or 0.0)
+        running += delta
+        rows.append({
+            "id": t.get("id"),
+            "date": t.get("date"),
+            "merchant": t.get("merchant") or t.get("contact_name") or t.get("description"),
+            "description": t.get("description"),
+            "amount": round(t.get("amount") or 0.0, 2),
+            "delta": round(delta, 2),
+            "running": round(running, 2),
+            "needs_review": bool(t.get("needs_review")),
+        })
+    # Newest → oldest for display.
+    rows.reverse()
+
+    return {
+        "company_name": company["name"] if company else "",
+        "account": {
+            "id": account["id"], "code": account["code"], "name": account["name"],
+            "type": account["type"], "parent_account_id": account.get("parent_account_id"),
+        },
+        "rows": rows,
+        "count": len(rows),
+        "sum_amount": round(sum(t.get("amount") or 0.0 for t in txns), 2),
+        "balance": round(running, 2),
+        "period_start": start,
+        "period_end": end,
+    }
+
+
+def build_account_detail_pdf(data: dict) -> bytes:
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=LETTER, leftMargin=0.6 * inch, rightMargin=0.6 * inch,
+                            topMargin=0.6 * inch, bottomMargin=0.6 * inch)
+    s = _pdf_styles()
+    a = data["account"] or {}
+    subtitle = f"ACCOUNT DETAIL &middot; {a.get('code', '')} {a.get('name', '')}"
+    story = [
+        Paragraph(data["company_name"], s["Title2"]),
+        Paragraph(subtitle, s["SubTitle"]),
+        Paragraph(
+            f"{data['count']} transaction{'' if data['count'] == 1 else 's'} "
+            f"&middot; running balance ${data['balance']:,.2f}",
+            s["SubTitle"],
+        ),
+        Spacer(1, 12),
+    ]
+    rows = [["Date", "Merchant / Description", "Amount", "Running Balance"]]
+    for r in data["rows"]:
+        rows.append([
+            r.get("date") or "",
+            (r.get("merchant") or r.get("description") or "")[:60],
+            f"${r['amount']:,.2f}",
+            f"${r['running']:,.2f}",
+        ])
+    rows.append(["", "TOTAL", f"${data['sum_amount']:,.2f}", f"${data['balance']:,.2f}"])
+    t = Table(rows, colWidths=[1.0 * inch, 3.7 * inch, 1.1 * inch, 1.4 * inch])
+    t.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F1F5F9")),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("LINEABOVE", (0, -1), (-1, -1), 0.5, colors.HexColor("#0F172A")),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    story.append(t)
+    if not data["rows"]:
+        story.append(Spacer(1, 20))
+        story.append(Paragraph("No transactions have posted to this account.", s["SubTitle"]))
+    doc.build(story)
+    return buf.getvalue()

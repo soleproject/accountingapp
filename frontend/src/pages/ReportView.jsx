@@ -3,50 +3,38 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, BACKEND_URL } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Download, Loader2, X, ArrowRightCircle } from "lucide-react";
+import { Download, Loader2, ArrowRightCircle } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import { toast } from "sonner";
 
 const startYtd = () => new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0, 10);
 const today = () => new Date().toISOString().slice(0, 10);
 
-// ------------------------- Balance-sheet drilldown -------------------------
-// A slide-over drawer that shows every transaction posted to a given
-// account. Row-click on the Balance Sheet opens this so users can spot-check
-// a nested sub-account's history in one view.
+// ------------------------- Account Detail (full report) -------------------------
+// Rendered when `kind === "account-detail"`. Same visual grammar as the
+// other reports (Balance Sheet, Income Statement, Trial Balance) — full
+// page, PDF-exportable via the standard header — but with bulk-update
+// capability (checkboxes + Move-to-account).
 
-function AccountDrilldown({ currentId, account, onClose }) {
-  const [rows, setRows] = useState(null);
-  const [accounts, setAccounts] = useState([]);
+function AccountDetailBody({ currentId, data, onReload }) {
+  const rows = data.rows || [];
+  const account = data.account || {};
+  const [selected, setSelected] = useState(() => new Set(rows.map(r => r.id)));
   const [moving, setMoving] = useState(false);
   const [applying, setApplying] = useState(false);
-  const [selected, setSelected] = useState(() => new Set()); // txn ids
+  const [accounts, setAccounts] = useState([]);
+
+  // Re-seed selection when a new dataset lands (e.g. after a Move refetches).
+  useEffect(() => {
+    setSelected(new Set((data.rows || []).map(r => r.id)));
+  }, [data]);
 
   useEffect(() => {
-    if (!currentId || !account?.id) return;
-    (async () => {
-      try {
-        const [txnsR, acctsR] = await Promise.all([
-          api.get(`/companies/${currentId}/transactions?category_account_id=${account.id}&limit=500`),
-          api.get(`/companies/${currentId}/accounts`),
-        ]);
-        // Newest → oldest already; reverse to compute running balance forward.
-        const list = (txnsR.data.transactions || []).slice().reverse();
-        let bal = 0;
-        for (const t of list) { bal += -1 * (t.amount || 0); t._running = bal; }
-        // Display newest first again.
-        list.reverse();
-        setRows(list);
-        // Default selection: everything (matches previous "move all" default).
-        setSelected(new Set(list.map(t => t.id)));
-        setAccounts(acctsR.data.accounts || []);
-      } catch {
-        setRows([]);
-      }
-    })();
-  }, [currentId, account?.id]);
+    if (!currentId) return;
+    api.get(`/companies/${currentId}/accounts`).then(r => setAccounts(r.data.accounts || []));
+  }, [currentId]);
 
-  const allSelected = rows && rows.length > 0 && selected.size === rows.length;
+  const allSelected = rows.length > 0 && selected.size === rows.length;
   const someSelected = selected.size > 0 && !allSelected;
   const toggleOne = (id) => {
     setSelected(prev => {
@@ -56,15 +44,11 @@ function AccountDrilldown({ currentId, account, onClose }) {
     });
   };
   const toggleAll = () => {
-    if (!rows) return;
-    setSelected(prev =>
-      prev.size === rows.length ? new Set() : new Set(rows.map(t => t.id))
-    );
+    setSelected(prev => prev.size === rows.length ? new Set() : new Set(rows.map(t => t.id)));
   };
 
-  // Bulk-reclassify only the SELECTED rows.
   const doMove = async (targetId) => {
-    if (!rows || selected.size === 0 || !targetId) return;
+    if (selected.size === 0 || !targetId) return;
     setApplying(true);
     try {
       await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
@@ -74,7 +58,7 @@ function AccountDrilldown({ currentId, account, onClose }) {
       const to = accounts.find(a => a.id === targetId);
       toast.success(`Moved ${selected.size} transaction${selected.size === 1 ? "" : "s"} to ${to?.name || "account"}`);
       setMoving(false);
-      onClose(true);  // reload parent
+      onReload?.();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Move failed");
     } finally {
@@ -82,123 +66,94 @@ function AccountDrilldown({ currentId, account, onClose }) {
     }
   };
 
-  const total = rows ? rows.reduce((s, t) => s + -1 * (t.amount || 0), 0) : 0;
   const selectedTotal = rows
-    ? rows.filter(t => selected.has(t.id)).reduce((s, t) => s + -1 * (t.amount || 0), 0)
-    : 0;
+    .filter(t => selected.has(t.id))
+    .reduce((s, t) => s + (t.delta || 0), 0);
 
-  // Positioning: sit to the LEFT of the AI panel (w-96 = 24rem) so both are
-  // usable side-by-side. Backdrop stops at the panel edge too.
   return (
-    <div className="fixed inset-y-0 left-0 right-[24rem] z-[70]" data-testid="account-drilldown">
-      <div className="absolute inset-0 bg-black/40" onClick={() => onClose(false)} />
-      <aside className="absolute right-0 top-0 bottom-0 w-[640px] max-w-[calc(100%-2rem)] bg-white shadow-2xl flex flex-col">
-        <div className="px-5 py-4 border-b flex items-center gap-3">
-          <div className="flex-1 min-w-0">
-            <div className="text-[11px] uppercase tracking-widest text-slate-500 font-semibold">
-              {account.code} · Drilldown
+    <div className="text-sm">
+      <div className="mb-4 flex items-center gap-2 flex-wrap px-3 py-2 bg-slate-50 rounded-md border border-slate-200">
+        <button
+          data-testid="acctdetail-move-selected"
+          onClick={() => setMoving(true)}
+          disabled={applying || selected.size === 0}
+          className="text-xs font-medium inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-indigo-300 bg-white text-indigo-800 hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <ArrowRightCircle size={13} />
+          Move {selected.size === rows.length ? `all ${rows.length}` : selected.size} to another account
+        </button>
+        <span className="text-[11px] text-slate-500">
+          {selected.size === 0
+            ? "Nothing selected."
+            : selected.size === rows.length
+              ? `All ${rows.length} rows — sums to ${fmtMoney(data.balance)}.`
+              : `${selected.size} of ${rows.length} — sums to ${fmtMoney(selectedTotal)}.`}
+        </span>
+      </div>
+      {rows.length === 0 ? (
+        <div className="p-6 text-sm text-slate-500 border rounded">No transactions have posted to this account.</div>
+      ) : (
+        <>
+          <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-slate-100 border-b text-[11px] uppercase tracking-widest text-slate-600 font-semibold items-center rounded-t">
+            <div className="col-span-1">
+              <input
+                type="checkbox"
+                data-testid="acctdetail-select-all"
+                checked={!!allSelected}
+                ref={el => { if (el) el.indeterminate = !!someSelected; }}
+                onChange={toggleAll}
+                className="h-3.5 w-3.5 accent-indigo-600 cursor-pointer"
+                aria-label="Select all rows"
+              />
             </div>
-            <h3 className="font-heading text-lg font-semibold truncate">{account.name}</h3>
+            <div className="col-span-2">Date</div>
+            <div className="col-span-4">Merchant / Description</div>
+            <div className="col-span-2 text-right">Amount</div>
+            <div className="col-span-3 text-right">Running Balance</div>
           </div>
-          <div className="text-right">
-            <div className="text-[11px] text-slate-500 uppercase tracking-wide">Balance</div>
-            <div className="font-mono-num text-lg font-bold">{fmtMoney(account.amount)}</div>
-          </div>
-          <button onClick={() => onClose(false)} className="p-1.5 rounded hover:bg-slate-100" data-testid="drilldown-close">
-            <X size={16} />
-          </button>
-        </div>
-        {rows && rows.length > 0 && (
-          <div className="px-5 py-2 border-b bg-slate-50 flex items-center gap-2 flex-wrap">
-            <button
-              data-testid="drilldown-move-selected"
-              onClick={() => setMoving(true)}
-              disabled={applying || selected.size === 0}
-              className="text-xs font-medium inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-indigo-300 bg-white text-indigo-800 hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <ArrowRightCircle size={13} />
-              Move {selected.size === rows.length ? `all ${rows.length}` : selected.size} to another account
-            </button>
-            <span className="text-[11px] text-slate-500">
-              {selected.size === 0
-                ? "Nothing selected."
-                : selected.size === rows.length
-                  ? `All ${rows.length} rows — sums to ${fmtMoney(total)}.`
-                  : `${selected.size} of ${rows.length} — sums to ${fmtMoney(selectedTotal)}.`}
-            </span>
-          </div>
-        )}
-        <div className="flex-1 overflow-auto">
-          {rows === null ? (
-            <div className="flex items-center justify-center p-10 text-slate-500">
-              <Loader2 className="animate-spin" size={18} />
-            </div>
-          ) : rows.length === 0 ? (
-            <div className="p-6 text-sm text-slate-500">No transactions have posted to this account yet.</div>
-          ) : (
-            <>
-              <div className="grid grid-cols-12 gap-2 px-4 py-2 bg-slate-50 border-b text-[11px] uppercase tracking-widest text-slate-600 font-semibold items-center">
-                <div className="col-span-1 flex items-center">
+          {rows.map(t => {
+            const isChecked = selected.has(t.id);
+            return (
+              <label
+                key={t.id}
+                className={`grid grid-cols-12 gap-2 px-3 py-2 border-b border-slate-100 text-[13px] items-center cursor-pointer ${isChecked ? "bg-indigo-50/40" : "hover:bg-slate-50"}`}
+              >
+                <div className="col-span-1">
                   <input
                     type="checkbox"
-                    data-testid="drilldown-select-all"
-                    checked={!!allSelected}
-                    ref={el => { if (el) el.indeterminate = !!someSelected; }}
-                    onChange={toggleAll}
+                    data-testid={`acctdetail-row-${t.id}`}
+                    checked={isChecked}
+                    onChange={() => toggleOne(t.id)}
                     className="h-3.5 w-3.5 accent-indigo-600 cursor-pointer"
-                    aria-label="Select all rows"
                   />
                 </div>
-                <div className="col-span-2">Date</div>
-                <div className="col-span-4">Merchant / Description</div>
-                <div className="col-span-2 text-right">Amount</div>
-                <div className="col-span-3 text-right">Running Balance</div>
-              </div>
-              {rows.map(t => {
-                const isChecked = selected.has(t.id);
-                return (
-                  <label
-                    key={t.id}
-                    className={`grid grid-cols-12 gap-2 px-4 py-2 border-b border-slate-100 text-[13px] items-center cursor-pointer ${isChecked ? "bg-indigo-50/40" : "hover:bg-slate-50"}`}
-                  >
-                    <div className="col-span-1">
-                      <input
-                        type="checkbox"
-                        data-testid={`drilldown-row-check-${t.id}`}
-                        checked={isChecked}
-                        onChange={() => toggleOne(t.id)}
-                        className="h-3.5 w-3.5 accent-indigo-600 cursor-pointer"
-                      />
-                    </div>
-                    <div className="col-span-2 font-mono-num text-slate-500">{t.date}</div>
-                    <div className="col-span-4 truncate" title={t.merchant || t.description}>
-                      {t.merchant || t.description || <span className="italic text-slate-400">—</span>}
-                      {t.needs_review && <span className="ml-2 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">review</span>}
-                    </div>
-                    <div className={`col-span-2 text-right font-mono-num ${(t.amount || 0) < 0 ? "text-slate-800" : "text-emerald-700"}`}>
-                      {fmtMoney(t.amount)}
-                    </div>
-                    <div className="col-span-3 text-right font-mono-num text-slate-600">
-                      {fmtMoney(t._running)}
-                    </div>
-                  </label>
-                );
-              })}
-              <div className="grid grid-cols-12 gap-2 px-4 py-2 border-t-2 border-slate-800 text-sm bg-slate-50">
-                <div className="col-span-7 font-semibold uppercase text-[11px] tracking-widest text-slate-600">
-                  {rows.length} transaction{rows.length === 1 ? "" : "s"}
+                <div className="col-span-2 font-mono-num text-slate-500">{t.date}</div>
+                <div className="col-span-4 truncate" title={t.merchant || t.description}>
+                  {t.merchant || t.description || <span className="italic text-slate-400">—</span>}
+                  {t.needs_review && <span className="ml-2 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">review</span>}
                 </div>
-                <div className="col-span-2 text-right font-mono-num font-bold">
-                  {fmtMoney(-1 * rows.reduce((s, t) => s + (t.amount || 0), 0))}
+                <div className={`col-span-2 text-right font-mono-num ${(t.amount || 0) < 0 ? "text-slate-800" : "text-emerald-700"}`}>
+                  {fmtMoney(t.amount)}
                 </div>
-                <div className="col-span-3 text-right font-mono-num font-bold">
-                  {fmtMoney(total)}
+                <div className="col-span-3 text-right font-mono-num text-slate-600">
+                  {fmtMoney(t.running)}
                 </div>
-              </div>
-            </>
-          )}
-        </div>
-      </aside>
+              </label>
+            );
+          })}
+          <div className="grid grid-cols-12 gap-2 px-3 py-2 border-t-2 border-slate-800 text-sm bg-slate-50 rounded-b">
+            <div className="col-span-7 font-semibold uppercase text-[11px] tracking-widest text-slate-600">
+              {rows.length} transaction{rows.length === 1 ? "" : "s"}
+            </div>
+            <div className="col-span-2 text-right font-mono-num font-bold">
+              {fmtMoney(data.sum_amount)}
+            </div>
+            <div className="col-span-3 text-right font-mono-num font-bold">
+              {fmtMoney(data.balance)}
+            </div>
+          </div>
+        </>
+      )}
       {moving && (
         <ReclassifyPicker
           accounts={accounts}
@@ -217,6 +172,7 @@ function AccountDrilldown({ currentId, account, onClose }) {
 
 export default function ReportView() {
   const { kind } = useParams();
+  const navigate = useNavigate();
   const { currentId, current } = useCompany();
   const [searchParams] = useSearchParams();
   const urlBasis = searchParams.get("basis");
@@ -227,9 +183,13 @@ export default function ReportView() {
   const [end, setEnd] = useState(urlEnd || today());
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
-  // Balance-sheet drilldown: clicking a row opens a slide-over showing every
-  // transaction that posted to that account.
-  const [drilldownAcct, setDrilldownAcct] = useState(null);
+  // Balance-sheet drilldown: clicking a row navigates to the full-page
+  // Account Detail report so users can review, PDF-export, or bulk-move
+  // transactions using the same UX as any other financial report.
+  const goToAccountDetail = (row) => {
+    if (!row?.id) return;
+    navigate(`/reports/account-detail?account=${row.id}`);
+  };
 
   // Re-sync from URL params when the user re-triggers a voice command that
   // navigates back to the same report page with different filters.
@@ -243,21 +203,35 @@ export default function ReportView() {
   const fetchData = async () => {
     if (!currentId) return;
     setBusy(true);
-    const params = kind === "balance-sheet"
-      ? `as_of=${end}&basis=${basis}`
-      : `start=${start}&end=${end}&basis=${basis}`;
+    let url;
+    if (kind === "balance-sheet") {
+      url = `/companies/${currentId}/reports/${kind}?as_of=${end}&basis=${basis}`;
+    } else if (kind === "account-detail") {
+      const aid = searchParams.get("account");
+      if (!aid) { setBusy(false); return; }
+      const s = urlStart ? `&start=${urlStart}` : "";
+      const e = urlEnd ? `&end=${urlEnd}` : "";
+      url = `/companies/${currentId}/reports/account-detail?account_id=${aid}${s}${e}`;
+    } else {
+      url = `/companies/${currentId}/reports/${kind}?start=${start}&end=${end}&basis=${basis}`;
+    }
     try {
-      const r = await api.get(`/companies/${currentId}/reports/${kind}?${params}`);
+      const r = await api.get(url);
       setData(r.data);
     } finally { setBusy(false); }
   };
 
-  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [currentId, kind, basis, start, end]);
+  const acctParam = searchParams.get("account");
+  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [currentId, kind, basis, start, end, acctParam]);
 
   const downloadPdf = async () => {
-    const params = kind === "balance-sheet"
-      ? `as_of=${end}&basis=${basis}`
-      : `start=${start}&end=${end}&basis=${basis}`;
+    let params;
+    if (kind === "balance-sheet") params = `as_of=${end}&basis=${basis}`;
+    else if (kind === "account-detail") {
+      const aid = searchParams.get("account");
+      if (!aid) return;
+      params = `account_id=${aid}`;
+    } else params = `start=${start}&end=${end}&basis=${basis}`;
     const token = localStorage.getItem("axiom_token");
     const r = await fetch(`${BACKEND_URL}/api/companies/${currentId}/reports/${kind}/pdf?${params}`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -265,7 +239,9 @@ export default function ReportView() {
     const blob = await r.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = `${kind}.pdf`; a.click();
+    a.href = url;
+    const suffix = kind === "account-detail" ? `-${(data?.account?.code || "acct")}` : "";
+    a.download = `${kind}${suffix}.pdf`; a.click();
     URL.revokeObjectURL(url);
   };
 
@@ -277,6 +253,7 @@ export default function ReportView() {
     "cash-flow": "Statement of Cash Flows",
     "sales-tax": "Sales Tax Liability",
     "1099-summary": "1099 Summary",
+    "account-detail": "Account Detail",
   }[kind] || kind;
 
   return (
@@ -284,7 +261,7 @@ export default function ReportView() {
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="font-heading text-3xl font-bold tracking-tight">{title}</h1>
         <div className="ml-auto flex items-center gap-2">
-          {kind !== "trial-balance" && (
+          {kind !== "trial-balance" && kind !== "account-detail" && (
             <div className="inline-flex rounded-md border bg-white text-xs" data-testid={TID.reportBasisToggle}>
               {["accrual", "cash"].map(b => (
                 <button key={b} onClick={() => setBasis(b)}
@@ -295,10 +272,12 @@ export default function ReportView() {
               ))}
             </div>
           )}
-          {kind !== "balance-sheet" && (
+          {kind !== "balance-sheet" && kind !== "account-detail" && (
             <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className="border rounded px-2 py-1 text-xs" />
           )}
-          <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="border rounded px-2 py-1 text-xs" />
+          {kind !== "account-detail" && (
+            <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="border rounded px-2 py-1 text-xs" />
+          )}
           <button data-testid={TID.reportApply} onClick={fetchData} className="px-3 py-1.5 rounded-md border bg-white text-xs">Apply</button>
           <button data-testid={TID.reportExportPdf} onClick={downloadPdf}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs">
@@ -319,6 +298,8 @@ export default function ReportView() {
                 ? `As of ${data.as_of} · ${data.basis} basis`
                 : kind === "1099-summary"
                 ? `Tax year ${data.year}`
+                : kind === "account-detail"
+                ? `${data.account?.code || ""} · ${data.account?.name || ""} · ${data.count} txn${data.count === 1 ? "" : "s"} · balance ${fmtMoney(data.balance)}`
                 : `${data.period_start} to ${data.period_end}${data.basis ? ` · ${data.basis} basis` : ""}`}
             </div>
           </div>
@@ -327,7 +308,14 @@ export default function ReportView() {
             <IncomeStatementBody data={data} />
           )}
           {kind === "balance-sheet" && (
-            <BalanceSheetBody data={data} onDrilldown={(row) => setDrilldownAcct(row)} />
+            <BalanceSheetBody data={data} onDrilldown={goToAccountDetail} />
+          )}
+          {kind === "account-detail" && (
+            <AccountDetailBody
+              currentId={currentId}
+              data={data}
+              onReload={fetchData}
+            />
           )}
           {kind === "trial-balance" && (
             <TrialBalanceBody data={data} />
@@ -345,13 +333,6 @@ export default function ReportView() {
             <Form1099Body data={data} />
           )}
         </div>
-      )}
-      {drilldownAcct && (
-        <AccountDrilldown
-          currentId={currentId}
-          account={drilldownAcct}
-          onClose={(reload) => { setDrilldownAcct(null); if (reload) fetchData(); }}
-        />
       )}
     </div>
   );

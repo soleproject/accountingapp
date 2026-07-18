@@ -2207,6 +2207,27 @@ async def rep_bs_pdf(cid: str, as_of: Optional[str] = None, basis: str = "accrua
                     headers={"Content-Disposition": "attachment; filename=balance_sheet.pdf"})
 
 
+
+@api.get("/companies/{cid}/reports/account-detail")
+async def rep_account_detail(cid: str, account_id: str,
+                             start: Optional[str] = None, end: Optional[str] = None,
+                             user: dict = Depends(get_current_user)):
+    await _require_company(user, cid)
+    return await R.compute_account_detail(cid, account_id, start, end)
+
+
+@api.get("/companies/{cid}/reports/account-detail/pdf")
+async def rep_account_detail_pdf(cid: str, account_id: str,
+                                 start: Optional[str] = None, end: Optional[str] = None,
+                                 user: dict = Depends(get_current_user)):
+    await _require_company(user, cid)
+    data = await R.compute_account_detail(cid, account_id, start, end)
+    fname = f"account_detail_{(data.get('account') or {}).get('code','x')}.pdf"
+    return Response(content=R.build_account_detail_pdf(data), media_type="application/pdf",
+                    headers={"Content-Disposition": f"attachment; filename={fname}"})
+
+
+
 @api.get("/companies/{cid}/reports/trial-balance")
 async def rep_tb(cid: str, as_of: Optional[str] = None, user: dict = Depends(get_current_user)):
     await _require_company(user, cid)

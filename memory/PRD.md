@@ -289,6 +289,13 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ### P0 — none (MVP feature-complete)
 
+### Recently shipped (2026-07-18 evening — patch 6)
+- **Account-detail is now a first-class report, not a modal drawer** — clicking any BS row navigates to `/reports/account-detail?account={id}`, rendered by `ReportView` alongside Balance Sheet, Income Statement, Trial Balance, etc. Same page layout (title bar, Apply/PDF-export buttons, boxed report body).
+- **PDF export** — new `GET /api/companies/{cid}/reports/account-detail/pdf?account_id=...` produces a proper `account_detail_<code>.pdf` via `build_account_detail_pdf` (ReportLab, same visual grammar as trial balance/GL).
+- **JSON endpoint** — `GET /api/companies/{cid}/reports/account-detail?account_id=...` returns `{account, rows, count, sum_amount, balance, period_start, period_end}` with running balance already computed server-side.
+- **Bulk-update preserved** — checkboxes + Move-to-account button live in the report body just like they did in the drawer.
+- Removed the old `AccountDrilldown` component; ReportView cleaner and no more overlay z-index gymnastics.
+
 ### Recently shipped (2026-07-18 evening — patch 5)
 - **Mic is click-to-toggle only** — removed the hold-to-talk (PTT) mode entirely. One click flips OFF ↔ LIVE (open-mic). Tooltip: *"Voice off — click to go live"* / *"Voice on — click to mute"*. Legacy `axiom_mic_mode=ptt` from localStorage is coerced to `open` on load so returning users don't get stuck.
 - **Sidebar no longer auto-flips into Accounting sub-view** — clicking "Transactions" from the main sidebar navigates to `/accounting/transactions` but the sidebar stays on the main view. The Accounting sub-view only opens when the user explicitly clicks the *Accounting* button.
