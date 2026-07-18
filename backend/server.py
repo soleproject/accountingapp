@@ -304,9 +304,21 @@ async def _categorize_and_insert(
     threshold = await categorizer.get_auto_post_threshold(cid)
 
     now = now_iso()
+    # Build id→doc index once so the sub-account resolver doesn't re-query.
+    accts_by_id = {a["id"]: a for a in accts}
+    from liability_subaccounts import maybe_route_to_liability_subaccount
     docs = []
     for c, r in zip(candidates, cat_res):
         post = categorizer.decide_posting(r, threshold, uncat_exp, uncat_inc, accts, c["amount"])
+        # If the AI picked a generic parent liability bucket (e.g. Loans
+        # Payable), fan out to a per-payee sub-account so the balance sheet
+        # tracks each instrument on its own line.
+        post = await maybe_route_to_liability_subaccount(
+            cid, post,
+            merchant=c.get("merchant"),
+            contact_name=c.get("contact_name"),
+            accts_by_id=accts_by_id,
+        )
         base = {
             "id": str(uuid.uuid4()), "company_id": cid, "date": c["date"],
             "description": c["description"], "merchant": c["merchant"], "amount": c["amount"],
@@ -982,6 +994,18 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
     if "category_account_id" in upd:
         acct = await db.accounts.find_one({"id": upd["category_account_id"], "company_id": cid})
         if acct:
+            # If the caller picked a generic parent liability bucket, auto-route
+            # to the matching per-payee sub-account so the balance sheet stays
+            # instrument-level.
+            from liability_subaccounts import is_parent_liability_bucket, resolve_or_create_liability_subaccount
+            if is_parent_liability_bucket(acct):
+                payee = existing.get("contact_name") if existing else None
+                if not payee and existing:
+                    payee = existing.get("merchant")
+                child = await resolve_or_create_liability_subaccount(cid, acct, payee)
+                if child:
+                    acct = child
+                    upd["category_account_id"] = child["id"]
             upd["category_account_code"] = acct["code"]
             upd["category_account_name"] = acct["name"]
         upd["human_reviewed"] = True
@@ -1159,21 +1183,62 @@ async def bulk_reclassify(cid: str, payload: dict, user: dict = Depends(get_curr
 
     now = now_iso()
     editable_ids = [t["id"] for t in editable]
-    await db.transactions.update_many(
-        {"id": {"$in": editable_ids}, "company_id": cid},
-        {"$set": {
-            "category_account_id":   acct["id"],
-            "category_account_code": acct["code"],
-            "category_account_name": acct["name"],
-            "ai_confidence": 1.0,
-            "ai_reasoning": f"Manual bulk reclassify → {acct['name']}",
-            "ai_source": "manual_bulk",
-            "needs_review": False,
-            "human_reviewed": True,
-            "posted": True,
-            "updated_at": now,
-        }},
-    )
+
+    # If the target is a generic parent liability bucket, fan out to per-payee
+    # sub-accounts so each instrument tracks separately on the balance sheet.
+    from liability_subaccounts import is_parent_liability_bucket, resolve_or_create_liability_subaccount
+    fanout = is_parent_liability_bucket(acct)
+    subaccounts_created = 0
+    if fanout:
+        # Group by payee, create/resolve one child per group, and issue a
+        # separate update_many per child.
+        by_payee: dict[str, list[dict]] = {}
+        for t in editable:
+            payee = (t.get("contact_name") or t.get("merchant") or "").strip()
+            by_payee.setdefault(payee, []).append(t)
+        touched = 0
+        for payee, txns_group in by_payee.items():
+            target = acct  # fall back to parent when payee is generic
+            if payee:
+                child = await resolve_or_create_liability_subaccount(cid, acct, payee)
+                if child:
+                    target = child
+                    # Track whether it was actually new to report to caller.
+                    if child.get("created_by_ai") and child.get("created_at") == now_iso():
+                        subaccounts_created += 1
+            group_ids = [t["id"] for t in txns_group]
+            await db.transactions.update_many(
+                {"id": {"$in": group_ids}, "company_id": cid},
+                {"$set": {
+                    "category_account_id":   target["id"],
+                    "category_account_code": target["code"],
+                    "category_account_name": target["name"],
+                    "ai_confidence": 1.0,
+                    "ai_reasoning": f"Manual bulk reclassify → {target['name']}",
+                    "ai_source": "manual_bulk",
+                    "needs_review": False,
+                    "human_reviewed": True,
+                    "posted": True,
+                    "updated_at": now,
+                }},
+            )
+            touched += len(txns_group)
+    else:
+        await db.transactions.update_many(
+            {"id": {"$in": editable_ids}, "company_id": cid},
+            {"$set": {
+                "category_account_id":   acct["id"],
+                "category_account_code": acct["code"],
+                "category_account_name": acct["name"],
+                "ai_confidence": 1.0,
+                "ai_reasoning": f"Manual bulk reclassify → {acct['name']}",
+                "ai_source": "manual_bulk",
+                "needs_review": False,
+                "human_reviewed": True,
+                "posted": True,
+                "updated_at": now,
+            }},
+        )
     await _log_ai(cid, "post_je", len(editable))
 
     # Bump rule_candidates per (merchant, account_code) pair, then look for a
@@ -3602,6 +3667,82 @@ async def ai_diagnose(cid: str, user: dict = Depends(get_current_user)):
     """
     await _require_company(user, cid)
     return await _diagnose_books(cid)
+
+
+@api.post("/companies/{cid}/accounts/{aid}/fanout-subaccounts")
+async def fanout_liability_subaccounts(cid: str, aid: str,
+                                       user: dict = Depends(get_current_user)):
+    """Migrate historical transactions currently posted to a generic parent
+    liability bucket (Credit Card Payable, Loans Payable, …) into per-payee
+    sub-accounts.
+
+    For each unique `contact_name` (or `merchant`) currently posting to the
+    parent, we:
+      1. Create (or match) a child sub-account named after the payee.
+      2. Bulk-update the transactions so they post to that child.
+
+    Returns the number of sub-accounts created + the number of transactions
+    moved. Idempotent: running twice does nothing on the second call.
+    """
+    await _require_company(user, cid)
+    parent = await db.accounts.find_one({"id": aid, "company_id": cid})
+    if not parent:
+        raise HTTPException(404, "Account not found")
+    from liability_subaccounts import (
+        is_parent_liability_bucket, resolve_or_create_liability_subaccount,
+    )
+    if not is_parent_liability_bucket(parent):
+        raise HTTPException(400, "Account is not a generic liability parent bucket")
+
+    # Group current postings by payee.
+    pipe = [
+        {"$match": {"company_id": cid, "category_account_id": aid, "posted": True}},
+        {"$group": {
+            "_id": {"$ifNull": ["$contact_name", "$merchant"]},
+            "ids": {"$push": "$id"},
+            "count": {"$sum": 1},
+        }},
+        {"$sort": {"count": -1}},
+    ]
+    groups: list[dict] = []
+    async for g in db.transactions.aggregate(pipe):
+        groups.append(g)
+
+    accounts_created = 0
+    txns_moved = 0
+    now = now_iso()
+    for g in groups:
+        payee = g.get("_id")
+        if not payee:
+            continue
+        # Snapshot child count BEFORE resolve so we can tell if a new one was made.
+        before = await db.accounts.count_documents(
+            {"company_id": cid, "parent_account_id": aid},
+        )
+        child = await resolve_or_create_liability_subaccount(cid, parent, payee, source="backfill")
+        if not child:
+            continue
+        after = await db.accounts.count_documents(
+            {"company_id": cid, "parent_account_id": aid},
+        )
+        if after > before:
+            accounts_created += 1
+        r = await db.transactions.update_many(
+            {"id": {"$in": g["ids"]}, "company_id": cid},
+            {"$set": {
+                "category_account_id":   child["id"],
+                "category_account_code": child.get("code"),
+                "category_account_name": child.get("name"),
+                "updated_at": now,
+            }},
+        )
+        txns_moved += r.modified_count
+
+    return {
+        "parent_account": {"id": parent["id"], "code": parent["code"], "name": parent["name"]},
+        "accounts_created": accounts_created,
+        "transactions_moved": txns_moved,
+    }
 
 
 @api.get("/companies/{cid}/ai/review")

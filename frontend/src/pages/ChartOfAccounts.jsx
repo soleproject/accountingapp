@@ -37,7 +37,23 @@ export default function ChartOfAccounts() {
     load();
   };
 
-  const grouped = TYPES.map(t => ({ type: t, items: accts.filter(a => a.type === t) }));
+  // Group by type AND respect parent/child hierarchy: parents render first,
+  // then their children indented right below. Orphans (no parent) still show.
+  const grouped = TYPES.map(t => {
+    const items = accts.filter(a => a.type === t);
+    // Sort: top-level by code, then each parent's kids by code right after it.
+    const byId = Object.fromEntries(items.map(a => [a.id, a]));
+    const topLevel = items.filter(a => !a.parent_account_id || !byId[a.parent_account_id]);
+    topLevel.sort((x, y) => String(x.code).localeCompare(String(y.code)));
+    const ordered = [];
+    for (const p of topLevel) {
+      ordered.push({ ...p, _depth: 0 });
+      const kids = items.filter(a => a.parent_account_id === p.id);
+      kids.sort((x, y) => String(x.code).localeCompare(String(y.code)));
+      for (const k of kids) ordered.push({ ...k, _depth: 1 });
+    }
+    return { type: t, items: ordered };
+  });
 
   return (
     <div className="space-y-4">
@@ -68,9 +84,21 @@ export default function ChartOfAccounts() {
             </div>
             <div>
               {g.items.map(a => (
-                <div key={a.id} className="grid grid-cols-12 gap-3 px-4 py-2 border-b border-slate-100 items-center hover:bg-slate-50">
-                  <div className="col-span-2 font-mono-num text-slate-500 text-sm">{a.code}</div>
-                  <div className="col-span-7 text-sm">{a.name}</div>
+                <div key={a.id}
+                     className={`grid grid-cols-12 gap-3 px-4 py-2 border-b border-slate-100 items-center hover:bg-slate-50 ${a._depth ? "bg-slate-50/40" : ""}`}
+                     data-testid={a.parent_account_id ? "coa-child-row" : "coa-parent-row"}>
+                  <div className="col-span-2 font-mono-num text-slate-500 text-sm">
+                    {a._depth ? <span className="opacity-40 mr-1">↳</span> : null}
+                    {a.code}
+                  </div>
+                  <div className={`col-span-7 text-sm ${a._depth ? "pl-4 text-slate-700" : "font-medium"}`}>
+                    {a.name}
+                    {a.created_by_ai && a.parent_account_id && (
+                      <span className="ml-2 text-[10px] uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
+                        auto
+                      </span>
+                    )}
+                  </div>
                   <div className="col-span-2 text-xs text-slate-500">{a.subtype}</div>
                   <div className="col-span-1 text-right">
                     <button onClick={() => del(a.id)} className="text-red-500 hover:bg-red-50 rounded p-1"

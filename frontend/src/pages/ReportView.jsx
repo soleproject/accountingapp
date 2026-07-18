@@ -147,12 +147,16 @@ function Section({ title }) {
     </div>
   );
 }
-function Row({ code, name, amount, bold }) {
+function Row({ code, name, amount, bold, parent_code }) {
+  const isChild = !!parent_code;
   return (
-    <div className={`grid grid-cols-12 gap-2 px-3 py-1.5 border-b border-slate-100 ${bold ? "font-semibold border-slate-800" : ""}`}>
-      <div className="col-span-2 font-mono-num text-xs text-slate-500">{code}</div>
-      <div className="col-span-7">{name}</div>
-      <div className="col-span-3 text-right font-mono-num">{fmtMoney(amount)}</div>
+    <div className={`grid grid-cols-12 gap-2 px-3 py-1.5 border-b border-slate-100 ${bold ? "font-semibold border-slate-800" : ""} ${isChild ? "bg-slate-50/60" : ""}`}>
+      <div className="col-span-2 font-mono-num text-xs text-slate-500">
+        {isChild ? <span className="opacity-40 mr-1">↳</span> : null}
+        {code}
+      </div>
+      <div className={`col-span-7 ${isChild ? "pl-4 text-slate-600 text-[13px]" : ""}`}>{name}</div>
+      <div className={`col-span-3 text-right font-mono-num ${isChild ? "text-slate-600 text-[13px]" : ""}`}>{fmtMoney(amount)}</div>
     </div>
   );
 }

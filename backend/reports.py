@@ -229,22 +229,70 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
     accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
     by = await _signed_balances(company_id, start=None, end=as_of, include_pre_period=True)
 
-    assets, liabilities, equity = [], [], []
+    # ----- Build parent → children index for hierarchical rollup -----
+    # Each account can have `parent_account_id`. Parents (no parent id) show
+    # a rolled-up amount = own direct postings + sum of children. Children
+    # appear as separate rows with `parent_code` set so consumers can indent
+    # or subtotal. The final section totals count only top-level rows so we
+    # don't double-count children.
+    children_of: dict[str, list[dict]] = {}
+    for a in accts:
+        pid = a.get("parent_account_id")
+        if pid:
+            children_of.setdefault(pid, []).append(a)
+
+    def _row(a: dict, direct_amount: float, parent_code: str | None = None):
+        r = {"code": a["code"], "name": a["name"], "amount": round(direct_amount, 2)}
+        if parent_code:
+            r["parent_code"] = parent_code
+        return r
+
+    def _emit_section(section_type: str) -> tuple[list[dict], float]:
+        """Return (rows, section_total) for one type — assets, liabilities, equity."""
+        rows: list[dict] = []
+        top_total = 0.0
+        # Sort parents (top-level accounts of this type) by code.
+        top_level = [a for a in accts
+                     if a["type"] == section_type and not a.get("parent_account_id")]
+        top_level.sort(key=lambda x: x["code"])
+        for a in top_level:
+            direct = _display_amount(a, by.get(a["id"], 0.0))
+            kids = sorted(children_of.get(a["id"], []), key=lambda x: x["code"])
+            kids_rows: list[dict] = []
+            kids_total = 0.0
+            for k in kids:
+                if k["type"] != section_type:
+                    continue  # defensive
+                kd = _display_amount(k, by.get(k["id"], 0.0))
+                if abs(kd) < 0.005:
+                    continue
+                kids_rows.append(_row(k, kd, parent_code=a["code"]))
+                kids_total += kd
+            rolled = direct + kids_total
+            # Only emit the parent if it has ANY value (own or via children)
+            # OR is a well-known section anchor (Retained Earnings, etc.).
+            keep_parent = abs(rolled) >= 0.005 or a["code"] == "3100"
+            if keep_parent:
+                rows.append(_row(a, rolled))
+                rows.extend(kids_rows)
+                top_total += rolled
+            else:
+                # Parent is zero + no visible children: still emit visible children
+                # (they had activity even if it netted at the parent).
+                for kr in kids_rows:
+                    rows.append(kr)
+                    top_total += kr["amount"]
+        return rows, top_total
+
+    assets, total_assets_raw = _emit_section("asset")
+    liabilities, total_liabilities_raw = _emit_section("liability")
+    equity, total_equity_raw = _emit_section("equity")
+
+    # Net income roll-in from revenue/expense accounts (unchanged).
     net_income_current = 0.0
-    for a in sorted(accts, key=lambda x: x["code"]):
-        raw = by.get(a["id"], 0.0)
-        disp = _display_amount(a, raw)
-        if a["type"] == "asset":
-            if abs(disp) >= 0.005:
-                assets.append({"code": a["code"], "name": a["name"], "amount": round(disp, 2)})
-        elif a["type"] == "liability":
-            if abs(disp) >= 0.005:
-                liabilities.append({"code": a["code"], "name": a["name"], "amount": round(disp, 2)})
-        elif a["type"] == "equity":
-            if abs(disp) >= 0.005 or a["code"] == "3100":  # keep RE row visible even if 0
-                equity.append({"code": a["code"], "name": a["name"], "amount": round(disp, 2)})
-        elif a["type"] in ("revenue", "expense"):
-            # income accounts roll into current-period retained earnings
+    for a in accts:
+        if a["type"] in ("revenue", "expense"):
+            disp = _display_amount(a, by.get(a["id"], 0.0))
             if a["type"] == "revenue":
                 net_income_current += disp
             else:
@@ -264,9 +312,8 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
             liabilities.append({"code": "2000", "name": "Accounts Payable", "amount": round(ap_open, 2)})
         # keep books balanced: A/R adds to accrued revenue, A/P adds to accrued expense
         net_income_current += ar_open - ap_open
-        # Sort assets & liabilities by code so A/R/A/P slot in properly
-        assets.sort(key=lambda x: x["code"])
-        liabilities.sort(key=lambda x: x["code"])
+        assets.sort(key=lambda x: (x["code"], x.get("parent_code", "")))
+        liabilities.sort(key=lambda x: (x.get("parent_code", "") or x["code"], x["code"]))
 
     net_income_current = round(net_income_current, 2)
     equity.append({
@@ -274,9 +321,10 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
         "amount": net_income_current,
     })
 
-    total_assets = round(sum(x["amount"] for x in assets), 2)
-    total_liabilities = round(sum(x["amount"] for x in liabilities), 2)
-    total_equity = round(sum(x["amount"] for x in equity), 2)
+    # Totals: sum only TOP-LEVEL rows (children carry parent_code).
+    total_assets = round(sum(x["amount"] for x in assets if not x.get("parent_code")), 2)
+    total_liabilities = round(sum(x["amount"] for x in liabilities if not x.get("parent_code")), 2)
+    total_equity = round(sum(x["amount"] for x in equity if not x.get("parent_code")), 2)
     total_le = round(total_liabilities + total_equity, 2)
     balanced = abs(total_assets - total_le) < 0.02
 
