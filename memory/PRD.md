@@ -289,6 +289,14 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ### P0 — none (MVP feature-complete)
 
+### Recently shipped (2026-07-18 late — patch 7: Account Detail polish)
+- **Contact column** — Account Detail table now shows the transaction Contact between Merchant/Description and Amount (col-span layout 1/2/3/2/2/2). Contact resolves from `transactions.contact_name`.
+- **Breadcrumb back to Balance Sheet with scroll restoration** — top of Account Detail shows *"Balance Sheet / <code> · <name>"*. Click on the drill-in row captures `document.querySelector('main').scrollTop` (the app shell scrolls the `<main>` element, not the window) into `sessionStorage["bsScrollY"]` and the current BS URL into `sessionStorage["bsReturnUrl"]`. Breadcrumb reads both and returns to that exact position via a double-rAF + 120ms fallback timeout after data render.
+- **Search + Filter drawer** — new URL-param-backed search input (`q`) and Filters popover (Date from/to, Amount ≥ / ≤). Backend `compute_account_detail(company_id, account_id, start, end, q, contact_id, min_amount, max_amount)` post-filters the txn cursor by needle in `merchant / description / contact_name` and by `abs(amount)` range. Filter count badge on the toggle button; "Clear all filters" resets everything.
+- **Voice router: "open account 2110" / "pull the Citi Card detail"** — new `OPEN_ACCOUNT_RE` in `voiceCommands.js` returns `{ handled: true, remote: 'open-account', target }`. `AiPanel.jsx` fetches `/accounts`, tries exact code → code prefix → fuzzy name match, navigates to `/reports/account-detail?account=<id>` and speaks *"Opening <code> <name>"*.
+- **Data-shape render guards** — added `Array.isArray(data.assets)` / `data.rows` / etc. checks on every report body so a lingering stale-data state during URL kind transitions no longer crashes the page ("Cannot read properties of undefined").
+- **Also**: `account-detail/pdf` endpoint accepts the same new filter params, so exported PDFs match the on-screen filtered view.
+
 ### Recently shipped (2026-07-18 evening — patch 6)
 - **Account-detail is now a first-class report, not a modal drawer** — clicking any BS row navigates to `/reports/account-detail?account={id}`, rendered by `ReportView` alongside Balance Sheet, Income Statement, Trial Balance, etc. Same page layout (title bar, Apply/PDF-export buttons, boxed report body).
 - **PDF export** — new `GET /api/companies/{cid}/reports/account-detail/pdf?account_id=...` produces a proper `account_detail_<code>.pdf` via `build_account_detail_pdf` (ReportLab, same visual grammar as trial balance/GL).
