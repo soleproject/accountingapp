@@ -30,6 +30,10 @@ export default function AiPanel({ collapsed, onToggle }) {
     const v = parseFloat(localStorage.getItem("axiom_tts_rate") || "1.05");
     return isFinite(v) ? v : 1.05;
   });
+  const [terseness, setTerseness] = useState(() =>
+    localStorage.getItem("axiom_terseness") || "balanced"
+  );
+  useEffect(() => { localStorage.setItem("axiom_terseness", terseness); }, [terseness]);
   const recognitionRef = useRef(null);
   const scrollRef = useRef(null);
   // TTS pointers: how much of the current assistant reply we've already
@@ -312,6 +316,7 @@ export default function AiPanel({ collapsed, onToggle }) {
           company_id: currentId,
           message: userMsg,
           focused_transaction_id: focus?.id || null,
+          terseness,
         }),
       });
       const reader = resp.body.getReader();
@@ -473,6 +478,8 @@ export default function AiPanel({ collapsed, onToggle }) {
               setVoiceName={setVoiceName}
               voiceRate={voiceRate}
               setVoiceRate={setVoiceRate}
+              terseness={terseness}
+              setTerseness={setTerseness}
               speakOne={speakOne}
               onClose={() => setVoiceMenuOpen(false)}
             />
@@ -562,7 +569,7 @@ export default function AiPanel({ collapsed, onToggle }) {
   );
 }
 
-function VoicePicker({ voices, voiceOn, setVoiceOn, voiceName, setVoiceName, voiceRate, setVoiceRate, speakOne, onClose }) {
+function VoicePicker({ voices, voiceOn, setVoiceOn, voiceName, setVoiceName, voiceRate, setVoiceRate, terseness, setTerseness, speakOne, onClose }) {
   // Prefer English voices at the top of the list — everything else follows,
   // grouped by language. Keeps "Google UK English Female" easy to find on a
   // machine with 60+ voices installed.
@@ -609,6 +616,33 @@ function VoicePicker({ voices, voiceOn, setVoiceOn, voiceName, setVoiceName, voi
               </option>
             ))}
           </select>
+        </div>
+        <div>
+          <label className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">
+            Reply length
+          </label>
+          <div
+            className="inline-flex rounded-md border border-slate-300 overflow-hidden text-xs w-full"
+            data-testid="ai-terseness"
+          >
+            {[
+              { k: "concise",  l: "Concise",  hint: "1 sentence, ≤25 words" },
+              { k: "balanced", l: "Balanced", hint: "1-3 sentences (default)" },
+              { k: "detailed", l: "Detailed", hint: "Deep analysis, multi-paragraph" },
+            ].map((o, i) => (
+              <button
+                key={o.k}
+                onClick={() => setTerseness(o.k)}
+                data-testid={`ai-terseness-${o.k}`}
+                title={o.hint}
+                className={`flex-1 px-2 py-1 ${i > 0 ? "border-l border-slate-300" : ""} ${
+                  terseness === o.k ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                {o.l}
+              </button>
+            ))}
+          </div>
         </div>
         <div>
           <div className="flex items-center justify-between mb-1">

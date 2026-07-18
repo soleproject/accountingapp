@@ -221,13 +221,32 @@ async def resolve_contact_ai(
     return result
 
 
+TERSENESS_OVERLAYS = {
+    "concise": (
+        "\n\nTERSENESS OVERRIDE — CONCISE:\n"
+        "- Reply in 1 sentence, ≤ 25 words. No preamble, no follow-up offers.\n"
+        "- For yes/no questions: 'Yes.' or 'No.' followed by one short clause.\n"
+        "- Skip ALL rationale unless the user asks 'why'."
+    ),
+    "balanced": "",  # use default ASSISTANT_SYSTEM rules unchanged
+    "detailed": (
+        "\n\nTERSENESS OVERRIDE — DETAILED:\n"
+        "- The user wants thorough analysis. Multi-paragraph replies are welcome.\n"
+        "- Include GAAP/tax nuance, edge cases, and worked examples.\n"
+        "- 4-10 sentences is fine; add bullet lists when comparing options."
+    ),
+}
+
+
 async def chat_stream(
-    session_id: str, user_text: str, context: Optional[dict] = None
+    session_id: str, user_text: str, context: Optional[dict] = None,
+    terseness: str = "balanced",
 ) -> AsyncGenerator[str, None]:
     prompt = user_text
     if context:
         prompt = f"Context (focused transaction):\n{json.dumps(context, indent=2)}\n\nUser: {user_text}"
-    chat = _new_chat(ASSISTANT_SYSTEM, session_id)
+    overlay = TERSENESS_OVERLAYS.get(terseness or "balanced", "")
+    chat = _new_chat(ASSISTANT_SYSTEM + overlay, session_id)
     try:
         async for ev in chat.stream_message(UserMessage(text=prompt)):
             if isinstance(ev, TextDelta):

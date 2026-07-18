@@ -185,6 +185,7 @@ class ChatIn(BaseModel):
     session_id: Optional[str] = None
     message: str
     focused_transaction_id: Optional[str] = None
+    terseness: Optional[str] = "balanced"  # "concise" | "balanced" | "detailed"
 
 
 class OnboardingUpdate(BaseModel):
@@ -3256,7 +3257,8 @@ async def ai_chat_stream(inp: ChatIn, user: dict = Depends(get_current_user)):
     full_reply = {"text": ""}
 
     async def event_gen():
-        async for chunk in chat_stream(session_id, inp.message, combined_context):
+        async for chunk in chat_stream(session_id, inp.message, combined_context,
+                                        terseness=inp.terseness or "balanced"):
             full_reply["text"] += chunk
             yield f"data: {json.dumps({'delta': chunk})}\n\n"
         # save assistant msg
