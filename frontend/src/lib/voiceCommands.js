@@ -295,6 +295,37 @@ export function resolveVoiceCommand(text, ctx) {
   if (/^(?:walk me through|take me through|give me a (?:briefing|walkthrough|stand[- ]?up|review)|review (?:my )?(?:books|the books)|start (?:review|morning) (?:mode)?|morning stand[- ]?up|weekly review|daily review)\b/i.test(t)) {
     return { handled: true, remote: "review-start" };
   }
+  // Batch resolve mode — voice-driven reclass sprint through flagged transactions.
+  //   "let's clear the flagged transactions"
+  //   "clear the flagged"
+  //   "resolve flagged"
+  //   "review flagged transactions" (only trigger if it's imperative — not a question)
+  if (/^(?:let'?s\s+)?(?:clear|resolve|process|clean up|knock out|go through|tackle|categorize|reclassify)\s+(?:the\s+)?(?:flagged|needs? review|for review|review)(?:\s+(?:transactions?|txns?|items|queue))?\b/i.test(t)
+      || /^(?:start\s+)?batch\s+(?:resolve|reclass|review|mode)\b/i.test(t)) {
+    return { handled: true, remote: "batch-start" };
+  }
+  // The following batch-mode responses ONLY fire when the caller signals
+  // batch mode is active. Otherwise "yes" / "no it's meals" would collide
+  // with the pending-intent confirm and normal chat.
+  if (ctx.batchActive) {
+    if (/^(?:yes|yep|yeah|correct|approve|accept|that'?s right|good|looks (?:good|right)|keep it|leave it)\b/i.test(t)) {
+      return { handled: true, batch: { action: "accept" } };
+    }
+    if (/^(?:skip|pass|not now|next one|move on|next)\b/i.test(t)) {
+      return { handled: true, batch: { action: "skip" } };
+    }
+    // "no it's X" / "actually X" / "put it in X" / "categorize as X"
+    const batchReclass = t.match(/^(?:no,?\s*(?:it'?s|that'?s)\s+|actually\s+(?:it'?s\s+)?|put it (?:in|under)\s+|categorize (?:it )?as\s+|change (?:it )?to\s+|it should be\s+|(?:no it'?s|it'?s)\s+)(.+)$/i);
+    if (batchReclass) {
+      return {
+        handled: true,
+        batch: { action: "reclassify", target: batchReclass[1].trim().replace(/[.?!]+$/, "") },
+      };
+    }
+    if (/^(?:exit|end|stop|quit|done|cancel)\s*(?:batch|resolve|reclass|review|mode)?\b/i.test(t)) {
+      return { handled: true, batch: { action: "exit" } };
+    }
+  }
   // Review-mode navigation commands (only meaningful when a review is active
   // — but returning them here is cheap and lets the panel decide).
   if (/^(next|next step|continue|move on|keep going|and then)\b/i.test(t)) {

@@ -289,21 +289,22 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ### P0 — none (MVP feature-complete)
 
-### Recently shipped (2026-07-18)
-- **Weekly Review Mode** — say *"walk me through the books"* / *"morning stand-up"* → AI paces through 4 pre-computed steps (Flagged txns, Overdue A/R, Expense spikes this week vs last, Suggested rules). Step card with progress + Back/Next/Exit buttons; voice `"next"` / `"back"` / `"exit"` navigates hands-free. Backend endpoint `GET /api/companies/{cid}/ai/review` returns the whole briefing in one shot.
-- **Chat context enrichment** — `POST /api/ai/chat/stream` now injects top-8 expense categories, top-8 vendors (grouped-by-merchant $ spend), 10 recent transactions, 10 flagged transactions, and A/R + A/P open+overdue totals. The AI can now cite actual $ per category and vendor instead of saying "I don't have visibility."
-- **Capability disclosure in system prompt** — Axiom explicitly told it CAN navigate, filter, read reports, create records via voice — so it no longer replies *"I can't navigate pages, use the menu."*
-- **Nav-prefix normalization** — *"take me to the reports page"*, *"bring me to invoices"*, *"navigate to loans"*, *"let's go to bills"* all normalize to the same route table.
-- **Comparative TTS narration** (earlier today) — *"read my P&L vs last quarter"* speaks top movers.
-- **Chat-question disambiguation** (earlier today) — question-word utterances fall through to LLM.
-- **Contextual filter** (earlier today) — *"filter by this contact"* uses the AI-focused row.
-- **TTS-narrated report summaries** (earlier today) — one-sentence spoken summary of any report.
-- **Transaction voice filters & deep-links** (earlier today) — text search + date range via URL params + single-match highlight.
-- **Confirm synonyms** (earlier today) — *"looks good"*, *"yep"*, *"post it"* trigger pending-intent save.
-- **Bug fix**: `POST /contacts` now sets `normalized_name` on insert.
-- **Hybrid voice-driven CREATE flow** (yesterday) — parse-intent endpoint + pending banner + modal auto-open.
-- **Expanded voice router** (yesterday) — 25+ nav routes, quarter/YTD filters, open-entity lookups.
-- **ReportView URL-driven filters** (yesterday).
+### Recently shipped (2026-07-18 late)
+- **Batch Resolve Mode** — *"let's clear the flagged transactions"* → paced sprint through flagged txns. Each row card shows merchant, amount, and AI-suggested category. Voice cues: `"yes"` accepts, `"no it's meals"` (or `"actually X"`, `"put it in X"`, `"categorize as X"`) reclassifies, `"skip"` moves on, `"exit"` ends with a summary ("Accepted 3, reclassified 5, skipped 1"). Uses existing `bulk-approve` + `bulk-reclassify` endpoints; local fuzzy-match resolves spoken category names to Chart-of-Accounts rows.
+- **Book Diagnostic Engine** — new `GET /api/companies/{cid}/ai/diagnose` scans the balance sheet for common data-entry pathologies: negative liabilities (over-debited), negative assets, non-zero Opening Balance Equity, unbalanced BS. Each anomaly returns a professional-quality explanation (specific $ amounts, transaction counts, and the GAAP fix). The top 5 anomalies are injected into every chat-stream call so the AI proactively diagnoses instead of giving generic "you have a data issue" replies.
+- **Real 317 LLC diagnosis** — Verified: the AI now correctly identifies that CC Payable (-$31,426.78) and Loans Payable (-$80,394.89) are over-debited by 162 paydown-side transactions with ZERO offsetting charge-side entries, and recommends opening-balance JEs to book original principal.
+
+### Recently shipped (2026-07-18 mid)
+- **Weekly Review Mode** — *"walk me through the books"* runs a paced 4-step briefing (Flagged, Overdue A/R, Expense spikes, Suggested rules) with `"next"` / `"back"` / `"exit"` voice cues.
+- **Chat context enrichment** — top expense categories, top vendors, recent + flagged txns, A/R + A/P aging, anomalies. AI no longer says "I don't have visibility."
+- **Capability disclosure in system prompt** — Axiom knows it CAN navigate/filter/read/create by voice.
+- **Nav-prefix normalization** — "take me to X", "bring me to X", "navigate to X" all work.
+- **Comparative TTS narration** — "read my P&L vs last quarter" speaks top movers.
+- **Chat-question disambiguation** — question-worded utterances route to LLM chat.
+- **Contextual filter** — "filter by this contact" uses the AI-focused row.
+
+### Earlier today
+- TTS-narrated report summaries; transaction voice filters/deep-links; confirm synonyms (looks good/yep/post it); `normalized_name` bug fix in create_contact; Hybrid voice-driven CREATE flow with pending banner; expanded voice router (25+ routes); ReportView URL-driven filters.
 
 ### P1
 - Refactor `server.py` (3300+ lines) into `/routes/` package for scalability

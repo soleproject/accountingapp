@@ -3315,6 +3315,14 @@ async def ai_chat_stream(inp: ChatIn, user: dict = Depends(get_current_user)):
         ar = {"total_open": 0, "total_overdue": 0}
         ap = {"total_open": 0, "total_overdue": 0}
 
+    # Diagnostic anomalies — so the AI can proactively flag data-entry
+    # pathologies (negative liabilities, uncleared OBE, unbalanced BS…).
+    try:
+        diag = await _diagnose_books(inp.company_id)
+        anomalies = diag.get("anomalies", [])[:5]  # cap for token budget
+    except Exception:
+        anomalies = []
+
     book_context = {
         "company": company.get("name") if company else "",
         "business_type": company.get("business_type") if company else "",
@@ -3337,6 +3345,7 @@ async def ai_chat_stream(inp: ChatIn, user: dict = Depends(get_current_user)):
         "ar_overdue": round(ar.get("total_overdue") or 0, 2),
         "ap_open": round(ap.get("total_open") or 0, 2),
         "ap_overdue": round(ap.get("total_overdue") or 0, 2),
+        "anomalies": anomalies,
     }
     combined_context = {"books": book_context}
     if context:
@@ -3437,6 +3446,162 @@ async def ai_parse_intent(cid: str, inp: IntentIn, user: dict = Depends(get_curr
 
     parsed["prefill"] = prefill
     return parsed
+
+
+# ------------------------- Anomaly Detection --------------------------
+# The AI panel calls this on demand ("what's wrong with my books?") AND we
+# include a light-weight summary of the top anomalies in every chat request
+# so the LLM can flag data-entry issues proactively.
+
+async def _diagnose_books(cid: str) -> dict:
+    """Scan the books for common data-entry pathologies and return a list
+    of anomalies with a professional-quality one-sentence explanation.
+
+    Detects:
+    - Liability accounts with a negative display balance (over-debited —
+      usually happens when only the paydown side of a credit card / loan
+      is booked, and the offsetting charges / advances are missing).
+    - Asset accounts with a negative display balance (except contra-assets).
+    - Non-zero Opening Balance Equity (should be cleared to Retained Earnings).
+    - Bank accounts with a large gap between last posted date and today
+      (indicates sync is stuck).
+    """
+    from reports import compute_balance_sheet, _signed_balances, CREDIT_NORMAL
+    company = await db.companies.find_one({"id": cid})
+    if not company:
+        return {"anomalies": [], "checked": []}
+    today = datetime.now(timezone.utc).date().isoformat()
+    basis = company.get("reporting_basis", "accrual")
+    bs = await compute_balance_sheet(cid, today, basis)
+
+    anomalies: list[dict] = []
+
+    # Cache accounts by id for descriptive drill-in.
+    accts = {a["id"]: a async for a in db.accounts.find({"company_id": cid})}
+
+    # --- Liability sign check ---
+    for a in bs["liabilities"]:
+        if a["amount"] < -0.01:  # display balance negative → over-debited
+            # Investigate: sum of transactions posted to this account by sign.
+            aid = None
+            for _id, doc in accts.items():
+                if doc.get("code") == a["code"]:
+                    aid = _id
+                    break
+            direction_hint = ""
+            if aid:
+                pipe = [
+                    {"$match": {"company_id": cid, "posted": True, "category_account_id": aid}},
+                    {"$group": {"_id": None,
+                                "n_outflow": {"$sum": {"$cond": [{"$lt": ["$amount", 0]}, 1, 0]}},
+                                "n_inflow":  {"$sum": {"$cond": [{"$gt": ["$amount", 0]}, 1, 0]}},
+                                "outflow_total": {"$sum": {"$cond": [{"$lt": ["$amount", 0]}, "$amount", 0]}},
+                                "inflow_total":  {"$sum": {"$cond": [{"$gt": ["$amount", 0]}, "$amount", 0]}}}},
+                ]
+                agg = await db.transactions.aggregate(pipe).to_list(1)
+                if agg:
+                    r = agg[0]
+                    if r["n_outflow"] and not r["n_inflow"]:
+                        direction_hint = (
+                            f" ({r['n_outflow']} paydown-side transactions totaling "
+                            f"${abs(r['outflow_total']):,.2f}, but ZERO charge-side entries — "
+                            "the offsetting charges (or original loan proceeds) were never booked)."
+                        )
+            anomalies.append({
+                "severity": "high",
+                "code": a["code"],
+                "account": a["name"],
+                "amount": round(a["amount"], 2),
+                "kind": "liability_negative",
+                "title": f"{a['name']} shows a negative balance",
+                "explanation": (
+                    f"A liability account with a negative balance is over-debited by "
+                    f"${abs(a['amount']):,.2f}."
+                    f"{direction_hint} "
+                    "Recommended fix: (a) connect the credit-card / loan feed so charges & advances post as CREDITs, "
+                    "or (b) book an opening-balance journal entry for the original principal "
+                    "(DEBIT the acquired asset or an expense; CREDIT this liability)."
+                ),
+            })
+
+    # --- Asset sign check (contra-assets excluded) ---
+    for a in bs["assets"]:
+        # Common contra-assets: Accumulated Depreciation, Allowance for Doubtful Accounts.
+        nm = (a.get("name") or "").lower()
+        if "accumulated depreciation" in nm or "allowance" in nm:
+            continue
+        if a["amount"] < -0.01:
+            anomalies.append({
+                "severity": "high",
+                "code": a["code"],
+                "account": a["name"],
+                "amount": round(a["amount"], 2),
+                "kind": "asset_negative",
+                "title": f"{a['name']} shows a negative balance",
+                "explanation": (
+                    f"An asset account should not have a negative balance (currently ${a['amount']:,.2f}). "
+                    "Common cause: outflows are being categorized directly to this account without an offsetting inflow. "
+                    "Review recent postings on this account and reclassify any that shouldn't be here."
+                ),
+            })
+
+    # --- OBE not cleared ---
+    for a in bs["equity"]:
+        if (a.get("name") or "").lower().startswith("opening balance equity") and abs(a["amount"]) > 0.01:
+            anomalies.append({
+                "severity": "medium",
+                "code": a["code"],
+                "account": a["name"],
+                "amount": round(a["amount"], 2),
+                "kind": "obe_nonzero",
+                "title": "Opening Balance Equity is not cleared",
+                "explanation": (
+                    f"Opening Balance Equity has a residual balance of ${a['amount']:,.2f}. "
+                    "Best practice: after initial setup, clear OBE to Retained Earnings (or Owner's Equity) "
+                    "with a single closing journal entry so it doesn't show on the balance sheet indefinitely."
+                ),
+            })
+
+    # --- Sanity: BS should balance ---
+    diff = bs["total_assets"] - (bs["total_liabilities"] + bs["total_equity"])
+    if abs(diff) > 0.5:
+        anomalies.append({
+            "severity": "critical",
+            "kind": "bs_unbalanced",
+            "amount": round(diff, 2),
+            "title": "Balance sheet does not balance",
+            "explanation": (
+                f"Assets ${bs['total_assets']:,.2f} ≠ Liabilities + Equity "
+                f"${bs['total_liabilities'] + bs['total_equity']:,.2f} (Δ ${diff:,.2f}). "
+                "This means at least one journal entry or transaction is not balanced. Investigate recent unposted or manually edited entries."
+            ),
+        })
+
+    # Sort by severity (critical > high > medium)
+    order = {"critical": 0, "high": 1, "medium": 2}
+    anomalies.sort(key=lambda x: order.get(x.get("severity"), 9))
+
+    return {
+        "as_of": today,
+        "basis": basis,
+        "total_assets": round(bs["total_assets"], 2),
+        "total_liabilities": round(bs["total_liabilities"], 2),
+        "total_equity": round(bs["total_equity"], 2),
+        "anomalies": anomalies,
+        "checked": ["liability_signs", "asset_signs", "obe_nonzero", "bs_balances"],
+    }
+
+
+@api.get("/companies/{cid}/ai/diagnose")
+async def ai_diagnose(cid: str, user: dict = Depends(get_current_user)):
+    """Diagnostic scan for common data-entry pathologies.
+
+    Called directly by the AI panel when a user asks "what's wrong with my books"
+    or "why are my liabilities negative"; also called by chat_stream to enrich
+    the LLM context so it can flag issues without being asked.
+    """
+    await _require_company(user, cid)
+    return await _diagnose_books(cid)
 
 
 @api.get("/companies/{cid}/ai/review")

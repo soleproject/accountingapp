@@ -176,6 +176,14 @@ export default function AiPanel({ collapsed, onToggle }) {
   const [review, setReview] = useState(null); // { steps: [...], idx: number }
   const reviewRef = useRef(null);
   useEffect(() => { reviewRef.current = review; }, [review]);
+
+  // Batch resolve mode: paced sprint through flagged transactions. Each row
+  // is announced with the AI's best-guess category; user says "yes" to accept,
+  // "no it's X" to reclassify, or "skip" to move on. All accepts/rejects are
+  // sent to the existing bulk-approve / bulk-reclassify endpoints.
+  const [batch, setBatch] = useState(null); // { txns, idx, accounts, decisions }
+  const batchRef = useRef(null);
+  useEffect(() => { batchRef.current = batch; }, [batch]);
   const recognitionRef = useRef(null);
   const scrollRef = useRef(null);
   // TTS pointers: how much of the current assistant reply we've already
@@ -473,6 +481,158 @@ export default function AiPanel({ collapsed, onToggle }) {
     if (voiceOnRef.current) speakOne("Ended.");
   };
 
+  // ---------------------------- Batch resolve mode ----------------------------
+  //
+  // Voice-driven sprint through flagged transactions. Uses the existing
+  // bulk-approve / bulk-reclassify endpoints so nothing new was needed on
+  // the backend. The AI just paces + resolves one row at a time.
+
+  const _fmtMoney = (n) => {
+    const v = Number(n || 0);
+    return `$${Math.abs(v).toFixed(2)}${v < 0 ? " out" : " in"}`;
+  };
+  const _announceBatchRow = (txn) => {
+    if (!txn) return "";
+    const merch = txn.merchant || txn.contact_name || "Unknown";
+    const suggested = txn.category_account_name || "Uncategorized";
+    return `${merch} for ${_fmtMoney(txn.amount)} — I'll book this to ${suggested}. Yes, skip, or tell me the right category.`;
+  };
+
+  const startBatch = async () => {
+    if (!currentId) return;
+    setMessages(m => [
+      ...m,
+      { role: "assistant", content: "Pulling flagged transactions…" },
+    ]);
+    try {
+      const [txnsR, acctsR] = await Promise.all([
+        api.get(`/companies/${currentId}/transactions?needs_review=true&limit=50`),
+        api.get(`/companies/${currentId}/accounts`),
+      ]);
+      const txns = (txnsR.data.transactions || []).filter(t => t.needs_review);
+      const accounts = acctsR.data.accounts || [];
+      if (!txns.length) {
+        const done = "No flagged transactions — you're clean.";
+        setMessages(m => {
+          const copy = [...m];
+          copy[copy.length - 1] = { role: "assistant", content: done };
+          return copy;
+        });
+        if (voiceOnRef.current) speakOne(done);
+        return;
+      }
+      setBatch({ txns, idx: 0, accounts, accepted: 0, reclassified: 0, skipped: 0 });
+      const intro = `Batch resolve — ${txns.length} flagged. First up: ${_announceBatchRow(txns[0])}`;
+      setMessages(m => {
+        const copy = [...m];
+        copy[copy.length - 1] = { role: "assistant", content: intro };
+        return copy;
+      });
+      if (voiceOnRef.current) speakOne(intro);
+    } catch (e) {
+      setMessages(m => {
+        const copy = [...m];
+        copy[copy.length - 1] = { role: "assistant", content: "Couldn't pull the flagged queue." };
+        return copy;
+      });
+    }
+  };
+
+  // Fuzzy-match a spoken category ("meals", "software subscriptions") to a
+  // Chart of Accounts row. Returns the account or null.
+  const _matchAccount = (needle, accounts) => {
+    if (!needle) return null;
+    const q = needle.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    if (q.length < 2) return null;
+    const words = q.split(" ").filter(w => w.length >= 2);
+    let best = null, bestScore = 0;
+    for (const a of accounts) {
+      // Prefer expense/COGS/revenue in batch mode (we're categorizing txns).
+      if (!["expense", "cogs", "revenue"].includes(a.type)) continue;
+      const n = (a.name || "").toLowerCase();
+      let score = 0;
+      if (n === q) score = 1000;
+      else if (n.includes(q) || q.includes(n)) score = 500 + Math.min(q.length, 20);
+      else score = words.reduce((s, w) => s + (n.includes(w) ? 10 : 0), 0);
+      if (score > bestScore) { bestScore = score; best = a; }
+    }
+    return bestScore >= 10 ? best : null;
+  };
+
+  const _advanceBatch = (b, updatedCounts) => {
+    const nextIdx = b.idx + 1;
+    const next = { ...b, ...updatedCounts, idx: nextIdx };
+    if (nextIdx >= b.txns.length) {
+      const summary = `Done. Accepted ${next.accepted}, reclassified ${next.reclassified}, skipped ${next.skipped}.`;
+      setBatch(null);
+      setMessages(m => [...m, { role: "assistant", content: summary }]);
+      if (voiceOnRef.current) speakOne(summary);
+      return;
+    }
+    setBatch(next);
+    const line = `${nextIdx + 1} of ${b.txns.length}. ${_announceBatchRow(b.txns[nextIdx])}`;
+    setMessages(m => [...m, { role: "assistant", content: line }]);
+    if (voiceOnRef.current) speakOne(line);
+  };
+
+  const handleBatchAction = async (action) => {
+    const b = batchRef.current;
+    if (!b) return;
+    const cur = b.txns[b.idx];
+    if (!cur) return;
+
+    if (action.action === "exit") {
+      const summary = `Ended. Accepted ${b.accepted}, reclassified ${b.reclassified}, skipped ${b.skipped}.`;
+      setBatch(null);
+      setMessages(m => [...m, { role: "assistant", content: summary }]);
+      if (voiceOnRef.current) speakOne(summary);
+      return;
+    }
+
+    if (action.action === "accept") {
+      try {
+        // The list endpoint accepts a raw list body — signature: bulk_approve(cid, ids: List[str]).
+        await api.post(`/companies/${currentId}/transactions/bulk-approve`, [cur.id]);
+        _advanceBatch(b, { accepted: b.accepted + 1 });
+      } catch (e) {
+        toast.error("Approve failed"); _advanceBatch(b, { skipped: b.skipped + 1 });
+      }
+      return;
+    }
+    if (action.action === "skip") {
+      _advanceBatch(b, { skipped: b.skipped + 1 });
+      return;
+    }
+    if (action.action === "reclassify") {
+      const acct = _matchAccount(action.target, b.accounts);
+      if (!acct) {
+        const line = `I couldn't find "${action.target}". Try again, say "skip", or "exit".`;
+        setMessages(m => [...m, { role: "assistant", content: line }]);
+        if (voiceOnRef.current) speakOne(line);
+        return;
+      }
+      try {
+        await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
+          transaction_ids: [cur.id],
+          category_account_id: acct.id,
+        });
+        setMessages(m => [...m, { role: "assistant", content: `Reclassified to ${acct.name}.` }]);
+        if (voiceOnRef.current) speakOne(`Reclassified to ${acct.name}.`);
+        _advanceBatch(b, { reclassified: b.reclassified + 1 });
+      } catch (e) {
+        toast.error("Reclassify failed");
+        _advanceBatch(b, { skipped: b.skipped + 1 });
+      }
+    }
+  };
+
+  // Manual buttons for batch mode (accessibility + click fallback).
+  const batchAcceptBtn  = () => handleBatchAction({ action: "accept" });
+  const batchSkipBtn    = () => handleBatchAction({ action: "skip" });
+  const batchExitBtn    = () => handleBatchAction({ action: "exit" });
+
+
+
 
   const startRecognizer = () => {
     const SR = getSR();
@@ -643,7 +803,21 @@ export default function AiPanel({ collapsed, onToggle }) {
       switchCompany,
       clearChat: clearChatMessages,
       focus,
+      batchActive: !!batchRef.current,
     });
+
+    // --- Batch resolve mode: entry ---
+    if (cmd.handled && cmd.remote === "batch-start") {
+      setMessages(m => [...m, { role: "user", content: userMsg }]);
+      await startBatch();
+      return;
+    }
+    // --- Batch resolve mode: in-flight ---
+    if (cmd.handled && cmd.batch && batchRef.current) {
+      setMessages(m => [...m, { role: "user", content: userMsg }]);
+      await handleBatchAction(cmd.batch);
+      return;
+    }
 
     // --- Weekly review mode: entry ---
     if (cmd.handled && cmd.remote === "review-start") {
@@ -1017,6 +1191,59 @@ export default function AiPanel({ collapsed, onToggle }) {
       </div>
 
       <div className="border-t p-3">
+        {batch && (() => {
+          const cur = batch.txns[batch.idx] || {};
+          return (
+            <div
+              className="mb-2 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-2"
+              data-testid="ai-batch-card"
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                <span className="text-[11px] uppercase tracking-wide font-semibold text-amber-900">
+                  Batch Resolve · {batch.idx + 1} of {batch.txns.length}
+                </span>
+                <button
+                  data-testid="ai-batch-exit"
+                  onClick={batchExitBtn}
+                  className="ml-auto text-[11px] text-amber-900/70 hover:text-amber-950"
+                >
+                  Exit
+                </button>
+              </div>
+              <div className="text-[13px] font-medium text-amber-950 leading-tight">
+                {(cur.merchant || cur.contact_name || "Unknown")}
+                <span className="ml-1 text-amber-800/80">
+                  {typeof cur.amount === "number"
+                    ? ` · $${Math.abs(cur.amount).toFixed(2)}${cur.amount < 0 ? " out" : " in"}`
+                    : ""}
+                </span>
+              </div>
+              <div className="text-[11px] text-amber-800 mt-0.5">
+                Suggested: <b>{cur.category_account_name || "Uncategorized"}</b>
+              </div>
+              <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                <button
+                  data-testid="ai-batch-accept"
+                  onClick={batchAcceptBtn}
+                  className="text-[11px] px-2 py-0.5 rounded bg-amber-600 text-white hover:bg-amber-700"
+                >
+                  ✓ Accept
+                </button>
+                <button
+                  data-testid="ai-batch-skip"
+                  onClick={batchSkipBtn}
+                  className="text-[11px] px-2 py-0.5 rounded text-amber-900 hover:bg-amber-100"
+                >
+                  Skip
+                </button>
+                <span className="text-[10px] text-amber-800/70 ml-1">
+                  say <b>"yes"</b> · <b>"skip"</b> · <b>"no, it's meals"</b>
+                </span>
+              </div>
+            </div>
+          );
+        })()}
         {review && (
           <div
             className="mb-2 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-2"
@@ -1154,9 +1381,10 @@ function VoiceHintTape({ micMode }) {
   // discoverable at the right moment.
   const HINTS = [
     'Try: "walk me through the books"  (paced review)',
+    'Try: "let\'s clear the flagged transactions"',
     'Try: "read my P&L vs last quarter"',
+    'Try: "why are my liabilities negative?"',
     'Try: "transactions for Walmart"',
-    'Try: "filter by this contact"  (hover a row first)',
     'Try: "open the July 15th McDonald\'s transaction"',
     'Try: "create an invoice for John Doe for 500 dollars"',
     'Try: "overdue invoices"',
