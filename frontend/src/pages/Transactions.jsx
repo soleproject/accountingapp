@@ -98,6 +98,13 @@ export default function Transactions() {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize, debouncedSearch, dateFrom, dateTo]);
   // Reset page when filters narrow/widen.
   useEffect(() => { setPage(p => (p === 1 ? p : 1)); }, [debouncedSearch, dateFrom, dateTo]);
+  // Keep a live ref to `load` so the background sync poller can invoke the
+  // CURRENT filter-aware load — not the stale closure from mount. Without
+  // this, clicking "Needs Review" briefly shows filtered rows and then the
+  // poller (5-15s later) fires the original all-rows load and overwrites
+  // them, so the tab stays selected but rows revert to All.
+  const loadRef = useRef(load);
+  useEffect(() => { loadRef.current = load; });
   // Reset ALL filter state on company switch — otherwise sticky filters from
   // the previous company (e.g. a date range) hide most rows on the new one
   // and users think the sync failed. (Real bug: 400 LLC had 1871 rows but a
@@ -118,21 +125,29 @@ export default function Transactions() {
     if (!currentId) return;
     let cancelled = false, timer;
     let lastSyncStatus = null;
+    // Track the last observed *company-wide* txn total from /sync-status so
+    // "did new rows land?" is a whole-company delta — not a filtered-view
+    // delta. Comparing against `paginationTotalRef` broke when a filter
+    // was active (filtered total ≠ company total → poller thought rows had
+    // changed every tick and clobbered the current view).
+    let lastCompanyTotal = null;
     const poll = async () => {
       try {
         const r = await api.get(`/companies/${currentId}/sync-status`);
         if (cancelled) return;
         const s = r.data;
-        const rowsChanged = (s.total_txns || 0) !== paginationTotalRef.current;
+        const companyTotal = s.total_txns || 0;
+        const rowsChanged = lastCompanyTotal !== null && companyTotal !== lastCompanyTotal;
         const flippedIdle = lastSyncStatus === "syncing" && s.status !== "syncing";
-        if (rowsChanged || flippedIdle) load();
+        if (rowsChanged || flippedIdle) loadRef.current();
+        lastCompanyTotal = companyTotal;
         lastSyncStatus = s.status;
       } catch { /* ignore */ }
       const delay = lastSyncStatus === "syncing" ? 5_000 : 15_000;
       timer = setTimeout(poll, delay);
     };
     timer = setTimeout(poll, 5_000);
-    const onFocus = () => { if (document.visibilityState === "visible") load(); };
+    const onFocus = () => { if (document.visibilityState === "visible") loadRef.current(); };
     document.addEventListener("visibilitychange", onFocus);
     window.addEventListener("focus", onFocus);
     return () => {
