@@ -169,6 +169,13 @@ export default function AiPanel({ collapsed, onToggle }) {
   const [pendingIntent, setPendingIntent] = useState(null);
   const pendingIntentRef = useRef(null);
   useEffect(() => { pendingIntentRef.current = pendingIntent; }, [pendingIntent]);
+
+  // Weekly-review mode: paced multi-step briefing. When active, the panel
+  // shows a progress card and listens for "next / skip / back / exit" cues
+  // between steps instead of routing utterances to the chat stream.
+  const [review, setReview] = useState(null); // { steps: [...], idx: number }
+  const reviewRef = useRef(null);
+  useEffect(() => { reviewRef.current = review; }, [review]);
   const recognitionRef = useRef(null);
   const scrollRef = useRef(null);
   // TTS pointers: how much of the current assistant reply we've already
@@ -404,6 +411,69 @@ export default function AiPanel({ collapsed, onToggle }) {
     }
   };
 
+  // Start the paced weekly-review briefing. Fetches all 4 steps at once so
+  // subsequent "next" utterances are instantaneous (no network hop).
+  const startReview = async () => {
+    if (!currentId) return;
+    setMessages(m => [
+      ...m,
+      { role: "assistant", content: "One sec — pulling your briefing…" },
+    ]);
+    try {
+      const r = await api.get(`/companies/${currentId}/ai/review`);
+      const steps = r.data?.steps || [];
+      if (!steps.length) throw new Error("empty");
+      setReview({ steps, idx: 0 });
+      // Speak step 1 immediately + drop a card into the chat.
+      const first = steps[0];
+      const intro = `Morning stand-up. ${first.spoken} Say "next" for step 2.`;
+      setMessages(m => {
+        const copy = [...m];
+        copy[copy.length - 1] = { role: "assistant", content: intro };
+        return copy;
+      });
+      if (voiceOnRef.current) speakOne(intro);
+    } catch {
+      setMessages(m => {
+        const copy = [...m];
+        copy[copy.length - 1] = { role: "assistant", content: "Couldn't pull the briefing right now." };
+        return copy;
+      });
+    }
+  };
+
+  // Advance / step-nav review mode.
+  const advanceReview = (direction /* 'next' | 'skip' | 'back' */) => {
+    const r = reviewRef.current;
+    if (!r) return false;
+    let idx = r.idx;
+    if (direction === "back") idx = Math.max(0, idx - 1);
+    else                       idx = idx + 1;
+
+    if (idx >= r.steps.length) {
+      const outro = "That's the briefing. Anything you'd like to dig into?";
+      setReview(null);
+      setMessages(m => [...m, { role: "assistant", content: outro }]);
+      if (voiceOnRef.current) speakOne(outro);
+      return true;
+    }
+    const step = r.steps[idx];
+    setReview({ ...r, idx });
+    const total = r.steps.length;
+    const line = `Step ${idx + 1} of ${total} — ${step.title}. ${step.spoken}` +
+      (idx + 1 < total ? ' Say "next" to continue.' : ' Last one — say "next" to finish.');
+    setMessages(m => [...m, { role: "assistant", content: line }]);
+    if (voiceOnRef.current) speakOne(line);
+    return true;
+  };
+
+  const exitReview = () => {
+    setReview(null);
+    setMessages(m => [...m, { role: "assistant", content: "Ended the briefing." }]);
+    if (voiceOnRef.current) speakOne("Ended.");
+  };
+
+
   const startRecognizer = () => {
     const SR = getSR();
     if (!SR) return null;
@@ -574,6 +644,22 @@ export default function AiPanel({ collapsed, onToggle }) {
       clearChat: clearChatMessages,
       focus,
     });
+
+    // --- Weekly review mode: entry ---
+    if (cmd.handled && cmd.remote === "review-start") {
+      setMessages(m => [...m, { role: "user", content: userMsg }]);
+      await startReview();
+      return;
+    }
+    // --- Weekly review mode: in-flight navigation ---
+    if (cmd.handled && cmd.review && reviewRef.current) {
+      setMessages(m => [...m, { role: "user", content: userMsg }]);
+      if (cmd.review === "exit") exitReview();
+      else advanceReview(cmd.review); // next / skip / back
+      return;
+    }
+    // If a review-command word (e.g. "next") arrived when NO review is
+    // active, fall through to LLM chat so it's not silently swallowed.
 
     // --- Pending intent follow-ups (confirm / cancel) ---
     if (cmd.handled && cmd.pending === "confirm" && pendingIntentRef.current) {
@@ -931,6 +1017,49 @@ export default function AiPanel({ collapsed, onToggle }) {
       </div>
 
       <div className="border-t p-3">
+        {review && (
+          <div
+            className="mb-2 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-2"
+            data-testid="ai-review-card"
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-[11px] uppercase tracking-wide font-semibold text-emerald-800">
+                Review Mode · Step {review.idx + 1} of {review.steps.length}
+              </span>
+              <button
+                data-testid="ai-review-exit"
+                onClick={exitReview}
+                className="ml-auto text-[11px] text-emerald-800/70 hover:text-emerald-900"
+              >
+                Exit
+              </button>
+            </div>
+            <div className="text-[13px] font-medium text-emerald-950 leading-tight">
+              {review.steps[review.idx]?.title}
+            </div>
+            <div className="flex items-center gap-2 mt-1.5">
+              <button
+                data-testid="ai-review-back"
+                onClick={() => advanceReview("back")}
+                disabled={review.idx === 0}
+                className="text-[11px] px-2 py-0.5 rounded text-emerald-900 hover:bg-emerald-100 disabled:opacity-40"
+              >
+                ← Back
+              </button>
+              <button
+                data-testid="ai-review-next"
+                onClick={() => advanceReview("next")}
+                className="text-[11px] px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-700"
+              >
+                Next →
+              </button>
+              <span className="text-[11px] text-emerald-800/70 ml-1">
+                or say <b>"next"</b> · <b>"back"</b> · <b>"exit"</b>
+              </span>
+            </div>
+          </div>
+        )}
         {pendingIntent && (
           <div
             className="mb-2 flex items-center gap-2 rounded-md bg-indigo-50 border border-indigo-200 px-2.5 py-2"
@@ -1024,18 +1153,14 @@ function VoiceHintTape({ micMode }) {
   // wall-of-text tutorial. Only shows when the mic is engaged so it's
   // discoverable at the right moment.
   const HINTS = [
-    'Try: "read my P&L for Q2"',
+    'Try: "walk me through the books"  (paced review)',
     'Try: "read my P&L vs last quarter"',
     'Try: "transactions for Walmart"',
     'Try: "filter by this contact"  (hover a row first)',
     'Try: "open the July 15th McDonald\'s transaction"',
-    'Try: "income statement for Q1 cash basis"',
     'Try: "create an invoice for John Doe for 500 dollars"',
-    'Try: "open contact Acme"',
     'Try: "overdue invoices"',
-    'Try: "clear chat"',
-    'Say "looks good" or "confirm" to auto-save a draft',
-    'Say "stop" — cancels the AI mid-speech',
+    'Say "looks good" to save a draft · "stop" cancels speech',
   ];
   const [idx, setIdx] = useState(0);
   useEffect(() => {

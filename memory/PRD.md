@@ -290,16 +290,20 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 ### P0 — none (MVP feature-complete)
 
 ### Recently shipped (2026-07-18)
-- **Comparative TTS narration** — say *"read my P&L vs last quarter"* / *"compare my income statement to last year"* → fetches BOTH periods, narrates current summary + top 2 movers with % change ("Net income up 32%… Meals up 14% quarter-over-quarter…"). Prior-period math handles quarter / year / month / prior-period-same-length.
-- **Chat-question vs nav-command disambiguation** — utterances starting with question words ("do you have any bills…", "what's my net income", "can you…") or ending in "?" now fall through to the LLM chat instead of silently opening the Bills page.
-- **Contextual filter** — *"filter by this contact"* / *"filter by this vendor"* uses the AI-focused row (hovered transaction) to auto-scope the transactions view. Speaks a hint if nothing is focused.
-- **TTS-narrated report summaries** — *"read my P&L for Q2"* / *"narrate the balance sheet"* → one-sentence spoken summary (revenue, expenses, net income, top 3 expenses).
-- **Transaction voice filters & deep-links** — *"transactions for Walmart"*, *"filter by meals"*, *"open the July 15th McDonald's transaction for $26.99"* apply URL-driven filters; single-match auto-highlights.
-- **Confirm synonyms** — *"looks good"*, *"yep"*, *"sounds good"*, *"book it"*, *"post it"*, *"approve it"* trigger the pending-intent save.
-- **Bug fix**: `POST /contacts` now sets `normalized_name` so the 2nd+ manual contact per company no longer trips the unique index.
-- **Hybrid voice-driven CREATE flow** (yesterday) — parse-intent endpoint + pending confirmation banner + modal auto-open with prefill.
-- **Expanded voice router** (yesterday) — 25+ nav routes, quarter/YTD/last-month + cash/accrual filters, "open contact/invoice/bill X" lookups.
-- **ReportView URL-driven filters** (yesterday) — /reports/{kind}?basis=&start=&end= hydrates + auto-refetches.
+- **Weekly Review Mode** — say *"walk me through the books"* / *"morning stand-up"* → AI paces through 4 pre-computed steps (Flagged txns, Overdue A/R, Expense spikes this week vs last, Suggested rules). Step card with progress + Back/Next/Exit buttons; voice `"next"` / `"back"` / `"exit"` navigates hands-free. Backend endpoint `GET /api/companies/{cid}/ai/review` returns the whole briefing in one shot.
+- **Chat context enrichment** — `POST /api/ai/chat/stream` now injects top-8 expense categories, top-8 vendors (grouped-by-merchant $ spend), 10 recent transactions, 10 flagged transactions, and A/R + A/P open+overdue totals. The AI can now cite actual $ per category and vendor instead of saying "I don't have visibility."
+- **Capability disclosure in system prompt** — Axiom explicitly told it CAN navigate, filter, read reports, create records via voice — so it no longer replies *"I can't navigate pages, use the menu."*
+- **Nav-prefix normalization** — *"take me to the reports page"*, *"bring me to invoices"*, *"navigate to loans"*, *"let's go to bills"* all normalize to the same route table.
+- **Comparative TTS narration** (earlier today) — *"read my P&L vs last quarter"* speaks top movers.
+- **Chat-question disambiguation** (earlier today) — question-word utterances fall through to LLM.
+- **Contextual filter** (earlier today) — *"filter by this contact"* uses the AI-focused row.
+- **TTS-narrated report summaries** (earlier today) — one-sentence spoken summary of any report.
+- **Transaction voice filters & deep-links** (earlier today) — text search + date range via URL params + single-match highlight.
+- **Confirm synonyms** (earlier today) — *"looks good"*, *"yep"*, *"post it"* trigger pending-intent save.
+- **Bug fix**: `POST /contacts` now sets `normalized_name` on insert.
+- **Hybrid voice-driven CREATE flow** (yesterday) — parse-intent endpoint + pending banner + modal auto-open.
+- **Expanded voice router** (yesterday) — 25+ nav routes, quarter/YTD filters, open-entity lookups.
+- **ReportView URL-driven filters** (yesterday).
 
 ### P1
 - Refactor `server.py` (3300+ lines) into `/routes/` package for scalability

@@ -3243,6 +3243,78 @@ async def ai_chat_stream(inp: ChatIn, user: dict = Depends(get_current_user)):
                                         company.get("reporting_basis", "accrual"))
     txn_count = await db.transactions.count_documents({"company_id": inp.company_id})
     flagged = await db.transactions.count_documents({"company_id": inp.company_id, "needs_review": True})
+
+    # ---- Transaction-level detail so the AI can drill in ----
+    # Top expense categories YTD, by absolute amount.
+    top_exp = sorted(
+        (inc.get("expenses") or []),
+        key=lambda x: abs(x.get("amount") or 0),
+        reverse=True,
+    )[:8]
+    top_expense_categories = [
+        {"name": e.get("account_name") or e.get("name"), "amount": round(e.get("amount") or 0, 2)}
+        for e in top_exp
+    ]
+    top_rev = sorted(
+        (inc.get("revenue") or []),
+        key=lambda x: abs(x.get("amount") or 0),
+        reverse=True,
+    )[:5]
+    top_revenue_categories = [
+        {"name": r.get("account_name") or r.get("name"), "amount": round(r.get("amount") or 0, 2)}
+        for r in top_rev
+    ]
+
+    # Top vendors (by outbound spend YTD) — group transactions by merchant.
+    vendor_pipeline = [
+        {"$match": {"company_id": inp.company_id, "date": {"$gte": ytd_start, "$lte": ytd_end}, "amount": {"$lt": 0}}},
+        {"$group": {"_id": {"$ifNull": ["$contact_name", "$merchant"]}, "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
+        {"$sort": {"total": 1}},  # most negative (biggest spend) first
+        {"$limit": 8},
+    ]
+    top_vendors = []
+    async for r in db.transactions.aggregate(vendor_pipeline):
+        name = r.get("_id")
+        if not name:
+            continue
+        top_vendors.append({
+            "vendor": name,
+            "spend": round(abs(r.get("total") or 0), 2),
+            "transactions": r.get("count") or 0,
+        })
+
+    # Recent transactions (last 10, most recent first).
+    recent_docs = await db.transactions.find(
+        {"company_id": inp.company_id}
+    ).sort([("date", -1), ("_id", -1)]).limit(10).to_list(10)
+    recent_transactions = [{
+        "date": t.get("date"),
+        "merchant": t.get("merchant") or t.get("contact_name"),
+        "amount": round(t.get("amount") or 0, 2),
+        "category": t.get("category_account_name"),
+        "needs_review": bool(t.get("needs_review")),
+    } for t in recent_docs]
+
+    # Up to 10 flagged transactions the user could act on now.
+    flagged_docs = await db.transactions.find(
+        {"company_id": inp.company_id, "needs_review": True}
+    ).sort([("date", -1)]).limit(10).to_list(10)
+    flagged_sample = [{
+        "date": t.get("date"),
+        "merchant": t.get("merchant") or t.get("contact_name"),
+        "amount": round(t.get("amount") or 0, 2),
+        "current_category": t.get("category_account_name"),
+        "confidence": t.get("ai_confidence"),
+    } for t in flagged_docs]
+
+    # A/R + A/P aging summaries (very compact — totals only).
+    try:
+        ar = await R.compute_ar_aging(inp.company_id, ytd_end)
+        ap = await R.compute_ap_aging(inp.company_id, ytd_end)
+    except Exception:
+        ar = {"total_open": 0, "total_overdue": 0}
+        ap = {"total_open": 0, "total_overdue": 0}
+
     book_context = {
         "company": company.get("name") if company else "",
         "business_type": company.get("business_type") if company else "",
@@ -3256,6 +3328,15 @@ async def ai_chat_stream(inp: ChatIn, user: dict = Depends(get_current_user)):
         "total_equity": bs["total_equity"],
         "transactions": txn_count,
         "needs_review": flagged,
+        "top_expense_categories": top_expense_categories,
+        "top_revenue_categories": top_revenue_categories,
+        "top_vendors": top_vendors,
+        "recent_transactions": recent_transactions,
+        "flagged_sample": flagged_sample,
+        "ar_open": round(ar.get("total_open") or 0, 2),
+        "ar_overdue": round(ar.get("total_overdue") or 0, 2),
+        "ap_open": round(ap.get("total_open") or 0, 2),
+        "ap_overdue": round(ap.get("total_overdue") or 0, 2),
     }
     combined_context = {"books": book_context}
     if context:
@@ -3356,6 +3437,157 @@ async def ai_parse_intent(cid: str, inp: IntentIn, user: dict = Depends(get_curr
 
     parsed["prefill"] = prefill
     return parsed
+
+
+@api.get("/companies/{cid}/ai/review")
+async def ai_review(cid: str, user: dict = Depends(get_current_user)):
+    """Return a structured 4-step "walk me through the books" briefing that
+    the AI panel narrates step-by-step, waiting for a voice "next" between
+    each step. Cheap: one shot, no LLM."""
+    await _require_company(user, cid)
+    today = datetime.now(timezone.utc).date()
+    today_s = today.isoformat()
+
+    # STEP 1: Flagged transactions.
+    flagged_task = db.transactions.find(
+        {"company_id": cid, "needs_review": True},
+    ).sort([("date", -1)]).limit(5).to_list(5)
+    flagged_count_task = db.transactions.count_documents(
+        {"company_id": cid, "needs_review": True},
+    )
+
+    # STEP 2: Overdue A/R.
+    ar_task = R.compute_ar_aging(cid, today_s)
+
+    # STEP 3: Expense spikes — this week vs last week per category.
+    week_end = today
+    week_start = week_end - timedelta(days=6)
+    prev_end = week_start - timedelta(days=1)
+    prev_start = prev_end - timedelta(days=6)
+
+    async def _expense_by_cat(start_d, end_d):
+        pipeline = [
+            {"$match": {
+                "company_id": cid,
+                "posted": True,
+                "date": {"$gte": start_d.isoformat(), "$lte": end_d.isoformat()},
+                "amount": {"$lt": 0},
+            }},
+            {"$group": {"_id": {"$ifNull": ["$category_account_name", "Uncategorized"]},
+                        "total": {"$sum": "$amount"}}},
+        ]
+        out = {}
+        async for r in db.transactions.aggregate(pipeline):
+            out[r["_id"]] = abs(r.get("total") or 0)
+        return out
+
+    # STEP 4: Suggested rules.
+    rules_task = db.rule_candidates.find(
+        {"company_id": cid, "approvals": {"$gte": 2}},
+    ).sort([("applies_to_count", -1)]).limit(5).to_list(5)
+
+    flagged, flagged_count, ar, this_week_exp, last_week_exp, rules = await asyncio.gather(
+        flagged_task,
+        flagged_count_task,
+        ar_task,
+        _expense_by_cat(week_start, week_end),
+        _expense_by_cat(prev_start, prev_end),
+        rules_task,
+    )
+
+    # Compute deltas — sorted by absolute change (dollars).
+    movers = []
+    for cat in set(this_week_exp) | set(last_week_exp):
+        n = this_week_exp.get(cat, 0)
+        p = last_week_exp.get(cat, 0)
+        delta = n - p
+        if abs(delta) < 1:
+            continue
+        pct = None
+        if p > 0.01:
+            pct = round(((n - p) / p) * 100)
+        movers.append({"category": cat, "this_week": round(n, 2),
+                       "last_week": round(p, 2), "delta": round(delta, 2), "pct": pct})
+    movers.sort(key=lambda x: abs(x["delta"] or 0), reverse=True)
+
+    ar_top = [{
+        "invoice_number": x.get("invoice_number"),
+        "contact_name": x.get("contact_name"),
+        "balance": x.get("balance"),
+        "days_overdue": x.get("days_overdue"),
+    } for x in (ar.get("overdue_invoices") or [])[:3]]
+
+    steps = [
+        {
+            "id": "flagged",
+            "title": "Flagged transactions",
+            "count": flagged_count,
+            "top": [{
+                "date": t.get("date"), "merchant": t.get("merchant") or t.get("contact_name"),
+                "amount": t.get("amount"), "current_category": t.get("category_account_name"),
+            } for t in flagged],
+            "spoken": (f"You have {flagged_count} flagged transaction{'s' if flagged_count != 1 else ''} needing review."
+                       if flagged_count else "No flagged transactions. Nice."),
+        },
+        {
+            "id": "ar",
+            "title": "Overdue A/R",
+            "total_overdue": round(ar.get("total_overdue") or 0, 2),
+            "count": len(ar.get("overdue_invoices") or []),
+            "top": ar_top,
+            "spoken": _spoken_ar(ar, ar_top),
+        },
+        {
+            "id": "expense_movers",
+            "title": "Expense spikes this week",
+            "movers": movers[:3],
+            "spoken": _spoken_movers(movers),
+        },
+        {
+            "id": "rules",
+            "title": "Suggested rules",
+            "count": len(rules),
+            "top": [{"key": r.get("merchant_pattern") or r.get("normalized_merchant"),
+                     "category": r.get("target_account_name"),
+                     "applies_to_count": r.get("applies_to_count") or 0} for r in rules],
+            "spoken": _spoken_rules(rules),
+        },
+    ]
+    return {"generated_at": now_iso(), "steps": steps}
+
+
+def _spoken_ar(ar: dict, top: list[dict]) -> str:
+    n = len(ar.get("overdue_invoices") or [])
+    if not n:
+        return "No overdue receivables. Everything current."
+    total = ar.get("total_overdue") or 0
+    lead = f"{n} overdue invoice{'s' if n != 1 else ''} totaling ${total:,.0f}"
+    if top:
+        biggest = top[0]
+        lead += f", biggest is {biggest.get('contact_name') or 'unknown'} at ${(biggest.get('balance') or 0):,.0f}"
+        if biggest.get("days_overdue") is not None:
+            lead += f" ({biggest['days_overdue']} days late)"
+    return lead + "."
+
+
+def _spoken_movers(movers: list[dict]) -> str:
+    if not movers:
+        return "Expenses are flat vs last week."
+    top = movers[:2]
+    bits = []
+    for m in top:
+        d = "up" if (m.get("delta") or 0) > 0 else "down"
+        pct = f" {abs(m['pct'])}%" if m.get("pct") is not None else ""
+        bits.append(f"{m['category']} {d}{pct}")
+    return f"Top spend movers: {', '.join(bits)}."
+
+
+def _spoken_rules(rules: list[dict]) -> str:
+    if not rules:
+        return "No new rules to approve."
+    top = rules[0]
+    key = top.get("merchant_pattern") or top.get("normalized_merchant") or "a merchant"
+    return f"{len(rules)} suggested rule{'s' if len(rules) != 1 else ''} ready to approve — top one auto-categorizes {key}."
 
 
 # ----------------------- Health -----------------------

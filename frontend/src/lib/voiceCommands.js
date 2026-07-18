@@ -261,8 +261,12 @@ const OPEN_ENTITY_RE = /^(?:open|show|find|pull up|bring up|view)\s+(?:the\s+)?(
  *     `hint` describes what was already opened.
  */
 export function resolveVoiceCommand(text, ctx) {
-  const t = (text || "").trim();
-  if (!t) return { handled: false };
+  const raw = (text || "").trim();
+  if (!raw) return { handled: false };
+  // Keep the raw utterance for meta / review / read / create pattern matching
+  // (they need phrases like "walk me through"). Below, we build a
+  // `nav`-normalized form for the route table only.
+  let t = raw;
 
   // ---- 0. Chat-question bailout ----
   // If the utterance is CLEARLY a question ("do you have any bills I need to
@@ -284,6 +288,28 @@ export function resolveVoiceCommand(text, ctx) {
     if (typeof ctx.clearChat === "function") ctx.clearChat();
     return { handled: true, say: "Cleared" };
   }
+
+  // Weekly review mode — a paced 4-step morning stand-up.
+  //   "walk me through the books", "review my books",
+  //   "morning stand-up", "give me a briefing"
+  if (/^(?:walk me through|take me through|give me a (?:briefing|walkthrough|stand[- ]?up|review)|review (?:my )?(?:books|the books)|start (?:review|morning) (?:mode)?|morning stand[- ]?up|weekly review|daily review)\b/i.test(t)) {
+    return { handled: true, remote: "review-start" };
+  }
+  // Review-mode navigation commands (only meaningful when a review is active
+  // — but returning them here is cheap and lets the panel decide).
+  if (/^(next|next step|continue|move on|keep going|and then)\b/i.test(t)) {
+    return { handled: true, review: "next" };
+  }
+  if (/^(skip|pass|not now)\b/i.test(t)) {
+    return { handled: true, review: "skip" };
+  }
+  if (/^(?:back|previous|go back)\b/i.test(t)) {
+    return { handled: true, review: "back" };
+  }
+  if (/^(?:exit|end|stop|quit)\s+(?:review|walkthrough|stand[- ]?up|briefing)\b/i.test(t)) {
+    return { handled: true, review: "exit" };
+  }
+
   // Confirm synonyms — covers casual affirmatives users actually say ("looks good", "yep")
   if (/^(confirm|yes|yep|yeah|yup|sure|ok(ay)?|save it?|do it|go ahead|looks good|sounds good|that.?s good|create it|make it|book it|post it|approve it?)\b/i.test(t)) {
     return { handled: true, pending: "confirm" };
@@ -350,11 +376,6 @@ export function resolveVoiceCommand(text, ctx) {
         say: bits.length ? `Opening ${r.name}, ${bits.join(", ")}` : `Opening ${r.name}`,
       };
     }
-  }
-  // "reports" catch-all (goes to the index)
-  if (/^(?:go to |open |show (?:me )?)?(?:reports?|financials?)$/i.test(t)) {
-    ctx.navigate("/reports");
-    return { handled: true, say: "Opening reports" };
   }
 
   // ---- 4. Transaction filter / lookup commands ----
@@ -445,9 +466,20 @@ export function resolveVoiceCommand(text, ctx) {
   // or explicitly prefixed with a nav verb). If it's a chat question we
   // fall through to the LLM — otherwise "do you have any bills I need to
   // pay?" would just open the Bills page silently instead of answering.
+  //
+  // Normalize noisy prefixes so "take me to the reports page" ≈ "reports".
+  const NAV_PREFIX = /^(?:please\s+)?(?:can you\s+)?(?:let'?s\s+)?(?:hey\s+)?(?:take|bring|get|show|open|go|navigate|jump)\s+(?:me\s+)?(?:to\s+)?(?:the\s+)?/i;
+  const navT = (t.replace(NAV_PREFIX, "").replace(/\b(page|section|screen|view|tab)\s*$/i, "").trim() || t);
+
+  // Report catch-all (index page): "reports" / "financials" after prefix strip.
+  if (!isQuestion && /^(?:reports?|financials?)$/i.test(navT)) {
+    ctx.navigate("/reports");
+    return { handled: true, say: "Opening reports" };
+  }
+
   if (!isQuestion) {
     for (const r of NAV_ROUTES) {
-      if (r.pat.test(t)) {
+      if (r.pat.test(navT)) {
         // Exclude cases where the utterance is really about creating something
         // (e.g. "create a new invoice" would otherwise match /invoices/).
         if (CREATE_INTENT_RE.test(t)) break;
