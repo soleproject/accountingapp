@@ -9,6 +9,46 @@ import { toast } from "sonner";
 import { resolveVoiceCommand } from "@/lib/voiceCommands";
 import { emitCreate, emitAction } from "@/lib/createBus";
 
+// Compact confirm card used by the create-account / recategorize / transfer
+// flows. Same visual language as BulkApproveCard but generic — takes a title,
+// a busy label, and an onConfirm/onDismiss pair.
+function InlineConfirmCard({ testId, tone = "fuchsia", confirmLabel = "Yes, do it", cancelLabel = "No, thanks", busyLabel = "Applying…", onConfirm, onDismiss }) {
+  const [busy, setBusy] = useState(false);
+  const [handled, setHandled] = useState(false);
+  const toneCls = {
+    fuchsia: "border-fuchsia-200 bg-fuchsia-50/60",
+    indigo:  "border-indigo-200 bg-indigo-50/60",
+    emerald: "border-emerald-200 bg-emerald-50/60",
+  }[tone] || "border-slate-200 bg-slate-50";
+  const btnCls = {
+    fuchsia: "bg-fuchsia-600 hover:bg-fuchsia-700",
+    indigo:  "bg-indigo-600 hover:bg-indigo-700",
+    emerald: "bg-emerald-600 hover:bg-emerald-700",
+  }[tone] || "bg-slate-700 hover:bg-slate-800";
+
+  const confirm = async () => {
+    if (busy || handled) return;
+    setBusy(true);
+    try { await onConfirm(); setHandled(true); } finally { setBusy(false); }
+  };
+  const dismiss = () => { if (handled) return; setHandled(true); onDismiss?.(); };
+
+  return (
+    <div data-testid={testId} className={`mt-2 rounded-md border px-3 py-2 text-[13px] ${toneCls}`}>
+      <div className="flex items-center gap-2">
+        <button data-testid={`${testId}-yes`} disabled={busy || handled} onClick={confirm}
+                className={`px-3 py-1 text-xs font-medium rounded text-white disabled:opacity-50 ${btnCls}`}>
+          {busy ? busyLabel : confirmLabel}
+        </button>
+        <button data-testid={`${testId}-no`} disabled={busy || handled} onClick={dismiss}
+                className="px-3 py-1 text-xs font-medium rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+          {cancelLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Interactive confirmation card shown in the chat stream after a user
 // approves a transaction that has other unapproved siblings from the same
 // contact. Yes → bulk-approve + rule; No → dismiss.
@@ -1219,6 +1259,100 @@ export default function AiPanel({ collapsed, onToggle }) {
       return;
     }
 
+    // --- Remote intent: recategorize the focused transaction to a named account. ---
+    if (cmd.handled && cmd.remote === "recategorize-focused") {
+      setMessages(m => [...m, { role: "user", content: userMsg }]);
+      try {
+        // Look up an account whose name/code matches the spoken target.
+        const r = await api.get(`/companies/${currentId}/accounts`);
+        const accts = r.data.accounts || [];
+        const needle = cmd.targetName.toLowerCase();
+        // Match priority: exact name → exact code → name-starts-with → contains.
+        let hit = accts.find(a => (a.name || "").toLowerCase() === needle);
+        if (!hit) hit = accts.find(a => (a.code || "") === cmd.targetName);
+        if (!hit) hit = accts.find(a => (a.name || "").toLowerCase().startsWith(needle));
+        if (!hit) hit = accts.find(a => (a.name || "").toLowerCase().includes(needle));
+        if (!hit) {
+          // Offer to CREATE it.
+          setMessages(m => [...m, {
+            role: "assistant",
+            content: `I couldn't find an account called "${cmd.targetName}". Want me to create it as an expense category and use it here?`,
+            card: {
+              kind: "create-account-then-recategorize",
+              accountName: cmd.targetName,
+              accountType: "expense",
+              txnId: cmd.txnId,
+            },
+          }]);
+          pendingIntentRef.current = { kind: "create-then-recat", accountName: cmd.targetName, accountType: "expense", txnId: cmd.txnId };
+          return;
+        }
+        // PATCH the transaction.
+        await api.patch(`/companies/${currentId}/transactions/${cmd.txnId}`, {
+          category_account_id: hit.id,
+        });
+        const say = `Recategorized to ${hit.code} ${hit.name}.`;
+        setMessages(m => [...m, { role: "assistant", content: say }]);
+        if (voiceOnRef.current) speakOne(say);
+        emitAction("txns:changed");
+      } catch (e) {
+        setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't recategorize that." }]);
+      }
+      return;
+    }
+
+    // --- Remote intent: create a new Chart-of-Accounts entry. ---
+    if (cmd.handled && cmd.remote === "create-account") {
+      setMessages(m => [...m, {
+        role: "user", content: userMsg,
+      }, {
+        role: "assistant",
+        content: `Create a new **${cmd.accountType}** account named **${cmd.accountName}**?`,
+        card: {
+          kind: "create-account-confirm",
+          accountName: cmd.accountName,
+          accountType: cmd.accountType,
+        },
+      }]);
+      pendingIntentRef.current = { kind: "create-account", accountName: cmd.accountName, accountType: cmd.accountType };
+      return;
+    }
+
+    // --- Remote intent: mark focused txn as an internal transfer. ---
+    if (cmd.handled && cmd.remote === "mark-transfer") {
+      setMessages(m => [...m, { role: "user", content: userMsg }]);
+      try {
+        const r = await api.post(`/companies/${currentId}/transactions/${cmd.txnId}/mark-as-transfer`, {});
+        const { transfer_account, candidates } = r.data || {};
+        const acctStr = transfer_account ? `${transfer_account.code} ${transfer_account.name}` : "Transfer";
+        if (!candidates || candidates.length === 0) {
+          const say = `Done — recategorized to ${acctStr}. No matching leg found on another bank account within ±3 days.`;
+          setMessages(m => [...m, { role: "assistant", content: say }]);
+          if (voiceOnRef.current) speakOne(say);
+          emitAction("txns:changed");
+          return;
+        }
+        const first = candidates[0];
+        const bank = first.bank_account_name || "another account";
+        const prompt = `Recategorized to **${acctStr}**. I also see a matching **${bank}** entry on **${first.date}** for the opposite amount — want me to mark that as the other leg of the transfer too?`;
+        setMessages(m => [...m, {
+          role: "assistant",
+          content: prompt,
+          card: {
+            kind: "transfer-match-confirm",
+            txnId: cmd.txnId,
+            candidates,
+          },
+        }]);
+        pendingIntentRef.current = { kind: "transfer-match", txnId: cmd.txnId, candidates };
+        if (voiceOnRef.current) speakOne(prompt.replace(/\*\*/g, ""));
+        emitAction("txns:changed");
+      } catch (e) {
+        setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't mark that as a transfer." }]);
+      }
+      return;
+    }
+
     if (cmd.handled) {
       setMessages(m => [
         ...m,
@@ -1464,6 +1598,75 @@ export default function AiPanel({ collapsed, onToggle }) {
                   pendingIntentRef.current = null;
                   setMessages(mm => [...mm, { role: "assistant", content: "OK — just the one approved." }]);
                   if (voiceOnRef.current) speakOne("OK, just the one approved.");
+                }}
+              />
+            )}
+            {m.card?.kind === "create-account-confirm" && (
+              <InlineConfirmCard
+                testId="create-account-card"
+                tone="indigo"
+                onConfirm={async () => {
+                  const r = await api.post(`/companies/${currentId}/accounts/ensure`, {
+                    name: m.card.accountName, type: m.card.accountType,
+                  });
+                  pendingIntentRef.current = null;
+                  const msg = r.data?.created
+                    ? `Created ${r.data.code} ${r.data.name} (${r.data.type}).`
+                    : `${r.data.code} ${r.data.name} already exists — using it.`;
+                  setMessages(mm => [...mm, { role: "assistant", content: msg }]);
+                  if (voiceOnRef.current) speakOne(msg);
+                  emitAction("txns:changed");
+                }}
+                onDismiss={() => {
+                  pendingIntentRef.current = null;
+                  setMessages(mm => [...mm, { role: "assistant", content: "OK — no new account created." }]);
+                }}
+              />
+            )}
+            {m.card?.kind === "create-account-then-recategorize" && (
+              <InlineConfirmCard
+                testId="create-then-recat-card"
+                tone="indigo"
+                confirmLabel="Yes, create + recategorize"
+                onConfirm={async () => {
+                  const r = await api.post(`/companies/${currentId}/accounts/ensure`, {
+                    name: m.card.accountName, type: m.card.accountType,
+                  });
+                  await api.patch(`/companies/${currentId}/transactions/${m.card.txnId}`, {
+                    category_account_id: r.data.id,
+                  });
+                  pendingIntentRef.current = null;
+                  const msg = `${r.data.created ? "Created" : "Reusing"} ${r.data.code} ${r.data.name} and recategorized this transaction.`;
+                  setMessages(mm => [...mm, { role: "assistant", content: msg }]);
+                  if (voiceOnRef.current) speakOne(msg);
+                  emitAction("txns:changed");
+                }}
+                onDismiss={() => {
+                  pendingIntentRef.current = null;
+                  setMessages(mm => [...mm, { role: "assistant", content: "OK — no changes made." }]);
+                }}
+              />
+            )}
+            {m.card?.kind === "transfer-match-confirm" && (
+              <InlineConfirmCard
+                testId="transfer-match-card"
+                tone="fuchsia"
+                confirmLabel="Yes, mark that leg too"
+                onConfirm={async () => {
+                  const legId = m.card.candidates[0]?.id;
+                  if (!legId) return;
+                  await api.post(`/companies/${currentId}/transactions/${m.card.txnId}/mark-as-transfer`, {
+                    matching_leg_id: legId,
+                  });
+                  pendingIntentRef.current = null;
+                  const msg = "Done — both legs of the transfer are now categorized correctly and won't hit the P&L.";
+                  setMessages(mm => [...mm, { role: "assistant", content: msg }]);
+                  if (voiceOnRef.current) speakOne(msg);
+                  emitAction("txns:changed");
+                }}
+                onDismiss={() => {
+                  pendingIntentRef.current = null;
+                  setMessages(mm => [...mm, { role: "assistant", content: "OK — only this side is marked as a transfer." }]);
                 }}
               />
             )}

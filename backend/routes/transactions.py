@@ -334,6 +334,130 @@ async def unapprove_transaction(cid: str, tid: str, user: dict = Depends(get_cur
     return {"ok": True}
 
 
+class MarkTransferIn(BaseModel):
+    matching_leg_id: Optional[str] = None  # if present, also recategorize this row
+    account_name: str = "Inter-Account Transfer"
+
+
+@router.post("/companies/{cid}/transactions/{tid}/mark-as-transfer")
+async def mark_as_transfer(cid: str, tid: str, inp: MarkTransferIn = MarkTransferIn(), user: dict = Depends(get_current_user)):
+    """Bookkeeper-grade "internal transfer" fix. In one call:
+      1. Idempotently ensure an equity account named `Inter-Account Transfer`
+         (or caller-provided name) exists — this account is the sink both
+         legs of a real inter-account transfer point at, so neither leg
+         appears on the P&L.
+      2. Reclassify the focused transaction to that account.
+      3. If a matching leg id was passed, reclassify that too.
+      4. Return the transfer account + any candidate matching legs the UI
+         didn't already know about (opposite-sign, same-amount, ±3 days,
+         on a *different* bank account, not already categorized as transfer).
+    """
+    await require_company(user, cid)
+    txn = await db.transactions.find_one({"id": tid, "company_id": cid})
+    if not txn:
+        raise HTTPException(404, "Transaction not found")
+    await assert_open(cid, txn.get("date"))
+
+    # 1. Ensure the Transfer equity account.
+    name_norm = re.sub(r"\s+", " ", inp.account_name.strip()).lower()
+    xfer = None
+    for a in await db.accounts.find({"company_id": cid, "type": "equity"}).to_list(500):
+        if re.sub(r"\s+", " ", a.get("name", "").strip()).lower() == name_norm:
+            xfer = a
+            break
+    if not xfer:
+        # Pick a free code in the equity range.
+        used = {a["code"] for a in await db.accounts.find(
+            {"company_id": cid, "code": {"$exists": True}}
+        ).to_list(2000)}
+        code = None
+        for n in range(3200, 3999, 10):
+            if str(n) not in used:
+                code = str(n); break
+        code = code or "3900"
+        now = now_iso()
+        xfer = {
+            "id": str(uuid.uuid4()), "company_id": cid, "code": code,
+            "name": inp.account_name.strip(), "type": "equity",
+            "subtype": "transfer", "active": True, "balance": 0.0,
+            "created_at": now, "updated_at": now, "source": "ai_transfer_fix",
+        }
+        await db.accounts.insert_one(xfer)
+
+    # 2. Reclassify the focused txn.
+    await db.transactions.update_one(
+        {"id": tid, "company_id": cid},
+        {"$set": {
+            "category_account_id": xfer["id"],
+            "category_account_code": xfer["code"],
+            "category_account_name": xfer["name"],
+            "needs_review": False,
+            "posted": True,
+            "updated_at": now_iso(),
+        }},
+    )
+
+    # 3. Also reclassify the caller-specified matching leg, if any.
+    matched_id = None
+    if inp.matching_leg_id:
+        m = await db.transactions.find_one({"id": inp.matching_leg_id, "company_id": cid})
+        if m and not await is_period_closed(cid, m.get("date")):
+            await db.transactions.update_one(
+                {"id": m["id"], "company_id": cid},
+                {"$set": {
+                    "category_account_id": xfer["id"],
+                    "category_account_code": xfer["code"],
+                    "category_account_name": xfer["name"],
+                    "needs_review": False,
+                    "posted": True,
+                    "updated_at": now_iso(),
+                }},
+            )
+            matched_id = m["id"]
+
+    # 4. Suggest a matching leg — opposite-sign, same-abs-amount, ±3 days,
+    #    different bank account, not already sitting in the transfer account.
+    txn = await db.transactions.find_one({"id": tid, "company_id": cid})
+    amt = float(txn.get("amount") or 0.0)
+    date = txn.get("date") or ""
+    candidates: list[dict] = []
+    if amt and date:
+        # Compute the ±3 day window.
+        try:
+            d = datetime.strptime(date, "%Y-%m-%d")
+            lo_d = (d - timedelta(days=3)).strftime("%Y-%m-%d")
+            hi_d = (d + timedelta(days=3)).strftime("%Y-%m-%d")
+        except Exception:
+            lo_d, hi_d = date, date
+        docs = await db.transactions.find({
+            "company_id": cid,
+            "date": {"$gte": lo_d, "$lte": hi_d},
+            "amount": round(-amt, 2),
+            "bank_account_id": {"$ne": txn.get("bank_account_id")},
+            "category_account_id": {"$ne": xfer["id"]},
+            "id": {"$ne": tid},
+        }).limit(5).to_list(5)
+        for c in docs:
+            if matched_id and c["id"] == matched_id:
+                continue
+            candidates.append({
+                "id": c["id"], "date": c.get("date"),
+                "merchant": c.get("merchant") or c.get("description"),
+                "amount": c.get("amount"),
+                "bank_account_name": c.get("bank_account_name"),
+                "current_category": c.get("category_account_name"),
+            })
+
+    return {
+        "ok": True,
+        "transfer_account": {
+            "id": xfer["id"], "code": xfer["code"], "name": xfer["name"],
+        },
+        "matched_leg_id": matched_id,
+        "candidates": candidates,
+    }
+
+
 @router.post("/companies/{cid}/transactions/{tid}/approve-with-suggestion")
 async def approve_with_suggestion(cid: str, tid: str, user: dict = Depends(get_current_user)):
     """Approve a single transaction, then return a suggestion payload the UI

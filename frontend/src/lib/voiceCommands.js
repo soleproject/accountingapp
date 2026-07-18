@@ -558,6 +558,55 @@ export function resolveVoiceCommand(text, ctx) {
     return { handled: true, remote: "unapprove-focused", txnId: ctx.focus.id };
   }
 
+  // ---- 3b. Recategorize the focused transaction ---------------------
+  // "recategorize this as Meals" / "categorize it as Owner's Draw" /
+  // "change to Rent" / "book this to Utilities" / "make this Utilities" /
+  // "put this under Marketing" / "move this to Consulting Income"
+  const RECAT_RE = /^(?:re-?categorize|categorize|change|switch|move|book|put|make|re-?class|reclass(?:ify)?)(?:\s+(?:this|it|that|the\s+transaction))?\s+(?:as|to|under|into|a|an)\s+(.+?)\s*[.!]?$/i;
+  const rc = t.match(RECAT_RE);
+  if (rc) {
+    if (!ctx.focus?.id) {
+      return { handled: true, say: "Hover a transaction or click its sparkle first so I know which one to recategorize." };
+    }
+    // Trim trailing "expense/account/category" noise.
+    const targetName = rc[1]
+      .replace(/\s+(?:expense|revenue|income|account|category|charge)s?$/i, "")
+      .replace(/^(the|a|an)\s+/i, "")
+      .trim();
+    if (targetName.length >= 2) {
+      return { handled: true, remote: "recategorize-focused", txnId: ctx.focus.id, targetName };
+    }
+  }
+
+  // ---- 3c. Create a new Chart-of-Accounts entry ---------------------
+  // "create a Transfer category" / "make a new equity account called
+  // Owner's Contribution" / "add a Meals subaccount named Client Lunches"
+  // Also handles: "create an expense account for Client Lunches"
+  const CREATE_ACCT_RE = /^(?:create|make|add|new)\s+(?:a\s+(?:new\s+)?|an\s+(?:new\s+)?)?(asset|liability|equity|revenue|income|expense|cogs|bank|credit\s*card)?\s*(?:sub-?)?(?:account|category)\s+(?:for|called|named|labeled|titled)\s+(.+?)\s*[.!]?$/i;
+  const ca = t.match(CREATE_ACCT_RE);
+  if (ca) {
+    let type = (ca[1] || "expense").toLowerCase().replace(/\s+/g, "");
+    if (type === "income") type = "revenue";
+    if (type === "creditcard") type = "liability";
+    if (type === "bank") type = "asset";
+    const name = ca[2].replace(/^(the|a|an)\s+/i, "").trim();
+    if (name.length >= 2) {
+      return { handled: true, remote: "create-account", accountName: name, accountType: type };
+    }
+  }
+
+  // ---- 3d. "This is an internal transfer" — Transfer flow ----------
+  // "this is an internal transfer" / "internal transfer between accounts" /
+  // "mark this as a transfer" / "book this as a bank transfer"
+  const TRANSFER_RE = /^(?:(?:so|this|it|that)\s+(?:is|was)\s+(?:an?\s+)?)?(?:(?:mark|book|treat|categorize|classify|record)\s+(?:this|it|that|the\s+transaction)?\s*(?:as|to\s+be)\s+)?(?:an?\s+)?(?:internal|inter[- ]?account|inter[- ]?bank|bank(?:\s+account)?)\s+transfer(?:\s+between\s+(?:the\s+)?(?:bank\s+)?accounts?)?\s*[.!]?$/i;
+  const TRANSFER_RE_ALT = /^(?:mark|book|treat|categorize|classify|record|make)\s+(?:this|it|that|the\s+transaction)\s+(?:as|to\s+be)\s+(?:an?\s+)?(?:(?:internal|inter[- ]?account|inter[- ]?bank|bank)\s+)?transfer\s*[.!]?$/i;
+  if (TRANSFER_RE.test(t) || TRANSFER_RE_ALT.test(t)) {
+    if (!ctx.focus?.id) {
+      return { handled: true, say: "Hover a transaction or click its sparkle first so I know which one is the transfer." };
+    }
+    return { handled: true, remote: "mark-transfer", txnId: ctx.focus.id };
+  }
+
   // ---- 4. Transaction filter / lookup commands ----
   //   "show me all the transactions for Walmart"
   //   "transactions for John Smith"

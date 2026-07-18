@@ -72,6 +72,79 @@ async def create_account(cid: str, inp: AccountCreate, user: dict = Depends(get_
     return {"id": aid}
 
 
+# Idempotent "get-or-create" used by AI-driven flows (voice: "create a Transfer
+# category", "make a new equity account named Owner's Contribution"). If an
+# account with the same normalized name OR the same code exists we return it
+# rather than creating a duplicate. Auto-assigns a code in the next-available
+# 100 block for the requested type when the caller didn't specify one.
+CODE_RANGES = {
+    "asset":      (1200, 1999),  # skip 1010 Business Checking baseline
+    "liability":  (2100, 2999),
+    "equity":     (3200, 3999),  # skip 3000 Owner block
+    "revenue":    (4100, 4999),
+    "expense":    (6000, 8999),
+    "cogs":       (5000, 5999),
+}
+
+
+class EnsureAccountIn(BaseModel):
+    name: str
+    type: str
+    code: Optional[str] = None
+    subtype: Optional[str] = ""
+    parent_account_id: Optional[str] = None
+
+
+@router.post("/companies/{cid}/accounts/ensure")
+async def ensure_account(cid: str, inp: EnsureAccountIn, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    t = (inp.type or "").lower().strip()
+    if t not in CODE_RANGES:
+        raise HTTPException(400, f"Unsupported account type: {inp.type}")
+
+    # Match by normalized name (case-insensitive) OR exact code.
+    name_norm = re.sub(r"\s+", " ", inp.name.strip()).lower()
+    existing = None
+    if inp.code:
+        existing = await db.accounts.find_one({"company_id": cid, "code": inp.code})
+    if not existing:
+        # Case-insensitive name match on same type; avoids "Transfer" vs "transfer".
+        all_of_type = await db.accounts.find({"company_id": cid, "type": t}).to_list(1000)
+        for a in all_of_type:
+            if re.sub(r"\s+", " ", a.get("name", "").strip()).lower() == name_norm:
+                existing = a
+                break
+    if existing:
+        return {"created": False, **coerce(existing)}
+
+    # Assign a code: caller-provided if free, else next-available in the type range.
+    lo, hi = CODE_RANGES[t]
+    used = {a["code"] for a in await db.accounts.find(
+        {"company_id": cid, "code": {"$exists": True}}
+    ).to_list(2000)}
+    if inp.code and inp.code not in used:
+        code = inp.code
+    else:
+        code = None
+        for n in range(lo, hi + 1, 10):
+            candidate = str(n)
+            if candidate not in used:
+                code = candidate
+                break
+        if not code:
+            code = str(lo + len([u for u in used if u.startswith(str(lo)[0])]))
+
+    aid = str(uuid.uuid4()); now = now_iso()
+    doc = {
+        "id": aid, "company_id": cid, "code": code, "name": inp.name.strip(),
+        "type": t, "subtype": inp.subtype or "", "active": True, "balance": 0.0,
+        "parent_account_id": inp.parent_account_id,
+        "created_at": now, "updated_at": now, "source": "ai_ensure",
+    }
+    await db.accounts.insert_one(doc)
+    return {"created": True, **coerce(doc)}
+
+
 @router.patch("/companies/{cid}/accounts/{aid}")
 async def update_account(cid: str, aid: str, payload: dict, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
