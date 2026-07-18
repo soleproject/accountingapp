@@ -1,0 +1,29 @@
+{
+  "summary": "All 4 Account Detail enhancements verified end-to-end and passing. Backend: 15/15 pytest tests green covering new query params (q, min_amount, max_amount, contact_id, date range) on /reports/account-detail and its /pdf variant, plus regressions for Balance Sheet balance/hierarchy and other reports. Frontend: end-to-end verified — company switch to 351 LLC, BS renders with bs-row-2110, click drills into /reports/account-detail?account=<uuid>, breadcrumb + search + filter popover all render with correct data-testids, Contact column shows 'Citi Card' populated, 17 transactions with Amount + Running Balance ($5,630 total). Scroll position (main.scrollTop=207) is faithfully restored after breadcrumb click. URL params q= and min_amount=50 wire through correctly, clear-search and clear-all filter buttons work. Voice router: both 'open account 2110' and 'pull the Citi Card detail' navigate to /reports/account-detail?account=6ccfc8a3-... and assistant replies 'Opening 2110 Citi Card'. Move-selected bulk-reclassify button still present (regression pass).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter26_account_detail_filters.py",
+    "/app/test_reports/pytest/iter26.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "ReportView.jsx is now ~764 lines — still under the 700-line soft-cap warning but approaching the limit; consider splitting AccountDetailBody + BalanceSheetBody + ReportHeader into separate files for maintainability.",
+    "Scroll capture uses document.querySelector('main') — robust for the current app shell but couples the drill-down to layout structure; a shared useScrollRestoration hook keyed on the current scroll container ref would be cleaner and resistant to future shell refactors.",
+    "compute_account_detail applies q/amount post-filters in Python after fetching up to 5000 txns from Mongo. For large accounts this is fine, but for portfolio queries against high-volume accounts pushing q into a Mongo regex or text index would scale better.",
+    "voiceCommands.js OPEN_ACCOUNT_RE + AiPanel remote handler duplicates account-fetch logic that already exists in ReportView — extract to a shared lib/accountsFetcher.js so future intents (e.g. 'open contact ...') don't re-implement.",
+    "Filter popover has no outside-click close handler — clicking outside the popover leaves it open until the toggle is re-clicked or Escape/close-X is pressed. Not blocking, but a common UX expectation."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter26_account_detail_filters.py"],
+  "success_rate": { "backend": "100%", "frontend": "100%" },
+  "test_credentials": "pro@axiom.ai / pro123 (351 LLC = 51f35d57-eec7-4662-b26e-11b37ccb71ff; Citi Card 2110 acct = 6ccfc8a3-b57d-417f-96a0-b25d26c5624f)",
+  "seed_data_creation": "None — used existing 351 LLC + Citi Card seed data.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression suite /app/backend/tests/test_iter26_account_detail_filters.py (15 tests) is stable and takes ~3s. Uses /app/frontend/.env auto-loader for REACT_APP_BACKEND_URL. Login response field is `token` (NOT access_token). /api/companies returns {companies: [...]}, /api/companies/{cid}/accounts returns {accounts: [...]}, /api/companies/{cid}/contacts returns {contacts: [...]}. AI panel has TWO toggle buttons with same testid ai-panel-toggle in the DOM tree (floating one and header 'ai-panel-toggle-header'); the panel is persisted so if a prior session left it open, no toggle click is needed. Voice router handles 'open account <code>' via OPEN_ACCOUNT_RE, and name-based ('pull the Citi Card detail') fuzzy-matches via /accounts fetch in AiPanel.jsx.",
+  "rca of the issue": "N/A — no bugs found in this iteration. All 4 planned enhancements are working end-to-end."
+}

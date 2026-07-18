@@ -2211,17 +2211,29 @@ async def rep_bs_pdf(cid: str, as_of: Optional[str] = None, basis: str = "accrua
 @api.get("/companies/{cid}/reports/account-detail")
 async def rep_account_detail(cid: str, account_id: str,
                              start: Optional[str] = None, end: Optional[str] = None,
+                             q: Optional[str] = None,
+                             contact_id: Optional[str] = None,
+                             min_amount: Optional[float] = None,
+                             max_amount: Optional[float] = None,
                              user: dict = Depends(get_current_user)):
     await _require_company(user, cid)
-    return await R.compute_account_detail(cid, account_id, start, end)
+    return await R.compute_account_detail(cid, account_id, start, end,
+                                          q=q, contact_id=contact_id,
+                                          min_amount=min_amount, max_amount=max_amount)
 
 
 @api.get("/companies/{cid}/reports/account-detail/pdf")
 async def rep_account_detail_pdf(cid: str, account_id: str,
                                  start: Optional[str] = None, end: Optional[str] = None,
+                                 q: Optional[str] = None,
+                                 contact_id: Optional[str] = None,
+                                 min_amount: Optional[float] = None,
+                                 max_amount: Optional[float] = None,
                                  user: dict = Depends(get_current_user)):
     await _require_company(user, cid)
-    data = await R.compute_account_detail(cid, account_id, start, end)
+    data = await R.compute_account_detail(cid, account_id, start, end,
+                                          q=q, contact_id=contact_id,
+                                          min_amount=min_amount, max_amount=max_amount)
     fname = f"account_detail_{(data.get('account') or {}).get('code','x')}.pdf"
     return Response(content=R.build_account_detail_pdf(data), media_type="application/pdf",
                     headers={"Content-Disposition": f"attachment; filename={fname}"})

@@ -943,7 +943,11 @@ def build_1099_pdf(data: dict) -> bytes:
 # so it fits naturally alongside the other reports.
 
 async def compute_account_detail(company_id: str, account_id: str,
-                                 start: str | None = None, end: str | None = None):
+                                 start: str | None = None, end: str | None = None,
+                                 q: str | None = None,
+                                 contact_id: str | None = None,
+                                 min_amount: float | None = None,
+                                 max_amount: float | None = None):
     company = await db.companies.find_one({"id": company_id})
     account = await db.accounts.find_one({"id": account_id, "company_id": company_id})
     if not account:
@@ -952,17 +956,42 @@ async def compute_account_detail(company_id: str, account_id: str,
             "account": None, "rows": [], "count": 0, "sum_amount": 0.0, "balance": 0.0,
         }
 
-    q: dict = {"company_id": company_id, "category_account_id": account_id}
+    mongo_q: dict = {"company_id": company_id, "category_account_id": account_id}
     if start:
-        q.setdefault("date", {})["$gte"] = start
+        mongo_q.setdefault("date", {})["$gte"] = start
     if end:
-        q.setdefault("date", {})["$lte"] = end
+        mongo_q.setdefault("date", {})["$lte"] = end
+    if contact_id:
+        mongo_q["contact_id"] = contact_id
 
-    txns = await db.transactions.find(q).sort([("date", 1), ("_id", 1)]).to_list(5000)
+    txns = await db.transactions.find(mongo_q).sort([("date", 1), ("_id", 1)]).to_list(5000)
+
+    # Post-filter for free-text search (merchant / description / contact_name)
+    # and amount range. Kept in Python to keep index usage tight and to support
+    # case-insensitive matching without regex escaping surprises.
+    needle = (q or "").strip().lower()
+
+    def _match(t: dict) -> bool:
+        if needle:
+            hay = " ".join([
+                str(t.get("merchant") or ""),
+                str(t.get("description") or ""),
+                str(t.get("contact_name") or ""),
+            ]).lower()
+            if needle not in hay:
+                return False
+        amt = float(t.get("amount") or 0.0)
+        if min_amount is not None and abs(amt) < float(min_amount) - 0.001:
+            return False
+        if max_amount is not None and abs(amt) > float(max_amount) + 0.001:
+            return False
+        return True
+
+    filtered = [t for t in txns if _match(t)]
 
     running = 0.0
     rows: list[dict] = []
-    for t in txns:
+    for t in filtered:
         # Liability / equity / revenue accounts have credit-normal balances,
         # so an outflow (negative amount) *raises* the balance. We use
         # `-amount` as the ledger delta to match the balance-sheet display.
@@ -973,6 +1002,7 @@ async def compute_account_detail(company_id: str, account_id: str,
             "date": t.get("date"),
             "merchant": t.get("merchant") or t.get("contact_name") or t.get("description"),
             "description": t.get("description"),
+            "contact_name": t.get("contact_name") or "",
             "amount": round(t.get("amount") or 0.0, 2),
             "delta": round(delta, 2),
             "running": round(running, 2),
@@ -989,7 +1019,7 @@ async def compute_account_detail(company_id: str, account_id: str,
         },
         "rows": rows,
         "count": len(rows),
-        "sum_amount": round(sum(t.get("amount") or 0.0 for t in txns), 2),
+        "sum_amount": round(sum(t.get("amount") or 0.0 for t in filtered), 2),
         "balance": round(running, 2),
         "period_start": start,
         "period_end": end,

@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, BACKEND_URL } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Download, Loader2, ArrowRightCircle } from "lucide-react";
+import { Download, Loader2, ArrowRightCircle, ChevronLeft, Search, SlidersHorizontal, X } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import { toast } from "sonner";
 
@@ -16,13 +16,45 @@ const today = () => new Date().toISOString().slice(0, 10);
 // page, PDF-exportable via the standard header — but with bulk-update
 // capability (checkboxes + Move-to-account).
 
-function AccountDetailBody({ currentId, data, onReload }) {
+function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchParams, navigate }) {
   const rows = data.rows || [];
   const account = data.account || {};
   const [selected, setSelected] = useState(() => new Set(rows.map(r => r.id)));
   const [moving, setMoving] = useState(false);
   const [applying, setApplying] = useState(false);
   const [accounts, setAccounts] = useState([]);
+
+  // Search + filter state — synced to URL params so the view is deep-linkable,
+  // survives refresh, and can be voice-populated.
+  const [searchDraft, setSearchDraft] = useState(searchParams.get("q") || "");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const startVal    = searchParams.get("start") || "";
+  const endVal      = searchParams.get("end") || "";
+  const minAmountVal = searchParams.get("min_amount") || "";
+  const maxAmountVal = searchParams.get("max_amount") || "";
+  const activeFilterCount =
+    (startVal ? 1 : 0) + (endVal ? 1 : 0) +
+    (minAmountVal ? 1 : 0) + (maxAmountVal ? 1 : 0);
+
+  const applyFilter = (key, value) => {
+    const next = new URLSearchParams(searchParams);
+    if (value === "" || value == null) next.delete(key); else next.set(key, value);
+    setSearchParams(next, { replace: true });
+  };
+  const applySearch = (val) => applyFilter("q", val);
+  const clearAllFilters = () => {
+    const next = new URLSearchParams(searchParams);
+    ["q", "start", "end", "min_amount", "max_amount"].forEach(k => next.delete(k));
+    setSearchDraft("");
+    setSearchParams(next, { replace: true });
+  };
+
+  // Breadcrumb back to Balance Sheet — restores the exact scroll position
+  // saved when the user clicked into this account.
+  const goBackToBalanceSheet = () => {
+    const returnUrl = sessionStorage.getItem("bsReturnUrl") || "/reports/balance-sheet";
+    navigate(returnUrl);
+  };
 
   // Re-seed selection when a new dataset lands (e.g. after a Move refetches).
   useEffect(() => {
@@ -72,6 +104,128 @@ function AccountDetailBody({ currentId, data, onReload }) {
 
   return (
     <div className="text-sm">
+      {/* Breadcrumb — back to Balance Sheet, preserving scroll position. */}
+      <div className="mb-3 flex items-center gap-2 text-xs text-slate-500">
+        <button
+          data-testid="acctdetail-breadcrumb-bs"
+          onClick={goBackToBalanceSheet}
+          className="inline-flex items-center gap-1 hover:text-indigo-700 hover:underline"
+        >
+          <ChevronLeft size={12} /> Balance Sheet
+        </button>
+        <span className="text-slate-300">/</span>
+        <span className="text-slate-700">{account.code} · {account.name}</span>
+      </div>
+
+      {/* Search + filter row */}
+      <div className="mb-3 flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-[220px] max-w-md">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          <input
+            data-testid="acctdetail-search"
+            value={searchDraft}
+            onChange={(e) => setSearchDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") applySearch(searchDraft); }}
+            onBlur={() => applySearch(searchDraft)}
+            placeholder="Search merchant, description, or contact…"
+            className="w-full pl-7 pr-8 py-1.5 text-xs border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400"
+          />
+          {searchDraft && (
+            <button
+              data-testid="acctdetail-search-clear"
+              onClick={() => { setSearchDraft(""); applySearch(""); }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+              aria-label="Clear search"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+        <div className="relative">
+          <button
+            data-testid="acctdetail-filter-toggle"
+            onClick={() => setFiltersOpen(v => !v)}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-md border ${activeFilterCount > 0 ? "border-indigo-400 bg-indigo-50 text-indigo-800" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"}`}
+          >
+            <SlidersHorizontal size={13} />
+            Filters
+            {activeFilterCount > 0 && (
+              <span className="ml-1 text-[10px] rounded-full bg-indigo-600 text-white px-1.5 py-0.5">{activeFilterCount}</span>
+            )}
+          </button>
+          {filtersOpen && (
+            <div
+              data-testid="acctdetail-filter-popover"
+              className="absolute right-0 z-30 mt-2 w-72 rounded-lg border border-slate-200 bg-white shadow-lg p-3 text-xs"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="font-semibold text-slate-700 uppercase tracking-wider text-[10px]">Filters</div>
+                <button
+                  onClick={() => setFiltersOpen(false)}
+                  className="text-slate-400 hover:text-slate-700"
+                  aria-label="Close filters"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+              <label className="block mb-2">
+                <span className="text-slate-500">Date from</span>
+                <input
+                  type="date"
+                  data-testid="acctdetail-filter-start"
+                  value={startVal}
+                  onChange={(e) => applyFilter("start", e.target.value)}
+                  className="mt-0.5 w-full border rounded px-2 py-1 text-xs"
+                />
+              </label>
+              <label className="block mb-2">
+                <span className="text-slate-500">Date to</span>
+                <input
+                  type="date"
+                  data-testid="acctdetail-filter-end"
+                  value={endVal}
+                  onChange={(e) => applyFilter("end", e.target.value)}
+                  className="mt-0.5 w-full border rounded px-2 py-1 text-xs"
+                />
+              </label>
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <label className="block">
+                  <span className="text-slate-500">Amount ≥</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    data-testid="acctdetail-filter-min"
+                    value={minAmountVal}
+                    onChange={(e) => applyFilter("min_amount", e.target.value)}
+                    className="mt-0.5 w-full border rounded px-2 py-1 text-xs font-mono-num"
+                    placeholder="0.00"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-slate-500">Amount ≤</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    data-testid="acctdetail-filter-max"
+                    value={maxAmountVal}
+                    onChange={(e) => applyFilter("max_amount", e.target.value)}
+                    className="mt-0.5 w-full border rounded px-2 py-1 text-xs font-mono-num"
+                    placeholder="0.00"
+                  />
+                </label>
+              </div>
+              <button
+                data-testid="acctdetail-filter-clear"
+                onClick={clearAllFilters}
+                className="w-full mt-1 py-1 text-[11px] rounded border border-slate-200 hover:bg-slate-50 text-slate-600"
+              >
+                Clear all filters
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="mb-4 flex items-center gap-2 flex-wrap px-3 py-2 bg-slate-50 rounded-md border border-slate-200">
         <button
           data-testid="acctdetail-move-selected"
@@ -107,9 +261,10 @@ function AccountDetailBody({ currentId, data, onReload }) {
               />
             </div>
             <div className="col-span-2">Date</div>
-            <div className="col-span-4">Merchant / Description</div>
+            <div className="col-span-3">Merchant / Description</div>
+            <div className="col-span-2">Contact</div>
             <div className="col-span-2 text-right">Amount</div>
-            <div className="col-span-3 text-right">Running Balance</div>
+            <div className="col-span-2 text-right">Running Balance</div>
           </div>
           {rows.map(t => {
             const isChecked = selected.has(t.id);
@@ -128,27 +283,30 @@ function AccountDetailBody({ currentId, data, onReload }) {
                   />
                 </div>
                 <div className="col-span-2 font-mono-num text-slate-500">{t.date}</div>
-                <div className="col-span-4 truncate" title={t.merchant || t.description}>
+                <div className="col-span-3 truncate" title={t.merchant || t.description}>
                   {t.merchant || t.description || <span className="italic text-slate-400">—</span>}
                   {t.needs_review && <span className="ml-2 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">review</span>}
+                </div>
+                <div className="col-span-2 truncate text-slate-700" title={t.contact_name}>
+                  {t.contact_name || <span className="text-slate-300">—</span>}
                 </div>
                 <div className={`col-span-2 text-right font-mono-num ${(t.amount || 0) < 0 ? "text-slate-800" : "text-emerald-700"}`}>
                   {fmtMoney(t.amount)}
                 </div>
-                <div className="col-span-3 text-right font-mono-num text-slate-600">
+                <div className="col-span-2 text-right font-mono-num text-slate-600">
                   {fmtMoney(t.running)}
                 </div>
               </label>
             );
           })}
           <div className="grid grid-cols-12 gap-2 px-3 py-2 border-t-2 border-slate-800 text-sm bg-slate-50 rounded-b">
-            <div className="col-span-7 font-semibold uppercase text-[11px] tracking-widest text-slate-600">
+            <div className="col-span-8 font-semibold uppercase text-[11px] tracking-widest text-slate-600">
               {rows.length} transaction{rows.length === 1 ? "" : "s"}
             </div>
             <div className="col-span-2 text-right font-mono-num font-bold">
               {fmtMoney(data.sum_amount)}
             </div>
-            <div className="col-span-3 text-right font-mono-num font-bold">
+            <div className="col-span-2 text-right font-mono-num font-bold">
               {fmtMoney(data.balance)}
             </div>
           </div>
@@ -174,10 +332,13 @@ export default function ReportView() {
   const { kind } = useParams();
   const navigate = useNavigate();
   const { currentId, current } = useCompany();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const urlBasis = searchParams.get("basis");
   const urlStart = searchParams.get("start");
   const urlEnd = searchParams.get("end");
+  const urlQ = searchParams.get("q");
+  const urlMinAmount = searchParams.get("min_amount");
+  const urlMaxAmount = searchParams.get("max_amount");
   const [basis, setBasis] = useState(urlBasis === "cash" || urlBasis === "accrual" ? urlBasis : "accrual");
   const [start, setStart] = useState(urlStart || startYtd());
   const [end, setEnd] = useState(urlEnd || today());
@@ -185,11 +346,40 @@ export default function ReportView() {
   const [busy, setBusy] = useState(false);
   // Balance-sheet drilldown: clicking a row navigates to the full-page
   // Account Detail report so users can review, PDF-export, or bulk-move
-  // transactions using the same UX as any other financial report.
+  // transactions using the same UX as any other financial report. We stash
+  // the current URL + scroll position (from the <main> scroll container in
+  // the app shell) so the breadcrumb can restore both.
   const goToAccountDetail = (row) => {
     if (!row?.id) return;
+    try {
+      const scroller = document.querySelector("main");
+      const y = scroller ? scroller.scrollTop : (window.scrollY || 0);
+      sessionStorage.setItem("bsReturnUrl",
+        `/reports/balance-sheet${window.location.search || ""}`);
+      sessionStorage.setItem("bsScrollY", String(y));
+    } catch { /* private mode / quota — fine to ignore */ }
     navigate(`/reports/account-detail?account=${row.id}`);
   };
+
+  // Restore Balance Sheet scroll position on return from Account Detail.
+  useEffect(() => {
+    if (kind !== "balance-sheet" || !data) return;
+    const y = sessionStorage.getItem("bsScrollY");
+    if (y == null) return;
+    const top = parseInt(y, 10) || 0;
+    // Double rAF + a tiny fallback timeout ensures the scroll container has
+    // finished sizing after the BS re-render (children rows arrive last).
+    let cancelled = false;
+    const apply = () => {
+      if (cancelled) return;
+      const scroller = document.querySelector("main");
+      if (scroller) scroller.scrollTop = top;
+      else window.scrollTo({ top, behavior: "instant" });
+    };
+    requestAnimationFrame(() => requestAnimationFrame(apply));
+    const t = setTimeout(() => { apply(); sessionStorage.removeItem("bsScrollY"); }, 120);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [kind, data]);
 
   // Re-sync from URL params when the user re-triggers a voice command that
   // navigates back to the same report page with different filters.
@@ -209,9 +399,13 @@ export default function ReportView() {
     } else if (kind === "account-detail") {
       const aid = searchParams.get("account");
       if (!aid) { setBusy(false); return; }
-      const s = urlStart ? `&start=${urlStart}` : "";
-      const e = urlEnd ? `&end=${urlEnd}` : "";
-      url = `/companies/${currentId}/reports/account-detail?account_id=${aid}${s}${e}`;
+      const parts = [`account_id=${aid}`];
+      if (urlStart)      parts.push(`start=${encodeURIComponent(urlStart)}`);
+      if (urlEnd)        parts.push(`end=${encodeURIComponent(urlEnd)}`);
+      if (urlQ)          parts.push(`q=${encodeURIComponent(urlQ)}`);
+      if (urlMinAmount)  parts.push(`min_amount=${encodeURIComponent(urlMinAmount)}`);
+      if (urlMaxAmount)  parts.push(`max_amount=${encodeURIComponent(urlMaxAmount)}`);
+      url = `/companies/${currentId}/reports/account-detail?${parts.join("&")}`;
     } else {
       url = `/companies/${currentId}/reports/${kind}?start=${start}&end=${end}&basis=${basis}`;
     }
@@ -222,7 +416,9 @@ export default function ReportView() {
   };
 
   const acctParam = searchParams.get("account");
-  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [currentId, kind, basis, start, end, acctParam]);
+  // Reset data on kind change to avoid rendering a stale shape from a prior report.
+  useEffect(() => { setData(null); }, [kind, acctParam]);
+  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [currentId, kind, basis, start, end, acctParam, urlQ, urlMinAmount, urlMaxAmount, urlStart, urlEnd]);
 
   const downloadPdf = async () => {
     let params;
@@ -230,7 +426,13 @@ export default function ReportView() {
     else if (kind === "account-detail") {
       const aid = searchParams.get("account");
       if (!aid) return;
-      params = `account_id=${aid}`;
+      const parts = [`account_id=${aid}`];
+      if (urlStart)     parts.push(`start=${encodeURIComponent(urlStart)}`);
+      if (urlEnd)       parts.push(`end=${encodeURIComponent(urlEnd)}`);
+      if (urlQ)         parts.push(`q=${encodeURIComponent(urlQ)}`);
+      if (urlMinAmount) parts.push(`min_amount=${encodeURIComponent(urlMinAmount)}`);
+      if (urlMaxAmount) parts.push(`max_amount=${encodeURIComponent(urlMaxAmount)}`);
+      params = parts.join("&");
     } else params = `start=${start}&end=${end}&basis=${basis}`;
     const token = localStorage.getItem("axiom_token");
     const r = await fetch(`${BACKEND_URL}/api/companies/${currentId}/reports/${kind}/pdf?${params}`, {
@@ -304,32 +506,35 @@ export default function ReportView() {
             </div>
           </div>
 
-          {kind === "income-statement" && (
+          {kind === "income-statement" && Array.isArray(data.revenue) && (
             <IncomeStatementBody data={data} />
           )}
-          {kind === "balance-sheet" && (
+          {kind === "balance-sheet" && Array.isArray(data.assets) && (
             <BalanceSheetBody data={data} onDrilldown={goToAccountDetail} />
           )}
-          {kind === "account-detail" && (
+          {kind === "account-detail" && Array.isArray(data.rows) && data.account !== undefined && (
             <AccountDetailBody
               currentId={currentId}
               data={data}
               onReload={fetchData}
+              searchParams={searchParams}
+              setSearchParams={setSearchParams}
+              navigate={navigate}
             />
           )}
-          {kind === "trial-balance" && (
+          {kind === "trial-balance" && Array.isArray(data.rows) && data.account === undefined && (
             <TrialBalanceBody data={data} />
           )}
-          {kind === "general-ledger" && (
+          {kind === "general-ledger" && Array.isArray(data.sections) && (
             <GeneralLedgerBody data={data} />
           )}
-          {kind === "cash-flow" && (
+          {kind === "cash-flow" && data.net_change !== undefined && (
             <CashFlowBody data={data} />
           )}
-          {kind === "sales-tax" && (
+          {kind === "sales-tax" && Array.isArray(data.rows) && data.net_liability !== undefined && (
             <SalesTaxBody data={data} />
           )}
-          {kind === "1099-summary" && (
+          {kind === "1099-summary" && data.year !== undefined && (
             <Form1099Body data={data} />
           )}
         </div>

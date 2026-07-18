@@ -950,6 +950,46 @@ export default function AiPanel({ collapsed, onToggle }) {
       return;
     }
 
+    // --- Remote intent: open account detail (Balance Sheet drilldown by voice) ---
+    if (cmd.handled && cmd.remote === "open-account") {
+      setMessages(m => [...m, { role: "user", content: userMsg }]);
+      try {
+        const r = await api.get(`/companies/${currentId}/accounts`);
+        const accts = (r.data.accounts || []);
+        const needle = (cmd.target || "").toLowerCase().replace(/[^a-z0-9 ]+/g, "").trim();
+        // Try (1) exact code match, (2) code prefix, (3) name/fuzzy match.
+        let hit = accts.find(a => (a.code || "").toLowerCase() === needle);
+        if (!hit) hit = accts.find(a => (a.code || "").toLowerCase().startsWith(needle));
+        if (!hit) {
+          const words = needle.split(/\s+/).filter(Boolean);
+          let best = null, bestScore = 0;
+          for (const a of accts) {
+            const n = (a.name || "").toLowerCase();
+            if (!n) continue;
+            let score = 0;
+            if (n === needle) score = 1000;
+            else if (n.includes(needle) || needle.includes(n)) score = 500;
+            else score = words.reduce((s, w) => s + (n.includes(w) ? 1 : 0), 0);
+            if (score > bestScore) { bestScore = score; best = a; }
+          }
+          if (best && bestScore >= (words.length || 1)) hit = best;
+        }
+        if (hit) {
+          const say = `Opening ${hit.code} ${hit.name}`;
+          setMessages(m => [...m, { role: "assistant", content: say }]);
+          if (voiceOnRef.current) speakOne(say);
+          navigate(`/reports/account-detail?account=${hit.id}`);
+        } else {
+          const say = `I couldn't find an account matching "${cmd.target}".`;
+          setMessages(m => [...m, { role: "assistant", content: say }]);
+          if (voiceOnRef.current) speakOne(say);
+        }
+      } catch (e) {
+        setMessages(m => [...m, { role: "assistant", content: "Couldn't look up that account." }]);
+      }
+      return;
+    }
+
     if (cmd.handled) {
       setMessages(m => [
         ...m,

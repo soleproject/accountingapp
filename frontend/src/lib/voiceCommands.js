@@ -491,6 +491,30 @@ export function resolveVoiceCommand(text, ctx) {
     }
   }
 
+  // ---- 6b. "open/pull/show account <code or name>" — Balance Sheet drilldown ----
+  //   "open account 2110"
+  //   "pull the Citi Card detail"
+  //   "show me account Mr. Cooper"
+  //   Requires a backend lookup (fuzzy match by code or name); the caller
+  //   (AiPanel) handles the resolution and navigation.
+  const OPEN_ACCOUNT_RE =
+    /^(?:open|pull(?:\s+up)?|show(?:\s+me)?|bring\s+up|view)\s+(?:the\s+)?(?:account\s+)?(.+?)(?:\s+(?:detail|account|report))?$/i;
+  const acctIntent =
+    /^(?:open|pull|show|bring up|view)\b.*\b(?:account|detail)\b/i.test(t) ||
+    /^(?:open|pull|show)\s+account\b/i.test(t);
+  if (acctIntent) {
+    const m = t.match(OPEN_ACCOUNT_RE);
+    if (m && m[1]) {
+      const target = m[1]
+        .replace(/^(?:the|an?)\s+/i, "")
+        .replace(/\s+(?:detail|account|report)$/i, "")
+        .trim();
+      if (target.length >= 2) {
+        return { handled: true, remote: "open-account", target };
+      }
+    }
+  }
+
   // ---- 7. Route navigation ----
   //
   // Only fire nav if the utterance LOOKS like a command (short, imperative,
