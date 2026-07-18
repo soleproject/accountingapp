@@ -52,6 +52,7 @@ export default function Contacts() {
     setModal(null);
     setMergeOpen(false);
     setReportContact(null);
+    load();
   });
 
   const del = async (e, id) => {

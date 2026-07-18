@@ -289,21 +289,29 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ### P0 — none (MVP feature-complete)
 
+### Recently shipped (2026-07-18)
+- **Hybrid voice-driven CREATE flow** — parse-intent endpoint (Claude Haiku), pending confirmation banner in AI panel, modal auto-open with prefill for invoices/bills/contacts/CoA accounts. Backend fuzzy-matches contact names to existing contacts. Voice or button "confirm" submits via API. Session-scoped chat clear button with backend history wipe.
+- **Expanded voice router** — 25+ nav routes, quarter/YTD/last-month + cash/accrual filter extraction for reports, "open contact/invoice/bill X" lookups, company switch by name, meta commands (stop/clear/confirm/cancel).
+- **ReportView URL-driven filters** — /reports/{kind}?basis=cash&start=…&end=… now hydrates the toggle + date range and refetches automatically.
+
 ### P1
+- Refactor `server.py` (3300+ lines) into `/routes/` package for scalability
 - Real Plaid Link SDK wiring (replace mock endpoint)
 - Real QBO OAuth + entity sync
 - Real Veryfi document upload + OCR
-- Voice interface for AI chat ("regarding the Walmart purchase on…")
 - Recurring transactions / bill scheduling
 - Sales Tax Liability + 1099 Summary reports (tiles reserved)
 - CSV / bank statement direct import UI
 - Enforce closed-period locking on transaction edits
 
 ### P2
+- Slack / Email digest (Resend/SMTP) of daily "Needs Attention" for Pros
+- Veryfi statement-line balance → `bank_balance_after`
+- AI-at-QBO-connect override generator & PFC-mapping settings page
+- Audit log entry for every edit to Invoices/Bills
 - Firm branding / white-label for Pro accounts
 - Multi-currency support
 - Budget vs. actual reports
 - Email/notification hooks for flagged txns (SendGrid / Resend)
 - Attachment upload on transactions (object storage)
-- Audit log
 - Stripe subscription billing for the SaaS itself

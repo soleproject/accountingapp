@@ -43,6 +43,7 @@ export default function Bills() {
     setCreating(false);
     setCreatingPrefill(null);
     setEditing(null);
+    load();
   });
   const del = async (id) => { if (confirm("Delete?")) { await api.delete(`/companies/${currentId}/bills/${id}`); load(); } };
 
@@ -158,6 +159,12 @@ function BillModal({ contacts, currentId, bill, prefill, onClose }) {
     return [{ description: "", quantity: 1, rate: 0, amount: 0 }];
   };
   const [contact, setContact] = useState(bill?.contact_id || p.contact_id || "");
+  useEffect(() => {
+    if (!contact && p.contact_id && contacts.some(c => c.id === p.contact_id)) {
+      setContact(p.contact_id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contacts, p.contact_id]);
   const [issue, setIssue] = useState(bill?.issue_date || p.issue_date || new Date().toISOString().slice(0, 10));
   const [due, setDue] = useState(
     bill?.due_date

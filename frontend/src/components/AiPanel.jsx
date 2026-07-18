@@ -660,7 +660,7 @@ export default function AiPanel({ collapsed, onToggle }) {
   }
 
   return (
-    <aside className="w-96 shrink-0 border-l bg-white flex flex-col" data-testid="ai-panel">
+    <aside className="w-96 shrink-0 border-l bg-white flex flex-col relative z-[60]" data-testid="ai-panel">
       <div className="h-16 shrink-0 border-b px-4 flex items-center gap-2">
         <div className="w-7 h-7 rounded-md bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center">
           <Sparkles size={14} className="text-white" />

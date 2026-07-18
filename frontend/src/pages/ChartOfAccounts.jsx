@@ -28,6 +28,7 @@ export default function ChartOfAccounts() {
     setCreating(false);
     setCreatingPrefill(null);
     setSuggestOpen(false);
+    load();
   });
 
   const del = async (id) => {

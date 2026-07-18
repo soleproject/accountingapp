@@ -56,6 +56,7 @@ export default function Invoices() {
     setCreating(false);
     setCreatingPrefill(null);
     setEditing(null);
+    load();
   });
   const del = async (id) => {
     if (!confirm("Delete?")) return;
@@ -186,6 +187,15 @@ function InvoiceModal({ contacts, currentId, invoice, prefill, onClose }) {
     return [{ description: "", quantity: 1, rate: 0, amount: 0 }];
   };
   const [contact, setContact] = useState(invoice?.contact_id || p.contact_id || "");
+  // Race guard: prefill.contact_id may arrive before the parent's contacts
+  // list finishes loading (voice-command flow). Re-apply if it starts
+  // matching a real option once contacts populate.
+  useEffect(() => {
+    if (!contact && p.contact_id && contacts.some(c => c.id === p.contact_id)) {
+      setContact(p.contact_id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contacts, p.contact_id]);
   const [issue, setIssue] = useState(invoice?.issue_date || p.issue_date || new Date().toISOString().slice(0, 10));
   const [due, setDue] = useState(
     invoice?.due_date
