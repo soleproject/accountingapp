@@ -289,6 +289,10 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ### P0 — none (MVP feature-complete)
 
+### Recently shipped (2026-07-18 evening — patch 2)
+- **Sub-account auto-creation for the REAL Plaid path** — `plaid_connect.categorize_and_insert_plaid_txns` (used by `_sync_and_import`) was the missing hook site for 804 LLC. Added `maybe_route_to_liability_subaccount` + accts_by_id refresh loop so children created mid-batch are reused for subsequent txns in the same sync. All 5 ingestion paths now hooked: real Plaid sync, mock-Plaid demo, mock-Veryfi demo, real Veryfi bank-statement upload, manual `POST /transactions`.
+- **Tap-to-drill on Balance Sheet** — click any account row → slide-over drawer (`AccountDrilldown`) shows every transaction posted to that account with date, merchant, amount, and running balance. Backend `GET /transactions?category_account_id=…` filter added. Row-highlight on hover, click-outside to close, keyboard-friendly. Drawer at `z-[70]` to sit above the AI panel.
+
 ### Recently shipped (2026-07-18 evening — patch)
 - **Bug fix: sub-account auto-creation on new-company onboarding** — the demo `/onboarding/mock-plaid` and `/onboarding/mock-veryfi` endpoints (which run when a new company is set up) were bypassing `maybe_route_to_liability_subaccount` because they inserted transactions inline instead of going through `_categorize_and_insert`. Same latent gap in `POST /transactions` (manual create) and `statements.py` (real Veryfi bank-statement upload). All four paths are now hooked. New companies (e.g. 746 LLC) get sub-accounts inline instead of needing a follow-up fanout. Fanout endpoint remains available for legacy data.
 

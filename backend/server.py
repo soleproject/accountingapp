@@ -879,6 +879,7 @@ async def list_transactions(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     contact_id: Optional[str] = None,
+    category_account_id: Optional[str] = None,
 ):
     await _require_company(user, cid)
     query: dict = {"company_id": cid}
@@ -886,6 +887,8 @@ async def list_transactions(
         query["needs_review"] = needs_review
     if contact_id:
         query["contact_id"] = contact_id
+    if category_account_id:
+        query["category_account_id"] = category_account_id
     if date_from or date_to:
         date_clause: dict = {}
         if date_from:

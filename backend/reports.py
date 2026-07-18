@@ -242,7 +242,7 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
             children_of.setdefault(pid, []).append(a)
 
     def _row(a: dict, direct_amount: float, parent_code: str | None = None):
-        r = {"code": a["code"], "name": a["name"], "amount": round(direct_amount, 2)}
+        r = {"id": a["id"], "code": a["code"], "name": a["name"], "amount": round(direct_amount, 2)}
         if parent_code:
             r["parent_code"] = parent_code
         return r

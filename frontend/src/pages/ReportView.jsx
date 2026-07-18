@@ -3,10 +3,109 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, BACKEND_URL } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Download, Loader2 } from "lucide-react";
+import { Download, Loader2, X } from "lucide-react";
 
 const startYtd = () => new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0, 10);
 const today = () => new Date().toISOString().slice(0, 10);
+
+// ------------------------- Balance-sheet drilldown -------------------------
+// A slide-over drawer that shows every transaction posted to a given
+// account. Row-click on the Balance Sheet opens this so users can spot-check
+// a nested sub-account's history in one view.
+
+function AccountDrilldown({ currentId, account, onClose }) {
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    if (!currentId || !account?.id) return;
+    (async () => {
+      try {
+        const r = await api.get(
+          `/companies/${currentId}/transactions?category_account_id=${account.id}&limit=500`
+        );
+        // Newest → oldest already; reverse to compute running balance forward.
+        const list = (r.data.transactions || []).slice().reverse();
+        let bal = 0;
+        for (const t of list) { bal += -1 * (t.amount || 0); t._running = bal; }
+        // Display newest first again.
+        list.reverse();
+        setRows(list);
+      } catch {
+        setRows([]);
+      }
+    })();
+  }, [currentId, account?.id]);
+
+  const total = rows ? rows.reduce((s, t) => s + -1 * (t.amount || 0), 0) : 0;
+
+  return (
+    <div className="fixed inset-0 z-[70]" data-testid="account-drilldown">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <aside className="absolute right-0 top-0 bottom-0 w-[540px] max-w-[92vw] bg-white shadow-2xl flex flex-col">
+        <div className="px-5 py-4 border-b flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="text-[11px] uppercase tracking-widest text-slate-500 font-semibold">
+              {account.code} · Drilldown
+            </div>
+            <h3 className="font-heading text-lg font-semibold truncate">{account.name}</h3>
+          </div>
+          <div className="text-right">
+            <div className="text-[11px] text-slate-500 uppercase tracking-wide">Balance</div>
+            <div className="font-mono-num text-lg font-bold">{fmtMoney(account.amount)}</div>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded hover:bg-slate-100" data-testid="drilldown-close">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto">
+          {rows === null ? (
+            <div className="flex items-center justify-center p-10 text-slate-500">
+              <Loader2 className="animate-spin" size={18} />
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="p-6 text-sm text-slate-500">No transactions have posted to this account yet.</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-12 gap-2 px-4 py-2 bg-slate-50 border-b text-[11px] uppercase tracking-widest text-slate-600 font-semibold">
+                <div className="col-span-2">Date</div>
+                <div className="col-span-5">Merchant / Description</div>
+                <div className="col-span-2 text-right">Amount</div>
+                <div className="col-span-3 text-right">Running Balance</div>
+              </div>
+              {rows.map(t => (
+                <div key={t.id}
+                     className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-slate-100 text-[13px] hover:bg-slate-50">
+                  <div className="col-span-2 font-mono-num text-slate-500">{t.date}</div>
+                  <div className="col-span-5 truncate" title={t.merchant || t.description}>
+                    {t.merchant || t.description || <span className="italic text-slate-400">—</span>}
+                    {t.needs_review && <span className="ml-2 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">review</span>}
+                  </div>
+                  <div className={`col-span-2 text-right font-mono-num ${(t.amount || 0) < 0 ? "text-slate-800" : "text-emerald-700"}`}>
+                    {fmtMoney(t.amount)}
+                  </div>
+                  <div className="col-span-3 text-right font-mono-num text-slate-600">
+                    {fmtMoney(t._running)}
+                  </div>
+                </div>
+              ))}
+              <div className="grid grid-cols-12 gap-2 px-4 py-2 border-t-2 border-slate-800 text-sm bg-slate-50">
+                <div className="col-span-7 font-semibold uppercase text-[11px] tracking-widest text-slate-600">
+                  {rows.length} transaction{rows.length === 1 ? "" : "s"}
+                </div>
+                <div className="col-span-2 text-right font-mono-num font-bold">
+                  {fmtMoney(-1 * rows.reduce((s, t) => s + (t.amount || 0), 0))}
+                </div>
+                <div className="col-span-3 text-right font-mono-num font-bold">
+                  {fmtMoney(total)}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </aside>
+    </div>
+  );
+}
+
 
 export default function ReportView() {
   const { kind } = useParams();
@@ -20,6 +119,9 @@ export default function ReportView() {
   const [end, setEnd] = useState(urlEnd || today());
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
+  // Balance-sheet drilldown: clicking a row opens a slide-over showing every
+  // transaction that posted to that account.
+  const [drilldownAcct, setDrilldownAcct] = useState(null);
 
   // Re-sync from URL params when the user re-triggers a voice command that
   // navigates back to the same report page with different filters.
@@ -117,7 +219,7 @@ export default function ReportView() {
             <IncomeStatementBody data={data} />
           )}
           {kind === "balance-sheet" && (
-            <BalanceSheetBody data={data} />
+            <BalanceSheetBody data={data} onDrilldown={(row) => setDrilldownAcct(row)} />
           )}
           {kind === "trial-balance" && (
             <TrialBalanceBody data={data} />
@@ -136,6 +238,13 @@ export default function ReportView() {
           )}
         </div>
       )}
+      {drilldownAcct && (
+        <AccountDrilldown
+          currentId={currentId}
+          account={drilldownAcct}
+          onClose={() => setDrilldownAcct(null)}
+        />
+      )}
     </div>
   );
 }
@@ -147,10 +256,15 @@ function Section({ title }) {
     </div>
   );
 }
-function Row({ code, name, amount, bold, parent_code }) {
+function Row({ id, code, name, amount, bold, parent_code, onClick }) {
   const isChild = !!parent_code;
+  const clickable = !!(onClick && id);
   return (
-    <div className={`grid grid-cols-12 gap-2 px-3 py-1.5 border-b border-slate-100 ${bold ? "font-semibold border-slate-800" : ""} ${isChild ? "bg-slate-50/60" : ""}`}>
+    <div
+      className={`grid grid-cols-12 gap-2 px-3 py-1.5 border-b border-slate-100 ${bold ? "font-semibold border-slate-800" : ""} ${isChild ? "bg-slate-50/60" : ""} ${clickable ? "cursor-pointer hover:bg-indigo-50/60 transition-colors" : ""}`}
+      onClick={clickable ? () => onClick({ id, code, name, amount }) : undefined}
+      data-testid={clickable ? `bs-row-${code}` : undefined}
+    >
       <div className="col-span-2 font-mono-num text-xs text-slate-500">
         {isChild ? <span className="opacity-40 mr-1">↳</span> : null}
         {code}
@@ -178,17 +292,17 @@ function IncomeStatementBody({ data }) {
   );
 }
 
-function BalanceSheetBody({ data }) {
+function BalanceSheetBody({ data, onDrilldown }) {
   return (
     <div className="text-sm">
       <Section title="Assets" />
-      {data.assets.map(r => <Row key={r.code} {...r} />)}
+      {data.assets.map(r => <Row key={`${r.code}-${r.parent_code || ""}`} {...r} onClick={onDrilldown} />)}
       <Row code="" name="Total Assets" amount={data.total_assets} bold />
       <Section title="Liabilities" />
-      {data.liabilities.map(r => <Row key={r.code} {...r} />)}
+      {data.liabilities.map(r => <Row key={`${r.code}-${r.parent_code || ""}`} {...r} onClick={onDrilldown} />)}
       <Row code="" name="Total Liabilities" amount={data.total_liabilities} bold />
       <Section title="Equity" />
-      {data.equity.map(r => <Row key={r.code} {...r} />)}
+      {data.equity.map(r => <Row key={`${r.code}-${r.parent_code || ""}`} {...r} onClick={onDrilldown} />)}
       <Row code="" name="Total Equity" amount={data.total_equity} bold />
       <div className="mt-4 grid grid-cols-12 gap-2 px-3 py-2 border-t-2 border-slate-800 bg-slate-50 rounded">
         <div className="col-span-9 font-heading font-bold uppercase text-sm">Total Liabilities &amp; Equity</div>

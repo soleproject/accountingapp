@@ -330,7 +330,9 @@ async def categorize_and_insert_plaid_txns(
     result_by_id = {id(c): r for c, r in zip(deferred, per_item_result)}
 
     accts = await db.accounts.find({"company_id": cid}).to_list(2000)  # refresh
+    accts_by_id = {a["id"]: a for a in accts}
     threshold = await categorizer.get_auto_post_threshold(cid)
+    from liability_subaccounts import maybe_route_to_liability_subaccount
 
     inserted: list[dict] = []
     for cand in candidates:
@@ -355,6 +357,22 @@ async def categorize_and_insert_plaid_txns(
             post = categorizer.decide_posting(
                 r, threshold, uncat_exp, uncat_inc, accts, cand["amount"],
             )
+        # Fan out generic parent liability buckets to per-payee sub-accounts.
+        # Also refresh the accts cache so subsequent iterations in the same
+        # batch reuse a just-created child.
+        post = await maybe_route_to_liability_subaccount(
+            cid, post,
+            merchant=cand.get("merchant"),
+            contact_name=cand.get("contact_name"),
+            accts_by_id=accts_by_id,
+        )
+        if post.get("category_account_id") not in accts_by_id:
+            new_a = await db.accounts.find_one({
+                "id": post["category_account_id"], "company_id": cid,
+            })
+            if new_a:
+                accts_by_id[new_a["id"]] = new_a
+                accts.append(new_a)
         inserted.append({
             "id": str(__import__("uuid").uuid4()), "company_id": cid, "date": t["date"],
             "description": t["name"], "merchant": cand["merchant"], "amount": t["amount"],
