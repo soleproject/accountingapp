@@ -538,6 +538,26 @@ export function resolveVoiceCommand(text, ctx) {
     }
   }
 
+  // ---- 3a. Approve / Unapprove the focused transaction ----
+  // "approve this" / "approve it" / "yes approve" / "let's approve this one"
+  // Requires a focused transaction (hover-set from the Transactions grid or
+  // sparkle-button on a row). Handled remotely because the caller needs the
+  // company id + focused txn id to hit the approve-with-suggestion endpoint.
+  const APPROVE_RE = /^(?:yes,?\s+)?(?:let'?s\s+|please\s+)?approve(?:\s+(?:this|it|that|the|this\s+one|this\s+transaction))?\s*[.!]?$/i;
+  const UNAPPROVE_RE = /^(?:un-?approve|reject|reverse\s+approve|undo\s+approve)(?:\s+(?:this|it|that))?\s*[.!]?$/i;
+  if (APPROVE_RE.test(t)) {
+    if (!ctx.focus?.id) {
+      return { handled: true, say: "Hover a transaction or click its sparkle first so I know which one to approve." };
+    }
+    return { handled: true, remote: "approve-focused", txnId: ctx.focus.id };
+  }
+  if (UNAPPROVE_RE.test(t)) {
+    if (!ctx.focus?.id) {
+      return { handled: true, say: "Hover a transaction first so I know which one to unapprove." };
+    }
+    return { handled: true, remote: "unapprove-focused", txnId: ctx.focus.id };
+  }
+
   // ---- 4. Transaction filter / lookup commands ----
   //   "show me all the transactions for Walmart"
   //   "transactions for John Smith"

@@ -9,6 +9,91 @@ import { toast } from "sonner";
 import { resolveVoiceCommand } from "@/lib/voiceCommands";
 import { emitCreate, emitAction } from "@/lib/createBus";
 
+// Interactive confirmation card shown in the chat stream after a user
+// approves a transaction that has other unapproved siblings from the same
+// contact. Yes → bulk-approve + rule; No → dismiss.
+function BulkApproveCard({ similar, createRule, currentId, onDone, onDismiss }) {
+  const [busy, setBusy] = useState(false);
+  const [handled, setHandled] = useState(false);
+  const catName = similar.category_account_name || similar.category_account_code || "the same category";
+
+  const applyBulk = async () => {
+    if (busy || handled) return;
+    setBusy(true);
+    try {
+      // Fetch every unapproved txn for this contact — the sample in `similar`
+      // caps at 5 for chat display, so ask the server for the full list.
+      const r = await api.get(
+        `/companies/${currentId}/transactions?contact_id=${similar.contact_id}&limit=1000`
+      );
+      const ids = (r.data.transactions || [])
+        .filter((t) => !t.human_reviewed)
+        .map((t) => t.id);
+      const res = await api.post(
+        `/companies/${currentId}/transactions/apply-bulk-approve-rule`,
+        {
+          txn_ids: ids,
+          category_account_id: similar.category_account_id,
+          contact_id: similar.contact_id,
+          contact_name: similar.contact_name,
+          create_rule: !!createRule,
+        }
+      );
+      const updated = res.data?.updated || 0;
+      const ruleId = res.data?.rule_id;
+      const msg = ruleId
+        ? `Approved ${updated} transaction${updated === 1 ? "" : "s"} and created a rule for ${similar.contact_name}.`
+        : `Approved ${updated} transaction${updated === 1 ? "" : "s"}.`;
+      setHandled(true);
+      onDone(msg);
+    } catch (e) {
+      onDone("Sorry — bulk approval failed.");
+      setHandled(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const dismiss = () => {
+    if (handled) return;
+    setHandled(true);
+    onDismiss();
+  };
+
+  return (
+    <div
+      data-testid="bulk-approve-card"
+      className="mt-2 rounded-md border border-fuchsia-200 bg-fuchsia-50/60 px-3 py-2 text-[13px]"
+    >
+      <div className="text-fuchsia-900 mb-2">
+        <span className="font-semibold">{similar.count}</span> other{" "}
+        <span className="font-semibold">{similar.contact_name}</span>{" "}
+        transaction{similar.count === 1 ? "" : "s"} → categorize as{" "}
+        <span className="font-semibold">{catName}</span> and approve
+        {createRule ? " + create a rule" : ""}?
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          data-testid="bulk-approve-yes"
+          disabled={busy || handled}
+          onClick={applyBulk}
+          className="px-3 py-1 text-xs font-medium rounded bg-fuchsia-600 text-white hover:bg-fuchsia-700 disabled:opacity-50"
+        >
+          {busy ? "Applying…" : "Yes, do it"}
+        </button>
+        <button
+          data-testid="bulk-approve-no"
+          disabled={busy || handled}
+          onClick={dismiss}
+          className="px-3 py-1 text-xs font-medium rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        >
+          No, thanks
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // --------------------- Report → one-sentence spoken summary ---------------------
 // Runs entirely on the client from the report API's JSON response so we never
 // spin up a chat LLM just to read numbers out loud.
@@ -832,6 +917,55 @@ export default function AiPanel({ collapsed, onToggle }) {
     // --- Pending intent follow-ups (confirm / cancel) ---
     if (cmd.handled && cmd.pending === "confirm" && pendingIntentRef.current) {
       const p = pendingIntentRef.current;
+      // Special-case our bulk-approve-contact intent: run the dedicated flow.
+      if (p.kind === "bulk-approve-contact") {
+        pendingIntentRef.current = null;
+        setPendingIntent(null);
+        setMessages(m => [...m, { role: "user", content: userMsg }]);
+        try {
+          const sim = p.similar;
+          const r = await api.post(`/companies/${currentId}/transactions/apply-bulk-approve-rule`, {
+            txn_ids: sim.sample.map(x => x.id).length >= sim.count
+              ? sim.sample.map(x => x.id)
+              : undefined,
+            category_account_id: sim.category_account_id,
+            contact_id: sim.contact_id,
+            contact_name: sim.contact_name,
+            create_rule: !!p.create_rule,
+          });
+          // We may have needed to fetch the FULL id list if `sample.length < count`.
+          let updated = r.data?.updated || 0;
+          let ruleId = r.data?.rule_id || null;
+          if (sim.count > sim.sample.length) {
+            const full = await api.get(
+              `/companies/${currentId}/transactions?contact_id=${sim.contact_id}&limit=1000`
+            );
+            const ids = (full.data.transactions || [])
+              .filter(t => !t.human_reviewed)
+              .map(t => t.id);
+            if (ids.length) {
+              const r2 = await api.post(`/companies/${currentId}/transactions/apply-bulk-approve-rule`, {
+                txn_ids: ids,
+                category_account_id: sim.category_account_id,
+                contact_id: sim.contact_id,
+                contact_name: sim.contact_name,
+                create_rule: !!p.create_rule && !ruleId,
+              });
+              updated = r2.data?.updated || 0;
+              ruleId = ruleId || r2.data?.rule_id;
+            }
+          }
+          const reply = ruleId
+            ? `Approved ${updated} transaction${updated === 1 ? "" : "s"} and created a rule for ${sim.contact_name}.`
+            : `Approved ${updated} transaction${updated === 1 ? "" : "s"}.`;
+          setMessages(m => [...m, { role: "assistant", content: reply }]);
+          if (voiceOnRef.current) speakOne(reply);
+          emitAction("txns:changed");
+        } catch (e) {
+          setMessages(m => [...m, { role: "assistant", content: "Sorry — bulk approval failed." }]);
+        }
+        return;
+      }
       setPendingIntent(null);
       setMessages(m => [...m, { role: "user", content: userMsg }]);
       const ok = await submitPendingIntent(p);
@@ -841,6 +975,17 @@ export default function AiPanel({ collapsed, onToggle }) {
       return;
     }
     if (cmd.handled && cmd.pending === "cancel") {
+      // Special-case: cancelling our bulk-approve card doesn't touch a modal.
+      if (pendingIntentRef.current?.kind === "bulk-approve-contact") {
+        pendingIntentRef.current = null;
+        setMessages(m => [
+          ...m,
+          { role: "user", content: userMsg },
+          { role: "assistant", content: "OK — just the one approved." },
+        ]);
+        if (voiceOnRef.current) speakOne("OK, just the one approved.");
+        return;
+      }
       setPendingIntent(null);
       emitAction("close-current-modal");
       setMessages(m => [
@@ -989,6 +1134,64 @@ export default function AiPanel({ collapsed, onToggle }) {
         }
       } catch (e) {
         setMessages(m => [...m, { role: "assistant", content: "Couldn't look up that account." }]);
+      }
+      return;
+    }
+
+    // --- Remote intent: approve the focused transaction, then offer bulk-approve
+    //     for every OTHER unapproved txn with the same contact + rule creation. ---
+    if (cmd.handled && cmd.remote === "approve-focused") {
+      setMessages(m => [...m, { role: "user", content: userMsg }]);
+      try {
+        const r = await api.post(
+          `/companies/${currentId}/transactions/${cmd.txnId}/approve-with-suggestion`
+        );
+        const { approved, similar, rule_exists } = r.data || {};
+        // Case 1: no meaningful bulk candidates — just confirm the single approval.
+        if (!similar || !similar.count) {
+          const say = "Approved.";
+          setMessages(m => [...m, { role: "assistant", content: say }]);
+          if (voiceOnRef.current) speakOne(say);
+          emitAction("txns:changed");
+          return;
+        }
+        // Case 2: offer the follow-up. Rendered as an interactive card in the
+        // assistant message stream — the user answers yes/no via buttons OR
+        // by saying "yes" / "no" (see the `pending: bulk-approve-contact` branch).
+        const catName = similar.category_account_name || similar.category_account_code || "the same category";
+        const prompt = `Approved. There ${similar.count === 1 ? "is" : "are"} ${similar.count} other unapproved transaction${similar.count === 1 ? "" : "s"} from **${similar.contact_name}**. Would you like me to categorize them all as **${catName}** and approve them${rule_exists ? "" : ", and create a rule for this contact"}?`;
+        pendingIntentRef.current = {
+          kind: "bulk-approve-contact",
+          similar,
+          create_rule: !rule_exists,
+        };
+        setMessages(m => [...m, {
+          role: "assistant",
+          content: prompt,
+          card: {
+            kind: "bulk-approve-confirm",
+            similar,
+            create_rule: !rule_exists,
+          },
+        }]);
+        if (voiceOnRef.current) speakOne(prompt.replace(/\*\*/g, ""));
+        emitAction("txns:changed");
+      } catch (e) {
+        setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't approve that transaction." }]);
+      }
+      return;
+    }
+
+    if (cmd.handled && cmd.remote === "unapprove-focused") {
+      setMessages(m => [...m, { role: "user", content: userMsg }]);
+      try {
+        await api.post(`/companies/${currentId}/transactions/${cmd.txnId}/unapprove`);
+        const say = "Unapproved.";
+        setMessages(m => [...m, { role: "assistant", content: say }]);
+        if (voiceOnRef.current) speakOne(say);
+        emitAction("txns:changed");
+      } catch (e) {
+        setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't unapprove that." }]);
       }
       return;
     }
@@ -1223,6 +1426,24 @@ export default function AiPanel({ collapsed, onToggle }) {
                  m.role === "user" ? "chat-bubble-user ml-auto" : "chat-bubble-ai"
                }`}>
             {m.content || (streaming && i === messages.length - 1 ? "…" : "")}
+            {m.card?.kind === "bulk-approve-confirm" && (
+              <BulkApproveCard
+                similar={m.card.similar}
+                createRule={m.card.create_rule}
+                currentId={currentId}
+                onDone={(msg) => {
+                  pendingIntentRef.current = null;
+                  setMessages(mm => [...mm, { role: "assistant", content: msg }]);
+                  if (voiceOnRef.current) speakOne(msg);
+                  emitAction("txns:changed");
+                }}
+                onDismiss={() => {
+                  pendingIntentRef.current = null;
+                  setMessages(mm => [...mm, { role: "assistant", content: "OK — just the one approved." }]);
+                  if (voiceOnRef.current) speakOne("OK, just the one approved.");
+                }}
+              />
+            )}
           </div>
         ))}
       </div>

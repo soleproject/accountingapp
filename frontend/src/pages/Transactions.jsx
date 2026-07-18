@@ -10,7 +10,7 @@ import {
   ChevronLeft, ChevronRight, Search, Calendar, XCircle, Tag, Sparkles, MoreHorizontal,
 } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
-import { emitAction } from "@/lib/createBus";
+import { emitAction, useActionListener } from "@/lib/createBus";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
 
@@ -173,6 +173,8 @@ export default function Transactions() {
   // them, so the tab stays selected but rows revert to All.
   const loadRef = useRef(load);
   useEffect(() => { loadRef.current = load; });
+  // AI-panel actions (approve-with-suggestion / bulk-approve-rule) reload us.
+  useActionListener("txns:changed", () => { loadRef.current?.(); });
   // Reset ALL filter state on company switch — otherwise sticky filters from
   // the previous company (e.g. a date range) hide most rows on the new one
   // and users think the sync failed. (Real bug: 400 LLC had 1871 rows but a
@@ -623,7 +625,10 @@ export default function Transactions() {
                         title="Ask AI about this transaction"
                         data-testid={`txn-ai-${t.id}`}
                         onClick={() => {
-                          setFocus({ id: t.id, merchant: t.merchant, amount: t.amount, date: t.date });
+                          setFocus(
+                            { id: t.id, merchant: t.merchant, amount: t.amount, date: t.date },
+                            { pin: true }
+                          );
                           emitAction("ai-open");
                         }}
                         className="p-1 rounded hover:bg-fuchsia-100 text-fuchsia-600"

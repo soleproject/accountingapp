@@ -334,6 +334,180 @@ async def unapprove_transaction(cid: str, tid: str, user: dict = Depends(get_cur
     return {"ok": True}
 
 
+@router.post("/companies/{cid}/transactions/{tid}/approve-with-suggestion")
+async def approve_with_suggestion(cid: str, tid: str, user: dict = Depends(get_current_user)):
+    """Approve a single transaction, then return a suggestion payload the UI
+    can use to offer bulk-approval of every OTHER unapproved transaction with
+    the same contact — plus offer to create a merchant/contact rule.
+
+    Response shape:
+        {
+          "ok": true,
+          "approved": {"id", "contact_id", "contact_name", "category_account_id",
+                       "category_account_code", "category_account_name"},
+          "similar": {
+            "contact_id", "contact_name",
+            "category_account_id", "category_account_code", "category_account_name",
+            "count", "sample": [{"id","date","merchant","amount","category_account_id","category_account_name"}, ...]
+          } | null,
+          "rule_exists": bool,
+        }
+    Only returns `similar` when the source txn has a contact + category AND at
+    least one other unapproved transaction exists for that contact.
+    """
+    await require_company(user, cid)
+    existing = await db.transactions.find_one({"id": tid, "company_id": cid})
+    if not existing:
+        raise HTTPException(404, "Transaction not found")
+    await assert_open(cid, existing.get("date"))
+    await db.transactions.update_one(
+        {"id": tid, "company_id": cid},
+        {"$set": {"human_reviewed": True, "needs_review": False, "posted": True, "updated_at": now_iso()}},
+    )
+    txn = await db.transactions.find_one({"id": tid, "company_id": cid})
+    approved_info = {
+        "id": txn["id"],
+        "contact_id": txn.get("contact_id"),
+        "contact_name": txn.get("contact_name"),
+        "category_account_id": txn.get("category_account_id"),
+        "category_account_code": txn.get("category_account_code"),
+        "category_account_name": txn.get("category_account_name"),
+    }
+
+    similar = None
+    rule_exists = False
+    contact_id = txn.get("contact_id")
+    category_id = txn.get("category_account_id")
+    contact_name = txn.get("contact_name")
+    if contact_id and category_id:
+        # Find every other transaction for this contact that hasn't been
+        # human-reviewed yet. Excludes the one we just approved and anything
+        # in a closed period (we can't safely bulk-update those).
+        candidates_q = {
+            "company_id": cid,
+            "contact_id": contact_id,
+            "human_reviewed": {"$ne": True},
+            "id": {"$ne": tid},
+        }
+        candidates = await db.transactions.find(candidates_q).sort([("date", -1), ("_id", -1)]).to_list(500)
+        # Filter out any in a closed period — bulk approval shouldn't silently
+        # skip them; the UI will show only the actionable count.
+        actionable: list[dict] = []
+        for c in candidates:
+            if await is_period_closed(cid, c.get("date")):
+                continue
+            actionable.append(c)
+        if actionable:
+            similar = {
+                "contact_id": contact_id,
+                "contact_name": contact_name,
+                "category_account_id": category_id,
+                "category_account_code": txn.get("category_account_code"),
+                "category_account_name": txn.get("category_account_name"),
+                "count": len(actionable),
+                "sample": [
+                    {
+                        "id": c["id"], "date": c.get("date"),
+                        "merchant": c.get("merchant"), "amount": c.get("amount"),
+                        "category_account_id": c.get("category_account_id"),
+                        "category_account_name": c.get("category_account_name"),
+                    }
+                    for c in actionable[:5]
+                ],
+            }
+        # Detect if a rule for this contact already exists so the client
+        # doesn't create a duplicate.
+        rule_exists = bool(await db.rules.find_one({
+            "company_id": cid,
+            "match_type": "contact_id",
+            "match_value": contact_id,
+        }))
+
+    return {"ok": True, "approved": approved_info, "similar": similar, "rule_exists": rule_exists}
+
+
+class BulkApproveRuleIn(BaseModel):
+    txn_ids: list[str]
+    category_account_id: str
+    contact_id: Optional[str] = None
+    contact_name: Optional[str] = None
+    create_rule: bool = True
+
+
+@router.post("/companies/{cid}/transactions/apply-bulk-approve-rule")
+async def apply_bulk_approve_rule(cid: str, inp: BulkApproveRuleIn, user: dict = Depends(get_current_user)):
+    """Bulk-set every listed transaction to `category_account_id` + approve
+    them (`human_reviewed=True, posted=True, needs_review=False`), and
+    optionally create a Rule so future imports match the same contact →
+    category mapping automatically. Skips anything already approved to
+    honor the promise: 'don't change approved transaction categories'.
+    """
+    await require_company(user, cid)
+    if not inp.txn_ids:
+        return {"ok": True, "updated": 0, "rule_id": None}
+
+    acct = await db.accounts.find_one({"id": inp.category_account_id, "company_id": cid})
+    if not acct:
+        raise HTTPException(404, "Category account not found")
+
+    # Only touch not-yet-approved rows, and only rows that live in an open
+    # period. The client already filtered, but re-check server-side.
+    docs = await db.transactions.find({
+        "id": {"$in": inp.txn_ids},
+        "company_id": cid,
+        "human_reviewed": {"$ne": True},
+    }).to_list(2000)
+
+    actionable_ids: list[str] = []
+    for d in docs:
+        if await is_period_closed(cid, d.get("date")):
+            continue
+        actionable_ids.append(d["id"])
+
+    updated = 0
+    if actionable_ids:
+        res = await db.transactions.update_many(
+            {"id": {"$in": actionable_ids}, "company_id": cid},
+            {"$set": {
+                "category_account_id": acct["id"],
+                "category_account_code": acct["code"],
+                "category_account_name": acct["name"],
+                "human_reviewed": True,
+                "posted": True,
+                "needs_review": False,
+                "ai_confidence": 1.0,
+                "updated_at": now_iso(),
+            }},
+        )
+        updated = res.modified_count
+        await log_ai(cid, "bulk_approve_rule", updated)
+
+    rule_id = None
+    if inp.create_rule and inp.contact_id:
+        existing = await db.rules.find_one({
+            "company_id": cid,
+            "match_type": "contact_id",
+            "match_value": inp.contact_id,
+        })
+        if not existing:
+            rule = {
+                "id": str(uuid.uuid4()),
+                "company_id": cid,
+                "match_type": "contact_id",
+                "match_value": inp.contact_id,
+                "contact_name": inp.contact_name or "",
+                "account_code": acct["code"],
+                "account_name": acct["name"],
+                "category_account_id": acct["id"],
+                "source": "user_bulk_approve",
+                "created_at": now_iso(),
+            }
+            await db.rules.insert_one(rule)
+            rule_id = rule["id"]
+
+    return {"ok": True, "updated": updated, "rule_id": rule_id}
+
+
 @router.post("/companies/{cid}/transactions/bulk-approve")
 async def bulk_approve(cid: str, ids: List[str], user: dict = Depends(get_current_user)):
     await require_company(user, cid)
