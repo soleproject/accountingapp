@@ -48,6 +48,7 @@ from deps import (
     categorize_and_insert, sync_and_import,
 )
 
+from routes.anomaly import _diagnose_books
 router = APIRouter(prefix="/api")
 
 

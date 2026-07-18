@@ -48,6 +48,7 @@ from deps import (
     categorize_and_insert, sync_and_import,
 )
 
+from routes.invoices import _sum_lines
 router = APIRouter(prefix="/api")
 
 

@@ -62,7 +62,6 @@ async def list_contacts(cid: str, user: dict = Depends(get_current_user)):
     # ~40x while staying fresh enough for a UI list. The cache is
     # invalidated in all contact-mutating endpoints AND by sync completion
     # (see sync_tasks._mark_done → get_cache().ainvalidate).
-    from infra import get_cache
     cache = get_cache()
     ckey = cache.key("contacts_list", company_id=cid)
 

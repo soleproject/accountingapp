@@ -73,16 +73,6 @@ async def pro_clients(user: dict = Depends(require_role("pro", "superadmin"))):
     return {"clients": result}
 
 
-class NewClientIn(BaseModel):
-    client_name: str
-    client_email: EmailStr
-    client_password: str = ""  # required only when the email is new
-    company_name: str
-    business_type: str = ""
-    business_description: str = ""
-    reporting_basis: str = "accrual"
-
-
 @router.get("/pro/clients/lookup")
 async def pro_lookup_client(email: str, user: dict = Depends(require_role("pro", "superadmin"))):
     """Lightweight probe used by the New-Client dialog to detect whether the
