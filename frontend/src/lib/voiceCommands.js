@@ -546,6 +546,25 @@ export function resolveVoiceCommand(text, ctx) {
     return { handled: true, say: "Hover a transaction first so I know which contact you mean." };
   }
 
+  // "show me (all the) Walmart transactions"  — noun-adjective form where
+  // the merchant/vendor name precedes 'transactions'. Also handles
+  // "bring up the McDonald's transactions", "pull up Rocket Mortgage
+  // charges", etc. Per user request, "show me" and "bring up" are treated
+  // as synonyms of "filter by" in the Transactions context.
+  const txFilterAdj = t.match(
+    /^(?:show (?:me )?|bring (?:me )?up (?:the )?|pull (?:me )?up (?:the )?|find (?:me )?|display (?:me )?|view (?:me )?)(?:all\s+)?(?:the\s+)?(.+?)\s+(?:transactions?|txns?|purchases?|charges?|payments?|activity)\s*$/i
+  );
+  if (txFilterAdj) {
+    let needle = txFilterAdj[1].trim().replace(/[.?!]+$/, "").replace(/^(the|any|all|my|our)\s+/i, "");
+    // Skip if "merchant" is actually a status filter — let NAV_ROUTES
+    // handle "flagged transactions" / "for-review transactions" further down.
+    const isStatus = /^(?:the|a|an|all|any|my|our|flagged|needs? review|for review|reviewed|posted|new|recent|open|closed)$/i.test(needle);
+    if (needle && needle.length >= 2 && !isStatus) {
+      ctx.navigate(`/accounting/transactions?q=${encodeURIComponent(needle)}`);
+      return { handled: true, say: `Filtering transactions by ${needle}` };
+    }
+  }
+
   const txFilter = t.match(
     /^(?:show (?:me )?(?:all )?(?:the )?)?(?:transactions? (?:for|from|with)|filter (?:transactions? )?(?:by|for)|search (?:transactions? )?for)\s+(.+)$/i
   );
