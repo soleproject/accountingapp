@@ -978,7 +978,10 @@ export default function AiPanel({ collapsed, onToggle }) {
           const say = `Opening ${hit.code} ${hit.name}`;
           setMessages(m => [...m, { role: "assistant", content: say }]);
           if (voiceOnRef.current) speakOne(say);
-          navigate(`/reports/account-detail?account=${hit.id}`);
+          const params = [`account=${hit.id}`];
+          if (cmd.start) params.push(`start=${encodeURIComponent(cmd.start)}`);
+          if (cmd.end)   params.push(`end=${encodeURIComponent(cmd.end)}`);
+          navigate(`/reports/account-detail?${params.join("&")}`);
         } else {
           const say = `I couldn't find an account matching "${cmd.target}".`;
           setMessages(m => [...m, { role: "assistant", content: say }]);

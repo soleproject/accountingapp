@@ -236,6 +236,122 @@ function tryParseTxnDeepLink(text) {
 }
 
 
+// ---- Date-range extractor -----------------------------------------------
+// Parses common English phrasings of a period out of a longer utterance
+// (e.g. "open the Citi Card detail from March", "pull account 2110 for Q1",
+// "show me Rocket Mortgage year to date"). Returns `{ start, end, stripped }`
+// where `stripped` is the input with the recognized period phrase removed
+// so downstream regexes (e.g. account-name matching) don't trip over it.
+// Returns null if no period was recognized.
+const _pad = (n) => String(n).padStart(2, "0");
+const _ymd = (y, m, d) => `${y}-${_pad(m)}-${_pad(d)}`;
+const _endOfMonth = (y, m) => new Date(y, m, 0).getDate(); // m: 1-12
+function extractPeriod(text) {
+  const yr = now().getFullYear();
+  const t = text;
+
+  const monthAlt = "(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
+
+  // "from <month> to <month> [<year>]"
+  let m = t.match(new RegExp(`\\b(?:from|between)\\s+${monthAlt}\\s+(?:to|through|thru|and)\\s+${monthAlt}(?:\\s+(\\d{4}))?\\b`, "i"));
+  if (m) {
+    const m1 = MONTHS[m[1].toLowerCase()], m2 = MONTHS[m[2].toLowerCase()];
+    const y = m[3] ? parseInt(m[3], 10) : yr;
+    return {
+      start: _ymd(y, m1, 1),
+      end: _ymd(y, m2, _endOfMonth(y, m2)),
+      stripped: t.replace(m[0], " "),
+    };
+  }
+
+  // "since <month> [<year>]" → from month-01 through today
+  m = t.match(new RegExp(`\\bsince\\s+${monthAlt}(?:\\s+(\\d{4}))?\\b`, "i"));
+  if (m) {
+    const mo = MONTHS[m[1].toLowerCase()];
+    const y = m[2] ? parseInt(m[2], 10) : yr;
+    return { start: _ymd(y, mo, 1), end: ymd(now()), stripped: t.replace(m[0], " ") };
+  }
+
+  // "since <year>"
+  m = t.match(/\bsince\s+(\d{4})\b/i);
+  if (m) return { start: `${m[1]}-01-01`, end: ymd(now()), stripped: t.replace(m[0], " ") };
+
+  // "in|for|during|from <month> [<year>]" — single-month window
+  m = t.match(new RegExp(`\\b(?:in|for|during|from|of)\\s+${monthAlt}(?:\\s+(\\d{4}))?\\b`, "i"));
+  if (m) {
+    const mo = MONTHS[m[1].toLowerCase()];
+    const y = m[2] ? parseInt(m[2], 10) : yr;
+    return {
+      start: _ymd(y, mo, 1),
+      end: _ymd(y, mo, _endOfMonth(y, mo)),
+      stripped: t.replace(m[0], " "),
+    };
+  }
+
+  // Quarter: "Q1", "for Q1", "Q1 2025", "first quarter"
+  m = t.match(/\b(?:for\s+|in\s+|during\s+)?(?:q([1-4])|(first|second|third|fourth)\s+quarter)(?:\s+(?:of\s+)?(\d{4}))?\b/i);
+  if (m) {
+    const qNum = m[1] ? parseInt(m[1], 10)
+      : { first: 1, second: 2, third: 3, fourth: 4 }[m[2].toLowerCase()];
+    const y = m[3] ? parseInt(m[3], 10) : yr;
+    const startMo = (qNum - 1) * 3 + 1;
+    const endMo = startMo + 2;
+    return {
+      start: _ymd(y, startMo, 1),
+      end: _ymd(y, endMo, _endOfMonth(y, endMo)),
+      stripped: t.replace(m[0], " "),
+    };
+  }
+
+  // "last quarter" / "this quarter"
+  m = t.match(/\b(this|last|previous)\s+quarter\b/i);
+  if (m) {
+    const d = now();
+    let y = d.getFullYear();
+    let q = Math.floor(d.getMonth() / 3) + 1;
+    if (/last|previous/i.test(m[1])) { q -= 1; if (q < 1) { q = 4; y -= 1; } }
+    const startMo = (q - 1) * 3 + 1;
+    const endMo = startMo + 2;
+    return {
+      start: _ymd(y, startMo, 1),
+      end: _ymd(y, endMo, _endOfMonth(y, endMo)),
+      stripped: t.replace(m[0], " "),
+    };
+  }
+
+  // "year to date" / "ytd" / "this year"
+  m = t.match(/\b(?:year to date|ytd|(?:for|in)?\s*this year)\b/i);
+  if (m) return { start: `${yr}-01-01`, end: ymd(now()), stripped: t.replace(m[0], " ") };
+
+  // "last year"
+  m = t.match(/\blast year\b/i);
+  if (m) return { start: `${yr - 1}-01-01`, end: `${yr - 1}-12-31`, stripped: t.replace(m[0], " ") };
+
+  // "this month" / "last month"
+  m = t.match(/\b(this|last|previous)\s+month\b/i);
+  if (m) {
+    const d = now();
+    let y = d.getFullYear(), mo = d.getMonth() + 1;
+    if (/last|previous/i.test(m[1])) { mo -= 1; if (mo < 1) { mo = 12; y -= 1; } }
+    return {
+      start: _ymd(y, mo, 1),
+      end: _ymd(y, mo, _endOfMonth(y, mo)),
+      stripped: t.replace(m[0], " "),
+    };
+  }
+
+  // "last N days" / "past N days"
+  m = t.match(/\b(?:last|past)\s+(\d{1,3})\s+days?\b/i);
+  if (m) {
+    const n = parseInt(m[1], 10);
+    const d = new Date(); d.setDate(d.getDate() - n);
+    return { start: ymd(d), end: ymd(now()), stripped: t.replace(m[0], " ") };
+  }
+
+  return null;
+}
+
+
 const CREATE_INTENT_RE = /\b(create|make|new|draft|add|start)\s+(?:an?\s+)?(invoice|bill|contact|customer|vendor|account|chart of account|payment|receipt)\b/i;
 
 // Explicit "open <entity> <name>" (contact/invoice/bill lookup by name/number)
@@ -491,26 +607,37 @@ export function resolveVoiceCommand(text, ctx) {
     }
   }
 
-  // ---- 6b. "open/pull/show account <code or name>" — Balance Sheet drilldown ----
+  // ---- 6b. "open/pull/show account <code or name> [<period phrase>]" ----
   //   "open account 2110"
   //   "pull the Citi Card detail"
   //   "show me account Mr. Cooper"
+  //   "open the Citi Card detail from March"
+  //   "pull account 2110 for Q1 2026"
+  //   "show me Rocket Mortgage year to date"
   //   Requires a backend lookup (fuzzy match by code or name); the caller
-  //   (AiPanel) handles the resolution and navigation.
+  //   (AiPanel) handles the resolution and navigation. When a period phrase
+  //   is present we strip it before the target extraction AND forward
+  //   `start` / `end` so the drilldown lands pre-filtered.
   const OPEN_ACCOUNT_RE =
     /^(?:open|pull(?:\s+up)?|show(?:\s+me)?|bring\s+up|view)\s+(?:the\s+)?(?:account\s+)?(.+?)(?:\s+(?:detail|account|report))?$/i;
   const acctIntent =
     /^(?:open|pull|show|bring up|view)\b.*\b(?:account|detail)\b/i.test(t) ||
     /^(?:open|pull|show)\s+account\b/i.test(t);
   if (acctIntent) {
-    const m = t.match(OPEN_ACCOUNT_RE);
+    // Pull any date/period phrase off the utterance first — the account-name
+    // matcher shouldn't see "from March", "Q1", etc.
+    const period = extractPeriod(t);
+    const scrubbed = (period ? period.stripped : t).replace(/\s+/g, " ").trim();
+    const m = scrubbed.match(OPEN_ACCOUNT_RE);
     if (m && m[1]) {
       const target = m[1]
         .replace(/^(?:the|an?)\s+/i, "")
         .replace(/\s+(?:detail|account|report)$/i, "")
         .trim();
       if (target.length >= 2) {
-        return { handled: true, remote: "open-account", target };
+        const out = { handled: true, remote: "open-account", target };
+        if (period) { out.start = period.start; out.end = period.end; }
+        return out;
       }
     }
   }
