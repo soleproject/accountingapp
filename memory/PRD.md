@@ -289,6 +289,9 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ### P0 — none (MVP feature-complete)
 
+### Recently shipped (2026-07-18 evening — patch)
+- **Bug fix: sub-account auto-creation on new-company onboarding** — the demo `/onboarding/mock-plaid` and `/onboarding/mock-veryfi` endpoints (which run when a new company is set up) were bypassing `maybe_route_to_liability_subaccount` because they inserted transactions inline instead of going through `_categorize_and_insert`. Same latent gap in `POST /transactions` (manual create) and `statements.py` (real Veryfi bank-statement upload). All four paths are now hooked. New companies (e.g. 746 LLC) get sub-accounts inline instead of needing a follow-up fanout. Fanout endpoint remains available for legacy data.
+
 ### Recently shipped (2026-07-18 evening)
 - **Liability Sub-accounts** — parent buckets like *2500 Loans Payable* / *2100 Credit Card Payable* now auto-fan-out into per-payee children (2510 Mr. Cooper, 2520 Rocket Mortgage, 2110 Capital One, …) whenever a transaction lands on a generic parent bucket. New `liability_subaccounts.py` module with regex-based bucket detection, ACH-memo scrubber (`MR COOPER PMT PPD ID:…` → *Mr. Cooper*), and next-free-code allocator (parent+10 stride). Hooked into: bank-feed ingestion loop, `PATCH /transactions/{tid}`, `bulk-reclassify`, plus new `POST /accounts/{aid}/fanout-subaccounts` that migrates historical transactions. Ran on 317 LLC: created 6 CC children + 4 loan children, moved 111+36 transactions.
 - **Hierarchical Balance Sheet** — `compute_balance_sheet` now nests children under parents (parent row = sum of children, children indented with `parent_code` metadata). Section totals correctly count only top-level rows so nothing double-counts.

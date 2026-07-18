@@ -955,6 +955,16 @@ async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depe
         if checking:
             bank_id = checking["id"]
     bank = accts_by_id.get(bank_id) if bank_id else None
+    # If the resolved category is a generic parent liability bucket, fan
+    # out to a per-payee sub-account so the balance sheet stays instrument-level.
+    if acct:
+        from liability_subaccounts import is_parent_liability_bucket, resolve_or_create_liability_subaccount
+        if is_parent_liability_bucket(acct):
+            payee = inp.merchant or inp.description or ""
+            child = await resolve_or_create_liability_subaccount(cid, acct, payee)
+            if child:
+                acct = child
+                category_id = child["id"]
     doc = {
         "id": tid, "company_id": cid, "date": inp.date,
         "description": inp.description, "merchant": inp.merchant or inp.description,
@@ -3023,6 +3033,8 @@ async def import_plaid(cid: str, account_ids: List[str], user: dict = Depends(ge
         raise HTTPException(400, "Business Checking account not found")
     now = now_iso()
     imported = 0
+    from liability_subaccounts import maybe_route_to_liability_subaccount
+    accts_by_id = {a["id"]: a for a in accts}
     today = datetime.now(timezone.utc)
     from seed import SAMPLE_MERCHANTS
     running = 15000.00
@@ -3033,12 +3045,23 @@ async def import_plaid(cid: str, account_ids: List[str], user: dict = Depends(ge
         result = await categorize_transaction(merchant, amount, merchant, coa)
         acct = next((a for a in accts if a["code"] == result["account_code"]), None) or checking
         running += amount
+        post = {
+            "category_account_id": acct["id"],
+            "category_account_code": acct["code"],
+            "category_account_name": acct["name"],
+        }
+        # Fan out to per-payee liability sub-account if this landed on a
+        # generic parent bucket (Credit Card Payable / Loans Payable / …).
+        post = await maybe_route_to_liability_subaccount(
+            cid, post, merchant=merchant, contact_name=None, accts_by_id=accts_by_id,
+        )
         await db.transactions.insert_one({
             "id": str(uuid.uuid4()), "company_id": cid, "date": d,
             "description": merchant, "merchant": merchant, "amount": round(amount, 2),
             "bank_account_id": checking["id"], "bank_account_name": checking["name"],
-            "category_account_id": acct["id"], "category_account_code": acct["code"],
-            "category_account_name": acct["name"],
+            "category_account_id": post["category_account_id"],
+            "category_account_code": post["category_account_code"],
+            "category_account_name": post["category_account_name"],
             "ai_confidence": round(result["confidence"], 2), "ai_reasoning": result["reasoning"],
             "needs_review": result["confidence"] < 0.80, "human_reviewed": False,
             "posted": result["confidence"] >= 0.80, "source": "plaid_mock",
@@ -3047,6 +3070,12 @@ async def import_plaid(cid: str, account_ids: List[str], user: dict = Depends(ge
             "linked_payment_id": None, "tags": [],
             "created_at": now, "updated_at": now,
         })
+        # Refresh accts_by_id so subsequent iterations see newly-created children.
+        if post["category_account_id"] not in accts_by_id:
+            new_acct = await db.accounts.find_one({"id": post["category_account_id"]})
+            if new_acct:
+                accts_by_id[new_acct["id"]] = new_acct
+                accts.append(new_acct)
         imported += 1
     await _log_ai(cid, "categorize", imported)
     return {"imported": imported}
@@ -3106,6 +3135,8 @@ async def mock_veryfi(cid: str, user: dict = Depends(get_current_user)):
     checking = next((a for a in accts if a["code"] == "1010"), None)
     now = now_iso()
     from seed import SAMPLE_MERCHANTS
+    from liability_subaccounts import maybe_route_to_liability_subaccount
+    accts_by_id = {a["id"]: a for a in accts}
     imported = 0
     today = datetime.now(timezone.utc)
     for _ in range(8):
@@ -3113,13 +3144,22 @@ async def mock_veryfi(cid: str, user: dict = Depends(get_current_user)):
         d = (today - timedelta(days=random.randint(30, 90))).date().isoformat()
         result = await categorize_transaction(merchant, amount, merchant, coa)
         acct = next((a for a in accts if a["code"] == result["account_code"]), None) or checking
+        post = {
+            "category_account_id": acct["id"],
+            "category_account_code": acct["code"],
+            "category_account_name": acct["name"],
+        }
+        post = await maybe_route_to_liability_subaccount(
+            cid, post, merchant=merchant, contact_name=None, accts_by_id=accts_by_id,
+        )
         await db.transactions.insert_one({
             "id": str(uuid.uuid4()), "company_id": cid, "date": d,
             "description": f"{merchant} (Veryfi)", "merchant": merchant, "amount": round(amount, 2),
             "bank_account_id": checking["id"] if checking else None,
             "bank_account_name": checking["name"] if checking else "",
-            "category_account_id": acct["id"], "category_account_code": acct["code"],
-            "category_account_name": acct["name"],
+            "category_account_id": post["category_account_id"],
+            "category_account_code": post["category_account_code"],
+            "category_account_name": post["category_account_name"],
             "ai_confidence": round(result["confidence"], 2), "ai_reasoning": result["reasoning"],
             "needs_review": result["confidence"] < 0.80, "human_reviewed": False,
             "posted": result["confidence"] >= 0.80, "source": "veryfi_mock",
@@ -3127,6 +3167,11 @@ async def mock_veryfi(cid: str, user: dict = Depends(get_current_user)):
             "linked_payment_id": None, "tags": [],
             "created_at": now, "updated_at": now,
         })
+        if post["category_account_id"] not in accts_by_id:
+            new_acct = await db.accounts.find_one({"id": post["category_account_id"]})
+            if new_acct:
+                accts_by_id[new_acct["id"]] = new_acct
+                accts.append(new_acct)
         imported += 1
     await _log_ai(cid, "veryfi_ocr", imported)
     return {"imported": imported}

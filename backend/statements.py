@@ -377,7 +377,9 @@ async def _categorize_and_insert_veryfi_lines(
     result_by_id = {id(c): r for c, r in zip(deferred, per_item)}
 
     accts_fresh = await db.accounts.find({"company_id": cid}).to_list(2000)
+    accts_by_id_fresh = {a["id"]: a for a in accts_fresh}
     threshold = await categorizer.get_auto_post_threshold(cid)
+    from liability_subaccounts import maybe_route_to_liability_subaccount
 
     inserted: list[dict] = []
     for cand in candidates:
@@ -400,6 +402,14 @@ async def _categorize_and_insert_veryfi_lines(
             post = categorizer.decide_posting(
                 r, threshold, uncat_exp, uncat_inc, accts_fresh, cand["amount"],
             )
+        # Fan out to per-payee liability sub-account when the resolved
+        # category is a generic parent bucket.
+        post = await maybe_route_to_liability_subaccount(
+            cid, post,
+            merchant=cand.get("merchant"),
+            contact_name=cand.get("contact_name"),
+            accts_by_id=accts_by_id_fresh,
+        )
         inserted.append({
             "id": str(uuid.uuid4()), "company_id": cid, "date": cand["date"],
             "description": cand["description"], "merchant": cand["merchant"],
