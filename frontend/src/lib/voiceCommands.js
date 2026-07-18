@@ -121,7 +121,63 @@ function bestMatch(target, list, nameKey = "name") {
   return bestScore >= (words.length || 1) ? { record: best, score: bestScore } : null;
 }
 
-// Try to parse an utterance like "open the July 15th McDonald's transaction
+// Detect a "vs last quarter" / "compared to last year" phrase and return
+// the semantic prior-period name.
+function extractComparisonPeriod(text) {
+  const t = text.toLowerCase();
+  if (/\b(?:vs|versus|compared to|against|change[sd]?|movers?|delta|from)\s+(?:the\s+)?(?:last|previous|prior)\s+quarter\b/.test(t))
+    return { unit: "quarter", label: "last quarter" };
+  if (/\b(?:vs|versus|compared to|against|change[sd]?|from)\s+(?:the\s+)?(?:last|previous|prior)\s+(?:year|annum)\b/.test(t)
+      || /\byear over year|y ?o ?y\b/.test(t))
+    return { unit: "year", label: "last year" };
+  if (/\b(?:vs|versus|compared to|against|change[sd]?|from)\s+(?:the\s+)?(?:last|previous|prior)\s+month\b/.test(t)
+      || /\bmonth over month|m ?o ?m\b/.test(t))
+    return { unit: "month", label: "last month" };
+  if (/\b(?:vs|versus|compared to|against|change[sd]?)\s+(?:the\s+)?prior period\b/.test(t))
+    return { unit: "prior_period", label: "prior period" };
+  return null;
+}
+
+// Given a filter object {start, end, basis} and a semantic prior-period
+// reference, produce the equivalent filter for that prior window.
+function buildPriorFilters(current, cmpPeriod) {
+  const out = { ...current };
+  const parse = (s) => new Date(`${s}T00:00:00Z`);
+  const daysBetween = (a, b) => Math.round((b - a) / 86400000) + 1;
+  const asYmd = (d) => d.toISOString().slice(0, 10);
+  let s = current.start ? parse(current.start) : null;
+  let e = current.end   ? parse(current.end)   : null;
+  const now = new Date();
+  // If we don't have a current window, default to YTD.
+  if (!s || !e) {
+    s = new Date(now.getFullYear(), 0, 1);
+    e = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    out.start = asYmd(s); out.end = asYmd(e);
+  }
+  const unit = cmpPeriod?.unit || "prior_period";
+  let ps, pe;
+  if (unit === "quarter") {
+    ps = new Date(s); pe = new Date(e);
+    ps.setUTCMonth(ps.getUTCMonth() - 3);
+    pe.setUTCMonth(pe.getUTCMonth() - 3);
+  } else if (unit === "year") {
+    ps = new Date(s); pe = new Date(e);
+    ps.setUTCFullYear(ps.getUTCFullYear() - 1);
+    pe.setUTCFullYear(pe.getUTCFullYear() - 1);
+  } else if (unit === "month") {
+    ps = new Date(s); pe = new Date(e);
+    ps.setUTCMonth(ps.getUTCMonth() - 1);
+    pe.setUTCMonth(pe.getUTCMonth() - 1);
+  } else {
+    // Same length immediately before start.
+    const span = daysBetween(s, e);
+    pe = new Date(s); pe.setUTCDate(pe.getUTCDate() - 1);
+    ps = new Date(pe); ps.setUTCDate(ps.getUTCDate() - (span - 1));
+  }
+  return { ...out, start: asYmd(ps), end: asYmd(pe) };
+}
+
+
 // for $26.99" into structured filters. Returns null if the shape doesn't
 // look like a deep-link for a specific transaction (in which case the
 // caller falls through to normal nav / chat).
@@ -208,6 +264,17 @@ export function resolveVoiceCommand(text, ctx) {
   const t = (text || "").trim();
   if (!t) return { handled: false };
 
+  // ---- 0. Chat-question bailout ----
+  // If the utterance is CLEARLY a question ("do you have any bills I need to
+  // pay?", "what's my net income", "how much did we spend on meals"), we
+  // must NOT swallow it into a nav command — it should reach the LLM chat
+  // stream so the user gets an actual answer. Heuristic: starts with a
+  // question word OR ends in '?'. Exceptions: "read/summarize/narrate" are
+  // report-narration verbs that we DO want to intercept.
+  const QUESTION_START = /^(what|when|where|who|why|how|do (you|we|i)|does|did (you|we|i)|is|are|can (you|we|i)|could (you|we|i)|should (i|we)|will|would|have|has|any|which)\b/i;
+  const READ_VERB = /^(read|narrate|summari[sz]e|tell me about|give me)/i;
+  const isQuestion = (QUESTION_START.test(t) || t.endsWith("?")) && !READ_VERB.test(t);
+
   // ---- 1. Meta commands (highest priority) ----
   if (/^(stop|be quiet|shut up|silence|mute|cancel speech)\b/i.test(t)) {
     if ("speechSynthesis" in window) window.speechSynthesis.cancel();
@@ -227,14 +294,35 @@ export function resolveVoiceCommand(text, ctx) {
 
   // ---- 2. "read me the numbers" — TTS-narrated report summary ----
   //   "read (me) (my|the) P&L (for) Q2"
+  //   "read the P&L vs last quarter"    → comparative narration
+  //   "compare my P&L to last quarter"
   //   "narrate the balance sheet"
   //   "summarize the income statement year to date"
-  const readMatch = t.match(/^(?:read|narrate|summari[sz]e|tell me about|give me)(?:\s+me)?\s+(?:my |the )?(.+)$/i);
+  //
+  // Comparative mode is triggered by 'vs', 'versus', 'compared to', or a
+  // leading 'compare'. It fetches two periods (current + prior) and speaks
+  // the top movers in the SECOND sentence.
+  const compareLead = /^(?:compare|contrast)\s+(?:me\s+)?(?:my |the )?(.+)$/i.exec(t);
+  const readMatch = compareLead || t.match(/^(?:read|narrate|summari[sz]e|tell me about|give me)(?:\s+me)?\s+(?:my |the )?(.+)$/i);
   if (readMatch) {
     const rest = readMatch[1];
     for (const r of REPORT_ALIASES) {
       if (r.pat.test(rest)) {
         const filters = extractReportFilters(rest);
+        const cmpPeriod = extractComparisonPeriod(rest);
+        const isCompare = Boolean(compareLead) || Boolean(cmpPeriod) || /\b(?:vs|versus|compared to|change[sd]?|movers?|delta)\b/i.test(rest);
+        if (isCompare) {
+          const prior = buildPriorFilters(filters, cmpPeriod);
+          return {
+            handled: true,
+            remote: "read-report-compare",
+            reportKind: r.kind,
+            reportName: r.name,
+            filters,        // current period
+            priorFilters: prior,
+            priorLabel: cmpPeriod?.label || "prior period",
+          };
+        }
         return {
           handled: true,
           remote: "read-report",
@@ -275,6 +363,21 @@ export function resolveVoiceCommand(text, ctx) {
   //   "filter by meals"      → text search
   //   "filter transactions by Walmart"
   //   "search transactions for Uber"
+
+  // Contextual filter — "filter by the/this contact" or "…by this vendor"
+  // Uses the AI-focused row (set by hovering a transaction) so voice-only
+  // users can zoom in on the record they're looking at.
+  const contextRefFilter = /^(?:show (?:me )?)?(?:filter (?:transactions? )?by|search for)\s+(?:this|the)\s+(contact|vendor|customer|merchant|counterparty)\b/i;
+  if (contextRefFilter.test(t)) {
+    const merchant = ctx.focus?.merchant;
+    if (merchant) {
+      ctx.navigate(`/accounting/transactions?q=${encodeURIComponent(merchant)}`);
+      return { handled: true, say: `Filtering transactions by ${merchant}` };
+    }
+    // No focused record — tell the user rather than silently opening a page.
+    return { handled: true, say: "Hover a transaction first so I know which contact you mean." };
+  }
+
   const txFilter = t.match(
     /^(?:show (?:me )?(?:all )?(?:the )?)?(?:transactions? (?:for|from|with)|filter (?:transactions? )?(?:by|for)|search (?:transactions? )?for)\s+(.+)$/i
   );
@@ -336,14 +439,21 @@ export function resolveVoiceCommand(text, ctx) {
     }
   }
 
-  // ---- 4. Route navigation ----
-  for (const r of NAV_ROUTES) {
-    if (r.pat.test(t)) {
-      // Exclude cases where the utterance is really about creating something
-      // (e.g. "create a new invoice" would otherwise match /invoices/).
-      if (CREATE_INTENT_RE.test(t)) break;
-      ctx.navigate(r.url);
-      return { handled: true, say: r.say };
+  // ---- 7. Route navigation ----
+  //
+  // Only fire nav if the utterance LOOKS like a command (short, imperative,
+  // or explicitly prefixed with a nav verb). If it's a chat question we
+  // fall through to the LLM — otherwise "do you have any bills I need to
+  // pay?" would just open the Bills page silently instead of answering.
+  if (!isQuestion) {
+    for (const r of NAV_ROUTES) {
+      if (r.pat.test(t)) {
+        // Exclude cases where the utterance is really about creating something
+        // (e.g. "create a new invoice" would otherwise match /invoices/).
+        if (CREATE_INTENT_RE.test(t)) break;
+        ctx.navigate(r.url);
+        return { handled: true, say: r.say };
+      }
     }
   }
 

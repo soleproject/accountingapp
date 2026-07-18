@@ -63,6 +63,77 @@ function summarizeReport(kind, name, data, filters = {}) {
   }
 }
 
+// Comparative narration. Given a report kind and TWO period responses (now
+// and prior), pick the top 2 line-item movers (by |delta|) and speak them.
+// Falls back to top-level totals for non-P&L reports.
+function summarizeComparison(kind, nowData, priorData, priorLabel = "prior period") {
+  if (!nowData || !priorData) return "";
+  const pct = (a, b) => {
+    if (!isFinite(a) || !isFinite(b) || Math.abs(b) < 0.01) return null;
+    return Math.round(((a - b) / Math.abs(b)) * 100);
+  };
+  const dir = (a, b) => (a > b ? "up" : a < b ? "down" : "flat");
+
+  try {
+    if (kind === "income-statement") {
+      // Top-line: net income delta.
+      const nowNi   = nowData.net_income   ?? ((nowData.total_revenue   || 0) - (nowData.total_expense   || 0));
+      const priorNi = priorData.net_income ?? ((priorData.total_revenue || 0) - (priorData.total_expense || 0));
+      const niPct = pct(nowNi, priorNi);
+      const headline = `Net income is ${dir(nowNi, priorNi)}${niPct != null ? ` ${Math.abs(niPct)}%` : ""} vs ${priorLabel}.`;
+
+      // Combine revenue + expenses into one flat list keyed by account_name.
+      const flat = (rpt) => {
+        const out = {};
+        for (const g of ["revenue", "expenses"]) {
+          for (const row of (rpt[g] || [])) {
+            const k = (row.account_name || row.name || "").toLowerCase();
+            if (!k) continue;
+            out[k] = { name: row.account_name || row.name, amount: row.amount || 0, section: g };
+          }
+        }
+        return out;
+      };
+      const N = flat(nowData), P = flat(priorData);
+      const keys = new Set([...Object.keys(N), ...Object.keys(P)]);
+      const movers = [];
+      for (const k of keys) {
+        const n = N[k]?.amount || 0;
+        const p = P[k]?.amount || 0;
+        const delta = n - p;
+        if (Math.abs(delta) < 1) continue;
+        movers.push({ name: N[k]?.name || P[k]?.name || k, n, p, delta, pct: pct(n, p) });
+      }
+      movers.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+      const top = movers.slice(0, 2).map(m =>
+        `${m.name} ${dir(m.n, m.p)} ${m.pct != null ? `${Math.abs(m.pct)}%` : _fmt$(Math.abs(m.delta))}`
+      );
+      const moversLine = top.length ? ` Top movers: ${top.join("; ")}.` : "";
+      return `${headline}${moversLine}`;
+    }
+    if (kind === "balance-sheet") {
+      const nA = nowData.total_assets || 0, pA = priorData.total_assets || 0;
+      const nL = nowData.total_liabilities || 0, pL = priorData.total_liabilities || 0;
+      const nE = nowData.total_equity || 0, pE = priorData.total_equity || 0;
+      const bits = [
+        `assets ${dir(nA, pA)} ${_fmt$(Math.abs(nA - pA))}`,
+        `liabilities ${dir(nL, pL)} ${_fmt$(Math.abs(nL - pL))}`,
+        `equity ${dir(nE, pE)} ${_fmt$(Math.abs(nE - pE))}`,
+      ];
+      return `Vs ${priorLabel}: ${bits.join(", ")}.`;
+    }
+    if (kind === "cash-flow") {
+      const n = nowData.net_change || 0, p = priorData.net_change || 0;
+      const cp = pct(n, p);
+      return `Net change in cash ${dir(n, p)}${cp != null ? ` ${Math.abs(cp)}%` : ""} vs ${priorLabel}.`;
+    }
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+
 
 const getSR = () => window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -501,6 +572,7 @@ export default function AiPanel({ collapsed, onToggle }) {
       navigate,
       switchCompany,
       clearChat: clearChatMessages,
+      focus,
     });
 
     // --- Pending intent follow-ups (confirm / cancel) ---
@@ -556,6 +628,40 @@ export default function AiPanel({ collapsed, onToggle }) {
         setMessages(m => {
           const copy = [...m];
           copy[copy.length - 1] = { role: "assistant", content: "Couldn't pull that report." };
+          return copy;
+        });
+      }
+      return;
+    }
+
+    // --- Remote intent: comparative report narration ---
+    //   "read my P&L vs last quarter" → current summary + top 2 movers.
+    if (cmd.handled && cmd.remote === "read-report-compare") {
+      setMessages(m => [
+        ...m,
+        { role: "user", content: userMsg },
+        { role: "assistant", content: "Comparing periods…" },
+      ]);
+      try {
+        const nowParams   = new URLSearchParams(cmd.filters || {});
+        const priorParams = new URLSearchParams(cmd.priorFilters || {});
+        const [now, prior] = await Promise.all([
+          api.get(`/companies/${currentId}/reports/${cmd.reportKind}?${nowParams.toString()}`),
+          api.get(`/companies/${currentId}/reports/${cmd.reportKind}?${priorParams.toString()}`),
+        ]);
+        const summary = summarizeReport(cmd.reportKind, cmd.reportName, now.data, cmd.filters);
+        const delta   = summarizeComparison(cmd.reportKind, now.data, prior.data, cmd.priorLabel);
+        const full    = `${summary} ${delta}`.trim();
+        setMessages(m => {
+          const copy = [...m];
+          copy[copy.length - 1] = { role: "assistant", content: full };
+          return copy;
+        });
+        if (voiceOnRef.current) speakOne(full);
+      } catch (e) {
+        setMessages(m => {
+          const copy = [...m];
+          copy[copy.length - 1] = { role: "assistant", content: "Couldn't pull that comparison." };
           return copy;
         });
       }
@@ -919,8 +1025,9 @@ function VoiceHintTape({ micMode }) {
   // discoverable at the right moment.
   const HINTS = [
     'Try: "read my P&L for Q2"',
+    'Try: "read my P&L vs last quarter"',
     'Try: "transactions for Walmart"',
-    'Try: "filter by meals"',
+    'Try: "filter by this contact"  (hover a row first)',
     'Try: "open the July 15th McDonald\'s transaction"',
     'Try: "income statement for Q1 cash basis"',
     'Try: "create an invoice for John Doe for 500 dollars"',
@@ -929,7 +1036,6 @@ function VoiceHintTape({ micMode }) {
     'Try: "clear chat"',
     'Say "looks good" or "confirm" to auto-save a draft',
     'Say "stop" — cancels the AI mid-speech',
-    'Tip: hover a transaction row to make it the AI\'s context',
   ];
   const [idx, setIdx] = useState(0);
   useEffect(() => {

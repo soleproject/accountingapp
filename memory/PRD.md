@@ -290,13 +290,16 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 ### P0 — none (MVP feature-complete)
 
 ### Recently shipped (2026-07-18)
-- **TTS-narrated report summaries** — say *"read my P&L for Q2"* / *"narrate the balance sheet"* → fetches the report, composes a one-sentence summary (revenue, expenses, net income, top 3 categories) client-side and speaks it aloud. Zero LLM cost.
-- **Transaction voice filters & deep-links** — *"transactions for Walmart"*, *"filter by meals"*, *"open the July 15th McDonald's transaction for $26.99"* now navigate to `/accounting/transactions?q=…&date_from=…&date_to=…`. Transactions page hydrates its toolbar from URL params and auto-highlights the row if exactly one match.
-- **Confirm synonyms** — *"looks good"*, *"yep"*, *"sounds good"*, *"book it"*, *"post it"*, *"approve it"* all trigger the pending-intent save.
-- **Bug fix**: `POST /api/companies/{cid}/contacts` was inserting rows without `normalized_name`, tripping the `company_contact_uniq` unique index on the 2nd+ manual create per company. Now computes `normalize_contact_name(name)` on insert; also backfilled legacy null rows.
-- **Hybrid voice-driven CREATE flow** (yesterday) — parse-intent endpoint (Claude Haiku), pending confirmation banner, modal auto-open with prefill for invoices/bills/contacts/CoA accounts.
-- **Expanded voice router** (yesterday) — 25+ nav routes, quarter/YTD/last-month + cash/accrual filters, "open contact/invoice/bill X" lookups, company switch by name, meta commands.
-- **ReportView URL-driven filters** (yesterday) — /reports/{kind}?basis=cash&start=…&end=… hydrates + auto-refetches.
+- **Comparative TTS narration** — say *"read my P&L vs last quarter"* / *"compare my income statement to last year"* → fetches BOTH periods, narrates current summary + top 2 movers with % change ("Net income up 32%… Meals up 14% quarter-over-quarter…"). Prior-period math handles quarter / year / month / prior-period-same-length.
+- **Chat-question vs nav-command disambiguation** — utterances starting with question words ("do you have any bills…", "what's my net income", "can you…") or ending in "?" now fall through to the LLM chat instead of silently opening the Bills page.
+- **Contextual filter** — *"filter by this contact"* / *"filter by this vendor"* uses the AI-focused row (hovered transaction) to auto-scope the transactions view. Speaks a hint if nothing is focused.
+- **TTS-narrated report summaries** — *"read my P&L for Q2"* / *"narrate the balance sheet"* → one-sentence spoken summary (revenue, expenses, net income, top 3 expenses).
+- **Transaction voice filters & deep-links** — *"transactions for Walmart"*, *"filter by meals"*, *"open the July 15th McDonald's transaction for $26.99"* apply URL-driven filters; single-match auto-highlights.
+- **Confirm synonyms** — *"looks good"*, *"yep"*, *"sounds good"*, *"book it"*, *"post it"*, *"approve it"* trigger the pending-intent save.
+- **Bug fix**: `POST /contacts` now sets `normalized_name` so the 2nd+ manual contact per company no longer trips the unique index.
+- **Hybrid voice-driven CREATE flow** (yesterday) — parse-intent endpoint + pending confirmation banner + modal auto-open with prefill.
+- **Expanded voice router** (yesterday) — 25+ nav routes, quarter/YTD/last-month + cash/accrual filters, "open contact/invoice/bill X" lookups.
+- **ReportView URL-driven filters** (yesterday) — /reports/{kind}?basis=&start=&end= hydrates + auto-refetches.
 
 ### P1
 - Refactor `server.py` (3300+ lines) into `/routes/` package for scalability
