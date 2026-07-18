@@ -18,7 +18,7 @@ const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
 // AI re-categorize, Split, and Link-to-invoice/bill. Opens on click, closes
 // on outside click or Escape. Positioned above the button so the menu never
 // clips off the bottom of the viewport on the last few rows.
-function RowMoreMenu({ t, onRecategorize, onSplit, onLink }) {
+function RowMoreMenu({ t, onRecategorize, onSplit, onLink, onDelete }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef(null);
   const menuRef = useRef(null);
@@ -69,6 +69,11 @@ function RowMoreMenu({ t, onRecategorize, onSplit, onLink }) {
           <button data-testid={TID.txnLink} onClick={handle(onLink)} className={item}>
             <span>Link to invoice / bill</span>
             <LinkIcon size={13} className="text-blue-600" />
+          </button>
+          <div className="my-1 border-t border-slate-100" />
+          <button data-testid={TID.deleteBtn} onClick={handle(onDelete)} className={`${item} text-red-600 hover:bg-red-50`}>
+            <span>Delete</span>
+            <Trash2 size={13} className="text-red-500" />
           </button>
         </div>
       )}
@@ -615,9 +620,8 @@ export default function Transactions() {
                         onRecategorize={() => recategorize(t.id)}
                         onSplit={() => setSplitting(t)}
                         onLink={() => setLinking(t)}
+                        onDelete={() => del(t.id)}
                       />
-                      <button title="Delete" data-testid={TID.deleteBtn} onClick={() => del(t.id)}
-                              className="p-1 rounded hover:bg-red-100 text-red-500"><Trash2 size={14} /></button>
                     </div>
                   </td>
                 </tr>
