@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import AiPanel from "./AiPanel";
@@ -8,6 +8,7 @@ import { TID } from "@/constants/testIds";
 import { ChevronDown, LogOut, MessageSquare } from "lucide-react";
 import { Toaster } from "sonner";
 import { AiFocusProvider } from "@/lib/aiFocus";
+import { useActionListener } from "@/lib/createBus";
 
 function CompanySwitcher() {
   const { companies, current, switchCompany } = useCompany();
@@ -46,6 +47,8 @@ export default function Layout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [aiCollapsed, setAiCollapsed] = useState(false);
   const { user, logout } = useAuth();
+  // Row-level "Ask AI" buttons emit `ai-open` — expand the panel when it fires.
+  useActionListener("ai-open", () => setAiCollapsed(false));
 
   return (
     <AiFocusProvider>

@@ -7,11 +7,74 @@ import { TID } from "@/constants/testIds";
 import { toast } from "sonner";
 import {
   Check, Wand2, Split, Link as LinkIcon, RotateCw, Plus, X, Trash2, AlertTriangle, ShieldCheck,
-  ChevronLeft, ChevronRight, Search, Calendar, XCircle, Tag, Sparkles,
+  ChevronLeft, ChevronRight, Search, Calendar, XCircle, Tag, Sparkles, MoreHorizontal,
 } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
+import { emitAction } from "@/lib/createBus";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
+
+// Per-row "More" dropdown for the actions we don't want cluttering the row:
+// AI re-categorize, Split, and Link-to-invoice/bill. Opens on click, closes
+// on outside click or Escape. Positioned above the button so the menu never
+// clips off the bottom of the viewport on the last few rows.
+function RowMoreMenu({ t, onRecategorize, onSplit, onLink }) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef(null);
+  const menuRef = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (menuRef.current?.contains(e.target)) return;
+      if (btnRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const item = "flex items-center justify-between gap-3 w-full px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50";
+  const handle = (fn) => () => { setOpen(false); fn(); };
+
+  return (
+    <div className="relative">
+      <button
+        ref={btnRef}
+        title="More actions"
+        data-testid={`txn-more-${t.id}`}
+        onClick={() => setOpen(v => !v)}
+        className={`p-1 rounded hover:bg-slate-100 ${open ? "bg-slate-100 text-slate-900" : "text-slate-500"}`}
+      >
+        <MoreHorizontal size={14} />
+      </button>
+      {open && (
+        <div
+          ref={menuRef}
+          data-testid={`txn-more-menu-${t.id}`}
+          className="absolute right-0 z-30 mt-1 w-52 rounded-md border border-slate-200 bg-white shadow-lg py-1"
+        >
+          <button data-testid={TID.txnRecategorize} onClick={handle(onRecategorize)} className={item}>
+            <span>AI re-categorize</span>
+            <RotateCw size={13} className="text-indigo-600" />
+          </button>
+          <button data-testid={TID.txnSplit} onClick={handle(onSplit)} className={item}>
+            <span>Split</span>
+            <Split size={13} className="text-violet-600" />
+          </button>
+          <button data-testid={TID.txnLink} onClick={handle(onLink)} className={item}>
+            <span>Link to invoice / bill</span>
+            <LinkIcon size={13} className="text-blue-600" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function ConfidenceChip({ conf, needs_review }) {
   const v = Number(conf || 0);
@@ -482,6 +545,7 @@ export default function Transactions() {
                     onChange={(e) => setSelected(e.target.checked ? new Set(txns.map(t => t.id)) : new Set())} />
                 </th>
                 <th className="px-3 py-2 text-left">Date</th>
+                <th className="px-3 py-2 text-left">Contact</th>
                 <th className="px-3 py-2 text-left">Merchant / Description</th>
                 <th className="px-3 py-2 text-left">Category</th>
                 <th className="px-3 py-2 text-left">AI</th>
@@ -502,6 +566,9 @@ export default function Transactions() {
                       checked={selected.has(t.id)} onChange={() => toggleSel(t.id)} />
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-slate-600 font-mono-num">{fmtDate(t.date)}</td>
+                  <td className="px-3 py-2 text-slate-700 max-w-[160px] truncate" title={t.contact_name || ""}>
+                    {t.contact_name || <span className="text-slate-300">—</span>}
+                  </td>
                   <td className="px-3 py-2">
                     <div className="font-medium">{t.merchant || t.description}</div>
                     {t.splits?.length > 0 && <div className="text-[10px] text-indigo-600">Split into {t.splits.length}</div>}
@@ -532,12 +599,23 @@ export default function Transactions() {
                     <div className="flex items-center gap-1 justify-end">
                       <button title="Approve" data-testid={TID.txnApprove} onClick={() => approve(t.id)}
                               className="p-1 rounded hover:bg-emerald-100 text-emerald-600"><Check size={14} /></button>
-                      <button title="AI re-categorize" data-testid={TID.txnRecategorize} onClick={() => recategorize(t.id)}
-                              className="p-1 rounded hover:bg-indigo-100 text-indigo-600"><RotateCw size={14} /></button>
-                      <button title="Split" data-testid={TID.txnSplit} onClick={() => setSplitting(t)}
-                              className="p-1 rounded hover:bg-violet-100 text-violet-600"><Split size={14} /></button>
-                      <button title="Link to invoice/bill" data-testid={TID.txnLink} onClick={() => setLinking(t)}
-                              className="p-1 rounded hover:bg-blue-100 text-blue-600"><LinkIcon size={14} /></button>
+                      <button
+                        title="Ask AI about this transaction"
+                        data-testid={`txn-ai-${t.id}`}
+                        onClick={() => {
+                          setFocus({ id: t.id, merchant: t.merchant, amount: t.amount, date: t.date });
+                          emitAction("ai-open");
+                        }}
+                        className="p-1 rounded hover:bg-fuchsia-100 text-fuchsia-600"
+                      >
+                        <Sparkles size={14} />
+                      </button>
+                      <RowMoreMenu
+                        t={t}
+                        onRecategorize={() => recategorize(t.id)}
+                        onSplit={() => setSplitting(t)}
+                        onLink={() => setLinking(t)}
+                      />
                       <button title="Delete" data-testid={TID.deleteBtn} onClick={() => del(t.id)}
                               className="p-1 rounded hover:bg-red-100 text-red-500"><Trash2 size={14} /></button>
                     </div>
@@ -545,7 +623,7 @@ export default function Transactions() {
                 </tr>
               ))}
               {!txns.length && (
-                <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-500">No transactions.</td></tr>
+                <tr><td colSpan={10} className="px-3 py-8 text-center text-slate-500">No transactions.</td></tr>
               )}
             </tbody>
           </table>
