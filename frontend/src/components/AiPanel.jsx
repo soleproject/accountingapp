@@ -584,11 +584,45 @@ export default function AiPanel({ collapsed, onToggle }) {
             <Send size={15} />
           </button>
         </div>
-        <div className="mt-2 text-[10px] text-slate-500">
-          Tip: hover a transaction row → it becomes context for your next question. Try the mic and say "regarding the Walmart purchase on May 3rd…"
-        </div>
+        <VoiceHintTape micMode={micMode} />
       </div>
     </aside>
+  );
+}
+
+function VoiceHintTape({ micMode }) {
+  // Rotating "Try saying..." examples to teach voice commands without a
+  // wall-of-text tutorial. Only shows when the mic is engaged so it's
+  // discoverable at the right moment.
+  const HINTS = [
+    'Try: "show flagged transactions"',
+    'Try: "open 317 LLC"',
+    'Try: "go to reports"',
+    'Try: "suggested rules"',
+    'Try: "overdue invoices"',
+    'Try: "clear chat"',
+    'Try: "stop" — cancels the AI mid-speech',
+    'Tip: hover a transaction row to make it the AI\'s context',
+    'Tip: say "why" to get a deeper answer',
+  ];
+  const [idx, setIdx] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setIdx(i => (i + 1) % HINTS.length), 4500);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const active = micMode !== "off";
+  return (
+    <div
+      key={idx}
+      data-testid="ai-voice-hint"
+      className={`mt-2 text-[10px] transition-opacity duration-500 ${
+        active ? "text-indigo-600" : "text-slate-500"
+      }`}
+      style={{ animation: "fadeInUp 0.5s" }}
+    >
+      {HINTS[idx]}
+    </div>
   );
 }
 
