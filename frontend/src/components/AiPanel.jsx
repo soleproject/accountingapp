@@ -147,7 +147,12 @@ export default function AiPanel({ collapsed, onToggle }) {
   // Mic mode: "off" | "ptt" (push-to-talk, hold to speak) | "open" (open-mic
   // with silence auto-submit + TTS echo protection). Persisted so a user's
   // preferred conversation mode survives reloads.
-  const [micMode, setMicMode] = useState(() => localStorage.getItem("axiom_mic_mode") || "off");
+  // Legacy value from earlier PTT design: coerce 'ptt' → 'open' on load so
+  // returning users don't get stuck in a mode the UI no longer supports.
+  const [micMode, setMicMode] = useState(() => {
+    const v = localStorage.getItem("axiom_mic_mode") || "off";
+    return v === "ptt" ? "open" : v;
+  });
   useEffect(() => { localStorage.setItem("axiom_mic_mode", micMode); }, [micMode]);
   const micModeRef = useRef(micMode);
   useEffect(() => { micModeRef.current = micMode; }, [micMode]);
@@ -686,8 +691,8 @@ export default function AiPanel({ collapsed, onToggle }) {
         .filter(t => now - t < ERROR_WINDOW_MS)
         .concat(now);
       if (errorLogRef.current.length >= ERROR_MAX) {
-        toast.error("Mic keeps failing — switched to manual push-to-talk.");
-        setMicMode("ptt");
+        toast.error("Mic keeps failing — turning off. Click the mic again when ready.");
+        setMicMode("off");
         setListening(false);
       }
     };
@@ -740,21 +745,10 @@ export default function AiPanel({ collapsed, onToggle }) {
     setInterim("");
   };
 
-  // Push-to-talk handlers (space bar OR hold on the mic button)
-  const pttStart = () => {
-    if (micModeRef.current !== "ptt") return;
-    if (!listening) startListening();
-  };
-  const pttEnd = () => {
-    if (micModeRef.current !== "ptt") return;
-    if (listening) stopListening();
-  };
-
   // Whenever micMode flips, open the mic (open) or close it (off).
   useEffect(() => {
     if (micMode === "open" && !listening) startListening();
     if (micMode === "off"  &&  listening) stopListening();
-    // "ptt" mode: don't auto-start — wait for user to press-and-hold.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [micMode]);
 
@@ -1345,11 +1339,9 @@ export default function AiPanel({ collapsed, onToggle }) {
             streaming={streaming}
             ttsSpeaking={ttsSpeakingRef.current}
             onCycle={() => {
-              const nextMode = micMode === "off" ? "ptt" : micMode === "ptt" ? "open" : "off";
-              setMicMode(nextMode);
+              // Simple binary toggle: off ↔ open (live mic).
+              setMicMode(prev => (prev === "off" ? "open" : "off"));
             }}
-            onPttStart={pttStart}
-            onPttEnd={pttEnd}
           />
           <input
             data-testid={TID.aiChatInput}
@@ -1521,75 +1513,35 @@ function VoicePicker({ voices, voiceOn, setVoiceOn, voiceName, setVoiceName, voi
 }
 
 
-function MicButton({ mode, listening, streaming, ttsSpeaking, onCycle, onPttStart, onPttEnd }) {
-  // Visual states:
-  //   off      — grey mic
-  //   ptt idle — indigo outline mic (hint the button is "armed")
-  //   ptt held — red mic (currently listening)
-  //   open     — red mic with dot indicator
-  //   speaking-back (any mode, ttsSpeaking) — dimmed with distinctive tint
-  const isOpen = mode === "open";
-  const isPtt = mode === "ptt";
-  const armed = (isOpen && listening) || (isPtt && listening);
+function MicButton({ mode, listening, streaming, ttsSpeaking, onCycle }) {
+  // Simplified click-to-toggle: mic is either OFF or LIVE (open-mic).
+  // No push-to-talk. One click flips the state.
+  const isLive = mode === "open" || mode === "ptt"; // treat legacy 'ptt' as live
+  const armed = isLive && listening;
   const cls = ttsSpeaking
     ? "border-slate-200 bg-slate-100 text-slate-400"
     : armed
       ? "bg-red-500 border-red-500 text-white"
-      : isPtt
-        ? "border-indigo-300 text-indigo-600 hover:bg-indigo-50"
-        : isOpen
-          ? "border-red-300 text-red-600 hover:bg-red-50"
-          : "border-slate-200 text-slate-600 hover:bg-slate-50";
-  const title =
-    mode === "off" ? "Voice input off — click to enable push-to-talk"
-    : mode === "ptt" ? "Click to switch to open-mic · hold to speak"
-    : "Click to turn off · open-mic is on";
-  // Tap-vs-hold discriminator: press-hold ≥ HOLD_MS triggers PTT; a quick
-  // press-release (< HOLD_MS) is treated as a click and cycles the mode.
-  // This avoids the classic mousedown+click race on a dual-purpose button.
-  const HOLD_MS = 220;
-  const holdRef = useRef({ timer: null, held: false });
-  const pointerDown = (e) => {
-    e.preventDefault();
-    holdRef.current.held = false;
-    holdRef.current.timer = setTimeout(() => {
-      holdRef.current.held = true;
-      if (mode === "ptt") onPttStart();
-    }, HOLD_MS);
-  };
-  const pointerUp = () => {
-    clearTimeout(holdRef.current.timer);
-    if (holdRef.current.held) {
-      if (mode === "ptt") onPttEnd();
-    } else {
-      onCycle();
-    }
-    holdRef.current.held = false;
-  };
+      : isLive
+        ? "border-red-300 text-red-600 hover:bg-red-50"
+        : "border-slate-200 text-slate-600 hover:bg-slate-50";
+  const title = isLive
+    ? "Voice on — click to mute"
+    : "Voice off — click to go live";
   return (
     <div className="relative">
       <button
         data-testid="ai-chat-mic"
-        onPointerDown={pointerDown}
-        onPointerUp={pointerUp}
-        onPointerLeave={() => {
-          clearTimeout(holdRef.current.timer);
-          if (holdRef.current.held && mode === "ptt") onPttEnd();
-          holdRef.current.held = false;
-        }}
+        onClick={(e) => { e.preventDefault(); onCycle(); }}
         disabled={streaming}
         className={`relative w-9 h-9 flex items-center justify-center rounded-md border transition select-none ${cls}`}
         title={title}
+        aria-pressed={isLive}
       >
         {armed ? <MicOff size={15} /> : <Mic size={15} />}
       </button>
-      {isOpen && !ttsSpeaking && (
+      {isLive && !ttsSpeaking && (
         <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" />
-      )}
-      {isPtt && !armed && !ttsSpeaking && (
-        <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 text-[8px] text-indigo-500 font-semibold uppercase tracking-wider">
-          Hold
-        </span>
       )}
     </div>
   );

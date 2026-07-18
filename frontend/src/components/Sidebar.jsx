@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   LayoutDashboard, FileText, Receipt, CreditCard, ScrollText, BarChart3,
   Users, Link2, Inbox, ChevronRight, ArrowLeft, ArrowLeftRight, Boxes,
@@ -46,10 +46,11 @@ export default function Sidebar({ collapsed, onToggle }) {
   const { user } = useAuth();
   const loc = useLocation();
 
-  // Auto-enter accounting view when navigating to an accounting route
-  useEffect(() => {
-    if (loc.pathname.startsWith("/accounting/")) setInAccounting(true);
-  }, [loc.pathname]);
+  // Note: we deliberately do NOT auto-enter the Accounting sub-view when the
+  // route is under /accounting/*. Some accounting pages (Transactions) also
+  // live directly in the main sidebar. If a user clicks Transactions from
+  // the main menu, they expect the main menu to stay put; the Accounting
+  // sub-view opens only when they explicitly click the "Accounting" button.
 
   const Item = ({ to, label, icon: Icon, color = NAV_COLOR, indent = false }) => {
     const active = loc.pathname === to || loc.pathname.startsWith(to + "/");

@@ -289,6 +289,10 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ### P0 — none (MVP feature-complete)
 
+### Recently shipped (2026-07-18 evening — patch 5)
+- **Mic is click-to-toggle only** — removed the hold-to-talk (PTT) mode entirely. One click flips OFF ↔ LIVE (open-mic). Tooltip: *"Voice off — click to go live"* / *"Voice on — click to mute"*. Legacy `axiom_mic_mode=ptt` from localStorage is coerced to `open` on load so returning users don't get stuck.
+- **Sidebar no longer auto-flips into Accounting sub-view** — clicking "Transactions" from the main sidebar navigates to `/accounting/transactions` but the sidebar stays on the main view. The Accounting sub-view only opens when the user explicitly clicks the *Accounting* button.
+
 ### Recently shipped (2026-07-18 evening — patch 4)
 - **Drilldown drawer sits BESIDE the AI chat**, not over it. Wrapper repositioned from `fixed inset-0` to `fixed inset-y-0 left-0 right-[24rem]` so the AI panel (w-96 = 24rem) stays visible and interactive while the user reviews / edits transactions in the drawer.
 - **Row checkboxes + select-all** in the drilldown. Every row now has an accent-indigo checkbox; header has a select-all checkbox that also shows an indeterminate state when a subset is selected. Selected rows highlight in `bg-indigo-50/40`. Button label + subtotal auto-update: *"Move all N…"* when everything's picked, *"Move X of N — sums to $Y"* when a subset is picked. Disabled when nothing selected.
