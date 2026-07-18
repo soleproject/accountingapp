@@ -289,6 +289,11 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ### P0 — none (MVP feature-complete)
 
+### Recently shipped (2026-07-18 evening — patch 3)
+- **Move-all bulk-reclassify** — from the balance-sheet drilldown drawer, click *"Move all N to another account"* → picker opens (all account types visible, source excluded) → one click moves the entire drilled-in transaction list via `bulk-reclassify`. Toast confirms the target account name. Balance sheet auto-refreshes on close so the emptied account disappears immediately.
+- **Extended ReclassifyPicker** with `allowedTypes` (null → all), `title` override, and `excludeIds` so it can be re-used as a general account picker.
+- Verified end-to-end via curl on 804 LLC: `POST /transactions/bulk-reclassify` with the drilled-in txn IDs → `{"ok":true,"updated":1}`, then confirmed `?category_account_id=2510` returned 0 rows post-move.
+
 ### Recently shipped (2026-07-18 evening — patch 2)
 - **Sub-account auto-creation for the REAL Plaid path** — `plaid_connect.categorize_and_insert_plaid_txns` (used by `_sync_and_import`) was the missing hook site for 804 LLC. Added `maybe_route_to_liability_subaccount` + accts_by_id refresh loop so children created mid-batch are reused for subsequent txns in the same sync. All 5 ingestion paths now hooked: real Plaid sync, mock-Plaid demo, mock-Veryfi demo, real Veryfi bank-statement upload, manual `POST /transactions`.
 - **Tap-to-drill on Balance Sheet** — click any account row → slide-over drawer (`AccountDrilldown`) shows every transaction posted to that account with date, merchant, amount, and running balance. Backend `GET /transactions?category_account_id=…` filter added. Row-highlight on hover, click-outside to close, keyboard-friendly. Drawer at `z-[70]` to sit above the AI panel.

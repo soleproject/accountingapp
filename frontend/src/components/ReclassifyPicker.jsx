@@ -7,21 +7,34 @@ import { X } from "lucide-react";
  * rows a user might reasonably reclassify TO. Used by both the Contacts
  * report drawer and the main Transactions page.
  */
-export default function ReclassifyPicker({ accounts, count, onCancel, onApply }) {
+export default function ReclassifyPicker({
+  accounts,
+  count,
+  onCancel,
+  onApply,
+  allowedTypes,   // e.g. null → all types; ["asset","liability"] → restricted
+  title,          // override modal heading
+  excludeIds,     // hide these account ids (used when moving OUT of an account)
+}) {
   const [q, setQ] = useState("");
 
   const options = useMemo(() => {
     const s = q.trim().toLowerCase();
+    const excludeSet = new Set(excludeIds || []);
+    const defaultTypeFilter = (a) =>
+      ["revenue", "expense", "cogs"].includes((a.type || "").toLowerCase())
+      || /uncategorized|owner|draw|contribution|refund|reimburs/i.test(a.name || "");
+    const typeFilter = Array.isArray(allowedTypes)
+      ? (a) => allowedTypes.includes((a.type || "").toLowerCase())
+      : (allowedTypes === null ? () => true : defaultTypeFilter);
     return (accounts || [])
-      .filter(a =>
-        ["revenue", "expense", "cogs"].includes((a.type || "").toLowerCase())
-        || /uncategorized|owner|draw|contribution|refund|reimburs/i.test(a.name || "")
-      )
+      .filter(a => !excludeSet.has(a.id))
+      .filter(typeFilter)
       .filter(a => !s
         || (a.name || "").toLowerCase().includes(s)
         || (a.code || "").includes(s))
       .sort((a, b) => (a.code || "").localeCompare(b.code || ""));
-  }, [accounts, q]);
+  }, [accounts, q, allowedTypes, excludeIds]);
 
   return (
     <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4">
@@ -29,7 +42,7 @@ export default function ReclassifyPicker({ accounts, count, onCancel, onApply })
         <div className="px-5 py-4 border-b flex items-center justify-between">
           <div>
             <h3 className="font-heading font-semibold">
-              Reclassify {count} transaction{count !== 1 ? "s" : ""}
+              {title || `Reclassify ${count} transaction${count !== 1 ? "s" : ""}`}
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">Pick the target category account.</p>
           </div>

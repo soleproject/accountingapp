@@ -3,7 +3,9 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, BACKEND_URL } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Download, Loader2, X } from "lucide-react";
+import { Download, Loader2, X, ArrowRightCircle } from "lucide-react";
+import ReclassifyPicker from "@/components/ReclassifyPicker";
+import { toast } from "sonner";
 
 const startYtd = () => new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0, 10);
 const today = () => new Date().toISOString().slice(0, 10);
@@ -15,32 +17,59 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 function AccountDrilldown({ currentId, account, onClose }) {
   const [rows, setRows] = useState(null);
+  const [accounts, setAccounts] = useState([]);
+  const [moving, setMoving] = useState(false);
+  const [applying, setApplying] = useState(false);
+
   useEffect(() => {
     if (!currentId || !account?.id) return;
     (async () => {
       try {
-        const r = await api.get(
-          `/companies/${currentId}/transactions?category_account_id=${account.id}&limit=500`
-        );
+        const [txnsR, acctsR] = await Promise.all([
+          api.get(`/companies/${currentId}/transactions?category_account_id=${account.id}&limit=500`),
+          api.get(`/companies/${currentId}/accounts`),
+        ]);
         // Newest → oldest already; reverse to compute running balance forward.
-        const list = (r.data.transactions || []).slice().reverse();
+        const list = (txnsR.data.transactions || []).slice().reverse();
         let bal = 0;
         for (const t of list) { bal += -1 * (t.amount || 0); t._running = bal; }
         // Display newest first again.
         list.reverse();
         setRows(list);
+        setAccounts(acctsR.data.accounts || []);
       } catch {
         setRows([]);
       }
     })();
   }, [currentId, account?.id]);
 
+  // "Move all →" — bulk-reclassify every row currently in this drawer into a
+  // different CoA account. One click from "found the problem" to "fixed it."
+  const doMoveAll = async (targetId) => {
+    if (!rows || !rows.length || !targetId) return;
+    setApplying(true);
+    try {
+      await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
+        transaction_ids: rows.map(r => r.id),
+        category_account_id: targetId,
+      });
+      const to = accounts.find(a => a.id === targetId);
+      toast.success(`Moved ${rows.length} transaction${rows.length === 1 ? "" : "s"} to ${to?.name || "account"}`);
+      setMoving(false);
+      onClose(true);  // reload parent
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Move failed");
+    } finally {
+      setApplying(false);
+    }
+  };
+
   const total = rows ? rows.reduce((s, t) => s + -1 * (t.amount || 0), 0) : 0;
 
   return (
     <div className="fixed inset-0 z-[70]" data-testid="account-drilldown">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <aside className="absolute right-0 top-0 bottom-0 w-[540px] max-w-[92vw] bg-white shadow-2xl flex flex-col">
+      <div className="absolute inset-0 bg-black/40" onClick={() => onClose(false)} />
+      <aside className="absolute right-0 top-0 bottom-0 w-[600px] max-w-[94vw] bg-white shadow-2xl flex flex-col">
         <div className="px-5 py-4 border-b flex items-center gap-3">
           <div className="flex-1 min-w-0">
             <div className="text-[11px] uppercase tracking-widest text-slate-500 font-semibold">
@@ -52,10 +81,26 @@ function AccountDrilldown({ currentId, account, onClose }) {
             <div className="text-[11px] text-slate-500 uppercase tracking-wide">Balance</div>
             <div className="font-mono-num text-lg font-bold">{fmtMoney(account.amount)}</div>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded hover:bg-slate-100" data-testid="drilldown-close">
+          <button onClick={() => onClose(false)} className="p-1.5 rounded hover:bg-slate-100" data-testid="drilldown-close">
             <X size={16} />
           </button>
         </div>
+        {rows && rows.length > 0 && (
+          <div className="px-5 py-2 border-b bg-slate-50 flex items-center gap-2">
+            <button
+              data-testid="drilldown-move-all"
+              onClick={() => setMoving(true)}
+              disabled={applying}
+              className="text-xs font-medium inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-indigo-300 bg-white text-indigo-800 hover:bg-indigo-50 disabled:opacity-50"
+            >
+              <ArrowRightCircle size={13} />
+              Move all {rows.length} to another account
+            </button>
+            <span className="text-[11px] text-slate-500">
+              One click bulk-reclassify — sums to {fmtMoney(total)}.
+            </span>
+          </div>
+        )}
         <div className="flex-1 overflow-auto">
           {rows === null ? (
             <div className="flex items-center justify-center p-10 text-slate-500">
@@ -102,6 +147,17 @@ function AccountDrilldown({ currentId, account, onClose }) {
           )}
         </div>
       </aside>
+      {moving && (
+        <ReclassifyPicker
+          accounts={accounts}
+          count={rows?.length || 0}
+          title={`Move all ${rows?.length || 0} txns out of ${account.name}`}
+          allowedTypes={null}
+          excludeIds={[account.id]}
+          onCancel={() => setMoving(false)}
+          onApply={doMoveAll}
+        />
+      )}
     </div>
   );
 }
@@ -242,7 +298,7 @@ export default function ReportView() {
         <AccountDrilldown
           currentId={currentId}
           account={drilldownAcct}
-          onClose={() => setDrilldownAcct(null)}
+          onClose={(reload) => { setDrilldownAcct(null); if (reload) fetchData(); }}
         />
       )}
     </div>
