@@ -527,3 +527,80 @@ async def onboarding_interview_synthesize(
 
     return {"accounts": accts_out, "rules": rules_out}
 
+
+
+# =========================================================================
+#                        Voice-driven Intent Parser
+# =========================================================================
+# Given a raw natural-language utterance, extract a structured "create" or
+# "open" intent. Runs on Claude Haiku (cheap + fast) with a strict JSON
+# contract so the frontend can hydrate creation modals without a full LLM
+# chat round-trip.
+
+INTENT_SYSTEM = (
+    "You are a voice-command intent parser for an accounting SaaS app. "
+    "Given a spoken utterance, extract a structured JSON action.\n\n"
+    "Output STRICT JSON with these keys:\n"
+    "  intent: one of ['create_invoice','create_bill','create_contact','create_account',"
+    "'create_payment','create_receipt','open_contact','open_invoice','open_bill','none']\n"
+    "  confidence: float 0.0-1.0\n"
+    "  prefill: object with fields specific to the intent (see below). MAY be empty.\n"
+    "  say: a short one-sentence confirmation to read back to the user (max ~15 words).\n\n"
+    "Field guides (only fill fields you can confidently extract):\n"
+    "- create_invoice / create_bill: contact_name (string), amount (number, dollars), "
+    "description (string), due_days (int, default 30 if 'net 30' etc mentioned).\n"
+    "- create_contact: name (string), type ('customer'|'vendor'|'both'), email, phone.\n"
+    "- create_account: name (string), type ('asset'|'liability'|'equity'|'revenue'|'cogs'|'expense'), code (string, optional).\n"
+    "- open_contact / open_invoice / open_bill: name_or_number (string).\n\n"
+    "Rules:\n"
+    "1. If the user did not actually ask to create/open a business record, set intent='none' and confidence < 0.4.\n"
+    "2. Extract only what the user actually said. Do NOT invent contacts, amounts, or dates.\n"
+    "3. Contact names should be Title Cased and stripped of transaction-noise ('for John Doe' → 'John Doe').\n"
+    "4. Amounts: '$500', 'five hundred dollars', '500 bucks' → 500.\n"
+    "5. Never include markdown, prose, or code fences — ONLY the JSON object."
+)
+
+
+async def parse_voice_intent(text: str) -> dict:
+    """Parse a voice/text utterance into a structured create/open intent.
+
+    Returns:
+      {"intent": str, "confidence": float, "prefill": dict, "say": str}
+    On any error, returns {"intent": "none", "confidence": 0.0, ...} so the
+    frontend can fall back to the normal chat stream.
+    """
+    if not text or not text.strip():
+        return {"intent": "none", "confidence": 0.0, "prefill": {}, "say": ""}
+
+    sid = hashlib.md5(text.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
+    chat = _new_chat(INTENT_SYSTEM, f"intent-{sid}", model_name=MODEL_HAIKU)
+    raw = ""
+    try:
+        async for ev in chat.stream_message(UserMessage(text=f"Utterance: {text!r}\n\nReturn the JSON now.")):
+            if isinstance(ev, TextDelta):
+                raw += ev.content
+            elif isinstance(ev, StreamDone):
+                break
+    except Exception as e:
+        return {"intent": "none", "confidence": 0.0, "prefill": {}, "say": f"AI unavailable: {e}"}
+
+    data = _extract_json(raw) or {}
+    intent = str(data.get("intent") or "none").strip()
+    if intent not in {
+        "create_invoice", "create_bill", "create_contact", "create_account",
+        "create_payment", "create_receipt",
+        "open_contact", "open_invoice", "open_bill", "none",
+    }:
+        intent = "none"
+    try:
+        conf = float(data.get("confidence", 0.5))
+    except Exception:
+        conf = 0.5
+    prefill = data.get("prefill") if isinstance(data.get("prefill"), dict) else {}
+    say = str(data.get("say") or "")[:200]
+    return {
+        "intent": intent,
+        "confidence": max(0.0, min(1.0, conf)),
+        "prefill": prefill,
+        "say": say,
+    }

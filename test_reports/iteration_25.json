@@ -1,0 +1,44 @@
+{
+  "summary": "Backend tests for parse-intent, chat history clear, and contact fuzzy matching all pass. Frontend voice-command routing works for most nav commands, report URL params, clear button, non-command streaming chat, company switch, and CREATE INVOICE modal prefill + pending banner. Two P0-ish bugs found: (1) 'overdue invoices' navigates to /invoices without the ?filter=overdue query — regex ordering issue in NAV_ROUTES; (2) Confirm button on the pending invoice banner does NOT trigger POST /api/companies/{cid}/invoices (backend logs show zero POST /invoices calls after confirm click). The pending banner also does not clear after clicking Confirm.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "AiPanel — pending Confirm button", "issue": "Clicking data-testid=ai-pending-confirm does NOT fire POST /api/companies/{cid}/invoices — no request in backend logs; banner remains visible; modal stays open. Investigate submitPendingIntent() path (possibly api.post rejected silently or click event not reaching handler).", "selector": "[data-testid='ai-pending-confirm']", "priority": "HIGH"},
+      {"component": "voiceCommands.js NAV_ROUTES", "issue": "'overdue invoices' resolves to /invoices (missing ?filter=overdue). The generic /invoices?/ regex is checked BEFORE the overdue-invoices variant. Reorder so more-specific patterns (overdue invoices, overdue bills, flagged transactions) come first, OR use a specificity-based sort.", "selector": "n/a", "priority": "HIGH"},
+      {"component": "InvoiceModal prefill", "issue": "When parse-intent returns contact_id (matched_existing=true) for Voice Vendor Test, the Customer dropdown in the opened New Invoice modal still displays 'Customer...' rather than pre-selecting the matched contact. Verify InvoiceModal reads prefill.contact_id after contacts finish loading.", "selector": "New Invoice > Customer select", "priority": "MEDIUM"},
+      {"component": "AiPanel cancel-as-text", "issue": "Typing 'cancel' with a pending intent may not always clear the banner in a chained scenario. Suspected side-effect of Confirm bug leaving state stuck; re-verify after Confirm is fixed.", "selector": "[data-testid='ai-pending-intent']", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [
+      {"flow": "Voice CREATE → Confirm → save", "issue": "Frontend never posts to /api/companies/{cid}/invoices (confirmed via backend access log). Toast 'Created via voice' therefore never appears.", "affected_selectors": ["[data-testid='ai-pending-confirm']"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter25_voice_intent.py",
+    "/app/test_reports/pytest/iter25.xml"
+  ],
+  "action_items": [
+    "Investigate why Confirm-button onClick isn't producing POST /invoices — add console.log around submitPendingIntent and check network tab; likely an unhandled exception inside submitPendingIntent (e.g., api.post URL, headers, or contact_id validation).",
+    "Fix NAV_ROUTES ordering so 'overdue invoices' / 'overdue bills' / 'flagged transactions' patterns win over generic ones. Consider iterating in reverse or moving specific patterns to the top of the list, or short-circuit with a specificity check.",
+    "Ensure InvoiceModal/BillModal apply prefill.contact_id AFTER contacts finish loading (useEffect dep on contacts + prefill).",
+    "Re-verify text 'cancel' clears pending after Confirm bug is fixed."
+  ],
+  "critical_code_review_comments": [
+    "voiceCommands.js NAV_ROUTES relies on array order for specificity — fragile; refactor to a scored resolver or place specific rules first.",
+    "AiPanel.jsx Confirm handler swallows exceptions from submitPendingIntent inside try/catch — add explicit error logging so silent failures don't hide.",
+    "InvoiceModal prefill handling is race-prone: prefill.contact_id can arrive before contacts fetch finishes; must reapply once contacts list is loaded.",
+    "server.py: chat_history GET returns messages via coerce() — good; DELETE returns count — fine.",
+    "parse_voice_intent contact matching threshold (score >= 10) is low; acceptable for MVP."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter25_voice_intent.py"],
+  "success_rate": {"backend": "100%", "frontend": "~70%"},
+  "test_credentials": "client@axiom.ai / client123 (has two TEST_dup companies)",
+  "seed_data_creation": "Created contact 'Voice Vendor Test' (vendor) in TEST_dup company b8d7612f-30c0-454e-a24d-2a4299c33fc4 via backend test.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test file /app/backend/tests/test_iter25_voice_intent.py covers DELETE /ai/chat/history, /api/companies/{cid}/ai/parse-intent for invoice/contact/account/bill with contact-name fuzzy match. All 7 pass. The main outstanding UI bugs are (a) Confirm button not posting invoice, (b) overdue-invoices route regex ordering. Verified working via UI: clear button, chart-of-accounts nav, income-statement Q1 cash basis URL construction (basis=cash&start=2026-01-01&end=2026-03-31), balance-sheet accrual, ReportView reading URL params, streaming chat still functional, TEST_dup company switch, invoice-create modal prefill + pending banner display.",
+  "rca of the issue": "Confirm button: onClick handler is inline async; the setPendingIntent(null) fires but the await submitPendingIntent(p) does not appear to complete a network POST. Since the pending banner also does NOT clear (despite setPendingIntent(null) being synchronous), the entire click handler may not be executing at all — possible causes: (1) button is behind the shadcn Dialog overlay from the open modal (z-index issue) and Playwright force=True click dispatches to the element but the DOM click handler runs synchronously — expect it to work; (2) the api.post throws before hitting network due to headers/URL. Recommendation: add console.log at handler start + catch. Overdue-invoices bug: NAV_ROUTES order — invoices regex comes before overdue-invoices regex; the for-loop matches invoices first."
+}

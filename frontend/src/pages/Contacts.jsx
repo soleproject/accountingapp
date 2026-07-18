@@ -5,6 +5,7 @@ import { TID } from "@/constants/testIds";
 import { Plus, Trash2, X, Pencil, GitMerge, ExternalLink, Tag, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
+import { useCreateListener, useActionListener } from "@/lib/createBus";
 
 const EMPTY_FORM = { name: "", type: "customer", email: "", phone: "", address: "" };
 
@@ -40,6 +41,18 @@ export default function Contacts() {
     setSelected(new Set());
   };
   useEffect(() => { load(); }, [currentId]);
+
+  // Voice/AI-driven modal opener. When the AI panel dispatches an
+  // axiom:create event with kind='contact', open the create modal with any
+  // parsed prefill (name, email, phone, type) applied to a fresh form.
+  useCreateListener("contact", (prefill) => {
+    setModal({ mode: "create", prefill: prefill || {} });
+  });
+  useActionListener("close-current-modal", () => {
+    setModal(null);
+    setMergeOpen(false);
+    setReportContact(null);
+  });
 
   const del = async (e, id) => {
     e.stopPropagation();
@@ -237,6 +250,7 @@ export default function Contacts() {
           currentId={currentId}
           mode={modal.mode}
           contact={modal.contact}
+          prefill={modal.prefill}
           onClose={(reload) => { setModal(null); if (reload) load(); }}
         />
       )}
@@ -261,7 +275,7 @@ export default function Contacts() {
   );
 }
 
-function ContactModal({ currentId, mode, contact, onClose }) {
+function ContactModal({ currentId, mode, contact, prefill, onClose }) {
   const [f, setF] = useState(() =>
     mode === "edit" && contact
       ? {
@@ -271,7 +285,16 @@ function ContactModal({ currentId, mode, contact, onClose }) {
           phone: contact.phone || "",
           address: contact.address || "",
         }
-      : { ...EMPTY_FORM }
+      : {
+          ...EMPTY_FORM,
+          ...(prefill && {
+            name: prefill.name || EMPTY_FORM.name,
+            type: prefill.type || EMPTY_FORM.type,
+            email: prefill.email || EMPTY_FORM.email,
+            phone: prefill.phone || EMPTY_FORM.phone,
+            address: prefill.address || EMPTY_FORM.address,
+          }),
+        }
   );
   const [saving, setSaving] = useState(false);
 

@@ -4,6 +4,7 @@ import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
 import { Plus, Trash2, X, AlertTriangle, Pencil } from "lucide-react";
 import { toast } from "sonner";
+import { useCreateListener, useActionListener } from "@/lib/createBus";
 
 const BUCKETS = [
   { key: "current", label: "Current", desc: "Not yet due", color: "emerald" },
@@ -33,6 +34,7 @@ export default function Invoices() {
   const [contacts, setContacts] = useState([]);
   const [aging, setAging] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [creatingPrefill, setCreatingPrefill] = useState(null);
   const [editing, setEditing] = useState(null);
   const load = async () => {
     if (!currentId) return;
@@ -44,6 +46,17 @@ export default function Invoices() {
     setItems(i.data.invoices || []); setContacts(c.data.contacts || []); setAging(a.data);
   };
   useEffect(() => { load(); }, [currentId]);
+
+  // Voice-driven modal opener — see /lib/createBus.js.
+  useCreateListener("invoice", (prefill) => {
+    setCreatingPrefill(prefill || {});
+    setCreating(true);
+  });
+  useActionListener("close-current-modal", () => {
+    setCreating(false);
+    setCreatingPrefill(null);
+    setEditing(null);
+  });
   const del = async (id) => {
     if (!confirm("Delete?")) return;
     await api.delete(`/companies/${currentId}/invoices/${id}`);
@@ -149,22 +162,39 @@ export default function Invoices() {
           </tbody>
         </table>
       </div>
-      {creating && <InvoiceModal contacts={contacts} currentId={currentId} onClose={() => { setCreating(false); load(); }} />}
+      {creating && <InvoiceModal contacts={contacts} currentId={currentId} prefill={creatingPrefill}
+                                  onClose={() => { setCreating(false); setCreatingPrefill(null); load(); }} />}
       {editing && <InvoiceModal contacts={contacts} currentId={currentId} invoice={editing} onClose={() => { setEditing(null); load(); }} />}
     </div>
   );
 }
 
-function InvoiceModal({ contacts, currentId, invoice, onClose }) {
+function InvoiceModal({ contacts, currentId, invoice, prefill, onClose }) {
   const editMode = !!invoice;
-  const [contact, setContact] = useState(invoice?.contact_id || "");
-  const [issue, setIssue] = useState(invoice?.issue_date || new Date().toISOString().slice(0, 10));
-  const [due, setDue] = useState(invoice?.due_date || new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10));
-  const [lines, setLines] = useState(invoice?.line_items?.length
-    ? invoice.line_items.map(l => ({ ...l }))
-    : [{ description: "", quantity: 1, rate: 0, amount: 0 }]);
-  const [tax, setTax] = useState(invoice?.tax || 0);
-  const [status, setStatus] = useState(invoice?.status || "sent");
+  const p = prefill || {};
+  const initLines = () => {
+    if (invoice?.line_items?.length) return invoice.line_items.map(l => ({ ...l }));
+    if (p.amount || p.description) {
+      const amt = Number(p.amount || 0);
+      return [{
+        description: p.description || "Services",
+        quantity: 1,
+        rate: amt,
+        amount: amt,
+      }];
+    }
+    return [{ description: "", quantity: 1, rate: 0, amount: 0 }];
+  };
+  const [contact, setContact] = useState(invoice?.contact_id || p.contact_id || "");
+  const [issue, setIssue] = useState(invoice?.issue_date || p.issue_date || new Date().toISOString().slice(0, 10));
+  const [due, setDue] = useState(
+    invoice?.due_date
+    || p.due_date
+    || new Date(Date.now() + (Number(p.due_days) || 30) * 86400000).toISOString().slice(0, 10)
+  );
+  const [lines, setLines] = useState(initLines);
+  const [tax, setTax] = useState(invoice?.tax || Number(p.tax || 0));
+  const [status, setStatus] = useState(invoice?.status || p.status || "sent");
   const upd = (i, patch) => setLines(lines.map((x, j) => j === i ? { ...x, ...patch, amount: (patch.quantity !== undefined ? patch.quantity : x.quantity) * (patch.rate !== undefined ? patch.rate : x.rate) } : x));
   const total = lines.reduce((s, l) => s + Number(l.amount || 0), 0) + Number(tax);
   const save = async () => {

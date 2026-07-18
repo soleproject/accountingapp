@@ -4,6 +4,7 @@ import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
 import { Plus, Trash2, X, AlertTriangle, Pencil } from "lucide-react";
 import { toast } from "sonner";
+import { useCreateListener, useActionListener } from "@/lib/createBus";
 
 const BUCKETS = [
   { key: "current", label: "Current", desc: "Not yet due", color: "emerald" },
@@ -22,6 +23,7 @@ export default function Bills() {
   const [contacts, setContacts] = useState([]);
   const [aging, setAging] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [creatingPrefill, setCreatingPrefill] = useState(null);
   const [editing, setEditing] = useState(null);
   const load = async () => {
     if (!currentId) return;
@@ -33,6 +35,15 @@ export default function Bills() {
     setItems(b.data.bills || []); setContacts(c.data.contacts || []); setAging(a.data);
   };
   useEffect(() => { load(); }, [currentId]);
+  useCreateListener("bill", (prefill) => {
+    setCreatingPrefill(prefill || {});
+    setCreating(true);
+  });
+  useActionListener("close-current-modal", () => {
+    setCreating(false);
+    setCreatingPrefill(null);
+    setEditing(null);
+  });
   const del = async (id) => { if (confirm("Delete?")) { await api.delete(`/companies/${currentId}/bills/${id}`); load(); } };
 
   return (
@@ -125,21 +136,36 @@ export default function Bills() {
           </tbody>
         </table>
       </div>
-      {creating && <BillModal contacts={contacts} currentId={currentId} onClose={() => { setCreating(false); load(); }} />}
+      {creating && <BillModal contacts={contacts} currentId={currentId} prefill={creatingPrefill}
+                                onClose={() => { setCreating(false); setCreatingPrefill(null); load(); }} />}
       {editing && <BillModal contacts={contacts} currentId={currentId} bill={editing} onClose={() => { setEditing(null); load(); }} />}
     </div>
   );
 }
 
-function BillModal({ contacts, currentId, bill, onClose }) {
+function BillModal({ contacts, currentId, bill, prefill, onClose }) {
   const editMode = !!bill;
-  const [contact, setContact] = useState(bill?.contact_id || "");
-  const [issue, setIssue] = useState(bill?.issue_date || new Date().toISOString().slice(0, 10));
-  const [due, setDue] = useState(bill?.due_date || new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10));
-  const [lines, setLines] = useState(bill?.line_items?.length
-    ? bill.line_items.map(l => ({ ...l }))
-    : [{ description: "", quantity: 1, rate: 0, amount: 0 }]);
-  const [status, setStatus] = useState(bill?.status || "open");
+  const p = prefill || {};
+  const initLines = () => {
+    if (bill?.line_items?.length) return bill.line_items.map(l => ({ ...l }));
+    if (p.amount || p.description) {
+      const amt = Number(p.amount || 0);
+      return [{
+        description: p.description || "Services",
+        quantity: 1, rate: amt, amount: amt,
+      }];
+    }
+    return [{ description: "", quantity: 1, rate: 0, amount: 0 }];
+  };
+  const [contact, setContact] = useState(bill?.contact_id || p.contact_id || "");
+  const [issue, setIssue] = useState(bill?.issue_date || p.issue_date || new Date().toISOString().slice(0, 10));
+  const [due, setDue] = useState(
+    bill?.due_date
+    || p.due_date
+    || new Date(Date.now() + (Number(p.due_days) || 30) * 86400000).toISOString().slice(0, 10)
+  );
+  const [lines, setLines] = useState(initLines);
+  const [status, setStatus] = useState(bill?.status || p.status || "open");
   const upd = (i, p) => setLines(lines.map((x, j) => j === i ? { ...x, ...p, amount: (p.quantity !== undefined ? p.quantity : x.quantity) * (p.rate !== undefined ? p.rate : x.rate) } : x));
   const total = lines.reduce((s, l) => s + Number(l.amount || 0), 0);
   const save = async () => {

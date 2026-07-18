@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Send, Sparkles, X, MessageSquare, Mic, MicOff, Volume2, VolumeX, ChevronDown } from "lucide-react";
+import { Send, Sparkles, X, MessageSquare, Mic, MicOff, Volume2, VolumeX, ChevronDown, Trash2 } from "lucide-react";
 import { api, BACKEND_URL } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
 import { useAiFocus } from "@/lib/aiFocus";
 import { toast } from "sonner";
 import { resolveVoiceCommand } from "@/lib/voiceCommands";
+import { emitCreate, emitAction } from "@/lib/createBus";
 
 const getSR = () => window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -37,6 +38,11 @@ export default function AiPanel({ collapsed, onToggle }) {
     localStorage.getItem("axiom_terseness") || "balanced"
   );
   useEffect(() => { localStorage.setItem("axiom_terseness", terseness); }, [terseness]);
+  // Pending create-intent from the backend parser. When populated, a
+  // "confirm" utterance submits it via API; "cancel" clears it.
+  const [pendingIntent, setPendingIntent] = useState(null);
+  const pendingIntentRef = useRef(null);
+  useEffect(() => { pendingIntentRef.current = pendingIntent; }, [pendingIntent]);
   const recognitionRef = useRef(null);
   const scrollRef = useRef(null);
   // TTS pointers: how much of the current assistant reply we've already
@@ -142,6 +148,135 @@ export default function AiPanel({ collapsed, onToggle }) {
 
   // Kept as a ref so the timer callback can call the latest `send`.
   const sendRef = useRef(null);
+
+  // Clear chat: wipes the on-screen conversation AND asks the backend to
+  // drop the persisted transcript for this session so a page refresh
+  // doesn't restore old messages.
+  const clearChatMessages = async () => {
+    setMessages([{
+      role: "assistant",
+      content: `Fresh session. Ask me anything about ${current?.name || "the books"}.`,
+    }]);
+    setPendingIntent(null);
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    if (currentId) {
+      try { await api.delete(`/ai/chat/history?company_id=${currentId}`); } catch { /* non-fatal */ }
+    }
+  };
+
+  // Dispatch a parsed create/open intent → open the right modal, show a
+  // confirmation card in chat.
+  const handleParsedIntent = (userMsg, parsed) => {
+    const { intent, prefill = {}, say, confidence = 0 } = parsed || {};
+    if (!intent || intent === "none" || confidence < 0.4) return false;
+
+    const routeFor = (i) => {
+      if (i === "create_invoice" || i === "open_invoice") return "/invoices";
+      if (i === "create_bill" || i === "open_bill") return "/bills";
+      if (i === "create_contact" || i === "open_contact") return "/contacts";
+      if (i === "create_account") return "/accounting/chart-of-accounts";
+      if (i === "create_payment") return "/payments";
+      if (i === "create_receipt") return "/receipts";
+      return null;
+    };
+    const kindFor = (i) => {
+      if (i.startsWith("create_")) return i.slice("create_".length);
+      if (i.startsWith("open_"))   return `open-${i.slice("open_".length)}`;
+      return null;
+    };
+    const url = routeFor(intent);
+    const kind = kindFor(intent);
+    if (!url || !kind) return false;
+
+    // Navigate first so the page mounts and its listener is ready; the
+    // createBus queue backstops any race where the event fires early.
+    navigate(url);
+    setTimeout(() => emitCreate(kind, prefill), 30);
+
+    // Human-friendly card in chat.
+    const readable = intent.startsWith("create_")
+      ? `Draft ready — review the ${kind} modal, then say "confirm" to save or "cancel" to abort.`
+      : say || "Opened.";
+
+    setMessages(m => {
+      const copy = [...m];
+      // Replace the "Parsing…" placeholder if present, else append.
+      const last = copy[copy.length - 1];
+      const card = { role: "assistant", content: `${say || readable}\n\n${intent.startsWith("create_") ? readable : ""}`.trim() };
+      if (last && last.role === "assistant" && last.content === "Parsing…") {
+        copy[copy.length - 1] = card;
+      } else {
+        copy.push(card);
+      }
+      return copy;
+    });
+
+    // Only creates are pending — opens are already handled by the page nav.
+    if (intent.startsWith("create_")) {
+      setPendingIntent({ intent, prefill, url });
+    } else {
+      setPendingIntent(null);
+    }
+    if (voiceOnRef.current && say) speakOne(say);
+    return true;
+  };
+
+  // Submit a pending create intent programmatically via API. Returns true
+  // on success. On failure we leave the modal open for the user to fix.
+  const submitPendingIntent = async (pending) => {
+    if (!pending || !currentId) return false;
+    const { intent, prefill } = pending;
+    try {
+      if (intent === "create_invoice") {
+        const amt = Number(prefill.amount || 0);
+        const body = {
+          contact_id: prefill.contact_id || null,
+          contact_name: prefill.contact_name || "",
+          issue_date: prefill.issue_date || new Date().toISOString().slice(0, 10),
+          due_date: prefill.due_date || new Date(Date.now() + (Number(prefill.due_days) || 30) * 86400000).toISOString().slice(0, 10),
+          line_items: [{ description: prefill.description || "Services", quantity: 1, rate: amt, amount: amt }],
+          tax: Number(prefill.tax || 0),
+          status: prefill.status || "sent",
+        };
+        await api.post(`/companies/${currentId}/invoices`, body);
+      } else if (intent === "create_bill") {
+        const amt = Number(prefill.amount || 0);
+        const body = {
+          contact_id: prefill.contact_id || null,
+          contact_name: prefill.contact_name || "",
+          issue_date: prefill.issue_date || new Date().toISOString().slice(0, 10),
+          due_date: prefill.due_date || new Date(Date.now() + (Number(prefill.due_days) || 30) * 86400000).toISOString().slice(0, 10),
+          line_items: [{ description: prefill.description || "Services", quantity: 1, rate: amt, amount: amt }],
+          status: prefill.status || "open",
+        };
+        await api.post(`/companies/${currentId}/bills`, body);
+      } else if (intent === "create_contact") {
+        await api.post(`/companies/${currentId}/contacts`, {
+          name: prefill.name || "",
+          type: prefill.type || "customer",
+          email: prefill.email || "",
+          phone: prefill.phone || "",
+          address: prefill.address || "",
+        });
+      } else if (intent === "create_account") {
+        await api.post(`/companies/${currentId}/accounts`, {
+          code: prefill.code || "9990",
+          name: prefill.name || "New Account",
+          type: prefill.type || "expense",
+          subtype: prefill.subtype || "operating_expense",
+        });
+      } else {
+        return false;
+      }
+      // Ask the currently open modal to close after a successful save.
+      emitAction("close-current-modal");
+      toast.success("Created via voice");
+      return true;
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to create");
+      return false;
+    }
+  };
 
   const startRecognizer = () => {
     const SR = getSR();
@@ -310,8 +445,69 @@ export default function AiPanel({ collapsed, onToggle }) {
       companies,
       navigate,
       switchCompany,
-      clearChat: () => setMessages([]),
+      clearChat: clearChatMessages,
     });
+
+    // --- Pending intent follow-ups (confirm / cancel) ---
+    if (cmd.handled && cmd.pending === "confirm" && pendingIntentRef.current) {
+      const p = pendingIntentRef.current;
+      setPendingIntent(null);
+      setMessages(m => [...m, { role: "user", content: userMsg }]);
+      const ok = await submitPendingIntent(p);
+      const reply = ok ? "Created." : "I couldn't create that — check the modal.";
+      setMessages(m => [...m, { role: "assistant", content: reply }]);
+      if (voiceOnRef.current) speakOne(reply);
+      return;
+    }
+    if (cmd.handled && cmd.pending === "cancel") {
+      setPendingIntent(null);
+      emitAction("close-current-modal");
+      setMessages(m => [
+        ...m,
+        { role: "user", content: userMsg },
+        { role: "assistant", content: "Cancelled." },
+      ]);
+      if (voiceOnRef.current) speakOne("Cancelled");
+      return;
+    }
+    if (cmd.handled && cmd.pending) {
+      // Confirm requested but nothing pending — treat as a no-op.
+      setMessages(m => [
+        ...m,
+        { role: "user", content: userMsg },
+        { role: "assistant", content: "Nothing pending to confirm." },
+      ]);
+      return;
+    }
+
+    // --- Remote intent (backend parser for creates) ---
+    if (cmd.handled && cmd.remote === "intent") {
+      setMessages(m => [
+        ...m,
+        { role: "user", content: userMsg },
+        { role: "assistant", content: "Parsing…" },
+      ]);
+      try {
+        const r = await api.post(`/companies/${currentId}/ai/parse-intent`, { text: userMsg });
+        const parsed = r.data || {};
+        const handled = handleParsedIntent(userMsg, parsed);
+        if (!handled) {
+          setMessages(m => {
+            const copy = [...m];
+            copy[copy.length - 1] = { role: "assistant", content: "I couldn't parse that as a create action. Try 'create an invoice for John Doe for 500 dollars'." };
+            return copy;
+          });
+        }
+      } catch (e) {
+        setMessages(m => {
+          const copy = [...m];
+          copy[copy.length - 1] = { role: "assistant", content: "Sorry — parsing failed." };
+          return copy;
+        });
+      }
+      return;
+    }
+
     if (cmd.handled) {
       setMessages(m => [
         ...m,
@@ -483,6 +679,14 @@ export default function AiPanel({ collapsed, onToggle }) {
         >
           {voiceOn ? <Volume2 size={16} /> : <VolumeX size={16} />}
         </button>
+        <button
+          onClick={clearChatMessages}
+          data-testid="ai-chat-clear"
+          className="p-1.5 rounded hover:bg-slate-100 text-slate-500"
+          title="Clear conversation"
+        >
+          <Trash2 size={15} />
+        </button>
         <div className="relative">
           <button
             onClick={() => setVoiceMenuOpen(v => !v)}
@@ -539,6 +743,43 @@ export default function AiPanel({ collapsed, onToggle }) {
       </div>
 
       <div className="border-t p-3">
+        {pendingIntent && (
+          <div
+            className="mb-2 flex items-center gap-2 rounded-md bg-indigo-50 border border-indigo-200 px-2.5 py-2"
+            data-testid="ai-pending-intent"
+          >
+            <Sparkles size={13} className="text-indigo-600 flex-shrink-0" />
+            <span className="text-xs text-indigo-900 flex-1 leading-tight">
+              Pending: <b>{pendingIntent.intent.replace(/_/g, " ")}</b>
+              {pendingIntent.prefill?.contact_name ? ` · ${pendingIntent.prefill.contact_name}` : ""}
+              {pendingIntent.prefill?.amount ? ` · $${pendingIntent.prefill.amount}` : ""}
+            </span>
+            <button
+              data-testid="ai-pending-confirm"
+              onClick={async () => {
+                const p = pendingIntent;
+                setPendingIntent(null);
+                const ok = await submitPendingIntent(p);
+                const reply = ok ? "Created." : "Couldn't create — check the modal.";
+                setMessages(m => [...m, { role: "assistant", content: reply }]);
+                if (voiceOnRef.current) speakOne(reply);
+              }}
+              className="text-[11px] px-2 py-0.5 rounded bg-indigo-600 text-white hover:bg-indigo-700"
+            >
+              Confirm
+            </button>
+            <button
+              data-testid="ai-pending-cancel"
+              onClick={() => {
+                setPendingIntent(null);
+                emitAction("close-current-modal");
+              }}
+              className="text-[11px] px-2 py-0.5 rounded text-indigo-800 hover:bg-indigo-100"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
         {listening && (
           <div className="mb-2 flex items-center gap-2 rounded-md bg-red-50 border border-red-200 px-2.5 py-1.5">
             <span className="relative flex h-2 w-2">
@@ -597,11 +838,15 @@ function VoiceHintTape({ micMode }) {
   const HINTS = [
     'Try: "show flagged transactions"',
     'Try: "open 317 LLC"',
-    'Try: "go to reports"',
-    'Try: "suggested rules"',
+    'Try: "income statement for Q1 cash basis"',
+    'Try: "create an invoice for John Doe for 500 dollars"',
+    'Try: "new contact"',
+    'Try: "go to chart of accounts"',
+    'Try: "open contact Acme"',
     'Try: "overdue invoices"',
     'Try: "clear chat"',
     'Try: "stop" — cancels the AI mid-speech',
+    'Say "confirm" to auto-save a draft I made',
     'Tip: hover a transaction row to make it the AI\'s context',
     'Tip: say "why" to get a deeper answer',
   ];

@@ -4,6 +4,7 @@ import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
 import { Plus, Trash2, Sparkles, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { useCreateListener, useActionListener } from "@/lib/createBus";
 
 const TYPES = ["asset", "liability", "equity", "revenue", "cogs", "expense"];
 
@@ -11,6 +12,7 @@ export default function ChartOfAccounts() {
   const { currentId } = useCompany();
   const [accts, setAccts] = useState([]);
   const [creating, setCreating] = useState(false);
+  const [creatingPrefill, setCreatingPrefill] = useState(null);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const load = async () => {
     if (!currentId) return;
@@ -18,6 +20,15 @@ export default function ChartOfAccounts() {
     setAccts(r.data.accounts || []);
   };
   useEffect(() => { load(); }, [currentId]);
+  useCreateListener("account", (prefill) => {
+    setCreatingPrefill(prefill || {});
+    setCreating(true);
+  });
+  useActionListener("close-current-modal", () => {
+    setCreating(false);
+    setCreatingPrefill(null);
+    setSuggestOpen(false);
+  });
 
   const del = async (id) => {
     if (!confirm("Delete account?")) return;
@@ -70,7 +81,8 @@ export default function ChartOfAccounts() {
           </div>
         ))}
       </div>
-      {creating && <CreateAccount currentId={currentId} onClose={() => { setCreating(false); load(); }} />}
+      {creating && <CreateAccount currentId={currentId} prefill={creatingPrefill}
+                                    onClose={() => { setCreating(false); setCreatingPrefill(null); load(); }} />}
       {suggestOpen && (
         <SuggestCoAModal
           currentId={currentId}
@@ -221,9 +233,12 @@ function SuggestCoAModal({ currentId, onClose }) {
   );
 }
 
-function CreateAccount({ currentId, onClose }) {
-  const [code, setCode] = useState(""); const [name, setName] = useState("");
-  const [type, setType] = useState("expense"); const [subtype, setSubtype] = useState("operating_expense");
+function CreateAccount({ currentId, prefill, onClose }) {
+  const p = prefill || {};
+  const [code, setCode] = useState(p.code || "");
+  const [name, setName] = useState(p.name || "");
+  const [type, setType] = useState(TYPES.includes(p.type) ? p.type : "expense");
+  const [subtype, setSubtype] = useState(p.subtype || "operating_expense");
   const save = async () => {
     await api.post(`/companies/${currentId}/accounts`, { code, name, type, subtype });
     toast.success("Account created"); onClose();

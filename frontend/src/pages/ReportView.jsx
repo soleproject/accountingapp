@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, BACKEND_URL } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
@@ -11,11 +11,24 @@ const today = () => new Date().toISOString().slice(0, 10);
 export default function ReportView() {
   const { kind } = useParams();
   const { currentId, current } = useCompany();
-  const [basis, setBasis] = useState("accrual");
-  const [start, setStart] = useState(startYtd());
-  const [end, setEnd] = useState(today());
+  const [searchParams] = useSearchParams();
+  const urlBasis = searchParams.get("basis");
+  const urlStart = searchParams.get("start");
+  const urlEnd = searchParams.get("end");
+  const [basis, setBasis] = useState(urlBasis === "cash" || urlBasis === "accrual" ? urlBasis : "accrual");
+  const [start, setStart] = useState(urlStart || startYtd());
+  const [end, setEnd] = useState(urlEnd || today());
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
+
+  // Re-sync from URL params when the user re-triggers a voice command that
+  // navigates back to the same report page with different filters.
+  useEffect(() => {
+    if (urlBasis === "cash" || urlBasis === "accrual") setBasis(urlBasis);
+    if (urlStart) setStart(urlStart);
+    if (urlEnd) setEnd(urlEnd);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlBasis, urlStart, urlEnd]);
 
   const fetchData = async () => {
     if (!currentId) return;
@@ -29,7 +42,7 @@ export default function ReportView() {
     } finally { setBusy(false); }
   };
 
-  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [currentId, kind]);
+  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [currentId, kind, basis, start, end]);
 
   const downloadPdf = async () => {
     const params = kind === "balance-sheet"

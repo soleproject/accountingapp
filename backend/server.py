@@ -27,6 +27,7 @@ from auth import (  # noqa: E402
 from ai_service import (  # noqa: E402
     categorize_transaction, chat_stream, suggest_chart_of_accounts,
     onboarding_interview_questions, onboarding_interview_synthesize,
+    parse_voice_intent,
 )
 import reports as R  # noqa: E402
 import plaid_service  # noqa: E402
@@ -3279,6 +3280,76 @@ async def chat_history(company_id: str, session_id: Optional[str] = None,
     sid = session_id or f"chat-{company_id}-{user['id']}"
     docs = await db.chat_messages.find({"session_id": sid}).sort("created_at", 1).to_list(200)
     return {"messages": [coerce(d) for d in docs], "session_id": sid}
+
+
+@api.delete("/ai/chat/history")
+async def clear_chat_history(company_id: str, session_id: Optional[str] = None,
+                             user: dict = Depends(get_current_user)):
+    """Wipe the current user's chat transcript for a company. Used by the
+    'Clear chat' button in the AI panel. Session-scoped so other users are
+    unaffected."""
+    await _require_company(user, company_id)
+    sid = session_id or f"chat-{company_id}-{user['id']}"
+    r = await db.chat_messages.delete_many({"session_id": sid})
+    return {"deleted": r.deleted_count, "session_id": sid}
+
+
+class IntentIn(BaseModel):
+    text: str
+
+
+@api.post("/companies/{cid}/ai/parse-intent")
+async def ai_parse_intent(cid: str, inp: IntentIn, user: dict = Depends(get_current_user)):
+    """Parse a natural-language utterance into a structured create/open intent.
+
+    Used by the voice-command router for 'create an invoice for X', 'open bill 1024', etc.
+    Returns intent + confidence + prefill. For create intents we also try to
+    resolve any mentioned contact name to an existing contact id so the modal
+    can select the right dropdown value.
+    """
+    await _require_company(user, cid)
+    parsed = await parse_voice_intent(inp.text)
+
+    prefill = parsed.get("prefill") or {}
+    intent = parsed.get("intent") or "none"
+
+    # For create_invoice / create_bill / open_contact: resolve contact_name against
+    # existing contacts so the frontend can preselect it.
+    lookup_name = None
+    if intent in ("create_invoice", "create_bill"):
+        lookup_name = prefill.get("contact_name")
+    elif intent == "open_contact":
+        lookup_name = prefill.get("name_or_number")
+
+    if lookup_name:
+        needle = str(lookup_name).lower().strip()
+        contacts = await db.contacts.find({"company_id": cid}).to_list(2000)
+        best = None
+        best_score = 0
+        for c in contacts:
+            nm = str(c.get("name") or "").lower().strip()
+            if not nm:
+                continue
+            if nm == needle:
+                score = 1000
+            elif needle in nm or nm in needle:
+                score = 500 + max(len(needle), 1)
+            else:
+                # per-word overlap
+                w_needle = set(w for w in needle.split() if len(w) >= 2)
+                w_nm = set(nm.split())
+                overlap = len(w_needle & w_nm)
+                score = overlap * 10 if overlap else 0
+            if score > best_score:
+                best_score = score
+                best = c
+        if best and best_score >= 10:
+            prefill["contact_id"] = best.get("id")
+            prefill["contact_name"] = best.get("name")
+            prefill["matched_existing"] = True
+
+    parsed["prefill"] = prefill
+    return parsed
 
 
 # ----------------------- Health -----------------------
