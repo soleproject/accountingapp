@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 
-const PAGE_SIZE_OPTIONS = [50, 100, 250, 500];
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
 
 function ConfidenceChip({ conf, needs_review }) {
   const v = Number(conf || 0);
@@ -52,8 +52,8 @@ export default function Transactions() {
   const [reclassOpen, setReclassOpen] = useState(false);
   const [ruleSuggestion, setRuleSuggestion] = useState(null);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(250);
-  const [pagination, setPagination] = useState({ total: 0, page: 1, pages: 1, limit: 250 });
+  const [pageSize, setPageSize] = useState(25);
+  const [pagination, setPagination] = useState({ total: 0, page: 1, pages: 1, limit: 25 });
   // Toolbar filters
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
