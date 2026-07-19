@@ -67,10 +67,10 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
     reviewed = sum(1 for t in txns if t.get("human_reviewed"))
     ai_cat  = sum(1 for t in txns
                   if not t.get("human_reviewed") and t.get("posted")
-                  and t.get("category_account_code") not in ("9999", "4999"))
+                  and t.get("category_account_code") not in ("9999", "6999", "4999"))
     uncat = sum(1 for t in txns
                 if not t.get("category_account_id")
-                or t.get("category_account_code") in ("9999", "4999"))
+                or t.get("category_account_code") in ("9999", "6999", "4999"))
     flagged = sum(1 for t in txns if t.get("needs_review"))
     pct = round(100.0 * reviewed / total, 1) if total else 0.0
 
@@ -88,7 +88,7 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
         cid_key = t.get("contact_id")
         if not cid_key:
             continue
-        if (not t.get("category_account_id") or t.get("category_account_code") in ("9999", "4999")) \
+        if (not t.get("category_account_id") or t.get("category_account_code") in ("9999", "6999", "4999")) \
                 and not t.get("human_reviewed"):
             b = uncat_by_contact[cid_key]
             b["count"] += 1
@@ -98,7 +98,7 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
             split_by_contact[cid_key].add(t.get("category_account_id"))
             # Track AI-categorized-unreviewed rows for the "ready to approve"
             # bucket — must all be the SAME account for a clean bulk-approve.
-            if t.get("category_account_code") not in ("9999", "4999"):
+            if t.get("category_account_code") not in ("9999", "6999", "4999"):
                 r = ai_ready_by_contact[cid_key]
                 r["count"] += 1
                 r["amount"] += abs(float(t.get("amount") or 0.0))
@@ -212,9 +212,15 @@ async def bulk_approve_ai_ready(
     """Mega bulk-approve: mark every AI-categorized-unreviewed row human_reviewed
     for contacts where the AI has picked a SINGLE consistent account.
 
-    Excludes: uncategorized rows (9999/4999), rows already reviewed, rows the
-    AI flagged for review (needs_review=true), rows in closed periods, and
-    contacts with mixed AI opinions.
+    Excludes: uncategorized rows (9999/6999/4999 — e.g. Venmo → Uncategorized
+    Expense, Michael Giorgi → Uncategorized Income), rows already reviewed,
+    rows in closed periods, and contacts with mixed AI opinions.
+
+    INCLUDES `needs_review=true` rows as long as the AI still landed them on
+    a REAL account (e.g. AT&T flagged for review but categorized to 6600
+    Utilities). Per user's follow-up request: "if it is a needs review contact
+    as long as the categorization is not uncategorized it can show up on the
+    'Approve all AI-ready'".
 
     On dry_run=true returns the full eligible vendor list (scrollable in the
     modal) + summary. On live run tags every touched row with a shared
@@ -230,12 +236,11 @@ async def bulk_approve_ai_ready(
     async for t in db.transactions.find({
         "company_id": cid,
         "human_reviewed": {"$ne": True},
-        # Exclude AI-flagged rows (needs_review=true) — those are the ones the
-        # AI itself wasn't sure about and should never be swept up by a mass
-        # approval. User asked for this explicitly.
-        "needs_review": {"$ne": True},
+        # NOTE: `needs_review=true` rows are NO LONGER excluded. As long as
+        # the row is categorized to a REAL account (not 9999/6999/4999) we
+        # let it through — the code filter below is the real safety net.
         "category_account_id": {"$nin": [None, ""]},
-        "category_account_code": {"$nin": ["9999", "4999"]},
+        "category_account_code": {"$nin": ["9999", "6999", "4999"]},
         "contact_id": {"$exists": True, "$nin": [None, ""]},
     }):
         r = ai_ready[t["contact_id"]]
@@ -475,20 +480,21 @@ async def list_transactions(
     # segment answers a different bookkeeper question:
     #   ai            → auto-posted by the LLM, no human sign-off yet.
     #                   (posted=True + human_reviewed≠True + a real category)
-    #   uncategorized → sitting in the fallback 9999/4999 accounts (or none).
+    #   uncategorized → sitting in the fallback 9999/6999/4999 accounts (or none).
     #   unapproved    → catch-all: anything the human hasn't reviewed yet.
     #   reviewed      → human_reviewed=True (the "done" bucket).
     if status == "ai":
         query["human_reviewed"] = {"$ne": True}
         query["posted"] = True
-        # exclude the two Uncategorized sink accounts (populated by seed).
-        query["category_account_code"] = {"$nin": ["9999", "4999"]}
+        # exclude the three Uncategorized sink accounts (9999 seed + 6999/4999
+        # runtime-created by categorizer).
+        query["category_account_code"] = {"$nin": ["9999", "6999", "4999"]}
     elif status == "uncategorized":
         # Wrap in a named clause so an $or search filter below can co-exist.
         query.setdefault("$and", []).append({"$or": [
             {"category_account_id": None},
             {"category_account_id": {"$exists": False}},
-            {"category_account_code": {"$in": ["9999", "4999"]}},
+            {"category_account_code": {"$in": ["9999", "6999", "4999"]}},
         ]})
     elif status == "unapproved":
         query["human_reviewed"] = {"$ne": True}

@@ -38,6 +38,20 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - Collapsible left nav + collapsible right AI panel
 
 ## What's been implemented (Feb 2026)
+
+### Feb 2026 — Mega-Approve: include needs_review categorized rows
+- **`bulk-approve-ai-ready`** (mega button): stopped excluding `needs_review=true` rows.
+  A row like AT&T flagged for review but AI-categorized to `6600 Utilities` is now
+  eligible for one-tap mass approval, per user request. Uncategorized sinks
+  (`9999`/`6999`/`4999`) are still filtered out — Venmo→Uncategorized Expense (6999)
+  and Michael Giorgi→Uncategorized Income (4999) do NOT show up.
+- **Bug fix**: uncategorized filter was only checking `9999`/`4999`, letting the
+  runtime-created `6999` Uncategorized Expense leak through the mega-approve modal
+  and the Transactions "AI Categorized" tab. Now consistently excludes all three
+  in `cleanup-suggestions`, `bulk-approve-ai-ready`, and the transactions listing.
+- Verified E2E via curl: 48 AT&T rows with `needs_review=true` → approved (48
+  updated, batch_id issued) → undo restored all 48.
+
 - **2026-02-17**: Contacts page — added inline **Edit Contact** flow (click row or pencil icon).
   Backend `PATCH /api/companies/{cid}/contacts/{xid}` already existed; UI now reuses the modal
   for create + edit with prefilled fields, sonner toasts, and empty-`type` handling.
