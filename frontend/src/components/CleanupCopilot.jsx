@@ -385,24 +385,51 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
           ) : null}
         </div>
         <div className="flex items-center gap-2">
-          {primary && (
-            <button
-              data-testid="cleanup-primary-cta"
-              onClick={() => onApplyAction?.(primary)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md bg-slate-900 text-white hover:bg-slate-800"
-            >
-              Fix now <ArrowRight size={13} />
-            </button>
-          )}
-          <button
-            data-testid="cleanup-mega-approve"
-            onClick={openMega}
-            disabled={megaBusy}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
-            title="Approve every vendor whose AI opinion is unanimous"
-          >
-            <Sparkles size={13} /> {megaBusy ? "Scanning…" : "Approve all AI-ready"}
-          </button>
+          {(() => {
+            // Which CTA should draw the eye? Approve-all-AI-ready wins if
+            // there are AI-categorized rows waiting for sign-off (data.progress.
+            // ai_categorized). Otherwise Fix now wins if there's any primary
+            // cleanup action queued.
+            const aiReadyCount = data?.progress?.ai_categorized || 0;
+            const hasApprove = aiReadyCount > 0;
+            const hasFixNow = !!primary;
+            const shimmerApprove = hasApprove;
+            const shimmerFixNow = !hasApprove && hasFixNow;
+            return (
+              <>
+                {primary && (
+                  <button
+                    data-testid="cleanup-primary-cta"
+                    onClick={() => onApplyAction?.(primary)}
+                    className={
+                      shimmerFixNow
+                        ? "ai-shimmer-btn inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md border"
+                        : "inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md bg-slate-900 text-white hover:bg-slate-800"
+                    }
+                  >
+                    Fix now <ArrowRight size={13} />
+                  </button>
+                )}
+                <button
+                  data-testid="cleanup-mega-approve"
+                  onClick={openMega}
+                  disabled={megaBusy}
+                  className={
+                    shimmerApprove
+                      ? "ai-shimmer-btn inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md border disabled:opacity-50"
+                      : "inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                  }
+                  title={
+                    hasApprove
+                      ? `${aiReadyCount} AI-categorized rows waiting for sign-off`
+                      : "Approve every vendor whose AI opinion is unanimous"
+                  }
+                >
+                  <Sparkles size={13} /> {megaBusy ? "Scanning…" : "Approve all AI-ready"}
+                </button>
+              </>
+            );
+          })()}
           <button
             data-testid="cleanup-start-session"
             onClick={() => onStartSession?.(data?.progress?.flagged || 0)}
