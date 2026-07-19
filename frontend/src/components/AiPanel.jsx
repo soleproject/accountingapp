@@ -441,13 +441,13 @@ export default function AiPanel({ collapsed, onToggle }) {
     if (!a) return;
     let msg = "";
     if (a.kind === "contact_in_uncat") {
-      msg = `I see **${a.count} ${a.contact_name}** transactions sitting in Uncategorized (totaling ${(a.total_amount || 0).toLocaleString("en-US", { style: "currency", currency: "USD" })}). Tell me what these are and I'll categorize them all + create a rule so future imports land in the right account. (e.g. "these are rent from tenants" or "contractor payments")`;
+      msg = `I see **${a.count} ${a.contact_name}** transactions sitting in Uncategorized. Tell me what these are and I'll categorize them all + create a rule so future imports land in the right account. (e.g. "these are rent from tenants" or "contractor payments")`;
     } else if (a.kind === "contact_split") {
       msg = `**${a.contact_name}** is split across ${a.count} different accounts — that's usually a categorization drift. Tell me what these transactions actually are, and I'll consolidate them and create a rule.`;
     } else if (a.kind === "contact_ai_ready") {
       const acode = a.account?.code || "";
       const aname = a.account?.name || "";
-      msg = `**${a.count} ${a.contact_name}** transactions were AI-categorized as **${acode} ${aname}** and are waiting for your sign-off (${(a.total_amount || 0).toLocaleString("en-US", { style: "currency", currency: "USD" })} total). Say **"approve"** to bulk-approve them all, or tell me the correct category if the AI got it wrong.`;
+      msg = `**${a.count} ${a.contact_name}** transactions were AI-categorized as **${acode} ${aname}** and are waiting for your sign-off. Say **"approve"** to bulk-approve them all, or tell me the correct category if the AI got it wrong.`;
     } else if (a.kind === "flagged_batch") {
       msg = `Let's run through the ${a.count} flagged transactions together. I'll surface one at a time — tell me what each one is (e.g. "rent from tenants") and I'll categorize + approve. Ready?`;
     }

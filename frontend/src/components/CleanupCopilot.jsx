@@ -298,6 +298,9 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   const selectedRows = megaVendors.reduce(
     (s, v) => s + (megaSelected.has(v.key) ? v.count : 0), 0
   );
+  const selectedAmount = megaVendors.reduce(
+    (s, v) => s + (megaSelected.has(v.key) ? v.amount : 0), 0
+  );
   const selectedBuckets = megaVendors.reduce(
     (s, v) => s + (megaSelected.has(v.key) ? 1 : 0), 0
   );
@@ -398,7 +401,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                   Approve <span data-testid="mega-selected-rows">{selectedRows.toLocaleString()}</span> rows across <span data-testid="mega-selected-vendors">{selectedBuckets}</span> {selectedBuckets === 1 ? "bucket" : "buckets"}?
                 </div>
                 <div className="text-xs text-slate-500 mb-2">
-                  Each row is one <span className="font-medium">vendor × category</span> bucket — vendors split across multiple accounts appear here as separate rows so you can approve, exclude, or override each independently.
+                  Total volume: ${selectedAmount.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2})}. Each row is one <span className="font-medium">vendor × category</span> bucket — vendors split across multiple accounts appear here as separate rows so you can approve, exclude, or override each independently.
                 </div>
                 <div className="mb-2">
                   <input
