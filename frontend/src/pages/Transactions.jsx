@@ -11,6 +11,7 @@ import {
   List as ListIcon, LayoutGrid,
 } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
+import CleanupCopilot from "@/components/CleanupCopilot";
 import { emitAction, useActionListener } from "@/lib/createBus";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
@@ -420,6 +421,27 @@ export default function Transactions() {
 
   return (
     <div className="space-y-4">
+      <CleanupCopilot
+        currentId={currentId}
+        onApplyAction={(a) => {
+          if (a.kind === "contact_in_uncat") {
+            setFilter("uncategorized");
+            setSearch(a.contact_name || "");
+          } else if (a.kind === "contact_split") {
+            setFilter("all");
+            setSearch(a.contact_name || "");
+            setView("rollup");
+          } else if (a.kind === "flagged_batch") {
+            setFilter("review");
+          }
+          setPage(1);
+        }}
+        onStartSession={() => {
+          setFilter("review");
+          setPage(1);
+          emitAction("ai-open");
+        }}
+      />
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="font-heading text-3xl font-bold tracking-tight">Transactions</h1>

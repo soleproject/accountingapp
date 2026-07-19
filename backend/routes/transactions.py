@@ -53,6 +53,80 @@ router = APIRouter(prefix="/api")
 
 # ----------------------- Transactions -----------------------
 
+@router.get("/companies/{cid}/transactions/cleanup-suggestions")
+async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
+    """Powers the Transactions-page Cleanup Copilot hero band. Returns:
+      progress:  overall segment counts + pct_reviewed
+      top_actions: ordered by impact (contact_in_uncat > contact_split > flagged)
+    All counts are for the whole company (no date filter) so the hero reflects
+    the true books-health picture, not whatever tab the user just clicked.
+    """
+    await require_company(user, cid)
+    txns = await db.transactions.find({"company_id": cid}).to_list(50000)
+    total = len(txns)
+    reviewed = sum(1 for t in txns if t.get("human_reviewed"))
+    ai_cat  = sum(1 for t in txns
+                  if not t.get("human_reviewed") and t.get("posted")
+                  and t.get("category_account_code") not in ("9999", "4999"))
+    uncat = sum(1 for t in txns
+                if not t.get("category_account_id")
+                or t.get("category_account_code") in ("9999", "4999"))
+    flagged = sum(1 for t in txns if t.get("needs_review"))
+    pct = round(100.0 * reviewed / total, 1) if total else 0.0
+
+    # Contacts sitting entirely (or mostly) in Uncategorized.
+    from collections import defaultdict
+    uncat_by_contact = defaultdict(lambda: {"count": 0, "amount": 0.0, "contact_name": ""})
+    split_by_contact = defaultdict(set)
+    for t in txns:
+        cid_key = t.get("contact_id")
+        if not cid_key:
+            continue
+        if not t.get("category_account_id") or t.get("category_account_code") in ("9999", "4999"):
+            b = uncat_by_contact[cid_key]
+            b["count"] += 1
+            b["amount"] += abs(float(t.get("amount") or 0.0))
+            b["contact_name"] = t.get("contact_name") or ""
+        if t.get("category_account_id"):
+            split_by_contact[cid_key].add(t.get("category_account_id"))
+
+    top_actions: list[dict] = []
+    for cidk, b in sorted(uncat_by_contact.items(), key=lambda kv: -kv[1]["count"])[:8]:
+        if b["count"] >= 3:
+            top_actions.append({
+                "kind": "contact_in_uncat",
+                "contact_id": cidk, "contact_name": b["contact_name"],
+                "count": b["count"], "total_amount": round(b["amount"], 2),
+                "label": f"{b['contact_name']} · Uncategorized",
+                "why": f"{b['count']} rows from {b['contact_name']} are still uncategorized.",
+            })
+    for cidk, cats in sorted(split_by_contact.items(), key=lambda kv: -len(kv[1]))[:6]:
+        if len(cats) >= 3:
+            cname = next((t.get("contact_name") for t in txns if t.get("contact_id") == cidk), "")
+            top_actions.append({
+                "kind": "contact_split",
+                "contact_id": cidk, "contact_name": cname,
+                "count": len(cats),
+                "label": f"{cname} · {len(cats)} categories",
+                "why": f"{cname} is spread across {len(cats)} different accounts — likely a categorization inconsistency.",
+            })
+    if flagged > 0:
+        top_actions.append({
+            "kind": "flagged_batch",
+            "count": flagged,
+            "label": f"Flagged for review ({flagged})",
+            "why": "The AI wasn't sure about these and marked them for a human eye.",
+        })
+
+    return {
+        "progress": {
+            "total": total, "reviewed": reviewed, "ai_categorized": ai_cat,
+            "uncategorized": uncat, "flagged": flagged, "pct_reviewed": pct,
+        },
+        "top_actions": top_actions[:8],
+    }
+
+
 @router.get("/companies/{cid}/transactions/contact-category-rollup")
 async def contact_category_rollup(
     cid: str,
