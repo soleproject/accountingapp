@@ -342,9 +342,13 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   });
 
   // Reorder actions so skipped contacts fall to the BACK (in FIFO skip
-  // order). Permanent dismissals are filtered out first.
+  // order). Permanent dismissals are filtered out first. `flagged_batch`
+  // is deliberately excluded from the primary/rest queue — it powers the
+  // one-at-a-time review, which is the "Start 5-min session" button, not
+  // "Fix now" (Fix now is contact-scoped bulk cleanup only).
   const eligibleActions = (data?.top_actions || []).filter(a =>
-    !dismissed.has(`${a.kind}-${a.contact_id || a.count}`)
+    a.kind !== "flagged_batch"
+    && !dismissed.has(`${a.kind}-${a.contact_id || a.count}`)
   );
   const unseenActions = eligibleActions.filter(
     a => !a.contact_id || !skippedOrder.includes(a.contact_id)
