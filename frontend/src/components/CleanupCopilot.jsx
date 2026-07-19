@@ -71,6 +71,42 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [dismissed, setDismissed] = useState(new Set());
+  const [megaPreview, setMegaPreview] = useState(null);
+  const [megaBusy, setMegaBusy] = useState(false);
+  const openMega = async () => {
+    if (megaBusy || !currentId) return;
+    setMegaBusy(true);
+    try {
+      const r = await api.post(
+        `/companies/${currentId}/transactions/bulk-approve-ai-ready`,
+        { dry_run: true }
+      );
+      if (!r.data?.total_rows) {
+        // Nothing AI-ready → sentinel so the button hides after click.
+        setMegaPreview({ total_rows: 0 });
+      } else {
+        setMegaPreview(r.data);
+      }
+    } catch (e) { /* silent */ } finally { setMegaBusy(false); }
+  };
+  const applyMega = async () => {
+    if (megaBusy || !currentId) return;
+    setMegaBusy(true);
+    try {
+      const r = await api.post(
+        `/companies/${currentId}/transactions/bulk-approve-ai-ready`,
+        { dry_run: false }
+      );
+      setMegaPreview(null);
+      load(); // reload the copilot band
+      // Broadcast so the Transactions page + AI panel refresh their grids.
+      window.dispatchEvent(new CustomEvent("axiom:action",
+        { detail: { kind: "txns:changed", at: Date.now() } }));
+      // Toast-style banner via existing bus.
+      window.dispatchEvent(new CustomEvent("axiom:toast",
+        { detail: { message: `Approved ${r.data?.updated || 0} rows across ${r.data?.total_contacts || 0} vendors.` } }));
+    } catch (e) { /* silent */ } finally { setMegaBusy(false); }
+  };
 
   const load = async () => {
     if (!currentId) return;
@@ -169,6 +205,15 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
             </button>
           )}
           <button
+            data-testid="cleanup-mega-approve"
+            onClick={openMega}
+            disabled={megaBusy}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+            title="Approve every vendor whose AI opinion is unanimous"
+          >
+            <Sparkles size={13} /> {megaBusy ? "Scanning…" : "Approve all AI-ready"}
+          </button>
+          <button
             data-testid="cleanup-start-session"
             onClick={() => onStartSession?.()}
             className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
@@ -201,6 +246,71 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
           {total > 0 && actions.length < 3 && (
             <span className="text-[11px] text-slate-500">Nothing else urgent — you're in good shape.</span>
           )}
+        </div>
+      )}
+      {megaPreview && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-[2px] flex items-center justify-center p-4"
+             data-testid="mega-approve-modal"
+             onClick={() => !megaBusy && setMegaPreview(null)}>
+          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-5"
+               onClick={(e) => e.stopPropagation()}>
+            {megaPreview.total_rows === 0 ? (
+              <>
+                <div className="text-base font-semibold text-slate-900 mb-1">Nothing to approve</div>
+                <div className="text-sm text-slate-600 mb-4">No AI-categorized-unreviewed rows found for vendors with a unanimous AI opinion. You're clean.</div>
+                <button onClick={() => setMegaPreview(null)}
+                        className="w-full py-2 rounded-md bg-slate-900 text-white text-sm font-medium">Close</button>
+              </>
+            ) : (
+              <>
+                <div className="text-base font-semibold text-slate-900 mb-1">
+                  Approve {megaPreview.total_rows.toLocaleString()} rows across {megaPreview.total_contacts} vendors?
+                </div>
+                <div className="text-xs text-slate-500 mb-3">
+                  Total volume: ${megaPreview.total_amount.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2})}. Only vendors where the AI picked ONE consistent account are eligible — mixed-opinion vendors need manual review.
+                </div>
+                <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">Top 5 vendors</div>
+                <div className="space-y-1.5 mb-3 max-h-48 overflow-y-auto">
+                  {megaPreview.top_contacts.map((c, i) => (
+                    <div key={i} className="flex items-center justify-between rounded border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium truncate">{c.contact_name}</div>
+                        <div className="text-slate-500 truncate">→ {c.account?.code} {c.account?.name}</div>
+                      </div>
+                      <div className="text-right ml-2 shrink-0">
+                        <div className="font-mono-num text-slate-900">{c.count} rows</div>
+                        <div className="font-mono-num text-slate-500">${c.amount.toLocaleString("en-US", {maximumFractionDigits: 0})}</div>
+                      </div>
+                    </div>
+                  ))}
+                  {megaPreview.total_contacts > 5 && (
+                    <div className="text-[11px] text-slate-500 text-center">… + {megaPreview.total_contacts - 5} more vendors</div>
+                  )}
+                </div>
+                <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mb-3">
+                  ⚠ This marks every row human-reviewed with the AI's suggested category. Review carefully — undoing individual rows afterward requires opening each one.
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    data-testid="mega-approve-cancel"
+                    onClick={() => setMegaPreview(null)}
+                    disabled={megaBusy}
+                    className="flex-1 py-2 rounded-md border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Cancel — review first
+                  </button>
+                  <button
+                    data-testid="mega-approve-confirm"
+                    onClick={applyMega}
+                    disabled={megaBusy}
+                    className="flex-1 py-2 rounded-md bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    {megaBusy ? "Approving…" : `Approve all ${megaPreview.total_rows.toLocaleString()} rows`}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>

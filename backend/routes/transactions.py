@@ -196,6 +196,116 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
     }
 
 
+class BulkApproveAiReadyIn(BaseModel):
+    dry_run: bool = False
+
+
+@router.post("/companies/{cid}/transactions/bulk-approve-ai-ready")
+async def bulk_approve_ai_ready(
+    cid: str,
+    inp: BulkApproveAiReadyIn = BulkApproveAiReadyIn(),
+    user: dict = Depends(get_current_user),
+):
+    """Mega bulk-approve: mark every AI-categorized-unreviewed row human_reviewed
+    for contacts where the AI has picked a SINGLE consistent account (i.e. the
+    same set of contacts that appear as `contact_ai_ready` in cleanup-suggestions).
+
+    Skips: uncategorized rows, code-9999/4999 parked rows, rows in closed
+    periods, rows whose contact has a mixed AI opinion.
+
+    dry_run=True returns the vendor summary + total row count without touching
+    the DB. Powers the "Approve all AI-ready" mega button in the Copilot band.
+    """
+    await require_company(user, cid)
+
+    from collections import defaultdict
+    ai_ready = defaultdict(lambda: {
+        "count": 0, "amount": 0.0, "contact_name": "",
+        "accounts": set(), "sample_acct": None, "txn_ids": [],
+    })
+    async for t in db.transactions.find({
+        "company_id": cid,
+        "human_reviewed": {"$ne": True},
+        "category_account_id": {"$nin": [None, ""]},
+        "category_account_code": {"$nin": ["9999", "4999"]},
+        "contact_id": {"$exists": True, "$nin": [None, ""]},
+    }):
+        r = ai_ready[t["contact_id"]]
+        r["count"] += 1
+        r["amount"] += abs(float(t.get("amount") or 0.0))
+        r["contact_name"] = t.get("contact_name") or ""
+        r["accounts"].add(t.get("category_account_id"))
+        r["txn_ids"].append(t["id"])
+        if not r["sample_acct"]:
+            r["sample_acct"] = {
+                "code": t.get("category_account_code"),
+                "name": t.get("category_account_name"),
+            }
+
+    eligible = [(cidk, r) for cidk, r in ai_ready.items() if len(r["accounts"]) == 1]
+    eligible.sort(key=lambda kv: -kv[1]["count"])
+
+    total_rows = sum(r["count"] for _, r in eligible)
+    total_contacts = len(eligible)
+    total_amount = sum(r["amount"] for _, r in eligible)
+    top_contacts = [{
+        "contact_id": cidk,
+        "contact_name": r["contact_name"],
+        "count": r["count"],
+        "amount": round(r["amount"], 2),
+        "account": r["sample_acct"] or {},
+    } for cidk, r in eligible[:5]]
+
+    if inp.dry_run or total_rows == 0:
+        return {
+            "ok": True, "dry_run": inp.dry_run,
+            "total_contacts": total_contacts,
+            "total_rows": total_rows,
+            "total_amount": round(total_amount, 2),
+            "top_contacts": top_contacts,
+            "updated": 0,
+        }
+
+    # Apply — one $in update per contact so we can also skip closed periods
+    # silently. Fast path: gather all ids + dates in one pass, then filter.
+    updated_total = 0
+    now = now_iso()
+    for cidk, r in eligible:
+        ids = r["txn_ids"]
+        # Skip closed-period rows client-side.
+        keep_ids: list[str] = []
+        cur = db.transactions.find(
+            {"id": {"$in": ids}, "company_id": cid}, {"id": 1, "date": 1}
+        )
+        async for t in cur:
+            if await is_period_closed(cid, t.get("date") or ""):
+                continue
+            keep_ids.append(t["id"])
+        if not keep_ids: continue
+        res = await db.transactions.update_many(
+            {"id": {"$in": keep_ids}, "company_id": cid, "human_reviewed": {"$ne": True}},
+            {"$set": {
+                "human_reviewed": True, "posted": True, "needs_review": False,
+                "ai_source": "user_bulk_approve_ai_ready",
+                "updated_at": now,
+            }},
+        )
+        updated_total += res.modified_count
+    if updated_total:
+        await log_ai(cid, "bulk_approve_ai_ready", updated_total)
+
+    return {
+        "ok": True, "dry_run": False,
+        "total_contacts": total_contacts,
+        "total_rows": total_rows,
+        "total_amount": round(total_amount, 2),
+        "top_contacts": top_contacts,
+        "updated": updated_total,
+    }
+
+
+
+
 @router.get("/companies/{cid}/transactions/contact-category-rollup")
 async def contact_category_rollup(
     cid: str,

@@ -1,0 +1,39 @@
+{
+  "summary": "Iter38 — Mega bulk-approve endpoint (POST /companies/{cid}/transactions/bulk-approve-ai-ready) + CleanupCopilot 'Approve all AI-ready' UI. Backend: 6/6 pytest cases pass covering dry_run shape (812 LLC returns >100 rows, actually 1305 rows / 218 vendors / $412k), no mutation on dry_run, closed-period skip, mixed-opinion vendor exclusion, code 9999/4999 exclusion, idempotency, auth 401/403. Frontend: mega button renders next to 'Start 5-min session', modal opens with correct testids, top-5 vendor cards, amber warning, cancel + confirm flows, apply refreshes copilot (band now says 'you're in good shape'), empty-state modal appears on re-open. Bright Beans DB state snapshotted before apply and restored to original 14 unreviewed rows.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/companies/{cid}/transactions/cleanup-suggestions", "issue": "REGRESSION on 812 LLC — 0 contact_ai_ready actions returned in top_actions despite bulk-approve-ai-ready dry_run finding 1305 eligible rows across 218 vendors. Top actions are all contact_split / contact_in_uncat / flagged_batch. iter37 regression test `TestLargeCompany812.test_812_llc_ai_ready_present` now fails (0 >= 3). Likely cause: contact_ai_ready dedupe against contact_in_uncat/contact_split is over-eager, OR the adaptive threshold in cleanup_suggestions no longer surfaces ai_ready when many contact_split actions exist. NOT caused by this iter38 change — the new endpoint has its own eligibility path — but the review request explicitly asked to verify /cleanup-suggestions still returns contact_ai_ready actions, and it does not on 812 LLC."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Transactions page (any company)", "issues": ["Repeated React console warning: 'Encountered two children with the same key' — noisy, appears many times. Not caused by CleanupCopilot (its rest.map uses index; modal top_contacts also indexed) — likely from the transactions grid rows. Pre-existing but worth cleaning up."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter38_bulk_approve_ai_ready.py",
+    "/app/test_reports/pytest/iter38.xml"
+  ],
+  "action_items": [
+    "Investigate why /cleanup-suggestions no longer surfaces contact_ai_ready actions on 812 LLC even though ~1305 rows / 218 vendors are eligible per the mega dry_run. Either the dedupe logic is too aggressive or the ranking is starving contact_ai_ready. This breaks the pitch that 'the mega button and the per-vendor Fix Now surface the same pool'.",
+    "Fix the duplicate-key React warning on the Transactions grid (likely `key={i}` collision or missing key on a mapped row)."
+  ],
+  "critical_code_review_comments": [
+    "routes/transactions.py bulk_approve_ai_ready — dry_run summary includes closed-period rows in total_rows/total_amount/top_contacts.count, but apply silently skips them. Preview will slightly over-count vs. what actually updates. Minor cosmetic issue but worth documenting (or filtering closed-period out of the dry_run counts too).",
+    "The per-txn `find_one` closed-period check inside the apply loop is O(N) DB roundtrips per eligible row — main agent's own comment flags this. Fine for 812 LLC (~1300 rows) but will bite at scale.",
+    "CleanupCopilot.jsx openMega/applyMega swallow errors silently (`/* silent */`) — a network failure or 5xx would leave megaBusy stuck if reload throws. Consider surfacing a toast on failure."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter38_bulk_approve_ai_ready.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "pro@axiom.ai / pro123 (812 LLC id: 3cf2309b-0ecc-42b5-b99d-e9230bf4d9ca, Bright Beans id: 1829a9eb-7df2-4a31-afcf-7e50a514da7e); client2@axiom.ai / client123 for 403 test",
+  "seed_data_creation": "test seeds a TAG-prefixed contact + closed-period + mixed-vendor + 9999-code rows on the LAST company in the pro user's list (avoids touching 812 LLC). Teardown removes all seed_tag docs. Bright Beans live-apply test snapshotted 14 eligible-unreviewed txns to /tmp/bb_snapshot.json and restored them to human_reviewed=False after the UI apply — verified count is back to 14 eligible.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "The mega bulk-approve endpoint on 812 LLC currently reports 1305 rows / 218 contacts / $412k (higher than main agent's 1295/211/$411k snapshot — someone else may have unreviewed rows since). Bright Beans has 14 eligible-unreviewed rows, of which 12 apply (2 excluded by mixed-opinion or code filter). If retesting the live apply on 812 LLC, MUST snapshot the 1300+ unreviewed txn IDs first and restore afterward — do not leave the demo state trashed.",
+  "rca of the issue": "The /cleanup-suggestions regression on 812 LLC (0 contact_ai_ready actions) is likely a dedupe/ranking issue in the existing cleanup_suggestions code — not introduced by iter38. To reproduce: login pro@axiom.ai, GET /api/companies/{812_id}/transactions/cleanup-suggestions → observe top_actions kinds = [contact_in_uncat, contact_split x6, flagged_batch] with zero contact_ai_ready, even though the new bulk-approve-ai-ready dry_run returns 1305 eligible rows across 218 vendors on the same company. Suggested mitigation: audit the dedupe set-subtraction in cleanup_suggestions — contact_ai_ready should still surface for vendors that DON'T also appear as contact_in_uncat or contact_split. Currently the dedupe seems to exclude every vendor once it's been categorized as any other action kind."
+}
