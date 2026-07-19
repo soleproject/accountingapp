@@ -593,11 +593,7 @@ export default function Transactions() {
           <ContactRollup
             data={rollup}
             busy={rollupBusy}
-            onCellClick={(cn, cat) => {
-              // Deep-link into the list view filtered by this contact + category.
-              setView("list");
-              setSearch(cn);
-            }}
+            currentId={currentId}
           />
         ) : (
         <>
@@ -809,16 +805,47 @@ function Modal({ title, children, onClose, wide }) {
 // Contact-rollup: alphabetized cards, one per contact, listing every category
 // their transactions fall under with count + amount range. Perfect for
 // spotting split categorizations (e.g. AT&T mostly in Utilities but 1 stray
-// row in Inter-Account Transfer). Read-only for now — clicking a category
-// row deep-links back to the list view filtered by that contact.
-function ContactRollup({ data, busy, onCellClick }) {
+// row in Inter-Account Transfer). Clicking a category row expands inline
+// to show the underlying transactions — no navigation, no page change.
+function ContactRollup({ data, busy, currentId }) {
   const contacts = data?.contacts || [];
+  // Cache expanded rows: key = `${contactKey}||${categoryKey}` → txn list.
+  const [expanded, setExpanded] = useState({});   // key → true/false
+  const [cache, setCache] = useState({});          // key → txn[] (or "loading")
+
   if (busy && contacts.length === 0) {
     return <div className="p-8 text-center text-slate-500 text-sm">Grouping transactions…</div>;
   }
   if (contacts.length === 0) {
     return <div className="p-8 text-center text-slate-500 text-sm">No transactions to group.</div>;
   }
+
+  const toggle = async (contact, category) => {
+    const ck = contact.contact_id || `_nocontact_${contact.contact_name}`;
+    const ak = category.category_account_id || "_uncat_";
+    const key = `${ck}||${ak}`;
+    const nextOpen = !expanded[key];
+    setExpanded(e => ({ ...e, [key]: nextOpen }));
+    if (nextOpen && !cache[key]) {
+      setCache(c => ({ ...c, [key]: "loading" }));
+      try {
+        const p = new URLSearchParams({ limit: "500" });
+        if (contact.contact_id) p.set("contact_id", contact.contact_id);
+        if (category.category_account_id) p.set("category_account_id", category.category_account_id);
+        const r = await api.get(`/companies/${currentId}/transactions?${p.toString()}`);
+        // Post-filter for (No contact) and Uncategorized cells since those
+        // aren't representable as query params.
+        let rows = r.data.transactions || [];
+        if (!contact.contact_id) rows = rows.filter(t => !t.contact_id);
+        if (!category.category_account_id) rows = rows.filter(t => !t.category_account_id);
+        // Also match by name for the (No contact) fallback bucket.
+        if (!contact.contact_id) rows = rows.filter(t => (t.contact_name || "") === contact.contact_name || !t.contact_name);
+        setCache(c => ({ ...c, [key]: rows }));
+      } catch {
+        setCache(c => ({ ...c, [key]: [] }));
+      }
+    }
+  };
 
   return (
     <div data-testid="txn-rollup-grid" className="p-4 flex flex-col gap-4">
@@ -843,20 +870,60 @@ function ContactRollup({ data, busy, onCellClick }) {
             </div>
             <div className="divide-y divide-slate-100">
               {c.categories.map((cat) => {
+                const ck = c.contact_id || `_nocontact_${c.contact_name}`;
+                const ak = cat.category_account_id || "_uncat_";
+                const key = `${ck}||${ak}`;
+                const isOpen = !!expanded[key];
+                const cached = cache[key];
                 const rangeStr = cat.min_amount === cat.max_amount
                   ? fmtMoney(cat.min_amount)
                   : `${fmtMoney(cat.min_amount)} – ${fmtMoney(cat.max_amount)}`;
                 return (
-                  <button
-                    key={cat.category_account_id || cat.category_name}
-                    onClick={() => onCellClick?.(c.contact_name, cat)}
-                    className="w-full grid grid-cols-12 gap-2 px-3 py-2 items-center text-xs hover:bg-slate-50 text-left"
-                  >
-                    <span className="col-span-1 font-mono-num text-slate-400">{cat.category_code || "—"}</span>
-                    <span className="col-span-6 text-slate-800 truncate">{cat.category_name}</span>
-                    <span className="col-span-1 text-right text-slate-500 font-mono-num">{cat.count}×</span>
-                    <span className="col-span-4 text-right font-mono-num text-slate-600">{rangeStr}</span>
-                  </button>
+                  <div key={cat.category_account_id || cat.category_name}>
+                    <button
+                      onClick={() => toggle(c, cat)}
+                      className={`w-full grid grid-cols-12 gap-2 px-3 py-2 items-center text-xs text-left ${isOpen ? "bg-slate-50" : "hover:bg-slate-50"}`}
+                      aria-expanded={isOpen}
+                    >
+                      <span className="col-span-1 flex items-center gap-1 font-mono-num text-slate-400">
+                        <ChevronRight
+                          size={12}
+                          className={`text-slate-400 transition-transform ${isOpen ? "rotate-90" : ""}`}
+                        />
+                        {cat.category_code || "—"}
+                      </span>
+                      <span className="col-span-6 text-slate-800 truncate">{cat.category_name}</span>
+                      <span className="col-span-1 text-right text-slate-500 font-mono-num">{cat.count}×</span>
+                      <span className="col-span-4 text-right font-mono-num text-slate-600">{rangeStr}</span>
+                    </button>
+                    {isOpen && (
+                      <div data-testid={`rollup-expand-${key}`} className="bg-slate-50/40 border-t border-slate-100">
+                        {cached === "loading" && (
+                          <div className="px-4 py-3 text-[11px] text-slate-500">Loading transactions…</div>
+                        )}
+                        {Array.isArray(cached) && cached.length === 0 && (
+                          <div className="px-4 py-3 text-[11px] text-slate-500">No transactions matched.</div>
+                        )}
+                        {Array.isArray(cached) && cached.length > 0 && (
+                          <div className="divide-y divide-slate-100 text-[12px]">
+                            {cached.map(t => (
+                              <div key={t.id} className="grid grid-cols-12 gap-2 px-4 py-1.5 items-center hover:bg-white">
+                                <span className="col-span-2 font-mono-num text-slate-500">{t.date}</span>
+                                <span className="col-span-7 truncate text-slate-800" title={t.merchant || t.description}>
+                                  {t.merchant || t.description || <span className="italic text-slate-400">—</span>}
+                                  {t.needs_review && <span className="ml-2 text-[9px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">review</span>}
+                                  {t.human_reviewed && <span className="ml-2 text-[9px] text-slate-600 bg-slate-100 rounded px-1">reviewed</span>}
+                                </span>
+                                <span className={`col-span-3 text-right font-mono-num ${(t.amount || 0) < 0 ? "text-slate-800" : "text-emerald-700"}`}>
+                                  {fmtMoney(t.amount)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
