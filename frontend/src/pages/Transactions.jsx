@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import {
   Check, Wand2, Split, Link as LinkIcon, RotateCw, Plus, X, Trash2, AlertTriangle, ShieldCheck,
   ChevronLeft, ChevronRight, Search, Calendar, XCircle, Tag, Sparkles, MoreHorizontal,
+  List as ListIcon, LayoutGrid,
 } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import { emitAction, useActionListener } from "@/lib/createBus";
@@ -127,6 +128,10 @@ export default function Transactions() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  // "list" (default) or "rollup" — toggled by the two icons in the toolbar.
+  const [view, setView] = useState("list");
+  const [rollup, setRollup] = useState(null);
+  const [rollupBusy, setRollupBusy] = useState(false);
 
   // Debounce free-text search so a fast typist doesn't hammer the API.
   // Single-char searches are almost never useful (returns 20K+ matches) and
@@ -166,6 +171,21 @@ export default function Transactions() {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize, debouncedSearch, dateFrom, dateTo]);
   // Reset page when filters narrow/widen.
   useEffect(() => { setPage(p => (p === 1 ? p : 1)); }, [debouncedSearch, dateFrom, dateTo]);
+
+  // Rollup fetch — mirrors the list filters so the two views stay in sync.
+  const loadRollup = async () => {
+    if (!currentId || view !== "rollup") return;
+    setRollupBusy(true);
+    try {
+      const p = new URLSearchParams();
+      if (debouncedSearch) p.set("q", debouncedSearch);
+      if (dateFrom) p.set("date_from", dateFrom);
+      if (dateTo) p.set("date_to", dateTo);
+      const r = await api.get(`/companies/${currentId}/transactions/contact-category-rollup?${p.toString()}`);
+      setRollup(r.data);
+    } finally { setRollupBusy(false); }
+  };
+  useEffect(() => { loadRollup(); /* eslint-disable-next-line */ }, [currentId, view, debouncedSearch, dateFrom, dateTo]);
   // Keep a live ref to `load` so the background sync poller can invoke the
   // CURRENT filter-aware load — not the stale closure from mount. Without
   // this, clicking "Needs Review" briefly shows filtered rows and then the
@@ -456,6 +476,28 @@ export default function Transactions() {
             </button>
           )}
         </div>
+        <div className="inline-flex items-center rounded-md border border-slate-200 bg-white overflow-hidden" role="tablist" aria-label="Transactions view">
+          <button
+            data-testid="txn-view-list"
+            title="List view"
+            role="tab"
+            aria-selected={view === "list"}
+            onClick={() => setView("list")}
+            className={`px-2 py-1.5 flex items-center ${view === "list" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+          >
+            <ListIcon size={14} />
+          </button>
+          <button
+            data-testid="txn-view-rollup"
+            title="Group by contact & category"
+            role="tab"
+            aria-selected={view === "rollup"}
+            onClick={() => setView("rollup")}
+            className={`px-2 py-1.5 flex items-center border-l border-slate-200 ${view === "rollup" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+          >
+            <LayoutGrid size={14} />
+          </button>
+        </div>
         <div className="inline-flex items-center gap-1 border rounded-md bg-white px-2 py-1">
           <Calendar size={13} className="text-slate-400" />
           <input
@@ -547,6 +589,18 @@ export default function Transactions() {
       )}
 
       <div className="rounded-xl border bg-white overflow-hidden">
+        {view === "rollup" ? (
+          <ContactRollup
+            data={rollup}
+            busy={rollupBusy}
+            onCellClick={(cn, cat) => {
+              // Deep-link into the list view filtered by this contact + category.
+              setView("list");
+              setSearch(cn);
+            }}
+          />
+        ) : (
+        <>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-xs uppercase text-slate-500 border-b bg-slate-50">
@@ -662,6 +716,8 @@ export default function Transactions() {
           filtersActive={filtersActive}
           onClearFilters={clearFilters}
         />
+        </>
+        )}
       </div>
 
       {creating && <ManualTxnModal accts={accts} currentId={currentId} onClose={() => { setCreating(false); load(); }} />}
@@ -746,6 +802,67 @@ function Modal({ title, children, onClose, wide }) {
         </div>
         <div className="p-5">{children}</div>
       </div>
+    </div>
+  );
+}
+
+// Contact-rollup: alphabetized cards, one per contact, listing every category
+// their transactions fall under with count + amount range. Perfect for
+// spotting split categorizations (e.g. AT&T mostly in Utilities but 1 stray
+// row in Inter-Account Transfer). Read-only for now — clicking a category
+// row deep-links back to the list view filtered by that contact.
+function ContactRollup({ data, busy, onCellClick }) {
+  const contacts = data?.contacts || [];
+  if (busy && contacts.length === 0) {
+    return <div className="p-8 text-center text-slate-500 text-sm">Grouping transactions…</div>;
+  }
+  if (contacts.length === 0) {
+    return <div className="p-8 text-center text-slate-500 text-sm">No transactions to group.</div>;
+  }
+
+  return (
+    <div data-testid="txn-rollup-grid" className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      {contacts.map((c) => {
+        const multi = c.categories.length > 1;
+        return (
+          <div
+            key={c.contact_id || c.contact_name}
+            data-testid={`rollup-card-${(c.contact_name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+            className={`rounded-lg border ${multi ? "border-amber-200" : "border-slate-200"} bg-white overflow-hidden`}
+          >
+            <div className="px-3 py-2 flex items-center justify-between bg-slate-50 border-b">
+              <div className="font-semibold text-slate-900 truncate">{c.contact_name}</div>
+              <div className="flex items-center gap-2 shrink-0">
+                {multi && (
+                  <span className="text-[10px] uppercase tracking-wider text-amber-800 bg-amber-100 border border-amber-200 rounded px-1.5 py-0.5">
+                    {c.categories.length} categories
+                  </span>
+                )}
+                <span className="text-xs text-slate-500 font-mono-num">{c.total_count} txns</span>
+              </div>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {c.categories.map((cat) => {
+                const rangeStr = cat.min_amount === cat.max_amount
+                  ? fmtMoney(cat.min_amount)
+                  : `${fmtMoney(cat.min_amount)} – ${fmtMoney(cat.max_amount)}`;
+                return (
+                  <button
+                    key={cat.category_account_id || cat.category_name}
+                    onClick={() => onCellClick?.(c.contact_name, cat)}
+                    className="w-full grid grid-cols-12 gap-2 px-3 py-2 items-center text-xs hover:bg-slate-50 text-left"
+                  >
+                    <span className="col-span-1 font-mono-num text-slate-400">{cat.category_code || "—"}</span>
+                    <span className="col-span-6 text-slate-800 truncate">{cat.category_name}</span>
+                    <span className="col-span-1 text-right text-slate-500 font-mono-num">{cat.count}×</span>
+                    <span className="col-span-4 text-right font-mono-num text-slate-600">{rangeStr}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

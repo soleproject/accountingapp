@@ -53,6 +53,101 @@ router = APIRouter(prefix="/api")
 
 # ----------------------- Transactions -----------------------
 
+@router.get("/companies/{cid}/transactions/contact-category-rollup")
+async def contact_category_rollup(
+    cid: str,
+    q: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    contact_id: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """Group every visible transaction by (contact, category) and report the
+    count + amount range for each cell. Powers the "Contact Rollup" view on
+    the Transactions page — a cleanup lens that surfaces contacts whose
+    transactions span multiple accounts (e.g. AT&T split across Utilities,
+    Meals, and Uncategorized).
+
+    Response:
+        {
+          "contacts": [
+            {
+              "contact_id": "...", "contact_name": "AT&T",
+              "total_count": 10,
+              "categories": [
+                {"category_account_id": "...", "category_code": "6600",
+                 "category_name": "Utilities", "count": 7,
+                 "min_amount": 109.28, "max_amount": 237.44,
+                 "total_amount": 1234.56},
+                ...
+              ]
+            },
+            ...
+          ]
+        }
+    Contacts sorted alphabetically; categories within each contact sorted
+    by count desc. Amounts are the absolute value of the transaction amount
+    so a single-sign range reads naturally in the UI.
+    """
+    await require_company(user, cid)
+
+    mongo_q: dict = {"company_id": cid}
+    if date_from: mongo_q.setdefault("date", {})["$gte"] = date_from
+    if date_to:   mongo_q.setdefault("date", {})["$lte"] = date_to
+    if contact_id: mongo_q["contact_id"] = contact_id
+
+    txns = await db.transactions.find(mongo_q).limit(20000).to_list(20000)
+
+    needle = (q or "").strip().lower()
+    if needle:
+        def _match(t: dict) -> bool:
+            hay = " ".join([
+                str(t.get("merchant") or ""),
+                str(t.get("description") or ""),
+                str(t.get("contact_name") or ""),
+            ]).lower()
+            return needle in hay
+        txns = [t for t in txns if _match(t)]
+
+    # Fold into a nested dict for the aggregation, then flatten to lists.
+    buckets: dict = {}
+    for t in txns:
+        cid_key = t.get("contact_id") or "__no_contact__"
+        cname = t.get("contact_name") or "(No contact)"
+        acat = t.get("category_account_id") or "__uncategorized__"
+        aname = t.get("category_account_name") or "(Uncategorized)"
+        acode = t.get("category_account_code") or ""
+        amt = abs(float(t.get("amount") or 0.0))
+        bkey = (cid_key, cname)
+        cbucket = buckets.setdefault(bkey, {})
+        cell = cbucket.setdefault(acat, {
+            "category_account_id": None if acat == "__uncategorized__" else acat,
+            "category_code": acode, "category_name": aname,
+            "count": 0, "min_amount": None, "max_amount": None, "total_amount": 0.0,
+        })
+        cell["count"] += 1
+        cell["total_amount"] += amt
+        cell["min_amount"] = amt if cell["min_amount"] is None else min(cell["min_amount"], amt)
+        cell["max_amount"] = amt if cell["max_amount"] is None else max(cell["max_amount"], amt)
+
+    contacts: list[dict] = []
+    for (cid_key, cname), cats in buckets.items():
+        cat_list = sorted(cats.values(), key=lambda c: (-c["count"], c["category_name"].lower()))
+        for c in cat_list:
+            c["min_amount"] = round(c["min_amount"] or 0.0, 2)
+            c["max_amount"] = round(c["max_amount"] or 0.0, 2)
+            c["total_amount"] = round(c["total_amount"], 2)
+        contacts.append({
+            "contact_id": None if cid_key == "__no_contact__" else cid_key,
+            "contact_name": cname,
+            "total_count": sum(c["count"] for c in cat_list),
+            "categories": cat_list,
+        })
+    contacts.sort(key=lambda c: c["contact_name"].lower())
+
+    return {"contacts": contacts}
+
+
 @router.get("/companies/{cid}/transactions")
 async def list_transactions(
     cid: str, user: dict = Depends(get_current_user),
