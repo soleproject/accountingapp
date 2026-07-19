@@ -640,3 +640,185 @@ async def parse_voice_intent(text: str) -> dict:
         "prefill": prefill,
         "say": say,
     }
+
+
+CPA_REVIEWER_SYSTEM = (
+    "You are a senior CPA reviewing a bookkeeper's answer to a categorization prompt. "
+    "You have full context on the client's chart of accounts and the vendor being cleaned up. "
+    "Your job is to classify the user's intent and, when they ARE giving a categorization, "
+    "resolve their answer to real accounts (existing OR a new GAAP-compliant one) so the "
+    "downstream code doesn't have to guess.\n\n"
+    "OUTPUT: strict JSON only. Schema:\n"
+    "{\n"
+    "  \"intent\": \"categorize\" | \"approve_existing\" | \"redirect\" | \"skip\" | \"question\" | \"unclear\",\n"
+    "  \"confidence\": 0.0-1.0,\n"
+    "  \"reasoning\": \"one sentence — why this intent\",\n"
+    "  \"say\": \"one short sentence to speak back to the user\",\n"
+    "  \"resolution\": { ...intent-specific... }\n"
+    "}\n\n"
+    "INTENTS — pick the ONE that best fits:\n\n"
+    "1. categorize — user is telling you what account(s) the transactions belong in.\n"
+    "   Examples: 'these are all office supplies', 'meals', 'under $50 is Meals, above is Office Supplies',\n"
+    "   'utilities except for the $150 that was actually a meal', 'aggressive Q4 marketing spend'.\n"
+    "   Resolution:\n"
+    "   {\n"
+    "     \"buckets\": [\n"
+    "       {\n"
+    "         \"predicate\": { \"min\": number|null, \"max\": number|null, \"exactAmount\": number|null } | null,\n"
+    "         \"label\": \"human-readable bucket name\",\n"
+    "         \"account\": {\n"
+    "           \"existing_account_id\": \"<uuid>\" | null,   // set if maps to an existing account\n"
+    "           \"code\": \"6300\",\n"
+    "           \"name\": \"Office Supplies\",\n"
+    "           \"type\": \"expense\" | \"revenue\" | \"asset\" | \"liability\" | \"equity\",\n"
+    "           \"gaap_rationale\": \"one sentence — why this account fits GAAP\"\n"
+    "         }\n"
+    "       }, ...\n"
+    "     ]\n"
+    "   }\n"
+    "   ACCOUNT-RESOLUTION RULES:\n"
+    "   • Prefer an EXISTING account from the provided chart. Use fuzzy matching — 'office supplies' matches\n"
+    "     '6300 Office Supplies', 'meals' matches '6000 Meals', 'utilities' matches '6600 Utilities'.\n"
+    "   • Only propose a NEW account when nothing in the chart reasonably fits. Follow GAAP code ranges:\n"
+    "       - 1000-1999 = Assets, 2000-2999 = Liabilities, 3000-3999 = Equity,\n"
+    "         4000-4999 = Revenue, 5000-5999 = COGS, 6000-9999 = Expenses.\n"
+    "   • Name new accounts with STANDARD accounting terminology — never vendor-specific, never colloquial.\n"
+    "     'Marketing - Q4 Campaign' is fine. 'Aggressive Marketing Spend' is NOT. 'they look good' is NEVER.\n"
+    "   • If the user's phrasing looks like filler ('these are okay', 'looks fine', 'good'), that's NOT a\n"
+    "     categorization — return intent=approve_existing instead.\n\n"
+    "2. approve_existing — user is telling you to leave the transactions with their current categories\n"
+    "   (just mark them reviewed). Examples: 'they look good the way they are', 'looks fine', 'these are ok',\n"
+    "   'keep them as-is', 'accept the current categories', 'approve them all'.\n"
+    "   Resolution: { \"note\": \"why user chose to approve existing\" }\n\n"
+    "3. redirect — user wants to switch to a different contact. Examples: 'let's look at Healthy Paws',\n"
+    "   'actually can we do AT&T first', 'jump to Amazon', 'show me Walmart instead'.\n"
+    "   Resolution: { \"target_contact_name\": \"Healthy Paws\" }\n\n"
+    "4. skip — user wants to defer this contact. Examples: 'skip', 'skip this', 'move on', 'next one',\n"
+    "   'come back later', 'not now', 'pass'.\n"
+    "   Resolution: {}\n\n"
+    "5. question — user is asking you a question about the transactions, not categorizing them.\n"
+    "   Examples: 'what should these usually be?', 'is this an expense or asset?', 'why are they flagged?'.\n"
+    "   Resolution: {}   (the frontend will hand off to the normal chat stream)\n\n"
+    "6. unclear — the message is genuinely ambiguous and you need to ask the user a clarifying question.\n"
+    "   Resolution: { \"clarifying_question\": \"...\" }\n\n"
+    "CRITICAL SAFEGUARDS:\n"
+    "- NEVER create an account whose name contains filler phrases: 'they look', 'looks good', 'let's', 'ok',\n"
+    "  'fine', 'yes', 'no', 'maybe', 'these are', 'this is', 'that was', 'we should', 'i think', 'like'.\n"
+    "- NEVER return intent=categorize if the user's message is < 3 letters AND doesn't match a common\n"
+    "  category shorthand ('rent', 'gas', 'food' are OK; 'ok', 'yes' are approve_existing / question).\n"
+    "- When in doubt between categorize and approve_existing, prefer approve_existing — recategorizing\n"
+    "  based on a bad interpretation is far more damaging than approving in place.\n"
+    "- When in doubt between categorize and unclear, prefer unclear — a clarifying question is cheap."
+)
+
+
+async def cpa_review(
+    user_message: str,
+    contact_name: str,
+    contact_id: str | None,
+    accounts: list[dict],
+    txn_sample: list[dict] | None = None,
+    current_categories: list[dict] | None = None,
+) -> dict:
+    """LLM-backed CPA gate for cleanup-inquiry answers.
+
+    Args:
+      user_message: raw text the user typed / spoke back to the AI.
+      contact_name: the vendor/contact under cleanup.
+      contact_id: optional contact UUID for context.
+      accounts: [{id, code, name, type, subtype}] — chart of accounts.
+      txn_sample: optional [{amount, date, description}] — up to 5 recent txns.
+      current_categories: optional [{code, name, count}] — what the rows are
+        currently categorized as (used by approve_existing intent).
+
+    Returns dict matching the CPA_REVIEWER_SYSTEM schema. On error, returns a
+    conservative {"intent": "unclear", ...} so the caller falls back to a
+    clarifying prompt (never to the regex parser).
+    """
+    if not user_message or not user_message.strip():
+        return {
+            "intent": "unclear",
+            "confidence": 0.0,
+            "reasoning": "empty message",
+            "say": "I didn't catch that — could you say it again?",
+            "resolution": {"clarifying_question": "Could you tell me what these transactions are?"},
+        }
+
+    # Compact the chart-of-accounts payload so the prompt stays lean.
+    acct_lines = []
+    for a in accounts[:200]:  # cap at 200 accounts to keep tokens sane
+        acct_lines.append(f"  - id={a.get('id')} code={a.get('code','')} name={a.get('name','')} type={a.get('type','')}")
+    acct_block = "\n".join(acct_lines) if acct_lines else "  (no accounts yet)"
+
+    txn_lines = []
+    for t in (txn_sample or [])[:5]:
+        txn_lines.append(f"  - ${t.get('amount')} on {t.get('date','?')}: {t.get('description','')[:80]}")
+    txn_block = "\n".join(txn_lines) if txn_lines else "  (no sample)"
+
+    cat_lines = []
+    for c in (current_categories or [])[:10]:
+        cat_lines.append(f"  - {c.get('code','')} {c.get('name','')}: {c.get('count',0)} rows")
+    cat_block = "\n".join(cat_lines) if cat_lines else "  (uncategorized)"
+
+    user_prompt = (
+        f"Contact under cleanup: {contact_name!r}\n"
+        f"How rows are currently categorized:\n{cat_block}\n\n"
+        f"Sample transactions:\n{txn_block}\n\n"
+        f"Chart of accounts:\n{acct_block}\n\n"
+        f"USER'S ANSWER (verbatim): {user_message!r}\n\n"
+        "Classify the intent and return the strict JSON described in the system prompt."
+    )
+
+    sid = hashlib.md5(f"cpa-{contact_name}-{user_message}".encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
+    chat = _new_chat(CPA_REVIEWER_SYSTEM, f"cpa-review-{sid}", model_name=MODEL_NAME)
+    raw = ""
+    try:
+        async for ev in chat.stream_message(UserMessage(text=user_prompt)):
+            if isinstance(ev, TextDelta):
+                raw += ev.content
+            elif isinstance(ev, StreamDone):
+                break
+    except Exception as e:
+        return {
+            "intent": "unclear",
+            "confidence": 0.0,
+            "reasoning": f"CPA reviewer unavailable: {e}",
+            "say": "I'm having trouble reviewing that — could you rephrase?",
+            "resolution": {"clarifying_question": "Could you tell me what these transactions are?"},
+        }
+
+    data = _extract_json(raw) or {}
+    intent = str(data.get("intent") or "unclear").strip()
+    if intent not in {"categorize", "approve_existing", "redirect", "skip", "question", "unclear"}:
+        intent = "unclear"
+    try:
+        conf = float(data.get("confidence", 0.5))
+    except Exception:
+        conf = 0.5
+
+    # Server-side safety net: even if the LLM returned intent=categorize with
+    # a filler-phrase account name, downgrade to approve_existing.
+    resolution = data.get("resolution") if isinstance(data.get("resolution"), dict) else {}
+    if intent == "categorize":
+        buckets = resolution.get("buckets") if isinstance(resolution.get("buckets"), list) else []
+        for b in buckets:
+            acct = b.get("account", {}) if isinstance(b, dict) else {}
+            name = str(acct.get("name") or "").lower().strip()
+            _filler_markers = (
+                "they look", "looks good", "looks fine", "let's", "let us", "same", "okay", "ok ",
+                "fine", "yes", "no ", "no,", "maybe", "these are", "this is", "that was", "we should",
+                "i think", "like ", "good", "leave ", "keep ", "as is", "as-is", "approve", "accept",
+            )
+            if any(m in name for m in _filler_markers) or len(name) < 3:
+                intent = "unclear"
+                data["say"] = "That didn't sound like a category name — could you tell me which account these belong in?"
+                resolution = {"clarifying_question": "Which account should these post to (e.g. Meals, Office Supplies, Utilities)?"}
+                break
+
+    return {
+        "intent": intent,
+        "confidence": max(0.0, min(1.0, conf)),
+        "reasoning": str(data.get("reasoning") or "")[:300],
+        "say": str(data.get("say") or "")[:280],
+        "resolution": resolution,
+    }

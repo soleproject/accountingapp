@@ -25,7 +25,7 @@ from auth import (
 from ai_service import (
     categorize_transaction, chat_stream, suggest_chart_of_accounts,
     onboarding_interview_questions, onboarding_interview_synthesize,
-    parse_voice_intent,
+    parse_voice_intent, cpa_review,
 )
 import reports as R
 import plaid_service
@@ -80,6 +80,68 @@ async def ai_recategorize(cid: str, tid: str, user: dict = Depends(get_current_u
     await log_ai(cid, "categorize", 1)
     doc = await db.transactions.find_one({"id": tid, "company_id": cid})
     return {"transaction": coerce(doc)}
+
+class CpaReviewIn(BaseModel):
+    message: str
+    contact_name: str
+    contact_id: Optional[str] = None
+    txn_ids: Optional[List[str]] = None
+
+
+@router.post("/companies/{cid}/ai/cpa-review")
+async def ai_cpa_review(cid: str, inp: CpaReviewIn, user: dict = Depends(get_current_user)):
+    """LLM-backed CPA gate for cleanup-inquiry answers. Given a user's raw text
+    plus the vendor being cleaned up, classifies intent (categorize /
+    approve_existing / redirect / skip / question / unclear) and resolves
+    categorize answers to real Chart-of-Accounts rows (existing or GAAP-safe
+    new). Prevents the client-side regex parser from creating garbage accounts
+    like 'they look good the way they are'.
+    """
+    await require_company(user, cid)
+
+    accts = await db.accounts.find({"company_id": cid, "active": {"$ne": False}}).to_list(500)
+    accts_payload = [{
+        "id": a.get("id"), "code": a.get("code"), "name": a.get("name"),
+        "type": a.get("type"), "subtype": a.get("subtype"),
+    } for a in accts]
+
+    txn_sample: List[dict] = []
+    current_categories: List[dict] = []
+    sample: List[dict] = []
+    if inp.txn_ids:
+        sample = await db.transactions.find({"id": {"$in": inp.txn_ids[:50]}, "company_id": cid}).to_list(50)
+    elif inp.contact_id:
+        sample = await db.transactions.find({
+            "company_id": cid, "contact_id": inp.contact_id,
+            "human_reviewed": {"$ne": True},
+        }).limit(50).to_list(50)
+
+    if sample:
+        txn_sample = [{
+            "amount": t.get("amount"), "date": t.get("date"),
+            "description": t.get("description") or t.get("merchant") or "",
+        } for t in sample[:5]]
+        _cat_agg: dict[str, dict] = {}
+        for t in sample:
+            code = t.get("category_account_code") or ""
+            name = t.get("category_account_name") or "Uncategorized"
+            k = f"{code}|{name}"
+            if k not in _cat_agg:
+                _cat_agg[k] = {"code": code, "name": name, "count": 0}
+            _cat_agg[k]["count"] += 1
+        current_categories = sorted(_cat_agg.values(), key=lambda x: -x["count"])[:10]
+
+    result = await cpa_review(
+        user_message=inp.message,
+        contact_name=inp.contact_name,
+        contact_id=inp.contact_id,
+        accounts=accts_payload,
+        txn_sample=txn_sample,
+        current_categories=current_categories,
+    )
+    return result
+
+
 
 
 @router.get("/companies/{cid}/ai/activity")

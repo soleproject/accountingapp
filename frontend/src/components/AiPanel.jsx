@@ -1072,142 +1072,233 @@ export default function AiPanel({ collapsed, onToggle }) {
         return;
       }
 
-      // Parse the user's answer into a "plan":
-      //   base    → default category name for everything not caught by an exception
-      //   groups  → additional {predicate, categoryName} — currently supports
-      //             single-amount exceptions ("except for the $115,000") and
-      //             range splits ("under $5000 is Meals, above is Consulting").
-      // 1. Amount-range split: "under $X is A, above (that) is B" / "up to X → A, over → B"
-      const parseMoney = (s) => {
-        const m = String(s).replace(/[\s,\$]/g, "").match(/(-?\d+(?:\.\d+)?)([km])?/i);
-        if (!m) return null;
-        let v = parseFloat(m[1]);
-        if (m[2] && m[2].toLowerCase() === "k") v *= 1000;
-        if (m[2] && m[2].toLowerCase() === "m") v *= 1000000;
-        return Math.abs(v);
-      };
-      const cleanCat = (s) =>
-        (s || "").replace(/^(?:categorize|make|mark|set|book|classify)\s+(?:all|them|these|those|it|everything)?\s*(?:as|to)\s+/i, "")
-                 .replace(/^\$?[\d,.km]+\s+(?:is|are|=|:|goes?\s+to|→)\s+/i, "")
-                 .replace(/^(?:the|a|an|some|our|my)\s+/i, "")
-                 .replace(/\s+(?:transactions?|payments?|charges?|expenses?|receipts?)\s*$/i, "")
-                 .replace(/^(?:is|are|=|:)\s+/i, "")
-                 .replace(/[.?!]+$/, "")
-                 .trim();
-
-      const plan = { base: null, groups: [] };
-      // 1. Amount-range split: "under $X is A, above (that) is B" / "up to X → A, over → B"
-      const rangeM = rawText.match(/(?:from\s+\$?[\d,.]+\s+to\s+|up\s+to\s+|under\s+|below\s+|less\s+than\s+)\$?([\d,.km]+)\s+(?:is|are|goes?\s+to|→|=)\s+(.+?)(?:,|\s+and)\s+(?:above|over|greater\s+than|more\s+than)(?:\s+that)?\s+(?:is|are|goes?\s+to|→|=)?\s*(.+?)\s*[.!]?$/i);
-      if (rangeM) {
-        const threshold = parseMoney(rangeM[1]);
-        const belowCat = cleanCat(rangeM[2].replace(/,$/, ""));
-        const aboveCat = cleanCat(rangeM[3]);
-        if (threshold != null && belowCat && aboveCat) {
-          plan.groups.push({ predicate: { max: threshold }, categoryName: belowCat, label: `up to $${threshold.toLocaleString()}` });
-          plan.groups.push({ predicate: { min: threshold + 0.01 }, categoryName: aboveCat, label: `above $${threshold.toLocaleString()}` });
-        }
-      }
-      // 2. "X except for the $Y (that was actually) Z"
-      if (plan.groups.length === 0) {
-        const exM = rawText.match(/^(.+?)\s+except(?:\s+for)?\s+(?:the\s+)?\$?([\d,.km]+)\s+(?:that\s+(?:was|is)|which\s+(?:was|is))\s+(?:actually\s+|really\s+)?(?:a\s+|an\s+|the\s+)?(.+?)\s*[.!]?$/i);
-        if (exM) {
-          const baseCat = cleanCat(exM[1]);
-          const amt = parseMoney(exM[2]);
-          const exCat = cleanCat(exM[3]);
-          if (baseCat && amt != null && exCat) {
-            plan.base = baseCat;
-            plan.groups.push({ predicate: { exactAmount: amt }, categoryName: exCat, label: `the $${amt.toLocaleString()} row` });
-          }
-        }
-      }
-      // 3. Fallback: single category — old flow.
-      if (!plan.base && plan.groups.length === 0) {
-        plan.base = cleanCat(
-          rawText.replace(/^(?:these|those|they|it)\s+(?:are|is|were|was)\s+/i, "")
-                 .replace(/^(?:actually\s+|really\s+|just\s+)/i, "")
-                 .replace(/^(?:all\s+)?(?:a\s+|an\s+|the\s+|some\s+|our\s+|my\s+)?/i, "")
-                 .replace(/\s+(?:from|for|by|at|to)\s+.+$/i, "")
-        );
-      }
-      if (!plan.base && plan.groups.length === 0) {
+      // Everything past this point goes to the LLM-backed CPA reviewer.
+      // The reviewer classifies intent (categorize / approve_existing /
+      // redirect / skip / question / unclear) AND, for categorize, resolves
+      // the user's words to real Chart-of-Accounts rows — so we never again
+      // create an account literally named "they look good the way they are".
+      let review;
+      try {
+        review = await api.post(`/companies/${currentId}/ai/cpa-review`, {
+          message: rawText,
+          contact_name: inq?.action?.contact_name || "this contact",
+          contact_id: inq?.action?.contact_id || null,
+        });
+      } catch (e) {
         pendingIntentRef.current = inq;
-        const say = "Sorry, I need one or two more words — what category should these fall under?";
+        const say = "I couldn't reach the AI reviewer just now — mind rephrasing?";
         setMessages(m => [...m, { role: "assistant", content: say }]);
         if (voiceOnRef.current) speakOne(say);
         return;
       }
+      const rev = review?.data || {};
 
-      try {
-        // Fetch every unapproved txn for this contact.
-        const list = await api.get(
-          `/companies/${currentId}/transactions?contact_id=${inq.action.contact_id}&limit=2000`
-        );
-        const rows = (list.data.transactions || []).filter((t) => !t.human_reviewed);
-        // Look up accounts by name (case-insensitive).
-        const r = await api.get(`/companies/${currentId}/accounts`);
-        const accts = r.data.accounts || [];
-        const findAcct = (name) => {
-          const n = (name || "").toLowerCase();
-          return accts.find((a) => (a.name || "").toLowerCase() === n)
-              || accts.find((a) => (a.name || "").toLowerCase().startsWith(n))
-              || accts.find((a) => (a.name || "").toLowerCase().includes(n));
-        };
-        const guessType = (name) =>
-          /rent|revenue|income|sales|consult|fee|earn|receiv|deposit/i.test(name)
-            ? "revenue"
-            : /loan|note\s+payable|line\s+of\s+credit|mortgage|payable/i.test(name)
-              ? "liability"
-              : "expense";
-
-        // Assign each txn to a group.
-        const buckets = new Map();  // key → {label, categoryName, txns:[], amount_min?, amount_max?}
-        const ensureBucket = (key, label, name, min, max) => {
-          if (!buckets.has(key)) buckets.set(key, { label, categoryName: name, txns: [], amount_min: min, amount_max: max });
-          return buckets.get(key);
-        };
-        for (const t of rows) {
-          const amt = Math.abs(parseFloat(t.amount) || 0);
-          let placed = false;
-          for (const g of plan.groups) {
-            const p = g.predicate;
-            const hit = (p.exactAmount != null && Math.abs(amt - p.exactAmount) < 0.5)
-                     || (p.max != null && amt <= p.max)
-                     || (p.min != null && amt >= p.min);
-            if (hit) {
-              ensureBucket(g.categoryName, g.label, g.categoryName, p.min, p.max ?? p.exactAmount).txns.push(t);
-              placed = true; break;
-            }
-          }
-          if (!placed && plan.base) {
-            ensureBucket(plan.base, `everything else`, plan.base).txns.push(t);
-          }
-        }
-
-        // Preview lines for the card.
-        const preview = Array.from(buckets.values()).map((b) => {
-          const existing = findAcct(b.categoryName);
-          return { ...b, existingAccount: existing, guessType: guessType(b.categoryName) };
+      // Skip via LLM (belt & suspenders — the regex above already catches most).
+      if (rev.intent === "skip") {
+        const say = rev.say || `Skipped **${inq?.action?.contact_name || "this contact"}** — moving on.`;
+        setMessages(mm => [...mm, { role: "assistant", content: say }]);
+        if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
+        emitAction("cleanup-completed", {
+          contact_id: inq?.action?.contact_id,
+          kind: inq?.action?.kind || "contact_in_uncat",
+          count: 0,
+          skipped: true,
         });
-        const totalCount = preview.reduce((s, b) => s + b.txns.length, 0);
-        const previewLines = preview
-          .map((b) => `• **${b.txns.length}** ${b.txns.length === 1 ? "row" : "rows"} (${b.label}) → **${b.existingAccount ? `${b.existingAccount.code} ${b.existingAccount.name}` : b.categoryName + " (new)"}**`)
-          .join("\n");
-        const say = `Here's the plan for **${inq.action.contact_name}**:\n${previewLines}\nApply all ${totalCount}, mark them reviewed, and create rules so future imports do the same?`;
-        setMessages(m => [...m, {
-          role: "assistant", content: say,
-          card: {
-            kind: "cleanup-multi-confirm",
-            preview,
-            contactId: inq.action.contact_id,
-            contactName: inq.action.contact_name,
-            count: totalCount,
-          },
-        }]);
-        if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, "").replace(/\n/g, ". "));
-      } catch (e) {
-        setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't build the plan." }]);
+        return;
       }
-      return;
+
+      // Approve-existing: user wants to leave rows with their current
+      // categories, just mark them human-reviewed.
+      if (rev.intent === "approve_existing") {
+        try {
+          const list = await api.get(
+            `/companies/${currentId}/transactions?contact_id=${inq.action.contact_id}&limit=2000`
+          );
+          const rows = (list.data.transactions || []).filter(t => !t.human_reviewed);
+          const catRows = rows.filter(t => !!t.category_account_id);
+          const uncatCount = rows.length - catRows.length;
+          if (catRows.length === 0) {
+            const say = rev.say || "None of these rows have a category yet — I need one before I can approve them. What account should they post to?";
+            pendingIntentRef.current = inq;
+            setMessages(mm => [...mm, { role: "assistant", content: say }]);
+            if (voiceOnRef.current) speakOne(say);
+            return;
+          }
+          // Bucket by existing category so we can send one apply-bulk-approve
+          // per unique account.
+          const byAcct = new Map();
+          for (const t of catRows) {
+            const k = t.category_account_id;
+            if (!byAcct.has(k)) byAcct.set(k, []);
+            byAcct.get(k).push(t.id);
+          }
+          const groups = [];
+          for (const [acctId, ids] of byAcct.entries()) {
+            groups.push({ txn_ids: ids, category_account_id: acctId });
+          }
+          const res = await api.post(
+            `/companies/${currentId}/transactions/apply-multi-bulk-approve-rule`,
+            { contact_id: inq.action.contact_id, contact_name: inq.action.contact_name,
+              groups, create_rules: false }
+          );
+          const say = `Approved **${res.data?.updated || 0}** ${inq.action.contact_name} rows with their current categorization.${uncatCount ? ` (${uncatCount} without a category were left alone.)` : ""}`;
+          setMessages(mm => [...mm, { role: "assistant", content: say }]);
+          if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
+          emitAction("txns:changed");
+          emitAction("cleanup-completed", {
+            contact_id: inq.action.contact_id,
+            kind: inq.action.kind || "contact_in_uncat",
+            count: res.data?.updated || 0,
+          });
+        } catch (e) {
+          setMessages(mm => [...mm, { role: "assistant", content: "Sorry — I couldn't approve those rows." }]);
+        }
+        return;
+      }
+
+      // Redirect: user wants to jump to a different contact.
+      if (rev.intent === "redirect") {
+        const target = rev.resolution?.target_contact_name;
+        if (!target) {
+          const say = rev.say || "Which contact would you like to look at?";
+          pendingIntentRef.current = inq;
+          setMessages(mm => [...mm, { role: "assistant", content: say }]);
+          if (voiceOnRef.current) speakOne(say);
+          return;
+        }
+        // Dismiss the current contact, then look up the target contact by name.
+        emitAction("cleanup-completed", {
+          contact_id: inq.action.contact_id,
+          kind: inq.action.kind || "contact_in_uncat",
+          count: 0,
+          skipped: true,
+        });
+        try {
+          const cr = await api.get(`/companies/${currentId}/contacts?q=${encodeURIComponent(target)}&limit=5`);
+          const list = cr.data.contacts || [];
+          const hit = list.find(c => (c.name || "").toLowerCase() === target.toLowerCase()) || list[0];
+          if (hit) {
+            // Count unreviewed txns for the target.
+            const tr = await api.get(`/companies/${currentId}/transactions?contact_id=${hit.id}&status=unreviewed&limit=1`);
+            const total = tr.data.total || tr.data.transactions?.length || 0;
+            const say = rev.say || `Jumping to **${hit.name}**.`;
+            setMessages(mm => [...mm, { role: "assistant", content: say }]);
+            if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
+            emitAction("cleanup-inquiry", {
+              action: {
+                kind: "contact_in_uncat",
+                contact_id: hit.id,
+                contact_name: hit.name,
+                count: total,
+                total_amount: 0,
+              },
+            });
+          } else {
+            const say = `I couldn't find a contact called "${target}" — try again with the exact name.`;
+            setMessages(mm => [...mm, { role: "assistant", content: say }]);
+            if (voiceOnRef.current) speakOne(say);
+          }
+        } catch (e) {
+          setMessages(mm => [...mm, { role: "assistant", content: "Sorry — I couldn't redirect." }]);
+        }
+        return;
+      }
+
+      // Question: user is asking about the txns, not categorizing them.
+      // Hand off to the normal chat stream so it can answer conversationally.
+      if (rev.intent === "question") {
+        pendingIntentRef.current = inq; // leave the queue paused for the follow-up
+        // Fall through — the code below will hit the streaming assistant path.
+      } else if (rev.intent === "unclear") {
+        pendingIntentRef.current = inq;
+        const say = rev.say || rev.resolution?.clarifying_question ||
+          "I need one or two more words — what category should these fall under?";
+        setMessages(mm => [...mm, { role: "assistant", content: say }]);
+        if (voiceOnRef.current) speakOne(say);
+        return;
+      } else if (rev.intent === "categorize") {
+        // Build the cleanup-multi-confirm card from the LLM's resolved buckets.
+        try {
+          const list = await api.get(
+            `/companies/${currentId}/transactions?contact_id=${inq.action.contact_id}&limit=2000`
+          );
+          const rows = (list.data.transactions || []).filter(t => !t.human_reviewed);
+          const buckets = rev.resolution?.buckets || [];
+          if (buckets.length === 0) {
+            pendingIntentRef.current = inq;
+            const say = "I understood you wanted to categorize, but couldn't pin down which account. Can you try again?";
+            setMessages(mm => [...mm, { role: "assistant", content: say }]);
+            if (voiceOnRef.current) speakOne(say);
+            return;
+          }
+          // Assign each row to the first bucket whose predicate matches; rows
+          // that match nothing go to the last (base) bucket.
+          const bucketState = buckets.map(b => ({
+            label: b.label || b.account?.name || "everything else",
+            account: b.account || {},
+            predicate: b.predicate || null,
+            txns: [],
+          }));
+          const baseBucket = bucketState.find(b => !b.predicate) || bucketState[bucketState.length - 1];
+          for (const t of rows) {
+            const amt = Math.abs(parseFloat(t.amount) || 0);
+            let placed = false;
+            for (const b of bucketState) {
+              const p = b.predicate;
+              if (!p) continue;
+              const hit = (p.exactAmount != null && Math.abs(amt - p.exactAmount) < 0.5)
+                       || (p.max != null && amt <= p.max && (p.min == null || amt >= p.min))
+                       || (p.min != null && amt >= p.min && (p.max == null || amt <= p.max));
+              if (hit) { b.txns.push(t); placed = true; break; }
+            }
+            if (!placed && baseBucket) baseBucket.txns.push(t);
+          }
+          const preview = bucketState.filter(b => b.txns.length > 0);
+          if (preview.length === 0) {
+            setMessages(mm => [...mm, { role: "assistant", content: "None of the rows matched the buckets — nothing to do." }]);
+            return;
+          }
+          const totalCount = preview.reduce((s, b) => s + b.txns.length, 0);
+          const previewLines = preview.map(b => {
+            const a = b.account;
+            const label = a.existing_account_id
+              ? `${a.code || "?"} ${a.name || "?"}`
+              : `${a.code || "new"} ${a.name || "?"} (new)`;
+            return `• **${b.txns.length}** ${b.txns.length === 1 ? "row" : "rows"} (${b.label}) → **${label}**`;
+          }).join("\n");
+          const say = `Here's the plan for **${inq.action.contact_name}**:\n${previewLines}\nApply all ${totalCount}, mark them reviewed, and create rules so future imports do the same?`;
+          setMessages(m => [...m, {
+            role: "assistant", content: say,
+            card: {
+              kind: "cleanup-multi-confirm",
+              // Adapt the LLM-resolved buckets into the shape the existing
+              // InlineConfirmCard handler expects.
+              preview: preview.map(b => ({
+                label: b.label,
+                categoryName: b.account?.name || b.label,
+                txns: b.txns,
+                amount_min: b.predicate?.min ?? null,
+                amount_max: b.predicate?.max ?? null,
+                existingAccount: b.account?.existing_account_id ? {
+                  id: b.account.existing_account_id,
+                  code: b.account.code,
+                  name: b.account.name,
+                } : null,
+                guessType: b.account?.type || "expense",
+              })),
+              contactId: inq.action.contact_id,
+              contactName: inq.action.contact_name,
+              count: totalCount,
+            },
+          }]);
+          if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, "").replace(/\n/g, ". "));
+        } catch (e) {
+          setMessages(mm => [...mm, { role: "assistant", content: "Sorry — I couldn't build the plan." }]);
+        }
+        return;
+      }
+      // Note: if intent === "question", we intentionally fall through to the
+      // regular chat stream below.
     }
 
     // ------ Voice command dispatch (client-side, zero cost) ------
