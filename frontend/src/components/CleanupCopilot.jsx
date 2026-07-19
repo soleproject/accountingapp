@@ -132,11 +132,11 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   };
   const undoMega = async () => {
     if (!megaUndo || !currentId) return;
-    const batchId = megaUndo.batch_id;
+    const snapshot = megaUndo;
     setMegaUndo(null);
     try {
       const r = await api.post(
-        `/companies/${currentId}/transactions/undo-mega-batch/${batchId}`, {}
+        `/companies/${currentId}/transactions/undo-mega-batch/${snapshot.batch_id}`, {}
       );
       load();
       window.dispatchEvent(new CustomEvent("axiom:action",
@@ -144,8 +144,10 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
       window.dispatchEvent(new CustomEvent("axiom:toast",
         { detail: { message: `Reverted ${r.data?.reverted || 0} rows.` } }));
     } catch (e) {
+      // Restore the toast so the user can retry Undo instead of being locked out.
+      setMegaUndo(snapshot);
       window.dispatchEvent(new CustomEvent("axiom:toast",
-        { detail: { message: "Undo failed. Please review manually.", type: "error" } }));
+        { detail: { message: "Undo failed — try again.", type: "error" } }));
     }
   };
   const toggleVendor = (cid) => {
@@ -413,7 +415,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         </div>
       )}
       {megaUndo && (
-        <div className="fixed bottom-6 right-6 z-40 max-w-sm bg-slate-900 text-white rounded-lg shadow-2xl px-4 py-3 flex items-center gap-3"
+        <div className="fixed bottom-6 right-6 z-[70] max-w-sm bg-slate-900 text-white rounded-lg shadow-2xl px-4 py-3 flex items-center gap-3"
              data-testid="mega-undo-toast">
           <div className="text-sm">
             <div className="font-semibold">Approved {megaUndo.count.toLocaleString()} rows</div>
