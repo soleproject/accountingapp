@@ -1,0 +1,31 @@
+{
+  "summary": "Tested split-suggestion endpoint + Cleanup Copilot Suggest-Split flow (iter29). Backend 3/3 PASS. Frontend UI/rendering PASS (all testids present, labels correct, Apply/Ignore work, unimodal Walmart correctly gets no hint). Two integration bugs found: (1) auto-submit after Apply doesn't fire send() — accepted per request; manual send-btn click works. (2) CRITICAL: interceptor mis-parses SplitHintForm's templated text so 'above $100 is Office Supplies' yields category name '$100 Is Office Supplies' instead of 'Office Supplies'. 6 of 12 SplitDemo txns were categorized under the wrong (malformed) category name.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "AiPanel useActionListener('cleanup-inquiry') → send() after setInput", "issue": "Auto-submit via setTimeout(send,30) does NOT fire — input is populated but send is not dispatched. Manual click on ai-chat-send works. Root cause likely: `send` closure captures stale `input` value; needs to read via inputRef or trigger via handleSubmit path.", "selector": "[data-testid='split-hint-apply']", "priority": "MEDIUM"},
+      {"component": "AiPanel cleanup-inquiry range-split regex (~line 1062)", "issue": "SplitHintForm emits `under $100 is Meals, above $100 is Office Supplies`. The regex on line 1062 matches but the 3rd capture group greedily consumes the '$100 is ' prefix into the aboveCat, producing category name '$100 Is Office Supplies'. Verified in DB: 6 txns saved under literal category '$100 Is Office Supplies'. Fix: either (a) change SplitHintForm templated string to `under $${t} is X, above is Y` (matches existing parser), OR (b) extend regex to `(?:above|over|...)\\s+(?:\\$?[\\d,.km]+\\s+)?(?:is|are|→|=)?\\s*(.+?)`.", "selector": "n/a", "priority": "CRITICAL"}
+    ],
+    "integration_issues": [
+      {"flow": "SplitHint Apply → multi-bulk-confirm → apply-multi-bulk-approve-rule", "issue": "End-to-end works after manual send click. Backend correctly created 2 rules (source=user_multi_bulk_approve) and updated 12 txns, but one category name is malformed due to interceptor parsing bug.", "affected_selectors": ["[data-testid='split-hint-apply']", "[data-testid='cleanup-multi-card-yes']"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_split_suggestion.py", "/app/test_reports/pytest/iter29.xml"],
+  "action_items": [
+    "FIX (critical): Adjust range-split parsing so `above $100 is X` is parsed as X, not '$100 Is X'. Recommended: change SplitHintForm templated string on AiPanel.jsx:1915 from `under $${t} is ${belowCat}, above $${t} is ${aboveCat}` to `under $${t} is ${belowCat}, above is ${aboveCat}` (matches existing parser).",
+    "FIX (medium): Auto-submit after Apply doesn't fire — setTimeout(send,30) captures stale input closure. Consider using inputRef inside send() or invoking submit handler with the templated string directly."
+  ],
+  "critical_code_review_comments": [
+    "AiPanel.jsx is now 2496 lines — well past the 700-line guideline. Extract SplitHintForm, BulkApproveCard, MultiCard, and the cleanup-inquiry interceptor into separate modules.",
+    "Range-split regex (line 1062) is untested for the exact string SplitHintForm produces — this is the root cause of the category-name bug. Add a unit test for the parser with input `under $100 is Meals, above $100 is Office Supplies`."
+  ],
+  "updated_files": ["/app/backend/tests/test_split_suggestion.py"],
+  "success_rate": {"backend": "100%", "frontend": "70%"},
+  "test_credentials": "pro@axiom.ai / pro123; company 613 LLC id=4a972b56-c1bb-4f77-a20b-0cc3a31b821d",
+  "seed_data_creation": "None. SplitDemo Vendor (contact 72da725e-970b-463d-b22e-b169ff3352d2) already seeded. After testing, DB state was RESET: all 12 SplitDemo txns set to human_reviewed=False, posted=False, needs_review=True, category_account_*=None, ai_confidence=0.5. All 2 rules with source='user_multi_bulk_approve' were deleted. Synthetic contact and txns preserved.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend endpoint /api/companies/{cid}/transactions/split-suggestion works correctly (bimodal + unimodal + auth). Frontend SplitHintForm renders correctly and all testids exist. Two bugs remain in AiPanel.jsx: (1) auto-submit closure, (2) range-split regex greedily consumes threshold prefix on the 'above' side. When retesting after fix, verify the DB after clicking Apply → Yes: `db.transactions.find({contact_id:'72da725e-970b-463d-b22e-b169ff3352d2'})` should show 6 rows with category_account_name='Meals' and 6 with category_account_name='Office Supplies' (NOT '$100 Is Office Supplies').",
+  "rca_of_the_issue": "The SplitHintForm.onApply handler at AiPanel.jsx:1915 emits `under $${t} is ${below}, above $${t} is ${above}` and hands off to the range-split regex at AiPanel.jsx:1062. The regex's third capture group `(.+?)` is preceded by `(?:is|are|goes?\\s+to|→|=)?` — this is OPTIONAL, so when the input contains a second `$100 is` after 'above ', the optional group doesn't consume it and `(.+?)` non-greedily matches `$100 is Office Supplies` (anchored to end). Result: category name literal is '$100 is Office Supplies' (title-cased by cleanCat → '$100 Is Office Supplies'). Two fixes possible; the SplitHintForm-side fix is safest (single line change)."
+}

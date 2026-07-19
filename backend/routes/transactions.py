@@ -843,6 +843,86 @@ async def apply_multi_bulk_approve(cid: str, inp: MultiBulkApproveIn, user: dict
     return {"ok": True, "updated": updated_total, "rule_ids": rule_ids}
 
 
+@router.get("/companies/{cid}/transactions/split-suggestion")
+async def split_suggestion(
+    cid: str,
+    contact_id: str = Query(...),
+    user: dict = Depends(get_current_user),
+):
+    """Detects a bimodal amount distribution for a contact's unreviewed
+    transactions and suggests a natural split threshold. Powers the
+    Cleanup Copilot's "Suggest split" hint. Returns
+    `{suggestion: null}` when the distribution is unimodal or too small
+    to be meaningful.
+
+    Algorithm: sort absolute amounts, find the largest gap. Accept as a
+    bimodal split iff:
+      • ≥ 6 candidate rows total,
+      • the two resulting clusters each have ≥ 3 rows,
+      • the gap ≥ max(3× the median inter-amount gap, 1.5× the tighter
+        cluster's range, $20 absolute).
+
+    The threshold is rounded to a nearby "nice" number ($10 / $25 / $50 /
+    $100 / $250 / $500 / $1000 / $2500 / $5000 / $10000) when within 10 %
+    of one, so users see natural buckets instead of `$52.37`.
+    """
+    await require_company(user, cid)
+    cur = db.transactions.find({
+        "company_id": cid,
+        "contact_id": contact_id,
+        "human_reviewed": {"$ne": True},
+    }, {"amount": 1})
+    docs = await cur.to_list(5000)
+    amts = sorted(abs(float(d.get("amount") or 0)) for d in docs if d.get("amount"))
+    if len(amts) < 6:
+        return {"suggestion": None, "reason": "too_few_rows", "candidate_count": len(amts)}
+
+    gaps = [(amts[i + 1] - amts[i], i) for i in range(len(amts) - 1)]
+    max_gap, max_idx = max(gaps, key=lambda g: g[0])
+    lower = amts[: max_idx + 1]
+    upper = amts[max_idx + 1:]
+    if len(lower) < 3 or len(upper) < 3:
+        return {"suggestion": None, "reason": "clusters_too_small", "candidate_count": len(amts)}
+
+    median_gap = sorted(g[0] for g in gaps)[len(gaps) // 2]
+    lower_range = lower[-1] - lower[0]
+    upper_range = upper[-1] - upper[0]
+    tighter_range = min(lower_range, upper_range) or 1.0
+    required_gap = max(median_gap * 3, tighter_range * 1.5, 20.0)
+    if max_gap < required_gap:
+        return {
+            "suggestion": None,
+            "reason": "gap_not_significant",
+            "candidate_count": len(amts),
+            "largest_gap": round(max_gap, 2),
+            "required_gap": round(required_gap, 2),
+        }
+
+    threshold = round((lower[-1] + upper[0]) / 2.0, 2)
+    for nice in (10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000):
+        if abs(threshold - nice) < nice * 0.1:
+            threshold = float(nice)
+            break
+
+    return {
+        "suggestion": {
+            "threshold": threshold,
+            "below": {
+                "count": len(lower),
+                "min": round(lower[0], 2),
+                "max": round(lower[-1], 2),
+            },
+            "above": {
+                "count": len(upper),
+                "min": round(upper[0], 2),
+                "max": round(upper[-1], 2),
+            },
+            "gap": round(max_gap, 2),
+        },
+        "candidate_count": len(amts),
+    }
+
+
 @router.post("/companies/{cid}/transactions/apply-bulk-approve-rule")
 async def apply_bulk_approve_rule(cid: str, inp: BulkApproveRuleIn, user: dict = Depends(get_current_user)):
     """Bulk-set every listed transaction to `category_account_id` + approve

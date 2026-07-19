@@ -49,6 +49,70 @@ function InlineConfirmCard({ testId, tone = "fuchsia", confirmLabel = "Yes, do i
   );
 }
 
+// Compact two-input form shown under an assistant message when the backend
+// detected a bimodal amount distribution. Lets the user name the below /
+// above categories and fires them through the same natural-language flow.
+function SplitHintForm({ hint, onApply, onDismiss }) {
+  const [below, setBelow] = useState("");
+  const [above, setAbove] = useState("");
+  const [busy, setBusy] = useState(false);
+  const apply = async () => {
+    if (busy || !below.trim() || !above.trim()) return;
+    setBusy(true);
+    try { await onApply(below.trim(), above.trim()); } finally { setBusy(false); }
+  };
+  return (
+    <div className="mt-2 rounded-md border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-[12px]"
+         data-testid="split-hint">
+      <div className="text-emerald-900 mb-1.5 font-medium">
+        Split at ${hint.threshold.toLocaleString()}
+      </div>
+      <div className="grid grid-cols-[auto,1fr] gap-x-2 gap-y-1 items-center">
+        <span className="text-emerald-900/80 text-[11px]">
+          {hint.below.count} rows (${hint.below.min}–${hint.below.max}) →
+        </span>
+        <input
+          data-testid="split-hint-below"
+          value={below}
+          onChange={(e) => setBelow(e.target.value)}
+          placeholder="e.g. Meals"
+          className="w-full px-2 py-1 rounded border border-slate-300 bg-white text-[12px]"
+          onKeyDown={(e) => { if (e.key === "Enter" && above.trim()) apply(); }}
+        />
+        <span className="text-emerald-900/80 text-[11px]">
+          {hint.above.count} rows (${hint.above.min}–${hint.above.max}) →
+        </span>
+        <input
+          data-testid="split-hint-above"
+          value={above}
+          onChange={(e) => setAbove(e.target.value)}
+          placeholder="e.g. Office Supplies"
+          className="w-full px-2 py-1 rounded border border-slate-300 bg-white text-[12px]"
+          onKeyDown={(e) => { if (e.key === "Enter" && below.trim()) apply(); }}
+        />
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          data-testid="split-hint-apply"
+          disabled={busy || !below.trim() || !above.trim()}
+          onClick={apply}
+          className="px-3 py-1 text-xs font-medium rounded text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50"
+        >
+          {busy ? "Applying…" : "Apply split"}
+        </button>
+        <button
+          data-testid="split-hint-dismiss"
+          disabled={busy}
+          onClick={onDismiss}
+          className="px-3 py-1 text-xs font-medium rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        >
+          Ignore
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Interactive confirmation card shown in the chat stream after a user
 // approves a transaction that has other unapproved siblings from the same
 // contact. Yes → bulk-approve + rule; No → dismiss.
@@ -366,7 +430,7 @@ export default function AiPanel({ collapsed, onToggle }) {
   // action payload. We seed a conversational message so the AI asks about
   // the contact, and stash the action on `pendingIntentRef` so the user's
   // next reply is interpreted as the category description.
-  useActionListener("cleanup-inquiry", (payload) => {
+  useActionListener("cleanup-inquiry", async (payload) => {
     const a = payload?.action;
     if (!a) return;
     let msg = "";
@@ -377,12 +441,35 @@ export default function AiPanel({ collapsed, onToggle }) {
     } else if (a.kind === "flagged_batch") {
       msg = `Let's run through the ${a.count} flagged transactions together. I'll surface one at a time — tell me what each one is (e.g. "rent from tenants") and I'll categorize + approve. Ready?`;
     }
-    if (msg) {
-      pendingIntentRef.current = { kind: "cleanup-inquiry", action: a };
-      setMessages(m => [...m, { role: "assistant", content: msg }]);
-      if (voiceOnRef.current) speakOne(msg.replace(/\*\*/g, ""));
-      emitAction("ai-open");
+    if (!msg) return;
+
+    pendingIntentRef.current = { kind: "cleanup-inquiry", action: a };
+
+    // For contact-in-uncat, probe the amount distribution — if it's bimodal,
+    // surface the natural split as a quick-action chip so the user doesn't
+    // have to eyeball the amounts themselves.
+    let splitHint = null;
+    if (a.kind === "contact_in_uncat" && a.contact_id && currentId) {
+      try {
+        const r = await api.get(
+          `/companies/${currentId}/transactions/split-suggestion?contact_id=${a.contact_id}`
+        );
+        const s = r.data?.suggestion;
+        if (s) {
+          splitHint = {
+            threshold: s.threshold,
+            below: s.below,
+            above: s.above,
+            contactName: a.contact_name,
+          };
+          msg += `\n\n💡 These amounts naturally split at **$${s.threshold.toLocaleString()}** — ${s.below.count} rows under, ${s.above.count} rows above. Want to bucket them separately?`;
+        }
+      } catch { /* non-fatal */ }
     }
+
+    setMessages(m => [...m, { role: "assistant", content: msg, splitHint }]);
+    if (voiceOnRef.current) speakOne(msg.replace(/\*\*/g, ""));
+    emitAction("ai-open");
   });
 
   // ------------------------- Open-mic + TTS-echo protection -------------------------
@@ -1820,6 +1907,23 @@ export default function AiPanel({ collapsed, onToggle }) {
                  m.role === "user" ? "chat-bubble-user ml-auto" : "chat-bubble-ai"
                }`}>
             {m.content || (streaming && i === messages.length - 1 ? "…" : "")}
+            {m.splitHint && (
+              <SplitHintForm
+                hint={m.splitHint}
+                onApply={(belowCat, aboveCat) => {
+                  const t = m.splitHint.threshold;
+                  const templated = `under $${t} is ${belowCat}, above $${t} is ${aboveCat}`;
+                  setInput(templated);
+                  // Clear the hint so the chip disappears after use.
+                  setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, splitHint: null } : mm2));
+                  // Give React a tick to flush input state, then submit.
+                  setTimeout(() => send(), 30);
+                }}
+                onDismiss={() => {
+                  setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, splitHint: null } : mm2));
+                }}
+              />
+            )}
             {m.card?.kind === "bulk-approve-confirm" && (
               <BulkApproveCard
                 similar={m.card.similar}
