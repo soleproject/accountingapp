@@ -424,6 +424,8 @@ export default function Transactions() {
       <CleanupCopilot
         currentId={currentId}
         onApplyAction={(a) => {
+          // Filter the list first so the user sees exactly what the AI is about
+          // to touch, then kick off a conversational inquiry in the AI panel.
           if (a.kind === "contact_in_uncat") {
             setFilter("uncategorized");
             setSearch(a.contact_name || "");
@@ -435,11 +437,12 @@ export default function Transactions() {
             setFilter("review");
           }
           setPage(1);
+          emitAction("cleanup-inquiry", { action: a });
         }}
         onStartSession={() => {
           setFilter("review");
           setPage(1);
-          emitAction("ai-open");
+          emitAction("cleanup-inquiry", { action: { kind: "flagged_batch", count: 274, label: "Flagged for review" } });
         }}
       />
       <div className="flex items-start justify-between flex-wrap gap-3">

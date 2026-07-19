@@ -7,7 +7,7 @@ import { TID } from "@/constants/testIds";
 import { useAiFocus } from "@/lib/aiFocus";
 import { toast } from "sonner";
 import { resolveVoiceCommand } from "@/lib/voiceCommands";
-import { emitCreate, emitAction } from "@/lib/createBus";
+import { emitCreate, emitAction, useActionListener } from "@/lib/createBus";
 
 // Compact confirm card used by the create-account / recategorize / transfer
 // flows. Same visual language as BulkApproveCard but generic — takes a title,
@@ -360,6 +360,30 @@ export default function AiPanel({ collapsed, onToggle }) {
     return () => window.speechSynthesis.removeEventListener("voiceschanged", load);
   }, []);
   const { focus } = useAiFocus();
+
+  // Cleanup Copilot integration: when the user clicks a chip / "Fix now" on
+  // the hero band, the Transactions page emits `cleanup-inquiry` with the
+  // action payload. We seed a conversational message so the AI asks about
+  // the contact, and stash the action on `pendingIntentRef` so the user's
+  // next reply is interpreted as the category description.
+  useActionListener("cleanup-inquiry", (payload) => {
+    const a = payload?.action;
+    if (!a) return;
+    let msg = "";
+    if (a.kind === "contact_in_uncat") {
+      msg = `I see **${a.count} ${a.contact_name}** transactions sitting in Uncategorized (totaling ${(a.total_amount || 0).toLocaleString("en-US", { style: "currency", currency: "USD" })}). Tell me what these are and I'll categorize them all + create a rule so future imports land in the right account. (e.g. "these are rent from tenants" or "contractor payments")`;
+    } else if (a.kind === "contact_split") {
+      msg = `**${a.contact_name}** is split across ${a.count} different accounts — that's usually a categorization drift. Tell me what these transactions actually are, and I'll consolidate them and create a rule.`;
+    } else if (a.kind === "flagged_batch") {
+      msg = `Let's run through the ${a.count} flagged transactions together. I'll surface one at a time — tell me what each one is (e.g. "rent from tenants") and I'll categorize + approve. Ready?`;
+    }
+    if (msg) {
+      pendingIntentRef.current = { kind: "cleanup-inquiry", action: a };
+      setMessages(m => [...m, { role: "assistant", content: msg }]);
+      if (voiceOnRef.current) speakOne(msg.replace(/\*\*/g, ""));
+      emitAction("ai-open");
+    }
+  });
 
   // ------------------------- Open-mic + TTS-echo protection -------------------------
   // Rules (see architecture doc in PR):
@@ -912,6 +936,72 @@ export default function AiPanel({ collapsed, onToggle }) {
     clearSilenceTimer();
     const userMsg = input.trim();
     setInput("");
+
+    // ------ Cleanup-Copilot inquiry interceptor -----------------------
+    // The Transactions page emits `cleanup-inquiry` when the user clicks
+    // "Fix now" on the hero band. The AI asked "what are these X <contact>
+    // transactions?" — the next user message is the answer. Interpret it
+    // as a category description, resolve/create the account, and show a
+    // bulk-approve confirmation card.
+    if (pendingIntentRef.current?.kind === "cleanup-inquiry") {
+      const inq = pendingIntentRef.current;
+      pendingIntentRef.current = null;
+      setMessages(m => [...m, { role: "user", content: userMsg }]);
+      // Very light NLP: strip filler and pull the last N words as the
+      // category candidate. Users typically say "these are X" or "X payments".
+      const raw = userMsg
+        .replace(/^(?:these|those|they|it)\s+(?:are|is|were|was)\s+/i, "")
+        .replace(/^(?:those\s+are\s+|these\s+are\s+|it'?s\s+|it\s+is\s+)/i, "")
+        .replace(/^(?:actually\s+|really\s+|just\s+)/i, "")
+        .replace(/^(?:all\s+)?(?:a\s+|an\s+|the\s+|some\s+|our\s+|my\s+)?/i, "")
+        .replace(/\s+(?:from|for|by|at|to)\s+.+$/i, "")
+        .replace(/\s+(?:transactions?|payments?|charges?|purchases?|expenses?|receipts?|activity|income|revenue)\s*$/i, "")
+        .replace(/[.?!]+$/, "")
+        .trim();
+      if (!raw || raw.length < 2) {
+        // Not enough signal — re-arm and ask for more.
+        pendingIntentRef.current = inq;
+        const say = "Sorry, I need one or two more words — what category should these fall under? (e.g. \"Rental Income\", \"Contractor Payments\", \"Meals\")";
+        setMessages(m => [...m, { role: "assistant", content: say }]);
+        if (voiceOnRef.current) speakOne(say);
+        return;
+      }
+      try {
+        // Look up the target account.
+        const r = await api.get(`/companies/${currentId}/accounts`);
+        const accts = r.data.accounts || [];
+        const needle = raw.toLowerCase();
+        let hit = accts.find(a => (a.name || "").toLowerCase() === needle);
+        if (!hit) hit = accts.find(a => (a.name || "").toLowerCase().startsWith(needle));
+        if (!hit) hit = accts.find(a => (a.name || "").toLowerCase().includes(needle));
+        // Fetch every unapproved txn for this contact so we know the exact target set.
+        const cnt = inq.action.count || 0;
+        const cname = inq.action.contact_name;
+        const cid_ = inq.action.contact_id;
+        const say = hit
+          ? `Got it — categorize all **${cnt} ${cname}** transactions as **${hit.code} ${hit.name}**, mark them reviewed, and create a rule?`
+          : `I couldn't find an account called "${raw}". Want me to create it (as revenue if these look like income, expense otherwise), then categorize all ${cnt} ${cname} transactions and create a rule?`;
+        // Decide account type guess for the "create-then-bulk" path.
+        const guessType = /rent|revenue|income|sales|consult|fee|earn|receiv/i.test(raw) ? "revenue" : "expense";
+        setMessages(m => [...m, {
+          role: "assistant",
+          content: say,
+          card: {
+            kind: "cleanup-bulk-confirm",
+            targetName: raw,
+            existingAccount: hit || null,
+            guessType,
+            contactId: cid_,
+            contactName: cname,
+            count: cnt,
+          },
+        }]);
+        if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
+      } catch (e) {
+        setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't look up accounts." }]);
+      }
+      return;
+    }
 
     // ------ Voice command dispatch (client-side, zero cost) ------
     // If the user's utterance matches a local intent (route/company switch/
@@ -1732,6 +1822,63 @@ export default function AiPanel({ collapsed, onToggle }) {
                 onDismiss={() => {
                   pendingIntentRef.current = null;
                   setMessages(mm => [...mm, { role: "assistant", content: "OK — only this side is marked as a transfer." }]);
+                }}
+              />
+            )}
+            {m.card?.kind === "cleanup-bulk-confirm" && (
+              <InlineConfirmCard
+                testId="cleanup-bulk-card"
+                tone="emerald"
+                confirmLabel={m.card.existingAccount ? `Yes, categorize all ${m.card.count} + create rule` : `Yes, create + categorize all + rule`}
+                onConfirm={async () => {
+                  // 1. Ensure the account exists (create if we didn't find a match).
+                  let acct = m.card.existingAccount;
+                  if (!acct) {
+                    const r = await api.post(`/companies/${currentId}/accounts/ensure`, {
+                      name: m.card.targetName.replace(/\b(\w)/g, (c) => c.toUpperCase()),
+                      type: m.card.guessType,
+                    });
+                    acct = r.data;
+                  }
+                  // 2. Grab every unapproved txn for this contact.
+                  const list = await api.get(
+                    `/companies/${currentId}/transactions?contact_id=${m.card.contactId}&limit=2000`
+                  );
+                  const ids = (list.data.transactions || [])
+                    .filter(t => !t.human_reviewed)
+                    .map(t => t.id);
+                  // 3. Bulk-approve with rule creation.
+                  const res = await api.post(
+                    `/companies/${currentId}/transactions/apply-bulk-approve-rule`,
+                    {
+                      txn_ids: ids,
+                      category_account_id: acct.id,
+                      contact_id: m.card.contactId,
+                      contact_name: m.card.contactName,
+                      create_rule: true,
+                    }
+                  );
+                  const updated = res.data?.updated || 0;
+                  const say = `Done — recategorized and approved ${updated} ${m.card.contactName} transactions as ${acct.code} ${acct.name}${res.data?.rule_id ? " and created a rule so future imports auto-post here" : ""}.`;
+                  setMessages(mm => [...mm, { role: "assistant", content: say }]);
+                  if (voiceOnRef.current) speakOne(say);
+                  emitAction("txns:changed");
+                }}
+                onDismiss={() => {
+                  // Re-open the inquiry so the user can give a different category
+                  // or add more detail about the transactions.
+                  pendingIntentRef.current = {
+                    kind: "cleanup-inquiry",
+                    action: {
+                      kind: "contact_in_uncat",
+                      contact_id: m.card.contactId,
+                      contact_name: m.card.contactName,
+                      count: m.card.count,
+                    },
+                  };
+                  const say = `OK — what should I categorize the ${m.card.count} ${m.card.contactName} transactions as instead? Or tell me more about what they are.`;
+                  setMessages(mm => [...mm, { role: "assistant", content: say }]);
+                  if (voiceOnRef.current) speakOne(say);
                 }}
               />
             )}
