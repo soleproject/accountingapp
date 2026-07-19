@@ -466,7 +466,10 @@ export default function Transactions() {
           // Filter the list first so the user sees exactly what the AI is about
           // to touch, then kick off a conversational inquiry in the AI panel.
           if (a.kind === "contact_in_uncat") {
-            setFilter("uncategorized");
+            // Uncategorized tab removed — route to "Unapproved" (the closest
+            // visible tab that shows AI-categorized-and-uncategorized alike),
+            // then narrow via search.
+            setFilter("unapproved");
             setSearch(a.contact_name || "");
           } else if (a.kind === "contact_split") {
             setFilter("all");
@@ -507,7 +510,6 @@ export default function Transactions() {
               { k: "all",           label: "All" },
               { k: "review",        label: "Needs Review" },
               { k: "ai",            label: "AI Categorized" },
-              { k: "uncategorized", label: "Uncategorized" },
               { k: "unapproved",    label: "Unapproved" },
               { k: "reviewed",      label: "Reviewed" },
             ].map(({ k, label }) => (
