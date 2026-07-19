@@ -42,25 +42,25 @@ body {
 .ai-shimmer-btn {
   background-image: linear-gradient(
     120deg,
-    #a78bfa 0%,    /* violet-400 */
-    #22d3ee 25%,   /* cyan-400 */
-    #34d399 50%,   /* emerald-400 */
-    #fbbf24 75%,   /* amber-400 */
-    #f472b6 100%   /* pink-400 */
+    #7c3aed 0%,    /* violet-600 */
+    #0891b2 25%,   /* cyan-600 */
+    #059669 50%,   /* emerald-600 */
+    #d97706 75%,   /* amber-600 */
+    #db2777 100%   /* pink-600 */
   );
   background-size: 300% 300%;
-  color: #0f172a;                     /* slate-900 for AA-contrast on gradient */
+  color: #ffffff;                     /* white text on the deeper 600-shade gradient */
   border-color: transparent !important;
   animation:
     ai-shimmer 6s ease-in-out infinite,
     ai-shimmer-pulse 5s ease-in-out infinite;
 }
-.ai-shimmer-btn:hover { filter: brightness(1.05); }
+.ai-shimmer-btn:hover { filter: brightness(1.08); }
 .ai-shimmer-btn:disabled { animation: none; opacity: 0.7; }
 @media (prefers-reduced-motion: reduce) {
   .ai-shimmer-btn {
     animation: none;
-    background: linear-gradient(120deg, #a78bfa, #22d3ee, #34d399, #fbbf24, #f472b6);
+    background: linear-gradient(120deg, #7c3aed, #0891b2, #059669, #d97706, #db2777);
   }
 }
 
