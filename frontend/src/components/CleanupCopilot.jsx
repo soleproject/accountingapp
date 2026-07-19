@@ -53,6 +53,17 @@ const KIND_STYLES = {
 // Compose a friendly one-liner the AI would say if it were a bookkeeper
 // standing over your shoulder.
 function pitchFor(action, progress) {
+  // When there are AI-categorized rows the CPA can sign off in one tap,
+  // that's the biggest single-move win — pitch that ahead of any per-
+  // contact cleanup. Matches the shimmering "Approve all AI-ready" button.
+  const megaReady = progress?.mega_ready_rows || 0;
+  if (megaReady > 0 && progress?.total) {
+    const afterPct = Math.min(
+      100,
+      Math.round(1000 * (progress.reviewed + megaReady) / progress.total) / 10,
+    );
+    return `Verifying the AI categorizations for ${megaReady} transaction${megaReady === 1 ? "" : "s"} will put you at ${afterPct}% of completing the review.`;
+  }
   if (!action) {
     if (!progress?.total) return "No transactions yet — connect a bank feed or drop in a statement.";
     return "Looking clean — nothing urgent flagged.";
@@ -386,50 +397,57 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         </div>
         <div className="flex items-center gap-2">
           {(() => {
-            // Which CTA should draw the eye? Approve-all-AI-ready wins if
-            // the mega-approve endpoint would actually surface rows for the
-            // reviewer (progress.mega_ready_rows, computed the same way on
-            // the backend as the mega-approve dry-run). Otherwise Fix now
-            // wins if there's any primary cleanup action queued.
             const aiReadyCount = data?.progress?.mega_ready_rows || 0;
             const hasApprove = aiReadyCount > 0;
             const hasFixNow = !!primary;
             const shimmerApprove = hasApprove;
             const shimmerFixNow = !hasApprove && hasFixNow;
-            return (
-              <>
-                {primary && (
-                  <button
-                    data-testid="cleanup-primary-cta"
-                    onClick={() => onApplyAction?.(primary)}
-                    className={
-                      shimmerFixNow
-                        ? "ai-shimmer-btn inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md border"
-                        : "inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md bg-slate-900 text-white hover:bg-slate-800"
-                    }
-                  >
-                    Fix now <ArrowRight size={13} />
-                  </button>
-                )}
-                <button
-                  data-testid="cleanup-mega-approve"
-                  onClick={openMega}
-                  disabled={megaBusy}
-                  className={
-                    shimmerApprove
-                      ? "ai-shimmer-btn inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md border disabled:opacity-50"
-                      : "inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
-                  }
-                  title={
-                    hasApprove
-                      ? `${aiReadyCount} AI-categorized rows waiting for sign-off`
-                      : "Approve every vendor whose AI opinion is unanimous"
-                  }
-                >
-                  <Sparkles size={13} /> {megaBusy ? "Scanning…" : "Approve all AI-ready"}
-                </button>
-              </>
+
+            // Build both buttons as JSX and then order them so the
+            // shimmering one comes FIRST. The Sparkles/AI icon rides with
+            // the shimmering CTA — the other one is plain.
+            const approveBtn = (
+              <button
+                key="approve"
+                data-testid="cleanup-mega-approve"
+                onClick={openMega}
+                disabled={megaBusy}
+                className={
+                  shimmerApprove
+                    ? "ai-shimmer-btn inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md disabled:opacity-50"
+                    : "inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                }
+                title={
+                  hasApprove
+                    ? `${aiReadyCount} AI-categorized rows waiting for sign-off`
+                    : "Approve every vendor whose AI opinion is unanimous"
+                }
+              >
+                {shimmerApprove && <Sparkles size={13} className="text-fuchsia-500" />}
+                {megaBusy ? "Scanning…" : "Approve all AI-ready"}
+              </button>
             );
+            const fixNowBtn = primary ? (
+              <button
+                key="fixnow"
+                data-testid="cleanup-primary-cta"
+                onClick={() => onApplyAction?.(primary)}
+                className={
+                  shimmerFixNow
+                    ? "ai-shimmer-btn inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md"
+                    : "inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md bg-slate-900 text-white hover:bg-slate-800"
+                }
+              >
+                {shimmerFixNow && <Sparkles size={13} className="text-fuchsia-500" />}
+                Fix now <ArrowRight size={13} />
+              </button>
+            ) : null;
+
+            // Shimmering CTA goes first; the other one (if it exists) trails.
+            const buttons = shimmerApprove
+              ? [approveBtn, fixNowBtn]
+              : [fixNowBtn, approveBtn];
+            return buttons.filter(Boolean);
           })()}
           <button
             data-testid="cleanup-start-session"
