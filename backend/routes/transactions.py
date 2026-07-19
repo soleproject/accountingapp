@@ -198,6 +198,9 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
 
 class BulkApproveAiReadyIn(BaseModel):
     dry_run: bool = False
+    # Optional filter: when non-empty on a live run, only these contact_ids are
+    # approved. Powers the vendor-level toggle in the mega-approve modal.
+    contact_ids: Optional[List[str]] = None
 
 
 @router.post("/companies/{cid}/transactions/bulk-approve-ai-ready")
@@ -207,14 +210,15 @@ async def bulk_approve_ai_ready(
     user: dict = Depends(get_current_user),
 ):
     """Mega bulk-approve: mark every AI-categorized-unreviewed row human_reviewed
-    for contacts where the AI has picked a SINGLE consistent account (i.e. the
-    same set of contacts that appear as `contact_ai_ready` in cleanup-suggestions).
+    for contacts where the AI has picked a SINGLE consistent account.
 
-    Skips: uncategorized rows, code-9999/4999 parked rows, rows in closed
-    periods, rows whose contact has a mixed AI opinion.
+    Excludes: uncategorized rows (9999/4999), rows already reviewed, rows the
+    AI flagged for review (needs_review=true), rows in closed periods, and
+    contacts with mixed AI opinions.
 
-    dry_run=True returns the vendor summary + total row count without touching
-    the DB. Powers the "Approve all AI-ready" mega button in the Copilot band.
+    On dry_run=true returns the full eligible vendor list (scrollable in the
+    modal) + summary. On live run tags every touched row with a shared
+    `mega_batch_id` so the whole batch can be undone in one click.
     """
     await require_company(user, cid)
 
@@ -226,6 +230,10 @@ async def bulk_approve_ai_ready(
     async for t in db.transactions.find({
         "company_id": cid,
         "human_reviewed": {"$ne": True},
+        # Exclude AI-flagged rows (needs_review=true) — those are the ones the
+        # AI itself wasn't sure about and should never be swept up by a mass
+        # approval. User asked for this explicitly.
+        "needs_review": {"$ne": True},
         "category_account_id": {"$nin": [None, ""]},
         "category_account_code": {"$nin": ["9999", "4999"]},
         "contact_id": {"$exists": True, "$nin": [None, ""]},
@@ -245,16 +253,21 @@ async def bulk_approve_ai_ready(
     eligible = [(cidk, r) for cidk, r in ai_ready.items() if len(r["accounts"]) == 1]
     eligible.sort(key=lambda kv: -kv[1]["count"])
 
+    # Optional contact_ids filter for the live run.
+    if not inp.dry_run and inp.contact_ids:
+        wanted = set(inp.contact_ids)
+        eligible = [(cidk, r) for cidk, r in eligible if cidk in wanted]
+
     total_rows = sum(r["count"] for _, r in eligible)
     total_contacts = len(eligible)
     total_amount = sum(r["amount"] for _, r in eligible)
-    top_contacts = [{
+    vendors = [{
         "contact_id": cidk,
         "contact_name": r["contact_name"],
         "count": r["count"],
         "amount": round(r["amount"], 2),
         "account": r["sample_acct"] or {},
-    } for cidk, r in eligible[:5]]
+    } for cidk, r in eligible]
 
     if inp.dry_run or total_rows == 0:
         return {
@@ -262,22 +275,21 @@ async def bulk_approve_ai_ready(
             "total_contacts": total_contacts,
             "total_rows": total_rows,
             "total_amount": round(total_amount, 2),
-            "top_contacts": top_contacts,
+            "vendors": vendors,
+            "top_contacts": vendors[:5],  # kept for backward-compat
             "updated": 0,
         }
 
-    # Apply — one $in update per contact so we can also skip closed periods
-    # silently. Fast path: gather all ids + dates in one pass, then filter.
+    # Live run — tag every row with a shared batch id so the Undo button works.
+    batch_id = str(uuid.uuid4())
     updated_total = 0
     now = now_iso()
     for cidk, r in eligible:
         ids = r["txn_ids"]
-        # Skip closed-period rows client-side.
         keep_ids: list[str] = []
-        cur = db.transactions.find(
+        async for t in db.transactions.find(
             {"id": {"$in": ids}, "company_id": cid}, {"id": 1, "date": 1}
-        )
-        async for t in cur:
+        ):
             if await is_period_closed(cid, t.get("date") or ""):
                 continue
             keep_ids.append(t["id"])
@@ -287,6 +299,8 @@ async def bulk_approve_ai_ready(
             {"$set": {
                 "human_reviewed": True, "posted": True, "needs_review": False,
                 "ai_source": "user_bulk_approve_ai_ready",
+                "mega_batch_id": batch_id,
+                "mega_batch_at": now,
                 "updated_at": now,
             }},
         )
@@ -296,12 +310,52 @@ async def bulk_approve_ai_ready(
 
     return {
         "ok": True, "dry_run": False,
+        "batch_id": batch_id,
         "total_contacts": total_contacts,
         "total_rows": total_rows,
         "total_amount": round(total_amount, 2),
-        "top_contacts": top_contacts,
+        "vendors": vendors,
+        "top_contacts": vendors[:5],
         "updated": updated_total,
     }
+
+
+@router.post("/companies/{cid}/transactions/undo-mega-batch/{batch_id}")
+async def undo_mega_batch(cid: str, batch_id: str, user: dict = Depends(get_current_user)):
+    """Reverts a mega bulk-approve batch. Flips every row tagged with the
+    supplied `mega_batch_id` back to unreviewed / not posted / needs_review=true,
+    then clears the batch tag so re-approvals can be tracked separately.
+    Only works while all rows are still tagged (i.e. before the next mega run
+    overwrites the tag). Closed-period rows are silently skipped.
+    """
+    await require_company(user, cid)
+    rows = await db.transactions.find(
+        {"company_id": cid, "mega_batch_id": batch_id},
+        {"id": 1, "date": 1},
+    ).to_list(20000)
+    if not rows:
+        return {"ok": True, "reverted": 0}
+    keep_ids: list[str] = []
+    for t in rows:
+        if await is_period_closed(cid, t.get("date") or ""):
+            continue
+        keep_ids.append(t["id"])
+    if not keep_ids:
+        return {"ok": True, "reverted": 0}
+    res = await db.transactions.update_many(
+        {"id": {"$in": keep_ids}, "company_id": cid, "mega_batch_id": batch_id},
+        {"$set": {
+            "human_reviewed": False, "posted": False, "needs_review": False,
+            "ai_source": "pfc_resolver",
+            "updated_at": now_iso(),
+        }, "$unset": {"mega_batch_id": "", "mega_batch_at": ""}},
+    )
+    if res.modified_count:
+        await log_ai(cid, "undo_mega_batch", res.modified_count)
+    return {"ok": True, "reverted": res.modified_count}
+
+
+
 
 
 

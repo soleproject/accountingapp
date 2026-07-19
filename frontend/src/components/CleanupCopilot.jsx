@@ -73,6 +73,15 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   const [dismissed, setDismissed] = useState(new Set());
   const [megaPreview, setMegaPreview] = useState(null);
   const [megaBusy, setMegaBusy] = useState(false);
+  const [megaSelected, setMegaSelected] = useState(new Set());
+  const [megaSearch, setMegaSearch] = useState("");
+  const [megaUndo, setMegaUndo] = useState(null);  // {batch_id, count, expires}
+  useEffect(() => {
+    // Auto-dismiss the Undo toast after 60s.
+    if (!megaUndo) return;
+    const t = setTimeout(() => setMegaUndo(null), 60_000);
+    return () => clearTimeout(t);
+  }, [megaUndo]);
   const openMega = async () => {
     if (megaBusy || !currentId) return;
     setMegaBusy(true);
@@ -82,33 +91,69 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         { dry_run: true }
       );
       if (!r.data?.total_rows) {
-        setMegaPreview({ total_rows: 0 });
+        setMegaPreview({ total_rows: 0, vendors: [] });
+        setMegaSelected(new Set());
       } else {
         setMegaPreview(r.data);
+        // Everyone selected by default — CPA can uncheck the risky ones.
+        setMegaSelected(new Set((r.data.vendors || []).map(v => v.contact_id)));
       }
+      setMegaSearch("");
     } catch (e) {
       window.dispatchEvent(new CustomEvent("axiom:toast",
         { detail: { message: "Couldn't scan AI-ready rows. Try again in a moment.", type: "error" } }));
     } finally { setMegaBusy(false); }
   };
   const applyMega = async () => {
-    if (megaBusy || !currentId) return;
+    if (megaBusy || !currentId || megaSelected.size === 0) return;
     setMegaBusy(true);
     try {
       const r = await api.post(
         `/companies/${currentId}/transactions/bulk-approve-ai-ready`,
-        { dry_run: false }
+        { dry_run: false, contact_ids: Array.from(megaSelected) }
       );
       setMegaPreview(null);
+      setMegaSelected(new Set());
       load();
       window.dispatchEvent(new CustomEvent("axiom:action",
         { detail: { kind: "txns:changed", at: Date.now() } }));
-      window.dispatchEvent(new CustomEvent("axiom:toast",
-        { detail: { message: `Approved ${r.data?.updated || 0} rows across ${r.data?.total_contacts || 0} vendors.` } }));
+      // Set the Undo toast — visible for 60s.
+      if (r.data?.batch_id && r.data?.updated) {
+        setMegaUndo({
+          batch_id: r.data.batch_id,
+          count: r.data.updated,
+          expires: Date.now() + 60_000,
+        });
+      }
     } catch (e) {
       window.dispatchEvent(new CustomEvent("axiom:toast",
         { detail: { message: "Bulk-approve failed. No rows were changed.", type: "error" } }));
     } finally { setMegaBusy(false); }
+  };
+  const undoMega = async () => {
+    if (!megaUndo || !currentId) return;
+    const batchId = megaUndo.batch_id;
+    setMegaUndo(null);
+    try {
+      const r = await api.post(
+        `/companies/${currentId}/transactions/undo-mega-batch/${batchId}`, {}
+      );
+      load();
+      window.dispatchEvent(new CustomEvent("axiom:action",
+        { detail: { kind: "txns:changed", at: Date.now() } }));
+      window.dispatchEvent(new CustomEvent("axiom:toast",
+        { detail: { message: `Reverted ${r.data?.reverted || 0} rows.` } }));
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("axiom:toast",
+        { detail: { message: "Undo failed. Please review manually.", type: "error" } }));
+    }
+  };
+  const toggleVendor = (cid) => {
+    setMegaSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(cid)) next.delete(cid); else next.add(cid);
+      return next;
+    });
   };
 
   const load = async () => {
@@ -173,6 +218,18 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   const primary = actions[0];
   const rest = actions.slice(1, 6);
   const total = data?.progress?.total || 0;
+  // Derived state for the mega-approve modal (kept out of state so it stays
+  // in sync with megaSelected + megaSearch without an effect).
+  const megaVendors = megaPreview?.vendors || [];
+  const filteredVendors = megaSearch.trim()
+    ? megaVendors.filter(v => (v.contact_name || "").toLowerCase().includes(megaSearch.trim().toLowerCase()))
+    : megaVendors;
+  const selectedRows = megaVendors.reduce(
+    (s, v) => s + (megaSelected.has(v.contact_id) ? v.count : 0), 0
+  );
+  const selectedAmount = megaVendors.reduce(
+    (s, v) => s + (megaSelected.has(v.contact_id) ? v.amount : 0), 0
+  );
 
   return (
     <div data-testid="cleanup-copilot" className="rounded-xl border border-slate-200 bg-gradient-to-br from-indigo-50/40 via-white to-fuchsia-50/40 shadow-sm p-4">
@@ -267,31 +324,70 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
             ) : (
               <>
                 <div className="text-base font-semibold text-slate-900 mb-1">
-                  Approve {megaPreview.total_rows.toLocaleString()} rows across {megaPreview.total_contacts} vendors?
+                  Approve <span data-testid="mega-selected-rows">{selectedRows.toLocaleString()}</span> rows across <span data-testid="mega-selected-vendors">{megaSelected.size}</span> vendors?
                 </div>
-                <div className="text-xs text-slate-500 mb-3">
-                  Total volume: ${megaPreview.total_amount.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2})}. Only vendors where the AI picked ONE consistent account are eligible — mixed-opinion vendors need manual review.
+                <div className="text-xs text-slate-500 mb-2">
+                  Total volume: ${selectedAmount.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2})}. Vendors with mixed AI opinions or rows flagged for review are already excluded.
                 </div>
-                <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">Top 5 vendors</div>
-                <div className="space-y-1.5 mb-3 max-h-48 overflow-y-auto">
-                  {megaPreview.top_contacts.map((c, i) => (
-                    <div key={i} className="flex items-center justify-between rounded border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs">
-                      <div className="min-w-0 flex-1">
-                        <div className="font-medium truncate">{c.contact_name}</div>
-                        <div className="text-slate-500 truncate">→ {c.account?.code} {c.account?.name}</div>
-                      </div>
-                      <div className="text-right ml-2 shrink-0">
-                        <div className="font-mono-num text-slate-900">{c.count} rows</div>
-                        <div className="font-mono-num text-slate-500">${c.amount.toLocaleString("en-US", {maximumFractionDigits: 0})}</div>
-                      </div>
-                    </div>
-                  ))}
-                  {megaPreview.total_contacts > 5 && (
-                    <div className="text-[11px] text-slate-500 text-center">… + {megaPreview.total_contacts - 5} more vendors</div>
+                <div className="mb-2">
+                  <input
+                    data-testid="mega-vendor-search"
+                    type="text"
+                    value={megaSearch}
+                    onChange={(e) => setMegaSearch(e.target.value)}
+                    placeholder={`Filter ${megaPreview.vendors.length} vendors…`}
+                    className="w-full px-2.5 py-1.5 rounded border border-slate-300 text-xs"
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1.5">
+                  <span>Click a row to include/exclude</span>
+                  <div className="flex gap-2">
+                    <button data-testid="mega-select-all"
+                            className="text-emerald-700 hover:underline"
+                            onClick={() => setMegaSelected(new Set(megaPreview.vendors.map(v => v.contact_id)))}>
+                      Select all
+                    </button>
+                    <button data-testid="mega-select-none"
+                            className="text-slate-600 hover:underline"
+                            onClick={() => setMegaSelected(new Set())}>
+                      None
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-1 mb-3 max-h-72 overflow-y-auto pr-1" data-testid="mega-vendor-list">
+                  {filteredVendors.map((c) => {
+                    const on = megaSelected.has(c.contact_id);
+                    return (
+                      <button
+                        key={c.contact_id}
+                        data-testid={`mega-vendor-${c.contact_id}`}
+                        onClick={() => toggleVendor(c.contact_id)}
+                        className={`w-full flex items-center gap-2 rounded border px-2.5 py-1.5 text-xs text-left transition-colors ${
+                          on
+                            ? "border-emerald-300 bg-emerald-50 hover:bg-emerald-100"
+                            : "border-slate-200 bg-slate-50 opacity-60 hover:opacity-100 hover:bg-slate-100"
+                        }`}
+                      >
+                        <span className={`w-4 h-4 rounded flex items-center justify-center text-white text-[10px] shrink-0 ${on ? "bg-emerald-600" : "bg-slate-300"}`}>
+                          {on ? "✓" : ""}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium truncate">{c.contact_name}</div>
+                          <div className="text-slate-500 truncate">→ {c.account?.code} {c.account?.name}</div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="font-mono-num text-slate-900">{c.count} rows</div>
+                          <div className="font-mono-num text-slate-500">${c.amount.toLocaleString("en-US", {maximumFractionDigits: 0})}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {filteredVendors.length === 0 && (
+                    <div className="text-[11px] text-slate-500 text-center py-4">No vendors match &quot;{megaSearch}&quot;</div>
                   )}
                 </div>
                 <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mb-3">
-                  ⚠ This marks every row human-reviewed with the AI's suggested category. Review carefully — undoing individual rows afterward requires opening each one.
+                  ⚠ You&apos;ll have 60 seconds to Undo after applying. Rows the AI flagged for review are excluded automatically.
                 </div>
                 <div className="flex gap-2">
                   <button
@@ -300,20 +396,43 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                     disabled={megaBusy}
                     className="flex-1 py-2 rounded-md border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                   >
-                    Cancel — review first
+                    Cancel
                   </button>
                   <button
                     data-testid="mega-approve-confirm"
                     onClick={applyMega}
-                    disabled={megaBusy}
+                    disabled={megaBusy || megaSelected.size === 0}
                     className="flex-1 py-2 rounded-md bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50"
                   >
-                    {megaBusy ? "Approving…" : `Approve all ${megaPreview.total_rows.toLocaleString()} rows`}
+                    {megaBusy ? "Approving…" : `Approve ${selectedRows.toLocaleString()} rows`}
                   </button>
                 </div>
               </>
             )}
           </div>
+        </div>
+      )}
+      {megaUndo && (
+        <div className="fixed bottom-6 right-6 z-40 max-w-sm bg-slate-900 text-white rounded-lg shadow-2xl px-4 py-3 flex items-center gap-3"
+             data-testid="mega-undo-toast">
+          <div className="text-sm">
+            <div className="font-semibold">Approved {megaUndo.count.toLocaleString()} rows</div>
+            <div className="text-slate-300 text-xs">You have 60 seconds to undo.</div>
+          </div>
+          <button
+            data-testid="mega-undo-btn"
+            onClick={undoMega}
+            className="px-3 py-1.5 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-900 text-xs font-semibold"
+          >
+            Undo
+          </button>
+          <button
+            onClick={() => setMegaUndo(null)}
+            className="text-slate-400 hover:text-white text-lg leading-none"
+            title="Dismiss"
+          >
+            ×
+          </button>
         </div>
       )}
     </div>

@@ -1,0 +1,35 @@
+{
+  "summary": "Iter39 — Mega bulk-approve modal (full vendor list + selective apply + Undo toast). Backend 6/6 pytest cases PASS on live 1119 LLC + Bright Beans (dry_run returns 193 vendors uncapped w/ contact_id/name/count/amount/account shape; selective contact_ids filter works; batch_id returned; undo reverts full batch; undo idempotent; auth 401/403). Frontend E2E on Bright Beans validates all new testids (mega-vendor-list, mega-vendor-{id}, mega-vendor-search, mega-select-all/none, mega-selected-rows/vendors, mega-approve-confirm, mega-undo-toast, mega-undo-btn) and dynamic count math (10/7 → toggle Adobe off → 7/6 → selective apply Adobe only = 3 rows / 1 vendor). CRITICAL UI BUG FOUND: the Undo toast is rendered at z-40 while the AiPanel sidebar sits at z-[60] — on any screen with the AiPanel open (the default) the toast is either fully covered or its Undo button is pointer-intercepted, making Undo unreachable to users. Bright Beans DB state restored (0 tagged rows, back to pre-test 10 eligible/7 vendors).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "CleanupCopilot.jsx — mega-undo-toast", "issue": "Undo toast has z-40 but the AiPanel sidebar (AiPanel.jsx line ~1987) is z-[60]. On the default Transactions page with the AiPanel open, the toast is fully occluded by the panel and the Undo button is pointer-intercepted. Playwright's real (non-force) click on mega-undo-btn times out with 'ai-chat-input subtree intercepts pointer events'. Users cannot click Undo. Fix: bump toast to z-[70] or z-[100].", "selector": "[data-testid=\"mega-undo-toast\"]", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter39_mega_approve_undo.py",
+    "/app/test_reports/pytest/iter39.xml"
+  ],
+  "action_items": [
+    "CRITICAL: Raise z-index of mega-undo-toast above z-[60] (AiPanel). Suggest changing `z-40` → `z-[70]` on the toast container in CleanupCopilot.jsx line ~416. Without this, Undo is unclickable in the primary demo view.",
+    "Optional: also raise the mega-approve-modal backdrop check — modal is z-50 vs AiPanel z-[60]; may want to verify modal isn't also occluded (during our test the modal DID render on top since we saw it in the screenshot, but the panel narrows the visible column — worth double checking on smaller viewports)."
+  ],
+  "critical_code_review_comments": [
+    "CleanupCopilot.jsx applyMega swallow-error path only fires an axiom:toast — no Undo toast possible if the API returns a batch_id but response parse fails; low risk.",
+    "The mega-undo-btn onClick calls undoMega which awaits the API but does NOT re-show any state if the undo call errors; only an axiom:toast fires. On failure the user has no way to retry (megaUndo was already cleared before the request). Consider restoring megaUndo on catch.",
+    "routes/transactions.py bulk_approve_ai_ready — dry_run summary vs live apply parity: dry_run reports total_rows without excluding closed-period rows; a live run silently drops them. On companies with any closed period the modal will slightly over-promise. Cosmetic.",
+    "routes/transactions.py bulk_approve_ai_ready — the per-vendor `find_one` closed-period check inside the apply loop is O(N) DB roundtrips (called out by main agent already). Fine for BB/1119 LLC scale."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter39_mega_approve_undo.py (new — 6 pytest cases: dry_run full list shape, needs_review exclusion sanity, selective apply → undo → idempotent undo → state restore, 3× auth negative)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "90% — Undo toast render OK, counts OK, apply-through-undo API round-trip OK via backend, but Undo BUTTON is unclickable in real UI due to z-index bug"},
+  "test_credentials": "pro@axiom.ai / pro123 (Bright Beans=1829a9eb-7df2-4a31-afcf-7e50a514da7e; 1119 LLC=8cefdf98-843a-490b-a22f-831333649bfe); client2@axiom.ai / client123 for 403 negatives",
+  "seed_data_creation": "None. Live Bright Beans data used for the selective apply/undo test; state was pending 3 tagged rows after the first playwright pass (Undo click blocked by z-index bug) — recovered via server-side undo call and confirmed dry_run back to pre-test 10 rows / 7 vendors / 0 tagged. No seeded fixtures required for this iteration.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend endpoint contract fully verified. When retesting the UI Undo flow, either close the AiPanel first or fix the z-index. All new testids from the review request are wired correctly. Bright Beans has 10 eligible rows / 7 vendors as of this run. 1119 LLC has 193 eligible vendors (uncapped in `vendors[]`, top_contacts still cap at 5 for backward-compat). Bright Beans left in restored state (0 mega_batch_id docs).",
+  "rca of the issue": "Undo unclickable in default view: CleanupCopilot.jsx line ~416 renders the toast with `z-40`; AiPanel.jsx line ~1987 renders the right sidebar with `z-[60]`. Bottom-right toast overlaps the AiPanel's chat input area, so pointer events land on the AiPanel input instead of the Undo button. Repro: login pro@axiom.ai on Bright Beans → Transactions → 'Approve all AI-ready' → select any 1 vendor → Approve → toast appears in bottom-right, Undo button is visible but click is intercepted by ai-chat-input. Mitigation: replace `z-40` with `z-[70]` (or any value > 60) on the toast container div. One-line fix."
+}
