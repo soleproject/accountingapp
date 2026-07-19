@@ -1,0 +1,26 @@
+{
+  "summary": "Verified iter34 Cleanup Copilot re-appearance bugfix on 704 LLC. Backend fix (split_by_contact + uncat_by_contact now filter by not human_reviewed) validated end-to-end via pytest: marking Eimorlain Ugali Co's 21 unreviewed categorized rows as human_reviewed=True causes it to drop from contact_split top_actions on the next /cleanup-suggestions call; restored afterward. Frontend rendering verified via Playwright — 704 LLC Transactions page hero band shows the exact 'Eimorlain Ugali Co is spread across 3 accounts. Want me to help consolidate?' prompt, confirming the fixed endpoint is powering the UI. Idempotent approve_existing fallback (AiPanel.jsx L1125-1135) and pendingIntentRef retention after categorize confirm card (L1315) verified in place via code review. Full interactive LLM refinement flow not automated (each /ai/cpa-review roundtrip is 3-6s and would need brittle chat scraping); recommend main-agent smoke-test manually.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": { "ui_bugs": [], "integration_issues": [], "design_issues": [] },
+  "test_report_links": [
+    "/app/backend/tests/test_iter34_cleanup_filters.py",
+    "/app/test_reports/pytest/iter34.xml"
+  ],
+  "action_items": [
+    "Main agent: manually smoke-test the LLM refinement flow — dispatch cleanup-inquiry for a contact with unreviewed rows on 704 LLC, type 'these are all Meals' → confirm card appears, then WITHOUT clicking Yes/No type 'wait, only the uncategorized ones' → verify it re-runs /ai/cpa-review (not plain chat stream)."
+  ],
+  "critical_code_review_comments": [
+    "transactions.py cleanup_suggestions loads up to 50k txns per call; on very large companies this is O(N) memory. Not urgent for MVP.",
+    "AiPanel.jsx is 2689 lines — should be split into hooks/subcomponents (per code_review_guidelines >700 lines threshold). Non-blocking."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter34_cleanup_filters.py (new)"
+  ],
+  "success_rate": { "backend": "100%", "frontend": "verified via rendering + code review" },
+  "test_credentials": "pro@axiom.ai / pro123",
+  "seed_data_creation": "None. Test flips human_reviewed on 21 Eimorlain rows during test and restores in finally block.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter34 backend test at /app/backend/tests/test_iter34_cleanup_filters.py is a good regression harness for the cleanup-suggestions filter semantics — reuse for future changes to split_by_contact/uncat_by_contact. Eimorlain Ugali Co on 704 LLC (cid=65c43432-305d-4419-8037-bfbcfa7de748) has 21 unreviewed categorized rows across 3 accounts as of test time — a reliable contact_split candidate.",
+  "rca of the issue": "Root cause: split_by_contact accumulated category_account_ids for ALL rows regardless of human_reviewed flag, so once user approve_existing marked all 21 rows reviewed, they still counted toward the >=3 accounts threshold, causing the contact to re-appear indefinitely. Fix: add `and not t.get('human_reviewed')` guard on both split_by_contact and uncat_by_contact. Verified: contact correctly drops when rows flipped, correctly returns when rows restored."
+}

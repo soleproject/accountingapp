@@ -82,12 +82,21 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
         cid_key = t.get("contact_id")
         if not cid_key:
             continue
-        if not t.get("category_account_id") or t.get("category_account_code") in ("9999", "4999"):
+        # Uncat: only counts rows that are still awaiting a category AND
+        # haven't been human-reviewed (a reviewed row with code 9999/4999 has
+        # been explicitly parked by the user — leave it alone).
+        if (not t.get("category_account_id") or t.get("category_account_code") in ("9999", "4999")) \
+                and not t.get("human_reviewed"):
             b = uncat_by_contact[cid_key]
             b["count"] += 1
             b["amount"] += abs(float(t.get("amount") or 0.0))
             b["contact_name"] = t.get("contact_name") or ""
-        if t.get("category_account_id"):
+        # Split: only counts UNREVIEWED categorized rows. Once the user has
+        # explicitly approved a contact's split as-is (approve_existing
+        # marks each row human_reviewed=true), the contact shouldn't come
+        # back as a "categorization drift" candidate — the user has already
+        # blessed the split.
+        if t.get("category_account_id") and not t.get("human_reviewed"):
             split_by_contact[cid_key].add(t.get("category_account_id"))
 
     top_actions: list[dict] = []

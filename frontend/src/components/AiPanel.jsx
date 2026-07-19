@@ -1117,6 +1117,22 @@ export default function AiPanel({ collapsed, onToggle }) {
           const rows = (list.data.transactions || []).filter(t => !t.human_reviewed);
           const catRows = rows.filter(t => !!t.category_account_id);
           const uncatCount = rows.length - catRows.length;
+          // Idempotent path: if nothing is left unreviewed for this contact
+          // (already approved in an earlier turn, or all rows are truly
+          // uncategorized), still emit cleanup-completed so the copilot
+          // dismisses this contact and moves on. This is the primary fix for
+          // the "same contact keeps coming back" bug the user reported.
+          if (rows.length === 0) {
+            const say = `Already approved — moving on from **${inq.action.contact_name}**.`;
+            setMessages(mm => [...mm, { role: "assistant", content: say }]);
+            if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
+            emitAction("cleanup-completed", {
+              contact_id: inq.action.contact_id,
+              kind: inq.action.kind || "contact_split",
+              count: 0,
+            });
+            return;
+          }
           if (catRows.length === 0) {
             const say = rev.say || "None of these rows have a category yet — I need one before I can approve them. What account should they post to?";
             pendingIntentRef.current = inq;
@@ -1292,6 +1308,11 @@ export default function AiPanel({ collapsed, onToggle }) {
             },
           }]);
           if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, "").replace(/\n/g, ". "));
+          // Keep the inquiry PENDING so the user can refine by typing
+          // ("no, only the uncategorized ones as Consulting" / "actually
+          // make the big one a Loan"). When they click Yes/No on the card
+          // OR skip, the handlers clear pendingIntentRef.
+          pendingIntentRef.current = inq;
         } catch (e) {
           setMessages(mm => [...mm, { role: "assistant", content: "Sorry — I couldn't build the plan." }]);
         }
