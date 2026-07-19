@@ -947,58 +947,140 @@ export default function AiPanel({ collapsed, onToggle }) {
       const inq = pendingIntentRef.current;
       pendingIntentRef.current = null;
       setMessages(m => [...m, { role: "user", content: userMsg }]);
-      // Very light NLP: strip filler and pull the last N words as the
-      // category candidate. Users typically say "these are X" or "X payments".
-      const raw = userMsg
-        .replace(/^(?:these|those|they|it)\s+(?:are|is|were|was)\s+/i, "")
-        .replace(/^(?:those\s+are\s+|these\s+are\s+|it'?s\s+|it\s+is\s+)/i, "")
-        .replace(/^(?:actually\s+|really\s+|just\s+)/i, "")
-        .replace(/^(?:all\s+)?(?:a\s+|an\s+|the\s+|some\s+|our\s+|my\s+)?/i, "")
-        .replace(/\s+(?:from|for|by|at|to)\s+.+$/i, "")
-        .replace(/\s+(?:transactions?|payments?|charges?|purchases?|expenses?|receipts?|activity|income|revenue)\s*$/i, "")
-        .replace(/[.?!]+$/, "")
-        .trim();
-      if (!raw || raw.length < 2) {
-        // Not enough signal — re-arm and ask for more.
+
+      // Parse the user's answer into a "plan":
+      //   base    → default category name for everything not caught by an exception
+      //   groups  → additional {predicate, categoryName} — currently supports
+      //             single-amount exceptions ("except for the $115,000") and
+      //             range splits ("under $5000 is Meals, above is Consulting").
+      const rawText = userMsg;
+      const parseMoney = (s) => {
+        const m = String(s).replace(/[\s,\$]/g, "").match(/(-?\d+(?:\.\d+)?)([km])?/i);
+        if (!m) return null;
+        let v = parseFloat(m[1]);
+        if (m[2] && m[2].toLowerCase() === "k") v *= 1000;
+        if (m[2] && m[2].toLowerCase() === "m") v *= 1000000;
+        return Math.abs(v);
+      };
+      const cleanCat = (s) =>
+        (s || "").replace(/^(?:categorize|make|mark|set|book|classify)\s+(?:all|them|these|those|it|everything)?\s*(?:as|to)\s+/i, "")
+                 .replace(/^(?:the|a|an|some|our|my)\s+/i, "")
+                 .replace(/\s+(?:transactions?|payments?|charges?|expenses?|receipts?)\s*$/i, "")
+                 .replace(/^(?:is|are|=|:)\s+/i, "")
+                 .replace(/[.?!]+$/, "")
+                 .trim();
+
+      const plan = { base: null, groups: [] };
+      // 1. Amount-range split: "under $X is A, above (that) is B" / "up to X → A, over → B"
+      const rangeM = rawText.match(/(?:from\s+\$?[\d,.]+\s+to\s+|up\s+to\s+|under\s+|below\s+|less\s+than\s+)\$?([\d,.km]+)\s+(?:is|are|goes?\s+to|→|=)\s+(.+?)(?:,|\s+and)\s+(?:above|over|greater\s+than|more\s+than)(?:\s+that)?\s+(?:is|are|goes?\s+to|→|=)?\s*(.+?)\s*[.!]?$/i);
+      if (rangeM) {
+        const threshold = parseMoney(rangeM[1]);
+        const belowCat = cleanCat(rangeM[2].replace(/,$/, ""));
+        const aboveCat = cleanCat(rangeM[3]);
+        if (threshold != null && belowCat && aboveCat) {
+          plan.groups.push({ predicate: { max: threshold }, categoryName: belowCat, label: `up to $${threshold.toLocaleString()}` });
+          plan.groups.push({ predicate: { min: threshold + 0.01 }, categoryName: aboveCat, label: `above $${threshold.toLocaleString()}` });
+        }
+      }
+      // 2. "X except for the $Y (that was actually) Z"
+      if (plan.groups.length === 0) {
+        const exM = rawText.match(/^(.+?)\s+except(?:\s+for)?\s+(?:the\s+)?\$?([\d,.km]+)\s+(?:that\s+(?:was|is)|which\s+(?:was|is))\s+(?:actually\s+|really\s+)?(?:a\s+|an\s+|the\s+)?(.+?)\s*[.!]?$/i);
+        if (exM) {
+          const baseCat = cleanCat(exM[1]);
+          const amt = parseMoney(exM[2]);
+          const exCat = cleanCat(exM[3]);
+          if (baseCat && amt != null && exCat) {
+            plan.base = baseCat;
+            plan.groups.push({ predicate: { exactAmount: amt }, categoryName: exCat, label: `the $${amt.toLocaleString()} row` });
+          }
+        }
+      }
+      // 3. Fallback: single category — old flow.
+      if (!plan.base && plan.groups.length === 0) {
+        plan.base = cleanCat(
+          rawText.replace(/^(?:these|those|they|it)\s+(?:are|is|were|was)\s+/i, "")
+                 .replace(/^(?:actually\s+|really\s+|just\s+)/i, "")
+                 .replace(/^(?:all\s+)?(?:a\s+|an\s+|the\s+|some\s+|our\s+|my\s+)?/i, "")
+                 .replace(/\s+(?:from|for|by|at|to)\s+.+$/i, "")
+        );
+      }
+      if (!plan.base && plan.groups.length === 0) {
         pendingIntentRef.current = inq;
-        const say = "Sorry, I need one or two more words — what category should these fall under? (e.g. \"Rental Income\", \"Contractor Payments\", \"Meals\")";
+        const say = "Sorry, I need one or two more words — what category should these fall under?";
         setMessages(m => [...m, { role: "assistant", content: say }]);
         if (voiceOnRef.current) speakOne(say);
         return;
       }
+
       try {
-        // Look up the target account.
+        // Fetch every unapproved txn for this contact.
+        const list = await api.get(
+          `/companies/${currentId}/transactions?contact_id=${inq.action.contact_id}&limit=2000`
+        );
+        const rows = (list.data.transactions || []).filter((t) => !t.human_reviewed);
+        // Look up accounts by name (case-insensitive).
         const r = await api.get(`/companies/${currentId}/accounts`);
         const accts = r.data.accounts || [];
-        const needle = raw.toLowerCase();
-        let hit = accts.find(a => (a.name || "").toLowerCase() === needle);
-        if (!hit) hit = accts.find(a => (a.name || "").toLowerCase().startsWith(needle));
-        if (!hit) hit = accts.find(a => (a.name || "").toLowerCase().includes(needle));
-        // Fetch every unapproved txn for this contact so we know the exact target set.
-        const cnt = inq.action.count || 0;
-        const cname = inq.action.contact_name;
-        const cid_ = inq.action.contact_id;
-        const say = hit
-          ? `Got it — categorize all **${cnt} ${cname}** transactions as **${hit.code} ${hit.name}**, mark them reviewed, and create a rule?`
-          : `I couldn't find an account called "${raw}". Want me to create it (as revenue if these look like income, expense otherwise), then categorize all ${cnt} ${cname} transactions and create a rule?`;
-        // Decide account type guess for the "create-then-bulk" path.
-        const guessType = /rent|revenue|income|sales|consult|fee|earn|receiv/i.test(raw) ? "revenue" : "expense";
+        const findAcct = (name) => {
+          const n = (name || "").toLowerCase();
+          return accts.find((a) => (a.name || "").toLowerCase() === n)
+              || accts.find((a) => (a.name || "").toLowerCase().startsWith(n))
+              || accts.find((a) => (a.name || "").toLowerCase().includes(n));
+        };
+        const guessType = (name) =>
+          /rent|revenue|income|sales|consult|fee|earn|receiv|deposit/i.test(name)
+            ? "revenue"
+            : /loan|note\s+payable|line\s+of\s+credit|mortgage|payable/i.test(name)
+              ? "liability"
+              : "expense";
+
+        // Assign each txn to a group.
+        const buckets = new Map();  // key → {label, categoryName, txns:[], amount_min?, amount_max?}
+        const ensureBucket = (key, label, name, min, max) => {
+          if (!buckets.has(key)) buckets.set(key, { label, categoryName: name, txns: [], amount_min: min, amount_max: max });
+          return buckets.get(key);
+        };
+        for (const t of rows) {
+          const amt = Math.abs(parseFloat(t.amount) || 0);
+          let placed = false;
+          for (const g of plan.groups) {
+            const p = g.predicate;
+            const hit = (p.exactAmount != null && Math.abs(amt - p.exactAmount) < 0.5)
+                     || (p.max != null && amt <= p.max)
+                     || (p.min != null && amt >= p.min);
+            if (hit) {
+              ensureBucket(g.categoryName, g.label, g.categoryName, p.min, p.max ?? p.exactAmount).txns.push(t);
+              placed = true; break;
+            }
+          }
+          if (!placed && plan.base) {
+            ensureBucket(plan.base, `everything else`, plan.base).txns.push(t);
+          }
+        }
+
+        // Preview lines for the card.
+        const preview = Array.from(buckets.values()).map((b) => {
+          const existing = findAcct(b.categoryName);
+          return { ...b, existingAccount: existing, guessType: guessType(b.categoryName) };
+        });
+        const totalCount = preview.reduce((s, b) => s + b.txns.length, 0);
+        const previewLines = preview
+          .map((b) => `• **${b.txns.length}** ${b.txns.length === 1 ? "row" : "rows"} (${b.label}) → **${b.existingAccount ? `${b.existingAccount.code} ${b.existingAccount.name}` : b.categoryName + " (new)"}**`)
+          .join("\n");
+        const say = `Here's the plan for **${inq.action.contact_name}**:\n${previewLines}\nApply all ${totalCount}, mark them reviewed, and create rules so future imports do the same?`;
         setMessages(m => [...m, {
-          role: "assistant",
-          content: say,
+          role: "assistant", content: say,
           card: {
-            kind: "cleanup-bulk-confirm",
-            targetName: raw,
-            existingAccount: hit || null,
-            guessType,
-            contactId: cid_,
-            contactName: cname,
-            count: cnt,
+            kind: "cleanup-multi-confirm",
+            preview,
+            contactId: inq.action.contact_id,
+            contactName: inq.action.contact_name,
+            count: totalCount,
           },
         }]);
-        if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
+        if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, "").replace(/\n/g, ". "));
       } catch (e) {
-        setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't look up accounts." }]);
+        setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't build the plan." }]);
       }
       return;
     }
@@ -1822,6 +1904,64 @@ export default function AiPanel({ collapsed, onToggle }) {
                 onDismiss={() => {
                   pendingIntentRef.current = null;
                   setMessages(mm => [...mm, { role: "assistant", content: "OK — only this side is marked as a transfer." }]);
+                }}
+              />
+            )}
+            {m.card?.kind === "cleanup-multi-confirm" && (
+              <InlineConfirmCard
+                testId="cleanup-multi-card"
+                tone="emerald"
+                confirmLabel={`Yes, categorize all ${m.card.count} + create rules`}
+                onConfirm={async () => {
+                  // 1. Ensure every bucket's category account exists.
+                  const groups = [];
+                  for (const b of m.card.preview) {
+                    let acct = b.existingAccount;
+                    if (!acct) {
+                      const r = await api.post(`/companies/${currentId}/accounts/ensure`, {
+                        name: (b.categoryName || "").replace(/\b(\w)/g, (c) => c.toUpperCase()),
+                        type: b.guessType,
+                      });
+                      acct = r.data;
+                    }
+                    groups.push({
+                      txn_ids: b.txns.map((t) => t.id),
+                      category_account_id: acct.id,
+                      amount_min: b.amount_min ?? null,
+                      amount_max: b.amount_max ?? null,
+                      rule_label: b.label,
+                    });
+                  }
+                  // 2. Apply all buckets in one call.
+                  const res = await api.post(
+                    `/companies/${currentId}/transactions/apply-multi-bulk-approve-rule`,
+                    {
+                      contact_id: m.card.contactId,
+                      contact_name: m.card.contactName,
+                      groups,
+                      create_rules: true,
+                    }
+                  );
+                  const updated = res.data?.updated || 0;
+                  const rules = (res.data?.rule_ids || []).length;
+                  const say = `Done — recategorized ${updated} ${m.card.contactName} transactions across ${groups.length} categor${groups.length === 1 ? "y" : "ies"}${rules ? ` and created ${rules} rule${rules === 1 ? "" : "s"}` : ""}.`;
+                  setMessages(mm => [...mm, { role: "assistant", content: say }]);
+                  if (voiceOnRef.current) speakOne(say);
+                  emitAction("txns:changed");
+                }}
+                onDismiss={() => {
+                  pendingIntentRef.current = {
+                    kind: "cleanup-inquiry",
+                    action: {
+                      kind: "contact_in_uncat",
+                      contact_id: m.card.contactId,
+                      contact_name: m.card.contactName,
+                      count: m.card.count,
+                    },
+                  };
+                  const say = `OK — how would you like to categorize the ${m.card.count} ${m.card.contactName} transactions instead?`;
+                  setMessages(mm => [...mm, { role: "assistant", content: say }]);
+                  if (voiceOnRef.current) speakOne(say);
                 }}
               />
             )}

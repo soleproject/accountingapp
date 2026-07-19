@@ -757,6 +757,92 @@ class BulkApproveRuleIn(BaseModel):
     create_rule: bool = True
 
 
+class MultiBulkApproveIn(BaseModel):
+    """Multi-group bulk approve. Each `groups` entry gets its own category
+    and can carry its own optional rule (amount range → category). Used by
+    the Cleanup Copilot when the user says "X except for the $Y" or
+    "$0-5000 → A, above → B".
+    """
+    contact_id: Optional[str] = None
+    contact_name: Optional[str] = None
+    groups: list  # [{txn_ids: [], category_account_id: str, amount_min?: float, amount_max?: float, rule_label?: str}]
+    create_rules: bool = True
+
+
+@router.post("/companies/{cid}/transactions/apply-multi-bulk-approve-rule")
+async def apply_multi_bulk_approve(cid: str, inp: MultiBulkApproveIn, user: dict = Depends(get_current_user)):
+    """One call, N category buckets. For each group we update the txns
+    listed, mark them approved, and (optionally) create a contact_id rule
+    scoped to the amount range that applies. Skips already-approved rows.
+    """
+    await require_company(user, cid)
+    if not inp.groups:
+        return {"ok": True, "updated": 0, "rule_ids": []}
+
+    updated_total = 0
+    rule_ids: list[str] = []
+    for g in inp.groups:
+        acct_id = g.get("category_account_id")
+        ids = g.get("txn_ids") or []
+        if not acct_id or not ids:
+            continue
+        acct = await db.accounts.find_one({"id": acct_id, "company_id": cid})
+        if not acct:
+            continue
+        # Only actionable rows: not already approved AND in an open period.
+        docs = await db.transactions.find({
+            "id": {"$in": ids}, "company_id": cid,
+            "human_reviewed": {"$ne": True},
+        }).to_list(3000)
+        actionable = [d["id"] for d in docs if not await is_period_closed(cid, d.get("date"))]
+        if actionable:
+            res = await db.transactions.update_many(
+                {"id": {"$in": actionable}, "company_id": cid},
+                {"$set": {
+                    "category_account_id": acct["id"],
+                    "category_account_code": acct["code"],
+                    "category_account_name": acct["name"],
+                    "human_reviewed": True,
+                    "posted": True,
+                    "needs_review": False,
+                    "ai_confidence": 1.0,
+                    "updated_at": now_iso(),
+                }},
+            )
+            updated_total += res.modified_count
+
+        # Create a contact_id rule that carries the amount bound (if any).
+        # This lets future Plaid imports auto-route per range.
+        if inp.create_rules and inp.contact_id:
+            match_meta = {"match_type": "contact_id", "match_value": inp.contact_id}
+            if g.get("amount_min") is not None:
+                match_meta["amount_min"] = float(g["amount_min"])
+            if g.get("amount_max") is not None:
+                match_meta["amount_max"] = float(g["amount_max"])
+            existing = await db.rules.find_one({
+                "company_id": cid,
+                "match_type": "contact_id",
+                "match_value": inp.contact_id,
+                "amount_min": match_meta.get("amount_min"),
+                "amount_max": match_meta.get("amount_max"),
+                "category_account_id": acct["id"],
+            })
+            if not existing:
+                rid = str(uuid.uuid4())
+                await db.rules.insert_one({
+                    "id": rid, "company_id": cid,
+                    **match_meta,
+                    "contact_name": inp.contact_name or "",
+                    "account_code": acct["code"], "account_name": acct["name"],
+                    "category_account_id": acct["id"],
+                    "source": "user_multi_bulk_approve",
+                    "created_at": now_iso(),
+                })
+                rule_ids.append(rid)
+    await log_ai(cid, "multi_bulk_approve", updated_total)
+    return {"ok": True, "updated": updated_total, "rule_ids": rule_ids}
+
+
 @router.post("/companies/{cid}/transactions/apply-bulk-approve-rule")
 async def apply_bulk_approve_rule(cid: str, inp: BulkApproveRuleIn, user: dict = Depends(get_current_user)):
     """Bulk-set every listed transaction to `category_account_id` + approve
