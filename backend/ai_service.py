@@ -797,19 +797,32 @@ async def cpa_review(
         conf = 0.5
 
     # Server-side safety net: even if the LLM returned intent=categorize with
-    # a filler-phrase account name, downgrade to approve_existing.
+    # a filler-phrase account name, downgrade to approve_existing. We check
+    # for names whose ENTIRE stripped content is filler (whole-name match), or
+    # names that are absurdly short and lack any accounting vocabulary — this
+    # avoids false positives like "fine dining meals" (contains "fine") or
+    # legitimate short names like "IT" or "HR".
     resolution = data.get("resolution") if isinstance(data.get("resolution"), dict) else {}
     if intent == "categorize":
         buckets = resolution.get("buckets") if isinstance(resolution.get("buckets"), list) else []
+        # Whole-name filler phrases (case-insensitive, exact match after
+        # punctuation strip). Legitimate accounts never look like these.
+        _whole_filler = {
+            "they look good", "they look good the way they are",
+            "looks good", "looks fine", "let's", "let us", "same",
+            "okay", "ok", "fine", "yes", "no", "maybe", "these are",
+            "this is", "that was", "we should", "i think", "good",
+            "leave it", "keep it", "as is", "as-is", "approve", "accept",
+            "they're fine", "these are fine", "all good", "sounds good",
+            "same again", "same as before", "correct", "right",
+        }
         for b in buckets:
             acct = b.get("account", {}) if isinstance(b, dict) else {}
-            name = str(acct.get("name") or "").lower().strip()
-            _filler_markers = (
-                "they look", "looks good", "looks fine", "let's", "let us", "same", "okay", "ok ",
-                "fine", "yes", "no ", "no,", "maybe", "these are", "this is", "that was", "we should",
-                "i think", "like ", "good", "leave ", "keep ", "as is", "as-is", "approve", "accept",
-            )
-            if any(m in name for m in _filler_markers) or len(name) < 3:
+            raw_name = str(acct.get("name") or "").strip()
+            normalized = raw_name.lower().rstrip(".!?").strip()
+            # Trigger downgrade only when the entire account name IS a filler
+            # phrase, or when the name is empty/single-char.
+            if normalized in _whole_filler or len(normalized) < 2:
                 intent = "unclear"
                 data["say"] = "That didn't sound like a category name — could you tell me which account these belong in?"
                 resolution = {"clarifying_question": "Which account should these post to (e.g. Meals, Office Supplies, Utilities)?"}
