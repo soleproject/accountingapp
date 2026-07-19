@@ -11,7 +11,7 @@ import json
 import random
 import asyncio
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Any, List
+from typing import Optional, Any, List, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, Response
@@ -201,6 +201,12 @@ class BulkApproveAiReadyIn(BaseModel):
     # Optional filter: when non-empty on a live run, only these contact_ids are
     # approved. Powers the vendor-level toggle in the mega-approve modal.
     contact_ids: Optional[List[str]] = None
+    # Optional per-vendor category overrides: {contact_id -> category_account_id}
+    # Set when the CPA changes a vendor's category pill in the modal before
+    # approving. The row's category is switched to the target account (unless
+    # target is one of the Uncategorized sinks) and the original category is
+    # snapshotted on each row so Undo can restore it cleanly.
+    overrides: Optional[Dict[str, str]] = None
 
 
 @router.post("/companies/{cid}/transactions/bulk-approve-ai-ready")
@@ -289,27 +295,81 @@ async def bulk_approve_ai_ready(
     batch_id = str(uuid.uuid4())
     updated_total = 0
     now = now_iso()
+
+    # Resolve override targets once (contact_id -> account doc). Reject targets
+    # that are uncategorized sinks or belong to a different company.
+    override_accounts: Dict[str, dict] = {}
+    if inp.overrides:
+        eligible_cids = {cidk for cidk, _ in eligible}
+        for cidk, target_id in inp.overrides.items():
+            if not target_id or cidk not in eligible_cids:
+                continue
+            acct = await db.accounts.find_one({"id": target_id, "company_id": cid})
+            if not acct:
+                raise HTTPException(404, f"Override target account {target_id} not found")
+            if str(acct.get("code")) in ("9999", "6999", "4999"):
+                raise HTTPException(400, f"Cannot override to Uncategorized ({acct.get('code')})")
+            override_accounts[cidk] = acct
+
     for cidk, r in eligible:
         ids = r["txn_ids"]
-        keep_ids: list[str] = []
+        override = override_accounts.get(cidk)
+        # When there's an override we need each row's ORIGINAL category so we
+        # can snapshot it on the row (for Undo restoration). Fetch full docs.
+        proj = {"id": 1, "date": 1}
+        if override:
+            proj.update({
+                "category_account_id": 1,
+                "category_account_code": 1,
+                "category_account_name": 1,
+            })
+        keep_docs: list[dict] = []
         async for t in db.transactions.find(
-            {"id": {"$in": ids}, "company_id": cid}, {"id": 1, "date": 1}
+            {"id": {"$in": ids}, "company_id": cid}, proj
         ):
             if await is_period_closed(cid, t.get("date") or ""):
                 continue
-            keep_ids.append(t["id"])
-        if not keep_ids: continue
-        res = await db.transactions.update_many(
-            {"id": {"$in": keep_ids}, "company_id": cid, "human_reviewed": {"$ne": True}},
-            {"$set": {
-                "human_reviewed": True, "posted": True, "needs_review": False,
-                "ai_source": "user_bulk_approve_ai_ready",
-                "mega_batch_id": batch_id,
-                "mega_batch_at": now,
-                "updated_at": now,
-            }},
-        )
-        updated_total += res.modified_count
+            keep_docs.append(t)
+        if not keep_docs: continue
+
+        if override:
+            # Per-row updates because each row needs its own `_pre_mega_cat`
+            # snapshot.
+            for t in keep_docs:
+                snap = {
+                    "category_account_id": t.get("category_account_id"),
+                    "category_account_code": t.get("category_account_code"),
+                    "category_account_name": t.get("category_account_name"),
+                }
+                res = await db.transactions.update_one(
+                    {"id": t["id"], "company_id": cid, "human_reviewed": {"$ne": True}},
+                    {"$set": {
+                        "human_reviewed": True, "posted": True, "needs_review": False,
+                        "ai_source": "user_bulk_approve_ai_ready_override",
+                        "mega_batch_id": batch_id,
+                        "mega_batch_at": now,
+                        "_pre_mega_cat": snap,
+                        "category_account_id": override["id"],
+                        "category_account_code": override.get("code"),
+                        "category_account_name": override.get("name"),
+                        "updated_at": now,
+                    }},
+                )
+                if res.modified_count:
+                    updated_total += 1
+        else:
+            keep_ids = [t["id"] for t in keep_docs]
+            res = await db.transactions.update_many(
+                {"id": {"$in": keep_ids}, "company_id": cid, "human_reviewed": {"$ne": True}},
+                {"$set": {
+                    "human_reviewed": True, "posted": True, "needs_review": False,
+                    "ai_source": "user_bulk_approve_ai_ready",
+                    "mega_batch_id": batch_id,
+                    "mega_batch_at": now,
+                    "updated_at": now,
+                }},
+            )
+            updated_total += res.modified_count
     if updated_total:
         await log_ai(cid, "bulk_approve_ai_ready", updated_total)
 
@@ -336,28 +396,50 @@ async def undo_mega_batch(cid: str, batch_id: str, user: dict = Depends(get_curr
     await require_company(user, cid)
     rows = await db.transactions.find(
         {"company_id": cid, "mega_batch_id": batch_id},
-        {"id": 1, "date": 1},
+        {"id": 1, "date": 1, "_pre_mega_cat": 1},
     ).to_list(20000)
     if not rows:
         return {"ok": True, "reverted": 0}
-    keep_ids: list[str] = []
+    # Rows without a category snapshot go through a fast bulk update; rows with
+    # a snapshot need their per-row original category restored.
+    fast_ids: list[str] = []
+    snapshot_rows: list[dict] = []
     for t in rows:
         if await is_period_closed(cid, t.get("date") or ""):
             continue
-        keep_ids.append(t["id"])
-    if not keep_ids:
-        return {"ok": True, "reverted": 0}
-    res = await db.transactions.update_many(
-        {"id": {"$in": keep_ids}, "company_id": cid, "mega_batch_id": batch_id},
-        {"$set": {
-            "human_reviewed": False, "posted": False, "needs_review": False,
-            "ai_source": "pfc_resolver",
-            "updated_at": now_iso(),
-        }, "$unset": {"mega_batch_id": "", "mega_batch_at": ""}},
-    )
-    if res.modified_count:
-        await log_ai(cid, "undo_mega_batch", res.modified_count)
-    return {"ok": True, "reverted": res.modified_count}
+        if t.get("_pre_mega_cat"):
+            snapshot_rows.append(t)
+        else:
+            fast_ids.append(t["id"])
+    reverted = 0
+    now = now_iso()
+    if fast_ids:
+        res = await db.transactions.update_many(
+            {"id": {"$in": fast_ids}, "company_id": cid, "mega_batch_id": batch_id},
+            {"$set": {
+                "human_reviewed": False, "posted": False, "needs_review": False,
+                "ai_source": "pfc_resolver",
+                "updated_at": now,
+            }, "$unset": {"mega_batch_id": "", "mega_batch_at": ""}},
+        )
+        reverted += res.modified_count
+    for t in snapshot_rows:
+        snap = t.get("_pre_mega_cat") or {}
+        res = await db.transactions.update_one(
+            {"id": t["id"], "company_id": cid, "mega_batch_id": batch_id},
+            {"$set": {
+                "human_reviewed": False, "posted": False, "needs_review": False,
+                "ai_source": "pfc_resolver",
+                "category_account_id": snap.get("category_account_id"),
+                "category_account_code": snap.get("category_account_code"),
+                "category_account_name": snap.get("category_account_name"),
+                "updated_at": now,
+            }, "$unset": {"mega_batch_id": "", "mega_batch_at": "", "_pre_mega_cat": ""}},
+        )
+        reverted += res.modified_count
+    if reverted:
+        await log_ai(cid, "undo_mega_batch", reverted)
+    return {"ok": True, "reverted": reverted}
 
 
 

@@ -52,6 +52,25 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - Verified E2E via curl: 48 AT&T rows with `needs_review=true` → approved (48
   updated, batch_id issued) → undo restored all 48.
 
+### Feb 2026 — Mega-Approve modal redesign: dropdown + info + width
+- Modal upgraded to `max-w-3xl` (wider) and `max-h-[92vh]` (taller) with a
+  flex-column layout: header + vendor list (flex-1 scroll) + sticky footer.
+- **Category pill → dropdown**: each vendor row now has a `<select>` grouped by
+  account type (EXPENSE / REVENUE / ASSET / …). A reviewer can override the AI's
+  category before approving. Overridden rows are highlighted amber.
+- **Info icon + tooltip**: Info icon sits to the right of the category dropdown.
+  On hover (or keyboard focus) a portaled tooltip shows the account's GAAP
+  definition sourced from `/frontend/src/lib/accountDefinitions.js`.
+  Portal placement escapes the scrollable vendor list's overflow clip.
+- Backend `BulkApproveAiReadyIn` now accepts `overrides: {contact_id → account_id}`.
+  Live-run snapshots each affected row's original category into `_pre_mega_cat`
+  before applying the override; `undo-mega-batch` restores original categories
+  when the snapshot is present.
+- Verified E2E via curl: AT&T (48 rows) approved with override → all rows land on
+  `6120 Transportation`; `_pre_mega_cat` = original `6600 Utilities`; Undo →
+  rows restored to `6600 Utilities` and snapshot cleared.
+
+
 - **2026-02-17**: Contacts page — added inline **Edit Contact** flow (click row or pencil icon).
   Backend `PATCH /api/companies/{cid}/contacts/{xid}` already existed; UI now reuses the modal
   for create + edit with prefilled fields, sonner toasts, and empty-`type` handling.

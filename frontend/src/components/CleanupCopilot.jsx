@@ -1,7 +1,60 @@
 import { useEffect, useState, useRef } from "react";
+import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
 import { useActionListener } from "@/lib/createBus";
-import { Sparkles, PlayCircle, ArrowRight, Loader2 } from "lucide-react";
+import { Sparkles, PlayCircle, ArrowRight, Loader2, Info } from "lucide-react";
+import { accountDefinition } from "@/lib/accountDefinitions";
+
+// Small hover-tooltip that renders in a portal so it escapes the modal's
+// scrollable vendor list (which would otherwise clip an absolutely-positioned
+// tooltip).
+function InfoTooltip({ account }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const ref = useRef(null);
+  const show = () => {
+    const r = ref.current?.getBoundingClientRect();
+    if (r) setPos({ x: r.left + r.width / 2, y: r.top });
+    setOpen(true);
+  };
+  return (
+    <>
+      <span
+        ref={ref}
+        onMouseEnter={show}
+        onMouseLeave={() => setOpen(false)}
+        onFocus={show}
+        onBlur={() => setOpen(false)}
+        tabIndex={0}
+        className="shrink-0 inline-flex items-center cursor-help"
+      >
+        <Info size={12} className="text-slate-400 hover:text-slate-600" />
+      </span>
+      {open && account && createPortal(
+        <div
+          role="tooltip"
+          style={{
+            position: "fixed",
+            left: pos.x,
+            top: pos.y,
+            transform: "translate(-50%, calc(-100% - 8px))",
+            zIndex: 100,
+            pointerEvents: "none",
+          }}
+          className="w-64 rounded-md bg-slate-900 text-white text-[11px] leading-snug px-2.5 py-2 shadow-xl"
+        >
+          <span className="block font-semibold mb-0.5 font-mono-num">
+            {account.code} · {account.name}
+          </span>
+          <span className="block text-slate-200">
+            {accountDefinition(account)}
+          </span>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
 
 // Compact SVG donut: reviewed (emerald), ai (indigo), uncategorized (rose),
 // flagged (amber), rest of total (slate). All slice sizes are proportional
@@ -76,6 +129,13 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   const [megaSelected, setMegaSelected] = useState(new Set());
   const [megaSearch, setMegaSearch] = useState("");
   const [megaUndo, setMegaUndo] = useState(null);  // {batch_id, count, expires}
+  // Per-vendor category overrides: Map<contact_id, account_id>. When present,
+  // the mega-approve call sends `overrides` and the vendor's row gets
+  // recategorized to the target account (and snapshotted for Undo).
+  const [megaOverrides, setMegaOverrides] = useState({});
+  // Full CoA for the current company, loaded once when the modal opens. Used
+  // for the category dropdown and the info-icon tooltip.
+  const [accounts, setAccounts] = useState([]);
   useEffect(() => {
     // Auto-dismiss the Undo toast after 60s.
     if (!megaUndo) return;
@@ -86,10 +146,20 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     if (megaBusy || !currentId) return;
     setMegaBusy(true);
     try {
-      const r = await api.post(
-        `/companies/${currentId}/transactions/bulk-approve-ai-ready`,
-        { dry_run: true }
+      const [r, ar] = await Promise.all([
+        api.post(
+          `/companies/${currentId}/transactions/bulk-approve-ai-ready`,
+          { dry_run: true }
+        ),
+        api.get(`/companies/${currentId}/accounts`),
+      ]);
+      // Filter out uncategorized sinks so they never appear in the override
+      // dropdown — the whole point of the modal is to *get out* of them.
+      const allAccounts = (ar.data?.accounts || []).filter(
+        a => !["9999", "6999", "4999"].includes(String(a.code))
       );
+      setAccounts(allAccounts);
+      setMegaOverrides({});
       if (!r.data?.total_rows) {
         setMegaPreview({ total_rows: 0, vendors: [] });
         setMegaSelected(new Set());
@@ -108,9 +178,18 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     if (megaBusy || !currentId || megaSelected.size === 0) return;
     setMegaBusy(true);
     try {
+      // Only send overrides for vendors actually being approved this round.
+      const overrides = {};
+      for (const cid of megaSelected) {
+        if (megaOverrides[cid]) overrides[cid] = megaOverrides[cid];
+      }
       const r = await api.post(
         `/companies/${currentId}/transactions/bulk-approve-ai-ready`,
-        { dry_run: false, contact_ids: Array.from(megaSelected) }
+        {
+          dry_run: false,
+          contact_ids: Array.from(megaSelected),
+          ...(Object.keys(overrides).length ? { overrides } : {}),
+        }
       );
       setMegaPreview(null);
       setMegaSelected(new Set());
@@ -164,9 +243,14 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
       const n = new Set(prev); n.delete(vendor.contact_id); return n;
     });
     try {
+      const overrideId = megaOverrides[vendor.contact_id];
       const r = await api.post(
         `/companies/${currentId}/transactions/bulk-approve-ai-ready`,
-        { dry_run: false, contact_ids: [vendor.contact_id] }
+        {
+          dry_run: false,
+          contact_ids: [vendor.contact_id],
+          ...(overrideId ? { overrides: { [vendor.contact_id]: overrideId } } : {}),
+        }
       );
       window.dispatchEvent(new CustomEvent("axiom:action",
         { detail: { kind: "txns:changed", at: Date.now() } }));
@@ -350,7 +434,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-[2px] flex items-center justify-center p-4"
              data-testid="mega-approve-modal"
              onClick={() => !megaBusy && setMegaPreview(null)}>
-          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-5"
+          <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[92vh] flex flex-col p-5"
                onClick={(e) => e.stopPropagation()}>
             {megaPreview.total_rows === 0 ? (
               <>
@@ -365,7 +449,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                   Approve <span data-testid="mega-selected-rows">{selectedRows.toLocaleString()}</span> rows across <span data-testid="mega-selected-vendors">{megaSelected.size}</span> vendors?
                 </div>
                 <div className="text-xs text-slate-500 mb-2">
-                  Total volume: ${selectedAmount.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2})}. Vendors with mixed AI opinions or rows flagged for review are already excluded.
+                  Total volume: ${selectedAmount.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2})}. Vendors with mixed AI opinions are already excluded. Change any category from the dropdown before approving.
                 </div>
                 <div className="mb-2">
                   <input
@@ -378,7 +462,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                   />
                 </div>
                 <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1.5">
-                  <span>Click a row to include/exclude</span>
+                  <span>Click a row to include/exclude · change the category pill to override</span>
                   <div className="flex gap-2">
                     <button data-testid="mega-select-all"
                             className="text-emerald-700 hover:underline"
@@ -392,9 +476,15 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                     </button>
                   </div>
                 </div>
-                <div className="space-y-1 mb-3 max-h-72 overflow-y-auto pr-1" data-testid="mega-vendor-list">
+                <div className="space-y-1 mb-3 flex-1 min-h-[240px] overflow-y-auto pr-1" data-testid="mega-vendor-list">
                   {filteredVendors.map((c) => {
                     const on = megaSelected.has(c.contact_id);
+                    // Effective account = user override (if any) else AI's pick.
+                    const overrideId = megaOverrides[c.contact_id];
+                    const effAccount = overrideId
+                      ? accounts.find(a => a.id === overrideId)
+                      : accounts.find(a => String(a.code) === String(c.account?.code)) || c.account;
+                    const isOverridden = !!overrideId;
                     return (
                       <div
                         key={c.contact_id}
@@ -414,13 +504,53 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                         </button>
                         <button
                           onClick={() => toggleVendor(c.contact_id)}
-                          className="min-w-0 flex-1 text-left flex items-center gap-2"
+                          className="min-w-0 shrink-0 text-left"
+                          title={c.contact_name}
                         >
-                          <span className="font-medium truncate">{c.contact_name}</span>
-                          <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full bg-white border border-slate-200 text-slate-700 text-[10px] font-mono-num">
-                            {c.account?.code} · {c.account?.name}
-                          </span>
+                          <span className="font-medium truncate max-w-[180px] inline-block align-middle">{c.contact_name}</span>
                         </button>
+                        <div className="min-w-0 flex-1 flex items-center gap-1">
+                          <select
+                            data-testid={`mega-vendor-cat-${c.contact_id}`}
+                            value={effAccount?.id || ""}
+                            onChange={(e) => {
+                              const newId = e.target.value;
+                              setMegaOverrides(prev => {
+                                const next = { ...prev };
+                                // If user reverts to AI's original code, clear the override.
+                                const chosen = accounts.find(a => a.id === newId);
+                                if (chosen && String(chosen.code) === String(c.account?.code)) {
+                                  delete next[c.contact_id];
+                                } else if (newId) {
+                                  next[c.contact_id] = newId;
+                                }
+                                return next;
+                              });
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className={`min-w-0 flex-1 max-w-[280px] px-1.5 py-0.5 rounded-full border text-[10px] font-mono-num truncate ${
+                              isOverridden
+                                ? "bg-amber-50 border-amber-300 text-amber-900"
+                                : "bg-white border-slate-200 text-slate-700"
+                            }`}
+                          >
+                            {/* Grouped options by type for readability. */}
+                            {["expense", "cogs", "revenue", "asset", "liability", "equity"].map(kind => {
+                              const opts = accounts.filter(a => (a.type || "").toLowerCase() === kind);
+                              if (opts.length === 0) return null;
+                              return (
+                                <optgroup key={kind} label={kind.toUpperCase()}>
+                                  {opts.map(a => (
+                                    <option key={a.id} value={a.id}>{a.code} · {a.name}</option>
+                                  ))}
+                                </optgroup>
+                              );
+                            })}
+                          </select>
+                          <span data-testid={`mega-vendor-info-${c.contact_id}`}>
+                            <InfoTooltip account={effAccount} />
+                          </span>
+                        </div>
                         <div className="text-right shrink-0">
                           <div className="font-mono-num text-slate-900">{c.count} rows</div>
                           <div className="font-mono-num text-slate-500">${c.amount.toLocaleString("en-US", {maximumFractionDigits: 0})}</div>
@@ -429,7 +559,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                           data-testid={`mega-vendor-approve-${c.contact_id}`}
                           onClick={() => approveOne(c)}
                           className="ml-2 shrink-0 text-emerald-700 hover:text-emerald-900 text-xs font-semibold hover:underline"
-                          title={`Approve ${c.count} rows now`}
+                          title={`Approve ${c.count} rows now${isOverridden ? " (with override)" : ""}`}
                         >
                           Approve →
                         </button>
@@ -441,7 +571,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                   )}
                 </div>
                 <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mb-3">
-                  ⚠ You&apos;ll have 60 seconds to Undo after applying. Rows the AI flagged for review are excluded automatically.
+                  ⚠ You&apos;ll have 60 seconds to Undo after applying. Undo restores each row&apos;s original category too.
                 </div>
                 <div className="flex gap-2">
                   <button
