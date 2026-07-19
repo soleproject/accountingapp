@@ -148,6 +148,9 @@ export default function Transactions() {
     if (!currentId) return;
     const params = new URLSearchParams();
     if (filter === "review") params.set("needs_review", "true");
+    else if (filter === "ai" || filter === "uncategorized" || filter === "unapproved" || filter === "reviewed") {
+      params.set("status", filter);
+    }
     if (debouncedSearch) params.set("q", debouncedSearch);
     if (dateFrom) params.set("date_from", dateFrom);
     if (dateTo) params.set("date_to", dateTo);
@@ -252,7 +255,7 @@ export default function Transactions() {
   const clearFilters = () => {
     setSearch(""); setDateFrom(""); setDateTo(""); setFilter("all");
   };
-  const filtersActive = Boolean(debouncedSearch || dateFrom || dateTo || filter === "review");
+  const filtersActive = Boolean(debouncedSearch || dateFrom || dateTo || (filter !== "all"));
 
   const [params] = useSearchParams();
   // Voice-command deep-link support: /accounting/transactions?q=Walmart or
@@ -425,17 +428,24 @@ export default function Transactions() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="inline-flex rounded-md border bg-white">
-            {["all", "review"].map(f => (
+          <div className="inline-flex rounded-md border bg-white overflow-hidden">
+            {[
+              { k: "all",           label: "All" },
+              { k: "review",        label: "Needs Review" },
+              { k: "ai",            label: "AI Categorized" },
+              { k: "uncategorized", label: "Uncategorized" },
+              { k: "unapproved",    label: "Unapproved" },
+              { k: "reviewed",      label: "Reviewed" },
+            ].map(({ k, label }) => (
               <button
-                key={f}
-                data-testid={f === "review" ? TID.txnFilterReview : `txn-filter-${f}`}
-                onClick={() => { setFilter(f); setPage(1); }}
-                className={`px-3 py-1.5 text-xs font-medium ${filter === f ? "bg-slate-900 text-white" : "text-slate-600"}`}
+                key={k}
+                data-testid={k === "review" ? TID.txnFilterReview : `txn-filter-${k}`}
+                onClick={() => { setFilter(k); setPage(1); }}
+                className={`px-3 py-1.5 text-xs font-medium border-r border-slate-200 last:border-r-0 ${filter === k ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
               >
-                {f === "all" ? "All" : "Needs Review"}
-                {filter === f && (
-                  <span data-testid={`txn-filter-count-${f}`}
+                {label}
+                {filter === k && (
+                  <span data-testid={`txn-filter-count-${k}`}
                         className="ml-1.5 px-1.5 py-0.5 rounded bg-white/20 font-mono-num">
                     {pagination.total}
                   </span>

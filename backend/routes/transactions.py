@@ -152,6 +152,7 @@ async def contact_category_rollup(
 async def list_transactions(
     cid: str, user: dict = Depends(get_current_user),
     needs_review: Optional[bool] = None,
+    status: Optional[str] = None,  # "ai" | "uncategorized" | "unapproved" | "reviewed"
     page: int = 1, limit: int = 250,
     q: Optional[str] = None,
     date_from: Optional[str] = None,
@@ -163,6 +164,29 @@ async def list_transactions(
     query: dict = {"company_id": cid}
     if needs_review is not None:
         query["needs_review"] = needs_review
+    # Status buckets — mutually exclusive tabs on the Transactions UI. Each
+    # segment answers a different bookkeeper question:
+    #   ai            → auto-posted by the LLM, no human sign-off yet.
+    #                   (posted=True + human_reviewed≠True + a real category)
+    #   uncategorized → sitting in the fallback 9999/4999 accounts (or none).
+    #   unapproved    → catch-all: anything the human hasn't reviewed yet.
+    #   reviewed      → human_reviewed=True (the "done" bucket).
+    if status == "ai":
+        query["human_reviewed"] = {"$ne": True}
+        query["posted"] = True
+        # exclude the two Uncategorized sink accounts (populated by seed).
+        query["category_account_code"] = {"$nin": ["9999", "4999"]}
+    elif status == "uncategorized":
+        # Wrap in a named clause so an $or search filter below can co-exist.
+        query.setdefault("$and", []).append({"$or": [
+            {"category_account_id": None},
+            {"category_account_id": {"$exists": False}},
+            {"category_account_code": {"$in": ["9999", "4999"]}},
+        ]})
+    elif status == "unapproved":
+        query["human_reviewed"] = {"$ne": True}
+    elif status == "reviewed":
+        query["human_reviewed"] = True
     if contact_id:
         query["contact_id"] = contact_id
     if category_account_id:
@@ -179,11 +203,17 @@ async def list_transactions(
         # and contact_name. Escape regex specials so user input like "$5.00" or
         # "AT&T" doesn't blow up.
         pattern = re.escape(q.strip())
-        query["$or"] = [
+        search_or = [
             {"merchant":     {"$regex": pattern, "$options": "i"}},
             {"description":  {"$regex": pattern, "$options": "i"}},
             {"contact_name": {"$regex": pattern, "$options": "i"}},
         ]
+        # Nest under $and if another $or clause is already present (e.g. from
+        # the uncategorized status filter).
+        if "$or" in query or "$and" in query:
+            query.setdefault("$and", []).append({"$or": search_or})
+        else:
+            query["$or"] = search_or
     # Clamp inputs to sane bounds. limit=0 returns everything (used by exports
     # and legacy callers that expect the full list).
     page = max(1, int(page or 1))
