@@ -82,12 +82,14 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         { dry_run: true }
       );
       if (!r.data?.total_rows) {
-        // Nothing AI-ready → sentinel so the button hides after click.
         setMegaPreview({ total_rows: 0 });
       } else {
         setMegaPreview(r.data);
       }
-    } catch (e) { /* silent */ } finally { setMegaBusy(false); }
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("axiom:toast",
+        { detail: { message: "Couldn't scan AI-ready rows. Try again in a moment.", type: "error" } }));
+    } finally { setMegaBusy(false); }
   };
   const applyMega = async () => {
     if (megaBusy || !currentId) return;
@@ -98,14 +100,15 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         { dry_run: false }
       );
       setMegaPreview(null);
-      load(); // reload the copilot band
-      // Broadcast so the Transactions page + AI panel refresh their grids.
+      load();
       window.dispatchEvent(new CustomEvent("axiom:action",
         { detail: { kind: "txns:changed", at: Date.now() } }));
-      // Toast-style banner via existing bus.
       window.dispatchEvent(new CustomEvent("axiom:toast",
         { detail: { message: `Approved ${r.data?.updated || 0} rows across ${r.data?.total_contacts || 0} vendors.` } }));
-    } catch (e) { /* silent */ } finally { setMegaBusy(false); }
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("axiom:toast",
+        { detail: { message: "Bulk-approve failed. No rows were changed.", type: "error" } }));
+    } finally { setMegaBusy(false); }
   };
 
   const load = async () => {
