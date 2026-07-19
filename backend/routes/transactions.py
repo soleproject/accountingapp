@@ -68,6 +68,17 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
     ai_cat  = sum(1 for t in txns
                   if not t.get("human_reviewed") and t.get("posted")
                   and t.get("category_account_code") not in ("9999", "6999", "4999"))
+    # Rows the mega-approve endpoint would ACTUALLY surface — i.e. AI-
+    # categorized-unreviewed rows with a real account AND a contact_id (rows
+    # without a contact — like raw "Online Banking transfer" bank noise —
+    # are handled by Detect Transfers, not mass-approve). We surface this
+    # to the frontend so the shimmering "Approve all AI-ready" CTA only
+    # highlights when there's genuinely something to approve.
+    mega_ready = sum(1 for t in txns
+                     if not t.get("human_reviewed")
+                     and t.get("category_account_id")
+                     and t.get("category_account_code") not in ("9999", "6999", "4999")
+                     and t.get("contact_id"))
     uncat = sum(1 for t in txns
                 if not t.get("category_account_id")
                 or t.get("category_account_code") in ("9999", "6999", "4999"))
@@ -190,6 +201,7 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
     return {
         "progress": {
             "total": total, "reviewed": reviewed, "ai_categorized": ai_cat,
+            "mega_ready_rows": mega_ready,
             "uncategorized": uncat, "flagged": flagged, "pct_reviewed": pct,
         },
         "top_actions": top_actions[:50],

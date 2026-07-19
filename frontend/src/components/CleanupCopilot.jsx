@@ -387,10 +387,11 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         <div className="flex items-center gap-2">
           {(() => {
             // Which CTA should draw the eye? Approve-all-AI-ready wins if
-            // there are AI-categorized rows waiting for sign-off (data.progress.
-            // ai_categorized). Otherwise Fix now wins if there's any primary
-            // cleanup action queued.
-            const aiReadyCount = data?.progress?.ai_categorized || 0;
+            // the mega-approve endpoint would actually surface rows for the
+            // reviewer (progress.mega_ready_rows, computed the same way on
+            // the backend as the mega-approve dry-run). Otherwise Fix now
+            // wins if there's any primary cleanup action queued.
+            const aiReadyCount = data?.progress?.mega_ready_rows || 0;
             const hasApprove = aiReadyCount > 0;
             const hasFixNow = !!primary;
             const shimmerApprove = hasApprove;
