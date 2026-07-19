@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="3" failures="0" skipped="0" tests="3" time="0.768" timestamp="2026-07-19T13:13:53.812772+00:00" hostname="agent-env-0c1de1d2-6552-4616-ac96-0653f7e53686"><testcase classname="tests.test_split_recall" name="test_split_suggestion_with_recall" time="0.411"><error message="failed on setup with &quot;KeyError: 'access_token'&quot;">backend/tests/test_split_recall.py:15: in token
+    return r.json()["access_token"]
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'access_token'</error></testcase><testcase classname="tests.test_split_recall" name="test_split_suggestion_no_rules_other_contact" time="0.000"><error message="failed on setup with &quot;KeyError: 'access_token'&quot;">backend/tests/test_split_recall.py:15: in token
+    return r.json()["access_token"]
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'access_token'</error></testcase><testcase classname="tests.test_split_recall" name="test_split_suggestion_invalid_contact" time="0.000"><error message="failed on setup with &quot;KeyError: 'access_token'&quot;">backend/tests/test_split_recall.py:15: in token
+    return r.json()["access_token"]
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'access_token'</error></testcase></testsuite></testsuites>

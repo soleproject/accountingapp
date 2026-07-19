@@ -904,6 +904,28 @@ async def split_suggestion(
             threshold = float(nice)
             break
 
+    # Fetch prior split rules the user set up for this contact so we can
+    # pre-fill the SplitHintForm inputs and offer a true one-tap re-run.
+    previous_below = None
+    previous_above = None
+    prior_rules = await db.rules.find({
+        "company_id": cid,
+        "match_type": "contact_id",
+        "match_value": contact_id,
+        "source": "user_multi_bulk_approve",
+    }).to_list(20)
+    # Choose the rule whose amount envelope best matches each bucket.
+    for r in prior_rules:
+        amin = r.get("amount_min")
+        amax = r.get("amount_max")
+        name = r.get("account_name")
+        if not name:
+            continue
+        if amax is not None and amax <= threshold * 1.5 and previous_below is None:
+            previous_below = name
+        elif amin is not None and amin >= threshold * 0.5 and previous_above is None:
+            previous_above = name
+
     return {
         "suggestion": {
             "threshold": threshold,
@@ -918,6 +940,8 @@ async def split_suggestion(
                 "max": round(upper[-1], 2),
             },
             "gap": round(max_gap, 2),
+            "previous_below": previous_below,
+            "previous_above": previous_above,
         },
         "candidate_count": len(amts),
     }

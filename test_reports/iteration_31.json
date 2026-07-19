@@ -1,0 +1,20 @@
+{
+  "summary": "All 5 requested features verified end-to-end (backend + frontend) for the SplitHint recall + auto-advance follow-up. Backend split-suggestion endpoint returns previous_below='Meals' and previous_above='Office Supplies' when the 2 seeded user_multi_bulk_approve rules exist, and returns null/null when they don't. Frontend renders SplitHintForm with pre-filled inputs, the 'recalled from last time' badge, 'Yes, same again' apply label, and the 'Last time you split ... Same again?' message. One-tap re-apply works: click apply → auto-send fires → cleanup-multi-card appears → click yes → 12 txns categorized (6 Meals + 6 Office Supplies) with NO duplicate rules created. Auto-advance also verified: after multi-card confirm, cleanup-completed event dispatched, CleanupCopilot reloads /cleanup-suggestions, dismisses SplitDemo, and after ~1.2s auto-fires cleanup-inquiry for the next uncat contact (Larry D Brown appeared automatically). Regression: for the same contact WITHOUT prior rules, split-hint form renders empty, no recall badge, apply label 'Apply split', message uses 'naturally split at $100' wording (no 'Same again').",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_split_recall.py", "/app/test_reports/pytest/iter31.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Auto-advance for single-bucket 'cleanup-bulk-confirm' path (AiPanel.jsx ~L2133) uses the identical emitAction('cleanup-completed', ...) call as the multi-confirm path, so it should behave the same way. I directly verified the multi-confirm path end-to-end; I did NOT click through a bulk-confirm card to observe the second auto-advance, but the code path is symmetric and CleanupCopilot's listener is kind-agnostic — main agent can self-verify if desired.",
+    "Company switching still requires a page reload for AiPanel's currentId to pick up the new cid (pre-existing UX issue noted in iter30). All tests here worked around it via reload().",
+    "Repeated React 'two children with the same key, null' warnings persist on /pro/clients (pre-existing, unrelated)."
+  ],
+  "updated_files": ["/app/backend/tests/test_split_recall.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "pro@axiom.ai / pro123 · cid=4a972b56-c1bb-4f77-a20b-0cc3a31b821d (613 LLC) · SplitDemo Vendor contact_id=72da725e-970b-463d-b22e-b169ff3352d2",
+  "seed_data_creation": "None net-new. Verified DB state is clean at end: SplitDemo 12 txns → needs_review=True, category=None; 0 rules with source=user_multi_bulk_approve for SplitDemo. Synthetic contact + 12 txns preserved.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All iter31 flows verified. When triggering AiPanel cleanup-inquiry via CustomEvent, the correct shape is: new CustomEvent('axiom:action', {detail: {kind: 'cleanup-inquiry', payload: {action: {...}}, at: Date.now()}}). Also, the AiPanel currentId is captured at mount — after switching companies, you MUST page.reload() before dispatching, or the split-suggestion query will hit the wrong company. bulk-confirm auto-advance NOT explicitly clicked-through (only multi-confirm was), but code path is identical — flagged in critical_code_review_comments.",
+  "rca_of_the_issue": "N/A — feature validation, no bugs found."
+}

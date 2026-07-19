@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { api } from "@/lib/api";
+import { useActionListener } from "@/lib/createBus";
 import { Sparkles, PlayCircle, ArrowRight, Loader2 } from "lucide-react";
 
 // Compact SVG donut: reviewed (emerald), ai (indigo), uncategorized (rose),
@@ -77,6 +78,46 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     } finally { setBusy(false); }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId]);
+
+  // Auto-advance: when the AiPanel confirms a cleanup batch is done, dismiss
+  // that contact from our queue, reload the actions list, and — if there's
+  // another Fix Now candidate — automatically kick it off so the user rolls
+  // through the queue without touching the copilot again.
+  const onApplyRef = useRef(onApplyAction);
+  useEffect(() => { onApplyRef.current = onApplyAction; });
+  useActionListener("cleanup-completed", async (payload) => {
+    const cid = payload?.contact_id;
+    if (cid) {
+      // Match the same dismissal key format used below when filtering
+      // the top_actions list.
+      setDismissed(prev => {
+        const next = new Set(prev);
+        next.add(`contact_in_uncat-${cid}`);
+        next.add(`contact_split-${cid}`);
+        return next;
+      });
+    }
+    // Reload the actions list so recently-cleared contacts drop off.
+    setBusy(true);
+    let latest = null;
+    try {
+      const r = await api.get(`/companies/${currentId}/transactions/cleanup-suggestions`);
+      latest = r.data;
+      setData(latest);
+    } finally { setBusy(false); }
+
+    // Then serve up the next action after a short beat so the user sees
+    // the "Done — recategorized N" message before the next inquiry lands.
+    const nextActions = (latest?.top_actions || []).filter(a => {
+      const key = `${a.kind}-${a.contact_id || a.count}`;
+      if (cid && a.contact_id === cid) return false;
+      return !dismissed.has(key) && key !== `contact_in_uncat-${cid}`;
+    });
+    const next = nextActions[0];
+    if (next) {
+      setTimeout(() => { onApplyRef.current?.(next); }, 1200);
+    }
+  });
 
   const actions = (data?.top_actions || []).filter(a =>
     !dismissed.has(`${a.kind}-${a.contact_id || a.count}`)

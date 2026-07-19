@@ -53,9 +53,10 @@ function InlineConfirmCard({ testId, tone = "fuchsia", confirmLabel = "Yes, do i
 // detected a bimodal amount distribution. Lets the user name the below /
 // above categories and fires them through the same natural-language flow.
 function SplitHintForm({ hint, onApply, onDismiss }) {
-  const [below, setBelow] = useState("");
-  const [above, setAbove] = useState("");
+  const [below, setBelow] = useState(hint.previous_below || "");
+  const [above, setAbove] = useState(hint.previous_above || "");
   const [busy, setBusy] = useState(false);
+  const hasHistory = !!(hint.previous_below || hint.previous_above);
   const apply = async () => {
     if (busy || !below.trim() || !above.trim()) return;
     setBusy(true);
@@ -64,8 +65,13 @@ function SplitHintForm({ hint, onApply, onDismiss }) {
   return (
     <div className="mt-2 rounded-md border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-[12px]"
          data-testid="split-hint">
-      <div className="text-emerald-900 mb-1.5 font-medium">
-        Split at ${hint.threshold.toLocaleString()}
+      <div className="text-emerald-900 mb-1.5 font-medium flex items-center justify-between">
+        <span>Split at ${hint.threshold.toLocaleString()}</span>
+        {hasHistory && (
+          <span data-testid="split-hint-recall" className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
+            recalled from last time
+          </span>
+        )}
       </div>
       <div className="grid grid-cols-[auto,1fr] gap-x-2 gap-y-1 items-center">
         <span className="text-emerald-900/80 text-[11px]">
@@ -98,7 +104,7 @@ function SplitHintForm({ hint, onApply, onDismiss }) {
           onClick={apply}
           className="px-3 py-1 text-xs font-medium rounded text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50"
         >
-          {busy ? "Applying…" : "Apply split"}
+          {busy ? "Applying…" : (hasHistory ? "Yes, same again" : "Apply split")}
         </button>
         <button
           data-testid="split-hint-dismiss"
@@ -461,8 +467,14 @@ export default function AiPanel({ collapsed, onToggle }) {
             below: s.below,
             above: s.above,
             contactName: a.contact_name,
+            previous_below: s.previous_below || null,
+            previous_above: s.previous_above || null,
           };
-          msg += `\n\n💡 These amounts naturally split at **$${s.threshold.toLocaleString()}** — ${s.below.count} rows under, ${s.above.count} rows above. Want to bucket them separately?`;
+          if (s.previous_below && s.previous_above) {
+            msg += `\n\n💡 Last time you split ${a.contact_name} at **$${s.threshold.toLocaleString()}** → **${s.previous_below}** / **${s.previous_above}**. Same again? (${s.below.count} below · ${s.above.count} above)`;
+          } else {
+            msg += `\n\n💡 These amounts naturally split at **$${s.threshold.toLocaleString()}** — ${s.below.count} rows under, ${s.above.count} rows above. Want to bucket them separately?`;
+          }
         }
       } catch { /* non-fatal */ }
     }
@@ -2056,6 +2068,13 @@ export default function AiPanel({ collapsed, onToggle }) {
                   setMessages(mm => [...mm, { role: "assistant", content: say }]);
                   if (voiceOnRef.current) speakOne(say);
                   emitAction("txns:changed");
+                  // Auto-advance: nudge the Cleanup Copilot to serve up the
+                  // next contact from the top-actions queue.
+                  emitAction("cleanup-completed", {
+                    contact_id: m.card.contactId,
+                    kind: "contact_in_uncat",
+                    count: updated,
+                  });
                 }}
                 onDismiss={() => {
                   pendingIntentRef.current = {
@@ -2111,6 +2130,11 @@ export default function AiPanel({ collapsed, onToggle }) {
                   setMessages(mm => [...mm, { role: "assistant", content: say }]);
                   if (voiceOnRef.current) speakOne(say);
                   emitAction("txns:changed");
+                  emitAction("cleanup-completed", {
+                    contact_id: m.card.contactId,
+                    kind: "contact_in_uncat",
+                    count: updated,
+                  });
                 }}
                 onDismiss={() => {
                   // Re-open the inquiry so the user can give a different category
