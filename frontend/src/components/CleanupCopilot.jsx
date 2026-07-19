@@ -150,6 +150,42 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         { detail: { message: "Undo failed — try again.", type: "error" } }));
     }
   };
+  const approveOne = async (vendor) => {
+    if (!currentId) return;
+    // Optimistic remove so the CPA can fly through the list.
+    setMegaPreview(mp => mp ? {
+      ...mp,
+      vendors: mp.vendors.filter(v => v.contact_id !== vendor.contact_id),
+      total_rows: mp.total_rows - vendor.count,
+      total_contacts: mp.total_contacts - 1,
+      total_amount: mp.total_amount - vendor.amount,
+    } : mp);
+    setMegaSelected(prev => {
+      const n = new Set(prev); n.delete(vendor.contact_id); return n;
+    });
+    try {
+      const r = await api.post(
+        `/companies/${currentId}/transactions/bulk-approve-ai-ready`,
+        { dry_run: false, contact_ids: [vendor.contact_id] }
+      );
+      window.dispatchEvent(new CustomEvent("axiom:action",
+        { detail: { kind: "txns:changed", at: Date.now() } }));
+      if (r.data?.batch_id && r.data?.updated) {
+        setMegaUndo({ batch_id: r.data.batch_id, count: r.data.updated, expires: Date.now() + 60_000 });
+      }
+    } catch (e) {
+      // Roll back the optimistic remove on failure.
+      setMegaPreview(mp => mp ? {
+        ...mp,
+        vendors: [vendor, ...mp.vendors],
+        total_rows: mp.total_rows + vendor.count,
+        total_contacts: mp.total_contacts + 1,
+        total_amount: mp.total_amount + vendor.amount,
+      } : mp);
+      window.dispatchEvent(new CustomEvent("axiom:toast",
+        { detail: { message: `Couldn't approve ${vendor.contact_name}. Try again.`, type: "error" } }));
+    }
+  };
   const toggleVendor = (cid) => {
     setMegaSelected(prev => {
       const next = new Set(prev);
@@ -360,28 +396,44 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                   {filteredVendors.map((c) => {
                     const on = megaSelected.has(c.contact_id);
                     return (
-                      <button
+                      <div
                         key={c.contact_id}
                         data-testid={`mega-vendor-${c.contact_id}`}
-                        onClick={() => toggleVendor(c.contact_id)}
-                        className={`w-full flex items-center gap-2 rounded border px-2.5 py-1.5 text-xs text-left transition-colors ${
+                        className={`w-full flex items-center gap-2 rounded border px-2.5 py-1.5 text-xs transition-colors ${
                           on
                             ? "border-emerald-300 bg-emerald-50 hover:bg-emerald-100"
                             : "border-slate-200 bg-slate-50 opacity-60 hover:opacity-100 hover:bg-slate-100"
                         }`}
                       >
-                        <span className={`w-4 h-4 rounded flex items-center justify-center text-white text-[10px] shrink-0 ${on ? "bg-emerald-600" : "bg-slate-300"}`}>
+                        <button
+                          onClick={() => toggleVendor(c.contact_id)}
+                          className={`w-4 h-4 rounded flex items-center justify-center text-white text-[10px] shrink-0 ${on ? "bg-emerald-600" : "bg-slate-300"}`}
+                          title={on ? "Exclude from batch" : "Include in batch"}
+                        >
                           {on ? "✓" : ""}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <div className="font-medium truncate">{c.contact_name}</div>
-                          <div className="text-slate-500 truncate">→ {c.account?.code} {c.account?.name}</div>
-                        </div>
+                        </button>
+                        <button
+                          onClick={() => toggleVendor(c.contact_id)}
+                          className="min-w-0 flex-1 text-left flex items-center gap-2"
+                        >
+                          <span className="font-medium truncate">{c.contact_name}</span>
+                          <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full bg-white border border-slate-200 text-slate-700 text-[10px] font-mono-num">
+                            {c.account?.code} · {c.account?.name}
+                          </span>
+                        </button>
                         <div className="text-right shrink-0">
                           <div className="font-mono-num text-slate-900">{c.count} rows</div>
                           <div className="font-mono-num text-slate-500">${c.amount.toLocaleString("en-US", {maximumFractionDigits: 0})}</div>
                         </div>
-                      </button>
+                        <button
+                          data-testid={`mega-vendor-approve-${c.contact_id}`}
+                          onClick={() => approveOne(c)}
+                          className="ml-2 shrink-0 text-emerald-700 hover:text-emerald-900 text-xs font-semibold hover:underline"
+                          title={`Approve ${c.count} rows now`}
+                        >
+                          Approve →
+                        </button>
+                      </div>
                     );
                   })}
                   {filteredVendors.length === 0 && (
