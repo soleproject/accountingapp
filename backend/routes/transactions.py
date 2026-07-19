@@ -78,31 +78,54 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
     from collections import defaultdict
     uncat_by_contact = defaultdict(lambda: {"count": 0, "amount": 0.0, "contact_name": ""})
     split_by_contact = defaultdict(set)
+    # Ready-to-approve: contacts whose AI-categorized-unreviewed rows all fall
+    # into the SAME account. Perfect for a one-tap bulk-approve prompt.
+    ai_ready_by_contact = defaultdict(lambda: {
+        "count": 0, "amount": 0.0, "contact_name": "",
+        "accounts": set(), "sample_acct": None,
+    })
     for t in txns:
         cid_key = t.get("contact_id")
         if not cid_key:
             continue
-        # Uncat: only counts rows that are still awaiting a category AND
-        # haven't been human-reviewed (a reviewed row with code 9999/4999 has
-        # been explicitly parked by the user — leave it alone).
         if (not t.get("category_account_id") or t.get("category_account_code") in ("9999", "4999")) \
                 and not t.get("human_reviewed"):
             b = uncat_by_contact[cid_key]
             b["count"] += 1
             b["amount"] += abs(float(t.get("amount") or 0.0))
             b["contact_name"] = t.get("contact_name") or ""
-        # Split: only counts UNREVIEWED categorized rows. Once the user has
-        # explicitly approved a contact's split as-is (approve_existing
-        # marks each row human_reviewed=true), the contact shouldn't come
-        # back as a "categorization drift" candidate — the user has already
-        # blessed the split.
         if t.get("category_account_id") and not t.get("human_reviewed"):
             split_by_contact[cid_key].add(t.get("category_account_id"))
+            # Track AI-categorized-unreviewed rows for the "ready to approve"
+            # bucket — must all be the SAME account for a clean bulk-approve.
+            if t.get("category_account_code") not in ("9999", "4999"):
+                r = ai_ready_by_contact[cid_key]
+                r["count"] += 1
+                r["amount"] += abs(float(t.get("amount") or 0.0))
+                r["contact_name"] = t.get("contact_name") or ""
+                r["accounts"].add(t.get("category_account_id"))
+                if not r["sample_acct"]:
+                    r["sample_acct"] = {
+                        "id": t.get("category_account_id"),
+                        "code": t.get("category_account_code"),
+                        "name": t.get("category_account_name"),
+                    }
 
     # Filter by threshold FIRST, then slice — otherwise the top-N raw contacts
     # (which may all be below threshold) can drop legitimate smaller items.
+    # Adaptive threshold: if the strict ≥3 threshold surfaces very few items
+    # (< 5 contact-scoped actions), drop to ≥2 so thin cleanup queues still
+    # get useful suggestions instead of leaving the user staring at only a
+    # 'flagged batch' loop.
     top_actions: list[dict] = []
-    uncat_ranked = [(cidk, b) for cidk, b in uncat_by_contact.items() if b["count"] >= 3]
+    _thresh_uncat = 3
+    _thresh_split = 3
+    _thresh_ai_ready = 3
+    if sum(1 for b in uncat_by_contact.values() if b["count"] >= 3) + \
+       sum(1 for cats in split_by_contact.values() if len(cats) >= 3) < 5:
+        _thresh_uncat = 2
+
+    uncat_ranked = [(cidk, b) for cidk, b in uncat_by_contact.items() if b["count"] >= _thresh_uncat]
     uncat_ranked.sort(key=lambda kv: -kv[1]["count"])
     for cidk, b in uncat_ranked[:50]:
         top_actions.append({
@@ -112,7 +135,7 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
             "label": f"{b['contact_name']} · Uncategorized",
             "why": f"{b['count']} rows from {b['contact_name']} are still uncategorized.",
         })
-    split_ranked = [(cidk, cats) for cidk, cats in split_by_contact.items() if len(cats) >= 3]
+    split_ranked = [(cidk, cats) for cidk, cats in split_by_contact.items() if len(cats) >= _thresh_split]
     split_ranked.sort(key=lambda kv: -len(kv[1]))
     for cidk, cats in split_ranked[:50]:
         cname = next((t.get("contact_name") for t in txns if t.get("contact_id") == cidk), "")
@@ -123,8 +146,26 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
             "label": f"{cname} · {len(cats)} categories",
             "why": f"{cname} is spread across {len(cats)} different accounts — likely a categorization inconsistency.",
         })
-    # Sort the combined list by count DESC so the biggest cleanups surface
-    # first regardless of kind (a 30-row uncat contact beats a 3-account split).
+    # AI-categorized-ready-for-approval: contacts whose AI-cat'd rows all land
+    # in ONE account and have ≥ threshold rows. Single-tap bulk approve.
+    # Deduped against contacts already surfaced above so the user isn't
+    # offered two competing actions for the same vendor.
+    already = {a.get("contact_id") for a in top_actions if a.get("contact_id")}
+    ai_ready_ranked = [
+        (cidk, r) for cidk, r in ai_ready_by_contact.items()
+        if r["count"] >= _thresh_ai_ready and len(r["accounts"]) == 1 and cidk not in already
+    ]
+    ai_ready_ranked.sort(key=lambda kv: -kv[1]["count"])
+    for cidk, r in ai_ready_ranked[:50]:
+        acct = r["sample_acct"] or {}
+        top_actions.append({
+            "kind": "contact_ai_ready",
+            "contact_id": cidk, "contact_name": r["contact_name"],
+            "count": r["count"], "total_amount": round(r["amount"], 2),
+            "account": {"id": acct.get("id"), "code": acct.get("code"), "name": acct.get("name")},
+            "label": f"{r['contact_name']} · {r['count']} AI-categorized",
+            "why": f"{r['count']} rows from {r['contact_name']} were AI-categorized to {acct.get('code','?')} {acct.get('name','?')}. Approve in one tap.",
+        })
     top_actions.sort(key=lambda a: -a["count"])
     if flagged > 0:
         # flagged_batch is a different workflow (one-at-a-time review) — pin

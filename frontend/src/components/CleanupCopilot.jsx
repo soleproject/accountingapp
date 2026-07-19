@@ -43,9 +43,10 @@ function Donut({ progress, size = 88 }) {
 }
 
 const KIND_STYLES = {
-  contact_in_uncat: { chipCls: "bg-rose-50 border-rose-200 text-rose-800 hover:bg-rose-100", dot: "🔥" },
-  contact_split:    { chipCls: "bg-amber-50 border-amber-200 text-amber-900 hover:bg-amber-100", dot: "🔀" },
-  flagged_batch:    { chipCls: "bg-indigo-50 border-indigo-200 text-indigo-800 hover:bg-indigo-100", dot: "⚡" },
+  contact_in_uncat:  { chipCls: "bg-rose-50 border-rose-200 text-rose-800 hover:bg-rose-100", dot: "🔥" },
+  contact_split:     { chipCls: "bg-amber-50 border-amber-200 text-amber-900 hover:bg-amber-100", dot: "🔀" },
+  contact_ai_ready:  { chipCls: "bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100", dot: "✓" },
+  flagged_batch:     { chipCls: "bg-indigo-50 border-indigo-200 text-indigo-800 hover:bg-indigo-100", dot: "⚡" },
 };
 
 // Compose a friendly one-liner the AI would say if it were a bookkeeper
@@ -59,6 +60,8 @@ function pitchFor(action, progress) {
     return `${action.count} ${action.contact_name} transactions are sitting in Uncategorized — knock them out in one go?`;
   if (action.kind === "contact_split")
     return `${action.contact_name} is spread across ${action.count} accounts. Want me to help consolidate?`;
+  if (action.kind === "contact_ai_ready")
+    return `${action.count} ${action.contact_name} transactions were AI-categorized as ${action.account?.code} ${action.account?.name} — approve them all in one tap?`;
   if (action.kind === "flagged_batch")
     return `${action.count} transactions were flagged by the AI for a human eye. Fast-review them together?`;
   return action.why || action.label;
@@ -94,6 +97,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         const next = new Set(prev);
         next.add(`contact_in_uncat-${cid}`);
         next.add(`contact_split-${cid}`);
+        next.add(`contact_ai_ready-${cid}`);
         return next;
       });
     }
