@@ -1,0 +1,34 @@
+{
+  "summary": "Iter35 internal-transfer detector: all backend + frontend flows validated end-to-end. Main agent's regression harness passes as a script (not pytest-compatible due to module-level code + -n 2 xdist double-collection, but works standalone). Added new pytest suite covering multi-tenant auth (403), dry_run/date_since flags, live-run persistence, and post-sync hook wiring — all 6 tests pass. Frontend Playwright: Detect transfers button renders next to filter tabs, click triggers dry-run scan (POST /detect-transfers → 200), modal preview opens with correct heading + pair rows, Apply books both legs (2nd POST → 200), toast confirms 'Booked 1 internal transfer (2 rows moved to the transfer clearing account).', modal closes. Real 704 LLC $13,200 pair confirmed intact + booked to 3200 Inter-Account Transfer equity account (pre-existing after main agent's run — no drift from testing). Equity account preserved for future syncs. All seed data cleaned.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "N/A (test harness)", "issue": "test_iter35_transfer_detect.py is module-level script code, not real pytest — runs twice under xdist -n 2 (each worker collects the module and re-executes the top-level assertions), causing spurious failures on the 2nd execution because seeded rows are already flipped. Standalone `python test_iter35_transfer_detect.py` works. Recommend wrapping in a `def test_*():` function or moving to a scripts/ folder."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter35_transfer_detect.py",
+    "/app/backend/tests/test_iter35_transfer_endpoint.py"
+  ],
+  "action_items": [
+    "(Optional, minor) Refactor test_iter35_transfer_detect.py into a pytest function so it's collectable & idempotent under -n 2 xdist — the assertions all pass on a fresh run but the second worker's re-collection double-executes the module and trips because the first pass already booked the pairs."
+  ],
+  "critical_code_review_comments": [
+    "detect_transfer_pairs correctly gated by require_company(user, cid) — multi-tenant confirmed via 403 for client2@axiom.ai against 704 LLC.",
+    "Post-sync hook (sync_tasks.py:231-237) wraps detect_transfer_pairs in try/except pass — silent failure is deliberate per the code comment, but be aware this masks real errors. Consider logger.warning at minimum for observability.",
+    "Frontend applyTransfers toast copy: 'Booked N internal transfer(s) (M rows moved…)' — copy matches spec. Confirmed live.",
+    "Idempotency verified: rerunning detect on already-booked pairs returns updated=0."
+  ],
+  "updated_files": [],
+  "created_files": ["/app/backend/tests/test_iter35_transfer_endpoint.py"],
+  "success_rate": {"backend": "100% (6/6 new pytest + 1/1 standalone script)", "frontend": "100% (button + modal + apply + toast all verified)"},
+  "seed_data_creation": "Temporary during testing only — all __XFER_TEST / __XFER_EP_TEST / __XFER_SYNC_HOOK / __UI_XFER seeds and their bank accounts (codes 15xx/16xx/17xx/18xx/19xx/1591/1592) were fully cleaned up. 704 LLC real $13,200 pair state unchanged (was already booked before testing). Equity account 3200 preserved as instructed.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "New pytest suite lives at /app/backend/tests/test_iter35_transfer_endpoint.py — covers auth, dry_run/date_since flags, persistence, and the sync-hook wiring. The older test_iter35_transfer_detect.py is a script (run with `python`, not pytest). Frontend flow uses `pro@axiom.ai / pro123` → open 704 LLC card → Transactions tab → data-testid='detect-transfers-btn'. Session-cookie state does NOT persist across mcp_browser_automation calls; each run must re-login via input.nth(0)/nth(1) + button:has-text('Sign in')."
+}

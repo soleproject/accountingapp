@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import {
   Check, Wand2, Split, Link as LinkIcon, RotateCw, Plus, X, Trash2, AlertTriangle, ShieldCheck,
   ChevronLeft, ChevronRight, Search, Calendar, XCircle, Tag, Sparkles, MoreHorizontal,
-  List as ListIcon, LayoutGrid,
+  List as ListIcon, LayoutGrid, ArrowLeftRight,
 } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import CleanupCopilot from "@/components/CleanupCopilot";
@@ -419,6 +419,44 @@ export default function Transactions() {
     load();
   };
 
+  const [xferBusy, setXferBusy] = useState(false);
+  const [xferPreview, setXferPreview] = useState(null);
+  const detectTransfers = async () => {
+    if (xferBusy || !currentId) return;
+    setXferBusy(true);
+    try {
+      const r = await api.post(
+        `/companies/${currentId}/transactions/detect-transfers`,
+        { dry_run: true }
+      );
+      const pairs = r.data?.pairs || [];
+      if (pairs.length === 0) {
+        toast.success("No unresolved internal transfers found — you're clean.");
+        return;
+      }
+      setXferPreview(pairs);
+    } catch (e) {
+      toast.error("Couldn't scan for transfers.");
+    } finally { setXferBusy(false); }
+  };
+  const applyTransfers = async () => {
+    if (xferBusy || !currentId) return;
+    setXferBusy(true);
+    try {
+      const r = await api.post(
+        `/companies/${currentId}/transactions/detect-transfers`,
+        { dry_run: false }
+      );
+      const n = r.data?.updated || 0;
+      const pairs = (r.data?.pairs || []).length;
+      toast.success(`Booked ${pairs} internal transfer${pairs === 1 ? "" : "s"} (${n} rows moved to the transfer clearing account).`);
+      setXferPreview(null);
+      load(); loadRollup();
+    } catch (e) {
+      toast.error("Couldn't apply transfers.");
+    } finally { setXferBusy(false); }
+  };
+
   return (
     <div className="space-y-4">
       <CleanupCopilot
@@ -453,6 +491,16 @@ export default function Transactions() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            data-testid="detect-transfers-btn"
+            onClick={detectTransfers}
+            disabled={xferBusy}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+            title="Scan for internal transfers between company-owned bank accounts"
+          >
+            <ArrowLeftRight size={14} />
+            {xferBusy ? "Scanning…" : "Detect transfers"}
+          </button>
           <div className="inline-flex rounded-md border bg-white overflow-hidden">
             {[
               { k: "all",           label: "All" },
@@ -754,6 +802,50 @@ export default function Transactions() {
       {creating && <ManualTxnModal accts={accts} currentId={currentId} onClose={() => { setCreating(false); load(); }} />}
       {splitting && <SplitModal txn={splitting} accts={accts} currentId={currentId} onClose={() => { setSplitting(null); load(); }} />}
       {linking && <LinkModal txn={linking} invoices={invoices} bills={bills} currentId={currentId} onClose={() => { setLinking(null); load(); }} />}
+      {xferPreview && (
+        <Modal title={`Found ${xferPreview.length} internal-transfer pair${xferPreview.length === 1 ? "" : "s"}`}
+               onClose={() => setXferPreview(null)}>
+          <div className="text-xs text-slate-600 mb-3">
+            Both legs of each pair will be booked to the <b>Inter-Account Transfer</b> equity account so neither leg hits your P&amp;L.
+          </div>
+          <div className="max-h-80 overflow-y-auto space-y-2 mb-4" data-testid="detect-transfers-preview">
+            {xferPreview.map((p, i) => (
+              <div key={i} className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                <div className="flex justify-between items-center text-rose-700 font-medium">
+                  <span>{fmtDate(p.debit_leg.date)} · {p.debit_leg.bank_account_name}</span>
+                  <span className="font-mono-num">{fmtMoney(p.debit_leg.amount)}</span>
+                </div>
+                <div className="text-slate-500 truncate italic">{p.debit_leg.description}</div>
+                <div className="flex justify-between items-center text-emerald-700 font-medium mt-1">
+                  <span>{fmtDate(p.credit_leg.date)} · {p.credit_leg.bank_account_name}</span>
+                  <span className="font-mono-num">+{fmtMoney(p.credit_leg.amount)}</span>
+                </div>
+                <div className="text-slate-500 truncate italic">{p.credit_leg.description}</div>
+                {p.date_delta_days > 0 && (
+                  <div className="text-[10px] text-slate-400 mt-1">Δ{p.date_delta_days} day{p.date_delta_days === 1 ? "" : "s"}</div>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <button
+              data-testid="detect-transfers-apply"
+              disabled={xferBusy}
+              onClick={applyTransfers}
+              className="flex-1 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {xferBusy ? "Applying…" : `Book all ${xferPreview.length} pair${xferPreview.length === 1 ? "" : "s"}`}
+            </button>
+            <button
+              onClick={() => setXferPreview(null)}
+              disabled={xferBusy}
+              className="px-4 py-2 rounded-md border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

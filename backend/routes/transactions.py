@@ -542,6 +542,34 @@ async def unapprove_transaction(cid: str, tid: str, user: dict = Depends(get_cur
     return {"ok": True}
 
 
+async def _ensure_transfer_account(cid: str, name: str = "Inter-Account Transfer") -> dict:
+    """Idempotently ensure the equity transfer clearing account exists.
+    Both legs of a real inter-account transfer post here so neither leg lands
+    on the P&L. Reused by mark-as-transfer + detect-transfers.
+    """
+    name_norm = re.sub(r"\s+", " ", name.strip()).lower()
+    for a in await db.accounts.find({"company_id": cid, "type": "equity"}).to_list(500):
+        if re.sub(r"\s+", " ", a.get("name", "").strip()).lower() == name_norm:
+            return a
+    used = {a["code"] for a in await db.accounts.find(
+        {"company_id": cid, "code": {"$exists": True}}
+    ).to_list(2000)}
+    code = None
+    for n in range(3200, 3999, 10):
+        if str(n) not in used:
+            code = str(n); break
+    code = code or "3900"
+    now = now_iso()
+    xfer = {
+        "id": str(uuid.uuid4()), "company_id": cid, "code": code,
+        "name": name.strip(), "type": "equity",
+        "subtype": "transfer", "active": True, "balance": 0.0,
+        "created_at": now, "updated_at": now, "source": "ai_transfer_fix",
+    }
+    await db.accounts.insert_one(xfer)
+    return xfer
+
+
 class MarkTransferIn(BaseModel):
     matching_leg_id: Optional[str] = None  # if present, also recategorize this row
     account_name: str = "Inter-Account Transfer"
@@ -567,30 +595,7 @@ async def mark_as_transfer(cid: str, tid: str, inp: MarkTransferIn = MarkTransfe
     await assert_open(cid, txn.get("date"))
 
     # 1. Ensure the Transfer equity account.
-    name_norm = re.sub(r"\s+", " ", inp.account_name.strip()).lower()
-    xfer = None
-    for a in await db.accounts.find({"company_id": cid, "type": "equity"}).to_list(500):
-        if re.sub(r"\s+", " ", a.get("name", "").strip()).lower() == name_norm:
-            xfer = a
-            break
-    if not xfer:
-        # Pick a free code in the equity range.
-        used = {a["code"] for a in await db.accounts.find(
-            {"company_id": cid, "code": {"$exists": True}}
-        ).to_list(2000)}
-        code = None
-        for n in range(3200, 3999, 10):
-            if str(n) not in used:
-                code = str(n); break
-        code = code or "3900"
-        now = now_iso()
-        xfer = {
-            "id": str(uuid.uuid4()), "company_id": cid, "code": code,
-            "name": inp.account_name.strip(), "type": "equity",
-            "subtype": "transfer", "active": True, "balance": 0.0,
-            "created_at": now, "updated_at": now, "source": "ai_transfer_fix",
-        }
-        await db.accounts.insert_one(xfer)
+    xfer = await _ensure_transfer_account(cid, inp.account_name)
 
     # 2. Reclassify the focused txn.
     await db.transactions.update_one(
@@ -664,6 +669,175 @@ async def mark_as_transfer(cid: str, tid: str, inp: MarkTransferIn = MarkTransfe
         "matched_leg_id": matched_id,
         "candidates": candidates,
     }
+
+
+async def detect_transfer_pairs(cid: str, dry_run: bool = False, date_since: str | None = None) -> dict:
+    """Scan all unreviewed txns on a company's bank accounts and find pairs
+    that look like internal transfers between two company-owned accounts.
+
+    A pair matches iff:
+      • both rows carry a bank_account_id (i.e. hit a real company bank/CC row)
+      • the bank_account_id's differ (source ≠ destination)
+      • amounts are equal-magnitude, opposite sign (within $0.01)
+      • dates are within ±3 days of each other
+      • neither row is already human_reviewed on a real category (excludes
+        the transfer clearing account itself so we can re-run idempotently
+        for previously-detected pairs and skip them).
+
+    When multiple candidates tie, we deterministically pick the one with the
+    smallest date-delta first, then the earliest id — so re-runs converge.
+
+    dry_run=True returns the planned pairs without mutating anything.
+    """
+    q: dict = {
+        "company_id": cid,
+        "bank_account_id": {"$exists": True, "$nin": [None, ""]},
+        "human_reviewed": {"$ne": True},
+    }
+    if date_since:
+        q["date"] = {"$gte": date_since}
+    docs = await db.transactions.find(q).to_list(20000)
+    if not docs:
+        return {"ok": True, "pairs": [], "updated": 0, "dry_run": dry_run}
+
+    # Index by (bank_account_id, sign, rounded-amount) for fast lookup of
+    # candidates on OTHER bank accounts with the opposite sign.
+    from collections import defaultdict
+    by_key: dict[tuple, list[dict]] = defaultdict(list)
+    for t in docs:
+        try:
+            amt = float(t.get("amount") or 0.0)
+        except Exception:
+            continue
+        if not amt:
+            continue
+        key = (t.get("bank_account_id"), round(amt, 2))
+        by_key[key].append(t)
+
+    consumed: set[str] = set()
+    pairs: list[dict] = []
+    # Iterate rows once. For a debit (amt<0) look for a matching credit
+    # (amt>0, same absolute value) on OTHER bank accounts within ±3d.
+    for src in docs:
+        if src["id"] in consumed:
+            continue
+        try:
+            amt = float(src.get("amount") or 0.0)
+        except Exception:
+            continue
+        if not amt:
+            continue
+        need_amt = round(-amt, 2)
+        src_bank = src.get("bank_account_id")
+        src_date = src.get("date") or ""
+        try:
+            d = datetime.strptime(src_date, "%Y-%m-%d")
+            lo = (d - timedelta(days=3)).strftime("%Y-%m-%d")
+            hi = (d + timedelta(days=3)).strftime("%Y-%m-%d")
+        except Exception:
+            continue
+
+        # Gather same-abs-amount candidates on OTHER bank accounts.
+        cand: list[dict] = []
+        for key, rows in by_key.items():
+            bank_id, rounded = key
+            if bank_id == src_bank or rounded != need_amt:
+                continue
+            for r in rows:
+                if r["id"] in consumed or r["id"] == src["id"]:
+                    continue
+                rd = r.get("date") or ""
+                if not (lo <= rd <= hi):
+                    continue
+                # Skip if this row is already parked on the transfer account
+                # via a previous run — but only if human_reviewed.
+                cand.append(r)
+        if not cand:
+            continue
+        # Deterministic tie-break: smallest |date-delta|, then earliest id.
+        def _delta_days(r: dict) -> int:
+            try:
+                return abs((datetime.strptime(r["date"], "%Y-%m-%d") - d).days)
+            except Exception:
+                return 999
+        cand.sort(key=lambda r: (_delta_days(r), r["id"]))
+        winner = cand[0]
+
+        # Debit leg is the negative amount, credit is the positive one.
+        debit, credit = (src, winner) if amt < 0 else (winner, src)
+        pairs.append({
+            "pair_id": str(uuid.uuid4()),
+            "debit_leg": {
+                "id": debit["id"], "date": debit.get("date"),
+                "amount": debit.get("amount"),
+                "bank_account_id": debit.get("bank_account_id"),
+                "bank_account_name": debit.get("bank_account_name"),
+                "description": debit.get("description") or debit.get("merchant") or "",
+            },
+            "credit_leg": {
+                "id": credit["id"], "date": credit.get("date"),
+                "amount": credit.get("amount"),
+                "bank_account_id": credit.get("bank_account_id"),
+                "bank_account_name": credit.get("bank_account_name"),
+                "description": credit.get("description") or credit.get("merchant") or "",
+            },
+            "date_delta_days": _delta_days(winner),
+        })
+        consumed.add(src["id"])
+        consumed.add(winner["id"])
+
+    updated = 0
+    if pairs and not dry_run:
+        xfer = await _ensure_transfer_account(cid)
+        for p in pairs:
+            for leg_key in ("debit_leg", "credit_leg"):
+                leg = p[leg_key]
+                # Guard closed periods; skip silently.
+                if await is_period_closed(cid, leg.get("date") or ""):
+                    continue
+                res = await db.transactions.update_one(
+                    {"id": leg["id"], "company_id": cid, "human_reviewed": {"$ne": True}},
+                    {"$set": {
+                        "category_account_id": xfer["id"],
+                        "category_account_code": xfer["code"],
+                        "category_account_name": xfer["name"],
+                        "is_internal_transfer": True,
+                        "transfer_pair_id": p["pair_id"],
+                        "human_reviewed": True,
+                        "needs_review": False,
+                        "posted": True,
+                        "ai_source": "internal_transfer_detector",
+                        "ai_confidence": 1.0,
+                        "updated_at": now_iso(),
+                    }},
+                )
+                updated += res.modified_count
+        if updated:
+            await log_ai(cid, "internal_transfer_detector", updated)
+
+    return {
+        "ok": True,
+        "pairs": pairs,
+        "updated": updated,
+        "dry_run": dry_run,
+    }
+
+
+class DetectTransfersIn(BaseModel):
+    dry_run: bool = False
+    date_since: Optional[str] = None  # ISO YYYY-MM-DD; None = scan everything
+
+
+@router.post("/companies/{cid}/transactions/detect-transfers")
+async def detect_transfers(cid: str, inp: DetectTransfersIn = DetectTransfersIn(), user: dict = Depends(get_current_user)):
+    """Batch-scan the company's unreviewed txns for internal-transfer pairs
+    between two company-owned bank/credit-card accounts. dry_run=True returns
+    the planned pairs without mutating; dry_run=False actually books both
+    legs to the Inter-Account Transfer equity account (idempotent).
+    """
+    await require_company(user, cid)
+    return await detect_transfer_pairs(cid, dry_run=inp.dry_run, date_since=inp.date_since)
+
 
 
 @router.post("/companies/{cid}/transactions/{tid}/approve-with-suggestion")

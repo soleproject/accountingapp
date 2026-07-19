@@ -222,6 +222,19 @@ async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool,
         )
         imported += len(inserted)
         await _emit("categorizing", imported, total_target)
+
+    # Post-sync: auto-detect internal transfers between company-owned bank
+    # accounts. If the user linked BOTH sides of a transfer via Plaid, this
+    # collapses the pair to the Inter-Account Transfer equity account so
+    # neither leg pollutes the P&L. Silent on failure — never blocks the
+    # sync from returning.
+    if imported > 0:
+        try:
+            from routes.transactions import detect_transfer_pairs
+            await _emit("detecting_transfers", imported, total_target)
+            await detect_transfer_pairs(company_id, dry_run=False)
+        except Exception:
+            pass
     return imported
 
 
