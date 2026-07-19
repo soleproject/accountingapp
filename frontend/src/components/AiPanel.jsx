@@ -1051,6 +1051,7 @@ export default function AiPanel({ collapsed, onToggle }) {
       };
       const cleanCat = (s) =>
         (s || "").replace(/^(?:categorize|make|mark|set|book|classify)\s+(?:all|them|these|those|it|everything)?\s*(?:as|to)\s+/i, "")
+                 .replace(/^\$?[\d,.km]+\s+(?:is|are|=|:|goes?\s+to|→)\s+/i, "")
                  .replace(/^(?:the|a|an|some|our|my)\s+/i, "")
                  .replace(/\s+(?:transactions?|payments?|charges?|expenses?|receipts?)\s*$/i, "")
                  .replace(/^(?:is|are|=|:)\s+/i, "")
@@ -1912,12 +1913,15 @@ export default function AiPanel({ collapsed, onToggle }) {
                 hint={m.splitHint}
                 onApply={(belowCat, aboveCat) => {
                   const t = m.splitHint.threshold;
-                  const templated = `under $${t} is ${belowCat}, above $${t} is ${aboveCat}`;
+                  // NOTE: template uses "above is X" (no second threshold)
+                  // so the range regex's optional "is/=" doesn't get fooled
+                  // by "$100 is" appearing twice in the input.
+                  const templated = `under $${t} is ${belowCat}, above is ${aboveCat}`;
                   setInput(templated);
-                  // Clear the hint so the chip disappears after use.
                   setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, splitHint: null } : mm2));
-                  // Give React a tick to flush input state, then submit.
-                  setTimeout(() => send(), 30);
+                  // Use sendRef so we invoke the LATEST send() closure —
+                  // it will read the input state committed by setInput above.
+                  setTimeout(() => sendRef.current?.(), 30);
                 }}
                 onDismiss={() => {
                   setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, splitHint: null } : mm2));

@@ -1,0 +1,23 @@
+{
+  "summary": "Re-verified iter29 fixes for split-suggestion flow. Both fixes confirmed working: (1) AUTO-SEND after SplitHintForm Apply now fires correctly via sendRef.current — cleanup-multi-card appeared at t=0.0s after Apply click. (2) Category names come out clean — DB shows exactly 6 txns='Meals', 6 txns='Office Supplies' (NOT the buggy '$100 Is Office Supplies'). Regression case also passes: user-typed 'under $100 is Meals, above $100 is Office Supplies' now correctly cleans to 'Office Supplies' thanks to cleanCat's new regex stripping leading '$100 is'. Two rules created with source='user_multi_bulk_approve', amount-scoped (max=100.0 → Meals, min=100.01 → Office Supplies). DB reset at end.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_split_suggestion.py"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "AiPanel.jsx is still 2500 lines — recommend splitting into modules (SplitHintForm, BulkApproveCard, MultiCard, cleanup-inquiry interceptor).",
+    "Observed harmless React warning: 'Encountered two children with the same key, null' repeated ~10x on /pro/clients page — unrelated to this fix, but worth fixing (missing key/id on client list items)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "pro@axiom.ai / pro123; company 613 LLC id=4a972b56-c1bb-4f77-a20b-0cc3a31b821d; contact SplitDemo Vendor id=72da725e-970b-463d-b22e-b169ff3352d2",
+  "seed_data_creation": "None. SplitDemo txns and rules were reset at end (12 txns → needs_review=True/category=None, 2 amount-scoped rules deleted). Test-time incidentally discovered txns had been left in 'Or Describe Which Each Of The Software Subscriptio' category from an unrelated prior test — reset before running.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Both iter29 fixes work. SplitHintForm now emits `under $${t} is X, above is Y` (no second threshold) and calls sendRef.current?.() so send() closure sees the fresh input. cleanCat regex `^\\$?[\\d,.km]+\\s+(?:is|are|=|:|goes?\\s+to|→)\\s+` strips '$100 is ' prefix. NOTE: The AI panel's currentId is scoped to the initially-active company at mount; when switching companies via header, a page reload is required for the AI panel to pick up the new cid — this is a pre-existing UX issue, worth reporting separately but did not affect these fixes.",
+  "rca_of_the_issue": "Root cause was the SplitHintForm template producing 'above $100 is Office Supplies' which fooled the range-split regex. Fix (a) changed the template so no second '$100 is' appears in the emitted string, AND fix (b) added a defensive cleanCat rule to strip leading amount prefixes so user-typed variants also parse cleanly. Both verified end-to-end via UI + DB inspection."
+}
