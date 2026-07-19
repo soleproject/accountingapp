@@ -180,7 +180,14 @@ async def resolve_or_create_bank_account(
     # Also require the account-type keyword ("checking"/"savings"/"credit"/…)
     # to appear in the candidate name — otherwise a new Chase Savings would
     # wrongly collapse onto an existing Chase Checking row.
-    if bank_name:
+    #
+    # IMPORTANT: only fall back to fuzzy matching when the caller had NO
+    # last-4 to disambiguate on. If a last4 exists and step 1 didn't find
+    # it in any existing account name, the account is genuinely new — we
+    # must create a dedicated CoA row instead of collapsing it onto a
+    # different-mask existing row (previously the second Bank of America
+    # Checking ···9917 was being merged into the first ···6084 row).
+    if bank_name and not last4:
         bank_norm = _normalize(bank_name)
         detail = _base_detail_from_type(account_type).lower()
         detail_norm = _normalize(detail)

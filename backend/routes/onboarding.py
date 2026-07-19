@@ -450,3 +450,186 @@ async def plaid_connect_account(cid: str, payload: dict, user: dict = Depends(ge
     return result
 
 
+@router.post("/companies/{cid}/plaid/repair-collided-mappings")
+async def plaid_repair_collided_mappings(cid: str, user: dict = Depends(get_current_user)):
+    """One-shot repair for the pre-fix bug where two Plaid accounts from the
+    same bank (e.g. Bank of America Checking ···6084 + ···9917) collapsed
+    onto ONE CoA row. Detects any case where multiple `plaid_account_id`s
+    share the same `ledger_account_id`, re-resolves each collided mask
+    using the fixed resolver (which now creates a dedicated CoA row per
+    unique last-4), moves that Plaid account's transactions to the new CoA
+    row, and posts a fresh opening-balance JE for it.
+
+    Idempotent — safe to run multiple times. Returns a per-account summary.
+    """
+    await require_company(user, cid)
+    item = await db.plaid_items.find_one({"company_id": cid})
+    if not item:
+        raise HTTPException(400, "No linked Plaid item — nothing to repair")
+
+    mappings = dict(item.get("account_mappings") or {})
+    if not mappings:
+        return {"ok": True, "repaired": [], "note": "No Plaid account mappings on this item."}
+
+    # Group plaid_account_ids by their current ledger row.
+    from collections import defaultdict
+    by_ledger: dict[str, list[str]] = defaultdict(list)
+    for pa_id, m in mappings.items():
+        lid = m.get("ledger_account_id")
+        if lid:
+            by_ledger[lid].append(pa_id)
+
+    # Fetch Plaid accounts once so we can re-resolve.
+    try:
+        plaid_accts = plaid_service.get_accounts(item["access_token"])
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Couldn't fetch Plaid accounts: {e}")
+    inst_name = item.get("institution_name")
+
+    repaired: list[dict] = []
+    for ledger_id, pa_ids in by_ledger.items():
+        if len(pa_ids) < 2:
+            continue
+        # Keep the FIRST plaid_account_id on the original ledger row —
+        # everyone else gets a dedicated new CoA row.
+        for pa_id in pa_ids[1:]:
+            plaid_acct = next((a for a in plaid_accts if a.get("account_id") == pa_id), None)
+            if not plaid_acct:
+                repaired.append({"plaid_account_id": pa_id, "status": "skipped_no_plaid_data"})
+                continue
+            new_ledger = await plaid_connect.get_ledger_for_plaid_account(
+                cid, plaid_acct, institution_name=inst_name,
+            )
+            if not new_ledger or new_ledger.get("id") == ledger_id:
+                repaired.append({
+                    "plaid_account_id": pa_id,
+                    "status": "no_change",
+                    "reason": "Resolver still returned same ledger row — the collision may already be fixed.",
+                })
+                continue
+            # Move this Plaid account's transactions to the new ledger row.
+            moved = await db.transactions.update_many(
+                {"company_id": cid, "plaid_account_id": pa_id, "bank_account_id": ledger_id},
+                {"$set": {
+                    "bank_account_id": new_ledger["id"],
+                    "updated_at": now_iso(),
+                }},
+            )
+            # Update the mapping to point to the new ledger row.
+            mappings[pa_id] = {
+                **mappings[pa_id],
+                "ledger_account_id": new_ledger["id"],
+                "ledger_account_code": new_ledger["code"],
+                "ledger_account_name": new_ledger["name"],
+                "repaired_at": now_iso(),
+                "previous_ledger_account_id": ledger_id,
+            }
+            # Recompute + post opening-balance JE for the new row if we don't
+            # already have one.
+            existing_obe = await db.journal_entries.find_one({
+                "company_id": cid, "source": "opening_balance",
+                "lines.account_id": new_ledger["id"],
+            })
+            je_id = None
+            if not existing_obe:
+                # Use Plaid's current balance as the opening (matches the
+                # connect flow's fallback semantics). `plaid_service.get_accounts`
+                # returns FLAT keys (`balance_current`/`balance_available`),
+                # not a nested `balances` dict.
+                current = (
+                    plaid_acct.get("balance_current")
+                    or plaid_acct.get("balance_available")
+                    or 0.0
+                )
+                is_liability = new_ledger.get("type") == "liability"
+                opening = -float(current) if is_liability else float(current)
+                as_of = datetime.now(timezone.utc).date().isoformat()
+                oldest = await db.transactions.find({
+                    "company_id": cid, "plaid_account_id": pa_id,
+                }).sort("date", 1).limit(1).to_list(1)
+                if oldest and oldest[0].get("date"):
+                    from datetime import date as _d
+                    try:
+                        as_of = (_d.fromisoformat(oldest[0]["date"]) - timedelta(days=1)).isoformat()
+                    except Exception:
+                        pass
+                je_id = await plaid_connect.post_opening_balance_je(
+                    cid, new_ledger, opening, as_of,
+                    f"Opening balance — {plaid_acct.get('name') or new_ledger['name']} (repaired)",
+                )
+            repaired.append({
+                "plaid_account_id": pa_id,
+                "status": "repaired",
+                "old_ledger": {"id": ledger_id},
+                "new_ledger": {
+                    "id": new_ledger["id"],
+                    "code": new_ledger["code"],
+                    "name": new_ledger["name"],
+                },
+                "transactions_moved": moved.modified_count,
+                "opening_je_id": je_id,
+            })
+
+    if repaired:
+        await db.plaid_items.update_one(
+            {"id": item["id"]},
+            {"$set": {"account_mappings": mappings, "updated_at": now_iso()}},
+        )
+        await log_ai(cid, "plaid_repair", len(repaired))
+
+    # Second pass — ensure every current mapping has an opening-balance JE.
+    # Covers the case where a collision was fixed in a previous run but the
+    # OBE JE was skipped (e.g. balance parsing bug) — re-running repair now
+    # backfills it.
+    obe_posted: list[dict] = []
+    for pa_id, m in mappings.items():
+        ledger_id = m.get("ledger_account_id")
+        if not ledger_id:
+            continue
+        existing_obe = await db.journal_entries.find_one({
+            "company_id": cid, "source": "opening_balance",
+            "lines.account_id": ledger_id,
+        })
+        if existing_obe:
+            continue
+        plaid_acct = next((a for a in plaid_accts if a.get("account_id") == pa_id), None)
+        if not plaid_acct:
+            continue
+        ledger = await db.accounts.find_one({"id": ledger_id, "company_id": cid})
+        if not ledger:
+            continue
+        current = (
+            plaid_acct.get("balance_current")
+            or plaid_acct.get("balance_available")
+            or 0.0
+        )
+        is_liability = ledger.get("type") == "liability"
+        opening = -float(current) if is_liability else float(current)
+        if abs(opening) < 0.005:
+            continue
+        as_of = datetime.now(timezone.utc).date().isoformat()
+        oldest = await db.transactions.find({
+            "company_id": cid, "plaid_account_id": pa_id,
+        }).sort("date", 1).limit(1).to_list(1)
+        if oldest and oldest[0].get("date"):
+            from datetime import date as _d
+            try:
+                as_of = (_d.fromisoformat(oldest[0]["date"]) - timedelta(days=1)).isoformat()
+            except Exception:
+                pass
+        je_id = await plaid_connect.post_opening_balance_je(
+            cid, ledger, opening, as_of,
+            f"Opening balance — {plaid_acct.get('name') or ledger['name']} (repair backfill)",
+        )
+        if je_id:
+            obe_posted.append({
+                "plaid_account_id": pa_id,
+                "ledger_code": ledger["code"],
+                "ledger_name": ledger["name"],
+                "opening": opening,
+                "je_id": je_id,
+            })
+
+    return {"ok": True, "repaired": repaired, "obe_backfilled": obe_posted}
+
+
