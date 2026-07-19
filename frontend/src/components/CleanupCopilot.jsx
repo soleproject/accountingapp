@@ -76,6 +76,10 @@ function pitchFor(action, progress) {
     return `${action.count} ${action.contact_name} transactions were AI-categorized as ${action.account?.code} ${action.account?.name} — approve them all in one tap?`;
   if (action.kind === "flagged_batch")
     return `${action.count} transactions were flagged by the AI for a human eye. Fast-review them together?`;
+  if (action.kind === "filter_uncat")
+    return `${action.count} rows are still uncategorized — click Fix now to focus the table on them.`;
+  if (action.kind === "filter_flagged")
+    return `${action.count} rows are still flagged for review — click Fix now to focus the table on them (or Start 5-min session for a guided walkthrough).`;
   return action.why || action.label;
 }
 
@@ -357,7 +361,32 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     .map(scid => eligibleActions.find(a => a.contact_id === scid))
     .filter(Boolean);
   const actions = [...unseenActions, ...skippedActions];
-  const primary = actions[0];
+  // Fallback synthetic primary when no contact-scoped cleanup exists but
+  // there IS still work to do — filters the transactions table to the
+  // right tab so the CPA can dig in manually. This is what keeps Fix now
+  // visible on companies like Bright Beans where the queue is drained of
+  // per-contact clusters but flagged / uncategorized rows still linger.
+  const synthPrimary = (() => {
+    if (actions.length > 0) return null;
+    const p = data?.progress;
+    if (!p) return null;
+    if (p.uncategorized > 0) {
+      return {
+        kind: "filter_uncat",
+        count: p.uncategorized,
+        label: `${p.uncategorized} uncategorized rows`,
+      };
+    }
+    if (p.flagged > 0) {
+      return {
+        kind: "filter_flagged",
+        count: p.flagged,
+        label: `${p.flagged} flagged rows`,
+      };
+    }
+    return null;
+  })();
+  const primary = actions[0] || synthPrimary;
   const rest = actions.slice(1, 6);
   const total = data?.progress?.total || 0;
   // Derived state for the mega-approve modal (kept out of state so it stays

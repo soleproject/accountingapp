@@ -477,6 +477,20 @@ export default function Transactions() {
             setView("rollup");
           } else if (a.kind === "flagged_batch") {
             setFilter("review");
+          } else if (a.kind === "filter_uncat") {
+            // Fallback: no per-contact cluster, but uncategorized rows exist —
+            // filter the table and let the CPA pick them off manually.
+            setFilter("unapproved");
+            setSearch("");
+            setPage(1);
+            return;
+          } else if (a.kind === "filter_flagged") {
+            // Fallback: no per-contact cluster, but flagged rows exist —
+            // filter the table without starting the one-at-a-time chat.
+            setFilter("review");
+            setSearch("");
+            setPage(1);
+            return;
           }
           setPage(1);
           emitAction("cleanup-inquiry", { action: a });
