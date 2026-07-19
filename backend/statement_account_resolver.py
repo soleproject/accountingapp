@@ -59,6 +59,36 @@ def _base_detail_from_type(t: str | None) -> str:
     return "Checking"
 
 
+async def _pick_parent_account(company_id: str, detail: str, is_liability: bool) -> str | None:
+    """Return the parent CoA row this new bank/credit account should nest
+    under so the Chart of Accounts renders it as an indented sub-account
+    (matching the Citi Card → Credit Card Payable pattern in the UI).
+
+    Priority:
+      - Credit cards → "Credit Card Payable" (code 2100)
+      - Savings      → "Business Savings"   (code 1020)
+      - Money Market → "Business Savings"   (code 1020) if it exists
+      - Checking / everything else → "Business Checking" (code 1010)
+      - Fallback: the parent group ("Cash and Bank" 1000)
+
+    Returns the parent's `id` or None if we couldn't find a suitable parent
+    (the account will render at the top level then, which is still fine).
+    """
+    if is_liability:
+        candidates = ["2100"]
+    elif detail == "Savings" or detail == "Money Market":
+        candidates = ["1020", "1000"]
+    else:
+        candidates = ["1010", "1000"]
+    for code in candidates:
+        row = await db.accounts.find_one({
+            "company_id": company_id, "code": code, "active": True,
+        })
+        if row:
+            return row["id"]
+    return None
+
+
 def _build_account_name(bank: str | None, acct_type: str | None, last4: str | None) -> str:
     parts: list[str] = []
     if bank:
@@ -214,6 +244,9 @@ async def resolve_or_create_bank_account(
     subtype = ("current_liability" if is_liability
                else ("Bank" if BANK_KEYWORDS.search(name)
                      else "current_asset"))
+    parent_id = await _pick_parent_account(
+        company_id, _base_detail_from_type(account_type), is_liability,
+    )
     now = now_iso()
     await db.accounts.insert_one({
         "id": account_id,
@@ -222,6 +255,7 @@ async def resolve_or_create_bank_account(
         "name": name,
         "type": kind_type,
         "subtype": subtype,
+        "parent_account_id": parent_id,
         "active": True,
         "balance": 0.0,
         "created_by_ai": True,
