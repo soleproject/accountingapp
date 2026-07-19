@@ -99,8 +99,12 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
         if t.get("category_account_id") and not t.get("human_reviewed"):
             split_by_contact[cid_key].add(t.get("category_account_id"))
 
+    # Build both queues, then interleave by descending count so the
+    # user is always working on the biggest wins first. Bump caps from
+    # [:8]/[:6] to [:50] so the queue keeps refilling as items resolve —
+    # previously the auto-advance ran dry after 8 completions.
     top_actions: list[dict] = []
-    for cidk, b in sorted(uncat_by_contact.items(), key=lambda kv: -kv[1]["count"])[:8]:
+    for cidk, b in sorted(uncat_by_contact.items(), key=lambda kv: -kv[1]["count"])[:50]:
         if b["count"] >= 3:
             top_actions.append({
                 "kind": "contact_in_uncat",
@@ -109,7 +113,7 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
                 "label": f"{b['contact_name']} · Uncategorized",
                 "why": f"{b['count']} rows from {b['contact_name']} are still uncategorized.",
             })
-    for cidk, cats in sorted(split_by_contact.items(), key=lambda kv: -len(kv[1]))[:6]:
+    for cidk, cats in sorted(split_by_contact.items(), key=lambda kv: -len(kv[1]))[:50]:
         if len(cats) >= 3:
             cname = next((t.get("contact_name") for t in txns if t.get("contact_id") == cidk), "")
             top_actions.append({
@@ -119,7 +123,12 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
                 "label": f"{cname} · {len(cats)} categories",
                 "why": f"{cname} is spread across {len(cats)} different accounts — likely a categorization inconsistency.",
             })
+    # Sort the combined list by count DESC so the biggest cleanups surface
+    # first regardless of kind (a 30-row uncat contact beats a 3-account split).
+    top_actions.sort(key=lambda a: -a["count"])
     if flagged > 0:
+        # flagged_batch is a different workflow (one-at-a-time review) — pin
+        # it at the end so contact-level cleanups drain first.
         top_actions.append({
             "kind": "flagged_batch",
             "count": flagged,
@@ -132,7 +141,7 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
             "total": total, "reviewed": reviewed, "ai_categorized": ai_cat,
             "uncategorized": uncat, "flagged": flagged, "pct_reviewed": pct,
         },
-        "top_actions": top_actions[:8],
+        "top_actions": top_actions[:50],
     }
 
 

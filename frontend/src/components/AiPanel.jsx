@@ -1123,7 +1123,8 @@ export default function AiPanel({ collapsed, onToggle }) {
           // dismisses this contact and moves on. This is the primary fix for
           // the "same contact keeps coming back" bug the user reported.
           if (rows.length === 0) {
-            const say = `Already approved — moving on from **${inq.action.contact_name}**.`;
+            const name = inq.action.contact_name || "these transactions";
+            const say = `Already approved — moving on from **${name}**.`;
             setMessages(mm => [...mm, { role: "assistant", content: say }]);
             if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
             emitAction("cleanup-completed", {

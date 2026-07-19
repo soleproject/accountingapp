@@ -1,0 +1,25 @@
+{
+  "summary": "Iter36 — Cleanup Copilot auto-advance fixes. Backend: cleanup-suggestions cap raised 8→50, top_actions sorted by count DESC across kinds, flagged_batch pinned last. Frontend: auto-advance filter skips flagged_batch; approve_existing rows.length===0 fallback message uses contact_name || 'these transactions'. All 5 backend tests pass with seeded synthetic contacts (12 uncat + 3 split + 1 flagged). Frontend fixes verified via code inspection; smoke UI test confirms app loads without errors.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_cleanup_suggestions_iter36.py",
+    "/app/test_reports/pytest/iter36.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routes/transactions.py:107,116 — uncat and split top-N slices are [:50] BEFORE the ≥3 threshold filter. If the top 50 contacts by raw count are all below threshold, valid smaller contacts get dropped. Consider filtering before slicing. Not a regression; edge case.",
+    "CleanupCopilot.jsx:118 — dedupe key uses `${a.kind}-${a.contact_id || a.count}` which for flagged_batch collapses to `flagged_batch-<count>`; changes each time flagged count changes so dismissal doesn't survive. Since flagged_batch is now skipped in auto-advance anyway, low impact.",
+    "AiPanel.jsx approve_existing branch — good defensive fallback; consider also guarding `emitAction('cleanup-completed', ...)` payload for missing contact_id (currently null contact_id from flagged_batch action wouldn't dismiss properly, but this branch is only reachable for contact_id-bearing actions)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_cleanup_suggestions_iter36.py (new)"
+  ],
+  "success_rate": {"backend": "100% (5/5)", "frontend": "smoke-only (code inspection)"},
+  "test_credentials": "pro@axiom.ai / pro123",
+  "seed_data_creation": "Seeded 16 contacts + ~120 txns under seed_tag ITER36_* on the first pro-visible company; all cleaned up in fixture teardown. No residual data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "test_cleanup_suggestions_iter36.py seeds against the first pro-visible company (not necessarily 704 LLC); tests are idempotent because SEED_TAG is randomized per run and teardown deletes by tag. Auth token is under `token` (not `access_token`). Ran with `-o addopts=''` to bypass xdist config that fights collection here.",
+  "rca of the issue": "User bug: auto-advance kept looping on flagged_batch after all contact-scoped items were consumed because (a) top_actions was capped at 8, exhausting queue prematurely; (b) auto-advance served whatever nextActions[0] was, and flagged_batch's CPA-review returned ambiguous intent → loop. Also, approve_existing early-return message interpolated undefined contact_name when triggered from flagged_batch. Fix (verified): cap→50, sort by count desc, flagged_batch pinned last AND skipped in auto-advance filter, and fallback string for missing contact_name."
+}

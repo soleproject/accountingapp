@@ -109,9 +109,14 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     // Then serve up the next action after a short beat so the user sees
     // the "Done — recategorized N" message before the next inquiry lands.
     const nextActions = (latest?.top_actions || []).filter(a => {
-      const key = `${a.kind}-${a.contact_id || a.count}`;
+      // Skip the just-completed contact.
       if (cid && a.contact_id === cid) return false;
-      return !dismissed.has(key) && key !== `contact_in_uncat-${cid}`;
+      // Auto-advance only through contact-scoped actions. flagged_batch is
+      // a different workflow (one-at-a-time review) and repeats forever
+      // when picked automatically, so leave it as a manual "Fix now" click.
+      if (a.kind === "flagged_batch") return false;
+      const key = `${a.kind}-${a.contact_id || a.count}`;
+      return !dismissed.has(key);
     });
     const next = nextActions[0];
     if (next) {

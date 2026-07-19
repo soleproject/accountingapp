@@ -233,8 +233,11 @@ async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool,
             from routes.transactions import detect_transfer_pairs
             await _emit("detecting_transfers", imported, total_target)
             await detect_transfer_pairs(company_id, dry_run=False)
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger("axiom.app").warning(
+                "internal-transfer detector failed after sync for cid=%s: %s", company_id, e
+            )
     return imported
 
 
