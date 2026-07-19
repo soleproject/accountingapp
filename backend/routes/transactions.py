@@ -223,6 +223,36 @@ class BulkApproveAiReadyIn(BaseModel):
     # (unless target is an Uncategorized sink), original category snapshotted
     # on each row for Undo restoration.
     overrides: Optional[Dict[str, str]] = None
+    # If True (default), auto-create categorization rules for approved
+    # buckets that meet the smart-rule criteria (see `_should_create_rule`
+    # below). Undo removes the created rules alongside the row changes.
+    auto_create_rules: bool = True
+
+
+# Merchants that should NEVER get an auto-generated rule — these are
+# generic payment rails (Venmo/Zelle/Cash App), cash withdrawals, and
+# other "context-dependent" merchants where the category depends on the
+# specific transaction, not the merchant name. Case-insensitive substring
+# match on both merchant + contact name.
+_RULE_NOISE_MERCHANTS = (
+    "venmo", "zelle", "cash app", "cash withdrawal", "atm withdrawal",
+    "paypal", "square cash", "apple cash", "wire transfer",
+    "online banking transfer", "internal transfer", "check ",
+    "check#", "check no", "ach credit", "ach debit",
+    "monthly service charge", "overdraft", "unknown vendor",
+)
+
+
+def _is_rule_noise_merchant(merchant: str | None, contact_name: str | None) -> bool:
+    """Return True if this vendor should not spawn an auto-rule (payment
+    rails, cash withdrawals, generic bank noise). Substring match — so
+    'Zelle · Kevin Petersen' also matches 'zelle'."""
+    m = (merchant or "").lower()
+    c = (contact_name or "").lower()
+    for k in _RULE_NOISE_MERCHANTS:
+        if k in m or k in c:
+            return True
+    return False
 
 
 @router.post("/companies/{cid}/transactions/bulk-approve-ai-ready")
@@ -401,6 +431,85 @@ async def bulk_approve_ai_ready(
     if updated_total:
         await log_ai(cid, "bulk_approve_ai_ready", updated_total)
 
+    # Auto-create categorization rules from approved buckets.
+    # Guardrails:
+    #   1. Skip payment-rail / cash-noise merchants (Venmo, Zelle, ATM, …)
+    #   2. Skip contacts with multiple buckets in this batch (ambiguous — a
+    #      Costco 6800 rule would misroute the Costco 6120 rows next time).
+    #   3. Require count ≥ 3 unless the CPA overrode the AI (any override is
+    #      a strong "teach me" signal regardless of count).
+    #   4. Skip merchants that already have a rule pointing at the same
+    #      account (idempotent — re-running the same batch never dupes).
+    rules_created: list[dict] = []
+    if inp.auto_create_rules and updated_total:
+        # How many buckets per contact in this batch — used to detect
+        # ambiguous vendors that should NOT be ruled.
+        buckets_per_contact: dict[str, int] = {}
+        for _k, b in eligible:
+            buckets_per_contact[b["contact_id"]] = buckets_per_contact.get(b["contact_id"], 0) + 1
+
+        for k, b in eligible:
+            contact_id = b["contact_id"]
+            override = override_accounts.get(k)
+            target_acct_id = override["id"] if override else b["account"].get("id")
+            target_acct_code = override.get("code") if override else b["account"].get("code")
+            target_acct_name = override.get("name") if override else b["account"].get("name")
+
+            # Ambiguous vendor — skip.
+            if buckets_per_contact.get(contact_id, 0) > 1:
+                continue
+            # Payment rail / bank noise — skip.
+            merchant_sample = b["contact_name"] or ""
+            # Cheap peek at one txn's merchant string to double-check noise.
+            first_txn = await db.transactions.find_one(
+                {"id": {"$in": b["txn_ids"]}, "company_id": cid},
+                {"merchant": 1, "description": 1},
+            )
+            if first_txn:
+                merchant_sample = first_txn.get("merchant") or first_txn.get("description") or merchant_sample
+            if _is_rule_noise_merchant(merchant_sample, b["contact_name"]):
+                continue
+            # Below-threshold and not an override — signal too weak.
+            if b["count"] < 3 and not override:
+                continue
+            # Existing rule already covers this merchant → target account.
+            match_value = (b["contact_name"] or merchant_sample or "").strip()
+            if not match_value:
+                continue
+            existing = await db.rules.find_one({
+                "company_id": cid,
+                "match_type": "merchant_contains",
+                "match_value": match_value,
+                "account_code": target_acct_code,
+            })
+            if existing:
+                continue
+
+            rule_id = str(uuid.uuid4())
+            rule_doc = {
+                "id": rule_id, "company_id": cid,
+                "match_type": "merchant_contains",
+                "match_value": match_value,
+                "account_id": target_acct_id,
+                "account_code": target_acct_code,
+                "account_name": target_acct_name,
+                "created_by": "human" if override else "ai",
+                "source": "mega_bulk_approve_override" if override else "mega_bulk_approve",
+                "mega_batch_id": batch_id,   # tagged so Undo can remove it
+                "hits": b["count"],
+                "created_at": now, "updated_at": now,
+            }
+            await db.rules.insert_one(rule_doc)
+            rules_created.append({
+                "id": rule_id,
+                "match_value": match_value,
+                "account": {"code": target_acct_code, "name": target_acct_name},
+                "count": b["count"],
+                "from_override": bool(override),
+            })
+        if rules_created:
+            await log_ai(cid, "rule_created", len(rules_created))
+
     return {
         "ok": True, "dry_run": False,
         "batch_id": batch_id,
@@ -411,6 +520,7 @@ async def bulk_approve_ai_ready(
         "vendors": vendors,
         "top_contacts": vendors[:5],
         "updated": updated_total,
+        "rules_created": rules_created,
     }
 
 
@@ -468,7 +578,15 @@ async def undo_mega_batch(cid: str, batch_id: str, user: dict = Depends(get_curr
         reverted += res.modified_count
     if reverted:
         await log_ai(cid, "undo_mega_batch", reverted)
-    return {"ok": True, "reverted": reverted}
+    # Also undo any auto-created rules tagged with this batch id.
+    rules_deleted = await db.rules.delete_many({
+        "company_id": cid, "mega_batch_id": batch_id,
+    })
+    return {
+        "ok": True,
+        "reverted": reverted,
+        "rules_deleted": rules_deleted.deleted_count,
+    }
 
 
 

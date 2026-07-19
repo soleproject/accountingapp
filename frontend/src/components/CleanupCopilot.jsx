@@ -110,7 +110,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   const [megaBusy, setMegaBusy] = useState(false);
   const [megaSelected, setMegaSelected] = useState(new Set());
   const [megaSearch, setMegaSearch] = useState("");
-  const [megaUndo, setMegaUndo] = useState(null);  // {batch_id, count, expires}
+  const [megaUndo, setMegaUndo] = useState(null);  // {batch_id, count, rules_created, expires}
   // Per-vendor category overrides: Map<contact_id, account_id>. When present,
   // the mega-approve call sends `overrides` and the vendor's row gets
   // recategorized to the target account (and snapshotted for Undo).
@@ -118,6 +118,17 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   // Full CoA for the current company, loaded once when the modal opens. Used
   // for the category dropdown and the info-icon tooltip.
   const [accounts, setAccounts] = useState([]);
+  // Auto-create rules on approval? User-controllable, persisted per-browser.
+  const [autoCreateRules, setAutoCreateRules] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const v = window.localStorage.getItem("axiom.mega.autoCreateRules");
+    return v === null ? true : v === "1";
+  });
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("axiom.mega.autoCreateRules", autoCreateRules ? "1" : "0");
+    }
+  }, [autoCreateRules]);
   useEffect(() => {
     // Auto-dismiss the Undo toast after 60s.
     if (!megaUndo) return;
@@ -171,6 +182,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         {
           dry_run: false,
           keys: Array.from(megaSelected),
+          auto_create_rules: autoCreateRules,
           ...(Object.keys(overrides).length ? { overrides } : {}),
         }
       );
@@ -184,6 +196,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         setMegaUndo({
           batch_id: r.data.batch_id,
           count: r.data.updated,
+          rules_created: (r.data.rules_created || []).length,
           expires: Date.now() + 60_000,
         });
       }
@@ -232,13 +245,19 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         {
           dry_run: false,
           keys: [vendor.key],
+          auto_create_rules: autoCreateRules,
           ...(overrideId ? { overrides: { [vendor.key]: overrideId } } : {}),
         }
       );
       window.dispatchEvent(new CustomEvent("axiom:action",
         { detail: { kind: "txns:changed", at: Date.now() } }));
       if (r.data?.batch_id && r.data?.updated) {
-        setMegaUndo({ batch_id: r.data.batch_id, count: r.data.updated, expires: Date.now() + 60_000 });
+        setMegaUndo({
+          batch_id: r.data.batch_id,
+          count: r.data.updated,
+          rules_created: (r.data.rules_created || []).length,
+          expires: Date.now() + 60_000,
+        });
       }
     } catch (e) {
       // Roll back the optimistic remove on failure.
@@ -661,6 +680,19 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                 <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mb-3">
                   ⚠ You&apos;ll have 60 seconds to Undo after applying. Undo restores each row&apos;s original category too.
                 </div>
+                <label className="flex items-center gap-2 mb-3 text-[11px] text-slate-600 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    data-testid="mega-auto-create-rules"
+                    checked={autoCreateRules}
+                    onChange={(e) => setAutoCreateRules(e.target.checked)}
+                    className="rounded border-slate-300"
+                  />
+                  <span>
+                    <span className="font-medium">Auto-create rules from approved buckets</span>
+                    <span className="text-slate-500"> — so future {`{merchant}`} imports land on the same account automatically. Skips payment apps (Venmo / Zelle / Cash App) and ambiguous vendors. Undo removes any created rules too.</span>
+                  </span>
+                </label>
                 <div className="flex gap-2">
                   <button
                     data-testid="mega-approve-cancel"
@@ -688,8 +720,13 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         <div className="fixed bottom-6 right-6 z-[70] max-w-sm bg-slate-900 text-white rounded-lg shadow-2xl px-4 py-3 flex items-center gap-3"
              data-testid="mega-undo-toast">
           <div className="text-sm">
-            <div className="font-semibold">Approved {megaUndo.count.toLocaleString()} rows</div>
-            <div className="text-slate-300 text-xs">You have 60 seconds to undo.</div>
+            <div className="font-semibold">
+              Approved {megaUndo.count.toLocaleString()} rows
+              {megaUndo.rules_created > 0 && (
+                <span> · created {megaUndo.rules_created} rule{megaUndo.rules_created === 1 ? "" : "s"}</span>
+              )}
+            </div>
+            <div className="text-slate-300 text-xs">You have 60 seconds to undo (rows + rules).</div>
           </div>
           <button
             data-testid="mega-undo-btn"
