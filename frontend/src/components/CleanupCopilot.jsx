@@ -78,9 +78,18 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   // after every other contact has been seen or skipped. Reset on company
   // switch so opening another client starts with a fresh queue.
   const [skippedOrder, setSkippedOrder] = useState([]);
+  // Refs mirror the two above so the async cleanup-completed handler always
+  // sees the LATEST values — otherwise stale-closure reads cause the queue
+  // to loop back to the just-skipped contact instead of advancing.
+  const skippedOrderRef = useRef([]);
+  const dismissedRef = useRef(new Set());
+  useEffect(() => { skippedOrderRef.current = skippedOrder; }, [skippedOrder]);
+  useEffect(() => { dismissedRef.current = dismissed; }, [dismissed]);
   useEffect(() => {
     setDismissed(new Set());
     setSkippedOrder([]);
+    dismissedRef.current = new Set();
+    skippedOrderRef.current = [];
   }, [currentId]);
   const [megaPreview, setMegaPreview] = useState(null);
   const [megaBusy, setMegaBusy] = useState(false);
@@ -256,28 +265,28 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   useActionListener("cleanup-completed", async (payload) => {
     const cid = payload?.contact_id;
     const wasSkip = !!payload?.skipped;
+    // Compute the next skip queue + dismissed set BEFORE reading state, using
+    // refs so we always see the freshest values (React state updates are
+    // async — the closure could otherwise read stale data and loop back to
+    // the just-skipped contact).
+    let nextSkipOrder = skippedOrderRef.current.slice();
+    const nextDismissed = new Set(dismissedRef.current);
     if (cid) {
       if (wasSkip) {
-        // Move this contact to the back of the queue — do NOT permanently
-        // dismiss. It will resurface after every other contact has had a turn.
-        setSkippedOrder(prev => {
-          const next = prev.filter(x => x !== cid);
-          next.push(cid);
-          return next;
-        });
+        nextSkipOrder = nextSkipOrder.filter(x => x !== cid);
+        nextSkipOrder.push(cid);
       } else {
-        // Real completion — permanently dismiss all action-kinds for this contact.
-        setDismissed(prev => {
-          const next = new Set(prev);
-          next.add(`contact_in_uncat-${cid}`);
-          next.add(`contact_split-${cid}`);
-          next.add(`contact_ai_ready-${cid}`);
-          return next;
-        });
-        // If this contact was previously skipped, drop it out of the skip queue
-        // too — completion trumps skip.
-        setSkippedOrder(prev => prev.filter(x => x !== cid));
+        nextDismissed.add(`contact_in_uncat-${cid}`);
+        nextDismissed.add(`contact_split-${cid}`);
+        nextDismissed.add(`contact_ai_ready-${cid}`);
+        nextSkipOrder = nextSkipOrder.filter(x => x !== cid);
       }
+      // Commit to state + refs. Refs first so any *synchronous* re-entry
+      // during the same tick sees the new values.
+      skippedOrderRef.current = nextSkipOrder;
+      dismissedRef.current = nextDismissed;
+      setSkippedOrder(nextSkipOrder);
+      setDismissed(nextDismissed);
     }
     // Reload the actions list so recently-cleared contacts drop off.
     setBusy(true);
@@ -288,24 +297,34 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
       setData(latest);
     } finally { setBusy(false); }
 
-    // Then serve up the next action after a short beat so the user sees
-    // the "Done — recategorized N" message before the next inquiry lands.
-    // Reorder: unseen contacts first (dismissed removed), then skipped contacts
-    // in FIFO skip order at the back.
-    const latestSkipOrder = wasSkip
-      ? [...skippedOrder.filter(x => x !== cid), cid]
-      : skippedOrder.filter(x => x !== cid);
+    // Reorder: unseen contacts first, then skipped contacts in FIFO skip
+    // order at the back. Only auto-advance if there's a NEW (never-skipped)
+    // contact — never bounce straight back into the skip ring, otherwise a
+    // 2-item queue re-serves the just-skipped item immediately.
     const eligible = (latest?.top_actions || []).filter(a => {
       if (a.kind === "flagged_batch") return false;
       const key = `${a.kind}-${a.contact_id || a.count}`;
-      return !dismissed.has(key);
+      return !nextDismissed.has(key);
     });
-    const unseen = eligible.filter(a => !a.contact_id || !latestSkipOrder.includes(a.contact_id));
-    const skippedRing = latestSkipOrder
+    const unseen = eligible.filter(
+      a => !a.contact_id || !nextSkipOrder.includes(a.contact_id)
+    );
+    const skippedRing = nextSkipOrder
       .map(scid => eligible.find(a => a.contact_id === scid))
       .filter(Boolean);
     const ordered = [...unseen, ...skippedRing];
-    const next = ordered[0];
+    // Pick the first UNSEEN action first. Only fall back to a resurfaced-
+    // skipped one when there are no unseen contacts left. Also guard against
+    // instantly picking the just-skipped contact.
+    let next = unseen[0];
+    if (!next) {
+      next = skippedRing.find(a => a.contact_id !== cid) || skippedRing[0];
+    }
+    if (next && next.contact_id === cid) {
+      // Absolute safety net: don't re-serve the same contact we just skipped
+      // on this turn. Take the next one in the ring instead.
+      next = ordered.find(a => a.contact_id !== cid) || null;
+    }
     if (next) {
       setTimeout(() => { onApplyRef.current?.(next); }, 1200);
     }
