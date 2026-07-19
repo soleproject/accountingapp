@@ -43,13 +43,17 @@ body {
   background-image: linear-gradient(
     120deg,
     #7c3aed 0%,    /* violet-600 */
-    #0891b2 25%,   /* cyan-600 */
-    #059669 50%,   /* emerald-600 */
-    #d97706 75%,   /* amber-600 */
-    #db2777 100%   /* pink-600 */
+    #a855f7 20%,   /* purple-500 */
+    #facc15 40%,   /* yellow-400 */
+    #eab308 55%,   /* yellow-500 (rich gold) */
+    #d946ef 75%,   /* fuchsia-500 */
+    #7c3aed 100%   /* violet-600 — loops smoothly */
   );
   background-size: 300% 300%;
-  color: #ffffff;                     /* white text on the deeper 600-shade gradient */
+  color: #ffffff;
+  /* Text-shadow gives white text an extra edge over the bright yellow stops
+   * without dragging the whole button toward a darker gradient. */
+  text-shadow: 0 1px 2px rgba(15, 23, 42, 0.55);
   border-color: transparent !important;
   animation:
     ai-shimmer 6s ease-in-out infinite,
@@ -60,7 +64,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .ai-shimmer-btn {
     animation: none;
-    background: linear-gradient(120deg, #7c3aed, #0891b2, #059669, #d97706, #db2777);
+    background: linear-gradient(120deg, #7c3aed, #a855f7, #facc15, #eab308, #d946ef, #7c3aed);
   }
 }
 
