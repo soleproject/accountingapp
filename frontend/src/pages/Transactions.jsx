@@ -821,7 +821,7 @@ function ContactRollup({ data, busy, onCellClick }) {
   }
 
   return (
-    <div data-testid="txn-rollup-grid" className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+    <div data-testid="txn-rollup-grid" className="p-4 flex flex-col gap-4">
       {contacts.map((c) => {
         const multi = c.categories.length > 1;
         return (
