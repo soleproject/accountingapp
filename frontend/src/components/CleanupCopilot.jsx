@@ -71,7 +71,17 @@ function pitchFor(action, progress) {
 export default function CleanupCopilot({ currentId, onApplyAction, onStartSession }) {
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
+  // Permanent dismissal (contact was actually handled, not just skipped).
   const [dismissed, setDismissed] = useState(new Set());
+  // Ordered skip queue: contact_ids skipped in FIFO order. Skipped items are
+  // moved to the BACK of the queue instead of vanishing so they come back
+  // after every other contact has been seen or skipped. Reset on company
+  // switch so opening another client starts with a fresh queue.
+  const [skippedOrder, setSkippedOrder] = useState([]);
+  useEffect(() => {
+    setDismissed(new Set());
+    setSkippedOrder([]);
+  }, [currentId]);
   const [megaPreview, setMegaPreview] = useState(null);
   const [megaBusy, setMegaBusy] = useState(false);
   const [megaSelected, setMegaSelected] = useState(new Set());
@@ -245,16 +255,29 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   useEffect(() => { onApplyRef.current = onApplyAction; });
   useActionListener("cleanup-completed", async (payload) => {
     const cid = payload?.contact_id;
+    const wasSkip = !!payload?.skipped;
     if (cid) {
-      // Match the same dismissal key format used below when filtering
-      // the top_actions list.
-      setDismissed(prev => {
-        const next = new Set(prev);
-        next.add(`contact_in_uncat-${cid}`);
-        next.add(`contact_split-${cid}`);
-        next.add(`contact_ai_ready-${cid}`);
-        return next;
-      });
+      if (wasSkip) {
+        // Move this contact to the back of the queue — do NOT permanently
+        // dismiss. It will resurface after every other contact has had a turn.
+        setSkippedOrder(prev => {
+          const next = prev.filter(x => x !== cid);
+          next.push(cid);
+          return next;
+        });
+      } else {
+        // Real completion — permanently dismiss all action-kinds for this contact.
+        setDismissed(prev => {
+          const next = new Set(prev);
+          next.add(`contact_in_uncat-${cid}`);
+          next.add(`contact_split-${cid}`);
+          next.add(`contact_ai_ready-${cid}`);
+          return next;
+        });
+        // If this contact was previously skipped, drop it out of the skip queue
+        // too — completion trumps skip.
+        setSkippedOrder(prev => prev.filter(x => x !== cid));
+      }
     }
     // Reload the actions list so recently-cleared contacts drop off.
     setBusy(true);
@@ -267,25 +290,39 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
 
     // Then serve up the next action after a short beat so the user sees
     // the "Done — recategorized N" message before the next inquiry lands.
-    const nextActions = (latest?.top_actions || []).filter(a => {
-      // Skip the just-completed contact.
-      if (cid && a.contact_id === cid) return false;
-      // Auto-advance only through contact-scoped actions. flagged_batch is
-      // a different workflow (one-at-a-time review) and repeats forever
-      // when picked automatically, so leave it as a manual "Fix now" click.
+    // Reorder: unseen contacts first (dismissed removed), then skipped contacts
+    // in FIFO skip order at the back.
+    const latestSkipOrder = wasSkip
+      ? [...skippedOrder.filter(x => x !== cid), cid]
+      : skippedOrder.filter(x => x !== cid);
+    const eligible = (latest?.top_actions || []).filter(a => {
       if (a.kind === "flagged_batch") return false;
       const key = `${a.kind}-${a.contact_id || a.count}`;
       return !dismissed.has(key);
     });
-    const next = nextActions[0];
+    const unseen = eligible.filter(a => !a.contact_id || !latestSkipOrder.includes(a.contact_id));
+    const skippedRing = latestSkipOrder
+      .map(scid => eligible.find(a => a.contact_id === scid))
+      .filter(Boolean);
+    const ordered = [...unseen, ...skippedRing];
+    const next = ordered[0];
     if (next) {
       setTimeout(() => { onApplyRef.current?.(next); }, 1200);
     }
   });
 
-  const actions = (data?.top_actions || []).filter(a =>
+  // Reorder actions so skipped contacts fall to the BACK (in FIFO skip
+  // order). Permanent dismissals are filtered out first.
+  const eligibleActions = (data?.top_actions || []).filter(a =>
     !dismissed.has(`${a.kind}-${a.contact_id || a.count}`)
   );
+  const unseenActions = eligibleActions.filter(
+    a => !a.contact_id || !skippedOrder.includes(a.contact_id)
+  );
+  const skippedActions = skippedOrder
+    .map(scid => eligibleActions.find(a => a.contact_id === scid))
+    .filter(Boolean);
+  const actions = [...unseenActions, ...skippedActions];
   const primary = actions[0];
   const rest = actions.slice(1, 6);
   const total = data?.progress?.total || 0;
