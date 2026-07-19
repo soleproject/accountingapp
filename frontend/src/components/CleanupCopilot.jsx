@@ -1,60 +1,8 @@
 import { useEffect, useState, useRef } from "react";
-import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
 import { useActionListener } from "@/lib/createBus";
-import { Sparkles, PlayCircle, ArrowRight, Loader2, Info } from "lucide-react";
-import { accountDefinition } from "@/lib/accountDefinitions";
-
-// Small hover-tooltip that renders in a portal so it escapes the modal's
-// scrollable vendor list (which would otherwise clip an absolutely-positioned
-// tooltip).
-function InfoTooltip({ account }) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ x: 0, y: 0 });
-  const ref = useRef(null);
-  const show = () => {
-    const r = ref.current?.getBoundingClientRect();
-    if (r) setPos({ x: r.left + r.width / 2, y: r.top });
-    setOpen(true);
-  };
-  return (
-    <>
-      <span
-        ref={ref}
-        onMouseEnter={show}
-        onMouseLeave={() => setOpen(false)}
-        onFocus={show}
-        onBlur={() => setOpen(false)}
-        tabIndex={0}
-        className="shrink-0 inline-flex items-center cursor-help"
-      >
-        <Info size={12} className="text-slate-400 hover:text-slate-600" />
-      </span>
-      {open && account && createPortal(
-        <div
-          role="tooltip"
-          style={{
-            position: "fixed",
-            left: pos.x,
-            top: pos.y,
-            transform: "translate(-50%, calc(-100% - 8px))",
-            zIndex: 100,
-            pointerEvents: "none",
-          }}
-          className="w-64 rounded-md bg-slate-900 text-white text-[11px] leading-snug px-2.5 py-2 shadow-xl"
-        >
-          <span className="block font-semibold mb-0.5 font-mono-num">
-            {account.code} · {account.name}
-          </span>
-          <span className="block text-slate-200">
-            {accountDefinition(account)}
-          </span>
-        </div>,
-        document.body
-      )}
-    </>
-  );
-}
+import { Sparkles, PlayCircle, ArrowRight, Loader2 } from "lucide-react";
+import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
 
 // Compact SVG donut: reviewed (emerald), ai (indigo), uncategorized (rose),
 // flagged (amber), rest of total (slate). All slice sizes are proportional
@@ -166,7 +114,8 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
       } else {
         setMegaPreview(r.data);
         // Everyone selected by default — CPA can uncheck the risky ones.
-        setMegaSelected(new Set((r.data.vendors || []).map(v => v.contact_id)));
+        // Selection key is the bucket key ("<contact_id>::<account_id>").
+        setMegaSelected(new Set((r.data.vendors || []).map(v => v.key)));
       }
       setMegaSearch("");
     } catch (e) {
@@ -178,16 +127,16 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     if (megaBusy || !currentId || megaSelected.size === 0) return;
     setMegaBusy(true);
     try {
-      // Only send overrides for vendors actually being approved this round.
+      // Only send overrides for buckets actually being approved this round.
       const overrides = {};
-      for (const cid of megaSelected) {
-        if (megaOverrides[cid]) overrides[cid] = megaOverrides[cid];
+      for (const k of megaSelected) {
+        if (megaOverrides[k]) overrides[k] = megaOverrides[k];
       }
       const r = await api.post(
         `/companies/${currentId}/transactions/bulk-approve-ai-ready`,
         {
           dry_run: false,
-          contact_ids: Array.from(megaSelected),
+          keys: Array.from(megaSelected),
           ...(Object.keys(overrides).length ? { overrides } : {}),
         }
       );
@@ -234,22 +183,22 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     // Optimistic remove so the CPA can fly through the list.
     setMegaPreview(mp => mp ? {
       ...mp,
-      vendors: mp.vendors.filter(v => v.contact_id !== vendor.contact_id),
+      vendors: mp.vendors.filter(v => v.key !== vendor.key),
       total_rows: mp.total_rows - vendor.count,
-      total_contacts: mp.total_contacts - 1,
+      total_buckets: (mp.total_buckets || 0) - 1,
       total_amount: mp.total_amount - vendor.amount,
     } : mp);
     setMegaSelected(prev => {
-      const n = new Set(prev); n.delete(vendor.contact_id); return n;
+      const n = new Set(prev); n.delete(vendor.key); return n;
     });
     try {
-      const overrideId = megaOverrides[vendor.contact_id];
+      const overrideId = megaOverrides[vendor.key];
       const r = await api.post(
         `/companies/${currentId}/transactions/bulk-approve-ai-ready`,
         {
           dry_run: false,
-          contact_ids: [vendor.contact_id],
-          ...(overrideId ? { overrides: { [vendor.contact_id]: overrideId } } : {}),
+          keys: [vendor.key],
+          ...(overrideId ? { overrides: { [vendor.key]: overrideId } } : {}),
         }
       );
       window.dispatchEvent(new CustomEvent("axiom:action",
@@ -263,17 +212,17 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         ...mp,
         vendors: [vendor, ...mp.vendors],
         total_rows: mp.total_rows + vendor.count,
-        total_contacts: mp.total_contacts + 1,
+        total_buckets: (mp.total_buckets || 0) + 1,
         total_amount: mp.total_amount + vendor.amount,
       } : mp);
       window.dispatchEvent(new CustomEvent("axiom:toast",
         { detail: { message: `Couldn't approve ${vendor.contact_name}. Try again.`, type: "error" } }));
     }
   };
-  const toggleVendor = (cid) => {
+  const toggleVendor = (key) => {
     setMegaSelected(prev => {
       const next = new Set(prev);
-      if (next.has(cid)) next.delete(cid); else next.add(cid);
+      if (next.has(key)) next.delete(key); else next.add(key);
       return next;
     });
   };
@@ -347,10 +296,13 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     ? megaVendors.filter(v => (v.contact_name || "").toLowerCase().includes(megaSearch.trim().toLowerCase()))
     : megaVendors;
   const selectedRows = megaVendors.reduce(
-    (s, v) => s + (megaSelected.has(v.contact_id) ? v.count : 0), 0
+    (s, v) => s + (megaSelected.has(v.key) ? v.count : 0), 0
   );
   const selectedAmount = megaVendors.reduce(
-    (s, v) => s + (megaSelected.has(v.contact_id) ? v.amount : 0), 0
+    (s, v) => s + (megaSelected.has(v.key) ? v.amount : 0), 0
+  );
+  const selectedBuckets = megaVendors.reduce(
+    (s, v) => s + (megaSelected.has(v.key) ? 1 : 0), 0
   );
 
   return (
@@ -446,10 +398,10 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
             ) : (
               <>
                 <div className="text-base font-semibold text-slate-900 mb-1">
-                  Approve <span data-testid="mega-selected-rows">{selectedRows.toLocaleString()}</span> rows across <span data-testid="mega-selected-vendors">{megaSelected.size}</span> vendors?
+                  Approve <span data-testid="mega-selected-rows">{selectedRows.toLocaleString()}</span> rows across <span data-testid="mega-selected-vendors">{selectedBuckets}</span> {selectedBuckets === 1 ? "bucket" : "buckets"}?
                 </div>
                 <div className="text-xs text-slate-500 mb-2">
-                  Total volume: ${selectedAmount.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2})}. Vendors with mixed AI opinions are already excluded. Change any category from the dropdown before approving.
+                  Total volume: ${selectedAmount.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2})}. Each row is one <span className="font-medium">vendor × category</span> bucket — vendors split across multiple accounts appear here as separate rows so you can approve, exclude, or override each independently.
                 </div>
                 <div className="mb-2">
                   <input
@@ -457,7 +409,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                     type="text"
                     value={megaSearch}
                     onChange={(e) => setMegaSearch(e.target.value)}
-                    placeholder={`Filter ${megaPreview.vendors.length} vendors…`}
+                    placeholder={`Filter ${megaPreview.vendors.length} buckets…`}
                     className="w-full px-2.5 py-1.5 rounded border border-slate-300 text-xs"
                   />
                 </div>
@@ -466,7 +418,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                   <div className="flex gap-2">
                     <button data-testid="mega-select-all"
                             className="text-emerald-700 hover:underline"
-                            onClick={() => setMegaSelected(new Set(megaPreview.vendors.map(v => v.contact_id)))}>
+                            onClick={() => setMegaSelected(new Set(megaPreview.vendors.map(v => v.key)))}>
                       Select all
                     </button>
                     <button data-testid="mega-select-none"
@@ -478,17 +430,19 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                 </div>
                 <div className="space-y-1 mb-3 flex-1 min-h-[240px] overflow-y-auto pr-1" data-testid="mega-vendor-list">
                   {filteredVendors.map((c) => {
-                    const on = megaSelected.has(c.contact_id);
+                    const on = megaSelected.has(c.key);
                     // Effective account = user override (if any) else AI's pick.
-                    const overrideId = megaOverrides[c.contact_id];
+                    const overrideId = megaOverrides[c.key];
                     const effAccount = overrideId
                       ? accounts.find(a => a.id === overrideId)
-                      : accounts.find(a => String(a.code) === String(c.account?.code)) || c.account;
+                      : accounts.find(a => a.id === c.account?.id)
+                        || accounts.find(a => String(a.code) === String(c.account?.code))
+                        || c.account;
                     const isOverridden = !!overrideId;
                     return (
                       <div
-                        key={c.contact_id}
-                        data-testid={`mega-vendor-${c.contact_id}`}
+                        key={c.key}
+                        data-testid={`mega-vendor-${c.key}`}
                         className={`w-full flex items-center gap-2 rounded border px-2.5 py-1.5 text-xs transition-colors ${
                           on
                             ? "border-emerald-300 bg-emerald-50 hover:bg-emerald-100"
@@ -496,14 +450,14 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                         }`}
                       >
                         <button
-                          onClick={() => toggleVendor(c.contact_id)}
+                          onClick={() => toggleVendor(c.key)}
                           className={`w-4 h-4 rounded flex items-center justify-center text-white text-[10px] shrink-0 ${on ? "bg-emerald-600" : "bg-slate-300"}`}
                           title={on ? "Exclude from batch" : "Include in batch"}
                         >
                           {on ? "✓" : ""}
                         </button>
                         <button
-                          onClick={() => toggleVendor(c.contact_id)}
+                          onClick={() => toggleVendor(c.key)}
                           className="min-w-0 shrink-0 text-left"
                           title={c.contact_name}
                         >
@@ -511,18 +465,17 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                         </button>
                         <div className="min-w-0 flex-1 flex items-center gap-1">
                           <select
-                            data-testid={`mega-vendor-cat-${c.contact_id}`}
+                            data-testid={`mega-vendor-cat-${c.key}`}
                             value={effAccount?.id || ""}
                             onChange={(e) => {
                               const newId = e.target.value;
                               setMegaOverrides(prev => {
                                 const next = { ...prev };
-                                // If user reverts to AI's original code, clear the override.
-                                const chosen = accounts.find(a => a.id === newId);
-                                if (chosen && String(chosen.code) === String(c.account?.code)) {
-                                  delete next[c.contact_id];
+                                // If user reverts to the AI's original account (by id), clear the override.
+                                if (newId === c.account?.id) {
+                                  delete next[c.key];
                                 } else if (newId) {
-                                  next[c.contact_id] = newId;
+                                  next[c.key] = newId;
                                 }
                                 return next;
                               });
@@ -547,8 +500,8 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                               );
                             })}
                           </select>
-                          <span data-testid={`mega-vendor-info-${c.contact_id}`}>
-                            <InfoTooltip account={effAccount} />
+                          <span data-testid={`mega-vendor-info-${c.key}`}>
+                            <AccountInfoTooltip account={effAccount} />
                           </span>
                         </div>
                         <div className="text-right shrink-0">
@@ -556,7 +509,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                           <div className="font-mono-num text-slate-500">${c.amount.toLocaleString("en-US", {maximumFractionDigits: 0})}</div>
                         </div>
                         <button
-                          data-testid={`mega-vendor-approve-${c.contact_id}`}
+                          data-testid={`mega-vendor-approve-${c.key}`}
                           onClick={() => approveOne(c)}
                           className="ml-2 shrink-0 text-emerald-700 hover:text-emerald-900 text-xs font-semibold hover:underline"
                           title={`Approve ${c.count} rows now${isOverridden ? " (with override)" : ""}`}

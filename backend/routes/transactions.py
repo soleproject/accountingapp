@@ -198,14 +198,18 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
 
 class BulkApproveAiReadyIn(BaseModel):
     dry_run: bool = False
-    # Optional filter: when non-empty on a live run, only these contact_ids are
-    # approved. Powers the vendor-level toggle in the mega-approve modal.
+    # DEPRECATED but kept for backwards-compat: when set, expands to every
+    # bucket-key that starts with any of these contact_ids.
     contact_ids: Optional[List[str]] = None
-    # Optional per-vendor category overrides: {contact_id -> category_account_id}
-    # Set when the CPA changes a vendor's category pill in the modal before
-    # approving. The row's category is switched to the target account (unless
-    # target is one of the Uncategorized sinks) and the original category is
-    # snapshotted on each row so Undo can restore it cleanly.
+    # Preferred selective-approve payload: list of bucket keys
+    # ("<contact_id>::<category_account_id>") to include. Powers per-bucket
+    # toggles in the mega modal — a single vendor with two categories now
+    # appears as TWO rows and can be approved / overridden independently.
+    keys: Optional[List[str]] = None
+    # Per-BUCKET category overrides: {bucket_key -> new_category_account_id}.
+    # When present the bucket's rows are recategorized to the target account
+    # (unless target is an Uncategorized sink), original category snapshotted
+    # on each row for Undo restoration.
     overrides: Optional[Dict[str, str]] = None
 
 
@@ -215,79 +219,95 @@ async def bulk_approve_ai_ready(
     inp: BulkApproveAiReadyIn = BulkApproveAiReadyIn(),
     user: dict = Depends(get_current_user),
 ):
-    """Mega bulk-approve: mark every AI-categorized-unreviewed row human_reviewed
-    for contacts where the AI has picked a SINGLE consistent account.
+    """Mega bulk-approve: mark AI-categorized-unreviewed rows human_reviewed,
+    grouped per **(vendor, category)** BUCKET so a vendor split across multiple
+    accounts appears as separate approvable rows (e.g. Costco → Supplies (108)
+    AND Costco → Transportation (19) are two independent buckets, either of
+    which the CPA can approve, exclude, or override).
 
     Excludes: uncategorized rows (9999/6999/4999 — e.g. Venmo → Uncategorized
     Expense, Michael Giorgi → Uncategorized Income), rows already reviewed,
-    rows in closed periods, and contacts with mixed AI opinions.
+    rows in closed periods, and rows without a contact_id (raw bank noise
+    like "Online Banking transfer to CHK 6278" — those are handled by the
+    Detect Transfers workflow, not mass-approve).
 
-    INCLUDES `needs_review=true` rows as long as the AI still landed them on
-    a REAL account (e.g. AT&T flagged for review but categorized to 6600
-    Utilities). Per user's follow-up request: "if it is a needs review contact
-    as long as the categorization is not uncategorized it can show up on the
-    'Approve all AI-ready'".
+    INCLUDES `needs_review=true` rows as long as the AI landed them on a REAL
+    account (e.g. AT&T flagged for review but categorized to 6600 Utilities).
 
-    On dry_run=true returns the full eligible vendor list (scrollable in the
-    modal) + summary. On live run tags every touched row with a shared
-    `mega_batch_id` so the whole batch can be undone in one click.
+    Bucket key format: "<contact_id>::<category_account_id>". Frontend uses
+    this as the row identity for toggle + override.
+
+    On dry_run=true returns every eligible bucket. On live run tags every
+    touched row with a shared `mega_batch_id` for one-click Undo.
     """
     await require_company(user, cid)
 
     from collections import defaultdict
-    ai_ready = defaultdict(lambda: {
+    # Bucket by (contact_id, category_account_id). Each unique pair is an
+    # independently-approvable row in the modal.
+    buckets = defaultdict(lambda: {
         "count": 0, "amount": 0.0, "contact_name": "",
-        "accounts": set(), "sample_acct": None, "txn_ids": [],
+        "account": None, "txn_ids": [],
     })
     async for t in db.transactions.find({
         "company_id": cid,
         "human_reviewed": {"$ne": True},
-        # NOTE: `needs_review=true` rows are NO LONGER excluded. As long as
-        # the row is categorized to a REAL account (not 9999/6999/4999) we
-        # let it through — the code filter below is the real safety net.
         "category_account_id": {"$nin": [None, ""]},
         "category_account_code": {"$nin": ["9999", "6999", "4999"]},
         "contact_id": {"$exists": True, "$nin": [None, ""]},
     }):
-        r = ai_ready[t["contact_id"]]
-        r["count"] += 1
-        r["amount"] += abs(float(t.get("amount") or 0.0))
-        r["contact_name"] = t.get("contact_name") or ""
-        r["accounts"].add(t.get("category_account_id"))
-        r["txn_ids"].append(t["id"])
-        if not r["sample_acct"]:
-            r["sample_acct"] = {
+        key = f"{t['contact_id']}::{t.get('category_account_id')}"
+        b = buckets[key]
+        b["count"] += 1
+        b["amount"] += abs(float(t.get("amount") or 0.0))
+        b["contact_name"] = t.get("contact_name") or ""
+        b["txn_ids"].append(t["id"])
+        if b["account"] is None:
+            b["account"] = {
+                "id": t.get("category_account_id"),
                 "code": t.get("category_account_code"),
                 "name": t.get("category_account_name"),
             }
+        # Cache contact_id on the bucket so we can still expand contact_ids-based
+        # filters (backwards-compat).
+        b["contact_id"] = t["contact_id"]
 
-    eligible = [(cidk, r) for cidk, r in ai_ready.items() if len(r["accounts"]) == 1]
-    eligible.sort(key=lambda kv: -kv[1]["count"])
+    # Sort by count desc so the biggest wins float to the top.
+    eligible = sorted(buckets.items(), key=lambda kv: -kv[1]["count"])
 
-    # Optional contact_ids filter for the live run.
-    if not inp.dry_run and inp.contact_ids:
-        wanted = set(inp.contact_ids)
-        eligible = [(cidk, r) for cidk, r in eligible if cidk in wanted]
+    # Selective-approve filters for the LIVE run only.
+    if not inp.dry_run:
+        wanted_keys: set[str] = set(inp.keys or [])
+        if inp.contact_ids:
+            wanted_from_contacts = {
+                k for k, b in eligible if b["contact_id"] in set(inp.contact_ids)
+            }
+            wanted_keys |= wanted_from_contacts
+        if wanted_keys:
+            eligible = [(k, b) for k, b in eligible if k in wanted_keys]
 
-    total_rows = sum(r["count"] for _, r in eligible)
-    total_contacts = len(eligible)
-    total_amount = sum(r["amount"] for _, r in eligible)
+    total_rows = sum(b["count"] for _, b in eligible)
+    total_contacts = len({b["contact_id"] for _, b in eligible})
+    total_amount = sum(b["amount"] for _, b in eligible)
     vendors = [{
-        "contact_id": cidk,
-        "contact_name": r["contact_name"],
-        "count": r["count"],
-        "amount": round(r["amount"], 2),
-        "account": r["sample_acct"] or {},
-    } for cidk, r in eligible]
+        "key": k,
+        # keep contact_id at the top level for legacy code paths + testids
+        "contact_id": b["contact_id"],
+        "contact_name": b["contact_name"],
+        "count": b["count"],
+        "amount": round(b["amount"], 2),
+        "account": b["account"] or {},
+    } for k, b in eligible]
 
     if inp.dry_run or total_rows == 0:
         return {
             "ok": True, "dry_run": inp.dry_run,
             "total_contacts": total_contacts,
+            "total_buckets": len(eligible),
             "total_rows": total_rows,
             "total_amount": round(total_amount, 2),
             "vendors": vendors,
-            "top_contacts": vendors[:5],  # kept for backward-compat
+            "top_contacts": vendors[:5],  # backwards-compat
             "updated": 0,
         }
 
@@ -296,26 +316,24 @@ async def bulk_approve_ai_ready(
     updated_total = 0
     now = now_iso()
 
-    # Resolve override targets once (contact_id -> account doc). Reject targets
+    # Resolve override targets once (bucket key -> account doc). Reject targets
     # that are uncategorized sinks or belong to a different company.
     override_accounts: Dict[str, dict] = {}
     if inp.overrides:
-        eligible_cids = {cidk for cidk, _ in eligible}
-        for cidk, target_id in inp.overrides.items():
-            if not target_id or cidk not in eligible_cids:
+        eligible_keys = {k for k, _ in eligible}
+        for k, target_id in inp.overrides.items():
+            if not target_id or k not in eligible_keys:
                 continue
             acct = await db.accounts.find_one({"id": target_id, "company_id": cid})
             if not acct:
                 raise HTTPException(404, f"Override target account {target_id} not found")
             if str(acct.get("code")) in ("9999", "6999", "4999"):
                 raise HTTPException(400, f"Cannot override to Uncategorized ({acct.get('code')})")
-            override_accounts[cidk] = acct
+            override_accounts[k] = acct
 
-    for cidk, r in eligible:
-        ids = r["txn_ids"]
-        override = override_accounts.get(cidk)
-        # When there's an override we need each row's ORIGINAL category so we
-        # can snapshot it on the row (for Undo restoration). Fetch full docs.
+    for k, b in eligible:
+        ids = b["txn_ids"]
+        override = override_accounts.get(k)
         proj = {"id": 1, "date": 1}
         if override:
             proj.update({
@@ -333,8 +351,6 @@ async def bulk_approve_ai_ready(
         if not keep_docs: continue
 
         if override:
-            # Per-row updates because each row needs its own `_pre_mega_cat`
-            # snapshot.
             for t in keep_docs:
                 snap = {
                     "category_account_id": t.get("category_account_id"),
@@ -377,6 +393,7 @@ async def bulk_approve_ai_ready(
         "ok": True, "dry_run": False,
         "batch_id": batch_id,
         "total_contacts": total_contacts,
+        "total_buckets": len(eligible),
         "total_rows": total_rows,
         "total_amount": round(total_amount, 2),
         "vendors": vendors,

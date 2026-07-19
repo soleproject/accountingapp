@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import CleanupCopilot from "@/components/CleanupCopilot";
+import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
 import { emitAction, useActionListener } from "@/lib/createBus";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
@@ -722,14 +723,19 @@ export default function Transactions() {
                     )}
                   </td>
                   <td className="px-3 py-2">
-                    <select data-testid={TID.txnEditCategory} value={t.category_account_id || ""}
-                            onChange={(e) => updateCategory(t.id, e.target.value)}
-                            className="text-xs border rounded px-1.5 py-1 bg-white max-w-[180px]">
-                      <option value="">— Uncategorized —</option>
-                      {accts.map(a => (
-                        <option key={a.id} value={a.id}>{a.code} {a.name}</option>
-                      ))}
-                    </select>
+                    <div className="inline-flex items-center gap-1">
+                      <select data-testid={TID.txnEditCategory} value={t.category_account_id || ""}
+                              onChange={(e) => updateCategory(t.id, e.target.value)}
+                              className="text-xs border rounded px-1.5 py-1 bg-white max-w-[180px]">
+                        <option value="">— Uncategorized —</option>
+                        {accts.map(a => (
+                          <option key={a.id} value={a.id}>{a.code} {a.name}</option>
+                        ))}
+                      </select>
+                      <AccountInfoTooltip
+                        account={accts.find(a => a.id === t.category_account_id)}
+                      />
+                    </div>
                   </td>
                   <td className="px-3 py-2"><ConfidenceChip conf={t.ai_confidence} needs_review={t.needs_review} /></td>
                   <td className={`px-3 py-2 text-right font-mono-num ${t.amount < 0 ? "text-slate-800" : "text-emerald-700 font-semibold"}`}>
