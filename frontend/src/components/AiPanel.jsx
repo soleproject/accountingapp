@@ -994,6 +994,71 @@ export default function AiPanel({ collapsed, onToggle }) {
         }
         return;
       }
+
+      // Transfer-match card: user said "yes" to mark the matching leg too.
+      if (p.kind === "transfer-match") {
+        pendingIntentRef.current = null;
+        setPendingIntent(null);
+        setMessages(m => [...m, { role: "user", content: userMsg }]);
+        try {
+          const legId = p.candidates?.[0]?.id;
+          if (!legId) throw new Error("no matching leg");
+          await api.post(`/companies/${currentId}/transactions/${p.txnId}/mark-as-transfer`, {
+            matching_leg_id: legId,
+          });
+          const say = "Done — both legs of the transfer are categorized correctly and won't hit the P&L.";
+          setMessages(m => [...m, { role: "assistant", content: say }]);
+          if (voiceOnRef.current) speakOne(say);
+          emitAction("txns:changed");
+        } catch (e) {
+          setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't link the matching leg." }]);
+        }
+        return;
+      }
+
+      // Create-account (standalone) card: user said "yes" to create the account.
+      if (p.kind === "create-account") {
+        pendingIntentRef.current = null;
+        setPendingIntent(null);
+        setMessages(m => [...m, { role: "user", content: userMsg }]);
+        try {
+          const r = await api.post(`/companies/${currentId}/accounts/ensure`, {
+            name: p.accountName, type: p.accountType,
+          });
+          const msg = r.data?.created
+            ? `Created ${r.data.code} ${r.data.name} (${r.data.type}).`
+            : `${r.data.code} ${r.data.name} already exists — using it.`;
+          setMessages(m => [...m, { role: "assistant", content: msg }]);
+          if (voiceOnRef.current) speakOne(msg);
+          emitAction("txns:changed");
+        } catch (e) {
+          setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't create that account." }]);
+        }
+        return;
+      }
+
+      // Create-then-recat card: user said "yes" to create the account AND
+      // reclassify the focused transaction to it in a single step.
+      if (p.kind === "create-then-recat") {
+        pendingIntentRef.current = null;
+        setPendingIntent(null);
+        setMessages(m => [...m, { role: "user", content: userMsg }]);
+        try {
+          const r = await api.post(`/companies/${currentId}/accounts/ensure`, {
+            name: p.accountName, type: p.accountType,
+          });
+          await api.patch(`/companies/${currentId}/transactions/${p.txnId}`, {
+            category_account_id: r.data.id,
+          });
+          const msg = `${r.data.created ? "Created" : "Reusing"} ${r.data.code} ${r.data.name} and recategorized this transaction.`;
+          setMessages(m => [...m, { role: "assistant", content: msg }]);
+          if (voiceOnRef.current) speakOne(msg);
+          emitAction("txns:changed");
+        } catch (e) {
+          setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't create the account or recategorize." }]);
+        }
+        return;
+      }
       setPendingIntent(null);
       setMessages(m => [...m, { role: "user", content: userMsg }]);
       const ok = await submitPendingIntent(p);

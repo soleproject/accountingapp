@@ -578,6 +578,34 @@ export function resolveVoiceCommand(text, ctx) {
     }
   }
 
+  // ---- 3b-2. DESCRIPTIVE intent: "this is actually a rental payment" ----
+  // When the user describes what a transaction IS (rather than issuing a
+  // recategorize command), we still know what to do — look up the category
+  // and offer to recategorize (or create it if it doesn't exist). Only
+  // fires when a transaction is focused; otherwise falls through to LLM.
+  const DESCRIBE_RE = /^(?:so\s+|and\s+|well\s+|ok(?:ay)?,?\s+)?(?:this|it|that|these|those)\s+(?:is|are|was|were|looks?\s+like|seems?\s+to\s+be)\s+(?:actually\s+|really\s+|just\s+)?(?:a\s+|an\s+|the\s+|some\s+|all\s+|our\s+|my\s+)?(.+?)\s*[.!?]?$/i;
+  const dm = t.match(DESCRIBE_RE);
+  if (dm && ctx.focus?.id) {
+    // Reject phrases that are pure meta-chatter or already handled by
+    // other rules (approval affirmatives, transfer, filter/nav).
+    const raw = dm[1].trim();
+    const bad = /^(?:good|fine|correct|right|approved|reviewed|done|ok|okay|great|bad|wrong|weird|strange|odd|not\s+right|not\s+correct|for\s+john|for\s+the|the\s+one|it)\b/i;
+    if (!bad.test(raw)) {
+      // Strip trailing "transaction/payment/charge/expense" noise AND
+      // trailing prepositional clauses ("from one of our renters", "at the
+      // office", "for the client project") which describe context rather
+      // than the category itself.
+      const targetName = raw
+        .replace(/\s+(?:transactions?|payments?|charges?|purchases?|expenses?|receipts?|activity)\b.*$/i, "")
+        .replace(/\s+(?:from|by|at|for|to|between|with|on)\s+.+$/i, "")
+        .replace(/^(the|a|an)\s+/i, "")
+        .trim();
+      if (targetName.length >= 2 && !/^(?:internal|inter|bank)\s*transfer/i.test(targetName)) {
+        return { handled: true, remote: "recategorize-focused", txnId: ctx.focus.id, targetName };
+      }
+    }
+  }
+
   // ---- 3c. Create a new Chart-of-Accounts entry ---------------------
   // "create a Transfer category" / "make a new equity account called
   // Owner's Contribution" / "add a Meals subaccount named Client Lunches"
@@ -639,6 +667,9 @@ export function resolveVoiceCommand(text, ctx) {
       .replace(/\s+(?:transactions?|txns?|purchases?|charges?|payments?|activity)\s*$/i, "")
       // Drop trailing conjunctions ("Walmart and", "Uber and just")
       .replace(/\s+(?:and|plus|,)\s*(?:just|only)?$/i, "")
+      // Drop trailing descriptive clauses — "…those are rent", "…which are personal",
+      // "…that were reimbursed". Keep just the entity name.
+      .replace(/\s+(?:those|these|which|that|they)\s+(?:are|is|were|was)\s+.+$/i, "")
       .replace(/\s+/g, " ")
       .trim();
     const params = new URLSearchParams();
