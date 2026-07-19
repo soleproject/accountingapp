@@ -99,30 +99,30 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
         if t.get("category_account_id") and not t.get("human_reviewed"):
             split_by_contact[cid_key].add(t.get("category_account_id"))
 
-    # Build both queues, then interleave by descending count so the
-    # user is always working on the biggest wins first. Bump caps from
-    # [:8]/[:6] to [:50] so the queue keeps refilling as items resolve —
-    # previously the auto-advance ran dry after 8 completions.
+    # Filter by threshold FIRST, then slice — otherwise the top-N raw contacts
+    # (which may all be below threshold) can drop legitimate smaller items.
     top_actions: list[dict] = []
-    for cidk, b in sorted(uncat_by_contact.items(), key=lambda kv: -kv[1]["count"])[:50]:
-        if b["count"] >= 3:
-            top_actions.append({
-                "kind": "contact_in_uncat",
-                "contact_id": cidk, "contact_name": b["contact_name"],
-                "count": b["count"], "total_amount": round(b["amount"], 2),
-                "label": f"{b['contact_name']} · Uncategorized",
-                "why": f"{b['count']} rows from {b['contact_name']} are still uncategorized.",
-            })
-    for cidk, cats in sorted(split_by_contact.items(), key=lambda kv: -len(kv[1]))[:50]:
-        if len(cats) >= 3:
-            cname = next((t.get("contact_name") for t in txns if t.get("contact_id") == cidk), "")
-            top_actions.append({
-                "kind": "contact_split",
-                "contact_id": cidk, "contact_name": cname,
-                "count": len(cats),
-                "label": f"{cname} · {len(cats)} categories",
-                "why": f"{cname} is spread across {len(cats)} different accounts — likely a categorization inconsistency.",
-            })
+    uncat_ranked = [(cidk, b) for cidk, b in uncat_by_contact.items() if b["count"] >= 3]
+    uncat_ranked.sort(key=lambda kv: -kv[1]["count"])
+    for cidk, b in uncat_ranked[:50]:
+        top_actions.append({
+            "kind": "contact_in_uncat",
+            "contact_id": cidk, "contact_name": b["contact_name"],
+            "count": b["count"], "total_amount": round(b["amount"], 2),
+            "label": f"{b['contact_name']} · Uncategorized",
+            "why": f"{b['count']} rows from {b['contact_name']} are still uncategorized.",
+        })
+    split_ranked = [(cidk, cats) for cidk, cats in split_by_contact.items() if len(cats) >= 3]
+    split_ranked.sort(key=lambda kv: -len(kv[1]))
+    for cidk, cats in split_ranked[:50]:
+        cname = next((t.get("contact_name") for t in txns if t.get("contact_id") == cidk), "")
+        top_actions.append({
+            "kind": "contact_split",
+            "contact_id": cidk, "contact_name": cname,
+            "count": len(cats),
+            "label": f"{cname} · {len(cats)} categories",
+            "why": f"{cname} is spread across {len(cats)} different accounts — likely a categorization inconsistency.",
+        })
     # Sort the combined list by count DESC so the biggest cleanups surface
     # first regardless of kind (a 30-row uncat contact beats a 3-account split).
     top_actions.sort(key=lambda a: -a["count"])
