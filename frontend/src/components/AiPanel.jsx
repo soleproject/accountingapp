@@ -479,7 +479,7 @@ export default function AiPanel({ collapsed, onToggle }) {
       } catch { /* non-fatal */ }
     }
 
-    setMessages(m => [...m, { role: "assistant", content: msg, splitHint }]);
+    setMessages(m => [...m, { role: "assistant", content: msg, splitHint, showSkip: true, skipContact: { id: a.contact_id, name: a.contact_name, kind: a.kind } }]);
     if (voiceOnRef.current) speakOne(msg.replace(/\*\*/g, ""));
     emitAction("ai-open");
   });
@@ -1046,13 +1046,38 @@ export default function AiPanel({ collapsed, onToggle }) {
       const inq = pendingIntentRef.current;
       pendingIntentRef.current = null;
       setMessages(m => [...m, { role: "user", content: userMsg }]);
+      const rawText = userMsg;
+
+      // Skip / defer intent — the user wants to leave this contact alone
+      // and jump to the next one in the queue. Recognise natural phrasing
+      // ("skip", "skip amazon", "let's skip this", "move on", "next",
+      // "pass", "come back later"). We deliberately anchor these so a
+      // category name that merely CONTAINS "skip" (unlikely, but e.g.
+      // "Skiptown Brewery") isn't caught.
+      const skipRe = /^(?:let'?s?\s+|please\s+|just\s+|can\s+we\s+|can\s+you\s+)?(?:skip|move\s+on|move\s+past|pass|pass\s+on|next(?:\s+one)?|not\s+(?:now|yet)|come\s+back\s+(?:to\s+(?:this|it|them|these))?\s*later|hold\s+off|ignore|forget\s+(?:it|this|these|them)|leave\s+(?:it|this|these|them))\b(?!\w)/i;
+      if (skipRe.test(rawText)) {
+        const contactId = inq?.action?.contact_id;
+        const contactName = inq?.action?.contact_name || "this contact";
+        const say = `Skipped **${contactName}** — moving on.`;
+        setMessages(mm => [...mm, { role: "assistant", content: say }]);
+        if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
+        // Auto-advance: same event the confirm cards emit, so the
+        // CleanupCopilot dismisses this contact + queues up the next.
+        emitAction("cleanup-completed", {
+          contact_id: contactId,
+          kind: inq?.action?.kind || "contact_in_uncat",
+          count: 0,
+          skipped: true,
+        });
+        return;
+      }
 
       // Parse the user's answer into a "plan":
       //   base    → default category name for everything not caught by an exception
       //   groups  → additional {predicate, categoryName} — currently supports
       //             single-amount exceptions ("except for the $115,000") and
       //             range splits ("under $5000 is Meals, above is Consulting").
-      const rawText = userMsg;
+      // 1. Amount-range split: "under $X is A, above (that) is B" / "up to X → A, over → B"
       const parseMoney = (s) => {
         const m = String(s).replace(/[\s,\$]/g, "").match(/(-?\d+(?:\.\d+)?)([km])?/i);
         if (!m) return null;
@@ -1939,6 +1964,34 @@ export default function AiPanel({ collapsed, onToggle }) {
                   setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, splitHint: null } : mm2));
                 }}
               />
+            )}
+            {m.showSkip && (
+              <div className="mt-1.5" data-testid="cleanup-skip-hint">
+                <button
+                  data-testid="cleanup-skip-btn"
+                  onClick={() => {
+                    // Same flow as typing "skip <contact>" — clears the
+                    // pending inquiry, notifies the copilot, auto-advances.
+                    pendingIntentRef.current = null;
+                    const name = m.skipContact?.name || "this contact";
+                    const say = `Skipped **${name}** — moving on.`;
+                    setMessages(mm => {
+                      const cleared = mm.map((mm2, j) => j === i ? { ...mm2, showSkip: false, splitHint: null } : mm2);
+                      return [...cleared, { role: "assistant", content: say }];
+                    });
+                    if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
+                    emitAction("cleanup-completed", {
+                      contact_id: m.skipContact?.id,
+                      kind: m.skipContact?.kind || "contact_in_uncat",
+                      count: 0,
+                      skipped: true,
+                    });
+                  }}
+                  className="text-[11px] px-2 py-0.5 rounded-full border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+                >
+                  or skip {m.skipContact?.name || "this contact"} →
+                </button>
+              </div>
             )}
             {m.card?.kind === "bulk-approve-confirm" && (
               <BulkApproveCard
