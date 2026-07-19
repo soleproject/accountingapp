@@ -114,16 +114,26 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
     # Filter by threshold FIRST, then slice — otherwise the top-N raw contacts
     # (which may all be below threshold) can drop legitimate smaller items.
     # Adaptive threshold: if the strict ≥3 threshold surfaces very few items
-    # (< 5 contact-scoped actions), drop to ≥2 so thin cleanup queues still
-    # get useful suggestions instead of leaving the user staring at only a
-    # 'flagged batch' loop.
+    # (< 5 contact-scoped actions), drop to ≥2 across ALL kinds so thin cleanup
+    # queues still get useful suggestions instead of leaving the user staring
+    # at only a 'flagged batch' loop.
     top_actions: list[dict] = []
-    _thresh_uncat = 3
-    _thresh_split = 3
-    _thresh_ai_ready = 3
+    _t = 3
     if sum(1 for b in uncat_by_contact.values() if b["count"] >= 3) + \
-       sum(1 for cats in split_by_contact.values() if len(cats) >= 3) < 5:
-        _thresh_uncat = 2
+       sum(1 for cats in split_by_contact.values() if len(cats) >= 3) + \
+       sum(1 for r in ai_ready_by_contact.values() if r["count"] >= 3 and len(r["accounts"]) == 1) < 5:
+        _t = 2
+    _thresh_uncat = _t
+    _thresh_split = _t
+    _thresh_ai_ready = _t
+
+    # Cache contact_id → contact_name once so split_ranked doesn't re-scan
+    # all N txns per contact_id (O(N*M) → O(N + M)).
+    _cname_by_cid: dict[str, str] = {}
+    for t in txns:
+        cid_k = t.get("contact_id")
+        if cid_k and cid_k not in _cname_by_cid:
+            _cname_by_cid[cid_k] = t.get("contact_name") or ""
 
     uncat_ranked = [(cidk, b) for cidk, b in uncat_by_contact.items() if b["count"] >= _thresh_uncat]
     uncat_ranked.sort(key=lambda kv: -kv[1]["count"])
@@ -138,7 +148,7 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
     split_ranked = [(cidk, cats) for cidk, cats in split_by_contact.items() if len(cats) >= _thresh_split]
     split_ranked.sort(key=lambda kv: -len(kv[1]))
     for cidk, cats in split_ranked[:50]:
-        cname = next((t.get("contact_name") for t in txns if t.get("contact_id") == cidk), "")
+        cname = _cname_by_cid.get(cidk, "")
         top_actions.append({
             "kind": "contact_split",
             "contact_id": cidk, "contact_name": cname,
