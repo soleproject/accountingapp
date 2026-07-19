@@ -349,7 +349,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
           </button>
           <button
             data-testid="cleanup-start-session"
-            onClick={() => onStartSession?.()}
+            onClick={() => onStartSession?.(data?.progress?.flagged || 0)}
             className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
           >
             <PlayCircle size={13} /> Start 5-min session

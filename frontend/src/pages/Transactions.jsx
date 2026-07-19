@@ -478,10 +478,10 @@ export default function Transactions() {
           setPage(1);
           emitAction("cleanup-inquiry", { action: a });
         }}
-        onStartSession={() => {
+        onStartSession={(flaggedCount) => {
           setFilter("review");
           setPage(1);
-          emitAction("cleanup-inquiry", { action: { kind: "flagged_batch", count: 274, label: "Flagged for review" } });
+          emitAction("cleanup-inquiry", { action: { kind: "flagged_batch", count: flaggedCount || 0, label: "Flagged for review" } });
         }}
       />
       <div className="flex items-start justify-between flex-wrap gap-3">

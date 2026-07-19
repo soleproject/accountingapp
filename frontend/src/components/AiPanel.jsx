@@ -449,7 +449,27 @@ export default function AiPanel({ collapsed, onToggle }) {
       const aname = a.account?.name || "";
       msg = `**${a.count} ${a.contact_name}** transactions were AI-categorized as **${acode} ${aname}** and are waiting for your sign-off. Say **"approve"** to bulk-approve them all, or tell me the correct category if the AI got it wrong.`;
     } else if (a.kind === "flagged_batch") {
-      msg = `Let's run through the ${a.count} flagged transactions together. I'll surface one at a time — tell me what each one is (e.g. "rent from tenants") and I'll categorize + approve. Ready?`;
+      // Fetch the first flagged transaction so we can dive straight in
+      // instead of asking "Ready?" — friction the user explicitly called out.
+      let first = null;
+      if (currentId) {
+        try {
+          const r = await api.get(
+            `/companies/${currentId}/transactions?needs_review=true&limit=1&sort=date_desc`
+          );
+          const items = r.data?.transactions || r.data?.items || [];
+          first = items[0] || null;
+        } catch { /* non-fatal */ }
+      }
+      if (first) {
+        const label = first.merchant || first.description || first.contact_name || "this transaction";
+        const amt = (typeof first.amount === "number")
+          ? ` (${first.amount.toLocaleString("en-US", { style: "currency", currency: "USD" })})`
+          : "";
+        msg = `Let's run through the ${a.count} flagged transactions together. I'll surface one at a time — tell me what each one is in your own words. The first one is **${label}**${amt}.`;
+      } else {
+        msg = `Let's run through the ${a.count} flagged transactions together. I'll surface one at a time — tell me what each one is in your own words.`;
+      }
     }
     if (!msg) return;
 
