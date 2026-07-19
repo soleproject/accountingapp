@@ -186,11 +186,22 @@ export default function Transactions() {
       if (debouncedSearch) p.set("q", debouncedSearch);
       if (dateFrom) p.set("date_from", dateFrom);
       if (dateTo) p.set("date_to", dateTo);
+      // Mirror the current status tab so the rollup shows the same slice
+      // as the list (esp. important for the AI Categorized tab, which
+      // should show ONLY AI-categorized rows grouped by contact).
+      if (filter && filter !== "all") p.set("status", filter);
       const r = await api.get(`/companies/${currentId}/transactions/contact-category-rollup?${p.toString()}`);
       setRollup(r.data);
     } finally { setRollupBusy(false); }
   };
-  useEffect(() => { loadRollup(); /* eslint-disable-next-line */ }, [currentId, view, debouncedSearch, dateFrom, dateTo]);
+  useEffect(() => { loadRollup(); /* eslint-disable-next-line */ }, [currentId, view, filter, debouncedSearch, dateFrom, dateTo]);
+  // Any time the user clicks the AI Categorized tab, snap the view to the
+  // rollup by default — that's the "contacts + categories" lens the user
+  // reaches for on that tab. Clicking any other tab returns to the list.
+  useEffect(() => {
+    if (filter === "ai") setView("rollup");
+    else setView("list");
+  }, [filter]);
   // Keep a live ref to `load` so the background sync poller can invoke the
   // CURRENT filter-aware load — not the stale closure from mount. Without
   // this, clicking "Needs Review" briefly shows filtered rows and then the

@@ -601,6 +601,7 @@ async def contact_category_rollup(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     contact_id: Optional[str] = None,
+    status: Optional[str] = None,
     user: dict = Depends(get_current_user),
 ):
     """Group every visible transaction by (contact, category) and report the
@@ -636,6 +637,18 @@ async def contact_category_rollup(
     if date_from: mongo_q.setdefault("date", {})["$gte"] = date_from
     if date_to:   mongo_q.setdefault("date", {})["$lte"] = date_to
     if contact_id: mongo_q["contact_id"] = contact_id
+    # Same status semantics as the /transactions list endpoint so the tabs
+    # (`ai`, `unapproved`, `review`, `reviewed`) filter both views identically.
+    if status == "ai":
+        mongo_q["human_reviewed"] = {"$ne": True}
+        mongo_q["posted"] = True
+        mongo_q["category_account_code"] = {"$nin": ["9999", "6999", "4999"]}
+    elif status == "review":
+        mongo_q["needs_review"] = True
+    elif status == "unapproved":
+        mongo_q["human_reviewed"] = {"$ne": True}
+    elif status == "reviewed":
+        mongo_q["human_reviewed"] = True
 
     txns = await db.transactions.find(mongo_q).limit(20000).to_list(20000)
 
