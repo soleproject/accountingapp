@@ -665,6 +665,11 @@ export default function AiPanel({ collapsed, onToggle }) {
   const ERROR_WINDOW_MS = 5000;
   const ERROR_MAX = 3;
   const ttsSpeakingRef = useRef(false);
+  // Mirror TTS activity into state so the "Stop AI" pill can render
+  // reactively. Ref alone doesn't trigger re-renders, so the old
+  // "AI speaking — mic muted" indicator only appeared when some other
+  // state change forced a paint.
+  const [ttsActive, setTtsActive] = useState(false);
   const ttsTailUntilRef = useRef(0);
   const silenceTimerRef = useRef(null);
   const lastFinalRef = useRef({ text: "", at: 0 });
@@ -1212,6 +1217,17 @@ export default function AiPanel({ collapsed, onToggle }) {
     clearSilenceTimer();
     const userMsg = input.trim();
     setInput("");
+
+    // "Stop" / "quiet" / "shut up" / "be quiet" / "silence" / "hush" / "cancel
+    // speech" — kills any current TTS utterance immediately. Doesn't send to
+    // the LLM, doesn't post a chat bubble (that would just add MORE for TTS
+    // to potentially say next).
+    if (/^(?:stop(?: talking| speaking)?|quiet|shush|hush|silence|shut up|be quiet|(?:cancel|stop)\s+speech|(?:cancel|stop)\s+voice)[\s.!]*$/i.test(userMsg)) {
+      try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
+      ttsSpeakingRef.current = false;
+      setTtsActive(false);
+      return;
+    }
 
     // "Cancel focus" / "clear focus" / "unfocus" / "stop focus" — voice-
     // and text-driven way to drop the pinned bucket/transaction focus
@@ -2157,7 +2173,7 @@ export default function AiPanel({ collapsed, onToggle }) {
     u.rate = Math.max(0.5, Math.min(2.0, voiceRateRef.current || 1.05));
     u.pitch = 1.0;
     u.volume = 1.0;
-    u.onstart = () => { ttsSpeakingRef.current = true; };
+    u.onstart = () => { ttsSpeakingRef.current = true; setTtsActive(true); };
     const finish = () => {
       // Only clear the flag when the browser queue is genuinely empty —
       // otherwise the NEXT chunked utterance (which fires start slightly
@@ -2166,6 +2182,7 @@ export default function AiPanel({ collapsed, onToggle }) {
       const idle = !ss.speaking && !ss.pending;
       if (idle) {
         ttsSpeakingRef.current = false;
+        setTtsActive(false);
         ttsTailUntilRef.current = Date.now() + TAIL_MS;
       }
     };
@@ -2742,6 +2759,26 @@ export default function AiPanel({ collapsed, onToggle }) {
               }
             </span>
           </div>
+        )}
+        {ttsActive && (
+          <button
+            data-testid="ai-stop-speaking"
+            onClick={() => {
+              // Kill any queued + currently-speaking utterances immediately.
+              try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
+              ttsSpeakingRef.current = false;
+              setTtsActive(false);
+            }}
+            className="mb-2 w-full flex items-center justify-center gap-2 rounded-md bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-2.5 py-2 shadow-sm transition"
+            title='Stop the AI from talking (or say "stop" / "quiet")'
+          >
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full rounded-full bg-white/60 opacity-75 animate-ping" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
+            </span>
+            Stop AI speaking
+            <span className="text-[10px] font-normal opacity-80">(or say "stop")</span>
+          </button>
         )}
         {focus && focusPinned && (
           <button
