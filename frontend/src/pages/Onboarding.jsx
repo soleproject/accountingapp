@@ -85,9 +85,14 @@ const COACH_SCRIPTS = {
   },
   4: {
     key: "onboarding.plaid",
-    message: () =>
-      `Now the fun bit — let's hook up your bank. I use Plaid: you'll see a secure popup to sign in. (Sandbox creds: user_good / pass_good.) Or if you'd rather add banks later, just say "skip".`,
+    message: (ctx) => {
+      const hello = ctx.userFirst ? `${ctx.userFirst}, we` : "We";
+      return `${hello} are on a roll! Do you want to hook up your bank accounts so that we can download transactions automatically?`;
+    },
     extractStep: "plaid_intent",
+    // Advance on either explicit "skip"/"no" OR after they successfully
+    // linked at least one Plaid account (handled by the local move-on
+    // regex catching "yes" once accounts are visible).
     ready: (fields) => fields.skip === true,
     confirm: (_bits, _ready, fields) =>
       fields.skip

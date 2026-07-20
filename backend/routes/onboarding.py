@@ -127,14 +127,17 @@ _COACH_STEP_SCHEMAS: dict[str, dict] = {
     },
     "plaid_intent": {
         "system": (
-            "You are a CPA guiding onboarding for a bank-link step. Extract "
-            "whether the user wants to skip Plaid for now, and any institution "
-            "name they mentioned. Respond with STRICT JSON — no prose. "
-            "Use `skip: true` ONLY when the user explicitly asks to skip, do "
-            "later, come back, or 'not now'."
+            "You are a CPA guiding onboarding for a bank-link step. The user "
+            "was just asked whether they want to hook up their bank accounts. "
+            "Extract whether the user wants to skip the bank link (either "
+            "outright or for now) and any institution name they mentioned. "
+            "Respond with STRICT JSON — no prose. Set `skip: true` when the "
+            "user says any of: 'skip', 'no', 'not now', 'later', 'do later', "
+            "'come back to this', 'we'll do it later', 'no thanks', 'pass'. "
+            "Set `skip: false` (or omit) only when they clearly want to link now."
         ),
-        "example_input": "We bank with Chase, but let's skip this for now.",
-        "example_output": {"skip": True, "institution_hint": "Chase"},
+        "example_input": "No, let's skip that for now.",
+        "example_output": {"skip": True},
         "fields": ["skip", "institution_hint"],
     },
     "veryfi_intent": {
