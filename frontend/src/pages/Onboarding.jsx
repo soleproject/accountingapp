@@ -8,6 +8,7 @@ import { TID } from "@/constants/testIds";
 import { CheckCircle2, ChevronRight, Loader2, Sparkles, ArrowLeft, Upload } from "lucide-react";
 import { toast } from "sonner";
 import PlaidLinkButton from "@/components/PlaidLinkButton";
+import StatementsTab from "@/components/StatementsTab";
 import { institutionLogoUrl } from "@/lib/institutionLogo";
 
 // AI onboarding coach — greetings posted into the chat on each step to make
@@ -1225,19 +1226,25 @@ export default function Onboarding() {
         {step === 5 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Upload statements Plaid couldn't reach</h2>
-            <p className="text-sm text-slate-500">Veryfi OCR pulls transactions off PDFs and images. AI categorizes the same way.</p>
-            <div className="flex gap-2 flex-wrap">
-              <input type="file" ref={fileInputRef} accept=".pdf,image/*"
-                     onChange={(e) => uploadVeryfi(e.target.files?.[0])} className="hidden" />
-              <button data-testid="onboarding-veryfi-upload"
-                      onClick={() => fileInputRef.current?.click()} disabled={uploading}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-slate-900 text-white text-sm">
-                {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-                Upload real statement (PDF / image)
-              </button>
-              <button data-testid={TID.onboardingMockVeryfi} onClick={mockVeryfi} disabled={busy}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-md border text-sm text-slate-600">
-                Or simulate Veryfi upload
+            <p className="text-sm text-slate-500">
+              Veryfi OCR pulls transactions off PDFs and images. AI categorizes the same way.
+              Old paper statements, credit-union PDFs, receipts — drop them here.
+            </p>
+            {/* Reuse the same drop-zone / imports table experience from the
+                Connections › Statements tab so onboarding matches the rest of
+                the app. `bare` skips the tab's own outer card since we're
+                already inside the onboarding step card. */}
+            <StatementsTab companyId={currentId} bare />
+            {/* Sandbox users can still fire a fake Veryfi import to see the
+                downstream flow without hitting the real OCR pipeline. */}
+            <div className="pt-2">
+              <button
+                data-testid={TID.onboardingMockVeryfi}
+                onClick={mockVeryfi}
+                disabled={busy}
+                className="text-xs text-slate-500 hover:text-slate-800 underline"
+              >
+                Or simulate a Veryfi upload (sandbox)
               </button>
             </div>
             {imported.veryfi > 0 && (

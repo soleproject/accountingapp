@@ -13,7 +13,7 @@ import { useNavigate } from "react-router-dom";
  * statement's bank name + last-4; user can override via the account
  * selector.
  */
-export default function StatementsTab({ companyId }) {
+export default function StatementsTab({ companyId, bare = false }) {
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState([]);
   const [accountId, setAccountId] = useState("auto");
@@ -119,7 +119,7 @@ export default function StatementsTab({ companyId }) {
 
   return (
     <div className="space-y-4" data-testid="statements-tab">
-      <div className="rounded-xl border bg-white p-5">
+      <div className={bare ? "" : "rounded-xl border bg-white p-5"}>
         <div className="flex items-start justify-between gap-4 mb-3 flex-wrap">
           <div>
             <h3 className="font-heading font-semibold text-lg">Upload bank statements</h3>
