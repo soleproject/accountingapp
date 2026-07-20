@@ -349,6 +349,18 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     if (typeof window === "undefined" || !window.speechSynthesis) return resolve();
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 1.02; u.pitch = 1.0;
+    // Prefer the "Google UK English Female (en-GB)" voice — warm, friendly
+    // narration for the tour. Fall back gracefully to en-GB female /
+    // en-US female / default if that specific voice isn't loaded.
+    const voices = window.speechSynthesis.getVoices() || [];
+    const pick =
+      voices.find(v => v.name === "Google UK English Female") ||
+      voices.find(v => v.name.toLowerCase().includes("uk english female")) ||
+      voices.find(v => v.lang === "en-GB" && /female/i.test(v.name)) ||
+      voices.find(v => v.lang === "en-GB") ||
+      voices.find(v => v.lang?.startsWith("en") && /female/i.test(v.name)) ||
+      null;
+    if (pick) u.voice = pick;
     u.onend = resolve; u.onerror = resolve;
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
@@ -357,6 +369,20 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     if (howToRunning) return;
     const preview = megaPreviewRef.current;
     if (!preview || !preview.vendors?.length) return;
+    // Preload voices — some browsers return an empty array on the first
+    // getVoices() call and only populate after `voiceschanged` fires. Warm
+    // it up here so the very first utterance already has the right voice.
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.getVoices();
+      if (window.speechSynthesis.getVoices().length === 0) {
+        await new Promise(r => {
+          const t = setTimeout(r, 400);
+          window.speechSynthesis.addEventListener("voiceschanged", () => {
+            clearTimeout(t); r();
+          }, { once: true });
+        });
+      }
+    }
     // Anchor the highlight to the FIRST vendor row — simple + visually
     // consistent walkthrough.
     setHowToTargetKey(preview.vendors[0].key);
@@ -699,8 +725,11 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                     // How-To tour: apply the rainbow-shimmer highlight to
                     // the specific sub-element being described. `hi(step)`
                     // returns the shimmer class ONLY when we're on that
-                    // step AND this row is the demo-target.
+                    // step AND this row is the demo-target. The row itself
+                    // stays visually white for the entire tour so the
+                    // sub-element highlight pops without competing green.
                     const isTourRow = howToTargetKey === c.key;
+                    const isTourActive = isTourRow && howToStep !== null && howToStep < 7;
                     const hi = (step) => (isTourRow && howToStep === step ? "ai-shimmer-btn bg-white" : "");
                     return (
                       <div
@@ -709,11 +738,13 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                         className={`w-full flex items-center gap-2.5 rounded border px-3 py-2 text-sm transition-colors ${
                           isTourRow && howToStep === 0
                             ? "ai-shimmer-btn"
-                            : focus?.bucket && focus.key === c.key
-                              ? "ai-shimmer-btn"
-                              : on
-                                ? "border-emerald-300 bg-emerald-50 hover:bg-emerald-100"
-                                : "border-slate-200 bg-slate-50 opacity-60 hover:opacity-100 hover:bg-slate-100"
+                            : isTourActive
+                              ? "bg-white border-slate-200"
+                              : focus?.bucket && focus.key === c.key
+                                ? "ai-shimmer-btn"
+                                : on
+                                  ? "border-emerald-300 bg-emerald-50 hover:bg-emerald-100"
+                                  : "border-slate-200 bg-slate-50 opacity-60 hover:opacity-100 hover:bg-slate-100"
                         }`}
                       >
                         <button
