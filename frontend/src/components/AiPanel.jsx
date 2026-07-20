@@ -548,6 +548,27 @@ export default function AiPanel({ collapsed, onToggle }) {
     emitAction("ai-open");
   });
 
+  // Fired from the per-row Sparkles button on the Transactions table. The
+  // AI panel is already open (the button emits `ai-open` right after), so
+  // we drop an "OK, tell me about this transaction" assistant message and
+  // pop open the mic so the user can dictate what it is without hunting
+  // for the mic button.
+  useActionListener("ai-tell-me-about", async (payload) => {
+    const t = payload?.txn;
+    if (!t) return;
+    const label = t.merchant || t.description || t.contact_name || "this transaction";
+    const amt = (typeof t.amount === "number")
+      ? ` (${t.amount.toLocaleString("en-US", { style: "currency", currency: "USD" })})`
+      : "";
+    const msg = `Tell me about this transaction — **${label}**${amt}. What was it for? I'll categorize it (and any similar ones from the same vendor) and offer to create a rule so future imports land in the right place.`;
+    setMessages(m => [...m, { role: "assistant", content: msg }]);
+    if (voiceOnRef.current) speakOne(msg.replace(/\*\*/g, ""));
+    // Give the panel a beat to open + render, then flip on the mic. Doing
+    // it via `micMode` mirrors the click on the mic pill in the header
+    // (same open-mic + auto-submit-on-silence behavior).
+    setTimeout(() => setMicMode("open"), 250);
+  });
+
   // ------------------------- Open-mic + TTS-echo protection -------------------------
   // Rules (see architecture doc in PR):
   //   1. Recognizer is continuous + self-heals on `onend` while a "listening" flag holds.

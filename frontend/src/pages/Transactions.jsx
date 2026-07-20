@@ -797,7 +797,20 @@ export default function Transactions() {
                             { id: t.id, merchant: t.merchant, amount: t.amount, date: t.date },
                             { pin: true }
                           );
+                          // Open the panel and let it prompt "tell me about
+                          // this" + auto-open the mic so the CPA can just
+                          // start talking.
                           emitAction("ai-open");
+                          emitAction("ai-tell-me-about", {
+                            txn: {
+                              id: t.id,
+                              merchant: t.merchant,
+                              description: t.description,
+                              contact_name: t.contact_name,
+                              amount: t.amount,
+                              date: t.date,
+                            },
+                          });
                         }}
                         className="p-1 rounded hover:bg-fuchsia-100 text-fuchsia-600"
                       >
