@@ -166,8 +166,17 @@ export default function Onboarding() {
   useEffect(() => {
     if (!currentId) return;
     api.get(`/companies/${currentId}/onboarding`).then(r => {
-      setStep(r.data.onboarding.step || 0);
-      setAnswers(r.data.onboarding.answers || {});
+      let step0 = r.data.onboarding.step || 0;
+      const ans = r.data.onboarding.answers || {};
+      // If the persisted step is an AI-only step (2 or 3) but the mode is
+      // Simple (the new default), hop forward past every AI-only step so
+      // the user doesn't land on a page they can't see.
+      const modeNow = ans.onboarding_mode === "guided" ? "guided" : "simple";
+      if (modeNow === "simple") {
+        while (AI_ONLY_STEPS.has(step0) && step0 < STEPS.length) step0 += 1;
+      }
+      setStep(step0);
+      setAnswers(ans);
       setLoaded(true);
     });
   }, [currentId]);
@@ -475,7 +484,12 @@ export default function Onboarding() {
     await api.patch(`/companies/${currentId}/onboarding`, patch);
   };
 
-  const mode = answers.onboarding_mode === "simple" ? "simple" : "guided";
+  // Default onboarding is Simple — clients get through the essentials
+  // (business profile, QBO, bank, statements, review) without the AI
+  // Interview or AI-tailored CoA generation steps. Pros can flip to
+  // "AI-guided" from the toggle at the top of the page when they want
+  // the fully-personalized experience.
+  const mode = answers.onboarding_mode === "guided" ? "guided" : "simple";
   // AI-only steps get skipped in "simple" mode.
   // - 2: AI Interview
   // - 3: AI-tailored Chart of Accounts
