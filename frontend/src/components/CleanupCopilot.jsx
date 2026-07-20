@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { api } from "@/lib/api";
-import { useActionListener } from "@/lib/createBus";
+import { useActionListener, emitAction } from "@/lib/createBus";
 import { Sparkles, PlayCircle, ArrowRight, Loader2 } from "lucide-react";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
 
@@ -663,9 +663,33 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                           <div className="font-mono-num text-slate-500 text-xs">${c.amount.toLocaleString("en-US", {maximumFractionDigits: 0})}</div>
                         </div>
                         <button
+                          data-testid={`mega-vendor-ai-${c.key}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            emitAction("ai-open");
+                            emitAction("ai-tell-me-about-bucket", {
+                              bucket: {
+                                contact_name: c.contact_name,
+                                count: c.count,
+                                amount: c.amount,
+                                account_code: effAccount?.code,
+                                account_name: effAccount?.name,
+                                account_type: effAccount?.type,
+                                is_overridden: isOverridden,
+                                ai_original_code: c.account?.code,
+                                ai_original_name: c.account?.name,
+                              },
+                            });
+                          }}
+                          className="ml-1 p-1 rounded hover:bg-fuchsia-100 text-fuchsia-600 shrink-0"
+                          title={`Ask AI about the ${c.contact_name} bucket`}
+                        >
+                          <Sparkles size={14} />
+                        </button>
+                        <button
                           data-testid={`mega-vendor-approve-${c.key}`}
                           onClick={() => approveOne(c)}
-                          className="ml-2 shrink-0 text-emerald-700 hover:text-emerald-900 text-sm font-semibold hover:underline"
+                          className="ml-1 shrink-0 text-emerald-700 hover:text-emerald-900 text-sm font-semibold hover:underline"
                           title={`Approve ${c.count} rows now${isOverridden ? " (with override)" : ""}`}
                         >
                           Approve →

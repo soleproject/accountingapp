@@ -584,6 +584,26 @@ export default function AiPanel({ collapsed, onToggle }) {
     setTimeout(() => setMicMode("open"), 250);
   });
 
+  // Sibling action fired by the mega-approve modal's per-vendor sparkle
+  // button. Primes the chat with the ENTIRE vendor bucket's context (count,
+  // dollar volume, current category, whether it's been overridden vs. the
+  // AI's original) so the CPA can ask "why is Walmart going to Supplies?"
+  // or "make this a rule" and the LLM has everything it needs.
+  useActionListener("ai-tell-me-about-bucket", (payload) => {
+    const b = payload?.bucket;
+    if (!b) return;
+    const amt = (typeof b.amount === "number")
+      ? b.amount.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })
+      : "";
+    const catBits = b.account_code && b.account_name
+      ? ` currently going to **${b.account_code} · ${b.account_name}**${b.is_overridden ? " (you overrode the AI's original **" + (b.ai_original_code || "?") + " · " + (b.ai_original_name || "?") + "**)" : ""}`
+      : "";
+    const msg = `Tell me about the **${b.contact_name}** bucket — ${b.count} transaction${b.count === 1 ? "" : "s"} totaling ${amt}${catBits}. Want me to explain the categorization, suggest a better one, or turn this into an auto-rule for future imports?`;
+    setMessages(m => [...m, { role: "assistant", content: msg }]);
+    if (voiceOnRef.current) speakOne(msg.replace(/\*\*/g, ""));
+    setTimeout(() => setMicMode("open"), 250);
+  });
+
   // Live-accountant onboarding coach — the Onboarding page fires this event
   // to inject scripted assistant messages that greet the user at each step
   // ("Great, tell me about your business…"). The rainbow-outline treatment
