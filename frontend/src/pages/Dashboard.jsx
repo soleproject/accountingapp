@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { emitAction, useActionListener } from "@/lib/createBus";
 import {
   Sparkles, Zap, AlertTriangle, TrendingUp, Wand2, FileCheck2, Bot, ArrowRight,
   Wallet2, FileText, Receipt as ReceiptIcon, Activity, BellRing, ScrollText,
@@ -126,25 +127,7 @@ export default function Dashboard() {
   if (!current) return <div className="text-slate-500">Select a company to view your Dashboard.</div>;
 
   if (!current.onboarding_complete) {
-    return (
-      <div className="max-w-2xl">
-        <div className="rounded-xl border bg-white p-8">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center">
-              <Sparkles className="text-indigo-600" size={20} />
-            </div>
-            <div>
-              <h1 className="font-heading text-2xl font-bold">Let's finish onboarding {current.name}</h1>
-              <p className="text-slate-500 text-sm">Our AI needs a few minutes to set up your books.</p>
-            </div>
-          </div>
-          <Link to="/onboarding" data-testid="start-onboarding-btn"
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-slate-900 text-white text-sm">
-            Start onboarding <ArrowRight size={14} />
-          </Link>
-        </div>
-      </div>
-    );
+    return <OnboardingNudge company={current} />;
   }
 
   return (
@@ -428,3 +411,52 @@ function AttentionCard({ testid, to, icon: Icon, tone, count, label, hint }) {
   );
 }
 
+
+
+// Onboarding not done → show the "let's finish onboarding" card AND fire a
+// live-accountant greeting into the AI panel. If the user replies "yes" /
+// "ok" / "sure" / "let's go" in the chat, we navigate them straight into
+// /onboarding. Otherwise the existing manual button still works.
+function OnboardingNudge({ company }) {
+  const navigate = useNavigate();
+  const greetedRef = useRef(new Set());
+  useEffect(() => {
+    if (!company?.id) return;
+    if (greetedRef.current.has(company.id)) return;
+    greetedRef.current.add(company.id);
+    emitAction("ai-open");
+    emitAction("onboarding-coach-greet", {
+      message: `Welcome — **${company.name}** still needs a quick onboarding to get its books ready. Ready to knock it out? Say **yes** and I'll take you there, or click the button when you're ready.`,
+    });
+  }, [company?.id, company?.name]);
+
+  // Chat-driven affirmative → navigate to /onboarding.
+  useActionListener("onboarding-user-message", (payload) => {
+    const t = (payload?.text || "").toLowerCase().trim();
+    if (!t) return;
+    if (/^(yes|yeah|yep|yup|sure|ok|okay|let'?s (?:go|do it|start)|ready|go)\b/.test(t)) {
+      emitAction("onboarding-coach-greet", { message: "Great — heading to onboarding now." });
+      setTimeout(() => navigate("/onboarding"), 800);
+    }
+  });
+
+  return (
+    <div className="max-w-2xl">
+      <div className="rounded-xl border bg-white p-8">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center">
+            <Sparkles className="text-indigo-600" size={20} />
+          </div>
+          <div>
+            <h1 className="font-heading text-2xl font-bold">Let's finish onboarding {company.name}</h1>
+            <p className="text-slate-500 text-sm">Say <b>yes</b> in the AI panel and I'll walk you through it — or click the button to start manually.</p>
+          </div>
+        </div>
+        <Link to="/onboarding" data-testid="start-onboarding-btn"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-slate-900 text-white text-sm">
+          Start onboarding <ArrowRight size={14} />
+        </Link>
+      </div>
+    </div>
+  );
+}

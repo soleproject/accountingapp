@@ -1146,15 +1146,23 @@ export default function AiPanel({ collapsed, onToggle }) {
     const userMsg = input.trim();
     setInput("");
 
-    // Live-accountant onboarding coach — when the user is on /onboarding
-    // AND the current step has an extractor registered, their reply is
-    // handed to the coach and the normal LLM chat pipeline is SKIPPED
-    // (otherwise the coach's clean confirmation gets a redundant yappy
-    // follow-up from the general chat model glued onto it).
-    if (typeof window !== "undefined" && window.location.pathname.startsWith("/onboarding")) {
-      setMessages(m => [...m, { role: "user", content: userMsg }]);
-      emitAction("onboarding-user-message", { text: userMsg });
-      return;
+    // Live-accountant onboarding coach — fire the user's message to any
+    // coach listener on either the onboarding page (Business Profile
+    // extractor) OR the dashboard's onboarding-not-complete nudge. On the
+    // /onboarding page we ALSO suppress the normal LLM chat so the coach's
+    // clean confirmation isn't tailed by a yappy follow-up. On the dashboard
+    // we still let the normal chat run (the nudge navigates in ~800ms).
+    if (typeof window !== "undefined") {
+      const path = window.location.pathname;
+      const onOnboarding = path.startsWith("/onboarding");
+      const onDashboard = path.startsWith("/dashboard");
+      if (onOnboarding || onDashboard) {
+        emitAction("onboarding-user-message", { text: userMsg });
+      }
+      if (onOnboarding) {
+        setMessages(m => [...m, { role: "user", content: userMsg }]);
+        return;
+      }
     }
     // ------ Cleanup-Copilot inquiry interceptor -----------------------
     // The Transactions page emits `cleanup-inquiry` when the user clicks
