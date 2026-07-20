@@ -210,34 +210,64 @@ export default function Onboarding() {
   const nextRef = useRef(() => {});
   const finishRef = useRef(() => {});
   const plaidAcctsRef = useRef([]);
-  useEffect(() => { stepRef.current = step; }, [step]);
+  const currentRef = useRef(current);
+  // Guards against double-advance when the user fires several move-on
+  // phrases in quick succession ("looks good"…"next"…"good to go"). We
+  // set this the moment we schedule a next()/finish() and clear it a few
+  // ticks after the step actually changes (or a 3s fail-safe).
+  const advancingRef = useRef(false);
+  useEffect(() => { stepRef.current = step; advancingRef.current = false; }, [step]);
   useEffect(() => { answersRef.current = answers; }, [answers]);
   useEffect(() => { plaidAcctsRef.current = plaidAccts; }, [plaidAccts]);
+  useEffect(() => { currentRef.current = current; }, [current]);
   useActionListener("onboarding-user-message", async (payload) => {
+    // Double-advance guard: if we JUST scheduled a next()/finish(), swallow
+    // subsequent messages until the step actually changes. Users often say
+    // "looks good"…"next"…"good to go" in a burst and we don't want each to
+    // trigger its own advance.
+    if (advancingRef.current) return;
     const currentStep = stepRef.current;
     const currentAnswers = answersRef.current;
+    const currentCompany = currentRef.current;
     const script = COACH_SCRIPTS[currentStep];
     if (!script?.extractStep || !currentId) return;
     const msg = (payload?.text || "").trim();
     if (!msg) return;
 
-    // Local affirmative-move-on detector — catches "next", "nope", "let's
-    // move on", "good to go", "yes", "yep", "sure", "ok", "looks good",
-    // "all set", "done", etc. Runs on every step so users can move forward
-    // with natural language without a round-trip to the LLM.
-    //
-    // Step-specific handling:
+    const scheduleAdvance = (fn, delayMs = 1200) => {
+      advancingRef.current = true;
+      setTimeout(fn, delayMs);
+      // Safety-net: if the step somehow doesn't change within 3s, clear the
+      // lock so the coach stays responsive.
+      setTimeout(() => { advancingRef.current = false; }, 3000);
+    };
+
+    // Broad "the user is fine, move on" detector — matches when ANY of a
+    // rich set of natural affirmations appears in the message, not just as
+    // a whole-string anchor. Handles filler words like "no that looks good"
+    // or "yeah I think this looks good actually".
+    const MOVE_ON_ANY_RE = /\b(?:looks (?:good|right|fine|great|correct)|(?:that'?s|this'?s|it'?s) (?:right|fine|correct|good|perfect|great)|good to go|all (?:good|set|done)|sounds (?:good|right|fine|great)|no (?:changes?|edits?|updates?|tweaks?)|nothing to (?:change|edit|update|tweak|add)|move on|next(?: step)?|proceed|continue|keep going|(?:let'?s )?carry on|(?:that|this) works|perfect|great|correct)\b/i;
+    // Whole-string minimal move-on tokens ("yes", "yep", "sure", "ok",
+    // "good", "done", "nope", "no", "skip") — used for steps where a bare
+    // yes/no is enough.
+    const MOVE_ON_SHORT_RE = /^(?:nope?|no(?:pe)?|yes|yeah|yep|yup|sure|ok(?:ay)?|good|great|done|next|proceed|continue|skip|move on)[\s.!,?]*$/i;
+
+    const isMoveOn = (m) => MOVE_ON_ANY_RE.test(m) || MOVE_ON_SHORT_RE.test(m);
+    // "Actually…" / "no wait" / "change…" style edits — user wants to
+    // modify what's already there rather than move on. Block a move-on
+    // interpretation when these appear.
+    const WANTS_EDIT_RE = /\b(?:actually|wait|change|edit|update|tweak|fix|correct(?: this| it| that)?(?= to| into| please)|add(?:ing)? |remove|drop|instead|different|rename|it'?s (?:actually|not)|not (?:consulting|quite|really))\b/i;
+    const moveOn = isMoveOn(msg) && !WANTS_EDIT_RE.test(msg);
+
+    // Step-specific handling (all use `moveOn` above except step 4 which
+    // has its own connect/skip/done regexes below):
     //   • business_profile — requires both business_type + business_description
-    //     already populated (recap-and-confirm flow).
-    //   • qbo_link — an affirmative "next"/"yes"/"good" is ambiguous re: QBO
-    //     linking, so we skip the local shortcut here and let the extractor
-    //     decide (users click the on-page Yes/No pill to make it explicit).
-    //   • plaid_intent — affirmative means "yes, launch Plaid Link now"
-    //     (fires the same handler the on-page button does). Negative/skip
-    //     phrases advance the step.
-    //   • veryfi — "next"/"skip"/"nope" all mean "advance without uploading".
-    //   • coa/ready — universally treated as move-on.
-    const MOVE_ON_RE = /^(?:nope?|no(?:pe)?|yes|yeah|yep|yup|sure|ok(?:ay)?|good(?: to go)?|looks good|move on|let'?s (?:move on|go|continue|proceed|do (?:it|this))|next|proceed|continue|all set|done|correct|that'?s right|skip(?: (?:this|it|for now))?)[\s.!,?]*$/i;
+    //     already populated (recap-and-confirm flow); nudges the user if not.
+    //   • qbo_link — bare "yes"/"no" is ambiguous re: migration intent, so
+    //     defer to the LLM extractor / on-page Yes/No pill.
+    //   • plaid_intent — dedicated CONNECT / SKIP / DONE regexes; affirmative
+    //     launches Plaid Link, skip advances, done also advances.
+    //   • veryfi/coa/ready — universally treated as move-on.
     // Affirmative-connect phrases specific to step 4 — user WANTS to link.
     // Anchored at start with a word boundary (not `$`) so compound answers
     // like "yes let's do it" or "sure, connect them" match cleanly.
@@ -256,13 +286,13 @@ export default function Onboarding() {
       // popup, or hit skip in Plaid, or just wants out). Also catches
       // "let's go to the next step" which used to (incorrectly) re-launch
       // Plaid via the "let's go" alternative in CONNECT_RE.
-      if (PLAID_DONE_RE.test(msg)) {
+      if (PLAID_DONE_RE.test(msg) || (moveOn && plaidAlreadyLinked)) {
         emitAction("onboarding-coach-greet", {
           message: plaidAlreadyLinked
             ? "Nice — bank connected. Moving on…"
             : "Got it — moving on…",
         });
-        setTimeout(() => nextRef.current(), 1200);
+        scheduleAdvance(() => nextRef.current());
         return;
       }
       if (PLAID_CONNECT_RE.test(msg)) {
@@ -285,21 +315,27 @@ export default function Onboarding() {
         emitAction("onboarding-coach-greet", {
           message: "No problem — you can connect banks later from Settings. Moving on…",
         });
-        setTimeout(() => nextRef.current(), 1200);
+        scheduleAdvance(() => nextRef.current());
         return;
       }
       // Anything else — fall through to the extractor.
-    } else if (MOVE_ON_RE.test(msg)) {
+    } else if (moveOn) {
       let doAdvance = false;
       let confirmText = "Moving on…";
       switch (script.extractStep) {
         case "business_profile": {
           const haveBoth =
-            (currentAnswers.business_type || current?.business_type) &&
-            (currentAnswers.business_description || current?.business_description);
+            (currentAnswers.business_type || currentCompany?.business_type) &&
+            (currentAnswers.business_description || currentCompany?.business_description);
           if (haveBoth) {
             doAdvance = true;
             confirmText = "Great — moving on…";
+          } else {
+            // Nothing on file yet — tell the user we need a bit more.
+            emitAction("onboarding-coach-greet", {
+              message: "Almost — I still need to know what kind of business this is and what it does. One sentence like \"we're an LLC doing IT security consulting for hospitals\" and we can move on.",
+            });
+            return;
           }
           break;
         }
@@ -316,14 +352,14 @@ export default function Onboarding() {
           break;
         case "ready_confirm":
           emitAction("onboarding-coach-greet", { message: "Perfect — taking you in now." });
-          setTimeout(() => finishRef.current(), 1200);
+          scheduleAdvance(() => finishRef.current());
           return;
         default:
           break;
       }
       if (doAdvance) {
         emitAction("onboarding-coach-greet", { message: confirmText });
-        setTimeout(() => nextRef.current(), 1200);
+        scheduleAdvance(() => nextRef.current());
         return;
       }
     }
