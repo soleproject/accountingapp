@@ -227,15 +227,22 @@ async def ai_chat_stream(inp: ChatIn, user: dict = Depends(get_current_user)):
 
     full_reply = {"text": ""}
 
+    # Regex that matches the hidden proposal marker the AI emits (parsed
+    # client-side to power "yes → do it" follow-throughs). We strip it
+    # from the persisted transcript so history reloads don't render the
+    # raw `[[PROPOSAL:...]]` tag inside a chat bubble.
+    _PROPOSAL_RE = re.compile(r"\[\[PROPOSAL:[^\]]+\]\]")
+
     async def event_gen():
         async for chunk in chat_stream(session_id, inp.message, combined_context,
                                         terseness=inp.terseness or "balanced"):
             full_reply["text"] += chunk
             yield f"data: {json.dumps({'delta': chunk})}\n\n"
-        # save assistant msg
+        # save assistant msg — strip the hidden proposal marker first.
+        clean_text = _PROPOSAL_RE.sub("", full_reply["text"]).rstrip()
         await db.chat_messages.insert_one({
             "id": str(uuid.uuid4()), "session_id": session_id, "company_id": inp.company_id,
-            "role": "assistant", "content": full_reply["text"], "created_at": now_iso(),
+            "role": "assistant", "content": clean_text, "created_at": now_iso(),
         })
         yield f"data: {json.dumps({'done': True})}\n\n"
 
@@ -249,7 +256,17 @@ async def chat_history(company_id: str, session_id: Optional[str] = None,
     await require_company(user, company_id)
     sid = session_id or f"chat-{company_id}-{user['id']}"
     docs = await db.chat_messages.find({"session_id": sid}).sort("created_at", 1).to_list(200)
-    return {"messages": [coerce(d) for d in docs], "session_id": sid}
+    # Legacy rows may have been persisted with the raw [[PROPOSAL:...]] tag
+    # before the strip-on-save fix landed. Scrub on read so past transcripts
+    # display cleanly without needing a migration.
+    _PROP_RE = re.compile(r"\[\[PROPOSAL:[^\]]+\]\]")
+    out = []
+    for d in docs:
+        c = coerce(d)
+        if c.get("role") == "assistant" and isinstance(c.get("content"), str):
+            c["content"] = _PROP_RE.sub("", c["content"]).rstrip()
+        out.append(c)
+    return {"messages": out, "session_id": sid}
 
 
 @router.delete("/ai/chat/history")

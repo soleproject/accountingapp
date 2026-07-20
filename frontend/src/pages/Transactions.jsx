@@ -212,6 +212,71 @@ export default function Transactions() {
   useEffect(() => { loadRef.current = load; });
   // AI-panel actions (approve-with-suggestion / bulk-approve-rule) reload us.
   useActionListener("txns:changed", () => { loadRef.current?.(); });
+
+  // Refs used by the "apply-categorize-proposal" listener below — the
+  // useActionListener hook binds its handler once, so we ferry live state
+  // (selection, CoA, focused txn) through refs to avoid a stale closure.
+  const selectedRef = useRef(selected);
+  useEffect(() => { selectedRef.current = selected; }, [selected]);
+  const acctsRef = useRef(accts);
+  useEffect(() => { acctsRef.current = accts; }, [accts]);
+  const txnsRef = useRef(txns);
+  useEffect(() => { txnsRef.current = txns; }, [txns]);
+
+  // AI proposal follow-through — the AI proposed a category via
+  // [[PROPOSAL:action=categorize|category=<Name>|scope=<...>]] and the user
+  // just said "yes". Match the category to the local CoA and apply it.
+  useActionListener("apply-categorize-proposal", async (payload) => {
+    if (!payload?.category) return;
+    const acctList = acctsRef.current || [];
+    const needle = String(payload.category).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    // Prefer exact-name match; fall back to "name contains" then "needle
+    // contains name". Skip retired / uncategorized accounts.
+    const active = acctList.filter(a => !a.retired_at);
+    let match = active.find(a => norm(a.name) === needle);
+    if (!match) match = active.find(a => norm(a.name).includes(needle));
+    if (!match) match = active.find(a => needle.includes(norm(a.name)) && norm(a.name).length >= 3);
+    if (!match) {
+      toast.error(`Couldn't find "${payload.category}" in the chart of accounts.`);
+      return;
+    }
+    const sel = selectedRef.current;
+    if (sel && sel.size > 0) {
+      // Route through the existing bulk path.
+      try {
+        setBusy(true);
+        const r = await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
+          transaction_ids: [...sel],
+          category_account_id: match.id,
+        });
+        toast.success(`Reclassified ${r.data.updated} to ${match.name}.`);
+        setSelected(new Set());
+        if (r.data.rule_suggestion) setRuleSuggestion(r.data.rule_suggestion);
+        loadRef.current?.();
+      } catch (err) {
+        toast.error(err?.response?.data?.detail || "Reclassify failed");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+    // No multi-selection — fall back to the focused row (hover-set).
+    const focusedId = payload.focusedTxnId;
+    if (focusedId) {
+      try {
+        await api.patch(`/companies/${currentId}/transactions/${focusedId}`, {
+          category_account_id: match.id,
+        });
+        toast.success(`Recategorized to ${match.name}.`);
+        loadRef.current?.();
+      } catch (err) {
+        toast.error(err?.response?.data?.detail || "Recategorize failed");
+      }
+      return;
+    }
+    toast.error("Select rows or hover a transaction first.");
+  });
   // Reset ALL filter state on company switch — otherwise sticky filters from
   // the previous company (e.g. a date range) hide most rows on the new one
   // and users think the sync failed. (Real bug: 400 LLC had 1871 rows but a

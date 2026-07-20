@@ -1692,6 +1692,47 @@ export default function AiPanel({ collapsed, onToggle }) {
         }
         return;
       }
+
+      // AI PROPOSAL follow-through: the AI's previous turn ended with
+      // [[PROPOSAL:action=categorize|category=<name>|scope=<focused|selected|contact:...>]].
+      // The user just said "yes / do it / categorize it / go ahead". Emit
+      // an action the Transactions page listens on; it will fuzzy-match the
+      // category against the CoA and apply to the selection (or focused row).
+      if (p.kind === "categorize-proposal") {
+        pendingIntentRef.current = null;
+        setPendingIntent(null);
+        setMessages(m => [...m, { role: "user", content: userMsg }]);
+        emitAction("apply-categorize-proposal", {
+          category: p.category,
+          scope: p.scope,
+          focusedTxnId: focus?.id || null,
+        });
+        const ack = `On it — categorizing to ${p.category}.`;
+        setMessages(m => [...m, { role: "assistant", content: ack }]);
+        if (voiceOnRef.current) speakOne(ack);
+        return;
+      }
+      if (p.kind === "transfer-proposal") {
+        pendingIntentRef.current = null;
+        setPendingIntent(null);
+        setMessages(m => [...m, { role: "user", content: userMsg }]);
+        if (!focus?.id) {
+          const say = "Hover a transaction first so I know which one is the transfer.";
+          setMessages(m => [...m, { role: "assistant", content: say }]);
+          if (voiceOnRef.current) speakOne(say);
+          return;
+        }
+        try {
+          await api.post(`/companies/${currentId}/transactions/${focus.id}/mark-as-transfer`, {});
+          const say = "Marked as an internal transfer.";
+          setMessages(m => [...m, { role: "assistant", content: say }]);
+          if (voiceOnRef.current) speakOne(say);
+          emitAction("txns:changed");
+        } catch (e) {
+          setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't mark that as a transfer." }]);
+        }
+        return;
+      }
       setPendingIntent(null);
       setMessages(m => [...m, { role: "user", content: userMsg }]);
       const ok = await submitPendingIntent(p);
@@ -2125,7 +2166,33 @@ export default function AiPanel({ collapsed, onToggle }) {
               setMessages(m => {
                 const copy = [...m];
                 const prev = copy[copy.length - 1].content;
-                const next = prev + j.delta;
+                const nextRaw = prev + j.delta;
+                // Strip the hidden [[PROPOSAL:...]] marker from the visible
+                // text and, if a fully-formed marker just landed, stash it
+                // as a pendingIntent so a follow-up "yes / do it" executes.
+                const propRe = /\[\[PROPOSAL:([^\]]+)\]\]/;
+                const pm = nextRaw.match(propRe);
+                if (pm && !pendingIntentRef.current) {
+                  const parts = pm[1].split("|");
+                  const kv = {};
+                  for (const seg of parts) {
+                    const idx = seg.indexOf("=");
+                    if (idx > 0) kv[seg.slice(0, idx).trim()] = seg.slice(idx + 1).trim();
+                  }
+                  if (kv.action === "categorize" && kv.category) {
+                    pendingIntentRef.current = {
+                      kind: "categorize-proposal",
+                      category: kv.category,
+                      scope: kv.scope || "focused",
+                    };
+                  } else if (kv.action === "transfer") {
+                    pendingIntentRef.current = {
+                      kind: "transfer-proposal",
+                      scope: kv.scope || "focused",
+                    };
+                  }
+                }
+                const next = nextRaw.replace(propRe, "").replace(/\n\s*\n\s*$/, "").trimEnd();
                 copy[copy.length - 1] = { role: "assistant", content: next };
                 // Feed newly-completed sentences to speechSynthesis
                 // immediately — this is what makes the voice "real-time":
