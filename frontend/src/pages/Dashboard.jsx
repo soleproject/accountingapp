@@ -8,8 +8,54 @@ import { emitAction, useActionListener } from "@/lib/createBus";
 import {
   Sparkles, Zap, AlertTriangle, TrendingUp, Wand2, FileCheck2, Bot, ArrowRight,
   Wallet2, FileText, Receipt as ReceiptIcon, Activity, BellRing, ScrollText,
-  FileWarning, ReceiptText,
+  FileWarning, ReceiptText, ChevronLeft, ChevronRight,
 } from "lucide-react";
+
+// -------- Timeframe helpers ---------------------------------------
+// The Dashboard "Income snapshot" defaults to YTD but users asked for a way
+// to step back through prior months / years. Rather than build a full date
+// picker we ship three simple modes ("ytd", "month", "year") with left/right
+// arrows to shift the anchor month. All range math is derived from a single
+// anchor `YYYY-MM` string.
+function monthAnchor(offset = 0) {
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + offset);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+function shiftAnchor(anchor, delta, mode) {
+  const [y, m] = anchor.split("-").map(Number);
+  const d = new Date(y, m - 1, 1);
+  if (mode === "year") d.setFullYear(d.getFullYear() + delta);
+  else d.setMonth(d.getMonth() + delta);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+function rangeFor(anchor, mode) {
+  const [y, m] = anchor.split("-").map(Number);
+  if (mode === "year") {
+    return { start: `${y}-01-01`, end: `${y}-12-31` };
+  }
+  if (mode === "ytd") {
+    const now = new Date();
+    return {
+      start: `${now.getFullYear()}-01-01`,
+      end: now.toISOString().slice(0, 10),
+    };
+  }
+  // month
+  const last = new Date(y, m, 0).getDate();
+  return {
+    start: `${y}-${String(m).padStart(2, "0")}-01`,
+    end: `${y}-${String(m).padStart(2, "0")}-${String(last).padStart(2, "0")}`,
+  };
+}
+function labelFor(anchor, mode) {
+  if (mode === "ytd") return "YTD";
+  const [y, m] = anchor.split("-").map(Number);
+  if (mode === "year") return `${y}`;
+  const monthName = new Date(y, m - 1, 1).toLocaleString("en-US", { month: "long" });
+  return `${monthName} ${y}`;
+}
 import FirstConnectWelcome from "@/components/FirstConnectWelcome";
 
 const kindLabel = {
@@ -42,6 +88,11 @@ export default function Dashboard() {
   const [metrics, setMetrics] = useState(null);
   const [attention, setAttention] = useState(null);
   const [syncStatus, setSyncStatus] = useState(null);
+  // Income-snapshot timeframe — user asked for a way to step back through
+  // prior months / years. `mode` is one of "ytd" | "month" | "year";
+  // `anchor` is a YYYY-MM string that arrow-navigates within the chosen mode.
+  const [tfMode, setTfMode] = useState("ytd");
+  const [tfAnchor, setTfAnchor] = useState(() => monthAnchor(0));
   // Track the last-observed sync status so we can trigger a heavy refetch
   // exactly once when a background sync transitions from `syncing → idle`.
   const prevStatusRef = useRef(null);
@@ -49,6 +100,8 @@ export default function Dashboard() {
   useEffect(() => {
     if (!currentId) return;
     let cancelled = false;
+
+    const { start, end } = rangeFor(tfAnchor, tfMode);
 
     // -------- Heavy fetch (ai/activity + reports + metrics) ------------
     // Server responses are already 15s-cached, so this is safe to call
@@ -58,7 +111,9 @@ export default function Dashboard() {
         if (cancelled) return;
         setTotals(r.data.totals); setActivity(r.data.activity);
       }).catch(() => {});
-      api.get(`/companies/${currentId}/reports/income-statement`)
+      api.get(`/companies/${currentId}/reports/income-statement`, {
+        params: { start, end },
+      })
         .then(r => { if (!cancelled) setIncome(r.data); }).catch(() => {});
       api.get(`/companies/${currentId}/dashboard/metrics`)
         .then(r => { if (!cancelled) setMetrics(r.data); }).catch(() => {});
@@ -123,7 +178,7 @@ export default function Dashboard() {
       document.removeEventListener("visibilitychange", onFocus);
       window.removeEventListener("focus", onFocus);
     };
-  }, [currentId]);
+  }, [currentId, tfMode, tfAnchor]);
 
   if (!current) return <div className="text-slate-500">Select a company to view your Dashboard.</div>;
 
@@ -168,9 +223,26 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 rounded-xl border bg-white p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <TrendingUp size={16} className="text-slate-500" />
-            <h2 className="font-heading font-semibold">Income snapshot · YTD</h2>
+          <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <TrendingUp size={16} className="text-slate-500" />
+              <h2 className="font-heading font-semibold">
+                Income snapshot · {labelFor(tfAnchor, tfMode)}
+              </h2>
+            </div>
+            <TimeframePicker
+              mode={tfMode}
+              anchor={tfAnchor}
+              onModeChange={(m) => {
+                setTfMode(m);
+                // Reset anchor to current period whenever mode changes so
+                // "This month" / "This year" always start where the user
+                // expects, regardless of where they'd navigated to.
+                setTfAnchor(monthAnchor(0));
+              }}
+              onShift={(delta) => setTfAnchor(a => shiftAnchor(a, delta, tfMode))}
+              onReset={() => setTfAnchor(monthAnchor(0))}
+            />
           </div>
           {income ? (
             <div className="grid grid-cols-3 gap-3">
@@ -412,6 +484,65 @@ function AttentionCard({ testid, to, icon: Icon, tone, count, label, hint }) {
   );
 }
 
+
+
+// -------- Timeframe picker (arrows + mode dropdown) ------------------
+// Lightweight header control for the Income Snapshot section. Purely
+// presentational — it just fires callbacks the parent uses to update state
+// and re-fetch the report.
+function TimeframePicker({ mode, anchor, onModeChange, onShift, onReset }) {
+  const isYTD = mode === "ytd";
+  return (
+    <div
+      className="flex items-center gap-1 rounded-lg border bg-slate-50 p-1"
+      data-testid="dashboard-timeframe"
+    >
+      <button
+        type="button"
+        onClick={() => onShift(-1)}
+        disabled={isYTD}
+        className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition"
+        aria-label="Previous period"
+        title="Previous"
+        data-testid="dashboard-timeframe-prev"
+      >
+        <ChevronLeft size={14} className="text-slate-600" />
+      </button>
+      <select
+        value={mode}
+        onChange={(e) => onModeChange(e.target.value)}
+        className="h-7 px-2 text-xs bg-transparent focus:outline-none cursor-pointer font-medium text-slate-700"
+        data-testid="dashboard-timeframe-mode"
+      >
+        <option value="ytd">Year to date</option>
+        <option value="month">By month</option>
+        <option value="year">By year</option>
+      </select>
+      <button
+        type="button"
+        onClick={() => onShift(1)}
+        disabled={isYTD}
+        className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition"
+        aria-label="Next period"
+        title="Next"
+        data-testid="dashboard-timeframe-next"
+      >
+        <ChevronRight size={14} className="text-slate-600" />
+      </button>
+      {!isYTD && anchor !== monthAnchor(0) && (
+        <button
+          type="button"
+          onClick={onReset}
+          className="h-7 px-2 text-[11px] text-slate-500 hover:text-slate-900 hover:bg-white rounded-md transition"
+          title="Jump to current period"
+          data-testid="dashboard-timeframe-reset"
+        >
+          Today
+        </button>
+      )}
+    </div>
+  );
+}
 
 
 // Onboarding not done → show the "let's finish onboarding" card AND fire a

@@ -447,3 +447,20 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   7/7 frontend Playwright checkpoints walking the full Bright Beans Coffee onboarding
   flow via natural-language chat.
 
+
+### 2026-02-20 — AiPanel prompt tightening + Dashboard timeframe selector
+- **`AiPanel.jsx`**: shortened the "Let's Review" cleanup prompt for uncategorized-by-contact
+  buckets. Was: *"I see [X] transactions sitting in Uncategorized. Tell me what these are
+  and I'll categorize them all + create a rule so future imports land in the right account."*
+  Now: *"I see [X] transactions sitting in Uncategorized. Tell me about them."* — keeps the
+  "live accountant" tone conversational instead of pitchy.
+- **`Dashboard.jsx`**: added a **timeframe picker** to the Income Snapshot header (P1 from
+  handoff). Three modes — `Year to date` (default), `By month`, `By year` — with prev/next
+  arrows to step the anchor and a `Today` reset pill. Header updates live
+  (e.g. "Income snapshot · May 2026"). Passes `start`/`end` to the existing
+  `/reports/income-statement` endpoint; the dashboard metrics tiles (Cash on hand, A/R,
+  A/P, 30d activity) remain semantically period-agnostic. `data-testid`s:
+  `dashboard-timeframe`, `dashboard-timeframe-mode`, `dashboard-timeframe-prev`,
+  `dashboard-timeframe-next`, `dashboard-timeframe-reset`.
+- Verified end-to-end via screenshot on Bright Beans Coffee (July→May 2026 step-back
+  shows different revenue/expense figures).

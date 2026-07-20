@@ -483,7 +483,7 @@ export default function AiPanel({ collapsed, onToggle }) {
     if (!a) return;
     let msg = "";
     if (a.kind === "contact_in_uncat") {
-      msg = `I see **${a.count} ${a.contact_name}** transactions sitting in Uncategorized. Tell me what these are and I'll categorize them all + create a rule so future imports land in the right account.`;
+      msg = `I see **${a.count} ${a.contact_name}** transactions sitting in Uncategorized. Tell me about them.`;
     } else if (a.kind === "contact_split") {
       msg = `**${a.contact_name}** is split across ${a.count} different accounts — that's usually a categorization drift. Tell me what these transactions actually are, and I'll consolidate them and create a rule.`;
     } else if (a.kind === "contact_ai_ready") {
