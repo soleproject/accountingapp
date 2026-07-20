@@ -36,10 +36,20 @@ export default function PlaidBackfillButton({ companyId, onDone }) {
 
   const { open, ready } = usePlaidLink({
     token: linkToken,
-    onSuccess: handleSuccess,
+    onSuccess: async (pt) => {
+      document.body.classList.remove("plaid-link-open");
+      return handleSuccess(pt);
+    },
     onExit: (err) => {
+      document.body.classList.remove("plaid-link-open");
       setLinkToken(null);
       if (err) toast.error(`Plaid exited: ${err.error_message || err.error_code || "cancelled"}`);
+    },
+    onEvent: (eventName) => {
+      if (eventName === "OPEN") document.body.classList.add("plaid-link-open");
+      if (eventName === "EXIT" || eventName === "HANDOFF") {
+        document.body.classList.remove("plaid-link-open");
+      }
     },
   });
 

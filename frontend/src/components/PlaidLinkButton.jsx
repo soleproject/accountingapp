@@ -20,6 +20,7 @@ export default function PlaidLinkButton({ companyId, onSuccess, disabled, label 
   }, [companyId, linkToken]);
 
   const handleSuccess = useCallback(async (public_token) => {
+    document.body.classList.remove("plaid-link-open");
     setLoading(true);
     try {
       const r = await api.post(`/companies/${companyId}/onboarding/plaid/exchange`, { public_token });
@@ -38,7 +39,18 @@ export default function PlaidLinkButton({ companyId, onSuccess, disabled, label 
   const { open, ready } = usePlaidLink({
     token: linkToken,
     onSuccess: handleSuccess,
-    onExit: (err) => { if (err) console.warn("Plaid exit", err); },
+    onExit: (err) => {
+      document.body.classList.remove("plaid-link-open");
+      if (err) console.warn("Plaid exit", err);
+    },
+    onEvent: (eventName) => {
+      // Toggle a body class so global CSS can shrink Plaid's full-viewport
+      // iframe and keep the AI chat panel accessible on the right.
+      if (eventName === "OPEN") document.body.classList.add("plaid-link-open");
+      if (eventName === "EXIT" || eventName === "HANDOFF") {
+        document.body.classList.remove("plaid-link-open");
+      }
+    },
   });
 
   // Voice/chat-driven launch — the onboarding coach emits `plaid-launch`

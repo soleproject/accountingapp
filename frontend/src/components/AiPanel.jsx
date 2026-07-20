@@ -349,6 +349,9 @@ export default function AiPanel({ collapsed, onToggle }) {
   });
   useEffect(() => {
     localStorage.setItem("axiom_ai_panel_width", String(panelWidth));
+    // Expose the current width as a CSS variable so global stylesheets
+    // (e.g. the Plaid-Link overlay carve-out) can leave room for us.
+    document.documentElement.style.setProperty("--ai-panel-width", `${panelWidth}px`);
   }, [panelWidth]);
   const resizingRef = useRef(false);
   useEffect(() => {

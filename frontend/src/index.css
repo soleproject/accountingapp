@@ -163,3 +163,18 @@ body {
 .confidence-high { background: #DCFCE7; color: #166534; }
 .confidence-med { background: #FEF3C7; color: #92400E; }
 .confidence-low { background: #FEE2E2; color: #991B1B; }
+
+/* -----------------------------------------------------------------
+ * Plaid Link overlay — keep the AI panel accessible.
+ * When body has .plaid-link-open (set by PlaidLinkButton on OPEN /
+ * removed on EXIT), the full-viewport Plaid iframe is shrunk so a
+ * right-side strip stays clickable for the AI chat sidebar. The strip
+ * width comes from --ai-panel-width, which AiPanel keeps in sync with
+ * its resizable width.
+ * ----------------------------------------------------------------- */
+body.plaid-link-open [id^="plaid-link-iframe-"],
+body.plaid-link-open iframe[id^="plaid-link-iframe-"] {
+  width: calc(100vw - var(--ai-panel-width, 420px)) !important;
+  right: var(--ai-panel-width, 420px) !important;
+  left: 0 !important;
+}
