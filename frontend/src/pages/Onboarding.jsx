@@ -230,11 +230,37 @@ export default function Onboarding() {
     //   • qbo_link — an affirmative "next"/"yes"/"good" is ambiguous re: QBO
     //     linking, so we skip the local shortcut here and let the extractor
     //     decide (users click the on-page Yes/No pill to make it explicit).
-    //   • plaid/veryfi — "next"/"skip"/"nope" all mean "advance without
-    //     linking/uploading". Auto-advance.
+    //   • plaid_intent — affirmative means "yes, launch Plaid Link now"
+    //     (fires the same handler the on-page button does). Negative/skip
+    //     phrases advance the step.
+    //   • veryfi — "next"/"skip"/"nope" all mean "advance without uploading".
     //   • coa/ready — universally treated as move-on.
     const MOVE_ON_RE = /^(?:nope?|no(?:pe)?|yes|yeah|yep|yup|sure|ok(?:ay)?|good(?: to go)?|looks good|move on|let'?s (?:move on|go|continue|proceed|do (?:it|this))|next|proceed|continue|all set|done|correct|that'?s right|skip(?: (?:this|it|for now))?)[\s.!,?]*$/i;
-    if (MOVE_ON_RE.test(msg)) {
+    // Affirmative-connect phrases specific to step 4 — user WANTS to link.
+    // Anchored at start with a word boundary (not `$`) so compound answers
+    // like "yes let's do it" or "sure, connect them" match cleanly.
+    const PLAID_CONNECT_RE = /^(?:yes|yeah|yep|yup|sure|ok(?:ay)?|please|absolutely|of course|do it|let'?s (?:do (?:it|this)|go|connect|link|hook (?:it )?up)|connect(?: it| them| my (?:bank|accounts?))?|link(?: it| them| my (?:bank|accounts?))?|hook (?:it |them |me )?up|launch(?: it| plaid)?|open(?: plaid)?)\b/i;
+    // Negative-skip phrases specific to step 4 — user does NOT want to link.
+    const PLAID_SKIP_RE = /^(?:nope?|no(?:pe)?|not (?:now|yet|today)|later|do (?:it |this )?later|skip(?: (?:this|it|for now))?|next|move on|come back|maybe later|no thanks)\b/i;
+
+    if (script.extractStep === "plaid_intent") {
+      if (PLAID_CONNECT_RE.test(msg)) {
+        emitAction("onboarding-coach-greet", {
+          message: "Great — launching Plaid now. Sign in with your bank and I'll take it from there.",
+        });
+        // Small delay so the confirm bubble lands before Plaid's popup steals focus.
+        setTimeout(() => emitAction("plaid-launch"), 600);
+        return;
+      }
+      if (PLAID_SKIP_RE.test(msg)) {
+        emitAction("onboarding-coach-greet", {
+          message: "No problem — you can connect banks later from Settings. Moving on…",
+        });
+        setTimeout(() => nextRef.current(), 1200);
+        return;
+      }
+      // Anything else — fall through to the extractor.
+    } else if (MOVE_ON_RE.test(msg)) {
       let doAdvance = false;
       let confirmText = "Moving on…";
       switch (script.extractStep) {
@@ -250,10 +276,6 @@ export default function Onboarding() {
         }
         case "qbo_link":
           // Ambiguous — leave to the extractor / on-page pill.
-          break;
-        case "plaid_intent":
-          doAdvance = true;
-          confirmText = "No problem — you can connect banks later from Settings. Moving on…";
           break;
         case "veryfi_intent":
           doAdvance = true;
