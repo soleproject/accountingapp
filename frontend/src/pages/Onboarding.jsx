@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, BACKEND_URL } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { useAuth } from "@/lib/auth";
 import { emitAction, useActionListener } from "@/lib/createBus";
 import { TID } from "@/constants/testIds";
 import { CheckCircle2, ChevronRight, Loader2, Sparkles, ArrowLeft, Upload } from "lucide-react";
@@ -17,21 +18,47 @@ import PlaidLinkButton from "@/components/PlaidLinkButton";
 const COACH_SCRIPTS = {
   0: {
     key: "onboarding.business_profile",
-    message: (ctx) =>
-      `Great, ${ctx.name ? `${ctx.name} ` : ""}let's set up your books together. First — tell me what kind of business this is and what it does (e.g. "we're an LLC doing IT security consulting for hospitals"). I'll fill in the fields on the right for you. You can also fill them manually if you prefer.`,
+    // If we already have the essentials on the company record (e.g. Pro
+    // pre-filled the profile when creating the client), open with a
+    // recap-and-confirm instead of a cold "tell me about your business"
+    // ask. The recap includes what we already know so the owner can either
+    // wave us through ("nope, good to go") or tack on corrections in one
+    // sentence.
+    message: (ctx) => {
+      const hello = ctx.userFirst ? `Hi ${ctx.userFirst}` : "Hi";
+      const bt = ctx.answers?.business_type || ctx.current?.business_type;
+      const bd = ctx.answers?.business_description || ctx.current?.business_description;
+      if (bt || bd) {
+        const cleanBd = bd ? String(bd).trim().replace(/[.!]+$/, "") : "";
+        const bits = [bt && `a **${bt}**`, cleanBd && `— ${cleanBd}`].filter(Boolean).join(" ");
+        return `${hello} — I have ${ctx.name || "this business"} down as ${bits}. Want to change anything, or should we move on? A quick "nope" / "good to go" works, or tell me what to tweak.`;
+      }
+      return `${hello} — let's set up ${ctx.name || "your"} books together. Tell me what kind of business this is and what it does (e.g. "we're an LLC doing IT security consulting for hospitals"). I'll fill in the fields on the right for you. You can also fill them manually if you prefer.`;
+    },
     extractStep: "business_profile",
-    ready: (fields, answers) =>
-      (fields.business_type || answers.business_type) &&
-      (fields.business_description || answers.business_description),
-    confirm: (bits, ready) =>
-      ready
+    // Auto-advance when we already had (or just captured) both essentials,
+    // OR when the user tells us they're happy with what's there.
+    ready: (fields, answers) => {
+      const haveBoth =
+        (fields.business_type || answers.business_type) &&
+        (fields.business_description || answers.business_description);
+      return haveBoth && (fields.confirm_move_on || Object.keys(fields).length > 0);
+    },
+    confirm: (bits, ready, fields) => {
+      if (fields.confirm_move_on && Object.keys(fields).length === 1) {
+        return `Great — moving on…`;
+      }
+      return ready
         ? `Got it — filled in ${bits}. Moving to the next step in a moment…`
-        : `Got it — filled in ${bits}. Anything else to add?`,
+        : `Got it — filled in ${bits}. Anything else to add?`;
+    },
   },
   1: {
     key: "onboarding.qbo_link",
-    message: () =>
-      `Do you already use QuickBooks Online? Just say "yes we're on QuickBooks" and I'll link it, or "no let's start fresh" and I'll set up a clean chart of accounts for you.`,
+    message: (ctx) => {
+      const hello = ctx.userFirst ? `${ctx.userFirst}, ` : "";
+      return `${hello}do you already use QuickBooks Online? Just say "yes we're on QuickBooks" and I'll link it, or "no let's start fresh" and I'll set up a clean chart of accounts for you.`;
+    },
     extractStep: "qbo_link",
     ready: (fields) => fields.qbo === "yes" || fields.qbo === "no",
     confirm: (_bits, _ready, fields) =>
@@ -41,8 +68,10 @@ const COACH_SCRIPTS = {
   },
   2: {
     key: "onboarding.interview",
-    message: () =>
-      `Five short questions coming up — should take about 30 seconds. Your answers help me tailor the chart of accounts and pre-seed bank-feed rules for your exact business. Hit "Start AI interview" whenever you're ready.`,
+    message: (ctx) => {
+      const hello = ctx.userFirst ? `${ctx.userFirst}, five` : "Five";
+      return `${hello} short questions coming up — should take about 30 seconds. Your answers help me tailor the chart of accounts and pre-seed bank-feed rules for your exact business. Hit "Start AI interview" whenever you're ready.`;
+    },
     // No extractStep — user drives the interview UI, not chat.
   },
   3: {
@@ -78,8 +107,10 @@ const COACH_SCRIPTS = {
   },
   6: {
     key: "onboarding.ready",
-    message: () =>
-      `You're all set. Every transaction I could categorize is ready to review; anything I wasn't sure about is flagged. Say "let's go" whenever you want me to take you into your books.`,
+    message: (ctx) => {
+      const hello = ctx.userFirst ? `${ctx.userFirst}, you're` : "You're";
+      return `${hello} all set. Every transaction I could categorize is ready to review; anything I wasn't sure about is flagged. Say "let's go" whenever you want me to take you into your books.`;
+    },
     extractStep: "ready_confirm",
     ready: (fields) => fields.confirm === true,
     confirm: () => `Perfect — taking you in now.`,
@@ -99,6 +130,7 @@ const STEPS = [
 export default function Onboarding() {
   const nav = useNavigate();
   const { currentId, current, refresh } = useCompany();
+  const { user } = useAuth();
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState({});
   const [busy, setBusy] = useState(false);
@@ -148,9 +180,15 @@ export default function Onboarding() {
     // Delay the emit so AiPanel has time to mount its listener; otherwise
     // TTS speaks it but the chat bubble never lands.
     emitAction("ai-open");
+    const userFirst = (user?.name || "").split(" ")[0];
     setTimeout(() => {
       emitAction("onboarding-coach-greet", {
-        message: script.message({ name: current?.name, answers }),
+        message: script.message({
+          name: current?.name,
+          current,
+          answers,
+          userFirst,
+        }),
       });
     }, 500);
   }, [currentId, step, current?.name, loaded]);
@@ -175,6 +213,24 @@ export default function Onboarding() {
     if (!script?.extractStep || !currentId) return;
     const msg = (payload?.text || "").trim();
     if (!msg) return;
+
+    // Local affirmative-move-on detector — catches "nope", "let's move on",
+    // "good to go", "yes", "yep", "sure", "ok", "next", "looks good", etc.
+    // When the current step already has enough info to advance (business
+    // profile already filled) we honor the shortcut instantly without a
+    // round-trip to the LLM.
+    const MOVE_ON_RE = /^(?:nope?|no(?:pe)?|yes|yeah|yep|yup|sure|ok(?:ay)?|good(?: to go)?|looks good|move on|let'?s (?:move on|go|continue|proceed|do (?:it|this))|next|proceed|continue|all set|done|correct|that'?s right)[\s.!]*$/i;
+    if (script.extractStep === "business_profile" && MOVE_ON_RE.test(msg)) {
+      const haveBoth =
+        (currentAnswers.business_type || current?.business_type) &&
+        (currentAnswers.business_description || current?.business_description);
+      if (haveBoth) {
+        emitAction("onboarding-coach-greet", { message: "Great — moving on…" });
+        setTimeout(() => nextRef.current(), 1200);
+        return;
+      }
+    }
+
     try {
       const r = await api.post(
         `/companies/${currentId}/onboarding/extract-step`,
@@ -230,28 +286,40 @@ export default function Onboarding() {
   };
 
   const mode = answers.onboarding_mode === "simple" ? "simple" : "guided";
-  const isInterviewStep = (s) => s === 2;
+  // AI-only steps get skipped in "simple" mode.
+  // - 2: AI Interview
+  // - 3: AI-tailored Chart of Accounts
+  const AI_ONLY_STEPS = new Set([2, 3]);
+  const isInterviewStep = (s) => s === 2;   // kept for existing UI conditions
+  const isAiOnlyStep = (s) => AI_ONLY_STEPS.has(s);
+
+  const skipForward = (target) => {
+    while (mode === "simple" && isAiOnlyStep(target) && target < STEPS.length) target += 1;
+    return target;
+  };
+  const skipBackward = (target) => {
+    while (mode === "simple" && isAiOnlyStep(target) && target > 0) target -= 1;
+    return target;
+  };
 
   const next = async () => {
-    let target = step + 1;
-    if (mode === "simple" && isInterviewStep(target)) target += 1;
+    const target = skipForward(step + 1);
     await persist({ step: target, answers });
     setStep(target);
   };
   const back = async () => {
     if (step <= 0) return;
-    let target = step - 1;
-    if (mode === "simple" && isInterviewStep(target)) target -= 1;
-    if (target < 0) target = 0;
+    const target = Math.max(0, skipBackward(step - 1));
     await persist({ step: target });
     setStep(target);
   };
   const setMode = async (m) => {
     const nextAns = { ...answers, onboarding_mode: m };
     setAnswers(nextAns);
-    // If flipping to simple while on the Interview step, hop forward.
+    // If flipping to simple while currently sitting on an AI-only step, hop
+    // forward past every consecutive AI-only step.
     let nextStep = step;
-    if (m === "simple" && isInterviewStep(step)) nextStep = step + 1;
+    if (m === "simple" && isAiOnlyStep(step)) nextStep = skipForward(step);
     await persist({ answers: nextAns, step: nextStep });
     if (nextStep !== step) setStep(nextStep);
   };
@@ -428,7 +496,7 @@ export default function Onboarding() {
           <button
             onClick={() => setMode("guided")}
             data-testid="onboarding-mode-guided"
-            title="Include a 30-second AI interview that tailors the CoA and seeds bank-feed rules."
+            title="Include the 30-second AI interview + AI-tailored Chart of Accounts for a fully personalized setup."
             className={`px-3 py-1.5 flex items-center gap-1 ${
               mode === "guided" ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50"
             }`}
@@ -438,7 +506,7 @@ export default function Onboarding() {
           <button
             onClick={() => setMode("simple")}
             data-testid="onboarding-mode-simple"
-            title="Skip the AI interview. Just business profile + CoA + bank + statements."
+            title="Skip the AI interview and AI-tailored Chart of Accounts. Just business profile + QBO + bank + statements."
             className={`px-3 py-1.5 border-l border-slate-300 ${
               mode === "simple" ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50"
             }`}
@@ -450,7 +518,7 @@ export default function Onboarding() {
 
       <div className="flex items-center gap-2 flex-wrap">
         {STEPS.map((s, i) => {
-          if (mode === "simple" && isInterviewStep(i)) return null;
+          if (mode === "simple" && isAiOnlyStep(i)) return null;
           return (
             <div key={i} className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full border ${i < step ? "bg-emerald-50 border-emerald-300 text-emerald-700" : i === step ? "bg-slate-900 text-white" : "bg-white text-slate-500"}`}>
               {i < step && <CheckCircle2 size={12} />} {i + 1}. {s}

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
 import { Link, useNavigate } from "react-router-dom";
 import { emitAction, useActionListener } from "@/lib/createBus";
@@ -419,6 +420,7 @@ function AttentionCard({ testid, to, icon: Icon, tone, count, label, hint }) {
 // /onboarding. Otherwise the existing manual button still works.
 function OnboardingNudge({ company }) {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const greetedRef = useRef(new Set());
   useEffect(() => {
     if (!company?.id) return;
@@ -429,12 +431,14 @@ function OnboardingNudge({ company }) {
     // `onboarding-coach-greet` listener — otherwise the emit races the
     // mount and the message never lands in the chat (TTS still speaks it
     // because the speak path is invoked directly on emit).
+    const firstName = (user?.name || "").split(" ")[0];
+    const hello = firstName ? `Hi ${firstName} — ` : "Welcome — ";
     setTimeout(() => {
       emitAction("onboarding-coach-greet", {
-        message: `Welcome — **${company.name}** still needs a quick onboarding to get its books ready. Ready to knock it out? Say **yes** and I'll take you there, or click the button when you're ready.`,
+        message: `${hello}**${company.name}** still needs a quick onboarding to get its books ready. Ready to knock it out? Say **yes** and I'll take you there, or click the button when you're ready.`,
       });
     }, 500);
-  }, [company?.id, company?.name]);
+  }, [company?.id, company?.name, user?.name]);
 
   // Chat-driven affirmative → navigate to /onboarding.
   useActionListener("onboarding-user-message", (payload) => {

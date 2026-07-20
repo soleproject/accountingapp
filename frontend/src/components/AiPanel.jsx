@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Send, Sparkles, X, MessageSquare, Mic, MicOff, Volume2, VolumeX, ChevronDown, Trash2 } from "lucide-react";
 import { api, BACKEND_URL } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
 import { useAiFocus } from "@/lib/aiFocus";
 import { toast } from "sonner";
@@ -334,6 +335,7 @@ const getSR = () => window.SpeechRecognition || window.webkitSpeechRecognition;
 
 export default function AiPanel({ collapsed, onToggle }) {
   const { currentId, current, companies, switchCompany } = useCompany();
+  const { user } = useAuth();
   const navigate = useNavigate();
   // User-adjustable panel width. Persisted in localStorage. Constrained to a
   // sensible range so it can't be dragged narrower than the header controls
@@ -1115,15 +1117,27 @@ export default function AiPanel({ collapsed, onToggle }) {
     api.get(`/ai/chat/history?company_id=${currentId}`).then(r => {
       const msgs = r.data.messages || [];
       if (msgs.length === 0) {
-        setMessages([{
-          role: "assistant",
-          content: `Hi ${current?.name ? "" : "there"}${current?.name ? "— I'm watching " + current.name : ""}. I categorize transactions, post JEs, and answer any accounting question. Ask me anything.`
-        }]);
+        // Skip the generic "Hi — I'm watching X" welcome whenever a
+        // step-specific coach is going to greet the user instead: the
+        // /onboarding page itself, plus the "let's finish onboarding" nudge
+        // that fires on /dashboard for a company that hasn't completed
+        // onboarding. Both scenarios produce a warmer, contextual first
+        // bubble that makes the generic welcome feel redundant.
+        const path = typeof window !== "undefined" ? window.location.pathname : "";
+        const onboardingContext =
+          path.startsWith("/onboarding") ||
+          (current && current.onboarding_complete === false);
+        if (onboardingContext) return;
+        const firstName = (user?.name || "").split(" ")[0];
+        const greeting = firstName
+          ? `Hi ${firstName} — I'm watching ${current?.name || "your books"}. I categorize transactions, post JEs, and answer any accounting question. Ask me anything.`
+          : `Hi — I'm watching ${current?.name || "your books"}. I categorize transactions, post JEs, and answer any accounting question. Ask me anything.`;
+        setMessages([{ role: "assistant", content: greeting }]);
       } else {
         setMessages(msgs.map(m => ({ role: m.role, content: m.content })));
       }
     }).catch(() => {});
-  }, [currentId, current?.name]);
+  }, [currentId, current?.name, current?.onboarding_complete, user?.name]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
