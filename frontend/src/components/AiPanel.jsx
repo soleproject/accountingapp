@@ -592,9 +592,12 @@ export default function AiPanel({ collapsed, onToggle }) {
   useActionListener("ai-tell-me-about-bucket", (payload) => {
     const b = payload?.bucket;
     if (!b) return;
-    // Pin the bucket as the AI focus — shows the "Focused bucket" card at
-    // the top of the chat + the "Cancel focus" pill above the input +
-    // paints the source row on the mega-approve modal with a rainbow ring.
+    // Silent focus — no primed assistant bubble, no TTS. Just pin the
+    // bucket so the "Focused bucket" card renders at the top of chat and
+    // the source row on the mega-approve modal picks up the rainbow ring.
+    // The LLM sees this focus in its system context on the next user
+    // question, so "why is this categorized as supplies?" or "make it a
+    // rule" work naturally without any prompting overhead.
     setFocus(
       {
         bucket: true,
@@ -607,15 +610,8 @@ export default function AiPanel({ collapsed, onToggle }) {
       },
       { pin: true },
     );
-    const amt = (typeof b.amount === "number")
-      ? b.amount.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })
-      : "";
-    const catBits = b.account_code && b.account_name
-      ? ` currently going to **${b.account_code} · ${b.account_name}**${b.is_overridden ? " (you overrode the AI's original **" + (b.ai_original_code || "?") + " · " + (b.ai_original_name || "?") + "**)" : ""}`
-      : "";
-    const msg = `Tell me about the **${b.contact_name}** bucket — ${b.count} transaction${b.count === 1 ? "" : "s"} totaling ${amt}${catBits}. Want me to explain the categorization, suggest a better one, or turn this into an auto-rule for future imports?`;
-    setMessages(m => [...m, { role: "assistant", content: msg }]);
-    if (voiceOnRef.current) speakOne(msg.replace(/\*\*/g, ""));
+    // Auto-open the mic so the CPA can just start talking — same UX as
+    // the transaction-row sparkle click.
     setTimeout(() => setMicMode("open"), 250);
   });
 
@@ -2048,6 +2044,13 @@ export default function AiPanel({ collapsed, onToggle }) {
           company_id: currentId,
           message: userMsg,
           focused_transaction_id: focus?.id || null,
+          focused_bucket: focus?.bucket ? {
+            contact_name: focus.contact_name,
+            count: focus.count,
+            amount: focus.amount,
+            account_code: focus.account_code,
+            account_name: focus.account_name,
+          } : null,
           terseness,
         }),
       });

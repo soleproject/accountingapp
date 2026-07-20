@@ -193,6 +193,38 @@ async def ai_chat_stream(inp: ChatIn, user: dict = Depends(get_current_user)):
     if context:
         combined_context["focused_transaction"] = context
 
+    # Vendor-bucket focus (fired by the mega-approve modal's Sparkle
+    # button). Give the LLM the shape of the bucket + a sample of the
+    # actual rows so it can answer "why is this categorized as Supplies?"
+    # or "make it a rule" with real awareness.
+    if inp.focused_bucket:
+        b = inp.focused_bucket
+        contact_name = (b.get("contact_name") or "").strip()
+        sample = []
+        if contact_name:
+            async for t in db.transactions.find({
+                "company_id": inp.company_id,
+                "$or": [
+                    {"contact_name": contact_name},
+                    {"merchant": contact_name},
+                ],
+            }).sort("date", -1).limit(6):
+                sample.append({
+                    "date": t.get("date"),
+                    "description": t.get("description") or t.get("merchant"),
+                    "amount": t.get("amount"),
+                    "category": t.get("category_account_name") or t.get("account_name"),
+                    "status": t.get("status"),
+                })
+        combined_context["focused_bucket"] = {
+            "contact_name": contact_name,
+            "count": b.get("count"),
+            "amount_total": b.get("amount"),
+            "current_category_code": b.get("account_code"),
+            "current_category_name": b.get("account_name"),
+            "sample_rows": sample,
+        }
+
     full_reply = {"text": ""}
 
     async def event_gen():

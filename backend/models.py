@@ -113,6 +113,7 @@ class ChatIn(BaseModel):
     session_id: Optional[str] = None
     message: str
     focused_transaction_id: Optional[str] = None
+    focused_bucket: Optional[dict] = None
     terseness: Optional[str] = "balanced"  # "concise" | "balanced" | "detailed"
 
 
