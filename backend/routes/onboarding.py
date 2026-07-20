@@ -598,72 +598,61 @@ async def plaid_exchange(cid: str, payload: dict, user: dict = Depends(get_curre
 
 @router.post("/companies/{cid}/onboarding/plaid/import")
 async def plaid_import(cid: str, payload: dict, user: dict = Depends(get_current_user)):
-    """Import transactions for the selected Plaid account IDs via /transactions/sync."""
+    """Import transactions for the selected Plaid account IDs.
+
+    Routes each selected `plaid_account_id` through the same
+    `connect_plaid_account` flow the Connections page uses, so the CoA gets
+    a proper sub-account per Plaid account (1010-A Checking ···6084,
+    1010-B Savings ···4321, etc.), an opening-balance JE is posted, and
+    transactions are pulled + AI-categorized. This keeps onboarding and
+    post-onboarding Plaid linking in perfect parity — nothing surprising
+    when the user later revisits the Connections page.
+    """
     await require_company(user, cid)
     selected: list[str] = payload.get("account_ids") or []
     item = await db.plaid_items.find_one({"company_id": cid})
     if not item:
         raise HTTPException(400, "No linked Plaid item — link first")
-    try:
-        synced = plaid_service.sync_transactions(item["access_token"], item.get("cursor"))
-    except Exception as e:
-        raise HTTPException(502, f"Plaid sync error: {e}")
-    await db.plaid_items.update_one({"id": item["id"]}, {"$set": {"cursor": synced["next_cursor"], "updated_at": now_iso()}})
 
-    accts = await db.accounts.find({"company_id": cid}).to_list(2000)
-    coa = [{"code": a["code"], "name": a["name"], "type": a["type"]} for a in accts]
-    fallback_bank = next((a for a in accts if a["code"] == "1010"), None)
-    if not fallback_bank:
-        raise HTTPException(400, "Business Checking (1010) account not found")
+    # If nothing was selected, connect every account attached to the item —
+    # onboarding auto-selects them all client-side, but be defensive.
+    if not selected:
+        selected = [a.get("account_id") for a in (item.get("accounts") or []) if a.get("account_id")]
 
-    mappings = item.get("account_mappings") or {}
-    range_cache: dict[str, list[tuple[str, str]]] = {}
-
-    candidates: list[dict] = []
-    for t in synced["added"]:
-        if selected and t["account_id"] not in selected:
+    imported_total = 0
+    connected: list[dict] = []
+    errors: list[str] = []
+    for plaid_account_id in selected:
+        try:
+            result = await plaid_connect.connect_plaid_account(
+                cid, item, plaid_account_id,
+                categorize_fn=categorize_transaction,
+                is_period_closed_fn=is_period_closed,
+            )
+        except (ValueError, RuntimeError) as e:
+            # Skip individual account failures so a single misbehaving
+            # account (e.g. sandbox returning odd metadata) doesn't torch
+            # the whole onboarding step.
+            errors.append(f"{plaid_account_id[:8]}…: {e}")
             continue
-        if await db.transactions.find_one({"company_id": cid, "plaid_transaction_id": t["transaction_id"]}):
-            continue
-        # Additional dedup — Plaid Sandbox re-generates transaction IDs on
-        # every sync, so a re-sync of the same window would look like fresh
-        # transactions to the ID-based check above. Match on the
-        # (plaid_account_id, date, amount, merchant_name) tuple which is
-        # stable across syncs.
-        merchant_key = t.get("merchant_name") or t.get("name") or "Unknown"
-        if await db.transactions.find_one({
-            "company_id": cid,
-            "plaid_account_id": t["account_id"],
-            "date": t["date"],
-            "amount": t["amount"],
-            "merchant": merchant_key,
-        }):
-            continue
-        if await is_period_closed(cid, t["date"]):
-            continue
-        mapping = mappings.get(t["account_id"])
-        ledger_bank = next((a for a in accts if a["id"] == mapping["ledger_account_id"]), fallback_bank) if mapping else fallback_bank
-        ranges = range_cache.get(ledger_bank["id"])
-        if ranges is None:
-            ranges = await plaid_connect.higher_source_ranges(cid, ledger_bank["id"], "plaid")
-            range_cache[ledger_bank["id"]] = ranges
-        if plaid_connect.in_any_range(t["date"], ranges):
-            continue
-        pfc = t.get("personal_finance_category")
-        candidates.append({
-            "date": t["date"], "description": t["name"],
-            "merchant": t.get("merchant_name") or t.get("name") or "Unknown",
-            "merchant_name": t.get("merchant_name"),
-            "amount": t["amount"],
-            "bank_account_id": ledger_bank["id"],
-            "bank_account_name": ledger_bank["name"],
-            "plaid_transaction_id": t["transaction_id"],
-            "plaid_account_id": t["account_id"],
-            "pending": t.get("pending", False),
-            "pfc": pfc, "pfc_primary": (pfc or {}).get("primary"),
+        # Refresh the item after every connect so the NEXT loop iteration
+        # sees the mapping we just persisted and can dedup vs. shared syncs.
+        item = await db.plaid_items.find_one({"id": item["id"]}) or item
+        imported_total += int(result.get("imported") or 0)
+        connected.append({
+            "plaid_account_id": plaid_account_id,
+            "ledger_account_id": result.get("ledger_account_id"),
+            "ledger_account_code": result.get("ledger_account_code"),
+            "ledger_account_name": result.get("ledger_account_name"),
+            "imported": result.get("imported") or 0,
         })
-    imported = await categorize_and_insert(cid, candidates, accts, coa, source="plaid")
-    return {"imported": imported}
+    if imported_total:
+        await log_ai(cid, "categorize", imported_total)
+    return {
+        "imported": imported_total,
+        "connected": connected,
+        "errors": errors or None,
+    }
 
 
 @router.post("/companies/{cid}/plaid/connect-account")
