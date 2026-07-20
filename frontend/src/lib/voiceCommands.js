@@ -556,9 +556,23 @@ export function resolveVoiceCommand(text, ctx) {
   // Requires a focused transaction (hover-set from the Transactions grid or
   // sparkle-button on a row). Handled remotely because the caller needs the
   // company id + focused txn id to hit the approve-with-suggestion endpoint.
-  const APPROVE_RE = /^(?:(?:yes|yep|yeah|yup|ok|okay|sure|alright|great|so|well|and),?\s+)?(?:let'?s\s+|please\s+)?(?:approve|(?:this\s+)?(?:one\s+)?looks?\s+good|good\s+to\s+go|(?:this\s+is\s+)?correct|(?:this\s+is\s+)?right)(?:\s+(?:this|it|that|the|this\s+one|this\s+transaction|too|as\s+well|also))?\s*[.!]?$/i;
+  const APPROVE_RE = /^(?:(?:yes|yep|yeah|yup|ok|okay|sure|alright|great|so|well|and),?\s+)?(?:let'?s\s+|please\s+)?(?:approve|(?:this\s+)?(?:one\s+)?looks?\s+good|good\s+to\s+go|(?:this\s+is\s+)?correct|(?:this\s+is\s+)?right)(?:\s+(?:this|it|that|the|this\s+one|this\s+transaction|this\s+bucket|the\s+bucket|this\s+vendor|too|as\s+well|also))?\s*[.!]?$/i;
   const UNAPPROVE_RE = /^(?:un-?approve|reject|reverse\s+approve|undo\s+approve)(?:\s+(?:this|it|that))?\s*[.!]?$/i;
   if (APPROVE_RE.test(t)) {
+    // Bucket-focus (from the mega-approve modal's sparkle) — approve every
+    // row in that vendor bucket. Handled remotely so AiPanel can emit an
+    // action the mega-approve modal listens on and call approveOne(bucket).
+    if (ctx.focus?.bucket && ctx.focus?.key) {
+      return {
+        handled: true,
+        remote: "approve-bucket",
+        bucket: {
+          key: ctx.focus.key,
+          contact_name: ctx.focus.contact_name,
+          count: ctx.focus.count,
+        },
+      };
+    }
     if (!ctx.focus?.id) {
       return { handled: true, say: "Hover a transaction or click its sparkle first so I know which one to approve." };
     }

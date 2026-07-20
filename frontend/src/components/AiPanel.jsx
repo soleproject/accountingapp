@@ -1865,6 +1865,21 @@ export default function AiPanel({ collapsed, onToggle }) {
 
     // --- Remote intent: approve the focused transaction, then offer bulk-approve
     //     for every OTHER unapproved txn with the same contact + rule creation. ---
+    // --- Remote intent: approve the focused transaction, then offer bulk-approve
+    //     for every OTHER unapproved txn with the same contact + rule creation. ---
+    if (cmd.handled && cmd.remote === "approve-bucket") {
+      setMessages(m => [...m, { role: "user", content: userMsg }]);
+      // Hand off to the mega-approve modal which owns the bucket-level
+      // approve function (including the "auto-create rule" toggle state).
+      emitAction("mega-approve-bucket", { key: cmd.bucket.key });
+      const say = `Approving ${cmd.bucket.count} ${cmd.bucket.contact_name} row${cmd.bucket.count === 1 ? "" : "s"}.`;
+      setMessages(m => [...m, { role: "assistant", content: say }]);
+      if (voiceOnRef.current) speakOne(say);
+      // Clear focus once approved — the row is about to disappear.
+      setFocus(null, { force: true });
+      return;
+    }
+
     if (cmd.handled && cmd.remote === "approve-focused") {
       setMessages(m => [...m, { role: "user", content: userMsg }]);
       try {

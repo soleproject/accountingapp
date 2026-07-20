@@ -298,6 +298,22 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   // through the queue without touching the copilot again.
   const onApplyRef = useRef(onApplyAction);
   useEffect(() => { onApplyRef.current = onApplyAction; });
+
+  // Refs for the mega-approve listener below — allows the AI voice
+  // command "approve this" (with a bucket focus) to fire this same
+  // function without stale-closure issues from the empty-deps listener.
+  const approveOneRef = useRef(() => {});
+  const megaPreviewRef = useRef(null);
+  useEffect(() => { approveOneRef.current = approveOne; });
+  useEffect(() => { megaPreviewRef.current = megaPreview; });
+  useActionListener("mega-approve-bucket", (payload) => {
+    const key = payload?.key;
+    if (!key) return;
+    const preview = megaPreviewRef.current;
+    if (!preview) return;
+    const vendor = (preview.vendors || []).find(v => v.key === key);
+    if (vendor) approveOneRef.current(vendor);
+  });
   useActionListener("cleanup-completed", async (payload) => {
     const cid = payload?.contact_id;
     const wasSkip = !!payload?.skipped;
