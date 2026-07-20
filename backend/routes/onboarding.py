@@ -604,6 +604,43 @@ async def plaid_exchange(cid: str, payload: dict, user: dict = Depends(get_curre
             "institution_name": institution_name}
 
 
+@router.get("/companies/{cid}/onboarding/plaid/items")
+async def onboarding_plaid_items(cid: str, user: dict = Depends(get_current_user)):
+    """List every Plaid item + its accounts already connected for this
+    company. Used by the onboarding UI to re-hydrate the "connected
+    accounts" list on refresh — otherwise a user who links Chase, refreshes
+    the page, comes back to the Plaid step and sees an empty state.
+
+    Also flags which accounts have already been imported into the ledger
+    (via `account_mappings`) so the UI can render them as "already
+    downloaded" instead of asking the user to click Import again.
+    """
+    await require_company(user, cid)
+    items = await db.plaid_items.find({"company_id": cid}).to_list(50)
+    out: list[dict] = []
+    for it in items:
+        mappings = it.get("account_mappings") or {}
+        for a in (it.get("accounts") or []):
+            if not a.get("account_id"):
+                continue
+            mapping = mappings.get(a["account_id"])
+            out.append({
+                "account_id": a["account_id"],
+                "name": a.get("name") or a.get("official_name") or "Account",
+                "official_name": a.get("official_name"),
+                "mask": a.get("mask"),
+                "subtype": a.get("subtype"),
+                "type": a.get("type"),
+                "balance_current": a.get("balance_current") or a.get("current_balance"),
+                "institution_name": it.get("institution_name") or "Bank",
+                "imported": bool(mapping),
+                "ledger_account_id": (mapping or {}).get("ledger_account_id"),
+                "ledger_account_code": (mapping or {}).get("ledger_account_code"),
+                "ledger_account_name": (mapping or {}).get("ledger_account_name"),
+            })
+    return {"accounts": out}
+
+
 @router.post("/companies/{cid}/onboarding/plaid/import")
 async def plaid_import(cid: str, payload: dict, user: dict = Depends(get_current_user)):
     """Import transactions for the selected Plaid account IDs.

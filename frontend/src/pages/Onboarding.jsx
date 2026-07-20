@@ -153,6 +153,42 @@ export default function Onboarding() {
   const [interviewResult, setInterviewResult] = useState(null); // {accounts, rules, inserted_accounts, inserted_rules, rules_applied_to_transactions}
   const [plaidAccts, setPlaidAccts] = useState([]);
   const [selectedPlaid, setSelectedPlaid] = useState(new Set());
+  // Hydrate previously-linked Plaid accounts (both freshly-linked ones and
+  // those already imported into the ledger) whenever the company changes
+  // OR the user navigates to the Plaid step. Persists across refresh
+  // until onboarding is complete.
+  useEffect(() => {
+    if (!currentId || step !== 4) return;
+    api.get(`/companies/${currentId}/onboarding/plaid/items`).then(r => {
+      const rows = r.data?.accounts || [];
+      if (!rows.length) return;
+      const mapped = rows.map(a => ({
+        id: a.account_id,
+        name: `${a.name} ...${a.mask || ""}`,
+        institution: a.institution_name,
+        subtype: a.subtype || a.type,
+        balance: a.balance_current || 0,
+        alreadyImported: a.imported,
+      }));
+      setPlaidAccts(prev => {
+        const known = new Set(prev.map(x => x.id));
+        // Prefer already-loaded rows (fresh-link data) over refetched ones,
+        // so an in-progress toggle from onPlaidLinked isn't clobbered.
+        return [...prev, ...mapped.filter(a => !known.has(a.id))];
+      });
+      // Mark already-imported accounts as auto-imported so the "Import"
+      // button correctly dims for them.
+      const imported = mapped.filter(a => a.alreadyImported).map(a => a.id);
+      imported.forEach(id => autoImportedRef.current.add(id));
+      // Auto-check anything not-yet-imported so the user's default is
+      // "connect these too". Already-imported accounts stay unchecked.
+      setSelectedPlaid(prev => {
+        const next = new Set(prev);
+        mapped.filter(a => !a.alreadyImported).forEach(a => next.add(a.id));
+        return next;
+      });
+    }).catch(() => { /* first-time users have no items yet — silent */ });
+  }, [currentId, step]);
   const [imported, setImported] = useState({ plaid: 0, veryfi: 0 });
   // Set of plaid_account_ids we've already auto-imported this session.
   // Guards against a re-mount or a second linking re-triggering the whole
