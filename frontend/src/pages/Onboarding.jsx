@@ -102,12 +102,18 @@ export default function Onboarding() {
       await persist(fields);
       // Confirmation message + auto-advance if we have the two must-have
       // fields for Business Profile.
-      const bits = Object.entries(fields).map(([k, v]) => `${k.replace("_"," ")}: ${v}`).join(" · ");
+      const label = (k) => k.replace(/_/g, " ");
+      const bits = Object.entries(fields).map(([k, v]) => `**${label(k)}**: ${v}`).join(" · ");
+      const ready = fields.business_type && fields.business_description;
       emitAction("onboarding-coach-greet", {
-        message: `Got it — filled in ${bits}. ${(fields.business_type && fields.business_description) ? "Moving to the next step." : "Anything else to add?"}`,
+        message: ready
+          ? `Got it — filled in ${bits}. Moving to the next step in a moment…`
+          : `Got it — filled in ${bits}. Anything else to add?`,
       });
-      if (fields.business_type && fields.business_description) {
-        setTimeout(() => next(), 900);
+      if (ready) {
+        // 2.5s gives the confirmation time to visually register (and be
+        // spoken aloud if voice output is on) before the page changes.
+        setTimeout(() => next(), 2500);
       }
     } catch { /* non-fatal */ }
   });

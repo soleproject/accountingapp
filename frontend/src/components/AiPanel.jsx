@@ -1147,12 +1147,14 @@ export default function AiPanel({ collapsed, onToggle }) {
     setInput("");
 
     // Live-accountant onboarding coach — when the user is on /onboarding
-    // their reply is ALSO handed to the current step's extractor via a
-    // bus event. The regular send flow continues in parallel, so the
-    // coach's extraction runs alongside the normal LLM chat (extractor
-    // is a no-op unless the current step registers an `extractStep`).
+    // AND the current step has an extractor registered, their reply is
+    // handed to the coach and the normal LLM chat pipeline is SKIPPED
+    // (otherwise the coach's clean confirmation gets a redundant yappy
+    // follow-up from the general chat model glued onto it).
     if (typeof window !== "undefined" && window.location.pathname.startsWith("/onboarding")) {
+      setMessages(m => [...m, { role: "user", content: userMsg }]);
       emitAction("onboarding-user-message", { text: userMsg });
+      return;
     }
     // ------ Cleanup-Copilot inquiry interceptor -----------------------
     // The Transactions page emits `cleanup-inquiry` when the user clicks
