@@ -8,6 +8,7 @@ import { TID } from "@/constants/testIds";
 import { CheckCircle2, ChevronRight, Loader2, Sparkles, ArrowLeft, Upload } from "lucide-react";
 import { toast } from "sonner";
 import PlaidLinkButton from "@/components/PlaidLinkButton";
+import { institutionLogoUrl } from "@/lib/institutionLogo";
 
 // AI onboarding coach — greetings posted into the chat on each step to make
 // the flow feel like a live accountant is walking you through. Each entry
@@ -652,77 +653,60 @@ export default function Onboarding() {
       const known = new Set(prev.map(a => a.id));
       return [...prev, ...mapped.filter(a => !known.has(a.id))];
     });
-    // Only auto-select accounts we haven't already imported.
-    const freshIds = mapped.map(a => a.id).filter(id => !autoImportedRef.current.has(id));
+    // Auto-check every returned account so the user's default is "pull
+    // them all in" — but they can uncheck any they don't want before
+    // clicking "Import & AI-categorize selected". No auto-import fires.
+    const freshIds = mapped.map(a => a.id);
     setSelectedPlaid(prev => {
       const nextSet = new Set(prev);
       freshIds.forEach(id => nextSet.add(id));
       return nextSet;
     });
-    if (!freshIds.length || !currentId) return;
-    // Mark ALL fresh IDs as in-progress before we await, so a second Plaid
-    // Link fired mid-download doesn't double-fire.
-    freshIds.forEach(id => autoImportedRef.current.add(id));
+    if (!freshIds.length) return;
     const inst = accounts[0]?.institution_name || "your bank";
-    emitAction("onboarding-coach-greet", {
-      message: `Nice — I linked ${freshIds.length} account${freshIds.length === 1 ? "" : "s"} from ${inst}. Pulling in transactions now and categorizing each with AI. This usually takes a few seconds…`,
-    });
-    setBusy(true);
-    try {
-      let importedCount = 0;
-      let alreadyImported = 0;
-      try {
-        const r = await api.post(
-          `/companies/${currentId}/onboarding/plaid/import`,
-          { account_ids: freshIds },
-        );
-        importedCount = r.data.imported || 0;
-        alreadyImported = r.data.already_imported || 0;
-      } catch {
-        const r = await api.post(
-          `/companies/${currentId}/onboarding/import-plaid`,
-          freshIds,
-        );
-        importedCount = r.data.imported || 0;
-        alreadyImported = r.data.already_imported || 0;
-      }
-      setImported(v => ({ ...v, plaid: v.plaid + (importedCount || alreadyImported) }));
-      // Message logic:
-      //   • already_imported > 0, nothing new → "these are already in your books"
-      //   • importedCount === 0 (Plaid Sandbox often needs a beat before
-      //     transactions are available) → "still downloading in the background"
-      //   • importedCount > 0 → "pulled N transactions, ready to move on"
-      let doneMsg;
-      if (alreadyImported > 0 && importedCount === 0) {
-        doneMsg = `These accounts are already in your books (${alreadyImported} transactions previously imported). Continue with the flow, or say "link another" to add a bank.`;
-      } else if (importedCount === 0) {
-        doneMsg = `Nice — accounts connected. Transactions are downloading and being AI-categorized in the background right now (this can take a minute for a fresh institution). Feel free to continue with the flow, or say "link another" if you have another bank to add.`;
-      } else {
-        doneMsg = `Done — pulled ${importedCount} transaction${importedCount === 1 ? "" : "s"} and AI-categorized each. Say "next" whenever you're ready to move on, or "link another" if you have more banks to connect.`;
-      }
-      emitAction("onboarding-coach-greet", { message: doneMsg });
-    } catch (e) {
-      // Reset the guard for these specific IDs so the user can retry.
-      freshIds.forEach(id => autoImportedRef.current.delete(id));
-      toast.error(`Import failed: ${e?.response?.data?.detail || e.message}`);
-      emitAction("onboarding-coach-greet", {
-        message: `Hmm — I hit a snag pulling transactions in. Try clicking "Import & AI-categorize selected" manually, or say "skip" to move on.`,
-      });
-    } finally { setBusy(false); }
+    const count = mapped.length;
+    const already = plaidAccts.length; // rendered before setPlaidAccts flushes
+    const msg = already
+      ? `Nice — added ${count} more account${count === 1 ? "" : "s"} from ${inst}. I've pre-checked them. Uncheck any you'd rather leave out, then click "Import & AI-categorize selected" to pull transactions. Or say "link another" for a different bank.`
+      : `Nice — I linked ${count} account${count === 1 ? "" : "s"} from ${inst}. I've pre-checked them all — uncheck any you'd rather skip, then click "Import & AI-categorize selected" to pull transactions and AI-categorize each. You can also say "link another" if you have another bank to add.`;
+    emitAction("onboarding-coach-greet", { message: msg });
   };
   const importPlaid = async () => {
+    const ids = [...selectedPlaid].filter(id => !autoImportedRef.current.has(id));
+    if (!ids.length) {
+      toast.info("Nothing new to import — every selected account is already downloaded.");
+      return;
+    }
+    // Mark these IDs as in-progress BEFORE the await so re-clicks during
+    // the download don't double-fire.
+    ids.forEach(id => autoImportedRef.current.add(id));
     setBusy(true);
+    emitAction("onboarding-coach-greet", {
+      message: `Pulling in transactions for ${ids.length} account${ids.length === 1 ? "" : "s"} now and AI-categorizing each…`,
+    });
+    let importedCount = 0;
+    let alreadyImported = 0;
     try {
       const r = await api.post(`/companies/${currentId}/onboarding/plaid/import`,
-                                { account_ids: [...selectedPlaid] });
-      setImported(v => ({ ...v, plaid: r.data.imported }));
-      toast.success(`AI categorized ${r.data.imported} imported transactions`);
-    } catch (e) {
-      // Fallback to mock import if Plaid session isn't stored (rare)
-      const r = await api.post(`/companies/${currentId}/onboarding/import-plaid`, [...selectedPlaid]);
-      setImported(v => ({ ...v, plaid: r.data.imported }));
-      toast.success(`AI categorized ${r.data.imported} imported transactions`);
+                                { account_ids: ids });
+      importedCount = r.data.imported || 0;
+      alreadyImported = r.data.already_imported || 0;
+    } catch {
+      const r = await api.post(`/companies/${currentId}/onboarding/import-plaid`, ids);
+      importedCount = r.data.imported || 0;
+      alreadyImported = r.data.already_imported || 0;
     } finally { setBusy(false); }
+    setImported(v => ({ ...v, plaid: v.plaid + (importedCount || alreadyImported) }));
+    let doneMsg;
+    if (alreadyImported > 0 && importedCount === 0) {
+      doneMsg = `These accounts are already in your books (${alreadyImported} transactions previously imported). Continue with the flow, or say "link another" to add a bank.`;
+    } else if (importedCount === 0) {
+      doneMsg = `Nice — accounts connected. Transactions are downloading and being AI-categorized in the background right now (this can take a minute for a fresh institution). Feel free to continue with the flow, or say "link another" if you have another bank to add.`;
+    } else {
+      doneMsg = `Done — pulled ${importedCount} transaction${importedCount === 1 ? "" : "s"} and AI-categorized each. Say "next" whenever you're ready to move on, or "link another" if you have more banks to connect.`;
+    }
+    emitAction("onboarding-coach-greet", { message: doneMsg });
+    toast.success(`AI categorized ${importedCount || alreadyImported} imported transactions`);
   };
   const mockVeryfi = async () => {
     setBusy(true);
@@ -1097,22 +1081,73 @@ export default function Onboarding() {
                 </button>
               </div>
             ) : (
-              <div className="space-y-2">
-                {plaidAccts.map(a => (
-                  <label key={a.id} className="flex items-center gap-3 p-3 border rounded-md">
-                    <input type="checkbox" checked={selectedPlaid.has(a.id)}
-                           onChange={(e) => {
-                             const s = new Set(selectedPlaid);
-                             e.target.checked ? s.add(a.id) : s.delete(a.id);
-                             setSelectedPlaid(s);
-                           }} />
-                    <div className="flex-1">
-                      <div className="font-medium text-sm">{a.name}</div>
-                      <div className="text-xs text-slate-500">{a.institution} · {a.subtype}</div>
-                    </div>
-                    <div className="font-mono-num text-sm">${Number(a.balance || 0).toLocaleString()}</div>
-                  </label>
-                ))}
+              <div className="space-y-4">
+                {(() => {
+                  // Group accounts by institution for a nicer scannable list:
+                  //   [Chase Business] logo · 2 accounts
+                  //     [x] Adv Plus Banking …6084    $3,986.57
+                  //     [x] Everyday Checking …0036    $319.19
+                  //   [Wells Fargo] logo · 1 account
+                  //     [x] Wells Business …9917       $112.88
+                  const groups = new Map();
+                  for (const a of plaidAccts) {
+                    const key = a.institution || "Other";
+                    if (!groups.has(key)) groups.set(key, []);
+                    groups.get(key).push(a);
+                  }
+                  return [...groups.entries()].map(([inst, accts]) => {
+                    const logo = institutionLogoUrl(inst);
+                    // Bulk-toggle helper for the whole institution.
+                    const allChecked = accts.every(a => selectedPlaid.has(a.id));
+                    const someChecked = accts.some(a => selectedPlaid.has(a.id));
+                    const toggleAll = () => {
+                      const s = new Set(selectedPlaid);
+                      if (allChecked) accts.forEach(a => s.delete(a.id));
+                      else accts.forEach(a => s.add(a.id));
+                      setSelectedPlaid(s);
+                    };
+                    return (
+                      <div key={inst} className="border rounded-md overflow-hidden">
+                        <div className="flex items-center gap-3 px-3 py-2 bg-slate-50 border-b">
+                          {logo ? (
+                            <img src={logo} alt=""
+                                 onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                 className="w-6 h-6 rounded-full bg-white ring-1 ring-slate-200 object-contain shrink-0" />
+                          ) : (
+                            <div className="w-6 h-6 rounded-full bg-slate-200 text-slate-600 text-[10px] font-semibold flex items-center justify-center shrink-0">
+                              {(inst[0] || "?").toUpperCase()}
+                            </div>
+                          )}
+                          <div className="flex-1">
+                            <div className="text-sm font-semibold">{inst}</div>
+                            <div className="text-[11px] text-slate-500">{accts.length} account{accts.length === 1 ? "" : "s"} connected</div>
+                          </div>
+                          <button type="button" onClick={toggleAll}
+                                  className="text-[11px] px-2 py-1 rounded border bg-white text-slate-600 hover:bg-slate-100">
+                            {allChecked ? "Uncheck all" : someChecked ? "Check all" : "Check all"}
+                          </button>
+                        </div>
+                        <div className="divide-y">
+                          {accts.map(a => (
+                            <label key={a.id} className="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50/60">
+                              <input type="checkbox" checked={selectedPlaid.has(a.id)}
+                                     onChange={(e) => {
+                                       const s = new Set(selectedPlaid);
+                                       e.target.checked ? s.add(a.id) : s.delete(a.id);
+                                       setSelectedPlaid(s);
+                                     }} />
+                              <div className="flex-1">
+                                <div className="font-medium text-sm">{a.name}</div>
+                                <div className="text-xs text-slate-500 capitalize">{a.subtype}</div>
+                              </div>
+                              <div className="font-mono-num text-sm">${Number(a.balance || 0).toLocaleString()}</div>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
                 {(() => {
                   // Compute which selected accounts still need to be
                   // auto-imported. Once every selected account is in the
