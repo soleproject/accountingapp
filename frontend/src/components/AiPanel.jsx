@@ -592,6 +592,21 @@ export default function AiPanel({ collapsed, onToggle }) {
   useActionListener("ai-tell-me-about-bucket", (payload) => {
     const b = payload?.bucket;
     if (!b) return;
+    // Pin the bucket as the AI focus — shows the "Focused bucket" card at
+    // the top of the chat + the "Cancel focus" pill above the input +
+    // paints the source row on the mega-approve modal with a rainbow ring.
+    setFocus(
+      {
+        bucket: true,
+        key: b.key,
+        contact_name: b.contact_name,
+        count: b.count,
+        amount: b.amount,
+        account_code: b.account_code,
+        account_name: b.account_name,
+      },
+      { pin: true },
+    );
     const amt = (typeof b.amount === "number")
       ? b.amount.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })
       : "";
@@ -1179,6 +1194,17 @@ export default function AiPanel({ collapsed, onToggle }) {
     clearSilenceTimer();
     const userMsg = input.trim();
     setInput("");
+
+    // "Cancel focus" / "clear focus" / "unfocus" / "stop focus" — voice-
+    // and text-driven way to drop the pinned bucket/transaction focus
+    // without having to reach for the mouse.
+    if (/^(?:cancel|clear|drop|stop|end|remove|unpin|un)[\s-]?focus\b|^unfocus\b/i.test(userMsg)) {
+      setFocus(null, { force: true });
+      const ack = "Focus cleared. What next?";
+      setMessages(m => [...m, { role: "user", content: userMsg }, { role: "assistant", content: ack }]);
+      if (voiceOnRef.current) speakOne(ack);
+      return;
+    }
 
     // Live-accountant onboarding coach — fire the user's message to any
     // coach listener on either the onboarding page (Business Profile
@@ -2223,11 +2249,25 @@ export default function AiPanel({ collapsed, onToggle }) {
       </div>
 
       {focus && (
-        <div className="mx-3 mt-3 border rounded-md p-2.5 bg-indigo-50/50 border-indigo-200 text-xs">
-          <div className="font-medium text-slate-700 mb-0.5">Focused transaction</div>
-          <div className="text-slate-600 truncate">
-            {focus.merchant} · <span className="font-mono-num">${Math.abs(focus.amount).toFixed(2)}</span> · {focus.date}
-          </div>
+        <div className="mx-3 mt-3 border rounded-md p-2.5 bg-indigo-50/50 border-indigo-200 text-xs" data-testid="ai-focus-card">
+          {focus.bucket ? (
+            <>
+              <div className="font-medium text-slate-700 mb-0.5">Focused bucket</div>
+              <div className="text-slate-600 truncate">
+                <b>{focus.contact_name}</b> · {focus.count} row{focus.count === 1 ? "" : "s"} · <span className="font-mono-num">${Math.abs(focus.amount).toLocaleString("en-US", {maximumFractionDigits: 0})}</span>
+                {focus.account_code && (
+                  <> · <span className="text-slate-500">{focus.account_code} · {focus.account_name}</span></>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="font-medium text-slate-700 mb-0.5">Focused transaction</div>
+              <div className="text-slate-600 truncate">
+                {focus.merchant} · <span className="font-mono-num">${Math.abs(focus.amount).toFixed(2)}</span> · {focus.date}
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -2662,6 +2702,19 @@ export default function AiPanel({ collapsed, onToggle }) {
               }
             </span>
           </div>
+        )}
+        {focus && (
+          <button
+            data-testid="ai-cancel-focus"
+            onClick={() => setFocus(null, { force: true })}
+            className="mb-2 w-full flex items-center justify-center gap-2 rounded-md border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-medium px-2.5 py-1.5 transition"
+            title="Stop focusing on this transaction / bucket"
+          >
+            <X size={12} /> Cancel focus
+            <span className="text-[10px] text-indigo-500 font-normal">
+              (or say "cancel focus")
+            </span>
+          </button>
         )}
         <div className="flex gap-2">
           <MicButton

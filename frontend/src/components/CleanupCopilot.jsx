@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { api } from "@/lib/api";
 import { useActionListener, emitAction } from "@/lib/createBus";
+import { useAiFocus } from "@/lib/aiFocus";
 import { Sparkles, PlayCircle, ArrowRight, Loader2 } from "lucide-react";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
 
@@ -84,6 +85,7 @@ function pitchFor(action, progress) {
 }
 
 export default function CleanupCopilot({ currentId, onApplyAction, onStartSession }) {
+  const { focus } = useAiFocus();
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   // Permanent dismissal (contact was actually handled, not just skipped).
@@ -598,9 +600,11 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                         key={c.key}
                         data-testid={`mega-vendor-${c.key}`}
                         className={`w-full flex items-center gap-2.5 rounded border px-3 py-2 text-sm transition-colors ${
-                          on
-                            ? "border-emerald-300 bg-emerald-50 hover:bg-emerald-100"
-                            : "border-slate-200 bg-slate-50 opacity-60 hover:opacity-100 hover:bg-slate-100"
+                          focus?.bucket && focus.key === c.key
+                            ? "ai-shimmer-btn"
+                            : on
+                              ? "border-emerald-300 bg-emerald-50 hover:bg-emerald-100"
+                              : "border-slate-200 bg-slate-50 opacity-60 hover:opacity-100 hover:bg-slate-100"
                         }`}
                       >
                         <button
@@ -669,6 +673,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                             emitAction("ai-open");
                             emitAction("ai-tell-me-about-bucket", {
                               bucket: {
+                                key: c.key,
                                 contact_name: c.contact_name,
                                 count: c.count,
                                 amount: c.amount,
