@@ -843,7 +843,12 @@ export function resolveVoiceCommand(text, ctx) {
 
   if (!isQuestion) {
     for (const r of NAV_ROUTES) {
-      if (r.pat.test(navT)) {
+      // Test the RAW utterance `t`, not the verb-stripped `navT` — every
+      // NAV() route now embeds its own verb prefix (go to / open / take me
+      // to / let's go to / navigate to / jump to / switch to / …), so
+      // testing against `navT` (which has already had the verb stripped by
+      // NAV_PREFIX above) would never match. See test iteration_41.
+      if (r.pat.test(t)) {
         // Exclude cases where the utterance is really about creating something
         // (e.g. "create a new invoice" would otherwise match /invoices/).
         if (CREATE_INTENT_RE.test(t)) break;
