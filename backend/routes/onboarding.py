@@ -197,6 +197,10 @@ async def onboarding_coach_extract(cid: str, payload: dict, user: dict = Depends
     # Whitelist to the schema fields only — never trust the LLM to invent
     # extra keys the frontend doesn't expect.
     fields = {k: v for k, v in data.items() if k in schema["fields"] and v}
+    # Per-step value guards — keep persisted state clean even when the LLM
+    # inserts sentinel values like 'ambiguous' for enum-like fields.
+    if step == "qbo_link" and fields.get("qbo") not in ("yes", "no"):
+        fields.pop("qbo", None)
     return {"step": step, "fields": fields}
 
 

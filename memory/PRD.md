@@ -425,3 +425,25 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - Email/notification hooks for flagged txns (SendGrid / Resend)
 - Attachment upload on transactions (object storage)
 - Stripe subscription billing for the SaaS itself
+
+### 2026-02-20 — AI Onboarding Coach: full-flow wiring (Steps 1–6)
+- Extended the AI onboarding coach beyond Step 0 (Business Profile) to every remaining step.
+  Each step now greets the user in the AI chat panel with a step-specific "live accountant"
+  message and (when meaningful) extracts structured intent from the user's freeform reply.
+- **Backend** (`/app/backend/routes/onboarding.py`): added five new `_COACH_STEP_SCHEMAS`
+  entries — `qbo_link` (extracts `qbo: 'yes'|'no'`; server-side value guard drops LLM
+  sentinels like `'ambiguous'`), `coa_overrides` (extracts `add_hints[]`, `remove_hints[]`,
+  `notes`), `plaid_intent` (extracts `skip: bool`, `institution_hint`), `veryfi_intent`
+  (extracts `skip: bool`), `ready_confirm` (extracts `confirm: bool`).
+- **Frontend** (`/app/frontend/src/pages/Onboarding.jsx`): expanded `COACH_SCRIPTS` with
+  greeting + `ready()` + `confirm()` for every step, wrapped auto-advance in per-step
+  intent (steps 0/1/4/5 advance on confident extraction, step 2 is greet-only, step 3
+  never auto-advances, step 6 calls `finish()` and navigates to Transactions).
+  Introduced `stepRef` / `answersRef` / `nextRef` / `finishRef` to compensate for
+  `useActionListener`'s empty-deps handler binding so the extraction handler always
+  reads the current step + answers. Added a `loaded` guard so the step-0 greeting no
+  longer fires momentarily before persisted state arrives.
+- **Tests** (iteration 44): 13/13 backend pytest across every schema + edge cases;
+  7/7 frontend Playwright checkpoints walking the full Bright Beans Coffee onboarding
+  flow via natural-language chat.
+
