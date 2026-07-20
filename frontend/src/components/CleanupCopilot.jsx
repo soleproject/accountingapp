@@ -84,7 +84,7 @@ function pitchFor(action, progress) {
   return action.why || action.label;
 }
 
-export default function CleanupCopilot({ currentId, onApplyAction, onStartSession }) {
+export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger }) {
   const { focus } = useAiFocus();
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -517,6 +517,27 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   const primary = actions[0] || synthPrimary;
   const rest = actions.slice(1, 6);
   const total = data?.progress?.total || 0;
+
+  // Auto-trigger: when the user lands here via the Dashboard's "Flagged for
+  // review" card (which adds `?auto=1`), pick the SAME action the shimmering
+  // CTA would run:
+  //   1. If there are AI-categorized rows queued for sign-off → open the
+  //      mega-approve modal (skips the intermediate table view entirely).
+  //   2. Else if there's a "Let's review" primary action → run it (filters
+  //      the table to flagged rows + kicks off the inquiry chat).
+  // Fires ONCE per component mount so re-renders don't re-open the modal.
+  const autoFiredRef = useRef(false);
+  useEffect(() => {
+    if (!autoTrigger || autoFiredRef.current || !data) return;
+    const aiReady = data?.progress?.mega_ready_rows || 0;
+    if (aiReady > 0) {
+      autoFiredRef.current = true;
+      openMega();
+    } else if (primary) {
+      autoFiredRef.current = true;
+      onApplyAction?.(primary);
+    }
+  }, [autoTrigger, data, primary, onApplyAction]);
   // Derived state for the mega-approve modal (kept out of state so it stays
   // in sync with megaSelected + megaSearch without an effect).
   const megaVendors = megaPreview?.vendors || [];

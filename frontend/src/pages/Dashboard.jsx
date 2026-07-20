@@ -325,7 +325,7 @@ function AttentionTile({ attention }) {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 divide-y sm:divide-y-0 lg:divide-x">
         <AttentionCard
           testid="attention-flagged"
-          to="/accounting/transactions?filter=review"
+          to="/accounting/transactions?filter=review&auto=1"
           icon={AlertTriangle}
           tone={flagged > 0 ? "amber" : "muted"}
           count={flagged}

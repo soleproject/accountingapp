@@ -474,6 +474,7 @@ export default function Transactions() {
     <div className="space-y-4">
       <CleanupCopilot
         currentId={currentId}
+        autoTrigger={params.get("auto") === "1"}
         onApplyAction={(a) => {
           // Filter the list first so the user sees exactly what the AI is about
           // to touch, then kick off a conversational inquiry in the AI panel.
