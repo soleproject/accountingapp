@@ -77,10 +77,14 @@ export default function Onboarding() {
     // Open the AI panel and post the greeting. AiPanel treats
     // `onboarding-coach-greet` like a scripted assistant message — it will
     // wear the rainbow-outline bubble because the user hasn't replied yet.
+    // Delay the emit so AiPanel has time to mount its listener; otherwise
+    // TTS speaks it but the chat bubble never lands.
     emitAction("ai-open");
-    emitAction("onboarding-coach-greet", {
-      message: script.message(current?.name),
-    });
+    setTimeout(() => {
+      emitAction("onboarding-coach-greet", {
+        message: script.message(current?.name),
+      });
+    }, 500);
   }, [currentId, step, current?.name]);
 
   // When the user replies in the chat while on this page, feed the reply

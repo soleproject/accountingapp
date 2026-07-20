@@ -425,9 +425,15 @@ function OnboardingNudge({ company }) {
     if (greetedRef.current.has(company.id)) return;
     greetedRef.current.add(company.id);
     emitAction("ai-open");
-    emitAction("onboarding-coach-greet", {
-      message: `Welcome — **${company.name}** still needs a quick onboarding to get its books ready. Ready to knock it out? Say **yes** and I'll take you there, or click the button when you're ready.`,
-    });
+    // Small delay so AiPanel has time to mount and register its
+    // `onboarding-coach-greet` listener — otherwise the emit races the
+    // mount and the message never lands in the chat (TTS still speaks it
+    // because the speak path is invoked directly on emit).
+    setTimeout(() => {
+      emitAction("onboarding-coach-greet", {
+        message: `Welcome — **${company.name}** still needs a quick onboarding to get its books ready. Ready to knock it out? Say **yes** and I'll take you there, or click the button when you're ready.`,
+      });
+    }, 500);
   }, [company?.id, company?.name]);
 
   // Chat-driven affirmative → navigate to /onboarding.

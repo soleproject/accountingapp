@@ -1,0 +1,44 @@
+{
+  "summary": "Frontend-only regression test of the onboarding-coach chat-bubble fix (setTimeout wrap around emitAction). Verified on live preview URL as pro@axiom.ai. All 4 scenarios PASSED.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_results": [
+    {
+      "scenario": "Dashboard greeting bubble appears for 231 LLC (onboarding_complete=false)",
+      "status": "PASS",
+      "evidence": "AiPanel rendered chat bubble text starting with 'Welcome — **231 LLC** still needs a quick onboarding to get its books ready...' after switching to 231 LLC via the header company switcher. Confirmed in DOM via evaluate() and screenshot."
+    },
+    {
+      "scenario": "Greeting bubble has rainbow-outline (ai-shimmer-bubble) class",
+      "status": "PASS",
+      "evidence": "Class list for the Welcome bubble is 'max-w-[92%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap leading-relaxed chat-bubble-ai ai-shimmer-bubble' — .closest('.ai-shimmer-bubble') returned true."
+    },
+    {
+      "scenario": "Typing 'yes' in AI input triggers reply and navigates to /onboarding",
+      "status": "PASS",
+      "evidence": "After sending 'yes', an assistant bubble 'Great — heading to onboarding now.' appeared and URL navigated to /onboarding within ~1s."
+    },
+    {
+      "scenario": "Onboarding /onboarding step-1 greeting bubble also appears (regression)",
+      "status": "PASS",
+      "evidence": "Bubble 'Great, 231 LLC let's set up your books together. First — tell me what kind of business this is...' rendered in AiPanel on /onboarding."
+    }
+  ],
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "OnboardingNudge uses setTimeout(500) as a workaround for a mount-order race between the emitter (Dashboard/Onboarding) and the AiPanel listener. Works today, but is timing-dependent. Consider a small event-bus buffer (replay last N unhandled actions to newly registered listeners) or a mounted-flag/ready-signal so AiPanel pulls the pending greet on register — would eliminate the race without arbitrary delays.",
+    "Same setTimeout duplication exists in Dashboard.jsx and Onboarding.jsx — extract a helper (e.g. emitActionDeferred / emitAfterMount) to DRY the pattern."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only)", "frontend": "100%"},
+  "test_credentials": "pro@axiom.ai / pro123 (present in /app/memory/test_credentials.md scope). Target company: 231 LLC (Consulting, Onboarding badge, onboarding_complete=false).",
+  "seed_data_creation": "None — 231 LLC already existed with onboarding_complete=false.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Login lands at /pro/clients. Do NOT click 'Open books' card button to select 231 LLC — it climbs DOM oddly and can pick the wrong company. Instead open /dashboard, click the header company-switcher button (currently-selected company name, e.g. 'Bright Beans Coffee Co.') then click the dropdown item 'button.w-full.text-left:has-text(\"231 LLC\")'. Wait ~3.5s after switch for the greeting bubble to render (setTimeout 500ms + React commit). Verify bubble via closest('.ai-shimmer-bubble')."
+}
