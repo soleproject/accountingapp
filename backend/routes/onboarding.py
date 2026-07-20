@@ -207,6 +207,106 @@ async def onboarding_coach_extract(cid: str, payload: dict, user: dict = Depends
     return {"step": step, "fields": fields}
 
 
+# Step-specific "what does this step do?" grounding — feeds the coach a
+# short brief so it answers questions like "what will connecting my bank
+# do?" or "what if I don't have statements?" in the user's actual context.
+_COACH_STEP_BRIEFS = {
+    "business_profile": (
+        "This is step 1 of onboarding — Business Profile. We're capturing the "
+        "business type, a one-sentence description of what it does, its fiscal "
+        "year end (usually Dec 31), reporting basis (Accrual vs Cash), and legal "
+        "form (LLC/S-Corp/etc.). Everything downstream (chart of accounts, "
+        "tax categorization, industry benchmarks) uses this."
+    ),
+    "qbo_link": (
+        "This is the QuickBooks Online link step. If the client already uses QBO, "
+        "we can pull their historical chart of accounts + transactions in the "
+        "background so they don't have to start from scratch. If they don't, we "
+        "set up a fresh GAAP-baseline CoA together in the next steps."
+    ),
+    "coa_overrides": (
+        "This is the Chart of Accounts step. We start from a 30-account GAAP "
+        "baseline and can layer 15-25 industry-specific accounts on top (e.g. "
+        "for a coffee roaster: Green Coffee COGS, Roasting Supplies, Barista "
+        "Wages). Users can ask us to add or remove specific accounts before we "
+        "apply them."
+    ),
+    "plaid_intent": (
+        "This is the bank connection step (Plaid). Connecting a bank lets us "
+        "download transactions automatically every night, tag them with vendor "
+        "info, run AI categorization, and reconcile balances. Users can link "
+        "multiple accounts (checking, credit card, savings) or skip and connect "
+        "later from Settings. Sandbox creds for testing: user_good / pass_good."
+    ),
+    "veryfi_intent": (
+        "This is the statement upload step (Veryfi OCR). For anything Plaid "
+        "couldn't reach — old paper statements, credit-union PDFs, PayPal "
+        "exports, standalone receipts — the user drops files here and Veryfi "
+        "OCR extracts the transaction rows so we can categorize them. Users "
+        "can skip if they don't have anything to upload."
+    ),
+    "ready_confirm": (
+        "This is the final review step. Everything the AI could categorize "
+        "confidently is queued as 'AI Categorized' for one-click approval. "
+        "Anything flagged is waiting on the user's judgement. Saying 'let's "
+        "go' finishes onboarding and drops them into their transactions view."
+    ),
+}
+
+
+@router.post("/companies/{cid}/onboarding/coach-answer")
+async def onboarding_coach_answer(cid: str, payload: dict, user: dict = Depends(get_current_user)):
+    """AI onboarding coach — answers freeform questions the user asks during
+    a specific onboarding step. Unlike /extract-step (which returns typed
+    form fields), this returns a short natural-language response the coach
+    speaks back into the chat.
+
+    Body: `{"step": "plaid_intent", "message": "what will connecting the bank do?"}`
+    Returns: `{"answer": "Connecting your bank lets us..."}`
+    """
+    await require_company(user, cid)
+    step = (payload.get("step") or "").strip()
+    message = (payload.get("message") or "").strip()
+    brief = _COACH_STEP_BRIEFS.get(step, "")
+    if not message:
+        return {"answer": ""}
+    company = await db.companies.find_one({"id": cid}) or {}
+    system = (
+        "You are a warm, expert CPA guiding a client through onboarding. Answer "
+        "the user's question in 2-3 short conversational sentences at most. "
+        "Reference the specific on-page action they can take (e.g. 'click "
+        "Launch Plaid Link', 'click Upload real statement', 'say skip'). "
+        "Never invent features or make up numbers. Do not use bullet points, "
+        "code blocks, or headings — just plain conversational prose so it "
+        "sounds natural when read aloud. If the user is clearly asking to "
+        "move on / skip / do the step, END your reply with exactly the marker "
+        "[ADVANCE] on its own line. If they're clearly asking to launch a "
+        "connect flow (Plaid, upload, QBO), END with [LAUNCH:plaid] or "
+        "[LAUNCH:upload] or [LAUNCH:qbo] on its own line. Otherwise omit the "
+        "marker. \n\n"
+        f"Client company: {company.get('name', 'this business')}\n"
+        f"Current step brief: {brief}"
+    )
+    chat = _new_chat(system, session_id=f"coach-qa:{cid}:{step}")
+    try:
+        resp = await chat.send_message(UserMessage(text=message))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"LLM error: {e}")
+    # Strip markers and return alongside the parsed action.
+    action = None
+    text = (resp or "").strip()
+    m = re.search(r"\[ADVANCE\]", text)
+    if m:
+        action = "advance"
+        text = text.replace(m.group(0), "").strip()
+    m = re.search(r"\[LAUNCH:(plaid|upload|qbo)\]", text, flags=re.IGNORECASE)
+    if m:
+        action = f"launch:{m.group(1).lower()}"
+        text = text.replace(m.group(0), "").strip()
+    return {"answer": text, "action": action}
+
+
+
 @router.post("/companies/{cid}/onboarding/coa/suggest")
 async def suggest_coa(cid: str, user: dict = Depends(get_current_user)):
     """Preview an AI-tailored chart of accounts without writing anything.

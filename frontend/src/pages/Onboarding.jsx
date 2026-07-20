@@ -220,6 +220,49 @@ export default function Onboarding() {
   useEffect(() => { answersRef.current = answers; }, [answers]);
   useEffect(() => { plaidAcctsRef.current = plaidAccts; }, [plaidAccts]);
   useEffect(() => { currentRef.current = current; }, [current]);
+  // Coach Q&A fallback — when the user's message doesn't match any local
+  // shortcut and the field extractor comes up empty, hand it to the LLM
+  // with step-aware context so the coach can actually answer questions
+  // like "what will connecting the bank do?" or "what if I don't have any
+  // statements?" instead of sitting silent.
+  //
+  // Wrapped in a ref because `useActionListener` binds its handler once
+  // (empty deps) — a plain fn reference would be captured before
+  // `currentId` resolved.
+  const coachAnswerRef = useRef(async () => {});
+  useEffect(() => {
+    coachAnswerRef.current = async (msg, extractStep) => {
+      if (!currentId) return;
+      try {
+        const r = await api.post(
+          `/companies/${currentId}/onboarding/coach-answer`,
+          { step: extractStep, message: msg },
+        );
+        const text = (r.data?.answer || "").trim();
+        const action = r.data?.action || null;
+        if (text) emitAction("onboarding-coach-greet", { message: text });
+        // Server can also tell us to launch a connect flow or advance the
+        // step based on the user's phrasing — honour that.
+        if (action === "advance") {
+          scheduleAdvanceRef.current(() => nextRef.current());
+        } else if (action === "launch:plaid") {
+          setTimeout(() => emitAction("plaid-launch"), 600);
+        } else if (action === "launch:upload") {
+          // Trigger the on-page upload button by dispatching a click via a
+          // known data-testid (kept selector-free here — the button's own
+          // click handler owns the flow).
+          setTimeout(() => {
+            const btn = document.querySelector('[data-testid="onboarding-veryfi-upload"], [data-testid="onboarding-mock-veryfi"]');
+            btn?.click();
+          }, 600);
+        }
+      } catch { /* non-fatal — silent fallback is better than a stack trace */ }
+    };
+  }, [currentId]);
+  // Expose scheduleAdvance via ref so coachAnswer can call it without
+  // hoisting issues.
+  const scheduleAdvanceRef = useRef(() => {});
+
   useActionListener("onboarding-user-message", async (payload) => {
     // Double-advance guard: if we JUST scheduled a next()/finish(), swallow
     // subsequent messages until the step actually changes. Users often say
@@ -241,6 +284,7 @@ export default function Onboarding() {
       // lock so the coach stays responsive.
       setTimeout(() => { advancingRef.current = false; }, 3000);
     };
+    scheduleAdvanceRef.current = scheduleAdvance;
 
     // Broad "the user is fine, move on" detector — matches when ANY of a
     // rich set of natural affirmations appears in the message, not just as
@@ -318,7 +362,10 @@ export default function Onboarding() {
         scheduleAdvance(() => nextRef.current());
         return;
       }
-      // Anything else — fall through to the extractor.
+      // Anything else on Plaid (questions like "what will this do?" or
+      // ambiguous statements) — hand to the LLM coach-answer.
+      await coachAnswerRef.current(msg, "plaid_intent");
+      return;
     } else if (moveOn) {
       let doAdvance = false;
       let confirmText = "Moving on…";
@@ -370,7 +417,13 @@ export default function Onboarding() {
         { step: script.extractStep, message: msg },
       );
       const fields = r.data?.fields || {};
-      if (!Object.keys(fields).length) return;
+      if (!Object.keys(fields).length) {
+        // No typed fields — the user is likely asking a question or making
+        // an off-script comment. Route through the coach-answer endpoint
+        // so they get a real answer instead of silence.
+        await coachAnswerRef.current(msg, script.extractStep);
+        return;
+      }
 
       // Per-step side effects that MUST run before we render a confirm bubble.
       // Keeps the extractor server-side generic while letting each step
