@@ -117,6 +117,14 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   // the mega-approve call sends `overrides` and the vendor's row gets
   // recategorized to the target account (and snapshotted for Undo).
   const [megaOverrides, setMegaOverrides] = useState({});
+  // Guided-tour ("How To") state — non-null means a walkthrough is running
+  // and this step's UI element gets the rainbow highlight. `howToTargetKey`
+  // holds the vendor row we're using as the demo subject (the first bucket
+  // in the preview) so we can highlight sub-elements of that specific row.
+  const [howToStep, setHowToStep] = useState(null);
+  const [howToRunning, setHowToRunning] = useState(false);
+  const [howToTargetKey, setHowToTargetKey] = useState(null);
+  const howToAbortRef = useRef(false);
   // Full CoA for the current company, loaded once when the modal opens. Used
   // for the category dropdown and the info-icon tooltip.
   const [accounts, setAccounts] = useState([]);
@@ -314,6 +322,63 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     const vendor = (preview.vendors || []).find(v => v.key === key);
     if (vendor) approveOneRef.current(vendor);
   });
+
+  // ---- Guided "How To" tour ----------------------------------------
+  // The user hits "How To" at the top of the mega-approve modal and the
+  // AI narrates through the screen, highlighting each element as it goes.
+  // We use browser TTS directly so we can await utterance-end and step
+  // forward at natural pauses.
+  const HOWTO_STEPS = [
+    { text: "These are all the transactions the AI has already categorized for you, grouped by vendor. Let's walk through what you can do here." },
+    { text: "The green checkbox on the left means this vendor's transactions are included in the batch approval. Uncheck any vendor you want to exclude." },
+    { text: "Next to the vendor name is the category the AI picked. If you disagree, click the dropdown to change how this vendor's transactions will be booked." },
+    { text: "The small info icon opens a tooltip explaining what that category means in plain English — handy when you're not sure whether something belongs in Supplies or Cost of Goods." },
+    { text: "To the right you can see how many transactions this vendor covers, along with the total dollar amount they represent." },
+    { text: "Click the sparkle icon if you want to ask the AI a question about this vendor's categorization or the transactions themselves. It focuses the AI on that bucket so you can just start talking." },
+    { text: "You can also approve any individual bucket right here without waiting to reach the bottom — just click the Approve arrow next to the row." },
+    { text: "When you're ready, hit the big green Approve button at the bottom. That'll approve every checked vendor at once, and if the auto-create rules toggle is on, it also builds rules so future transactions from these vendors land in the right place automatically. That's usually 80% or more of your cleanup, done in one click." },
+  ];
+  const cancelHowTo = () => {
+    howToAbortRef.current = true;
+    try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
+    setHowToStep(null);
+    setHowToRunning(false);
+    setHowToTargetKey(null);
+  };
+  const speakAsync = (text) => new Promise(resolve => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return resolve();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.02; u.pitch = 1.0;
+    u.onend = resolve; u.onerror = resolve;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  });
+  const runHowTo = async () => {
+    if (howToRunning) return;
+    const preview = megaPreviewRef.current;
+    if (!preview || !preview.vendors?.length) return;
+    // Anchor the highlight to the FIRST vendor row — simple + visually
+    // consistent walkthrough.
+    setHowToTargetKey(preview.vendors[0].key);
+    setHowToRunning(true);
+    howToAbortRef.current = false;
+    // Make sure the AI panel is visible so the narration lands somewhere.
+    emitAction("ai-open");
+    for (let i = 0; i < HOWTO_STEPS.length; i++) {
+      if (howToAbortRef.current) break;
+      setHowToStep(i);
+      // Post the narration into the AI chat as an assistant bubble too so
+      // there's a written trail after the tour ends.
+      emitAction("ai-chat-say", { message: HOWTO_STEPS[i].text });
+      await speakAsync(HOWTO_STEPS[i].text);
+      if (howToAbortRef.current) break;
+      // Brief beat between steps so the highlight doesn't snap instantly.
+      await new Promise(r => setTimeout(r, 400));
+    }
+    setHowToStep(null);
+    setHowToRunning(false);
+    setHowToTargetKey(null);
+  };
   useActionListener("cleanup-completed", async (payload) => {
     const cid = payload?.contact_id;
     const wasSkip = !!payload?.skipped;
@@ -569,8 +634,28 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
               </>
             ) : (
               <>
-                <div className="text-base font-semibold text-slate-900 mb-1">
-                  Approve <span data-testid="mega-selected-rows">{selectedRows.toLocaleString()}</span> rows across <span data-testid="mega-selected-vendors">{selectedBuckets}</span> {selectedBuckets === 1 ? "bucket" : "buckets"}?
+                <div className="flex items-start justify-between gap-3 mb-1">
+                  <div className="text-base font-semibold text-slate-900">
+                    Approve <span data-testid="mega-selected-rows">{selectedRows.toLocaleString()}</span> rows across <span data-testid="mega-selected-vendors">{selectedBuckets}</span> {selectedBuckets === 1 ? "bucket" : "buckets"}?
+                  </div>
+                  {howToRunning ? (
+                    <button
+                      data-testid="mega-howto-cancel"
+                      onClick={cancelHowTo}
+                      className="shrink-0 text-xs px-2 py-1 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                    >
+                      Stop tour
+                    </button>
+                  ) : (
+                    <button
+                      data-testid="mega-howto"
+                      onClick={runHowTo}
+                      className="shrink-0 inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-fuchsia-300 bg-fuchsia-50 text-fuchsia-700 hover:bg-fuchsia-100"
+                      title="Have the AI walk you through this screen"
+                    >
+                      <Sparkles size={12} /> How To
+                    </button>
+                  )}
                 </div>
                 <div className="text-xs text-slate-500 mb-2">
                   Total volume: ${selectedAmount.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2})}. Each row is one <span className="font-medium">vendor × category</span> bucket — vendors split across multiple accounts appear here as separate rows so you can approve, exclude, or override each independently.
@@ -611,21 +696,29 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                         || accounts.find(a => String(a.code) === String(c.account?.code))
                         || c.account;
                     const isOverridden = !!overrideId;
+                    // How-To tour: apply the rainbow-shimmer highlight to
+                    // the specific sub-element being described. `hi(step)`
+                    // returns the shimmer class ONLY when we're on that
+                    // step AND this row is the demo-target.
+                    const isTourRow = howToTargetKey === c.key;
+                    const hi = (step) => (isTourRow && howToStep === step ? "ai-shimmer-btn bg-white" : "");
                     return (
                       <div
                         key={c.key}
                         data-testid={`mega-vendor-${c.key}`}
                         className={`w-full flex items-center gap-2.5 rounded border px-3 py-2 text-sm transition-colors ${
-                          focus?.bucket && focus.key === c.key
+                          isTourRow && howToStep === 0
                             ? "ai-shimmer-btn"
-                            : on
-                              ? "border-emerald-300 bg-emerald-50 hover:bg-emerald-100"
-                              : "border-slate-200 bg-slate-50 opacity-60 hover:opacity-100 hover:bg-slate-100"
+                            : focus?.bucket && focus.key === c.key
+                              ? "ai-shimmer-btn"
+                              : on
+                                ? "border-emerald-300 bg-emerald-50 hover:bg-emerald-100"
+                                : "border-slate-200 bg-slate-50 opacity-60 hover:opacity-100 hover:bg-slate-100"
                         }`}
                       >
                         <button
                           onClick={() => toggleVendor(c.key)}
-                          className={`w-4 h-4 rounded flex items-center justify-center text-white text-[10px] shrink-0 ${on ? "bg-emerald-600" : "bg-slate-300"}`}
+                          className={`w-4 h-4 rounded flex items-center justify-center text-white text-[10px] shrink-0 ${on ? "bg-emerald-600" : "bg-slate-300"} ${hi(1)}`}
                           title={on ? "Exclude from batch" : "Include in batch"}
                         >
                           {on ? "✓" : ""}
@@ -637,7 +730,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                         >
                           <span className="font-semibold text-slate-900 truncate max-w-[220px] inline-block align-middle">{c.contact_name}</span>
                         </button>
-                        <div className="min-w-0 flex-1 flex items-center gap-1">
+                        <div className={`min-w-0 flex-1 flex items-center gap-1 rounded ${hi(2)}`}>
                           <select
                             data-testid={`mega-vendor-cat-${c.key}`}
                             value={effAccount?.id || ""}
@@ -674,11 +767,11 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                               );
                             })}
                           </select>
-                          <span data-testid={`mega-vendor-info-${c.key}`}>
+                          <span data-testid={`mega-vendor-info-${c.key}`} className={`rounded ${hi(3)}`}>
                             <AccountInfoTooltip account={effAccount} />
                           </span>
                         </div>
-                        <div className="text-right shrink-0">
+                        <div className={`text-right shrink-0 rounded px-1 ${hi(4)}`}>
                           <div className="font-mono-num text-slate-900 text-sm">{c.count} rows</div>
                           <div className="font-mono-num text-slate-500 text-xs">${c.amount.toLocaleString("en-US", {maximumFractionDigits: 0})}</div>
                         </div>
@@ -702,7 +795,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                               },
                             });
                           }}
-                          className="ml-1 p-1 rounded hover:bg-fuchsia-100 text-fuchsia-600 shrink-0"
+                          className={`ml-1 p-1 rounded hover:bg-fuchsia-100 text-fuchsia-600 shrink-0 ${hi(5)}`}
                           title={`Ask AI about the ${c.contact_name} bucket`}
                         >
                           <Sparkles size={14} />
@@ -710,7 +803,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                         <button
                           data-testid={`mega-vendor-approve-${c.key}`}
                           onClick={() => approveOne(c)}
-                          className="ml-1 shrink-0 text-emerald-700 hover:text-emerald-900 text-sm font-semibold hover:underline"
+                          className={`ml-1 shrink-0 text-emerald-700 hover:text-emerald-900 text-sm font-semibold hover:underline rounded px-1 ${hi(6)}`}
                           title={`Approve ${c.count} rows now${isOverridden ? " (with override)" : ""}`}
                         >
                           Approve →
@@ -751,7 +844,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                     data-testid="mega-approve-confirm"
                     onClick={applyMega}
                     disabled={megaBusy || megaSelected.size === 0}
-                    className="flex-1 py-2 rounded-md bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50"
+                    className={`flex-1 py-2 rounded-md bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 ${howToStep === 7 ? "ai-shimmer-btn" : ""}`}
                   >
                     {megaBusy ? "Approving…" : `Approve ${selectedRows.toLocaleString()} rows`}
                   </button>

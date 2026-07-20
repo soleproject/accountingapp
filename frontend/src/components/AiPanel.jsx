@@ -584,6 +584,15 @@ export default function AiPanel({ collapsed, onToggle }) {
     setTimeout(() => setMicMode("open"), 250);
   });
 
+  // Silent chat-bubble injector — the mega-approve modal's "How To" tour
+  // fires this per script step. Posts an assistant bubble without TTS
+  // (the modal orchestrator drives its own TTS so it can await utterance
+  // ends between steps).
+  useActionListener("ai-chat-say", (payload) => {
+    const msg = (payload?.message || "").trim();
+    if (msg) setMessages(m => [...m, { role: "assistant", content: msg }]);
+  });
+
   // Sibling action fired by the mega-approve modal's per-vendor sparkle
   // button. Primes the chat with the ENTIRE vendor bucket's context (count,
   // dollar volume, current category, whether it's been overridden vs. the
