@@ -167,14 +167,22 @@ body {
 /* -----------------------------------------------------------------
  * Plaid Link overlay — keep the AI panel accessible.
  * When body has .plaid-link-open (set by PlaidLinkButton on OPEN /
- * removed on EXIT), the full-viewport Plaid iframe is shrunk so a
- * right-side strip stays clickable for the AI chat sidebar. The strip
- * width comes from --ai-panel-width, which AiPanel keeps in sync with
- * its resizable width.
+ * removed on EXIT), we promote the AI panel to a fixed overlay above
+ * Plaid's iframe. Plaid's iframe uses z-index 2147483647 (max int) and
+ * is appended to <body> so it wins any tie by DOM order — we knock it
+ * down by 1 and float the panel one above it. The Plaid modal stays
+ * perfectly centered because we do NOT resize Plaid's iframe.
  * ----------------------------------------------------------------- */
 body.plaid-link-open [id^="plaid-link-iframe-"],
 body.plaid-link-open iframe[id^="plaid-link-iframe-"] {
-  width: calc(100vw - var(--ai-panel-width, 420px)) !important;
-  right: var(--ai-panel-width, 420px) !important;
-  left: 0 !important;
+  z-index: 2147483646 !important;
+}
+body.plaid-link-open [data-testid="ai-panel"] {
+  position: fixed !important;
+  top: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  height: 100vh !important;
+  z-index: 2147483647 !important;
+  box-shadow: -8px 0 32px rgba(15, 23, 42, 0.18);
 }
