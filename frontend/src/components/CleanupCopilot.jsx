@@ -585,7 +585,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                 }
               >
                 {shimmerApprove && <Sparkles size={13} className="text-fuchsia-500" />}
-                {megaBusy ? "Scanning…" : "Approve all AI-ready"}
+                {megaBusy ? "Scanning…" : "Approve AI Categorized"}
               </button>
             );
             const fixNowBtn = primary ? (
