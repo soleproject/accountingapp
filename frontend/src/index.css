@@ -80,6 +80,28 @@ body {
   }
 }
 
+/* Chat-bubble variant of the AI shimmer — used on the LAST assistant
+ * message when the user hasn't replied yet, to signal "your turn". The
+ * outline is a 2px rainbow border (same palette as the buttons) with the
+ * gradient position gently animating. Text stays plain slate. */
+.ai-shimmer-bubble {
+  background:
+    linear-gradient(#ffffff, #ffffff) padding-box,
+    linear-gradient(
+      120deg,
+      #7c3aed 0%, #a855f7 15%, #ec4899 30%, #f59e0b 45%,
+      #eab308 60%, #22d3ee 75%, #7c3aed 100%
+    ) border-box !important;
+  background-size: auto, 300% 300% !important;
+  border: 2px solid transparent !important;
+  animation:
+    ai-shimmer 6s ease-in-out infinite,
+    ai-shimmer-pulse 5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-shimmer-bubble { animation: none; }
+}
+
 @layer base {
   :root {
     --background: 220 14% 97%;

@@ -2169,11 +2169,21 @@ export default function AiPanel({ collapsed, onToggle }) {
       )}
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-3">
-        {messages.map((m, i) => (
+        {(() => {
+          // Which message should wear the rainbow outline? The most-recent
+          // assistant message, IF nothing from the user has come in since it.
+          // As soon as the user sends anything, the outline vanishes until
+          // the AI speaks again.
+          let latestUnansweredAssistant = -1;
+          for (let j = messages.length - 1; j >= 0; j--) {
+            if (messages[j].role === "user") break;
+            if (messages[j].role === "assistant") { latestUnansweredAssistant = j; break; }
+          }
+          return messages.map((m, i) => (
           <div key={i} data-testid={TID.aiChatMessage}
                className={`max-w-[92%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap leading-relaxed ${
                  m.role === "user" ? "chat-bubble-user ml-auto" : "chat-bubble-ai"
-               }`}>
+               } ${i === latestUnansweredAssistant ? "ai-shimmer-bubble" : ""}`}>
             {m.content || (streaming && i === messages.length - 1 ? "…" : "")}
             {m.splitHint && (
               <SplitHintForm
@@ -2438,7 +2448,8 @@ export default function AiPanel({ collapsed, onToggle }) {
               />
             )}
           </div>
-        ))}
+        ));
+        })()}
       </div>
 
       <div className="border-t p-3">
