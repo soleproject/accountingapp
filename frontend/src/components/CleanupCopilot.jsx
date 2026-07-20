@@ -597,7 +597,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                       <div
                         key={c.key}
                         data-testid={`mega-vendor-${c.key}`}
-                        className={`w-full flex items-center gap-2 rounded border px-2.5 py-1.5 text-xs transition-colors ${
+                        className={`w-full flex items-center gap-2.5 rounded border px-3 py-2 text-sm transition-colors ${
                           on
                             ? "border-emerald-300 bg-emerald-50 hover:bg-emerald-100"
                             : "border-slate-200 bg-slate-50 opacity-60 hover:opacity-100 hover:bg-slate-100"
@@ -615,7 +615,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                           className="min-w-0 shrink-0 text-left"
                           title={c.contact_name}
                         >
-                          <span className="font-medium truncate max-w-[180px] inline-block align-middle">{c.contact_name}</span>
+                          <span className="font-semibold text-slate-900 truncate max-w-[220px] inline-block align-middle">{c.contact_name}</span>
                         </button>
                         <div className="min-w-0 flex-1 flex items-center gap-1">
                           <select
@@ -635,10 +635,10 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                               });
                             }}
                             onClick={(e) => e.stopPropagation()}
-                            className={`min-w-0 flex-1 max-w-[280px] px-1.5 py-0.5 rounded-full border text-[10px] font-mono-num truncate ${
+                            className={`min-w-0 flex-1 max-w-[340px] px-2.5 py-1 rounded-md border text-[13px] font-medium truncate ${
                               isOverridden
                                 ? "bg-amber-50 border-amber-300 text-amber-900"
-                                : "bg-white border-slate-200 text-slate-700"
+                                : "bg-white border-slate-300 text-slate-800"
                             }`}
                           >
                             {/* Grouped options by type for readability. */}
@@ -659,13 +659,13 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                           </span>
                         </div>
                         <div className="text-right shrink-0">
-                          <div className="font-mono-num text-slate-900">{c.count} rows</div>
-                          <div className="font-mono-num text-slate-500">${c.amount.toLocaleString("en-US", {maximumFractionDigits: 0})}</div>
+                          <div className="font-mono-num text-slate-900 text-sm">{c.count} rows</div>
+                          <div className="font-mono-num text-slate-500 text-xs">${c.amount.toLocaleString("en-US", {maximumFractionDigits: 0})}</div>
                         </div>
                         <button
                           data-testid={`mega-vendor-approve-${c.key}`}
                           onClick={() => approveOne(c)}
-                          className="ml-2 shrink-0 text-emerald-700 hover:text-emerald-900 text-xs font-semibold hover:underline"
+                          className="ml-2 shrink-0 text-emerald-700 hover:text-emerald-900 text-sm font-semibold hover:underline"
                           title={`Approve ${c.count} rows now${isOverridden ? " (with override)" : ""}`}
                         >
                           Approve →
