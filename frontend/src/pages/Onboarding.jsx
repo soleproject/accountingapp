@@ -153,10 +153,10 @@ export default function Onboarding() {
   const [plaidAccts, setPlaidAccts] = useState([]);
   const [selectedPlaid, setSelectedPlaid] = useState(new Set());
   const [imported, setImported] = useState({ plaid: 0, veryfi: 0 });
-  // Latches the moment we auto-fire the Plaid download after Plaid Link so
-  // a second linking (e.g. adding a second bank) or a component re-mount
-  // doesn't retrigger the whole "Nice — I linked X accounts…" flow.
-  const autoImportedRef = useRef(false);
+  // Set of plaid_account_ids we've already auto-imported this session.
+  // Guards against a re-mount or a second linking re-triggering the whole
+  // "Nice — I linked X accounts…" flow for accounts already in the ledger.
+  const autoImportedRef = useRef(new Set());
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   // Guards the "greet on step change" effect from firing with the default
@@ -643,67 +643,72 @@ export default function Onboarding() {
     // Convert real Plaid accounts to the same UI shape as the mock
     const mapped = accounts.map(a => ({
       id: a.account_id, name: `${a.name || a.official_name} ...${a.mask || ""}`,
-      institution: "Plaid Sandbox", subtype: a.subtype || a.type,
+      institution: a.institution_name || "Plaid Sandbox", subtype: a.subtype || a.type,
       balance: a.balance_current || 0,
     }));
-    setPlaidAccts(mapped);
-    // Auto-select every returned account so the user doesn't have to
-    // babysit checkboxes — the whole point of "hook up my bank" is
-    // "pull my transactions", not "let me pick which ones".
-    const allIds = new Set(mapped.map(a => a.id));
-    setSelectedPlaid(allIds);
-    // Kick off the download + AI categorize immediately. Coach announces
-    // it in the chat so the user knows what's happening.
-    //
-    // Idempotency guard: if we already auto-imported once in this session
-    // (imported.plaid > 0), or another auto-import is currently running
-    // (autoImportedRef flag), skip. The backend also guards against dupes,
-    // but bailing early here avoids the confusing "Nice — I linked 3
-    // accounts…" bubble firing on every re-mount.
-    if (autoImportedRef.current || imported.plaid > 0) {
-      return;
-    }
-    if (mapped.length && currentId) {
-      autoImportedRef.current = true;
-      const inst = accounts[0]?.institution_name || "your bank";
-      emitAction("onboarding-coach-greet", {
-        message: `Nice — I linked ${mapped.length} account${mapped.length === 1 ? "" : "s"} from ${inst}. Pulling in transactions now and categorizing each with AI. This usually takes a few seconds…`,
-      });
-      setBusy(true);
+    // Append instead of replace — a user linking Wells Fargo AFTER Chase
+    // should see both institutions' accounts on the page.
+    setPlaidAccts(prev => {
+      const known = new Set(prev.map(a => a.id));
+      return [...prev, ...mapped.filter(a => !known.has(a.id))];
+    });
+    // Only auto-select accounts we haven't already imported.
+    const freshIds = mapped.map(a => a.id).filter(id => !autoImportedRef.current.has(id));
+    setSelectedPlaid(prev => {
+      const nextSet = new Set(prev);
+      freshIds.forEach(id => nextSet.add(id));
+      return nextSet;
+    });
+    if (!freshIds.length || !currentId) return;
+    // Mark ALL fresh IDs as in-progress before we await, so a second Plaid
+    // Link fired mid-download doesn't double-fire.
+    freshIds.forEach(id => autoImportedRef.current.add(id));
+    const inst = accounts[0]?.institution_name || "your bank";
+    emitAction("onboarding-coach-greet", {
+      message: `Nice — I linked ${freshIds.length} account${freshIds.length === 1 ? "" : "s"} from ${inst}. Pulling in transactions now and categorizing each with AI. This usually takes a few seconds…`,
+    });
+    setBusy(true);
+    try {
+      let importedCount = 0;
+      let alreadyImported = 0;
       try {
-        let importedCount = 0;
-        let alreadyImported = 0;
-        try {
-          const r = await api.post(
-            `/companies/${currentId}/onboarding/plaid/import`,
-            { account_ids: [...allIds] },
-          );
-          importedCount = r.data.imported || 0;
-          alreadyImported = r.data.already_imported || 0;
-        } catch {
-          // Fallback if Plaid session isn't stored (rare — happens when the
-          // exchange endpoint didn't persist the access token; e.g. mock).
-          const r = await api.post(
-            `/companies/${currentId}/onboarding/import-plaid`,
-            [...allIds],
-          );
-          importedCount = r.data.imported || 0;
-          alreadyImported = r.data.already_imported || 0;
-        }
-        setImported(v => ({ ...v, plaid: importedCount || alreadyImported }));
-        const doneMsg = alreadyImported > 0 && importedCount === 0
-          ? `These accounts are already in your books (${alreadyImported} transactions previously imported). Say "next" whenever you're ready to move on.`
-          : `Done — pulled ${importedCount} transaction${importedCount === 1 ? "" : "s"} and AI-categorized each. Say "next" whenever you're ready to move on, or "link another" if you have more banks to connect.`;
-        emitAction("onboarding-coach-greet", { message: doneMsg });
-      } catch (e) {
-        // Reset the guard so the user can retry if it truly failed.
-        autoImportedRef.current = false;
-        toast.error(`Import failed: ${e?.response?.data?.detail || e.message}`);
-        emitAction("onboarding-coach-greet", {
-          message: `Hmm — I hit a snag pulling transactions in. Try clicking "Import & AI-categorize selected" manually, or say "skip" to move on.`,
-        });
-      } finally { setBusy(false); }
-    }
+        const r = await api.post(
+          `/companies/${currentId}/onboarding/plaid/import`,
+          { account_ids: freshIds },
+        );
+        importedCount = r.data.imported || 0;
+        alreadyImported = r.data.already_imported || 0;
+      } catch {
+        const r = await api.post(
+          `/companies/${currentId}/onboarding/import-plaid`,
+          freshIds,
+        );
+        importedCount = r.data.imported || 0;
+        alreadyImported = r.data.already_imported || 0;
+      }
+      setImported(v => ({ ...v, plaid: v.plaid + (importedCount || alreadyImported) }));
+      // Message logic:
+      //   • already_imported > 0, nothing new → "these are already in your books"
+      //   • importedCount === 0 (Plaid Sandbox often needs a beat before
+      //     transactions are available) → "still downloading in the background"
+      //   • importedCount > 0 → "pulled N transactions, ready to move on"
+      let doneMsg;
+      if (alreadyImported > 0 && importedCount === 0) {
+        doneMsg = `These accounts are already in your books (${alreadyImported} transactions previously imported). Continue with the flow, or say "link another" to add a bank.`;
+      } else if (importedCount === 0) {
+        doneMsg = `Nice — accounts connected. Transactions are downloading and being AI-categorized in the background right now (this can take a minute for a fresh institution). Feel free to continue with the flow, or say "link another" if you have another bank to add.`;
+      } else {
+        doneMsg = `Done — pulled ${importedCount} transaction${importedCount === 1 ? "" : "s"} and AI-categorized each. Say "next" whenever you're ready to move on, or "link another" if you have more banks to connect.`;
+      }
+      emitAction("onboarding-coach-greet", { message: doneMsg });
+    } catch (e) {
+      // Reset the guard for these specific IDs so the user can retry.
+      freshIds.forEach(id => autoImportedRef.current.delete(id));
+      toast.error(`Import failed: ${e?.response?.data?.detail || e.message}`);
+      emitAction("onboarding-coach-greet", {
+        message: `Hmm — I hit a snag pulling transactions in. Try clicking "Import & AI-categorize selected" manually, or say "skip" to move on.`,
+      });
+    } finally { setBusy(false); }
   };
   const importPlaid = async () => {
     setBusy(true);
@@ -1108,10 +1113,36 @@ export default function Onboarding() {
                     <div className="font-mono-num text-sm">${Number(a.balance || 0).toLocaleString()}</div>
                   </label>
                 ))}
-                <button onClick={importPlaid} disabled={!selectedPlaid.size || busy}
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-emerald-600 text-white text-sm disabled:opacity-50">
-                  {busy && <Loader2 size={13} className="animate-spin" />} Import & AI-categorize selected
-                </button>
+                {(() => {
+                  // Compute which selected accounts still need to be
+                  // auto-imported. Once every selected account is in the
+                  // in-progress or completed set, dim the manual Import
+                  // button so the user can't accidentally re-trigger it.
+                  const pendingSelected = [...selectedPlaid].filter(id => !autoImportedRef.current.has(id));
+                  const allDone = selectedPlaid.size > 0 && pendingSelected.length === 0;
+                  return (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button onClick={importPlaid}
+                              disabled={!pendingSelected.length || busy || allDone}
+                              title={allDone ? "All selected accounts are already downloading / imported." : ""}
+                              className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-emerald-600 text-white text-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                        {busy && <Loader2 size={13} className="animate-spin" />} Import & AI-categorize selected
+                      </button>
+                      {/* Link another institution — Chase + Wells Fargo + Amex, one page. */}
+                      <PlaidLinkButton
+                        companyId={currentId}
+                        onSuccess={onPlaidLinked}
+                        disabled={busy}
+                        label="Link another bank"
+                      />
+                      {allDone && (
+                        <span className="text-xs text-slate-500">
+                          Downloading & AI-categorizing in the background — feel free to continue.
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
                 {imported.plaid > 0 && (
                   <div className="text-xs text-emerald-700">✓ Imported {imported.plaid} transactions. AI categorized each per GAAP.</div>
                 )}

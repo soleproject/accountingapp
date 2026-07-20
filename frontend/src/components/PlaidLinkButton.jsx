@@ -6,7 +6,7 @@ import { Loader2, Link2 } from "lucide-react";
 import { toast } from "sonner";
 import { useActionListener } from "@/lib/createBus";
 
-export default function PlaidLinkButton({ companyId, onSuccess, disabled }) {
+export default function PlaidLinkButton({ companyId, onSuccess, disabled, label }) {
   const [linkToken, setLinkToken] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -27,7 +27,12 @@ export default function PlaidLinkButton({ companyId, onSuccess, disabled }) {
       onSuccess?.(r.data.accounts);
     } catch (e) {
       toast.error(`Plaid exchange failed: ${e.response?.data?.detail || e.message}`);
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+      // Force a fresh link_token for the next click so the user can link a
+      // second institution in the same session.
+      setLinkToken(null);
+    }
   }, [companyId, onSuccess]);
 
   const { open, ready } = usePlaidLink({
@@ -59,7 +64,7 @@ export default function PlaidLinkButton({ companyId, onSuccess, disabled }) {
       className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50"
     >
       {loading ? <Loader2 size={13} className="animate-spin" /> : <Link2 size={13} />}
-      Launch Plaid Link
+      {label || "Launch Plaid Link"}
     </button>
   );
 }

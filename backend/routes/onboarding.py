@@ -568,7 +568,14 @@ async def plaid_backfill_history_token(cid: str, user: dict = Depends(get_curren
 
 @router.post("/companies/{cid}/onboarding/plaid/exchange")
 async def plaid_exchange(cid: str, payload: dict, user: dict = Depends(get_current_user)):
-    """Exchange the public_token from Plaid Link for an access_token, persist Item, return accounts."""
+    """Exchange the public_token from Plaid Link for an access_token, persist Item, return accounts.
+
+    Supports multiple Plaid items per company — every successful Plaid Link
+    flow inserts a NEW item (keyed by `item_id`) rather than overwriting an
+    existing one, so users can link Chase + Wells Fargo + Amex + ... during
+    onboarding without losing prior connections. Re-linking the same item_id
+    (e.g. after re-auth) is idempotent via upsert on `item_id`.
+    """
     await require_company(user, cid)
     public_token = payload.get("public_token")
     if not public_token:
@@ -580,9 +587,10 @@ async def plaid_exchange(cid: str, payload: dict, user: dict = Depends(get_curre
     except Exception as e:
         raise HTTPException(502, f"Plaid error: {e}")
     now = now_iso()
-    # Upsert Plaid item per company (single-item MVP: replace prior)
+    # Upsert on item_id — same Plaid item re-linked updates in place, a
+    # NEW institution insert a fresh doc.
     await db.plaid_items.update_one(
-        {"company_id": cid, "user_id": user["id"]},
+        {"company_id": cid, "item_id": ex["item_id"]},
         {"$set": {
             "id": str(uuid.uuid4()), "company_id": cid, "user_id": user["id"],
             "item_id": ex["item_id"], "access_token": ex["access_token"],
@@ -610,42 +618,50 @@ async def plaid_import(cid: str, payload: dict, user: dict = Depends(get_current
     """
     await require_company(user, cid)
     selected: list[str] = payload.get("account_ids") or []
-    item = await db.plaid_items.find_one({"company_id": cid})
-    if not item:
+    # Support multi-item companies — a user may link Chase + Wells Fargo
+    # + Amex during onboarding. Iterate every item, importing only the
+    # `plaid_account_id`s the user selected (or all of them if empty).
+    items = await db.plaid_items.find({"company_id": cid}).to_list(50)
+    if not items:
         raise HTTPException(400, "No linked Plaid item — link first")
 
-    # If nothing was selected, connect every account attached to the item —
-    # onboarding auto-selects them all client-side, but be defensive.
+    # If no explicit selection, use every account attached to every item.
     if not selected:
-        selected = [a.get("account_id") for a in (item.get("accounts") or []) if a.get("account_id")]
+        selected = []
+        for it in items:
+            selected.extend(
+                a.get("account_id") for a in (it.get("accounts") or []) if a.get("account_id")
+            )
+    selected_set = set(selected)
 
     imported_total = 0
     connected: list[dict] = []
     errors: list[str] = []
-    for plaid_account_id in selected:
-        try:
-            result = await plaid_connect.connect_plaid_account(
-                cid, item, plaid_account_id,
-                categorize_fn=categorize_transaction,
-                is_period_closed_fn=is_period_closed,
-            )
-        except (ValueError, RuntimeError) as e:
-            # Skip individual account failures so a single misbehaving
-            # account (e.g. sandbox returning odd metadata) doesn't torch
-            # the whole onboarding step.
-            errors.append(f"{plaid_account_id[:8]}…: {e}")
-            continue
-        # Refresh the item after every connect so the NEXT loop iteration
-        # sees the mapping we just persisted and can dedup vs. shared syncs.
-        item = await db.plaid_items.find_one({"id": item["id"]}) or item
-        imported_total += int(result.get("imported") or 0)
-        connected.append({
-            "plaid_account_id": plaid_account_id,
-            "ledger_account_id": result.get("ledger_account_id"),
-            "ledger_account_code": result.get("ledger_account_code"),
-            "ledger_account_name": result.get("ledger_account_name"),
-            "imported": result.get("imported") or 0,
-        })
+    for item in items:
+        # Snapshot the items' plaid_account_ids so we know which ones belong
+        # to this item.
+        item_account_ids = {a.get("account_id") for a in (item.get("accounts") or []) if a.get("account_id")}
+        for plaid_account_id in item_account_ids & selected_set:
+            try:
+                result = await plaid_connect.connect_plaid_account(
+                    cid, item, plaid_account_id,
+                    categorize_fn=categorize_transaction,
+                    is_period_closed_fn=is_period_closed,
+                )
+            except (ValueError, RuntimeError) as e:
+                errors.append(f"{plaid_account_id[:8]}…: {e}")
+                continue
+            # Refresh the item after every connect so the NEXT loop iteration
+            # sees the mapping we just persisted and can dedup vs. shared syncs.
+            item = await db.plaid_items.find_one({"id": item["id"]}) or item
+            imported_total += int(result.get("imported") or 0)
+            connected.append({
+                "plaid_account_id": plaid_account_id,
+                "ledger_account_id": result.get("ledger_account_id"),
+                "ledger_account_code": result.get("ledger_account_code"),
+                "ledger_account_name": result.get("ledger_account_name"),
+                "imported": result.get("imported") or 0,
+            })
     if imported_total:
         await log_ai(cid, "categorize", imported_total)
     return {
