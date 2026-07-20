@@ -2,10 +2,25 @@ import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, BACKEND_URL } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { emitAction, useActionListener } from "@/lib/createBus";
 import { TID } from "@/constants/testIds";
 import { CheckCircle2, ChevronRight, Loader2, Sparkles, ArrowLeft, Upload } from "lucide-react";
 import { toast } from "sonner";
 import PlaidLinkButton from "@/components/PlaidLinkButton";
+
+// AI onboarding coach — greetings posted into the chat on each step to make
+// the flow feel like a live accountant is walking you through. Each entry
+// is fired once per step per session. When the coach knows how to extract
+// structured fields from the user's freeform reply, `extractStep` is set
+// and the frontend calls /onboarding/extract-step to auto-fill the form.
+const COACH_SCRIPTS = {
+  0: {
+    key: "onboarding.business_profile",
+    message: (name) =>
+      `Great, ${name ? `${name} ` : ""}let's set up your books together. First — tell me what kind of business this is and what it does (e.g. "we're an LLC doing IT security consulting for hospitals"). I'll fill in the fields on the right for you. You can also fill them manually if you prefer.`,
+    extractStep: "business_profile",
+  },
+};
 
 const STEPS = [
   "Business profile",
@@ -47,6 +62,55 @@ export default function Onboarding() {
       setAnswers(r.data.onboarding.answers || {});
     });
   }, [currentId]);
+
+  // AI onboarding coach — fire a greeting whenever the step changes (and
+  // once on initial load). Debounced via a ref so we only greet each step
+  // once per session, even if React re-renders.
+  const coachedStepsRef = useRef(new Set());
+  useEffect(() => {
+    if (!currentId) return;
+    const script = COACH_SCRIPTS[step];
+    if (!script) return;
+    const key = `${currentId}::${script.key}`;
+    if (coachedStepsRef.current.has(key)) return;
+    coachedStepsRef.current.add(key);
+    // Open the AI panel and post the greeting. AiPanel treats
+    // `onboarding-coach-greet` like a scripted assistant message — it will
+    // wear the rainbow-outline bubble because the user hasn't replied yet.
+    emitAction("ai-open");
+    emitAction("onboarding-coach-greet", {
+      message: script.message(current?.name),
+    });
+  }, [currentId, step, current?.name]);
+
+  // When the user replies in the chat while on this page, feed the reply
+  // through the current step's extractor and apply the returned fields.
+  useActionListener("onboarding-user-message", async (payload) => {
+    const script = COACH_SCRIPTS[step];
+    if (!script?.extractStep || !currentId) return;
+    const msg = (payload?.text || "").trim();
+    if (!msg) return;
+    try {
+      const r = await api.post(
+        `/companies/${currentId}/onboarding/extract-step`,
+        { step: script.extractStep, message: msg },
+      );
+      const fields = r.data?.fields || {};
+      if (!Object.keys(fields).length) return;
+      // Merge into answers state + persist.
+      setAnswers(prev => ({ ...prev, ...fields }));
+      await persist(fields);
+      // Confirmation message + auto-advance if we have the two must-have
+      // fields for Business Profile.
+      const bits = Object.entries(fields).map(([k, v]) => `${k.replace("_"," ")}: ${v}`).join(" · ");
+      emitAction("onboarding-coach-greet", {
+        message: `Got it — filled in ${bits}. ${(fields.business_type && fields.business_description) ? "Moving to the next step." : "Anything else to add?"}`,
+      });
+      if (fields.business_type && fields.business_description) {
+        setTimeout(() => next(), 900);
+      }
+    } catch { /* non-fatal */ }
+  });
 
   const persist = async (patch) => {
     await api.patch(`/companies/${currentId}/onboarding`, patch);

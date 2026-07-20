@@ -25,8 +25,9 @@ from auth import (
 from ai_service import (
     categorize_transaction, chat_stream, suggest_chart_of_accounts,
     onboarding_interview_questions, onboarding_interview_synthesize,
-    parse_voice_intent,
+    parse_voice_intent, _new_chat, _extract_json,
 )
+from emergentintegrations.llm.chat import UserMessage
 import reports as R
 import plaid_service
 import plaid_connect
@@ -73,6 +74,71 @@ async def update_onboarding(cid: str, inp: OnboardingUpdate, user: dict = Depend
     if inp.complete:
         await db.companies.update_one({"id": cid}, {"$set": {"onboarding_complete": True}})
     return {"ok": True}
+
+
+# --- AI onboarding coach --------------------------------------------------
+# Per-step extraction schemas the coach uses to turn a freeform sentence
+# ("It's a consulting company that does IT security audits") into typed form
+# fields the frontend can drop straight into the current step's inputs.
+_COACH_STEP_SCHEMAS: dict[str, dict] = {
+    "business_profile": {
+        "system": (
+            "You are a CPA guiding a small-business owner through onboarding. "
+            "Given a freeform sentence describing their business, extract the "
+            "structured business profile fields. Respond with STRICT JSON — "
+            "no prose, no code fences. Missing fields → omit the key."
+        ),
+        "example_input": "We're an LLC doing IT security consulting for hospitals, cash-basis for now.",
+        "example_output": {
+            "business_type": "LLC",
+            "industry": "IT Security Consulting",
+            "business_description": "IT security consulting for hospitals",
+            "accounting_method": "cash",
+        },
+        "fields": ["business_type", "industry", "business_description",
+                   "fiscal_year_end", "accounting_method", "entity_form"],
+    },
+    # Add more steps here as we clone the pattern (chart_of_accounts, plaid, …).
+}
+
+
+@router.post("/companies/{cid}/onboarding/extract-step")
+async def onboarding_coach_extract(cid: str, payload: dict, user: dict = Depends(get_current_user)):
+    """AI onboarding coach — turns the user's freeform chat reply for the
+    current onboarding step into typed form fields the frontend can drop
+    into the step's inputs and auto-advance.
+
+    Body: `{"step": "business_profile", "message": "we're an LLC that ..."}`
+    Returns: `{"fields": {...}, "step": "..."}` — keys are the schema fields
+    the LLM confidently extracted; missing fields are omitted so the caller
+    can merge on top of whatever's already in state.
+    """
+    await require_company(user, cid)
+    step = (payload.get("step") or "").strip()
+    message = (payload.get("message") or "").strip()
+    schema = _COACH_STEP_SCHEMAS.get(step)
+    if not schema:
+        raise HTTPException(400, f"Unknown onboarding step: {step!r}")
+    if not message:
+        return {"step": step, "fields": {}}
+    prompt = (
+        f"{schema['system']}\n\n"
+        f"Extract these fields when present: {', '.join(schema['fields'])}.\n"
+        f"Example input: {schema['example_input']}\n"
+        f"Example output JSON: {json.dumps(schema['example_output'])}\n\n"
+        f"User message:\n{message}\n\n"
+        "Reply with JSON only."
+    )
+    chat = _new_chat(schema["system"], session_id=f"coach:{cid}:{step}")
+    try:
+        resp = await chat.send_message(UserMessage(text=prompt))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"LLM error: {e}")
+    data = _extract_json(resp) or {}
+    # Whitelist to the schema fields only — never trust the LLM to invent
+    # extra keys the frontend doesn't expect.
+    fields = {k: v for k, v in data.items() if k in schema["fields"] and v}
+    return {"step": step, "fields": fields}
 
 
 @router.post("/companies/{cid}/onboarding/coa/suggest")

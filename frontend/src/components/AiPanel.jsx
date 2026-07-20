@@ -582,6 +582,18 @@ export default function AiPanel({ collapsed, onToggle }) {
     setTimeout(() => setMicMode("open"), 250);
   });
 
+  // Live-accountant onboarding coach — the Onboarding page fires this event
+  // to inject scripted assistant messages that greet the user at each step
+  // ("Great, tell me about your business…"). The rainbow-outline treatment
+  // on the last unanswered assistant message is already handled by the
+  // chat renderer, so these messages naturally wear the shimmer border.
+  useActionListener("onboarding-coach-greet", (payload) => {
+    const msg = (payload?.message || "").trim();
+    if (!msg) return;
+    setMessages(m => [...m, { role: "assistant", content: msg }]);
+    if (voiceOnRef.current) speakOne(msg.replace(/\*\*/g, ""));
+  });
+
   // ------------------------- Open-mic + TTS-echo protection -------------------------
   // Rules (see architecture doc in PR):
   //   1. Recognizer is continuous + self-heals on `onend` while a "listening" flag holds.
@@ -1134,6 +1146,14 @@ export default function AiPanel({ collapsed, onToggle }) {
     const userMsg = input.trim();
     setInput("");
 
+    // Live-accountant onboarding coach — when the user is on /onboarding
+    // their reply is ALSO handed to the current step's extractor via a
+    // bus event. The regular send flow continues in parallel, so the
+    // coach's extraction runs alongside the normal LLM chat (extractor
+    // is a no-op unless the current step registers an `extractStep`).
+    if (typeof window !== "undefined" && window.location.pathname.startsWith("/onboarding")) {
+      emitAction("onboarding-user-message", { text: userMsg });
+    }
     // ------ Cleanup-Copilot inquiry interceptor -----------------------
     // The Transactions page emits `cleanup-inquiry` when the user clicks
     // "Fix now" on the hero band. The AI asked "what are these X <contact>
