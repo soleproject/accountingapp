@@ -79,7 +79,7 @@ function pitchFor(action, progress) {
   if (action.kind === "filter_uncat")
     return `${action.count} rows are still uncategorized — click Let's review to focus the table on them.`;
   if (action.kind === "filter_flagged")
-    return `${action.count} rows are still flagged for review — click Let's review to focus the table on them (or Start 5-min session for a guided walkthrough).`;
+    return `${action.count} rows are still flagged for review — click Let's review to focus the table on them (or Individual Review for a guided walkthrough).`;
   return action.why || action.label;
 }
 
@@ -506,7 +506,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
             onClick={() => onStartSession?.(data?.progress?.flagged || 0)}
             className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
           >
-            <PlayCircle size={13} /> Start 5-min session
+            <PlayCircle size={13} /> Individual Review
           </button>
         </div>
       </div>
