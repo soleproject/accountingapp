@@ -1,0 +1,23 @@
+{
+  "summary": "Iteration 44 — AI Onboarding Coach for steps 1-6. Backend pytest (13/13 passing) covers extract-step across qbo_link, coa_overrides, plaid_intent, veryfi_intent, ready_confirm, business_profile regression, unknown-step 400, and empty-message 200. Frontend Playwright E2E walked client2@axiom.ai through Bright Beans Coffee Co. onboarding from step 0 → 6 exactly as designed: auto-advances on steps 0, 1, 4, 5; no-auto-advance on steps 2, 3; finish() on step 6 navigates to /accounting/transactions.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter44_onboarding_coach.py",
+    "/app/test_reports/pytest/iter44.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Onboarding.jsx is now 837 lines — consider splitting per-step render blocks into subcomponents.",
+    "AiPanel.jsx is 2848 lines — well past the 700-line guideline. Refactor candidate.",
+    "The 'ambiguous' branch of qbo_link returns {qbo:'ambiguous'} from the LLM. The frontend only auto-advances on 'yes'/'no' so behaviour is safe, but the schema whitelist stores 'ambiguous' into answers.qbo — consider dropping non-yes/no values server-side to keep the persisted state clean."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter44_onboarding_coach.py"],
+  "success_rate": {"backend": "100% (13/13)", "frontend": "100% (7/7 flow checkpoints)"},
+  "test_credentials": "client2@axiom.ai / client123 (Bright Beans Coffee Co.)",
+  "seed_data_creation": "Reset onboarding_state.step to 0 via PATCH before each E2E run.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Step pill selector = div.bg-slate-900 with text like '1. Business profile'. AI chat input testid=ai-chat-input, send=ai-chat-send. Auto-advance takes ~2.5s + ~1s LLM latency. Onboarding reset endpoint: PATCH /api/companies/{cid}/onboarding {step:0, complete:false, answers:{}}.",
+  "rca of the issue": "N/A — no failures."
+}

@@ -98,7 +98,66 @@ _COACH_STEP_SCHEMAS: dict[str, dict] = {
         "fields": ["business_type", "industry", "business_description",
                    "fiscal_year_end", "accounting_method", "entity_form"],
     },
-    # Add more steps here as we clone the pattern (chart_of_accounts, plaid, …).
+    "qbo_link": {
+        "system": (
+            "You are a CPA guiding onboarding. Given a user's reply about whether "
+            "they use QuickBooks Online today, extract whether they want to link "
+            "QBO. Respond with STRICT JSON — no prose, no code fences. "
+            "Use 'yes' if they currently use QBO / want to link it, 'no' if they "
+            "want to start fresh. Omit the key if truly ambiguous."
+        ),
+        "example_input": "Yeah we're on QuickBooks Online right now.",
+        "example_output": {"qbo": "yes"},
+        "fields": ["qbo"],
+    },
+    "coa_overrides": {
+        "system": (
+            "You are a CPA guiding onboarding. The user is reviewing their "
+            "AI-generated chart of accounts and may want to add or drop "
+            "specific accounts. Extract their requested overrides. Respond "
+            "with STRICT JSON — no prose, no code fences."
+        ),
+        "example_input": "Add a food truck fuel account and we don't need consulting revenue.",
+        "example_output": {
+            "add_hints": ["food truck fuel"],
+            "remove_hints": ["consulting revenue"],
+            "notes": "Food-truck operator, no consulting income",
+        },
+        "fields": ["add_hints", "remove_hints", "notes"],
+    },
+    "plaid_intent": {
+        "system": (
+            "You are a CPA guiding onboarding for a bank-link step. Extract "
+            "whether the user wants to skip Plaid for now, and any institution "
+            "name they mentioned. Respond with STRICT JSON — no prose. "
+            "Use `skip: true` ONLY when the user explicitly asks to skip, do "
+            "later, come back, or 'not now'."
+        ),
+        "example_input": "We bank with Chase, but let's skip this for now.",
+        "example_output": {"skip": True, "institution_hint": "Chase"},
+        "fields": ["skip", "institution_hint"],
+    },
+    "veryfi_intent": {
+        "system": (
+            "You are a CPA guiding onboarding for a statement-upload step. "
+            "Extract whether the user wants to skip uploading old paper "
+            "statements for now. Respond with STRICT JSON — no prose. "
+            "Use `skip: true` ONLY when they explicitly want to skip / do later."
+        ),
+        "example_input": "Skip, we don't have any old statements to upload.",
+        "example_output": {"skip": True},
+        "fields": ["skip"],
+    },
+    "ready_confirm": {
+        "system": (
+            "You are a CPA closing onboarding. Extract whether the user is "
+            "confirming they're ready to enter their books (e.g. 'let's go', "
+            "'ready', 'i'm good'). Respond with STRICT JSON — no prose."
+        ),
+        "example_input": "Yep, let's go!",
+        "example_output": {"confirm": True},
+        "fields": ["confirm"],
+    },
 }
 
 

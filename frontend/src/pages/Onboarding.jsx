@@ -12,13 +12,77 @@ import PlaidLinkButton from "@/components/PlaidLinkButton";
 // the flow feel like a live accountant is walking you through. Each entry
 // is fired once per step per session. When the coach knows how to extract
 // structured fields from the user's freeform reply, `extractStep` is set
-// and the frontend calls /onboarding/extract-step to auto-fill the form.
+// and the frontend calls /onboarding/extract-step to auto-fill the form
+// and (optionally) auto-advance to the next step.
 const COACH_SCRIPTS = {
   0: {
     key: "onboarding.business_profile",
-    message: (name) =>
-      `Great, ${name ? `${name} ` : ""}let's set up your books together. First — tell me what kind of business this is and what it does (e.g. "we're an LLC doing IT security consulting for hospitals"). I'll fill in the fields on the right for you. You can also fill them manually if you prefer.`,
+    message: (ctx) =>
+      `Great, ${ctx.name ? `${ctx.name} ` : ""}let's set up your books together. First — tell me what kind of business this is and what it does (e.g. "we're an LLC doing IT security consulting for hospitals"). I'll fill in the fields on the right for you. You can also fill them manually if you prefer.`,
     extractStep: "business_profile",
+    ready: (fields, answers) =>
+      (fields.business_type || answers.business_type) &&
+      (fields.business_description || answers.business_description),
+    confirm: (bits, ready) =>
+      ready
+        ? `Got it — filled in ${bits}. Moving to the next step in a moment…`
+        : `Got it — filled in ${bits}. Anything else to add?`,
+  },
+  1: {
+    key: "onboarding.qbo_link",
+    message: () =>
+      `Do you already use QuickBooks Online? Just say "yes we're on QuickBooks" and I'll link it, or "no let's start fresh" and I'll set up a clean chart of accounts for you.`,
+    extractStep: "qbo_link",
+    ready: (fields) => fields.qbo === "yes" || fields.qbo === "no",
+    confirm: (_bits, _ready, fields) =>
+      fields.qbo === "yes"
+        ? `Perfect — I'll mock-link QuickBooks and sync your accounts + history in the background. Moving on…`
+        : `Got it — we'll set up fresh together. Moving on…`,
+  },
+  2: {
+    key: "onboarding.interview",
+    message: () =>
+      `Five short questions coming up — should take about 30 seconds. Your answers help me tailor the chart of accounts and pre-seed bank-feed rules for your exact business. Hit "Start AI interview" whenever you're ready.`,
+    // No extractStep — user drives the interview UI, not chat.
+  },
+  3: {
+    key: "onboarding.coa",
+    message: () =>
+      `Time for your Chart of Accounts. I've got a GAAP baseline; hit "Suggest tailored accounts" and I'll propose 15-25 industry-specific ones you can review. If you want anything specific (e.g. "add a food-truck fuel account", "we don't need consulting revenue"), just tell me and I'll factor it in.`,
+    extractStep: "coa_overrides",
+    // Never auto-advance — user has to actually generate + apply the CoA.
+    ready: () => false,
+    confirm: (bits) => `Noted — ${bits}. I'll factor that in when generating your CoA.`,
+  },
+  4: {
+    key: "onboarding.plaid",
+    message: () =>
+      `Now the fun bit — let's hook up your bank. I use Plaid: you'll see a secure popup to sign in. (Sandbox creds: user_good / pass_good.) Or if you'd rather add banks later, just say "skip".`,
+    extractStep: "plaid_intent",
+    ready: (fields) => fields.skip === true,
+    confirm: (_bits, _ready, fields) =>
+      fields.skip
+        ? `No problem — we'll skip Plaid for now. You can connect banks later from Settings. Moving on…`
+        : `Got it — launch Plaid whenever you're ready.`,
+  },
+  5: {
+    key: "onboarding.veryfi",
+    message: () =>
+      `Any statements Plaid couldn't reach? Old paper statements, credit-union PDFs, receipts — drop them here and Veryfi OCR will pull the transactions and I'll categorize each. Or say "skip" if you don't have any.`,
+    extractStep: "veryfi_intent",
+    ready: (fields) => fields.skip === true,
+    confirm: (_bits, _ready, fields) =>
+      fields.skip
+        ? `Skipping statement uploads. Moving on…`
+        : `Got it — upload whenever ready.`,
+  },
+  6: {
+    key: "onboarding.ready",
+    message: () =>
+      `You're all set. Every transaction I could categorize is ready to review; anything I wasn't sure about is flagged. Say "let's go" whenever you want me to take you into your books.`,
+    extractStep: "ready_confirm",
+    ready: (fields) => fields.confirm === true,
+    confirm: () => `Perfect — taking you in now.`,
   },
 };
 
@@ -54,12 +118,16 @@ export default function Onboarding() {
   const [imported, setImported] = useState({ plaid: 0, veryfi: 0 });
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
+  // Guards the "greet on step change" effect from firing with the default
+  // step=0 while onboarding state is still being fetched from the server.
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     if (!currentId) return;
     api.get(`/companies/${currentId}/onboarding`).then(r => {
       setStep(r.data.onboarding.step || 0);
       setAnswers(r.data.onboarding.answers || {});
+      setLoaded(true);
     });
   }, [currentId]);
 
@@ -68,7 +136,7 @@ export default function Onboarding() {
   // once per session, even if React re-renders.
   const coachedStepsRef = useRef(new Set());
   useEffect(() => {
-    if (!currentId) return;
+    if (!currentId || !loaded) return;
     const script = COACH_SCRIPTS[step];
     if (!script) return;
     const key = `${currentId}::${script.key}`;
@@ -82,15 +150,28 @@ export default function Onboarding() {
     emitAction("ai-open");
     setTimeout(() => {
       emitAction("onboarding-coach-greet", {
-        message: script.message(current?.name),
+        message: script.message({ name: current?.name, answers }),
       });
     }, 500);
-  }, [currentId, step, current?.name]);
+  }, [currentId, step, current?.name, loaded]);
 
   // When the user replies in the chat while on this page, feed the reply
   // through the current step's extractor and apply the returned fields.
+  //
+  // `useActionListener` in createBus.js binds its handler ONCE per mount
+  // (empty deps), so a naive closure would freeze `step`/`answers` at
+  // their initial values. Route through refs so the handler always sees
+  // the latest state.
+  const stepRef = useRef(step);
+  const answersRef = useRef(answers);
+  const nextRef = useRef(() => {});
+  const finishRef = useRef(() => {});
+  useEffect(() => { stepRef.current = step; }, [step]);
+  useEffect(() => { answersRef.current = answers; }, [answers]);
   useActionListener("onboarding-user-message", async (payload) => {
-    const script = COACH_SCRIPTS[step];
+    const currentStep = stepRef.current;
+    const currentAnswers = answersRef.current;
+    const script = COACH_SCRIPTS[currentStep];
     if (!script?.extractStep || !currentId) return;
     const msg = (payload?.text || "").trim();
     if (!msg) return;
@@ -101,23 +182,45 @@ export default function Onboarding() {
       );
       const fields = r.data?.fields || {};
       if (!Object.keys(fields).length) return;
-      // Merge into answers state + persist.
-      setAnswers(prev => ({ ...prev, ...fields }));
+
+      // Per-step side effects that MUST run before we render a confirm bubble.
+      // Keeps the extractor server-side generic while letting each step
+      // apply UI-level nudges (e.g. click a "yes/no" pill, toast the QBO
+      // mock-link, or close out onboarding).
+      const nextAnswers = { ...currentAnswers, ...fields };
+      if (script.extractStep === "qbo_link" && (fields.qbo === "yes" || fields.qbo === "no")) {
+        if (fields.qbo === "yes") {
+          toast.success("QBO mock-linked. Data will sync in background.");
+        }
+      }
+      setAnswers(nextAnswers);
       await persist(fields);
-      // Confirmation message + auto-advance if we have the two must-have
-      // fields for Business Profile.
+
       const label = (k) => k.replace(/_/g, " ");
-      const bits = Object.entries(fields).map(([k, v]) => `**${label(k)}**: ${v}`).join(" · ");
-      const ready = fields.business_type && fields.business_description;
-      emitAction("onboarding-coach-greet", {
-        message: ready
-          ? `Got it — filled in ${bits}. Moving to the next step in a moment…`
-          : `Got it — filled in ${bits}. Anything else to add?`,
-      });
+      const fmt = (v) =>
+        Array.isArray(v) ? v.join(", ") : typeof v === "boolean" ? (v ? "yes" : "no") : String(v);
+      const bits = Object.entries(fields)
+        .map(([k, v]) => `**${label(k)}**: ${fmt(v)}`)
+        .join(" · ");
+      const ready = script.ready ? !!script.ready(fields, nextAnswers) : false;
+      const confirmMsg = script.confirm
+        ? script.confirm(bits, ready, fields)
+        : ready
+          ? `Got it — ${bits}. Moving on…`
+          : `Got it — ${bits}.`;
+      emitAction("onboarding-coach-greet", { message: confirmMsg });
+
       if (ready) {
         // 2.5s gives the confirmation time to visually register (and be
         // spoken aloud if voice output is on) before the page changes.
-        setTimeout(() => next(), 2500);
+        // Step 6 (ready_confirm) is terminal — call finish() instead of next().
+        setTimeout(() => {
+          if (script.extractStep === "ready_confirm") {
+            finishRef.current();
+          } else {
+            nextRef.current();
+          }
+        }, 2500);
       }
     } catch { /* non-fatal */ }
   });
@@ -158,6 +261,9 @@ export default function Onboarding() {
     toast.success("Onboarding complete! Welcome to Axiom Ledger.");
     nav("/accounting/transactions");
   };
+  // Keep the coach-handler refs pointed at the latest closures.
+  useEffect(() => { nextRef.current = next; });
+  useEffect(() => { finishRef.current = finish; });
 
   const loadInterview = async () => {
     setInterviewLoading(true);
