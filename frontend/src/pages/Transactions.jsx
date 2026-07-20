@@ -533,10 +533,10 @@ export default function Transactions() {
           <div className="inline-flex rounded-md border bg-white overflow-hidden">
             {[
               { k: "all",           label: "All" },
-              { k: "review",        label: "Needs Review" },
-              { k: "ai",            label: "AI Categorized" },
-              { k: "unapproved",    label: "Unapproved" },
-              { k: "reviewed",      label: "Reviewed" },
+              { k: "review",        label: "Flagged" },
+              { k: "ai",            label: "Ready to approve" },
+              { k: "unapproved",    label: "To do" },
+              { k: "reviewed",      label: "Approved" },
             ].map(({ k, label }) => (
               <button
                 key={k}
