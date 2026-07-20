@@ -467,7 +467,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                 className={
                   shimmerApprove
                     ? "ai-shimmer-btn inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md disabled:opacity-50"
-                    : "inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                    : "inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                 }
                 title={
                   hasApprove
