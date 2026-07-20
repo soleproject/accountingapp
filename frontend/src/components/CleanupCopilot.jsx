@@ -487,7 +487,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                 className={
                   shimmerFixNow
                     ? "ai-shimmer-btn inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md"
-                    : "inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md bg-slate-900 text-white hover:bg-slate-800"
+                    : "inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
                 }
               >
                 {shimmerFixNow && <Sparkles size={13} className="text-fuchsia-500" />}

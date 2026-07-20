@@ -27,9 +27,25 @@ export default function ProClients() {
   };
   useEffect(() => { load(); }, []);
 
+  // Sort by urgency so the most-in-need client bubbles to the top-left.
+  // Primary: action_count desc (badge counts across flags, recons, invoices, bills).
+  // Secondary: onboarding_complete false first (still-onboarding needs help),
+  // Tertiary: flagged/needs_review desc, then name asc for stable ordering.
+  const sorted = [...clients].sort((a, b) => {
+    const aAct = a.action_count || 0;
+    const bAct = b.action_count || 0;
+    if (aAct !== bAct) return bAct - aAct;
+    const aOnb = a.onboarding_complete ? 1 : 0;
+    const bOnb = b.onboarding_complete ? 1 : 0;
+    if (aOnb !== bOnb) return aOnb - bOnb;
+    const aFlag = a.needs_review || a.flagged_count || 0;
+    const bFlag = b.needs_review || b.flagged_count || 0;
+    if (aFlag !== bFlag) return bFlag - aFlag;
+    return (a.name || "").localeCompare(b.name || "");
+  });
   const visible = showOnlyAction
-    ? clients.filter(c => (c.action_count || 0) > 0)
-    : clients;
+    ? sorted.filter(c => (c.action_count || 0) > 0)
+    : sorted;
 
   return (
     <div className="space-y-4">
@@ -56,11 +72,16 @@ export default function ProClients() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {visible.map(c => {
           const act = c.action_count || 0;
+          const isReady = act === 0 && c.onboarding_complete;
           return (
             <div
               key={c.id}
-              className={`rounded-xl border bg-white p-4 hover:border-slate-400 transition ${
-                act > 0 ? "border-amber-300" : ""
+              className={`rounded-xl border bg-white p-4 hover:border-slate-400 transition flex flex-col ${
+                act > 0
+                  ? "border-amber-300"
+                  : isReady
+                    ? "border-emerald-300 ring-1 ring-emerald-200"
+                    : ""
               }`}
               data-testid={`client-card-${c.id}`}
             >
@@ -93,9 +114,12 @@ export default function ProClients() {
                   <div className="font-mono-num font-semibold text-orange-700">{c.needs_review ?? c.flagged_count ?? 0}</div>
                 </div>
               </div>
-              {act > 0 && (
-                <ClientActionSummary c={c} />
-              )}
+              {/* flex-1 middle: pushes the Open books button to the bottom
+                  so every card ends at the same y-coordinate regardless of
+                  whether it has an action summary. */}
+              <div className="flex-1">
+                {act > 0 && <ClientActionSummary c={c} />}
+              </div>
               <button
                 onClick={() => { switchCompany(c.id); window.location.href = "/dashboard"; }}
                 className="mt-3 w-full inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs"

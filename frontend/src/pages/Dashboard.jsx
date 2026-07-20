@@ -251,12 +251,12 @@ export default function Dashboard() {
           )}
         </div>
 
-        <div className="rounded-xl border bg-white p-5">
-          <div className="flex items-center gap-2 mb-3">
+        <div className="rounded-xl border bg-white p-5 flex flex-col max-h-[420px]">
+          <div className="flex items-center gap-2 mb-3 shrink-0">
             <Bot size={16} className="text-slate-500" />
             <h2 className="font-heading font-semibold">AI activity</h2>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-2 overflow-y-auto pr-1 -mr-1 flex-1">
             {activity.map(a => {
               const Icon = kindIcon[a.type] || Sparkles;
               return (

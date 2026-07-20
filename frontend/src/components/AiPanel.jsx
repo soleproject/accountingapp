@@ -335,6 +335,46 @@ const getSR = () => window.SpeechRecognition || window.webkitSpeechRecognition;
 export default function AiPanel({ collapsed, onToggle }) {
   const { currentId, current, companies, switchCompany } = useCompany();
   const navigate = useNavigate();
+  // User-adjustable panel width. Persisted in localStorage. Constrained to a
+  // sensible range so it can't be dragged narrower than the header controls
+  // or wider than half the viewport.
+  const MIN_W = 320;
+  const MAX_W = Math.min(900, typeof window !== "undefined" ? Math.floor(window.innerWidth * 0.6) : 900);
+  const [panelWidth, setPanelWidth] = useState(() => {
+    const stored = parseInt(localStorage.getItem("axiom_ai_panel_width") || "", 10);
+    return Number.isFinite(stored) && stored >= MIN_W ? Math.min(MAX_W, stored) : 384;
+  });
+  useEffect(() => {
+    localStorage.setItem("axiom_ai_panel_width", String(panelWidth));
+  }, [panelWidth]);
+  const resizingRef = useRef(false);
+  useEffect(() => {
+    if (!resizingRef.current) return;
+    const onMove = (e) => {
+      if (!resizingRef.current) return;
+      // Drag handle is on the LEFT edge — width grows as pointer moves LEFT.
+      const w = window.innerWidth - e.clientX;
+      const clamped = Math.max(MIN_W, Math.min(MAX_W, w));
+      setPanelWidth(clamped);
+    };
+    const onUp = () => {
+      resizingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  });
+  const startResize = (e) => {
+    e.preventDefault();
+    resizingRef.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  };
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -2004,7 +2044,20 @@ export default function AiPanel({ collapsed, onToggle }) {
   }
 
   return (
-    <aside className="w-96 shrink-0 border-l bg-white flex flex-col relative z-[60]" data-testid="ai-panel">
+    <aside
+      className="shrink-0 border-l bg-white flex flex-col relative z-[60]"
+      style={{ width: `${panelWidth}px` }}
+      data-testid="ai-panel"
+    >
+      {/* Drag handle — 6px wide invisible strip along the left edge. */}
+      <div
+        onMouseDown={startResize}
+        role="separator"
+        aria-orientation="vertical"
+        title="Drag to resize"
+        data-testid="ai-panel-resize"
+        className="absolute left-0 top-0 h-full w-1.5 -translate-x-1/2 cursor-col-resize hover:bg-indigo-300/40 z-[65]"
+      />
       <div className="h-16 shrink-0 border-b px-4 flex items-center gap-2">
         <div className="w-7 h-7 rounded-md bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center">
           <Sparkles size={14} className="text-white" />
