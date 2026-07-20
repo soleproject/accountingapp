@@ -41,9 +41,9 @@ export function AccountInfoTooltip({ account, size = 12 }) {
             zIndex: 100,
             pointerEvents: "none",
           }}
-          className="w-64 rounded-md bg-slate-900 text-white text-[11px] leading-snug px-2.5 py-2 shadow-xl"
+          className="w-80 rounded-md bg-slate-900 text-white text-sm leading-relaxed px-3.5 py-3 shadow-xl"
         >
-          <span className="block font-semibold mb-0.5 font-mono-num">
+          <span className="block font-semibold text-base mb-1 font-mono-num">
             {account.code} · {account.name}
           </span>
           <span className="block text-slate-200">
