@@ -469,7 +469,7 @@ export default function AiPanel({ collapsed, onToggle }) {
     window.speechSynthesis.addEventListener("voiceschanged", load);
     return () => window.speechSynthesis.removeEventListener("voiceschanged", load);
   }, []);
-  const { focus } = useAiFocus();
+  const { focus, setFocus } = useAiFocus();
 
   // Cleanup Copilot integration: when the user clicks a chip / "Fix now" on
   // the hero band, the Transactions page emits `cleanup-inquiry` with the
@@ -553,9 +553,22 @@ export default function AiPanel({ collapsed, onToggle }) {
   // we drop an "OK, tell me about this transaction" assistant message and
   // pop open the mic so the user can dictate what it is without hunting
   // for the mic button.
+  const inquiryTxnRef = useRef(null);  // txn.id currently under Sparkle inquiry, null otherwise
+  const resolveInquiry = () => {
+    // End the current single-txn inquiry: drop the pinned focus, close the
+    // mic, and forget the txn id. Called after the AI successfully
+    // categorizes / marks-as-transfer / creates-account for the focused
+    // row — or when the user declines. Safe to call multiple times: only
+    // does work when an inquiry is actually active.
+    if (!inquiryTxnRef.current) return;
+    inquiryTxnRef.current = null;
+    setFocus(null, { force: true });
+    setMicMode("off");
+  };
   useActionListener("ai-tell-me-about", async (payload) => {
     const t = payload?.txn;
     if (!t) return;
+    inquiryTxnRef.current = t.id;
     const label = t.merchant || t.description || t.contact_name || "this transaction";
     const amt = (typeof t.amount === "number")
       ? ` (${t.amount.toLocaleString("en-US", { style: "currency", currency: "USD" })})`
@@ -1549,6 +1562,7 @@ export default function AiPanel({ collapsed, onToggle }) {
           setMessages(m => [...m, { role: "assistant", content: msg }]);
           if (voiceOnRef.current) speakOne(msg);
           emitAction("txns:changed");
+          if (inquiryTxnRef.current === p.txnId) resolveInquiry();
         } catch (e) {
           setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't create the account or recategorize." }]);
         }
@@ -1582,6 +1596,8 @@ export default function AiPanel({ collapsed, onToggle }) {
         { role: "assistant", content: "Cancelled." },
       ]);
       if (voiceOnRef.current) speakOne("Cancelled");
+      // User declined to categorize — end the single-txn inquiry.
+      resolveInquiry();
       return;
     }
     if (cmd.handled && cmd.pending) {
@@ -1600,6 +1616,7 @@ export default function AiPanel({ collapsed, onToggle }) {
             setMessages(m => [...m, { role: "assistant", content: say }]);
             if (voiceOnRef.current) speakOne(say);
             emitAction("txns:changed");
+            if (inquiryTxnRef.current === focus?.id) resolveInquiry();
             return;
           }
           const catName = similar.category_account_name || similar.category_account_code || "the same category";
@@ -1855,6 +1872,7 @@ export default function AiPanel({ collapsed, onToggle }) {
         setMessages(m => [...m, { role: "assistant", content: say }]);
         if (voiceOnRef.current) speakOne(say);
         emitAction("txns:changed");
+        if (inquiryTxnRef.current === cmd.txnId) resolveInquiry();
       } catch (e) {
         setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't recategorize that." }]);
       }
@@ -1890,6 +1908,7 @@ export default function AiPanel({ collapsed, onToggle }) {
           setMessages(m => [...m, { role: "assistant", content: say }]);
           if (voiceOnRef.current) speakOne(say);
           emitAction("txns:changed");
+          if (inquiryTxnRef.current === cmd.txnId) resolveInquiry();
           return;
         }
         const first = candidates[0];
