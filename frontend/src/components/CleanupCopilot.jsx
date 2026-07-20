@@ -77,9 +77,9 @@ function pitchFor(action, progress) {
   if (action.kind === "flagged_batch")
     return `${action.count} transactions were flagged by the AI for a human eye. Fast-review them together?`;
   if (action.kind === "filter_uncat")
-    return `${action.count} rows are still uncategorized — click Fix now to focus the table on them.`;
+    return `${action.count} rows are still uncategorized — click Let's review to focus the table on them.`;
   if (action.kind === "filter_flagged")
-    return `${action.count} rows are still flagged for review — click Fix now to focus the table on them (or Start 5-min session for a guided walkthrough).`;
+    return `${action.count} rows are still flagged for review — click Let's review to focus the table on them (or Start 5-min session for a guided walkthrough).`;
   return action.why || action.label;
 }
 
@@ -491,7 +491,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                 }
               >
                 {shimmerFixNow && <Sparkles size={13} className="text-fuchsia-500" />}
-                Fix now <ArrowRight size={13} />
+                Let's review <ArrowRight size={13} />
               </button>
             ) : null;
 
