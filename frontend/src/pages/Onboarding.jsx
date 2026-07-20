@@ -568,7 +568,7 @@ export default function Onboarding() {
     await persist({ complete: true, step: STEPS.length, answers });
     await refresh();
     toast.success("Onboarding complete! Welcome to Axiom Ledger.");
-    nav("/accounting/transactions");
+    nav("/dashboard");
   };
   // Keep the coach-handler refs pointed at the latest closures.
   useEffect(() => { nextRef.current = next; });
