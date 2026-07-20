@@ -722,7 +722,6 @@ export default function Transactions() {
                 <th className="px-3 py-2 text-left">AI</th>
                 <th className="px-3 py-2 text-right">Amount</th>
                 <th className="px-3 py-2 text-right">Bank Balance</th>
-                <th className="px-3 py-2 text-left">Status</th>
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
@@ -767,10 +766,6 @@ export default function Transactions() {
                     {fmtMoney(t.amount)}
                   </td>
                   <td className="px-3 py-2 text-right font-mono-num text-slate-500 text-xs">{t.bank_balance_after ? fmtMoney(t.bank_balance_after) : "—"}</td>
-                  <td className="px-3 py-2">
-                    {t.posted && <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">Posted</span>}
-                    {t.human_reviewed && <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">Reviewed</span>}
-                  </td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-1 justify-end">
                       <button
