@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { Upload, Loader2, FileText, Trash2, ChevronRight, CheckCircle2 } from "lucide-react";
+import { Upload, Loader2, FileText, Trash2, ChevronRight, CheckCircle2, RotateCw, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 /**
@@ -49,12 +49,23 @@ export default function StatementsTab({ companyId, bare = false }) {
     loadImports();
   }, [companyId, loadAssets, loadImports]);
 
-  const uploadOne = async (file) => {
-    const tempId = `${file.name}::${Date.now()}::${Math.random()}`;
-    setUploading(u => [...u, {
-      tempId, filename: file.name, size: file.size,
-      status: "processing", error: null,
-    }]);
+  const uploadOne = async (file, tempId = null) => {
+    // Reused for both first-time upload and retry — passing an existing
+    // tempId flips the row back to "processing" instead of creating a new
+    // one so ordering and any prior error state are preserved.
+    const id = tempId || `${file.name}::${Date.now()}::${Math.random()}`;
+    if (tempId) {
+      setUploading(u => u.map(x => x.tempId === tempId
+        ? { ...x, status: "processing", error: null } : x));
+    } else {
+      setUploading(u => [...u, {
+        tempId: id, filename: file.name, size: file.size,
+        // Keep the raw File on the entry so a Retry can re-POST it
+        // without asking the user to re-select. This does hold the file
+        // in memory until the row is dismissed or the tab is left.
+        file, status: "processing", error: null,
+      }]);
+    }
     try {
       const fd = new FormData();
       fd.append("file", file);
@@ -63,8 +74,8 @@ export default function StatementsTab({ companyId, bare = false }) {
         `/companies/${companyId}/statements/upload`, fd,
         { headers: { "Content-Type": "multipart/form-data" }, timeout: 180_000 },
       );
-      setUploading(u => u.map(x => x.tempId === tempId
-        ? { ...x, status: "completed",
+      setUploading(u => u.map(x => x.tempId === id
+        ? { ...x, file: null, status: "completed",
             importId: r.data.import_id,
             transactionCount: r.data.transaction_count,
             accountName: r.data.account?.name,
@@ -79,10 +90,26 @@ export default function StatementsTab({ companyId, bare = false }) {
       loadImports();
     } catch (e) {
       const msg = e.response?.data?.detail || e.message;
-      setUploading(u => u.map(x => x.tempId === tempId
+      setUploading(u => u.map(x => x.tempId === id
         ? { ...x, status: "failed", error: msg } : x));
       toast.error(`${file.name}: ${msg}`);
     }
+  };
+
+  const retryUpload = (tempId) => {
+    // Look up the row and re-post its stashed File. Guard against the
+    // (rare) case where `file` was cleared — e.g. row was somehow
+    // completed then reverted — by warning instead of silently failing.
+    const row = uploading.find(x => x.tempId === tempId);
+    if (!row?.file) {
+      toast.error("Can't retry — original file is no longer in memory. Please re-drop it.");
+      return;
+    }
+    uploadOne(row.file, tempId);
+  };
+
+  const dismissUpload = (tempId) => {
+    setUploading(u => u.filter(x => x.tempId !== tempId));
   };
 
   const onFiles = async (files) => {
@@ -203,8 +230,10 @@ export default function StatementsTab({ companyId, bare = false }) {
             </div>
             <div className="space-y-1">
               {uploading.map(x => (
-                <UploadRow key={x.tempId} entry={x} onOpen={(id) =>
-                  navigate(`/connections/imports/${id}`)} />
+                <UploadRow key={x.tempId} entry={x}
+                  onOpen={(id) => navigate(`/connections/imports/${id}`)}
+                  onRetry={retryUpload}
+                  onDismiss={dismissUpload} />
               ))}
             </div>
           </div>
@@ -221,40 +250,70 @@ export default function StatementsTab({ companyId, bare = false }) {
   );
 }
 
-function UploadRow({ entry, onOpen }) {
+function UploadRow({ entry, onOpen, onRetry, onDismiss }) {
   const size = entry.size ? `${(entry.size / 1024).toFixed(0)} KB` : "";
   return (
-    <div className="flex items-center gap-3 rounded-md border bg-slate-50/50 px-3 py-2 text-sm">
-      <FileText size={16} className="text-slate-400" />
-      <div className="flex-1 truncate">{entry.filename}</div>
-      <span className="text-xs text-slate-400 font-mono-num">{size}</span>
-      {entry.status === "processing" && (
-        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
-          <Loader2 size={12} className="animate-spin" /> processing
-        </span>
-      )}
-      {entry.status === "completed" && (
-        <>
-          {entry.accountName && (
-            <span className="text-xs text-slate-600 truncate max-w-[220px]" title={entry.accountName}>
-              ↳ {entry.accountName}
-            </span>
-          )}
-          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-            <CheckCircle2 size={12} /> {entry.transactionCount} txns
+    <div className="rounded-md border bg-slate-50/50 px-3 py-2 text-sm">
+      <div className="flex items-center gap-3">
+        <FileText size={16} className="text-slate-400 shrink-0" />
+        <div className="flex-1 truncate">{entry.filename}</div>
+        <span className="text-xs text-slate-400 font-mono-num">{size}</span>
+        {entry.status === "processing" && (
+          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+            <Loader2 size={12} className="animate-spin" /> processing
           </span>
-          <button
-            onClick={() => entry.importId && onOpen(entry.importId)}
-            className="text-xs text-cyan-700 hover:underline"
-          >
-            View
-          </button>
-        </>
-      )}
-      {entry.status === "failed" && (
-        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800" title={entry.error}>
-          failed
-        </span>
+        )}
+        {entry.status === "completed" && (
+          <>
+            {entry.accountName && (
+              <span className="text-xs text-slate-600 truncate max-w-[220px]" title={entry.accountName}>
+                ↳ {entry.accountName}
+              </span>
+            )}
+            <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+              <CheckCircle2 size={12} /> {entry.transactionCount} txns
+            </span>
+            <button
+              onClick={() => entry.importId && onOpen(entry.importId)}
+              className="text-xs text-cyan-700 hover:underline"
+            >
+              View
+            </button>
+          </>
+        )}
+        {entry.status === "failed" && (
+          <>
+            <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800">
+              failed
+            </span>
+            {onRetry && entry.file && (
+              <button
+                onClick={() => onRetry(entry.tempId)}
+                className="inline-flex items-center gap-1 text-xs text-cyan-700 hover:text-cyan-900 hover:underline"
+                title="Retry this upload"
+                data-testid={`stmt-retry-${entry.tempId}`}
+              >
+                <RotateCw size={12} /> Retry
+              </button>
+            )}
+            {onDismiss && (
+              <button
+                onClick={() => onDismiss(entry.tempId)}
+                className="text-slate-400 hover:text-slate-700"
+                title="Dismiss this row"
+                aria-label="Dismiss"
+                data-testid={`stmt-dismiss-${entry.tempId}`}
+              >
+                <X size={14} />
+              </button>
+            )}
+          </>
+        )}
+      </div>
+      {entry.status === "failed" && entry.error && (
+        <div className="mt-1 ml-7 text-[11px] text-red-700 leading-snug">
+          {entry.error}
+        </div>
       )}
     </div>
   );
