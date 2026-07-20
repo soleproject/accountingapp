@@ -9,6 +9,7 @@ import { useAiFocus } from "@/lib/aiFocus";
 import { toast } from "sonner";
 import { resolveVoiceCommand } from "@/lib/voiceCommands";
 import { emitCreate, emitAction, useActionListener } from "@/lib/createBus";
+import { stripMarkdownForSpeech } from "@/lib/speechText";
 
 // Compact confirm card used by the create-account / recategorize / transfer
 // flows. Same visual language as BulkApproveCard but generic — takes a title,
@@ -2161,7 +2162,7 @@ export default function AiPanel({ collapsed, onToggle }) {
   // yields the shortest possible time-to-first-word.
   const SENTENCE_END = /([.!?\n:])\s+/;
   const speakOne = (text) => {
-    const clean = text.replace(/\s+/g, " ").trim();
+    const clean = stripMarkdownForSpeech(text);
     if (!clean) return;
     if (!("speechSynthesis" in window)) return;
     const u = new SpeechSynthesisUtterance(clean);

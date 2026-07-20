@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { api } from "@/lib/api";
 import { useActionListener, emitAction } from "@/lib/createBus";
 import { useAiFocus } from "@/lib/aiFocus";
+import { stripMarkdownForSpeech } from "@/lib/speechText";
 import { Sparkles, PlayCircle, ArrowRight, Loader2 } from "lucide-react";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
 
@@ -347,7 +348,9 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   };
   const speakAsync = (text) => new Promise(resolve => {
     if (typeof window === "undefined" || !window.speechSynthesis) return resolve();
-    const u = new SpeechSynthesisUtterance(text);
+    const clean = stripMarkdownForSpeech(text);
+    if (!clean) return resolve();
+    const u = new SpeechSynthesisUtterance(clean);
     u.rate = 1.02; u.pitch = 1.0;
     // Prefer the "Google UK English Female (en-GB)" voice — warm, friendly
     // narration for the tour. Fall back gracefully to en-GB female /
