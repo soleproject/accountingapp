@@ -372,8 +372,18 @@ async def mock_plaid(cid: str, user: dict = Depends(get_current_user)):
 
 @router.post("/companies/{cid}/onboarding/import-plaid")
 async def import_plaid(cid: str, account_ids: List[str], user: dict = Depends(get_current_user)):
-    """Import mocked transactions from selected Plaid accounts, AI-categorize each."""
+    """Import mocked transactions from selected Plaid accounts, AI-categorize each.
+
+    Idempotent — if this mock has already run once for the company (i.e. any
+    `source="plaid_mock"` transactions exist), we short-circuit with
+    `imported: 0` so a user who accidentally clicks "Or use mock accounts"
+    twice (or navigates back to the Plaid step and re-triggers it) doesn't
+    end up with a doubled ledger.
+    """
     await require_company(user, cid)
+    existing = await db.transactions.count_documents({"company_id": cid, "source": "plaid_mock"})
+    if existing > 0:
+        return {"imported": 0, "already_imported": existing}
     accts = await db.accounts.find({"company_id": cid}).to_list(2000)
     coa = [{"code": a["code"], "name": a["name"], "type": a["type"]} for a in accts]
     checking = next((a for a in accts if a["code"] == "1010"), None)
@@ -476,8 +486,17 @@ async def veryfi_upload(cid: str, file: UploadFile = File(...), user: dict = Dep
 
 @router.post("/companies/{cid}/onboarding/mock-veryfi")
 async def mock_veryfi(cid: str, user: dict = Depends(get_current_user)):
-    """Simulate Veryfi statement upload: returns fake OCR'd transactions."""
+    """Simulate Veryfi statement upload: returns fake OCR'd transactions.
+
+    Idempotent — if this mock has already run once for the company (i.e.
+    any `source="veryfi_mock"` transactions exist), we short-circuit with
+    `imported: 0` so a user who re-triggers the upload button doesn't end
+    up with a doubled ledger.
+    """
     await require_company(user, cid)
+    existing = await db.transactions.count_documents({"company_id": cid, "source": "veryfi_mock"})
+    if existing > 0:
+        return {"imported": 0, "already_imported": existing}
     accts = await db.accounts.find({"company_id": cid}).to_list(2000)
     coa = [{"code": a["code"], "name": a["name"], "type": a["type"]} for a in accts]
     checking = next((a for a in accts if a["code"] == "1010"), None)

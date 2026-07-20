@@ -153,6 +153,10 @@ export default function Onboarding() {
   const [plaidAccts, setPlaidAccts] = useState([]);
   const [selectedPlaid, setSelectedPlaid] = useState(new Set());
   const [imported, setImported] = useState({ plaid: 0, veryfi: 0 });
+  // Latches the moment we auto-fire the Plaid download after Plaid Link so
+  // a second linking (e.g. adding a second bank) or a component re-mount
+  // doesn't retrigger the whole "Nice — I linked X accounts…" flow.
+  const autoImportedRef = useRef(false);
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   // Guards the "greet on step change" effect from firing with the default
@@ -636,20 +640,32 @@ export default function Onboarding() {
     setSelectedPlaid(allIds);
     // Kick off the download + AI categorize immediately. Coach announces
     // it in the chat so the user knows what's happening.
+    //
+    // Idempotency guard: if we already auto-imported once in this session
+    // (imported.plaid > 0), or another auto-import is currently running
+    // (autoImportedRef flag), skip. The backend also guards against dupes,
+    // but bailing early here avoids the confusing "Nice — I linked 3
+    // accounts…" bubble firing on every re-mount.
+    if (autoImportedRef.current || imported.plaid > 0) {
+      return;
+    }
     if (mapped.length && currentId) {
+      autoImportedRef.current = true;
       const inst = accounts[0]?.institution_name || "your bank";
       emitAction("onboarding-coach-greet", {
         message: `Nice — I linked ${mapped.length} account${mapped.length === 1 ? "" : "s"} from ${inst}. Pulling in transactions now and categorizing each with AI. This usually takes a few seconds…`,
       });
       setBusy(true);
       try {
-        let imported = 0;
+        let importedCount = 0;
+        let alreadyImported = 0;
         try {
           const r = await api.post(
             `/companies/${currentId}/onboarding/plaid/import`,
             { account_ids: [...allIds] },
           );
-          imported = r.data.imported || 0;
+          importedCount = r.data.imported || 0;
+          alreadyImported = r.data.already_imported || 0;
         } catch {
           // Fallback if Plaid session isn't stored (rare — happens when the
           // exchange endpoint didn't persist the access token; e.g. mock).
@@ -657,13 +673,17 @@ export default function Onboarding() {
             `/companies/${currentId}/onboarding/import-plaid`,
             [...allIds],
           );
-          imported = r.data.imported || 0;
+          importedCount = r.data.imported || 0;
+          alreadyImported = r.data.already_imported || 0;
         }
-        setImported(v => ({ ...v, plaid: imported }));
-        emitAction("onboarding-coach-greet", {
-          message: `Done — pulled ${imported} transaction${imported === 1 ? "" : "s"} and AI-categorized each. Say "next" whenever you're ready to move on, or "link another" if you have more banks to connect.`,
-        });
+        setImported(v => ({ ...v, plaid: importedCount || alreadyImported }));
+        const doneMsg = alreadyImported > 0 && importedCount === 0
+          ? `These accounts are already in your books (${alreadyImported} transactions previously imported). Say "next" whenever you're ready to move on.`
+          : `Done — pulled ${importedCount} transaction${importedCount === 1 ? "" : "s"} and AI-categorized each. Say "next" whenever you're ready to move on, or "link another" if you have more banks to connect.`;
+        emitAction("onboarding-coach-greet", { message: doneMsg });
       } catch (e) {
+        // Reset the guard so the user can retry if it truly failed.
+        autoImportedRef.current = false;
         toast.error(`Import failed: ${e?.response?.data?.detail || e.message}`);
         emitAction("onboarding-coach-greet", {
           message: `Hmm — I hit a snag pulling transactions in. Try clicking "Import & AI-categorize selected" manually, or say "skip" to move on.`,

@@ -625,6 +625,20 @@ async def plaid_import(cid: str, payload: dict, user: dict = Depends(get_current
             continue
         if await db.transactions.find_one({"company_id": cid, "plaid_transaction_id": t["transaction_id"]}):
             continue
+        # Additional dedup — Plaid Sandbox re-generates transaction IDs on
+        # every sync, so a re-sync of the same window would look like fresh
+        # transactions to the ID-based check above. Match on the
+        # (plaid_account_id, date, amount, merchant_name) tuple which is
+        # stable across syncs.
+        merchant_key = t.get("merchant_name") or t.get("name") or "Unknown"
+        if await db.transactions.find_one({
+            "company_id": cid,
+            "plaid_account_id": t["account_id"],
+            "date": t["date"],
+            "amount": t["amount"],
+            "merchant": merchant_key,
+        }):
+            continue
         if await is_period_closed(cid, t["date"]):
             continue
         mapping = mappings.get(t["account_id"])
