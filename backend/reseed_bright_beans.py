@@ -34,6 +34,44 @@ from contact_resolver import normalize_contact_name
 
 COMPANY_NAME = "Bright Beans Coffee Co."
 
+# Clearbit logo domains for demo contacts. Any contact NOT in this map falls
+# back to a colored letter avatar in the UI. Populates `contact.logo_url` so
+# every Transactions row can render a merchant logo the way QuickBooks / Ramp
+# do it — proves the Plaid `counterparties[].logo_url` + Veryfi `vendor.logo`
+# story before the real integrations light up.
+LOGO_DOMAIN = {
+    "Starbucks": "starbucks.com",
+    "Uber": "uber.com",
+    "Delta Airlines": "delta.com",
+    "AWS": "aws.amazon.com",
+    "Google Workspace": "workspace.google.com",
+    "Adobe": "adobe.com",
+    "WeWork": "wework.com",
+    "Comcast Business": "comcast.com",
+    "AT&T": "att.com",
+    "State Farm": "statefarm.com",
+    "Staples": "staples.com",
+    "Home Depot": "homedepot.com",
+    "Costco": "costco.com",
+    "Sysco Food Services": "sysco.com",
+    "Peet's Coffee Wholesale": "peets.com",
+    "Facebook Ads": "facebook.com",
+    "LinkedIn Premium": "linkedin.com",
+    "Lincare": "lincare.com",
+    "New York Life": "newyorklife.com",
+    "McDonald's": "mcdonalds.com",
+    "Olive Garden": "olivegarden.com",
+    "Venmo": "venmo.com",
+    "Zelle Payment": "zellepay.com",
+    "Cash App": "cash.app",
+}
+
+
+def _logo_url_for(name: str) -> str | None:
+    d = LOGO_DOMAIN.get(name)
+    return f"https://logo.clearbit.com/{d}" if d else None
+
+
 # Contact roster — mix of customers, vendors, and 1099 contractors so the
 # UI has real names to render everywhere.
 CONTACTS: list[tuple[str, str]] = [
@@ -140,6 +178,7 @@ async def main() -> None:
             "type": kind,
             "email": f"contact@{name.lower().replace(' ','').replace('&','and').replace(chr(39),'').replace(chr(46),'')[:24]}.com",
             "phone": "", "address": "",
+            "logo_url": _logo_url_for(name),
             "created_at": now, "updated_at": now,
         }
         contact_docs.append(c)

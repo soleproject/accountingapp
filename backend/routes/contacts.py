@@ -225,3 +225,101 @@ async def merge_contacts(cid: str, payload: dict, user: dict = Depends(get_curre
     }
 
 
+
+
+# Curated merchant → domain map used by the logo backfill endpoint. Match is
+# case-insensitive substring on the contact name so "AT&T Wireless" hits
+# "AT&T". Keep this list short and high-signal — real production would pull
+# from Plaid `counterparties[].logo_url` on sync + Veryfi `vendor.logo` on
+# OCR. This dict is the demo/prod backfill fallback.
+LOGO_BACKFILL_DOMAINS = {
+    "starbucks": "starbucks.com",
+    "uber": "uber.com",
+    "delta": "delta.com",
+    "aws": "aws.amazon.com",
+    "amazon": "amazon.com",
+    "google workspace": "workspace.google.com",
+    "google ads": "ads.google.com",
+    "adobe": "adobe.com",
+    "wework": "wework.com",
+    "comcast": "comcast.com",
+    "at&t": "att.com",
+    "state farm": "statefarm.com",
+    "staples": "staples.com",
+    "home depot": "homedepot.com",
+    "costco": "costco.com",
+    "sysco": "sysco.com",
+    "peet's coffee": "peets.com",
+    "facebook ads": "facebook.com",
+    "meta ads": "facebook.com",
+    "linkedin": "linkedin.com",
+    "lincare": "lincare.com",
+    "new york life": "newyorklife.com",
+    "mcdonald": "mcdonalds.com",
+    "olive garden": "olivegarden.com",
+    "venmo": "venmo.com",
+    "zelle": "zellepay.com",
+    "cash app": "cash.app",
+    "shopify": "shopify.com",
+    "stripe": "stripe.com",
+    "paypal": "paypal.com",
+    "spotify": "spotify.com",
+    "netflix": "netflix.com",
+    "microsoft": "microsoft.com",
+    "notion": "notion.so",
+    "slack": "slack.com",
+    "zoom": "zoom.us",
+    "twilio": "twilio.com",
+    "docusign": "docusign.com",
+    "quickbooks": "quickbooks.intuit.com",
+    "gusto": "gusto.com",
+    "adp": "adp.com",
+    "bank of america": "bankofamerica.com",
+    "chase": "chase.com",
+    "wells fargo": "wellsfargo.com",
+    "citi": "citi.com",
+    "capital one": "capitalone.com",
+}
+
+
+def _domain_for_contact(name: str | None) -> str | None:
+    if not name:
+        return None
+    n = name.lower()
+    # Longest match first so "Google Workspace" beats "Google Ads" for a row
+    # named "Google Workspace India".
+    for key in sorted(LOGO_BACKFILL_DOMAINS.keys(), key=len, reverse=True):
+        if key in n:
+            return LOGO_BACKFILL_DOMAINS[key]
+    return None
+
+
+@router.post("/companies/{cid}/contacts/backfill-logos")
+async def backfill_contact_logos(cid: str, user: dict = Depends(get_current_user)):
+    """Populate `logo_url` on every contact for this company that doesn't
+    already have one, using a curated merchant → domain map + Clearbit's
+    free logo endpoint (`logo.clearbit.com/{domain}`). Idempotent: contacts
+    with an existing `logo_url` are left alone.
+
+    In production we get logos automatically from Plaid's
+    `counterparties[].logo_url` on transactions/sync and from Veryfi's
+    `vendor.logo` on receipts — this endpoint fills the gap for
+    contacts created before the resolver was updated, and for demo /
+    mocked-integration environments.
+    """
+    await require_company(user, cid)
+    updated = []
+    async for c in db.contacts.find({
+        "company_id": cid,
+        "$or": [{"logo_url": {"$exists": False}}, {"logo_url": None}, {"logo_url": ""}],
+    }):
+        domain = _domain_for_contact(c.get("name"))
+        if not domain:
+            continue
+        logo_url = f"https://logo.clearbit.com/{domain}"
+        await db.contacts.update_one(
+            {"id": c["id"]},
+            {"$set": {"logo_url": logo_url, "updated_at": now_iso()}},
+        )
+        updated.append({"name": c.get("name"), "logo_url": logo_url})
+    return {"ok": True, "updated": len(updated), "contacts": updated}

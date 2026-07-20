@@ -13,6 +13,7 @@ import {
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import CleanupCopilot from "@/components/CleanupCopilot";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
+import { ContactBadge } from "@/components/ContactBadge";
 import { emitAction, useActionListener } from "@/lib/createBus";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
@@ -736,8 +737,16 @@ export default function Transactions() {
                       checked={selected.has(t.id)} onChange={() => toggleSel(t.id)} />
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-slate-600 font-mono-num">{fmtDate(t.date)}</td>
-                  <td className="px-3 py-2 text-slate-700 max-w-[160px] truncate" title={t.contact_name || ""}>
-                    {t.contact_name || <span className="text-slate-300">—</span>}
+                  <td className="px-3 py-2 text-slate-700 max-w-[200px]" title={t.contact_name || ""}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <ContactBadge
+                        contact={{ name: t.contact_name, logo_url: t.contact_logo_url }}
+                        size={22}
+                      />
+                      <span className="truncate">
+                        {t.contact_name || <span className="text-slate-300">—</span>}
+                      </span>
+                    </div>
                   </td>
                   <td className="px-3 py-2">
                     <div className="font-medium">{t.merchant || t.description}</div>

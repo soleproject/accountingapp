@@ -782,8 +782,26 @@ async def list_transactions(
     else:
         pages = 1
     docs = await cursor.to_list(length=None)
+    # Enrich each transaction with the contact's logo_url so the frontend
+    # can render merchant logos without an extra round-trip per row.
+    contact_ids = {d.get("contact_id") for d in docs if d.get("contact_id")}
+    logo_by_cid: dict[str, str] = {}
+    if contact_ids:
+        async for c in db.contacts.find(
+            {"company_id": cid, "id": {"$in": list(contact_ids)}},
+            {"id": 1, "logo_url": 1},
+        ):
+            if c.get("logo_url"):
+                logo_by_cid[c["id"]] = c["logo_url"]
+    coerced = []
+    for d in docs:
+        out = coerce(d)
+        cid_ = d.get("contact_id")
+        if cid_ and cid_ in logo_by_cid:
+            out["contact_logo_url"] = logo_by_cid[cid_]
+        coerced.append(out)
     return {
-        "transactions": [coerce(d) for d in docs],
+        "transactions": coerced,
         "pagination": {
             "total": total,
             "page": page,
