@@ -219,18 +219,59 @@ export default function Onboarding() {
     const msg = (payload?.text || "").trim();
     if (!msg) return;
 
-    // Local affirmative-move-on detector — catches "nope", "let's move on",
-    // "good to go", "yes", "yep", "sure", "ok", "next", "looks good", etc.
-    // When the current step already has enough info to advance (business
-    // profile already filled) we honor the shortcut instantly without a
-    // round-trip to the LLM.
-    const MOVE_ON_RE = /^(?:nope?|no(?:pe)?|yes|yeah|yep|yup|sure|ok(?:ay)?|good(?: to go)?|looks good|move on|let'?s (?:move on|go|continue|proceed|do (?:it|this))|next|proceed|continue|all set|done|correct|that'?s right)[\s.!]*$/i;
-    if (script.extractStep === "business_profile" && MOVE_ON_RE.test(msg)) {
-      const haveBoth =
-        (currentAnswers.business_type || current?.business_type) &&
-        (currentAnswers.business_description || current?.business_description);
-      if (haveBoth) {
-        emitAction("onboarding-coach-greet", { message: "Great — moving on…" });
+    // Local affirmative-move-on detector — catches "next", "nope", "let's
+    // move on", "good to go", "yes", "yep", "sure", "ok", "looks good",
+    // "all set", "done", etc. Runs on every step so users can move forward
+    // with natural language without a round-trip to the LLM.
+    //
+    // Step-specific handling:
+    //   • business_profile — requires both business_type + business_description
+    //     already populated (recap-and-confirm flow).
+    //   • qbo_link — an affirmative "next"/"yes"/"good" is ambiguous re: QBO
+    //     linking, so we skip the local shortcut here and let the extractor
+    //     decide (users click the on-page Yes/No pill to make it explicit).
+    //   • plaid/veryfi — "next"/"skip"/"nope" all mean "advance without
+    //     linking/uploading". Auto-advance.
+    //   • coa/ready — universally treated as move-on.
+    const MOVE_ON_RE = /^(?:nope?|no(?:pe)?|yes|yeah|yep|yup|sure|ok(?:ay)?|good(?: to go)?|looks good|move on|let'?s (?:move on|go|continue|proceed|do (?:it|this))|next|proceed|continue|all set|done|correct|that'?s right|skip(?: (?:this|it|for now))?)[\s.!,?]*$/i;
+    if (MOVE_ON_RE.test(msg)) {
+      let doAdvance = false;
+      let confirmText = "Moving on…";
+      switch (script.extractStep) {
+        case "business_profile": {
+          const haveBoth =
+            (currentAnswers.business_type || current?.business_type) &&
+            (currentAnswers.business_description || current?.business_description);
+          if (haveBoth) {
+            doAdvance = true;
+            confirmText = "Great — moving on…";
+          }
+          break;
+        }
+        case "qbo_link":
+          // Ambiguous — leave to the extractor / on-page pill.
+          break;
+        case "plaid_intent":
+          doAdvance = true;
+          confirmText = "No problem — you can connect banks later from Settings. Moving on…";
+          break;
+        case "veryfi_intent":
+          doAdvance = true;
+          confirmText = "Got it — skipping statement uploads. Moving on…";
+          break;
+        case "coa_overrides":
+          doAdvance = true;
+          confirmText = "Great — moving on…";
+          break;
+        case "ready_confirm":
+          emitAction("onboarding-coach-greet", { message: "Perfect — taking you in now." });
+          setTimeout(() => finishRef.current(), 1200);
+          return;
+        default:
+          break;
+      }
+      if (doAdvance) {
+        emitAction("onboarding-coach-greet", { message: confirmText });
         setTimeout(() => nextRef.current(), 1200);
         return;
       }
