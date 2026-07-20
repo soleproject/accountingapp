@@ -13,44 +13,51 @@ const ymd = (d) => d.toISOString().slice(0, 10);
 
 // ---------------------------- Route table ----------------------------
 
+// Navigation verb + optional filler + optional trailing "page/screen/…" —
+// wrapped in a helper so every route entry stays a one-liner. Requires a
+// prefix so bare category words during cleanup-inquiries ("this is a loan
+// from Kevin Peterson") don't accidentally jump pages. Accepts natural
+// phrasings: go to / open / show (me) / take me to / let's go to /
+// navigate to / bring me to / get me to / jump to / switch to / head to.
+const _NAV_VERB = "(?:go(?:\\s+to)?\\s+|goto\\s+|open\\s+|show(?:\\s+me)?\\s+|take\\s+me\\s+to\\s+|let'?s\\s+(?:go\\s+to\\s+|open\\s+)|navigate\\s+to\\s+|bring\\s+me\\s+to\\s+|get\\s+me\\s+to\\s+|jump\\s+to\\s+|switch\\s+to\\s+|head\\s+(?:on\\s+)?(?:over\\s+)?to\\s+)";
+const _NAV_FILLER = "(?:the\\s+|my\\s+|our\\s+)?";
+const _NAV_TAIL = "(?:\\s+(?:page|screen|section|tab|view))?";
+function NAV(inner) {
+  return new RegExp("\\b" + _NAV_VERB + _NAV_FILLER + inner.source + _NAV_TAIL + "\\b", "i");
+}
+
 const NAV_ROUTES = [
-  // Specific patterns FIRST — the resolver returns on first match. Every
-  // pattern REQUIRES a leading navigation verb ("go to" / "open" / "show
-  // (me)?") — bare category words like "loans", "payments", "assets" would
-  // otherwise falsely trigger navigation while the user is answering a
-  // cleanup-inquiry ("what are these Zelle transactions?" → "this is a loan
-  // from Kevin Peterson" used to jump to /accounting/loans). The prefix is
-  // mandatory now — users must say "open loans" to navigate.
+  // Specific patterns FIRST — the resolver returns on first match.
   { pat: /\b(?:show (?:me )?)?(?:flagged|for review|needs? review) transactions?\b/i,         url: "/accounting/transactions?filter=review", say: "Showing flagged transactions" },
   { pat: /\b(?:show (?:me )?)?overdue invoices?\b/i,                                          url: "/invoices?filter=overdue",      say: "Showing overdue invoices" },
   { pat: /\b(?:show (?:me )?)?overdue bills?\b/i,                                             url: "/bills?filter=overdue",         say: "Showing overdue bills" },
-  { pat: /\b(?:go to |open |show (?:me )?)suggested rules?\b/i,                               url: "/accounting/rules",             say: "Opening suggested rules" },
-  { pat: /\b(?:go to |open |show (?:me )?)journal entries\b/i,                                url: "/accounting/journal-entries",   say: "Opening journal entries" },
-  { pat: /\b(?:go to |open |show (?:me )?)general ledger\b/i,                                 url: "/accounting/general-ledger",    say: "Opening general ledger" },
-  { pat: /\b(?:go to |open |show (?:me )?)book review\b/i,                                    url: "/accounting/book-review",       say: "Opening book review" },
-  { pat: /\b(?:go to |open |show (?:me )?)(?:close books?|close period|month end)\b/i,        url: "/accounting/close-books",       say: "Opening close books" },
-  { pat: /\b(?:go to |open |show (?:me )?)year end\b/i,                                       url: "/accounting/year-end",          say: "Opening year end" },
-  { pat: /\b(?:go to |open |show (?:me )?)(?:reconcile|reconciliation)\b/i,                   url: "/accounting/reconciliation",    say: "Opening reconciliation" },
-  { pat: /\b(?:go to |open |show (?:me )?)(?:coa|chart of accounts)\b/i,                      url: "/accounting/chart-of-accounts", say: "Opening chart of accounts" },
-  { pat: /\b(?:go to |open |show (?:me )?)(?:ai )?rules?\b/i,                                 url: "/accounting/rules",             say: "Opening AI rules" },
-  { pat: /\b(?:go to |open |show (?:me )?)(?:clients?|my clients?)\b/i,                       url: "/pro/clients",                  say: "Opening clients" },
-  { pat: /\b(?:go to |open |show (?:me )?)(?:settings|company settings)\b/i,                  url: "/settings",                     say: "Opening settings" },
-  { pat: /\b(?:go to |open |show (?:me )?)communications?\b/i,                                url: "/communications",               say: "Opening communications" },
-  { pat: /\b(?:go to |open |show (?:me )?)connections?\b/i,                                   url: "/connections",                  say: "Opening connections" },
-  { pat: /\b(?:go to |open |show (?:me )?)onboarding\b/i,                                     url: "/onboarding",                   say: "Opening onboarding" },
-  { pat: /\b(?:go to |open |show (?:me )?)inventory\b/i,                                      url: "/accounting/inventory",         say: "Opening inventory" },
-  { pat: /\b(?:go to |open |show (?:me )?)assets?\b/i,                                        url: "/accounting/assets",            say: "Opening fixed assets" },
-  { pat: /\b(?:go to |open |show (?:me )?)loans?\b/i,                                         url: "/accounting/loans",             say: "Opening loans" },
-  { pat: /\b(?:go to |open |show (?:me )?)tags?\b/i,                                          url: "/accounting/tags",              say: "Opening tags" },
-  { pat: /\b(?:go to |open |show (?:me )?)admin\b/i,                                          url: "/admin",                        say: "Opening admin" },
+  { pat: NAV(/suggested rules?/),                                                             url: "/accounting/rules",             say: "Opening suggested rules" },
+  { pat: NAV(/journal entries/),                                                              url: "/accounting/journal-entries",   say: "Opening journal entries" },
+  { pat: NAV(/general ledger/),                                                               url: "/accounting/general-ledger",    say: "Opening general ledger" },
+  { pat: NAV(/book review/),                                                                  url: "/accounting/book-review",       say: "Opening book review" },
+  { pat: NAV(/(?:close books?|close period|month end)/),                                      url: "/accounting/close-books",       say: "Opening close books" },
+  { pat: NAV(/year end/),                                                                     url: "/accounting/year-end",          say: "Opening year end" },
+  { pat: NAV(/(?:reconcile|reconciliation)/),                                                 url: "/accounting/reconciliation",    say: "Opening reconciliation" },
+  { pat: NAV(/(?:coa|chart of accounts)/),                                                    url: "/accounting/chart-of-accounts", say: "Opening chart of accounts" },
+  { pat: NAV(/(?:ai )?rules?/),                                                               url: "/accounting/rules",             say: "Opening AI rules" },
+  { pat: NAV(/(?:clients?|my clients?)/),                                                     url: "/pro/clients",                  say: "Opening clients" },
+  { pat: NAV(/(?:settings|company settings)/),                                                url: "/settings",                     say: "Opening settings" },
+  { pat: NAV(/communications?/),                                                              url: "/communications",               say: "Opening communications" },
+  { pat: NAV(/connections?/),                                                                 url: "/connections",                  say: "Opening connections" },
+  { pat: NAV(/onboarding/),                                                                   url: "/onboarding",                   say: "Opening onboarding" },
+  { pat: NAV(/inventory/),                                                                    url: "/accounting/inventory",         say: "Opening inventory" },
+  { pat: NAV(/assets?/),                                                                      url: "/accounting/assets",            say: "Opening fixed assets" },
+  { pat: NAV(/loans?/),                                                                       url: "/accounting/loans",             say: "Opening loans" },
+  { pat: NAV(/tags?/),                                                                        url: "/accounting/tags",              say: "Opening tags" },
+  { pat: NAV(/admin/),                                                                        url: "/admin",                        say: "Opening admin" },
   // Generic index pages LAST.
-  { pat: /\b(?:go to |open |show (?:me )?)transactions?\b/i,                                  url: "/accounting/transactions",      say: "Opening transactions" },
-  { pat: /\b(?:go to |open |show (?:me )?)contacts?\b/i,                                      url: "/contacts",                     say: "Opening contacts" },
-  { pat: /\b(?:go to |open |show (?:me )?)invoices?\b/i,                                      url: "/invoices",                     say: "Opening invoices" },
-  { pat: /\b(?:go to |open |show (?:me )?)bills?\b/i,                                         url: "/bills",                        say: "Opening bills" },
-  { pat: /\b(?:go to |open |show (?:me )?)payments?\b/i,                                      url: "/payments",                     say: "Opening payments" },
-  { pat: /\b(?:go to |open |show (?:me )?)receipts?\b/i,                                      url: "/receipts",                     say: "Opening receipts" },
-  { pat: /\b(?:go to |open |show (?:me )?)dashboard\b/i,                                      url: "/dashboard",                    say: "Opening dashboard" },
+  { pat: NAV(/transactions?/),                                                                url: "/accounting/transactions",      say: "Opening transactions" },
+  { pat: NAV(/contacts?/),                                                                    url: "/contacts",                     say: "Opening contacts" },
+  { pat: NAV(/invoices?/),                                                                    url: "/invoices",                     say: "Opening invoices" },
+  { pat: NAV(/bills?/),                                                                       url: "/bills",                        say: "Opening bills" },
+  { pat: NAV(/payments?/),                                                                    url: "/payments",                     say: "Opening payments" },
+  { pat: NAV(/receipts?/),                                                                    url: "/receipts",                     say: "Opening receipts" },
+  { pat: NAV(/dashboard/),                                                                    url: "/dashboard",                    say: "Opening dashboard" },
 ];
 
 // ---------------------------- Reports table --------------------------
