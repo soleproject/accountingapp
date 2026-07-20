@@ -608,16 +608,68 @@ export default function Onboarding() {
   const mockPlaid = async () => {
     setBusy(true);
     const r = await api.post(`/companies/${currentId}/onboarding/mock-plaid`);
-    setPlaidAccts(r.data.accounts || []);
+    const accts = r.data.accounts || [];
     setBusy(false);
+    // Reshape mock accounts into the same shape onPlaidLinked expects so we
+    // reuse a single "auto-select + auto-import + coach announcement" path.
+    onPlaidLinked(accts.map(a => ({
+      account_id: a.id,
+      name: a.name,
+      mask: a.name.split("...")[1] || "",
+      subtype: a.subtype,
+      balance_current: a.balance,
+      institution_name: a.institution || "Plaid Sandbox",
+    })));
   };
-  const onPlaidLinked = (accounts) => {
+  const onPlaidLinked = async (accounts) => {
     // Convert real Plaid accounts to the same UI shape as the mock
-    setPlaidAccts(accounts.map(a => ({
+    const mapped = accounts.map(a => ({
       id: a.account_id, name: `${a.name || a.official_name} ...${a.mask || ""}`,
       institution: "Plaid Sandbox", subtype: a.subtype || a.type,
       balance: a.balance_current || 0,
-    })));
+    }));
+    setPlaidAccts(mapped);
+    // Auto-select every returned account so the user doesn't have to
+    // babysit checkboxes — the whole point of "hook up my bank" is
+    // "pull my transactions", not "let me pick which ones".
+    const allIds = new Set(mapped.map(a => a.id));
+    setSelectedPlaid(allIds);
+    // Kick off the download + AI categorize immediately. Coach announces
+    // it in the chat so the user knows what's happening.
+    if (mapped.length && currentId) {
+      const inst = accounts[0]?.institution_name || "your bank";
+      emitAction("onboarding-coach-greet", {
+        message: `Nice — I linked ${mapped.length} account${mapped.length === 1 ? "" : "s"} from ${inst}. Pulling in transactions now and categorizing each with AI. This usually takes a few seconds…`,
+      });
+      setBusy(true);
+      try {
+        let imported = 0;
+        try {
+          const r = await api.post(
+            `/companies/${currentId}/onboarding/plaid/import`,
+            { account_ids: [...allIds] },
+          );
+          imported = r.data.imported || 0;
+        } catch {
+          // Fallback if Plaid session isn't stored (rare — happens when the
+          // exchange endpoint didn't persist the access token; e.g. mock).
+          const r = await api.post(
+            `/companies/${currentId}/onboarding/import-plaid`,
+            [...allIds],
+          );
+          imported = r.data.imported || 0;
+        }
+        setImported(v => ({ ...v, plaid: imported }));
+        emitAction("onboarding-coach-greet", {
+          message: `Done — pulled ${imported} transaction${imported === 1 ? "" : "s"} and AI-categorized each. Say "next" whenever you're ready to move on, or "link another" if you have more banks to connect.`,
+        });
+      } catch (e) {
+        toast.error(`Import failed: ${e?.response?.data?.detail || e.message}`);
+        emitAction("onboarding-coach-greet", {
+          message: `Hmm — I hit a snag pulling transactions in. Try clicking "Import & AI-categorize selected" manually, or say "skip" to move on.`,
+        });
+      } finally { setBusy(false); }
+    }
   };
   const importPlaid = async () => {
     setBusy(true);
