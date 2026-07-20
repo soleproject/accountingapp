@@ -209,8 +209,10 @@ export default function Onboarding() {
   const answersRef = useRef(answers);
   const nextRef = useRef(() => {});
   const finishRef = useRef(() => {});
+  const plaidAcctsRef = useRef([]);
   useEffect(() => { stepRef.current = step; }, [step]);
   useEffect(() => { answersRef.current = answers; }, [answers]);
+  useEffect(() => { plaidAcctsRef.current = plaidAccts; }, [plaidAccts]);
   useActionListener("onboarding-user-message", async (payload) => {
     const currentStep = stepRef.current;
     const currentAnswers = answersRef.current;
@@ -239,12 +241,39 @@ export default function Onboarding() {
     // Affirmative-connect phrases specific to step 4 — user WANTS to link.
     // Anchored at start with a word boundary (not `$`) so compound answers
     // like "yes let's do it" or "sure, connect them" match cleanly.
-    const PLAID_CONNECT_RE = /^(?:yes|yeah|yep|yup|sure|ok(?:ay)?|please|absolutely|of course|do it|let'?s (?:do (?:it|this)|go|connect|link|hook (?:it )?up)|connect(?: it| them| my (?:bank|accounts?))?|link(?: it| them| my (?:bank|accounts?))?|hook (?:it |them |me )?up|launch(?: it| plaid)?|open(?: plaid)?)\b/i;
+    const PLAID_CONNECT_RE = /^(?:yes|yeah|yep|yup|sure|ok(?:ay)?|please|absolutely|of course|do it|let'?s (?:do (?:it|this)|connect|link|hook (?:it )?up)|connect(?: it| them| my (?:bank|accounts?))?|link(?: it| them| my (?:bank|accounts?))?|hook (?:it |them |me )?up|launch(?: it| plaid)?|open(?: plaid)?)\b/i;
     // Negative-skip phrases specific to step 4 — user does NOT want to link.
-    const PLAID_SKIP_RE = /^(?:nope?|no(?:pe)?|not (?:now|yet|today)|later|do (?:it |this )?later|skip(?: (?:this|it|for now))?|next|move on|come back|maybe later|no thanks)\b/i;
+    const PLAID_SKIP_RE = /^(?:nope?|no(?:pe)?|not (?:now|yet|today)|later|do (?:it |this )?later|skip(?: (?:this|it|for now))?|come back|maybe later|no thanks)\b/i;
+    // Post-link "we're done here" phrases — user finished Plaid and wants
+    // to move on. Also fires when Plaid Link already ran successfully
+    // (plaidAccts populated) and the user gives ANY move-on signal.
+    const PLAID_DONE_RE = /\b(?:done|all done|already (?:done|linked|completed|connected)|completed|linked|connected|finished|we'?re good|we'?re (?:all )?set|all set|next(?: step)?|move on|let'?s (?:move on|go (?:to (?:the )?next|next)|continue|proceed)|good (?:to go)?)\b/i;
 
     if (script.extractStep === "plaid_intent") {
+      const plaidAlreadyLinked = plaidAcctsRef.current.length > 0;
+      // "done" / "next step" / "all set" always means advance — this fires
+      // regardless of whether Plaid was linked (user may have completed the
+      // popup, or hit skip in Plaid, or just wants out). Also catches
+      // "let's go to the next step" which used to (incorrectly) re-launch
+      // Plaid via the "let's go" alternative in CONNECT_RE.
+      if (PLAID_DONE_RE.test(msg)) {
+        emitAction("onboarding-coach-greet", {
+          message: plaidAlreadyLinked
+            ? "Nice — bank connected. Moving on…"
+            : "Got it — moving on…",
+        });
+        setTimeout(() => nextRef.current(), 1200);
+        return;
+      }
       if (PLAID_CONNECT_RE.test(msg)) {
+        if (plaidAlreadyLinked) {
+          // Don't re-launch — they already linked. Ask if they want to add
+          // another account or move on.
+          emitAction("onboarding-coach-greet", {
+            message: "Bank's already connected. Want to link another, or should we move on to statement uploads?",
+          });
+          return;
+        }
         emitAction("onboarding-coach-greet", {
           message: "Great — launching Plaid now. Sign in with your bank and I'll take it from there.",
         });
