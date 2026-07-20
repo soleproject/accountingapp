@@ -471,7 +471,7 @@ export default function AiPanel({ collapsed, onToggle }) {
     window.speechSynthesis.addEventListener("voiceschanged", load);
     return () => window.speechSynthesis.removeEventListener("voiceschanged", load);
   }, []);
-  const { focus, setFocus } = useAiFocus();
+  const { focus, setFocus, pinned: focusPinned } = useAiFocus();
 
   // Cleanup Copilot integration: when the user clicks a chip / "Fix now" on
   // the hero band, the Transactions page emits `cleanup-inquiry` with the
@@ -571,6 +571,19 @@ export default function AiPanel({ collapsed, onToggle }) {
     const t = payload?.txn;
     if (!t) return;
     inquiryTxnRef.current = t.id;
+    // Pin the focus so the "Cancel focus" pill shows above the input —
+    // this is an explicit user gesture (they clicked the sparkle), which
+    // is distinct from the ephemeral hover-focus that would only bleed a
+    // "Focused transaction" hint without deserving a cancel affordance.
+    setFocus(
+      {
+        id: t.id,
+        merchant: t.merchant || t.description || t.contact_name || "Transaction",
+        amount: typeof t.amount === "number" ? t.amount : 0,
+        date: t.date || "",
+      },
+      { pin: true },
+    );
     const label = t.merchant || t.description || t.contact_name || "this transaction";
     const amt = (typeof t.amount === "number")
       ? ` (${t.amount.toLocaleString("en-US", { style: "currency", currency: "USD" })})`
@@ -2730,7 +2743,7 @@ export default function AiPanel({ collapsed, onToggle }) {
             </span>
           </div>
         )}
-        {focus && (
+        {focus && focusPinned && (
           <button
             data-testid="ai-cancel-focus"
             onClick={() => setFocus(null, { force: true })}
