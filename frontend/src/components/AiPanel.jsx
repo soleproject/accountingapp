@@ -1162,18 +1162,17 @@ export default function AiPanel({ collapsed, onToggle }) {
 
     // Live-accountant onboarding coach — fire the user's message to any
     // coach listener on either the onboarding page (Business Profile
-    // extractor) OR the dashboard's onboarding-not-complete nudge. On the
-    // /onboarding page we ALSO suppress the normal LLM chat so the coach's
-    // clean confirmation isn't tailed by a yappy follow-up. On the dashboard
-    // we still let the normal chat run (the nudge navigates in ~800ms).
+    // extractor) OR the dashboard's onboarding-not-complete nudge. In BOTH
+    // contexts we suppress the normal LLM chat so the coach's clean
+    // confirmation isn't tailed by a yappy generic follow-up (avoids two
+    // overlapping TTS voices playing at once).
     if (typeof window !== "undefined") {
       const path = window.location.pathname;
       const onOnboarding = path.startsWith("/onboarding");
-      const onDashboard = path.startsWith("/dashboard");
-      if (onOnboarding || onDashboard) {
+      const onDashboardWithNudge =
+        path.startsWith("/dashboard") && current && current.onboarding_complete === false;
+      if (onOnboarding || onDashboardWithNudge) {
         emitAction("onboarding-user-message", { text: userMsg });
-      }
-      if (onOnboarding) {
         setMessages(m => [...m, { role: "user", content: userMsg }]);
         return;
       }
