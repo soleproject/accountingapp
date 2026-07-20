@@ -148,6 +148,8 @@ export default function Dashboard() {
         </div>
       </div>
 
+      <AttentionTile attention={attention} />
+
       {totals && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
@@ -259,8 +261,6 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
-
-      <AttentionTile attention={attention} />
 
       <div className="rounded-xl border bg-white p-5">
         <div className="flex items-center justify-between mb-3">
