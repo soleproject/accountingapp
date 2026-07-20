@@ -56,8 +56,8 @@ const COACH_SCRIPTS = {
   1: {
     key: "onboarding.qbo_link",
     message: (ctx) => {
-      const hello = ctx.userFirst ? `${ctx.userFirst}, ` : "";
-      return `${hello}do you already use QuickBooks Online? Just say "yes we're on QuickBooks" and I'll link it, or "no let's start fresh" and I'll set up a clean chart of accounts for you.`;
+      const hello = ctx.userFirst ? `${ctx.userFirst}, do` : "Do";
+      return `${hello} you already use QuickBooks Online and want to migrate the information?`;
     },
     extractStep: "qbo_link",
     ready: (fields) => fields.qbo === "yes" || fields.qbo === "no",
