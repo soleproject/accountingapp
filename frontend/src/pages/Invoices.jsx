@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
@@ -36,6 +37,29 @@ export default function Invoices() {
   const [creating, setCreating] = useState(false);
   const [creatingPrefill, setCreatingPrefill] = useState(null);
   const [editing, setEditing] = useState(null);
+  // Deep-link filters from Month Close: /invoices?outstanding=1&as_of=YYYY-MM-DD
+  // Filtering is client-side against the already-loaded /invoices response
+  // — matches the backend `_outstanding_count` semantics exactly
+  // (issue_date <= as_of AND balance_due > 0).
+  const [params, setParams] = useSearchParams();
+  const outstanding = params.get("outstanding") === "1";
+  const asOf = params.get("as_of") || "";
+  const filtered = useMemo(() => {
+    if (!outstanding && !asOf) return items;
+    return items.filter(inv => {
+      if (outstanding && !(Number(inv.balance_due) > 0.005)) return false;
+      if (asOf) {
+        const d = inv.issue_date || inv.date || "";
+        if (d && d > asOf) return false;
+      }
+      return true;
+    });
+  }, [items, outstanding, asOf]);
+  const clearFilters = () => {
+    const p = new URLSearchParams(params);
+    p.delete("outstanding"); p.delete("as_of");
+    setParams(p, { replace: true });
+  };
   const load = async () => {
     if (!currentId) return;
     const [i, c, a] = await Promise.all([
@@ -127,6 +151,28 @@ export default function Invoices() {
         </div>
       )}
       <div className="rounded-xl border bg-white overflow-hidden">
+        {(outstanding || asOf) && (
+          <div
+            className="flex items-center justify-between px-3 py-2 bg-cyan-50 border-b border-cyan-100 text-xs text-cyan-900"
+            data-testid="invoices-filter-chip"
+          >
+            <span>
+              Showing{" "}
+              {outstanding && <b>outstanding</b>}
+              {outstanding && asOf && " "}
+              {asOf && <>as of <b className="font-mono-num">{asOf}</b></>}
+              {" "}·{" "}
+              <span className="font-mono-num">{filtered.length}</span> of {items.length}
+            </span>
+            <button
+              onClick={clearFilters}
+              className="inline-flex items-center gap-1 text-cyan-700 hover:underline"
+              data-testid="invoices-clear-filters"
+            >
+              <X size={12} /> Clear filters
+            </button>
+          </div>
+        )}
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500 border-b">
             <tr>
@@ -141,7 +187,7 @@ export default function Invoices() {
             </tr>
           </thead>
           <tbody>
-            {items.map(inv => (
+            {filtered.map(inv => (
               <tr key={inv.id} className="border-b hover:bg-slate-50">
                 <td className="px-3 py-2 font-mono-num text-slate-600">{inv.number}</td>
                 <td className="px-3 py-2">{inv.contact_name}</td>
@@ -159,7 +205,15 @@ export default function Invoices() {
                 </td>
               </tr>
             ))}
-            {!items.length && <tr><td colSpan={8} className="text-center py-8 text-slate-500">No invoices.</td></tr>}
+            {!filtered.length && (
+              <tr>
+                <td colSpan={8} className="text-center py-8 text-slate-500">
+                  {(outstanding || asOf)
+                    ? `No matching invoices${items.length ? ` (${items.length} total, none met the filter)` : ""}.`
+                    : "No invoices."}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

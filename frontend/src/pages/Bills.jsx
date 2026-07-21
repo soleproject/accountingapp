@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
@@ -25,6 +26,26 @@ export default function Bills() {
   const [creating, setCreating] = useState(false);
   const [creatingPrefill, setCreatingPrefill] = useState(null);
   const [editing, setEditing] = useState(null);
+  // Deep-link filters from Month Close: /bills?outstanding=1&as_of=YYYY-MM-DD
+  const [params, setParams] = useSearchParams();
+  const outstanding = params.get("outstanding") === "1";
+  const asOf = params.get("as_of") || "";
+  const filtered = useMemo(() => {
+    if (!outstanding && !asOf) return items;
+    return items.filter(b => {
+      if (outstanding && !(Number(b.balance_due) > 0.005)) return false;
+      if (asOf) {
+        const d = b.issue_date || b.date || "";
+        if (d && d > asOf) return false;
+      }
+      return true;
+    });
+  }, [items, outstanding, asOf]);
+  const clearFilters = () => {
+    const p = new URLSearchParams(params);
+    p.delete("outstanding"); p.delete("as_of");
+    setParams(p, { replace: true });
+  };
   const load = async () => {
     if (!currentId) return;
     const [b, c, a] = await Promise.all([
@@ -107,6 +128,28 @@ export default function Bills() {
       )}
 
       <div className="rounded-xl border bg-white overflow-hidden">
+        {(outstanding || asOf) && (
+          <div
+            className="flex items-center justify-between px-3 py-2 bg-cyan-50 border-b border-cyan-100 text-xs text-cyan-900"
+            data-testid="bills-filter-chip"
+          >
+            <span>
+              Showing{" "}
+              {outstanding && <b>outstanding</b>}
+              {outstanding && asOf && " "}
+              {asOf && <>as of <b className="font-mono-num">{asOf}</b></>}
+              {" "}·{" "}
+              <span className="font-mono-num">{filtered.length}</span> of {items.length}
+            </span>
+            <button
+              onClick={clearFilters}
+              className="inline-flex items-center gap-1 text-cyan-700 hover:underline"
+              data-testid="bills-clear-filters"
+            >
+              <X size={12} /> Clear filters
+            </button>
+          </div>
+        )}
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500 border-b">
             <tr><th className="px-3 py-2 text-left">Number</th><th className="px-3 py-2 text-left">Vendor</th>
@@ -115,7 +158,7 @@ export default function Bills() {
               <th className="px-3 py-2">Status</th><th></th></tr>
           </thead>
           <tbody>
-            {items.map(b => (
+            {filtered.map(b => (
               <tr key={b.id} className="border-b hover:bg-slate-50">
                 <td className="px-3 py-2 font-mono-num text-slate-600">{b.number}</td>
                 <td className="px-3 py-2">{b.contact_name}</td>
@@ -133,7 +176,15 @@ export default function Bills() {
                 </td>
               </tr>
             ))}
-            {!items.length && <tr><td colSpan={8} className="text-center py-8 text-slate-500">No bills.</td></tr>}
+            {!filtered.length && (
+              <tr>
+                <td colSpan={8} className="text-center py-8 text-slate-500">
+                  {(outstanding || asOf)
+                    ? `No matching bills${items.length ? ` (${items.length} total, none met the filter)` : ""}.`
+                    : "No bills."}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

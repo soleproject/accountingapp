@@ -248,9 +248,25 @@ function CheckpointRow({ meta, c, onSign, busy, divider, cursorMonth, periodStar
       </span>
     );
   } else if (meta.key === "invoices") {
-    statusEl = <Link to="/invoices" className="text-xs text-cyan-700 hover:underline">{c?.outstanding ?? 0} outstanding invoices</Link>;
+    statusEl = (
+      <Link
+        to={`/invoices${periodEnd ? `?outstanding=1&as_of=${periodEnd}` : ""}`}
+        className="text-xs text-cyan-700 hover:underline"
+        data-testid="month-close-invoices-link"
+      >
+        {c?.outstanding ?? 0} outstanding invoices
+      </Link>
+    );
   } else if (meta.key === "bills") {
-    statusEl = <Link to="/bills" className="text-xs text-cyan-700 hover:underline">{c?.outstanding ?? 0} outstanding bills</Link>;
+    statusEl = (
+      <Link
+        to={`/bills${periodEnd ? `?outstanding=1&as_of=${periodEnd}` : ""}`}
+        className="text-xs text-cyan-700 hover:underline"
+        data-testid="month-close-bills-link"
+      >
+        {c?.outstanding ?? 0} outstanding bills
+      </Link>
+    );
   } else if (meta.key === "recon") {
     statusEl = <Link to="/accounting/reconciliation" className="text-xs text-cyan-700 hover:underline">Open reconciliation</Link>;
   }
