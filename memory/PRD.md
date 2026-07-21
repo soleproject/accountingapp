@@ -505,3 +505,26 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
     (no auth) returns firm name + logos + theme; Login.jsx reads
     `?firm=<sub>` (or the hostname's leftmost label in prod) and renders
     the firm's logo above the sign-in form.
+
+### 2026-02-20 — Month Close checklist (NEW)
+- New route `/accounting/month-close` (also under `Accounting > Month Close`
+  in both left nav arrays, directly under Transactions).
+- 5-checkpoint checklist per calendar month:
+  - `txns_reviewed` (AUTO — 0 uncategorized + 0 unreviewed for posted txns in
+    the window; vacuously green when the month has no transactions)
+  - `invoices` (SIGN-OFF — outstanding count shown live, no requirement to pay)
+  - `bills` (SIGN-OFF)
+  - `recon` (SIGN-OFF for MVP; auto-inference from reconciliations collection
+    is future work)
+  - `closed` (SIGN-OFF, gated — backend returns 409 unless the other four are
+    green; also writes a `close_periods` row so the existing period-lock
+    engine sees the month as closed)
+- Two views: **detail** (per-month checklist with prev/next month arrows +
+  Today reset + clickable status links) and **list** (12-month grid with
+  red/green pills per checkpoint).
+- New Mongo collection: `month_close_signoffs`
+  `{company_id, year, month, kind, signed_at, signed_by}` upserted per row.
+- New backend routes in `/app/backend/routes/month_close.py`:
+  - `GET /api/companies/{cid}/month-close/months?count=12`
+  - `GET /api/companies/{cid}/month-close/{yyyy-mm}`
+  - `POST /api/companies/{cid}/month-close/{yyyy-mm}/checkpoint`

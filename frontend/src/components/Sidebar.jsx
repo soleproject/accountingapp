@@ -23,11 +23,13 @@ const NAV = [
   { to: "/connections", label: "Connections", icon: Link2 },
   { to: "/communications", label: "Communications", icon: Inbox },
   { to: "/accounting/transactions", label: "Transactions", icon: ArrowLeftRight },
+  { to: "/accounting/month-close", label: "Month Close", icon: CalendarCheck },
   { to: "/settings", label: "Settings", icon: Settings2 },
 ];
 
 const ACCOUNTING = [
   { to: "/accounting/transactions", label: "Transactions", icon: ArrowLeftRight },
+  { to: "/accounting/month-close", label: "Month Close", icon: CalendarCheck },
   { to: "/accounting/inventory", label: "Inventory", icon: Boxes },
   { to: "/accounting/assets", label: "Assets", icon: Building2 },
   { to: "/accounting/loans", label: "Loans", icon: Wallet },
