@@ -1,19 +1,23 @@
 """AI Ask Client — autonomous email loop.
 
-Once an hour, scans every company for recently-flagged transactions that
-have not yet been asked about, then emails the client-owner a magic-link
-question drafted by the AI. Respects:
+Once an hour *during business hours* (6am–8pm America/New_York by default),
+scans every company for recently-flagged transactions that have not yet
+been asked about, then emails the client-owner a magic-link question
+drafted by the AI. Respects:
 
 * the pro's ``ai_ask_client`` preference (opt-out — defaults ON)
 * a per-client-email daily cap of 3 emails / calendar day
 * transactions must be < 3 days old (fresh feedback only)
 * one focused transaction per email (client burnout is real — the
   magic-link chat itself will offer to chain more once the first is done)
+* time-of-day window — no 4am "quick question" pings; also keeps daily-cap
+  slots reserved for hours the client is actually awake
 
 Runs as an in-process asyncio background task registered by
 ``server.py`` at startup. The same body is exposed via HTTP
 (:py:func:`routes.communications.run_ai_ask_client`) so pros can trigger
-a run on demand and superadmins can smoke-test the flow.
+a run on demand (bypasses the time-of-day window) and superadmins can
+smoke-test the flow.
 """
 from __future__ import annotations
 
@@ -23,6 +27,7 @@ import os
 import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from db import db, now_iso
 from email_dispatcher import dispatch, get_prefs, public_base_url
@@ -34,7 +39,25 @@ logger = logging.getLogger(__name__)
 LOOKBACK_DAYS = 3
 DAILY_CAP_PER_CLIENT = 3
 SCHEDULER_INTERVAL_SECONDS = int(os.environ.get("AI_ASK_CLIENT_INTERVAL_SEC", "3600"))
+# Business-hour window (inclusive start, exclusive end). Ticks outside
+# this window skip the scan entirely — Plaid still pulls txns overnight
+# and the next in-window tick will pick them up.
+SEND_TZ = os.environ.get("AI_ASK_CLIENT_TZ", "America/New_York")
+SEND_START_HOUR = int(os.environ.get("AI_ASK_CLIENT_START_HOUR", "6"))
+SEND_END_HOUR = int(os.environ.get("AI_ASK_CLIENT_END_HOUR", "20"))
 KIND = "ai_ask_client"
+
+
+def _in_send_window(now: Optional[datetime] = None) -> bool:
+    """True when the current wall-clock hour in ``SEND_TZ`` is within the
+    configured [START, END) window."""
+    try:
+        tz = ZoneInfo(SEND_TZ)
+    except Exception:  # noqa: BLE001 — bad tz string → default to always-on
+        return True
+    now = now or datetime.now(tz)
+    hour = now.astimezone(tz).hour
+    return SEND_START_HOUR <= hour < SEND_END_HOUR
 
 
 async def _resolve_client_email(cid: str) -> tuple[Optional[str], str]:
@@ -240,10 +263,16 @@ async def _loop() -> None:
     await asyncio.sleep(30)
     while True:
         try:
-            summary = await run_once()
-            if summary["sent"]:
-                logger.info("AI ask-client: sent=%s companies=%s",
-                            summary["sent"], summary["companies"])
+            if _in_send_window():
+                summary = await run_once()
+                if summary["sent"]:
+                    logger.info("AI ask-client: sent=%s companies=%s",
+                                summary["sent"], summary["companies"])
+            else:
+                logger.debug(
+                    "AI ask-client tick outside %s window (%02d:00–%02d:00 %s) — skipping scan",
+                    SEND_TZ, SEND_START_HOUR, SEND_END_HOUR, SEND_TZ,
+                )
         except Exception:  # noqa: BLE001
             logger.exception("AI ask-client run failed — will retry next tick")
         await asyncio.sleep(SCHEDULER_INTERVAL_SECONDS)
@@ -259,7 +288,10 @@ def start_scheduler() -> None:
         return
     loop = asyncio.get_event_loop()
     _TASK = loop.create_task(_loop(), name="ai_ask_client_scheduler")
-    logger.info("AI ask-client scheduler started (interval=%ss)", SCHEDULER_INTERVAL_SECONDS)
+    logger.info(
+        "AI ask-client scheduler started (interval=%ss window=%02d:00–%02d:00 %s)",
+        SCHEDULER_INTERVAL_SECONDS, SEND_START_HOUR, SEND_END_HOUR, SEND_TZ,
+    )
 
 
 def stop_scheduler() -> None:

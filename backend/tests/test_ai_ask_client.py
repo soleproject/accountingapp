@@ -238,3 +238,27 @@ def test_chain_next_returns_another_pending_ai_question_for_same_client():
 def secrets_urlsafe():
     import secrets
     return secrets.token_urlsafe(16)
+
+
+def test_send_window_gates_scheduler_hours():
+    """The 6am–8pm America/New_York window means overnight ticks skip the
+    scan entirely. `run_once` isn't gated (used by the manual endpoint),
+    but the loop-tick gate `_in_send_window()` is what actually skips
+    real off-hours work."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo(sched.SEND_TZ)
+
+    # Deep-off-hours — 3am ET → False
+    off = datetime(2026, 7, 21, 3, 0, tzinfo=tz)
+    assert sched._in_send_window(off) is False
+
+    # Business hours — 10am ET → True
+    on = datetime(2026, 7, 21, 10, 0, tzinfo=tz)
+    assert sched._in_send_window(on) is True
+
+    # Boundaries — 6am inclusive, 8pm exclusive
+    assert sched._in_send_window(datetime(2026, 7, 21, 6, 0, tzinfo=tz)) is True
+    assert sched._in_send_window(datetime(2026, 7, 21, 19, 59, tzinfo=tz)) is True
+    assert sched._in_send_window(datetime(2026, 7, 21, 20, 0, tzinfo=tz)) is False
+    assert sched._in_send_window(datetime(2026, 7, 21, 5, 59, tzinfo=tz)) is False
