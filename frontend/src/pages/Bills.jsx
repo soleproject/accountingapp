@@ -6,6 +6,7 @@ import { TID } from "@/constants/testIds";
 import { Plus, Trash2, X, AlertTriangle, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
+import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
 
 const BUCKETS = [
   { key: "current", label: "Current", desc: "Not yet due", color: "emerald" },
@@ -70,6 +71,7 @@ export default function Bills() {
 
   return (
     <div className="space-y-4">
+      <MonthCloseBreadcrumb />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-heading text-3xl font-bold tracking-tight">Bills</h1>

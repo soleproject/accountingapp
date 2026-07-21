@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
@@ -7,6 +7,7 @@ import {
   CheckCircle2, Loader2, Upload, FileText, Sparkles, ArrowRight,
   CalendarDays, Building2, Plus, ChevronRight, X,
 } from "lucide-react";
+import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
 
 // Reconciliation — Slice R1+R2+R3.
 // R1 (Plaid auto-clear) runs invisibly on every sync + on-demand via the
@@ -41,6 +42,44 @@ export default function Reconciliation() {
   const [showMatchModal, setShowMatchModal] = useState(false);
   const [startOpen, setStartOpen] = useState(false);
   const fileRef = useRef(null);
+  const [urlParams] = useSearchParams();
+
+  // Deep-link from Month Close: /accounting/reconciliation?month=YYYY-MM
+  // pre-fills the "Start reconciliation" form with that month's bounds and
+  // opens it, AND narrows the history table to any recons overlapping it.
+  const monthFilter = urlParams.get("month") || "";
+  const monthBounds = useMemo(() => {
+    const m = /^(\d{4})-(\d{2})$/.exec(monthFilter);
+    if (!m) return null;
+    const y = Number(m[1]), mo = Number(m[2]);
+    if (mo < 1 || mo > 12) return null;
+    const last = new Date(y, mo, 0).getUTCDate();
+    return {
+      start: `${m[1]}-${m[2]}-01`,
+      end:   `${m[1]}-${m[2]}-${String(last).padStart(2, "0")}`,
+    };
+  }, [monthFilter]);
+
+  // Hydrate the start-new form + open it once when arriving with ?month=.
+  useEffect(() => {
+    if (!monthBounds) return;
+    setPeriodStart(monthBounds.start);
+    setPeriodEnd(monthBounds.end);
+    setStartOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [monthFilter]);
+
+  // History table is scoped to the requested month when the deep-link is
+  // present — real recons only, no fabricating.
+  const visibleHistory = useMemo(() => {
+    if (!monthBounds) return history;
+    return history.filter(r => {
+      const s = r.period_start || r.as_of;
+      const e = r.period_end || r.as_of;
+      if (!s || !e) return false;
+      return s <= monthBounds.end && e >= monthBounds.start;
+    });
+  }, [history, monthBounds]);
 
   // Load bank/CC accounts + past reconciliations once we know the company.
   const load = async () => {
@@ -219,11 +258,14 @@ export default function Reconciliation() {
 
   return (
     <div className="space-y-4" data-testid="reconciliation-page">
+      <MonthCloseBreadcrumb />
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="font-heading text-3xl font-bold tracking-tight">Reconciliation</h1>
           <p className="text-slate-500 text-sm mt-1">
-            {history.length} reconciliation period{history.length === 1 ? "" : "s"} · Plaid txns auto-clear after 5 days.
+            {monthBounds
+              ? <>{visibleHistory.length} reconciliation{visibleHistory.length === 1 ? "" : "s"} in {monthBounds.start.slice(0, 7)} · <b>{history.length} total</b></>
+              : <>{history.length} reconciliation period{history.length === 1 ? "" : "s"} · Plaid txns auto-clear after 5 days.</>}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -428,12 +470,14 @@ export default function Reconciliation() {
             </tr>
           </thead>
           <tbody>
-            {history.length === 0 && (
+            {visibleHistory.length === 0 && (
               <tr><td colSpan={7} className="text-center py-10 text-slate-500 text-sm">
-                No reconciliations yet. Hit "+ Start reconciliation" or "Auto-clear settled Plaid txns" to begin.
+                {monthBounds
+                  ? <>No reconciliations for {monthBounds.start.slice(0, 7)} yet. Use "+ Start reconciliation" — the form is pre-filled with this month's date range.</>
+                  : <>No reconciliations yet. Hit "+ Start reconciliation" or "Auto-clear settled Plaid txns" to begin.</>}
               </td></tr>
             )}
-            {history.map(r => (
+            {visibleHistory.map(r => (
               <tr key={r.id} className="border-b last:border-b-0 hover:bg-slate-50 cursor-pointer" data-testid={`recon-history-row-${r.id}`}>
                 <td className="px-4 py-2 font-mono-num text-xs text-cyan-700">
                   <Link to={`/accounting/reconciliation/${r.id}`} className="hover:underline">

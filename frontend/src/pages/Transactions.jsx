@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import CleanupCopilot from "@/components/CleanupCopilot";
+import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
 import { ContactBadge } from "@/components/ContactBadge";
 import { emitAction, useActionListener } from "@/lib/createBus";
@@ -541,6 +542,7 @@ export default function Transactions() {
 
   return (
     <div className="space-y-4">
+      <MonthCloseBreadcrumb />
       <CleanupCopilot
         currentId={currentId}
         autoTrigger={params.get("auto") === "1"}

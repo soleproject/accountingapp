@@ -210,10 +210,16 @@ function CheckpointRow({ meta, c, onSign, busy, divider, cursorMonth, periodStar
   const canToggle = !isAuto;
 
   // Build a "?status=…&date_from=…&date_to=…" suffix so the Transactions
-  // page opens filtered to THIS month's slice, not company-wide.
-  const monthRange = (periodStart && periodEnd)
-    ? `&date_from=${periodStart}&date_to=${periodEnd}`
+  // page opens filtered to THIS month's slice, not company-wide. Also carry
+  // the `from=month-close&ym=YYYY-MM` breadcrumb key so the destination
+  // page can render a "Back to <Month> close" link at the top.
+  const ymKey = cursorMonth
+    ? `${cursorMonth.year}-${String(cursorMonth.month).padStart(2, "0")}`
     : "";
+  const bc = `&from=month-close&ym=${ymKey}`;
+  const monthRange = (periodStart && periodEnd)
+    ? `&date_from=${periodStart}&date_to=${periodEnd}${bc}`
+    : bc;
 
   // Contextual status text per checkpoint — clickable link where possible
   // so the pro can jump straight to what needs review.
@@ -250,7 +256,7 @@ function CheckpointRow({ meta, c, onSign, busy, divider, cursorMonth, periodStar
   } else if (meta.key === "invoices") {
     statusEl = (
       <Link
-        to={`/invoices${periodEnd ? `?outstanding=1&as_of=${periodEnd}` : ""}`}
+        to={periodEnd ? `/invoices?outstanding=1&as_of=${periodEnd}${bc}` : "/invoices"}
         className="text-xs text-cyan-700 hover:underline"
         data-testid="month-close-invoices-link"
       >
@@ -260,7 +266,7 @@ function CheckpointRow({ meta, c, onSign, busy, divider, cursorMonth, periodStar
   } else if (meta.key === "bills") {
     statusEl = (
       <Link
-        to={`/bills${periodEnd ? `?outstanding=1&as_of=${periodEnd}` : ""}`}
+        to={periodEnd ? `/bills?outstanding=1&as_of=${periodEnd}${bc}` : "/bills"}
         className="text-xs text-cyan-700 hover:underline"
         data-testid="month-close-bills-link"
       >
@@ -268,7 +274,15 @@ function CheckpointRow({ meta, c, onSign, busy, divider, cursorMonth, periodStar
       </Link>
     );
   } else if (meta.key === "recon") {
-    statusEl = <Link to="/accounting/reconciliation" className="text-xs text-cyan-700 hover:underline">Open reconciliation</Link>;
+    statusEl = (
+      <Link
+        to={ymKey ? `/accounting/reconciliation?month=${ymKey}${bc}` : "/accounting/reconciliation"}
+        className="text-xs text-cyan-700 hover:underline"
+        data-testid="month-close-recon-link"
+      >
+        Open reconciliation
+      </Link>
+    );
   }
 
   return (
