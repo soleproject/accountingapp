@@ -201,7 +201,11 @@ function DetailView({ cursor, setCursor, data, onSign, busy }) {
 function CheckpointRow({ meta, c, onSign, busy, divider, cursorMonth }) {
   const Icon = meta.icon;
   const green = Boolean(c?.green);
-  const canToggle = !meta.auto || meta.key === "closed";
+  // A row is auto-driven either statically (Txns Reviewed) or dynamically
+  // when the server says nothing needs a signoff (e.g. 0 outstanding
+  // invoices/bills for the month). Closed is always manual.
+  const isAuto = (meta.auto || Boolean(c?.auto)) && meta.key !== "closed";
+  const canToggle = !isAuto;
 
   // Contextual status text per checkpoint — clickable link where possible
   // so the pro can jump straight to what needs review.
@@ -245,7 +249,7 @@ function CheckpointRow({ meta, c, onSign, busy, divider, cursorMonth }) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-medium text-sm text-slate-900">{meta.label}</span>
-          {meta.auto && (
+          {isAuto && (
             <span className="text-[10px] uppercase tracking-widest text-slate-400 border rounded px-1.5 py-0.5">
               auto
             </span>

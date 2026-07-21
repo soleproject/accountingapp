@@ -113,6 +113,12 @@ async def _month_status(cid: str, year: int, month: int) -> dict:
     recon_sign = signoffs.get("recon")
     closed_sign = signoffs.get("closed")
 
+    # When a month has no outstanding invoices / bills there's nothing to
+    # review — auto-green the row and expose an `auto` flag so the UI can
+    # show the neutral "Auto" pill instead of a sign-off button.
+    inv_auto_green = (invoices_open == 0)
+    bill_auto_green = (bills_open == 0)
+
     return {
         "year": year,
         "month": month,
@@ -127,13 +133,15 @@ async def _month_status(cid: str, year: int, month: int) -> dict:
                 "unreviewed": txns["unreviewed"],
             },
             "invoices": {
-                "green": bool(inv_sign),
+                "green": bool(inv_sign) or inv_auto_green,
+                "auto": inv_auto_green and not inv_sign,
                 "outstanding": invoices_open,
                 "signed_at": inv_sign.get("signed_at") if inv_sign else None,
                 "signed_by": inv_sign.get("signed_by") if inv_sign else None,
             },
             "bills": {
-                "green": bool(bill_sign),
+                "green": bool(bill_sign) or bill_auto_green,
+                "auto": bill_auto_green and not bill_sign,
                 "outstanding": bills_open,
                 "signed_at": bill_sign.get("signed_at") if bill_sign else None,
                 "signed_by": bill_sign.get("signed_by") if bill_sign else None,
