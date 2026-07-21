@@ -255,13 +255,17 @@ async def match_statement_lines(
                             missing from ledger)
     """
     if not statement_lines:
-        return {"auto": [], "suggest": [], "manual": []}
+        return {"auto": [], "suggest": [], "manual": [], "missing_from_statement": []}
 
     # Pull candidate pool once: uncleared posted txns for the account,
     # within a ±window around the statement's date range.
     all_dates = [d for d in (l.get("date") for l in statement_lines) if d]
     if not all_dates:
-        return {"auto": [], "suggest": [], "manual": [{"line": l, "best": None} for l in statement_lines]}
+        return {
+            "auto": [], "suggest": [],
+            "manual": [{"line": l, "best": None} for l in statement_lines],
+            "missing_from_statement": [],
+        }
     lo = min(all_dates)
     hi = max(all_dates)
     lo_d = _parse_date(lo); hi_d = _parse_date(hi)
@@ -324,7 +328,24 @@ async def match_statement_lines(
         else:
             manual.append(entry)
 
-    return {"auto": auto, "suggest": suggest, "manual": manual}
+    # "Missing from statement" — ledger txns in the same period+account that
+    # no statement line matched. Enterprise-grade trust signal: surfaces the
+    # transactions a client either forgot to send OR that hit the bank
+    # without landing on the paper statement (fraud / duplicate / typo).
+    missing = [
+        {
+            "id": c["id"], "date": c.get("date"),
+            "amount": c.get("amount"),
+            "description": c.get("description") or c.get("merchant"),
+            "category_account_name": c.get("category_account_name"),
+        }
+        for c in candidates if c["id"] not in used
+    ]
+
+    return {
+        "auto": auto, "suggest": suggest, "manual": manual,
+        "missing_from_statement": missing,
+    }
 
 
 # ---------------------------------------------------------------------------

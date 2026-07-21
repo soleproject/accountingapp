@@ -456,6 +456,9 @@ function MatchResultModal({ result, onClose, onApply }) {
               {result.line_count} statement lines · <b className="text-emerald-700">{result.auto_count} auto</b>
               {" · "}<b className="text-amber-700">{result.suggest_count} suggested</b>
               {" · "}<b className="text-slate-500">{result.manual_count} manual</b>
+              {result.missing_from_statement_count > 0 && (
+                <> · <b className="text-red-700">{result.missing_from_statement_count} in books but not on statement</b></>
+              )}
             </p>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-900 text-sm">Close</button>
@@ -483,6 +486,9 @@ function MatchResultModal({ result, onClose, onApply }) {
               rows={result.manual}
               manual
             />
+          )}
+          {result.missing_from_statement?.length > 0 && (
+            <MissingTier rows={result.missing_from_statement} />
           )}
         </div>
         <div className="px-5 py-3 border-t bg-slate-50 flex items-center justify-between">
@@ -540,6 +546,57 @@ function Tier({ title, rows, picked, onToggle, locked, manual }) {
             ) : (
               <div className="text-[11px] text-red-700 italic">No candidate — likely missing from ledger.</div>
             )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MissingTier({ rows }) {
+  // Ledger transactions with no matching line on the statement.
+  // For a client using Axiom this usually means either:
+  //   1. The transaction was posted to the books but never actually hit the bank
+  //      (typo, or the txn was deleted at the bank end)
+  //   2. A duplicate posting the client will want to review
+  //   3. A fraud item that hit the ledger but not the statement
+  // Purely informational — no bulk action; user needs to open each and decide.
+  return (
+    <div data-testid="recon-missing-from-statement">
+      <div className="text-xs font-semibold uppercase tracking-widest mb-2 text-red-700">
+        In your books but not on this statement ({rows.length})
+      </div>
+      <p className="text-[11px] text-slate-500 mb-2">
+        These transactions exist in the ledger for the same period + account but didn't match any line
+        on the uploaded statement. Review each — likely a duplicate, a bank correction,
+        or a fraud red-flag.
+      </p>
+      <div className="space-y-1">
+        {rows.map(t => (
+          <div key={t.id}
+               className="rounded border border-red-100 bg-red-50/40 px-3 py-2 flex items-center gap-3"
+               data-testid={`recon-missing-row-${t.id}`}>
+            <FileText size={14} className="text-red-500 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="truncate">{t.description}</div>
+              <div className="text-[11px] text-slate-500 font-mono-num">
+                {t.date}
+                {t.category_account_name && <> · {t.category_account_name}</>}
+              </div>
+            </div>
+            <span className={`font-mono-num tabular-nums w-24 text-right ${
+              Number(t.amount) < 0 ? "text-red-700" : "text-emerald-700"
+            }`}>
+              {fmtMoney(t.amount)}
+            </span>
+            <Link
+              to={`/accounting/transactions?highlight=${t.id}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[11px] text-cyan-700 hover:underline"
+            >
+              Open
+            </Link>
           </div>
         ))}
       </div>

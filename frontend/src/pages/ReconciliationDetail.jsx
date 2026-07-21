@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import {
-  ArrowLeft, CheckCircle2, Loader2, CalendarDays, Building2, User,
+  ArrowLeft, CheckCircle2, Loader2, CalendarDays, User, Undo2,
 } from "lucide-react";
 
 // Reconciliation detail — the drill-down when a user clicks a row in the
@@ -14,8 +14,10 @@ import {
 export default function ReconciliationDetail() {
   const { rid } = useParams();
   const { currentId } = useCompany();
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [undoing, setUndoing] = useState(false);
 
   useEffect(() => {
     if (!currentId || !rid) return;
@@ -25,6 +27,21 @@ export default function ReconciliationDetail() {
       .catch(e => toast.error(e.response?.data?.detail || "Failed to load"))
       .finally(() => setLoading(false));
   }, [currentId, rid]);
+
+  const unreconcile = async () => {
+    if (!window.confirm(
+      `Un-reconcile this reconciliation? All ${data?.transactions?.length || 0} transactions ` +
+      `will be un-marked as cleared and this snapshot will be deleted. This can't be undone.`
+    )) return;
+    setUndoing(true);
+    try {
+      const r = await api.delete(`/companies/${currentId}/reconciliations/${rid}`);
+      toast.success(`Un-reconciled ${r.data.un_cleared} transactions.`);
+      navigate("/accounting/reconciliation");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Un-reconcile failed");
+    } finally { setUndoing(false); }
+  };
 
   if (loading) return (
     <div className="p-10 text-center text-slate-500 text-sm">
@@ -68,6 +85,15 @@ export default function ReconciliationDetail() {
             </span>
           </p>
         </div>
+        <button
+          onClick={unreconcile}
+          disabled={undoing}
+          data-testid="recon-unreconcile-btn"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-40"
+        >
+          {undoing ? <Loader2 size={13} className="animate-spin" /> : <Undo2 size={13} />}
+          Un-reconcile
+        </button>
       </div>
 
       {/* Summary card */}

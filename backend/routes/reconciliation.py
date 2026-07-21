@@ -173,6 +173,7 @@ async def match_statement(
         "auto_count": len(matches["auto"]),
         "suggest_count": len(matches["suggest"]),
         "manual_count": len(matches["manual"]),
+        "missing_from_statement_count": len(matches.get("missing_from_statement", [])),
         **matches,
     }
 
@@ -240,6 +241,31 @@ async def get_rec_detail(cid: str, rid: str, user: dict = Depends(get_current_us
         "account": coerce(bank) if bank else None,
         "transactions": [coerce(t) for t in txns],
     }
+
+
+@router.delete("/companies/{cid}/reconciliations/{rid}")
+async def unreconcile(cid: str, rid: str, user: dict = Depends(get_current_user)):
+    """Un-reconcile: delete the reconciliation snapshot and `$unset` the
+    cleared markers on every transaction it touched. Idempotent — deleting an
+    already-deleted recon returns 404 so accidental double-clicks are safe."""
+    await require_company(user, cid)
+    rec = await db.reconciliations.find_one({"id": rid, "company_id": cid})
+    if not rec:
+        raise HTTPException(404, "Reconciliation not found.")
+    txn_ids = rec.get("cleared_txn_ids") or []
+    unset = 0
+    if txn_ids:
+        r = await db.transactions.update_many(
+            {"company_id": cid, "id": {"$in": txn_ids}},
+            {"$unset": {
+                "cleared_at": "",
+                "cleared_source": "",
+                "cleared_reconciliation_id": "",
+            }, "$set": {"updated_at": now_iso()}},
+        )
+        unset = r.modified_count
+    await db.reconciliations.delete_one({"id": rid, "company_id": cid})
+    return {"deleted": rid, "un_cleared": unset}
 
 
 @router.get("/companies/{cid}/book-reviews")
