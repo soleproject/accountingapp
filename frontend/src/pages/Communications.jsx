@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import {
   Inbox, Settings as SettingsIcon, Mail, CheckCircle2, XCircle,
   MinusCircle, Send, RefreshCw, ExternalLink, Sparkles, Wand2, Loader2,
+  MessageSquare, Bot, User as UserIcon, ChevronDown, ChevronRight,
 } from "lucide-react";
 
 const KIND_LABELS = {
@@ -39,6 +40,9 @@ export default function Communications() {
         <TabBtn active={tab === "suggested"} onClick={() => setTab("suggested")} testid="tab-suggested">
           <Wand2 size={14} /> AI Suggestions
         </TabBtn>
+        <TabBtn active={tab === "ailogs"} onClick={() => setTab("ailogs")} testid="tab-ailogs">
+          <MessageSquare size={14} /> AI Logs
+        </TabBtn>
         <TabBtn active={tab === "settings"} onClick={() => setTab("settings")} testid="tab-settings">
           <SettingsIcon size={14} /> Settings
         </TabBtn>
@@ -46,6 +50,7 @@ export default function Communications() {
 
       {tab === "inbox"     && <InboxTab cid={currentId} />}
       {tab === "suggested" && <SuggestedTab cid={currentId} />}
+      {tab === "ailogs"    && <AiLogsTab cid={currentId} />}
       {tab === "settings"  && <SettingsTab />}
     </div>
   );
@@ -467,3 +472,172 @@ function SuggestionCard({ sug, question, selected, onToggle, onChangeQuestion, o
     </div>
   );
 }
+
+
+// ---------------------------------------------------------------------------
+// AI Logs — every client-chat conversation, with full transcript and the
+// transactions it was about. Each row is expandable to see the back-and-
+// forth. Answered rows show the resulting category chip; pending rows show
+// how long the client's been sitting on it.
+// ---------------------------------------------------------------------------
+function AiLogsTab({ cid }) {
+  const [items, setItems] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState({});
+  const load = async () => {
+    if (!cid) return;
+    setBusy(true);
+    try {
+      const r = await api.get(`/companies/${cid}/communications/ai-logs`);
+      setItems(r.data?.items || []);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to load AI logs");
+    } finally { setBusy(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [cid]);
+  const toggle = (id) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
+
+  return (
+    <div className="space-y-4" data-testid="ailogs-tab">
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-slate-500">
+          {items.length} client-chat conversation{items.length === 1 ? "" : "s"} · linked to transactions on the ledger
+        </div>
+        <button
+          onClick={load}
+          disabled={busy}
+          data-testid="ailogs-refresh"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border hover:bg-slate-50"
+        >
+          <RefreshCw size={13} className={busy ? "animate-spin" : ""} /> Refresh
+        </button>
+      </div>
+
+      <div className="space-y-2">
+        {!items.length && !busy && (
+          <div className="rounded-xl border bg-white p-8 text-center text-sm text-slate-500">
+            No conversations yet. Ask a client about a flagged transaction from the Transactions page.
+          </div>
+        )}
+        {items.map(log => (
+          <AiLogRow
+            key={log.id}
+            log={log}
+            open={expanded[log.id]}
+            onToggle={() => toggle(log.id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AiLogRow({ log, open, onToggle }) {
+  const isAnswered = log.status === "answered";
+  const category = log.linked_txns.find(t => t.category_account_name)?.category_account_name;
+  const total = log.linked_txns.reduce((s, t) => s + Number(t.amount || 0), 0);
+  return (
+    <div className="rounded-xl border bg-white" data-testid={`ailog-${log.id}`}>
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center gap-3 p-3 text-left hover:bg-slate-50 rounded-xl"
+        data-testid={`ailog-toggle-${log.id}`}
+      >
+        {open ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-medium text-slate-900">{log.counterparty_label || "Client question"}</span>
+            <span className="text-xs text-slate-500">· {log.txn_count} txn{log.txn_count === 1 ? "" : "s"}</span>
+            <span className="text-xs text-slate-500 font-mono-num">· {fmtMoney(Math.abs(total))}</span>
+            {isAnswered && category && (
+              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                <CheckCircle2 size={10} /> {category}
+              </span>
+            )}
+            {!isAnswered && (
+              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                Awaiting client
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-slate-500 mt-0.5 truncate">
+            {log.question}
+          </div>
+        </div>
+        <div className="text-xs text-slate-400 font-mono-num whitespace-nowrap">
+          {(log.sent_at || "").replace("T", " ").slice(0, 16)}
+        </div>
+      </button>
+
+      {open && (
+        <div className="border-t px-4 py-4 space-y-4" data-testid={`ailog-expanded-${log.id}`}>
+          <div className="text-xs text-slate-500">
+            Asked by <b>{log.asked_by_name || "the pro"}</b> · sent to <span className="font-mono-num">{log.to_email}</span>
+            {log.answered_at && <> · answered {log.answered_at.replace("T", " ").slice(0, 16)}</>}
+          </div>
+
+          {/* Linked transactions */}
+          <div className="rounded-md border bg-slate-50">
+            <div className="px-3 py-2 border-b text-xs text-slate-500">
+              Linked transactions ({log.txn_count})
+            </div>
+            <div className="divide-y">
+              {log.linked_txns.map(t => (
+                <div key={t.id} className="grid grid-cols-[95px_1fr_140px_100px] items-center gap-3 px-3 py-1.5 text-xs">
+                  <span className="text-slate-500 font-mono-num">{t.date}</span>
+                  <span className="text-slate-800 truncate">{t.description}</span>
+                  <span className="text-slate-600 truncate">
+                    {t.category_account_name ? (
+                      <span className="inline-flex items-center gap-1 text-emerald-700">
+                        <CheckCircle2 size={10} /> {t.category_account_name}
+                      </span>
+                    ) : <em className="text-slate-400">Uncategorized</em>}
+                  </span>
+                  <span className={`text-right font-mono-num ${Number(t.amount) < 0 ? "text-slate-800" : "text-emerald-700 font-semibold"}`}>
+                    {fmtMoney(t.amount)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Chat transcript */}
+          <div>
+            <div className="text-xs text-slate-500 mb-2">Conversation</div>
+            <div className="space-y-2">
+              <TranscriptBubble role="ai" content={log.question} label="Original question" />
+              {(log.chat_messages || []).map((m, i) => (
+                <TranscriptBubble key={i} role={m.role} content={m.content} />
+              ))}
+              {isAnswered && log.answer && (
+                <div className="rounded-md border-l-4 border-emerald-400 bg-emerald-50/50 px-3 py-2 text-xs mt-3">
+                  <div className="text-slate-500 uppercase tracking-wide mb-0.5" style={{ fontSize: "10px" }}>Final answer recorded</div>
+                  <div className="text-slate-800">{log.answer}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TranscriptBubble({ role, content, label }) {
+  const isAi = role === "ai";
+  return (
+    <div className={`flex items-start gap-2 ${isAi ? "" : "flex-row-reverse"}`}>
+      <div className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-white ${isAi ? "bg-cyan-600" : "bg-slate-500"}`}>
+        {isAi ? <Bot size={11} /> : <UserIcon size={11} />}
+      </div>
+      <div
+        className={`max-w-[78%] text-xs rounded-lg px-3 py-2 whitespace-pre-wrap leading-relaxed
+          ${isAi ? "bg-slate-50 border border-slate-200 text-slate-800" : "bg-cyan-600 text-white"}`}
+      >
+        {label && <div className="text-[10px] uppercase tracking-wide opacity-70 mb-0.5">{label}</div>}
+        {content}
+      </div>
+    </div>
+  );
+}
+

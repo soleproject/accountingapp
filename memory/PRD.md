@@ -744,3 +744,45 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   finalizes, proposals land on every txn, and post-finalization turns are
   refused. 14/14 tests pass across the communications + recon suites.
 
+
+### 2026-07-21 — Client Chat UX Overhaul + AI Logs
+- **Two-path finalization** in the client chat. The AI now picks based on
+  complexity/confidence:
+  - **Fast path** — high-confidence, unambiguous mapping → AI says "Got it,
+    thanks!" and emits `[[DONE:{json}]]`. Backend applies the categorization
+    to every txn, closes the question, and (if the counterparty is a repeat)
+    creates a `db.rules` auto-categorize rule for future imports.
+  - **Confirm path** — split-decisions, low confidence, or unusual mappings
+    → AI emits `[[PLAN:{json}]]`. Frontend renders a green plan card with
+    "Yes, apply + create rule" (green) / "No, thanks" (grey) buttons.
+- **Anti-fishing prompt**: system explicitly forbids inventing hypothetical
+  follow-ups when the client's first answer is clear ("office supplies"
+  IS the answer — do NOT ask "what if some were coffee?").
+- **New endpoint** `POST /api/q/{token}/apply-plan` — server-side plan
+  execution (validates account_code against the CoA, never trusts a
+  client-side spoof) shared with the fast-path DONE flow.
+- **`_apply_client_plan()`** helper — idempotent one-shot: categorize +
+  human_reviewed + close question + spawn rule if applicable.
+- **Markdown rendering** in chat bubbles (bold via `**`, plain-text bullets
+  via `•`) so the plan lead-ins actually look formatted.
+
+### 2026-07-21 — Communications > AI Logs tab
+- **`GET /companies/{cid}/communications/ai-logs`** — every client-chat
+  conversation, newest first, each enriched with:
+  - full `chat_messages` transcript
+  - `linked_txns` (id/date/description/amount + resulting category)
+  - `ai_proposal` (the final categorization decision)
+  - `status`, `asked_by_name`, `to_email`, timestamps
+  - Single-query txn hydration (no N+1).
+- **Frontend "AI Logs" tab** on `/communications`:
+  - Collapsible row per conversation: counterparty · txn count · total ·
+    resulting category chip · sent timestamp
+  - Expanded view shows: pro/client metadata line, linked-txns mini-table
+    with per-row category chip + amount, full chat transcript with
+    Bot/Client avatars styled like the client-facing page.
+  - Answered rows carry a green "✓ Category" pill; pending rows show
+    "Awaiting client".
+- **Verified live** on Bright Beans Coffee Co.: 6 conversations, all
+  linked correctly to their 15+ transactions with resulting categories
+  (Office Supplies, Product Sales, Payroll, Legal & Professional Fees).
+

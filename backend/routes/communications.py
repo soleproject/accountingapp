@@ -694,6 +694,65 @@ async def public_answer_question(token: str, inp: AnswerIn):
 # client's answer. Sits on the communications router because the whole
 # thing is driven by the ask-client flow.
 # --------------------------------------------------------------------------
+@router.get("/companies/{cid}/communications/ai-logs")
+async def list_ai_conversation_logs(
+    cid: str,
+    limit: int = Query(200, ge=1, le=1000),
+    user: dict = Depends(get_current_user),
+):
+    """Every client-chat conversation on this company, newest first, each
+    with its full transcript + the transactions it was about + the final
+    categorization decision. This is what powers the Communications >
+    AI Logs tab."""
+    qs = await db.client_questions.find({"company_id": cid}).sort("sent_at", -1).limit(limit).to_list(limit)
+    # Collect every txn id we need in one round trip.
+    all_ids: set[str] = set()
+    for q in qs:
+        for x in (q.get("txn_ids") or []):
+            all_ids.add(x)
+        if q.get("txn_id"):
+            all_ids.add(q["txn_id"])
+    txn_by_id: dict = {}
+    if all_ids:
+        rows = await db.transactions.find(
+            {"id": {"$in": list(all_ids)}, "company_id": cid},
+            {"id": 1, "date": 1, "description": 1, "amount": 1,
+             "category_account_name": 1, "category_account_code": 1,
+             "human_reviewed": 1},
+        ).to_list(2000)
+        txn_by_id = {t["id"]: t for t in rows}
+
+    items = []
+    for q in qs:
+        tx_ids = q.get("txn_ids") or ([q["txn_id"]] if q.get("txn_id") else [])
+        linked = [
+            {
+                "id": t["id"], "date": t.get("date"),
+                "description": t.get("description"), "amount": t.get("amount"),
+                "category_account_name": t.get("category_account_name"),
+                "category_account_code": t.get("category_account_code"),
+                "human_reviewed": t.get("human_reviewed", False),
+            }
+            for t in (txn_by_id.get(x) for x in tx_ids) if t
+        ]
+        items.append({
+            "id": q.get("id"),
+            "counterparty_label": q.get("counterparty_label"),
+            "question": q.get("question"),
+            "asked_by_name": q.get("asked_by_name"),
+            "to_email": q.get("to_email"),
+            "sent_at": q.get("sent_at"),
+            "answered_at": q.get("answered_at"),
+            "status": q.get("status"),
+            "answer": q.get("answer"),
+            "ai_proposal": q.get("ai_proposal"),
+            "chat_messages": q.get("chat_messages") or [],
+            "linked_txns": linked,
+            "txn_count": len(linked),
+        })
+    return {"items": items}
+
+
 @router.get("/companies/{cid}/communications/pending-proposals")
 async def list_pending_proposals(cid: str, user: dict = Depends(get_current_user)):
     """Every transaction currently carrying a client-answer-derived AI
