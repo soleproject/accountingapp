@@ -412,6 +412,318 @@ async def match_statement_lines(
 # Used by month_close.py to auto-satisfy the `recon` checkpoint.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# R4 — Plaid bootstrap (auto-reconcile from the Plaid feed itself)
+# ---------------------------------------------------------------------------
+#
+# When Plaid ships a full transaction history + a `current` balance + an
+# `opening_balance` anchor, the ledger is already provably in sync with the
+# bank feed *if and only if*  opening + Σ(txns) == current.
+#
+# This function walks every mapped Plaid account, verifies that invariant
+# holds end-to-end, then generates ONE `status="reconciled"` doc per fully
+# completed calendar month between opening_as_of and (today − PROVISIONAL_DAYS).
+#
+# Zero fabrication rules:
+#   • If the end-to-end invariant fails for an account → the entire account is
+#     skipped with a clear reason. No partial fake data.
+#   • If a period contains any non-Plaid txn (manual/CSV) for the same bank
+#     account → skip that period. Bootstrap only knows about the Plaid feed.
+#   • If a real reconciliation already overlaps a period → skip.
+#   • `overwrite_placeholders=True` deletes prior "empty" recons for the
+#     company (no bank_account_id OR no cleared_txn_ids) before bootstrapping.
+#
+# What "reconciled" asserts here (be honest with the pro): the ledger matches
+# the Plaid transaction feed for the period. It does NOT assert the Plaid feed
+# matches the paper statement — that still needs Veryfi (R3).
+#
+async def bootstrap_from_plaid(
+    cid: str,
+    plaid_item_id: Optional[str] = None,
+    overwrite_placeholders: bool = False,
+) -> dict:
+    from calendar import monthrange
+    now = now_iso()
+    today = datetime.now(timezone.utc).date()
+    cutoff = (today - timedelta(days=PROVISIONAL_DAYS))  # last day we consider "fully settled"
+
+    purged = 0
+    if overwrite_placeholders:
+        # Placeholder = an existing recon with no bank account and no cleared
+        # txn ids. These are almost always seed/demo artifacts (see the 429
+        # LLC audit) that would otherwise block bootstrap for the whole year.
+        placeholder_ids = [
+            d["id"] for d in await db.reconciliations.find({
+                "company_id": cid,
+                "$or": [
+                    {"bank_account_id": {"$in": [None, ""]}},
+                    {"bank_account_id": {"$exists": False}},
+                    {"cleared_txn_ids": {"$in": [None, []]}},
+                    {"cleared_txn_ids": {"$exists": False}},
+                ],
+            }, {"id": 1, "cleared_txn_ids": 1}).to_list(1000)
+        ]
+        if placeholder_ids:
+            r = await db.reconciliations.delete_many({
+                "company_id": cid, "id": {"$in": placeholder_ids},
+            })
+            purged = r.deleted_count
+            # Nothing to un-clear on transactions: placeholders by definition
+            # had no cleared_txn_ids to attach.
+
+    q = {"company_id": cid}
+    if plaid_item_id:
+        q["id"] = plaid_item_id
+    items = await db.plaid_items.find(q).to_list(20)
+    if not items:
+        return {"created": [], "skipped": [], "errors": ["No Plaid items linked."], "purged": purged}
+
+    created: list[dict] = []
+    skipped: list[dict] = []
+    errors: list[str] = []
+    rerouted_total = 0
+
+    for item in items:
+        item_id = item.get("id")
+        acct_snapshots = {a.get("account_id"): a for a in (item.get("accounts") or [])}
+        mappings = item.get("account_mappings") or {}
+
+        # ---- Self-heal: sweep any Plaid txns for a mapped account that
+        # somehow landed on the wrong ledger row (webhook races during
+        # initial connect can drop txns onto the default fallback checking
+        # account BEFORE the mapping exists). Only re-routes txns whose
+        # `plaid_account_id` is EXPLICITLY listed in this item's mapping,
+        # so nothing else in the ledger can be touched.
+        for plaid_account_id, mapping in mappings.items():
+            ledger_id = mapping.get("ledger_account_id")
+            if not ledger_id:
+                continue
+            fresh_ledger = await db.accounts.find_one({"id": ledger_id, "company_id": cid})
+            r = await db.transactions.update_many(
+                {
+                    "company_id": cid,
+                    "plaid_account_id": plaid_account_id,
+                    "bank_account_id": {"$ne": ledger_id},
+                },
+                {"$set": {
+                    "bank_account_id": ledger_id,
+                    "bank_account_name": (fresh_ledger or {}).get("name") or mapping.get("ledger_account_name"),
+                    "updated_at": now,
+                }},
+            )
+            rerouted_total += r.modified_count
+
+        for plaid_account_id, mapping in mappings.items():
+            ledger_account_id = mapping.get("ledger_account_id")
+            opening_balance = float(mapping.get("opening_balance") or 0.0)
+            opening_as_of = mapping.get("opening_as_of")
+            snap = acct_snapshots.get(plaid_account_id) or {}
+            plaid_current = snap.get("balance_current")
+            if plaid_current is None:
+                errors.append(f"{mapping.get('ledger_account_name') or plaid_account_id}: no Plaid current balance snapshot yet — sync first.")
+                continue
+            plaid_current = float(plaid_current)
+            if not ledger_account_id or not opening_as_of:
+                errors.append(f"{plaid_account_id}: mapping missing ledger_account_id/opening_as_of.")
+                continue
+
+            # Pull the account's full Plaid txn stream from the ledger.
+            txns = await db.transactions.find({
+                "company_id": cid,
+                "bank_account_id": ledger_account_id,
+                "source": {"$regex": "^plaid"},
+                "posted": True,
+            }).sort("date", 1).to_list(20000)
+
+            # The invariant that matters:  opening + Σ(txns STRICTLY AFTER
+            # opening_as_of) == plaid_current.  Pre-opening txns are already
+            # baked into the ledger by way of prior periods and are none of
+            # bootstrap's business — the ledger owner is expected to have
+            # reconciled them (or intentionally left them alone) already.
+            opening_d = _parse_date(opening_as_of)
+            if not opening_d:
+                errors.append(f"{ledger_account_id}: unparseable opening_as_of '{opening_as_of}'.")
+                continue
+            post_txns = [
+                t for t in txns
+                if (_parse_date(t.get("date")) or opening_d) > opening_d
+            ]
+
+            # Integrity check #1 — end-to-end invariant.
+            plaid_sum = round(sum(float(t.get("amount") or 0) for t in post_txns), 2)
+            derived_current = round(opening_balance + plaid_sum, 2)
+            if abs(derived_current - plaid_current) > 0.01:
+                errors.append(
+                    f"{mapping.get('ledger_account_name') or ledger_account_id}: "
+                    f"ledger disagrees with Plaid — opening {opening_balance:.2f} + txns {plaid_sum:.2f} "
+                    f"= {derived_current:.2f}, Plaid current {plaid_current:.2f}. "
+                    f"Nothing reconciled for this account."
+                )
+                continue
+
+            # Integrity check #2 — refuse if the ledger has non-Plaid txns on
+            # this bank account (they'd throw off any bootstrap math).
+            has_foreign = await db.transactions.find_one({
+                "company_id": cid,
+                "bank_account_id": ledger_account_id,
+                "source": {"$not": {"$regex": "^plaid"}},
+                "posted": True,
+            })
+            if has_foreign:
+                errors.append(
+                    f"{mapping.get('ledger_account_name') or ledger_account_id}: "
+                    f"non-Plaid transactions found on this bank account — reconcile manually."
+                )
+                continue
+
+            # Determine window: strictly after opening_as_of, up to cutoff.
+            window_start = opening_d + timedelta(days=1)
+            window_end = cutoff
+            if window_start > window_end:
+                continue  # not enough history to reconcile a completed month yet.
+
+            # Load existing recons for this account so we can skip overlaps.
+            existing = await db.reconciliations.find({
+                "company_id": cid, "bank_account_id": ledger_account_id,
+            }).to_list(1000)
+
+            def _overlaps(p_start: str, p_end: str) -> bool:
+                for e in existing:
+                    es = e.get("period_start") or e.get("as_of")
+                    ee = e.get("period_end") or e.get("as_of")
+                    if not es or not ee:
+                        continue
+                    if p_start <= ee and p_end >= es:
+                        return True
+                return False
+
+            # Bucket post-opening Plaid txns by (year, month) for O(1) period sums.
+            from collections import defaultdict
+            by_month: dict[tuple[int, int], list[dict]] = defaultdict(list)
+            for t in post_txns:
+                d = _parse_date(t.get("date"))
+                if d:
+                    by_month[(d.year, d.month)].append(t)
+
+            # Walk month-by-month.
+            running = opening_balance
+            # Bring `running` forward through months that fall entirely before window_start.
+            def _month_iter(start: dt_date, end: dt_date):
+                y, m = start.year, start.month
+                while (y, m) <= (end.year, end.month):
+                    yield y, m
+                    m += 1
+                    if m == 13: y, m = y + 1, 1
+
+            for y, m in _month_iter(opening_d, window_end):
+                last = monthrange(y, m)[1]
+                m_first = dt_date(y, m, 1)
+                m_last = dt_date(y, m, last)
+                # Clamp to bootstrap window.
+                p_start = max(m_first, window_start)
+                p_end = min(m_last, window_end)
+
+                # Sum THIS month's txns strictly (opening_d falls inside the
+                # month it was created — its own txns before opening are not
+                # ours to reconcile).
+                m_txns = [
+                    t for t in by_month.get((y, m), [])
+                    if _parse_date(t.get("date")) and _parse_date(t.get("date")) >= p_start
+                    and _parse_date(t.get("date")) <= p_end
+                ]
+
+                # Advance `running` with any txns that fall in this calendar
+                # month but BEFORE our clamped window (won't happen with the
+                # +1-day rule but keep for safety).
+                pre_window_in_month = [
+                    t for t in by_month.get((y, m), [])
+                    if _parse_date(t.get("date")) and _parse_date(t.get("date")) < p_start
+                ]
+                running = round(running + sum(float(t.get("amount") or 0) for t in pre_window_in_month), 2)
+
+                if p_start > p_end:
+                    continue  # window doesn't touch this month.
+                # Skip months with zero activity — a "reconciliation" of
+                # nothing isn't useful noise in the history table.
+                if not m_txns:
+                    continue
+
+                p_start_iso = p_start.isoformat()
+                p_end_iso = p_end.isoformat()
+                if _overlaps(p_start_iso, p_end_iso):
+                    skipped.append({
+                        "account_id": ledger_account_id,
+                        "period": f"{p_start_iso}→{p_end_iso}",
+                        "reason": "already reconciled",
+                    })
+                    # Still advance running so subsequent months are correct.
+                    running = round(running + sum(float(t.get("amount") or 0) for t in m_txns), 2)
+                    continue
+
+                cleared_sum = round(sum(float(t.get("amount") or 0) for t in m_txns), 2)
+                period_open = running
+                period_close = round(period_open + cleared_sum, 2)
+                rec_id = str(uuid.uuid4())
+                txn_ids = [t["id"] for t in m_txns]
+                doc = {
+                    "id": rec_id,
+                    "company_id": cid,
+                    "bank_account_id": ledger_account_id,
+                    "as_of": p_end_iso,
+                    "period_start": p_start_iso,
+                    "period_end": p_end_iso,
+                    "opening_balance": period_open,
+                    "closing_balance": period_close,
+                    "statement_balance": period_close,
+                    "cleared_sum": cleared_sum,
+                    "difference": 0.0,
+                    "cleared_txn_ids": txn_ids,
+                    "matched_count": len(txn_ids),
+                    "source": "plaid_bootstrap",
+                    "status": "reconciled",
+                    "auto_generated": True,
+                    "plaid_item_id": item_id,
+                    "completed_at": now,
+                    "completed_by": "auto:plaid_bootstrap",
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                await db.reconciliations.insert_one(doc)
+                if txn_ids:
+                    await db.transactions.update_many(
+                        {"company_id": cid, "id": {"$in": txn_ids}},
+                        {"$set": {
+                            "cleared_at": p_end_iso,
+                            "cleared_source": "plaid_bootstrap",
+                            "cleared_reconciliation_id": rec_id,
+                            "updated_at": now,
+                        }},
+                    )
+                created.append({
+                    "id": rec_id,
+                    "account_id": ledger_account_id,
+                    "period": f"{p_start_iso}→{p_end_iso}",
+                    "cleared_count": len(txn_ids),
+                    "cleared_sum": cleared_sum,
+                    "opening_balance": period_open,
+                    "closing_balance": period_close,
+                })
+                running = period_close
+
+    return {
+        "created": created,
+        "skipped": skipped,
+        "errors": errors,
+        "purged": purged,
+        "rerouted": rerouted_total,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Utility — is a bank account fully reconciled for a given month?
+# Used by month_close.py to auto-satisfy the `recon` checkpoint.
+# ---------------------------------------------------------------------------
+
 async def month_recon_state(cid: str, start: str, end: str) -> dict:
     """Return `{green, total, cleared, sources}` — used by Month Close to
     decide whether to auto-flip the `recon` checkpoint."""

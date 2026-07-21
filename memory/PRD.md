@@ -553,3 +553,36 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - New file `backend/reconciliation_engine.py`, updated
   `backend/routes/reconciliation.py` (~150→220 lines), new frontend files
   `pages/Reconciliation.jsx` (rewritten) + `pages/ReconciliationDetail.jsx`.
+
+
+### 2026-07-21 — R4 Plaid Bootstrap (auto-reconcile from Plaid feed)
+- **`reconciliation_engine.bootstrap_from_plaid(cid, plaid_item_id?, overwrite_placeholders?)`** —
+  Walks every Plaid-mapped bank account and generates ONE real
+  `status="reconciled"` doc per completed calendar month, with
+  `source="plaid_bootstrap"` and full `cleared_txn_ids`.
+- **Zero-fabrication invariants** (enforced, never bypassed):
+  1. `opening_balance + Σ(post-opening Plaid txns) == plaid.balance_current`
+     within $0.01 — otherwise the whole account is skipped and the
+     discrepancy surfaced in `errors[]`.
+  2. If any non-Plaid txn exists on the same `bank_account_id`, the account
+     is skipped (bootstrap only reasons about the Plaid feed).
+  3. Any period already covered by a real recon is skipped with reason
+     `"already reconciled"`. Real recons are never overwritten.
+  4. Months with zero activity are skipped so the history stays meaningful.
+- **`POST /api/companies/{cid}/reconciliations/auto-bootstrap`** — endpoint
+  invoked by the "Auto-reconcile from Plaid" button on the Reconciliation
+  page. Also auto-fires at the end of `plaid_connect.connect_plaid_account`
+  so new companies get their history pre-reconciled at connect time.
+- **`POST /api/companies/{cid}/reconciliations/purge-placeholders`** —
+  surgical delete of recons with empty `bank_account_id` OR empty
+  `cleared_txn_ids` (seed/demo artifacts). Real completed recons untouched.
+  Also exposed via `overwrite_placeholders=true` on the bootstrap endpoint;
+  the frontend surfaces a confirmation modal when placeholders block auto-
+  reconcile.
+- **What "reconciled" here asserts (documented honestly in the code):**
+  "Ledger matches the Plaid feed for the period." It does NOT assert the
+  Plaid feed matches the paper bank statement — that check is still R3
+  (Veryfi statement match).
+- Tests: `backend/tests/test_recon_plaid_bootstrap.py` (5 cases: creates
+  real recons, refuses on ledger/Plaid disagreement, refuses on non-Plaid
+  txns, idempotent, purges only placeholders).

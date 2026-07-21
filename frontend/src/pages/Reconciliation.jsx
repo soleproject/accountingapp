@@ -148,6 +148,53 @@ export default function Reconciliation() {
     } finally { setBusy(false); }
   };
 
+  const [bootstrapConfirm, setBootstrapConfirm] = useState(null);
+  const runAutoBootstrap = async (overwrite_placeholders = false) => {
+    setBusy(true);
+    try {
+      const r = await api.post(
+        `/companies/${currentId}/reconciliations/auto-bootstrap`,
+        { overwrite_placeholders },
+      );
+      const created = r.data?.created?.length || 0;
+      const skipped = r.data?.skipped?.length || 0;
+      const errors = r.data?.errors || [];
+      const purged = r.data?.purged || 0;
+
+      // First pass: if nothing created and only reason is "already reconciled"
+      // on placeholders, ask the user if they want us to purge and retry.
+      const looksLikePlaceholderBlock =
+        created === 0 &&
+        !overwrite_placeholders &&
+        history.some(h => !h.bank_account_id || !h.cleared_txn_ids || h.cleared_txn_ids.length === 0);
+      if (looksLikePlaceholderBlock) {
+        setBootstrapConfirm({ purge_count: history.filter(h => !h.bank_account_id || !(h.cleared_txn_ids?.length)).length });
+        setBusy(false);
+        return;
+      }
+
+      if (created) {
+        const reroutedNote = r.data?.rerouted ? ` (repaired ${r.data.rerouted} mis-routed txn${r.data.rerouted === 1 ? "" : "s"})` : "";
+        toast.success(
+          purged
+            ? `Purged ${purged} placeholder(s), created ${created} real monthly reconciliation${created === 1 ? "" : "s"}.${reroutedNote}`
+            : `Created ${created} real monthly reconciliation${created === 1 ? "" : "s"} from the Plaid feed.${reroutedNote}`
+        );
+      } else if (errors.length) {
+        toast.error(errors[0]);
+      } else {
+        toast.info(`Nothing new to reconcile. ${skipped} period${skipped === 1 ? "" : "s"} already covered.`);
+      }
+      if (errors.length > 1) {
+        // Surface remaining errors so they don't get lost.
+        errors.slice(1).forEach(e => toast.warning(e));
+      }
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Auto-reconcile failed");
+    } finally { setBusy(false); }
+  };
+
   const uploadStatement = async (file) => {
     if (!file || !acctId) return;
     setBusy(true);
@@ -180,6 +227,15 @@ export default function Reconciliation() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={runAutoBootstrap}
+            disabled={busy || !currentId}
+            data-testid="recon-auto-bootstrap-btn"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-cyan-200 bg-cyan-50 text-cyan-900 hover:bg-cyan-100 disabled:opacity-40"
+            title="Generate one real reconciliation per completed month from the Plaid transaction feed. Skips any period where the ledger and Plaid don't match."
+          >
+            <Sparkles size={13} className="text-cyan-700" /> Auto-reconcile from Plaid
+          </button>
           <button
             onClick={runAutoClear}
             disabled={busy || !currentId}
@@ -409,6 +465,47 @@ export default function Reconciliation() {
           </tbody>
         </table>
       </div>
+
+      {bootstrapConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => setBootstrapConfirm(null)}
+          data-testid="bootstrap-confirm-modal"
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div>
+              <h3 className="font-heading font-semibold text-lg">Replace placeholder reconciliations?</h3>
+              <p className="text-sm text-slate-600 mt-1">
+                We found <b>{bootstrapConfirm.purge_count}</b> reconciliation{bootstrapConfirm.purge_count === 1 ? "" : "s"} with no bank
+                account or no cleared transactions attached — likely demo/seed artifacts. They're blocking auto-reconcile because
+                their date ranges overlap the periods we'd generate.
+              </p>
+              <p className="text-xs text-slate-500 mt-2">
+                Real completed reconciliations (with an account and cleared transactions) will <b>not</b> be touched.
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                onClick={() => setBootstrapConfirm(null)}
+                className="px-3 py-1.5 text-sm rounded-md border"
+                data-testid="bootstrap-cancel-btn"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => { setBootstrapConfirm(null); await runAutoBootstrap(true); }}
+                className="px-4 py-1.5 text-sm rounded-md bg-cyan-600 text-white hover:bg-cyan-700 inline-flex items-center gap-1.5"
+                data-testid="bootstrap-purge-btn"
+              >
+                <Sparkles size={13} /> Purge placeholders &amp; auto-reconcile
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showMatchModal && matchResult && (
         <MatchResultModal

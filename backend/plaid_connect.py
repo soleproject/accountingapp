@@ -582,6 +582,35 @@ async def connect_plaid_account(
         {"$set": {"account_mappings": mappings, "updated_at": now_iso()}},
     )
 
+    # Post-connect sweep — a webhook can race the connect flow and drop the
+    # first few txns for THIS plaid_account_id onto the default `1010`
+    # fallback checking (see `deps.sync_and_import`) BEFORE the mapping is
+    # written. Re-run the reroute AFTER the mapping is persisted so those
+    # early leaked txns land on the real ledger account.
+    late_reroute = await db.transactions.update_many(
+        {"company_id": cid, "plaid_account_id": plaid_account_id,
+         "bank_account_id": {"$ne": ledger_bank["id"]}},
+        {"$set": {
+            "bank_account_id": ledger_bank["id"],
+            "bank_account_name": ledger_bank["name"],
+            "updated_at": now_iso(),
+        }},
+    )
+    rerouted += late_reroute.modified_count
+
+    # Fire-and-forget auto-reconciliation from the freshly imported feed.
+    # Deterministic: the ledger already provably matches Plaid after this
+    # connect step (opening was derived from plaid_current - net_movement).
+    # If the invariant holds for this account, bootstrap creates real per-
+    # month recon docs. If it doesn't, bootstrap skips silently and the pro
+    # can trigger it manually from the Reconciliation page.
+    auto_reconcile: dict = {}
+    try:
+        from reconciliation_engine import bootstrap_from_plaid
+        auto_reconcile = await bootstrap_from_plaid(cid, plaid_item_id=item.get("id"))
+    except Exception as e:  # noqa: BLE001 — never let bootstrap break a connect
+        auto_reconcile = {"created": [], "skipped": [], "errors": [str(e)], "purged": 0}
+
     return {
         "ledger_account_id": ledger_bank["id"],
         "ledger_account_code": ledger_bank["code"],
@@ -593,4 +622,9 @@ async def connect_plaid_account(
         "rerouted": rerouted,
         "skipped": len(skipped),
         "skipped_reasons": [s["reason"] for s in skipped],
+        "auto_reconcile": {
+            "created_count": len(auto_reconcile.get("created") or []),
+            "skipped_count": len(auto_reconcile.get("skipped") or []),
+            "errors": auto_reconcile.get("errors") or [],
+        },
     }

@@ -61,6 +61,7 @@ from reconciliation_engine import (
     preview_recon,
     complete_recon,
     match_statement_lines,
+    bootstrap_from_plaid,
 )
 
 
@@ -158,6 +159,57 @@ async def auto_clear_endpoint(cid: str, user: dict = Depends(get_current_user)):
     automatically too."""
     await require_company(user, cid)
     return await auto_clear_settled_plaid_txns(cid)
+
+
+class AutoBootstrapIn(BaseModel):
+    plaid_item_id: Optional[str] = None
+    # If True, delete any prior "placeholder" reconciliations (rows with no
+    # bank_account_id or no cleared_txn_ids) before bootstrapping. This is
+    # the safe way to replace demo/seed artifacts with real recons — real
+    # completed recons are never touched.
+    overwrite_placeholders: bool = False
+
+
+@router.post("/companies/{cid}/reconciliations/auto-bootstrap")
+async def auto_bootstrap(
+    cid: str,
+    inp: AutoBootstrapIn = None,
+    user: dict = Depends(get_current_user),
+):
+    """Generate one reconciliation per completed calendar month for every
+    Plaid-linked bank account whose ledger provably matches the Plaid feed.
+
+    Refuses to fabricate: any account or period where the numbers don't line
+    up end-to-end is skipped with a reason (surfaced in the response)."""
+    await require_company(user, cid)
+    inp = inp or AutoBootstrapIn()
+    return await bootstrap_from_plaid(
+        cid,
+        plaid_item_id=inp.plaid_item_id,
+        overwrite_placeholders=inp.overwrite_placeholders,
+    )
+
+
+@router.post("/companies/{cid}/reconciliations/purge-placeholders")
+async def purge_placeholders(cid: str, user: dict = Depends(get_current_user)):
+    """Delete reconciliations with no bank_account_id or empty cleared_txn_ids
+    (i.e., demo/seed artifacts that never referenced real transactions).
+    Real completed reconciliations are never touched."""
+    await require_company(user, cid)
+    docs = await db.reconciliations.find({
+        "company_id": cid,
+        "$or": [
+            {"bank_account_id": {"$in": [None, ""]}},
+            {"bank_account_id": {"$exists": False}},
+            {"cleared_txn_ids": {"$in": [None, []]}},
+            {"cleared_txn_ids": {"$exists": False}},
+        ],
+    }, {"id": 1}).to_list(1000)
+    ids = [d["id"] for d in docs]
+    if ids:
+        await db.reconciliations.delete_many({"company_id": cid, "id": {"$in": ids}})
+    return {"purged": len(ids), "ids": ids}
+
 
 
 @router.post("/companies/{cid}/reconciliations/match-statement")
