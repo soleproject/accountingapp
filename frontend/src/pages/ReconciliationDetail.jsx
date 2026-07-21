@@ -71,7 +71,7 @@ export default function ReconciliationDetail() {
           </h1>
           <p className="text-slate-500 text-sm mt-1 flex items-center gap-3 flex-wrap">
             <span className="inline-flex items-center gap-1">
-              <CalendarDays size={13} /> {r.period_start || r.as_of} → {r.period_end || r.as_of}
+              <CalendarDays size={13} /> {formatPeriodLabel(r.period_start, r.period_end, r.as_of)}
             </span>
             {r.completed_by && (
               <span className="inline-flex items-center gap-1">
@@ -179,4 +179,21 @@ function StatBlock({ label, value, accent, muted }) {
       </div>
     </div>
   );
+}
+
+// See same helper in Reconciliation.jsx — pretty "May 2026" when the doc
+// spans a full month, raw dates otherwise.
+function formatPeriodLabel(start, end, asOf) {
+  const s = start || asOf, e = end || asOf;
+  if (!s || !e) return "—";
+  const sd = new Date(s), ed = new Date(e);
+  if (isNaN(sd) || isNaN(ed)) return `${s} → ${e}`;
+  const sameMonth = sd.getUTCFullYear() === ed.getUTCFullYear() &&
+                    sd.getUTCMonth() === ed.getUTCMonth();
+  const spansFullMonth = sd.getUTCDate() === 1 &&
+    ed.getUTCDate() === new Date(ed.getUTCFullYear(), ed.getUTCMonth() + 1, 0).getUTCDate();
+  if (sameMonth && spansFullMonth) {
+    return sd.toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  }
+  return `${s} → ${e}`;
 }

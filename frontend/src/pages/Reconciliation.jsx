@@ -17,7 +17,25 @@ export default function Reconciliation() {
   const { currentId } = useCompany();
   const [banks, setBanks] = useState([]);
   const [acctId, setAcctId] = useState("");
-  const [asOf, setAsOf] = useState(new Date().toISOString().slice(0, 10));
+  // Reconciliations are per-month by convention (matches Month Close +
+  // industry practice). `ym` is a "YYYY-MM" string; period_start / period_end
+  // are derived. `asOf` used for the preview call is period_end.
+  const [ym, setYm] = useState(() => {
+    // Default to the previous month — that's the one users usually reconcile.
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() - 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
+  const { periodStart, periodEnd } = useMemo(() => {
+    const [y, m] = ym.split("-").map(Number);
+    const last = new Date(y, m, 0).getDate();
+    return {
+      periodStart: `${y}-${String(m).padStart(2, "0")}-01`,
+      periodEnd:   `${y}-${String(m).padStart(2, "0")}-${String(last).padStart(2, "0")}`,
+    };
+  }, [ym]);
+  const asOf = periodEnd;
   const [stmtBal, setStmtBal] = useState("");
   const [preview, setPreview] = useState(null);
   const [checked, setChecked] = useState(new Set()); // txn ids the user has ticked
@@ -26,9 +44,6 @@ export default function Reconciliation() {
   const [history, setHistory] = useState([]);
   const [matchResult, setMatchResult] = useState(null);
   const [showMatchModal, setShowMatchModal] = useState(false);
-  // The interactive matcher lives behind a "+ Start new" button — the list
-  // of past reconciliations is now the primary surface, matching how QBO
-  // and Xero present recon history.
   const [startOpen, setStartOpen] = useState(false);
   const fileRef = useRef(null);
 
@@ -101,7 +116,8 @@ export default function Reconciliation() {
     try {
       await api.post(`/companies/${currentId}/reconciliations/complete`, {
         bank_account_id: acctId,
-        period_end: asOf,
+        period_start: periodStart,
+        period_end: periodEnd,
         statement_balance: parseFloat(stmtBal) || 0,
         cleared_txn_ids: [...checked],
       });
@@ -230,14 +246,17 @@ export default function Reconciliation() {
               </div>
               <div>
                 <div className="text-xs text-slate-500 mb-1 flex items-center gap-1">
-                  <CalendarDays size={12} /> Statement date
+                  <CalendarDays size={12} /> Statement month
                 </div>
                 <input
-                  type="date" value={asOf}
-                  onChange={(e) => setAsOf(e.target.value)}
+                  type="month" value={ym}
+                  onChange={(e) => setYm(e.target.value)}
                   className="w-full border rounded-md px-2 py-1.5 text-sm"
                   data-testid="recon-as-of"
                 />
+                <div className="text-[10px] text-slate-400 font-mono-num mt-0.5">
+                  {periodStart} → {periodEnd}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-slate-500 mb-1">Statement ending balance</div>
@@ -257,7 +276,7 @@ export default function Reconciliation() {
                 <div className="lg:col-span-2 rounded-xl border overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-2 border-b bg-slate-50">
                     <div className="text-xs uppercase tracking-widest text-slate-500">
-                      Uncleared through {asOf} · {preview.uncleared.length}
+                      Uncleared in {monthNameOf(ym)} · {preview.uncleared.length}
                     </div>
                     <div className="flex items-center gap-2 text-xs">
                       <button onClick={tickAll} className="text-cyan-700 hover:underline" data-testid="recon-tick-all">Check all</button>
@@ -273,7 +292,7 @@ export default function Reconciliation() {
                     )}
                     {!loading && preview.uncleared.length === 0 && (
                       <div className="p-8 text-center text-slate-500 text-sm">
-                        Nothing to clear — everything through {asOf} is already reconciled. 🎉
+                        Nothing to clear — everything through {monthNameOf(ym)} is already reconciled. 🎉
                       </div>
                     )}
                     {!loading && preview.uncleared.map(t => (
@@ -332,7 +351,7 @@ export default function Reconciliation() {
               <tr key={r.id} className="border-b last:border-b-0 hover:bg-slate-50 cursor-pointer" data-testid={`recon-history-row-${r.id}`}>
                 <td className="px-4 py-2 font-mono-num text-xs text-cyan-700">
                   <Link to={`/accounting/reconciliation/${r.id}`} className="hover:underline">
-                    {(r.period_start || r.as_of || "—")} → {(r.period_end || r.as_of || "—")}
+                    {formatPeriodLabel(r.period_start, r.period_end, r.as_of)}
                   </Link>
                 </td>
                 <td className="px-4 py-2">
@@ -369,7 +388,7 @@ export default function Reconciliation() {
             try {
               await api.post(`/companies/${currentId}/reconciliations/apply-matches`, {
                 bank_account_id: acctId,
-                period_end: asOf,
+                period_end: periodEnd,
                 apply_txn_ids: ids,
               });
               toast.success(`Cleared ${ids.length} matched transactions.`);
@@ -605,3 +624,26 @@ function MissingTier({ rows }) {
 }
 
 function round2(v) { return Math.round(v * 100) / 100; }
+
+function monthNameOf(ymStr) {
+  const [y, m] = ymStr.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleString("en-US", { month: "long", year: "numeric" });
+}
+
+// Prefer a "May 2026" label when the period spans a whole calendar month
+// (which is now the default). Fall back to the raw date range for legacy
+// docs where period_start and period_end don't align to month boundaries.
+function formatPeriodLabel(start, end, asOf) {
+  const s = start || asOf, e = end || asOf;
+  if (!s || !e) return "—";
+  const sd = new Date(s), ed = new Date(e);
+  if (isNaN(sd) || isNaN(ed)) return `${s} → ${e}`;
+  const sameMonth = sd.getUTCFullYear() === ed.getUTCFullYear() &&
+                    sd.getUTCMonth() === ed.getUTCMonth();
+  const spansFullMonth = sd.getUTCDate() === 1 &&
+    ed.getUTCDate() === new Date(ed.getUTCFullYear(), ed.getUTCMonth() + 1, 0).getUTCDate();
+  if (sameMonth && spansFullMonth) {
+    return sd.toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  }
+  return `${s} → ${e}`;
+}
