@@ -39,6 +39,40 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Client welcome emails + self-service password change
+- New Pro-flow client-create now sends one of two automated welcome emails:
+  * **First-time client** (`kind: client_welcome`) — magic-link "Set your
+    password" button that lands on `/set-password/{token}` and logs the
+    user in immediately upon setting. Tokens minted via
+    `routes.auth.mint_password_set_token` (32-byte `secrets.token_urlsafe`),
+    stored in new `password_set_tokens` collection, single-use, 7-day TTL.
+  * **Returning client** (`kind: client_welcome_returning`) — when a Pro
+    creates another company for a client-email that already owns one, we
+    email "we added <NewCompany> to your login" instead. Uses the client's
+    existing password; no token minted.
+- Both preferences added to `email_dispatcher.DEFAULT_PREFS` (opt-out, default ON).
+- `POST /api/auth/change-password` — self-service password rotation. Verifies
+  current bcrypt hash before updating; rejects "same as current" and enforces
+  8+ char min via pydantic. Existing JWTs stay valid by design.
+- `GET/POST /api/auth/password-set/{token}` — public magic-link redemption
+  endpoints. Single-use guard uses `updateOne(..., {used: False}, {used: True})`
+  for atomic race safety.
+- Frontend:
+  * New public route `/set-password/:token` (`SetPassword.jsx`) with
+    checking / OK / expired / used / invalid states.
+  * "Change password" item added to the profile dropdown for all roles
+    (`ChangePasswordModal` in `Layout.jsx`).
+  * New Client modal (`ProClients.jsx`) — removed the "Temporary password"
+    input; explanatory copy now tells the Pro the client will get an emailed
+    magic-link. Password field on `NewClientIn` is deprecated (still accepted
+    but ignored server-side for new client emails).
+- E2E tested: create-client via API → password_set_tokens row minted →
+  communications log row created → GET /token returns email → POST /token
+  redeems + issues JWT → 2nd POST returns 410 → login works with new password.
+- Preview emails sent to michael@bigsaas.ai (`eabbe18b-…` and `ba9e4221-…`)
+  to smoke-test both templates against live Resend.
+
+
 ### Feb 2026 — AI Ask Client (autonomous email loop) + rename to Pro Ask Client
 - Renamed the existing "Ask Client" flow to **"Pro Ask Client"** everywhere in the
   UI (Communications inbox/logs/settings, `AskClientButton` trigger + modal title).

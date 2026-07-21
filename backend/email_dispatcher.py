@@ -40,14 +40,16 @@ from email_service import send_email, EmailError
 logger = logging.getLogger(__name__)
 
 DEFAULT_PREFS = {
-    "daily_pro_digest":      True,
-    "ask_client":            True,   # Pro-initiated ask-client (labelled "Pro Ask Client")
-    "ai_ask_client":         True,   # Fully-automated AI-initiated ask-client (opt-out)
-    "dunning":               True,
-    "overdue_bill_client":   True,
-    "plaid_reauth":          True,
-    "onboarding_followup":   True,
-    "month_close_signoff":   True,
+    "daily_pro_digest":         True,
+    "ask_client":               True,   # Pro-initiated ask-client (labelled "Pro Ask Client")
+    "ai_ask_client":            True,   # Fully-automated AI-initiated ask-client (opt-out)
+    "client_welcome":           True,   # First-time client onboarding email
+    "client_welcome_returning": True,   # "We added another company to your login"
+    "dunning":                  True,
+    "overdue_bill_client":      True,
+    "plaid_reauth":             True,
+    "onboarding_followup":      True,
+    "month_close_signoff":      True,
 }
 
 

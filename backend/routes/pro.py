@@ -92,11 +92,20 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
     that user and just add a fresh membership for the new company — this lets
     one owner login switch between multiple companies they own via the company
     dropdown at the top-left.
+
+    On success, sends one of two welcome emails via Resend:
+      * First-time client (no prior companies) → magic-link password-set
+        email. The temp password on ``inp`` is ignored; the user picks
+        their own via the ``/set-password/{token}`` page.
+      * Returning client (already owns at least one company) → "we
+        added another company to your login" email pointing at the
+        top-left switcher.
     """
     now = now_iso()
     email = inp.client_email.lower()
     existing = await db.users.find_one({"email": email})
     reused = False
+    other_company_count = 0
     if existing:
         if existing.get("role") != "client":
             raise HTTPException(
@@ -105,14 +114,22 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
             )
         client_id = existing["id"]
         reused = True
-        # Do NOT overwrite their password — they already have credentials.
+        # Count the companies they already own BEFORE we add this one, so the
+        # returning-client welcome email reports the number correctly.
+        other_company_count = await db.memberships.count_documents({
+            "user_id": client_id, "role": "owner",
+        })
     else:
-        if not inp.client_password:
-            raise HTTPException(400, "Password required — this is a new client email.")
+        # Insert with a random placeholder password. The client will replace
+        # it via the magic-link, and any submitted temp password on `inp`
+        # is intentionally ignored so a Pro can't leak plaintext creds.
+        import secrets as _secrets
+        placeholder = hash_password(_secrets.token_urlsafe(48))
         client_id = str(uuid.uuid4())
         await db.users.insert_one({
             "id": client_id, "email": email, "name": inp.client_name,
-            "password": hash_password(inp.client_password), "role": "client",
+            "password": placeholder, "role": "client",
+            "must_set_password": True,
             "created_at": now, "updated_at": now,
         })
 
@@ -144,6 +161,53 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
         "id": str(uuid.uuid4()), "company_id": company_id, "step": 0, "total_steps": 6,
         "complete": False, "answers": {}, "created_at": now, "updated_at": now,
     })
+
+    # -----------------------------------------------------------
+    # Welcome email — first-time OR returning branch.
+    # Never blocks the create flow: if Resend errors, we still return
+    # 200 so the Pro's UI updates, and the error is surfaced in the
+    # `communications` log for follow-up.
+    # -----------------------------------------------------------
+    try:
+        from email_dispatcher import dispatch, public_base_url
+        import email_templates as _tmpl
+        from routes.auth import mint_password_set_token
+
+        pro_name = user.get("full_name") or user.get("name") or user.get("email") or "Your accountant"
+        firm_name = (user.get("branding") or {}).get("firm_name") or None
+        base = public_base_url()
+
+        if reused and other_company_count > 0:
+            subject, html = _tmpl.client_welcome_returning(
+                client_name=inp.client_name or "there",
+                pro_name=pro_name, firm_name=firm_name,
+                company_name=inp.company_name,
+                other_company_count=other_company_count,
+                dashboard_url=f"{base}/dashboard",
+            )
+            await dispatch(
+                kind="client_welcome_returning", to=email,
+                subject=subject, html=html,
+                initiating_user_id=user["id"], company_id=company_id,
+                related={"reused": True, "other_company_count": other_company_count},
+            )
+        else:
+            token = await mint_password_set_token(client_id, purpose="client_welcome")
+            subject, html = _tmpl.client_welcome_first_time(
+                client_name=inp.client_name or "there",
+                pro_name=pro_name, firm_name=firm_name,
+                company_name=inp.company_name,
+                set_password_url=f"{base}/set-password/{token}",
+            )
+            await dispatch(
+                kind="client_welcome", to=email,
+                subject=subject, html=html,
+                initiating_user_id=user["id"], company_id=company_id,
+                related={"reused": False, "password_set_token": token},
+            )
+    except Exception:  # noqa: BLE001 — email failure never blocks client creation
+        import logging as _lg
+        _lg.getLogger(__name__).exception("Welcome email failed (client create still succeeded)")
 
     # How many companies does this owner now have access to?
     total = await db.memberships.count_documents({"user_id": client_id, "role": "owner"})

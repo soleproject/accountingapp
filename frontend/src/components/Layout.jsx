@@ -5,10 +5,11 @@ import AiPanel from "./AiPanel";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
-import { ChevronDown, LogOut, MessageSquare, Settings2, User } from "lucide-react";
-import { Toaster } from "sonner";
+import { ChevronDown, LogOut, MessageSquare, Settings2, User, KeyRound, Loader2, X } from "lucide-react";
+import { Toaster, toast } from "sonner";
 import { AiFocusProvider } from "@/lib/aiFocus";
 import { useActionListener } from "@/lib/createBus";
+import { api } from "@/lib/api";
 
 function CompanySwitcher() {
   const { companies, current, switchCompany } = useCompany();
@@ -45,11 +46,12 @@ function CompanySwitcher() {
 
 function ProfileMenu() {
   // Profile chip in the topbar. Replaces the previous "email · sign out"
-  // strip with an avatar-initials pill that opens a dropdown for Settings
-  // and Sign out. Pros/superadmins get a link to the enterprise-branding
-  // settings surface; client-users only see the Sign-out entry.
+  // strip with an avatar-initials pill that opens a dropdown for Settings,
+  // Change password, and Sign out. Pros/superadmins additionally get a
+  // link to the enterprise-branding settings surface.
   const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
+  const [pwOpen, setPwOpen] = useState(false);
   const ref = useRef(null);
 
   // Close on outside-click / Escape — cheap dropdown ergonomics.
@@ -110,6 +112,13 @@ function ProfileMenu() {
             </Link>
           )}
           <button
+            onClick={() => { setOpen(false); setPwOpen(true); }}
+            data-testid="profile-menu-change-password"
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50"
+          >
+            <KeyRound size={14} className="text-slate-500" /> Change password
+          </button>
+          <button
             data-testid={TID.signoutBtn}
             onClick={logout}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50 text-red-700"
@@ -118,6 +127,87 @@ function ProfileMenu() {
           </button>
         </div>
       )}
+      {pwOpen && <ChangePasswordModal onClose={() => setPwOpen(false)} />}
+    </div>
+  );
+}
+
+
+function ChangePasswordModal({ onClose }) {
+  // Small self-service password rotation modal. Verifies the current
+  // password server-side (backend uses bcrypt), so a leaked JWT alone
+  // can't hijack this flow. Existing sessions stay valid by design —
+  // no forced logout after rotation.
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (next.length < 8) return toast.error("New password must be 8+ characters.");
+    if (next !== confirm) return toast.error("New passwords don't match.");
+    if (next === current) return toast.error("New password must be different from your current one.");
+    setBusy(true);
+    try {
+      await api.post("/auth/change-password", { current_password: current, new_password: next });
+      toast.success("Password updated.");
+      onClose();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't change password.");
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl shadow-2xl w-full max-w-md"
+        onClick={(e) => e.stopPropagation()}
+        data-testid="change-password-modal"
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b">
+          <h3 className="font-heading font-semibold flex items-center gap-2">
+            <KeyRound size={16} className="text-cyan-600" /> Change password
+          </h3>
+          <button onClick={onClose} className="p-1 rounded hover:bg-slate-100"><X size={14} /></button>
+        </div>
+        <div className="p-5 space-y-3 text-sm">
+          <div>
+            <label className="text-xs text-slate-600">Current password</label>
+            <input
+              type="password" value={current} onChange={(e) => setCurrent(e.target.value)}
+              autoFocus
+              data-testid="cp-current"
+              className="w-full mt-1 border rounded-md px-3 py-2"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-slate-600">New password</label>
+            <input
+              type="password" value={next} onChange={(e) => setNext(e.target.value)}
+              data-testid="cp-new"
+              className="w-full mt-1 border rounded-md px-3 py-2"
+              placeholder="8+ characters"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-slate-600">Confirm new password</label>
+            <input
+              type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+              data-testid="cp-confirm"
+              className="w-full mt-1 border rounded-md px-3 py-2"
+            />
+          </div>
+        </div>
+        <div className="px-5 py-3 border-t flex justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-1.5 rounded-md border text-sm">Cancel</button>
+          <button
+            onClick={submit} disabled={busy || !current || !next || !confirm}
+            data-testid="cp-submit"
+            className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-cyan-600 text-white text-sm disabled:opacity-50 hover:bg-cyan-700"
+          >
+            {busy && <Loader2 size={13} className="animate-spin" />} Update password
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

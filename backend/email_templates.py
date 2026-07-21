@@ -45,6 +45,76 @@ def _wrap(inner: str) -> str:
 
 
 # --------------------------------------------------------------------------
+# Client welcome — first company (magic-link password set).
+# Sent by `pro_create_client` when the client's email is brand-new to the
+# platform. The client hasn't chosen a password yet — clicking the button
+# lands them on `/set-password/{token}` where they pick one and are
+# immediately logged in.
+# --------------------------------------------------------------------------
+def client_welcome_first_time(*, client_name: str, pro_name: str,
+                              firm_name: Optional[str], company_name: str,
+                              set_password_url: str) -> tuple[str, str]:
+    firm = firm_name or pro_name
+    inner = f"""
+      <div style="{_H1}">Welcome to Axiom Ledger 👋</div>
+      <div style="{_P}">
+        Hi {escape(client_name)},<br><br>
+        <b>{escape(pro_name)}</b> at {escape(firm)} just set up
+        <b>{escape(company_name)}</b>'s books here on Axiom Ledger — a modern,
+        AI-assisted accounting platform.
+      </div>
+      <div style="{_P}">
+        To get in, pick a password. It takes about 20 seconds and this link
+        is unique to you.
+      </div>
+      <div style="padding:14px 0 6px;">
+        <a href="{set_password_url}" style="{_BTN}">Set your password →</a>
+      </div>
+      <div style="{_MUTE}">
+        Once you're in you'll see a short onboarding tour, your bank
+        connections, and the questions {escape(pro_name)} needs your help
+        with.<br><br>
+        This link expires in 7 days. If it does, ask {escape(pro_name)} to
+        re-send it.
+      </div>
+    """
+    return f"Welcome to Axiom Ledger — set your password", _wrap(inner)
+
+
+# --------------------------------------------------------------------------
+# Client welcome — additional company (already has a login).
+# Sent when a Pro creates a new company for a client email that already
+# owns at least one company on the platform. No magic link — they use
+# their existing password and switch companies from the top-left dropdown.
+# --------------------------------------------------------------------------
+def client_welcome_returning(*, client_name: str, pro_name: str,
+                             firm_name: Optional[str], company_name: str,
+                             other_company_count: int,
+                             dashboard_url: str) -> tuple[str, str]:
+    firm = firm_name or pro_name
+    others = (
+        f"You now have <b>{other_company_count + 1}</b> companies on your Axiom login — "
+        "switch between them from the dropdown at the top-left."
+    )
+    inner = f"""
+      <div style="{_H1}">A new company was added to your Axiom login</div>
+      <div style="{_P}">
+        Hi {escape(client_name)},<br><br>
+        <b>{escape(pro_name)}</b> at {escape(firm)} just added
+        <b>{escape(company_name)}</b> to your existing Axiom Ledger account.
+      </div>
+      <div style="{_P}">{others}</div>
+      <div style="padding:14px 0 6px;">
+        <a href="{dashboard_url}" style="{_BTN}">Open {escape(company_name)} →</a>
+      </div>
+      <div style="{_MUTE}">
+        Your existing password still works — no need to reset anything.
+      </div>
+    """
+    return f"{company_name} is now on your Axiom login", _wrap(inner)
+
+
+# --------------------------------------------------------------------------
 # 1c. AI Ask-client — fully-automated, ONE focused transaction per email.
 # Sent by the hourly scheduler (see ai_ask_client_scheduler.py). Tone is
 # on behalf of the accountant ("your accountant") but attributes the

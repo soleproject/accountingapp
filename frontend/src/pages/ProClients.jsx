@@ -285,19 +285,16 @@ function NewClientModal({ onClose, onCreated }) {
     if (!form.company_name || !form.client_name || !form.client_email) {
       toast.error("Fill company name + client name + email"); return;
     }
-    if (!existingEmail && !form.client_password) {
-      toast.error("Password required for new client emails"); return;
-    }
     setBusy(true);
     try {
       const r = await api.post("/pro/clients", form);
       if (r.data.reused_existing_user) {
         toast.success(
-          `${form.company_name} added to ${form.client_email}'s existing login. They now own ${r.data.owner_company_count} companies — switch via the top-left dropdown.`,
+          `${form.company_name} added to ${form.client_email}'s existing login. They now own ${r.data.owner_company_count} companies — we've emailed them the good news.`,
           { duration: 7000 },
         );
       } else {
-        toast.success(`Client "${form.client_name}" added to ${form.company_name}. Onboarding is ready to start.`);
+        toast.success(`Client "${form.client_name}" created — they'll get a "Set your password" email at ${form.client_email}.`, { duration: 7000 });
       }
       onCreated();
     } catch (e) {
@@ -347,36 +344,22 @@ function NewClientModal({ onClose, onCreated }) {
             <input data-testid="new-client-name" value={form.client_name} onChange={(e) => update("client_name", e.target.value)}
                    className="w-full mt-1 border rounded px-2 py-1.5" />
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="text-xs text-slate-600">Email</label>
-              <input data-testid="new-client-email" type="email" value={form.client_email}
-                     onChange={(e) => update("client_email", e.target.value)}
-                     className={`w-full mt-1 border rounded px-2 py-1.5 ${existingEmail ? "border-cyan-400 bg-cyan-50/40" : ""}`} />
-              {checkingEmail && <div className="text-[10px] text-slate-400 mt-1">Checking…</div>}
-              {existingEmail && !checkingEmail && (
-                <div className="text-[11px] text-cyan-700 mt-1" data-testid="new-client-email-reuse-hint">
-                  ✓ Existing client login — this new company will be added to their dropdown.
-                </div>
-              )}
-            </div>
-            <div>
-              <label className="text-xs text-slate-600">
-                Temporary password
-                {existingEmail && <span className="text-slate-400 font-normal"> (not needed — reusing)</span>}
-              </label>
-              <input data-testid="new-client-password" type="text"
-                     value={existingEmail ? "" : form.client_password}
-                     disabled={existingEmail}
-                     onChange={(e) => update("client_password", e.target.value)}
-                     placeholder={existingEmail ? "—" : ""}
-                     className="w-full mt-1 border rounded px-2 py-1.5 font-mono-num disabled:bg-slate-100 disabled:text-slate-400" />
-            </div>
+          <div>
+            <label className="text-xs text-slate-600">Email</label>
+            <input data-testid="new-client-email" type="email" value={form.client_email}
+                   onChange={(e) => update("client_email", e.target.value)}
+                   className={`w-full mt-1 border rounded px-2 py-1.5 ${existingEmail ? "border-cyan-400 bg-cyan-50/40" : ""}`} />
+            {checkingEmail && <div className="text-[10px] text-slate-400 mt-1">Checking…</div>}
+            {existingEmail && !checkingEmail && (
+              <div className="text-[11px] text-cyan-700 mt-1" data-testid="new-client-email-reuse-hint">
+                ✓ Existing client login — this new company will be added to their dropdown, and we'll email them the good news.
+              </div>
+            )}
           </div>
           <div className="text-[11px] text-slate-500">
             {existingEmail
-              ? "This client already has a login. They'll see the new company in the top-left dropdown after their next sign-in — no invite needed."
-              : "A GAAP-compliant Chart of Accounts is seeded automatically. The client can start onboarding after their first login."}
+              ? "This client already has a login. They'll see the new company in the top-left dropdown after their next sign-in."
+              : (<>A GAAP-compliant Chart of Accounts is seeded automatically. We'll email <b>{form.client_email || "the client"}</b> a "Set your password" link — no need to share a temporary password.</>)}
           </div>
         </div>
         <div className="px-5 py-3 border-t flex justify-end gap-2">
