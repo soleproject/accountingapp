@@ -888,30 +888,89 @@ async def run_ai_ask_client(
 
 @router.get("/q/{token}/next")
 async def public_next_question(token: str):
-    """Given an *answered* question token, return the id of the next
-    pending AI-initiated question for the same client email (if any) so
-    the magic-link chat can chain to it — one txn at a time, only if the
-    client volunteers to keep going. Returns ``{next: null}`` when
-    nothing else is waiting."""
+    """Given a just-answered question token, return the next question the
+    client can walk through.
+
+    Two-stage lookup:
+      1. Another *pending* ai_ask_client question already emailed to the
+         same address (most common in a batched auto-run).
+      2. If none, and the company still has candidate flagged transactions,
+         mint a fresh in-session question on the fly — no email sent, no
+         daily-cap increment, because the client is actively volunteering.
+
+    Returns ``{next: null}`` when nothing else is waiting.
+    """
     q = await db.client_questions.find_one({"id": token})
     if not q:
         raise HTTPException(404, "Question not found.")
     to_email = q.get("to_email")
-    if not to_email:
+    cid = q.get("company_id")
+
+    # Stage 1 — reuse a pending AI-initiated question for the same email.
+    if to_email:
+        pending = await db.client_questions.find_one({
+            "to_email": to_email,
+            "status": "pending",
+            "flow_type": "ai_ask_client",
+            "id": {"$ne": token},
+        }, sort=[("sent_at", -1)])
+        if pending:
+            return {
+                "next": {
+                    "token": pending["id"],
+                    "counterparty_label": pending.get("counterparty_label"),
+                    "question": pending.get("question"),
+                }
+            }
+
+    # Stage 2 — the client is here and willing; mint a new question
+    # in-session for another flagged transaction on the same company.
+    if not cid:
         return {"next": None}
-    nxt = await db.client_questions.find_one({
-        "to_email": to_email,
-        "status": "pending",
+    import ai_ask_client_scheduler as sched
+    candidates = await sched._candidate_txns(cid)
+    if not candidates:
+        return {"next": None}
+    company = await db.companies.find_one({"id": cid}) or {}
+    txn = candidates[0]
+    question = await sched._draft_question(txn, company_name=company.get("name") or "")
+    new_token = secrets.token_urlsafe(24)
+    expires = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    now = now_iso()
+    await db.client_questions.insert_one({
+        "id": new_token,
+        "company_id": cid,
+        "txn_id": txn["id"],
+        "txn_ids": [txn["id"]],
         "flow_type": "ai_ask_client",
-        "id": {"$ne": token},
-    }, sort=[("sent_at", -1)])
-    if not nxt:
-        return {"next": None}
+        "asked_by_user_id": q.get("asked_by_user_id"),
+        "asked_by_name": q.get("asked_by_name") or "Your accountant (AI)",
+        "question": question,
+        "status": "pending",
+        "answer": None,
+        "sent_at": now,
+        "expires_at": expires,
+        "to_email": to_email,
+        "counterparty_label": txn.get("contact_name") or "",
+        "in_session_chain": True,   # <- audit marker; NOT emailed, chain-generated
+    })
+    # Stamp the txn so the pro's Transactions view shows it's already asked.
+    await db.transactions.update_one(
+        {"id": txn["id"], "company_id": cid},
+        {"$set": {
+            "needs_review": True,
+            "ai_comment": (txn.get("ai_comment") or "")
+                          + f"\n\n[AI asked client in-session on {now[:10]}]: {question}",
+            "client_question_id": new_token,
+            "updated_at": now,
+        }},
+    )
     return {
         "next": {
-            "token": nxt["id"],
-            "counterparty_label": nxt.get("counterparty_label"),
-            "question": nxt.get("question"),
+            "token": new_token,
+            "counterparty_label": txn.get("contact_name") or "",
+            "question": question,
+            "in_session": True,
         }
     }
 

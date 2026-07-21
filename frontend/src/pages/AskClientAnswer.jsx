@@ -4,6 +4,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import {
   CheckCircle2, Loader2, AlertTriangle, Send, Sparkles, Bot, User as UserIcon,
+  Mic, MicOff,
 } from "lucide-react";
 
 const BASE = process.env.REACT_APP_BACKEND_URL;
@@ -145,6 +146,54 @@ export default function AskClientAnswer() {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   };
 
+  // ---- Voice input (Web Speech API). Client can dictate their answer
+  // instead of typing. Falls back gracefully on browsers without support.
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef(null);
+  const supported = typeof window !== "undefined" &&
+    !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  const toggleMic = () => {
+    if (!supported) {
+      toast.error("Voice input isn't supported in this browser. Please type your answer.");
+      return;
+    }
+    if (listening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const rec = new SR();
+    rec.lang = "en-US";
+    rec.interimResults = true;
+    rec.continuous = false;
+    let final = "";
+    rec.onresult = (e) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const chunk = e.results[i][0].transcript;
+        if (e.results[i].isFinal) final += chunk;
+        else interim += chunk;
+      }
+      // Show live transcript in the input as it comes in.
+      setInput((prev) => {
+        const base = prev.replace(/\s*·\s*[^·]*$/, "");   // strip previous interim tail
+        const composed = (final || "").trim();
+        if (interim) return `${composed}${composed ? " · " : ""}${interim}`;
+        return composed;
+      });
+    };
+    rec.onend = () => {
+      setListening(false);
+      // Clean up any interim marker left in the input.
+      setInput((prev) => prev.replace(/\s*·\s.*$/, "").trim());
+    };
+    rec.onerror = () => setListening(false);
+    recognitionRef.current = rec;
+    setListening(true);
+    try { rec.start(); } catch { setListening(false); }
+  };
+
   if (error) return <Wrap><ErrorState msg={error} /></Wrap>;
   if (!q)    return <Wrap><Loading /></Wrap>;
 
@@ -249,11 +298,23 @@ export default function AskClientAnswer() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKey}
             rows={2}
-            placeholder="Type your answer… (Enter to send)"
+            placeholder={listening ? "Listening… speak now" : "Type your answer… (Enter to send)"}
             disabled={busy}
             className="flex-1 text-sm border rounded-md px-3 py-2 resize-none"
             data-testid="chat-input"
           />
+          <button
+            onClick={toggleMic}
+            disabled={busy}
+            data-testid="chat-mic"
+            title={supported ? (listening ? "Stop dictating" : "Speak your answer") : "Voice input not supported in this browser"}
+            className={`inline-flex items-center justify-center w-10 h-10 rounded-md border transition
+              ${listening
+                ? "bg-rose-500 border-rose-500 text-white animate-pulse"
+                : "bg-white hover:bg-slate-50 text-slate-600"}`}
+          >
+            {listening ? <MicOff size={16} /> : <Mic size={16} />}
+          </button>
           <button
             onClick={send}
             disabled={busy || !input.trim()}
