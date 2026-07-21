@@ -71,7 +71,7 @@ export default function AskClientButton({
           className="inline-flex items-center gap-1 text-xs text-cyan-700 hover:text-cyan-800"
           title="Email your client to ask about this transaction"
         >
-          <HelpCircle size={12} /> Ask client
+          <HelpCircle size={12} /> Pro Ask Client
         </button>
       )}
 
@@ -88,7 +88,7 @@ export default function AskClientButton({
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="font-heading font-semibold text-lg flex items-center gap-2">
-                  <Sparkles size={16} className="text-cyan-600" /> Ask your client
+                  <Sparkles size={16} className="text-cyan-600" /> Pro Ask Client
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">
                   They'll get a magic-link email; their answer lands on this transaction automatically.

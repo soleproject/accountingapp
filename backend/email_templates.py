@@ -45,7 +45,45 @@ def _wrap(inner: str) -> str:
 
 
 # --------------------------------------------------------------------------
-# 1. Ask-client-about-a-transaction
+# 1c. AI Ask-client — fully-automated, ONE focused transaction per email.
+# Sent by the hourly scheduler (see ai_ask_client_scheduler.py). Tone is
+# on behalf of the accountant ("your accountant") but attributes the
+# question to the AI so the client understands the workflow.
+# --------------------------------------------------------------------------
+def ai_ask_client(*, pro_name: str, company_name: str, txn: dict, question: str, magic_url: str) -> tuple[str, str]:
+    date = txn.get("date") or ""
+    desc = txn.get("description") or "(no description)"
+    amt = float(txn.get("amount") or 0)
+    amt_str = f"${abs(amt):,.2f}" + (" out" if amt < 0 else " in")
+    from_line = (
+        f"{escape(pro_name)}'s AI assistant is helping keep your books for "
+        f"<b>{escape(company_name)}</b> on track, and needs a hand identifying "
+        f"this recent transaction:"
+    )
+    inner = f"""
+      <div style="{_H1}">Quick question about a transaction</div>
+      <div style="{_P}">{from_line}</div>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+             style="margin:12px 0 8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 18px;width:100%;">
+        <tr><td style="{_TABLE_KEY}">Date</td><td style="{_TABLE_VAL}">{escape(date)}</td></tr>
+        <tr><td style="{_TABLE_KEY}">Description</td><td style="{_TABLE_VAL}">{escape(desc)}</td></tr>
+        <tr><td style="{_TABLE_KEY}">Amount</td><td style="{_TABLE_VAL}">{escape(amt_str)}</td></tr>
+      </table>
+      <div style="{_P}">{escape(question)}</div>
+      <div style="padding:16px 0 8px;">
+        <a href="{magic_url}" style="{_BTN}">Chat with our AI →</a>
+      </div>
+      <div style="{_MUTE}">
+        Takes ~30 seconds. Once you're done, the AI will offer to walk you
+        through any other transactions that still need clarifying — one at a
+        time, only if you have a moment.
+      </div>
+    """
+    return f"Quick question — {desc[:40]}", _wrap(inner)
+
+
+# --------------------------------------------------------------------------
+# 1. Ask-client-about-a-transaction (Pro-initiated)
 # --------------------------------------------------------------------------
 def ask_client(*, pro_name: str, company_name: str, txn: dict, question: str, magic_url: str) -> tuple[str, str]:
     date = txn.get("date") or ""

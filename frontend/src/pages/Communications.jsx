@@ -9,7 +9,8 @@ import {
 } from "lucide-react";
 
 const KIND_LABELS = {
-  ask_client:            { label: "Ask client",         hint: "Pro asks the client about a transaction" },
+  ask_client:            { label: "Pro Ask Client",     hint: "Pro manually asks the client about flagged transactions" },
+  ai_ask_client:         { label: "AI Ask Client",      hint: "AI autonomously emails clients about unrecognized transactions (max 3/day per client, one txn per email)" },
   daily_pro_digest:      { label: "Daily digest",       hint: "Morning summary of your firm's Needs Attention" },
   dunning:               { label: "A/R dunning",        hint: "Reminders to customers about overdue invoices" },
   overdue_bill_client:   { label: "Overdue A/P",        hint: "Reminders to the client about overdue bills" },
@@ -101,6 +102,24 @@ function InboxTab({ cid }) {
     } finally { setBusy(false); }
   };
 
+  const runAiAskClient = async () => {
+    if (!cid) return;
+    setBusy(true);
+    try {
+      const r = await api.post(`/communications/ai-ask-client/run?for_company_id=${cid}`);
+      const s = r.data?.details?.[0] || {};
+      if (s.status === "sent") toast.success("AI asked the client about a new flagged transaction.");
+      else if (s.status === "no_candidates") toast.info("Nothing new to ask about right now.");
+      else if (s.status === "daily_cap_reached") toast.info("Daily cap of 3 emails reached for this client.");
+      else if (s.status === "pref_off") toast.info("AI Ask Client is off in Settings.");
+      else if (s.status === "no_client_email") toast.error("No client email on file for this company.");
+      else toast.info(`Result: ${s.status || "no-op"}`);
+      setTimeout(load, 600);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Run failed");
+    } finally { setBusy(false); }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -122,6 +141,15 @@ function InboxTab({ cid }) {
             <Send size={13} /> Send test
           </button>
         </div>
+        <button
+          onClick={runAiAskClient}
+          disabled={busy}
+          data-testid="run-ai-ask-client"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md bg-fuchsia-600 text-white hover:bg-fuchsia-700 disabled:opacity-40"
+          title="Trigger the AI Ask Client scheduler for this company now (respects daily cap + pref)"
+        >
+          <Sparkles size={13} /> Run AI Ask Client now
+        </button>
         <button
           onClick={load}
           disabled={busy}
@@ -547,6 +575,15 @@ function AiLogRow({ log, open, onToggle }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-medium text-slate-900">{log.counterparty_label || "Client question"}</span>
+            {log.flow_type === "ai_ask_client" ? (
+              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-800 border border-fuchsia-200" data-testid={`ailog-flow-ai-${log.id}`}>
+                <Sparkles size={10} /> AI Ask Client
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-800 border border-cyan-200" data-testid={`ailog-flow-pro-${log.id}`}>
+                Pro Ask Client
+              </span>
+            )}
             <span className="text-xs text-slate-500">· {log.txn_count} txn{log.txn_count === 1 ? "" : "s"}</span>
             <span className="text-xs text-slate-500 font-mono-num">· {fmtMoney(Math.abs(total))}</span>
             {isAnswered && category && (

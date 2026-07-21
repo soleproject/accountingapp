@@ -41,7 +41,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PREFS = {
     "daily_pro_digest":      True,
-    "ask_client":            True,
+    "ask_client":            True,   # Pro-initiated ask-client (labelled "Pro Ask Client")
+    "ai_ask_client":         True,   # Fully-automated AI-initiated ask-client (opt-out)
     "dunning":               True,
     "overdue_bill_client":   True,
     "plaid_reauth":          True,

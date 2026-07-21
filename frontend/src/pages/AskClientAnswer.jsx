@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { toast } from "sonner";
 import {
@@ -29,11 +29,14 @@ export default function AskClientAnswer() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+  const [nextQ, setNextQ] = useState(null);   // {token, counterparty_label, question}
+  const [chainPrompt, setChainPrompt] = useState(false);
   const scrollerRef = useRef(null);
 
   // Load the question + any prior chat history (so a client who closed the
   // tab and re-opened the link resumes exactly where they left off).
   useEffect(() => {
+    setDone(false); setNextQ(null); setChainPrompt(false); setInput("");
     axios.get(`${BASE}/api/q/${token}`)
       .then(r => {
         setQ(r.data);
@@ -54,6 +57,30 @@ export default function AskClientAnswer() {
   // client accepts or types another message.
   const [pendingPlan, setPendingPlan] = useState(null);
 
+  // After the current question closes, look for another AI-Ask-Client
+  // question waiting for the same client. If one exists, we offer to
+  // continue rather than hitting the "all done" state immediately.
+  const checkForNext = async () => {
+    try {
+      const r = await axios.get(`${BASE}/api/q/${token}/next`);
+      if (r.data?.next) {
+        setNextQ(r.data.next);
+        setChainPrompt(true);
+      } else {
+        setDone(true);
+      }
+    } catch {
+      setDone(true);
+    }
+  };
+
+  const navigate = useNavigate();
+  const continueToNext = () => {
+    if (!nextQ) return;
+    navigate(`/q/${nextQ.token}`);
+  };
+  const declineNext = () => { setChainPrompt(false); setDone(true); };
+
   const send = async () => {
     const msg = input.trim();
     if (!msg) return;
@@ -70,7 +97,7 @@ export default function AskClientAnswer() {
       if (r.data.plan) setPendingPlan(r.data.plan);
       if (r.data.finalize) {
         // Fast-path DONE — server already applied everything.
-        setTimeout(() => setDone(true), 800);
+        setTimeout(checkForNext, 800);
       }
     } catch (e) {
       toast.error(e.response?.data?.detail || "Send failed. Try again.");
@@ -90,7 +117,7 @@ export default function AskClientAnswer() {
     try {
       await axios.post(`${BASE}/api/q/${token}/apply-plan`, { plan: pendingPlan });
       setPendingPlan(null);
-      // Add a client bubble showing they said yes, then transition to done.
+      // Add a client bubble showing they said yes, then transition.
       setQ(prev => ({
         ...prev,
         chat_messages: [
@@ -99,7 +126,7 @@ export default function AskClientAnswer() {
           { role: "ai", content: "Done — everything's categorized and sent to your accountant. Thanks!" },
         ],
       }));
-      setTimeout(() => setDone(true), 900);
+      setTimeout(checkForNext, 900);
     } catch (e) {
       toast.error(e.response?.data?.detail || "Couldn't apply the plan. Please type instead.");
     } finally {
@@ -120,6 +147,37 @@ export default function AskClientAnswer() {
 
   if (error) return <Wrap><ErrorState msg={error} /></Wrap>;
   if (!q)    return <Wrap><Loading /></Wrap>;
+
+  if (chainPrompt && nextQ) {
+    return <Wrap>
+      <div className="text-center space-y-4 py-6" data-testid="chain-prompt">
+        <CheckCircle2 size={40} className="text-emerald-500 mx-auto" />
+        <div className="text-lg font-semibold text-slate-900">
+          Nice — that one's sorted.
+        </div>
+        <div className="text-sm text-slate-600 max-w-md mx-auto">
+          Got a minute for <b>one more</b>? Your accountant's AI is asking about{" "}
+          <b>{nextQ.counterparty_label || "another transaction"}</b>.
+        </div>
+        <div className="flex items-center justify-center gap-2 pt-2">
+          <button
+            onClick={continueToNext}
+            data-testid="chain-continue"
+            className="inline-flex items-center gap-1.5 px-5 py-2 rounded-md bg-cyan-600 text-white hover:bg-cyan-700 text-sm font-semibold"
+          >
+            Yes, let's do it
+          </button>
+          <button
+            onClick={declineNext}
+            data-testid="chain-decline"
+            className="px-5 py-2 rounded-md border bg-white hover:bg-slate-50 text-sm text-slate-700"
+          >
+            Not right now
+          </button>
+        </div>
+      </div>
+    </Wrap>;
+  }
 
   if (done) {
     return <Wrap>

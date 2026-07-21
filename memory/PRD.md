@@ -39,6 +39,36 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — AI Ask Client (autonomous email loop) + rename to Pro Ask Client
+- Renamed the existing "Ask Client" flow to **"Pro Ask Client"** everywhere in the
+  UI (Communications inbox/logs/settings, `AskClientButton` trigger + modal title).
+  Wire pref key `ask_client` was kept for backward-compat with the existing
+  `comms_prefs`.
+- Added new **"AI Ask Client"** flow — the AI autonomously scans every company
+  every hour for freshly-flagged transactions (<3 days old, `needs_review=True`,
+  no existing `client_question_id`) and emails the client-owner a magic-link
+  chat about ONE focused transaction per email.
+  - Opt-out (default ON) via `comms_prefs.ai_ask_client`.
+  - Per-client-email daily cap of **3 emails / calendar day** (counted from the
+    `communications` audit log where `kind=ai_ask_client` and `status=sent`).
+  - New `/api/communications/ai-ask-client/run` endpoint (Pro/Superadmin) —
+    triggers the loop on demand; the Communications inbox now has a "Run AI
+    Ask Client now" button that runs it for the currently-selected company.
+  - New `GET /api/q/{token}/next` public endpoint — after the client finishes
+    an AI question, the magic-link chat fetches the next pending
+    `ai_ask_client` question for the same email and shows a "Got a minute
+    for one more?" chain prompt (`AskClientAnswer.jsx`).
+  - `flow_type` field added to every `client_questions` doc
+    (`"pro_ask_client"` | `"ai_ask_client"`); AI Logs tab shows a coloured
+    flow badge per row.
+  - Background scheduler = `/app/backend/ai_ask_client_scheduler.py`,
+    registered via `server.py` startup. In-process asyncio loop; interval
+    configurable via `AI_ASK_CLIENT_INTERVAL_SEC`; disable via
+    `AI_ASK_CLIENT_SCHEDULER_DISABLED=1`.
+  - Tests: `/app/backend/tests/test_ai_ask_client.py` — 4 passing tests
+    (single-txn fresh pick, daily-cap short-circuit, pref-off short-circuit,
+    chaining endpoint).
+
 ### Feb 2026 — Mega-Approve: include needs_review categorized rows
 - **`bulk-approve-ai-ready`** (mega button): stopped excluding `needs_review=true` rows.
   A row like AT&T flagged for review but AI-categorized to `6600 Utilities` is now

@@ -38,6 +38,7 @@ router = APIRouter(prefix="/api")
 class PrefsPatch(BaseModel):
     daily_pro_digest:    Optional[bool] = None
     ask_client:          Optional[bool] = None
+    ai_ask_client:       Optional[bool] = None
     dunning:             Optional[bool] = None
     overdue_bill_client: Optional[bool] = None
     plaid_reauth:        Optional[bool] = None
@@ -153,6 +154,7 @@ async def ask_client_about_txn(
         "id": token,   # token IS the id, used as the magic-link path
         "company_id": cid, "txn_id": tid,
         "txn_ids": [tid],   # array form for batched flow parity
+        "flow_type": "pro_ask_client",
         "asked_by_user_id": user["id"],
         "asked_by_name": user.get("full_name") or user.get("email"),
         "question": inp.question,
@@ -322,6 +324,7 @@ async def ask_client_batch(
         "company_id": cid,
         "txn_id": txns[0]["id"],  # legacy single-value
         "txn_ids": [t["id"] for t in txns],
+        "flow_type": "pro_ask_client",
         "asked_by_user_id": user["id"],
         "asked_by_name": user.get("full_name") or user.get("email"),
         "question": inp.question,
@@ -737,6 +740,7 @@ async def list_ai_conversation_logs(
         ]
         items.append({
             "id": q.get("id"),
+            "flow_type": q.get("flow_type") or "pro_ask_client",
             "counterparty_label": q.get("counterparty_label"),
             "question": q.get("question"),
             "asked_by_name": q.get("asked_by_name"),
@@ -854,6 +858,62 @@ async def dismiss_proposal(cid: str, tid: str, user: dict = Depends(get_current_
         }, "$unset": {"ai_proposal_from_answer": ""}},
     )
     return {"dismissed": True}
+
+
+# --------------------------------------------------------------------------
+# AI Ask Client — manual trigger + client-chat chaining helper
+# --------------------------------------------------------------------------
+@router.post("/communications/ai-ask-client/run")
+async def run_ai_ask_client(
+    for_company_id: Optional[str] = Query(None),
+    user: dict = Depends(require_role("pro", "superadmin")),
+):
+    """Fire the autonomous AI-Ask-Client loop now. Pros can trigger their
+    own tenants; superadmins can pass ``for_company_id`` to smoke-test one
+    company, or omit to run against every company."""
+    import ai_ask_client_scheduler as sched
+    if for_company_id:
+        summary = await sched.process_company(for_company_id)
+        return {"companies": 1, "sent": 1 if summary.get("status") == "sent" else 0, "details": [summary]}
+    if user["role"] == "pro":
+        # Restrict to companies this pro is a member of.
+        ms = await db.memberships.find({"user_id": user["id"], "role": "pro"}).to_list(1000)
+        cids = [m["company_id"] for m in ms]
+        summaries = []
+        for cid in cids:
+            summaries.append(await sched.process_company(cid))
+        return {"companies": len(cids), "sent": sum(1 for s in summaries if s.get("status") == "sent"), "details": summaries}
+    return await sched.run_once()
+
+
+@router.get("/q/{token}/next")
+async def public_next_question(token: str):
+    """Given an *answered* question token, return the id of the next
+    pending AI-initiated question for the same client email (if any) so
+    the magic-link chat can chain to it — one txn at a time, only if the
+    client volunteers to keep going. Returns ``{next: null}`` when
+    nothing else is waiting."""
+    q = await db.client_questions.find_one({"id": token})
+    if not q:
+        raise HTTPException(404, "Question not found.")
+    to_email = q.get("to_email")
+    if not to_email:
+        return {"next": None}
+    nxt = await db.client_questions.find_one({
+        "to_email": to_email,
+        "status": "pending",
+        "flow_type": "ai_ask_client",
+        "id": {"$ne": token},
+    }, sort=[("sent_at", -1)])
+    if not nxt:
+        return {"next": None}
+    return {
+        "next": {
+            "token": nxt["id"],
+            "counterparty_label": nxt.get("counterparty_label"),
+            "question": nxt.get("question"),
+        }
+    }
 
 
 # --------------------------------------------------------------------------

@@ -113,6 +113,9 @@ async def startup():
     await job_queue.ensure_jobs_indexes()
     await statements.ensure_indexes()
     sync_tasks.register_all()
+    # AI Ask Client — hourly autonomous email loop (opt-out per pro).
+    import ai_ask_client_scheduler
+    ai_ask_client_scheduler.start_scheduler()
     # Any job left in queued/running from a previous process is stuck —
     # mark as failed so the Sync Pill doesn't display "syncing forever".
     stuck = await job_queue.reconcile_stuck_jobs()
