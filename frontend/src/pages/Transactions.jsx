@@ -345,7 +345,11 @@ export default function Transactions() {
     const q       = params.get("q") || "";
     const df      = params.get("date_from") || "";
     const dt      = params.get("date_to") || "";
-    const flt     = params.get("filter") || "";
+    // Accept either `filter` (voice deep-link convention) OR `status` (what
+    // Month Close and other outbound links emit — see load() below which
+    // writes `status=` back to the URL). Keeping both keeps every entrypoint
+    // working without a rename cascade.
+    const flt     = params.get("filter") || params.get("status") || "";
     if (q)   setSearch(q);
     if (df)  setDateFrom(df);
     if (dt)  setDateTo(dt);

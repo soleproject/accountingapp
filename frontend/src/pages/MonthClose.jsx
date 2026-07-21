@@ -190,6 +190,8 @@ function DetailView({ cursor, setCursor, data, onSign, busy }) {
               busy={busy}
               divider={idx > 0}
               cursorMonth={cursor}
+              periodStart={data?.period_start}
+              periodEnd={data?.period_end}
             />
           );
         })}
@@ -198,7 +200,7 @@ function DetailView({ cursor, setCursor, data, onSign, busy }) {
   );
 }
 
-function CheckpointRow({ meta, c, onSign, busy, divider, cursorMonth }) {
+function CheckpointRow({ meta, c, onSign, busy, divider, cursorMonth, periodStart, periodEnd }) {
   const Icon = meta.icon;
   const green = Boolean(c?.green);
   // A row is auto-driven either statically (Txns Reviewed) or dynamically
@@ -206,6 +208,12 @@ function CheckpointRow({ meta, c, onSign, busy, divider, cursorMonth }) {
   // invoices/bills for the month). Closed is always manual.
   const isAuto = (meta.auto || Boolean(c?.auto)) && meta.key !== "closed";
   const canToggle = !isAuto;
+
+  // Build a "?status=…&date_from=…&date_to=…" suffix so the Transactions
+  // page opens filtered to THIS month's slice, not company-wide.
+  const monthRange = (periodStart && periodEnd)
+    ? `&date_from=${periodStart}&date_to=${periodEnd}`
+    : "";
 
   // Contextual status text per checkpoint — clickable link where possible
   // so the pro can jump straight to what needs review.
@@ -218,14 +226,22 @@ function CheckpointRow({ meta, c, onSign, busy, divider, cursorMonth }) {
       <span className="text-xs text-slate-600">
         {c.uncategorized > 0 && (
           <>
-            <Link to={`/accounting/transactions?status=uncategorized`} className="text-cyan-700 hover:underline">
+            <Link
+              to={`/accounting/transactions?status=uncategorized${monthRange}`}
+              className="text-cyan-700 hover:underline"
+              data-testid="month-close-uncategorized-link"
+            >
               {c.uncategorized} uncategorized
             </Link>
             {c.unreviewed > 0 && " · "}
           </>
         )}
         {c.unreviewed > 0 && (
-          <Link to={`/accounting/transactions?status=unapproved`} className="text-cyan-700 hover:underline">
+          <Link
+            to={`/accounting/transactions?status=unapproved${monthRange}`}
+            className="text-cyan-700 hover:underline"
+            data-testid="month-close-unreviewed-link"
+          >
             {c.unreviewed} unreviewed
           </Link>
         )}
