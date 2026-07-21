@@ -6,10 +6,21 @@ import {
   CheckCircle2, Loader2, AlertTriangle, Send, Sparkles, Bot, User as UserIcon,
 } from "lucide-react";
 
-// Public, no-auth chat page — clients arrive via the magic-link in the
-// ask-client email. Uses raw axios (not the authenticated `api` client) so
-// the request carries no JWT and hits the wide-open /api/q/:token routes.
 const BASE = process.env.REACT_APP_BACKEND_URL;
+
+// Extract plain **bold** and • bullets into inline JSX so AI markdown
+// renders correctly in chat bubbles without pulling in a full renderer.
+function renderMarkdown(text) {
+  if (!text) return null;
+  const lines = String(text).split("\n");
+  return lines.map((line, li) => {
+    const parts = line.split(/(\*\*[^*]+\*\*)/g).map((p, i) => {
+      if (p.startsWith("**") && p.endsWith("**")) return <b key={i}>{p.slice(2, -2)}</b>;
+      return <span key={i}>{p}</span>;
+    });
+    return <div key={li}>{parts}</div>;
+  });
+}
 
 export default function AskClientAnswer() {
   const { token } = useParams();
@@ -38,11 +49,16 @@ export default function AskClientAnswer() {
     }
   }, [q?.chat_messages, busy, done]);
 
+  // The most recently proposed plan, if the AI's last turn emitted a PLAN
+  // block. When set, we render an interactive green card. Cleared once the
+  // client accepts or types another message.
+  const [pendingPlan, setPendingPlan] = useState(null);
+
   const send = async () => {
     const msg = input.trim();
     if (!msg) return;
     setBusy(true);
-    // Optimistically append the client turn so it appears instantly.
+    setPendingPlan(null);   // any new client message cancels an outstanding plan card
     setQ(prev => ({
       ...prev,
       chat_messages: [...(prev.chat_messages || []), { role: "client", content: msg }],
@@ -50,16 +66,14 @@ export default function AskClientAnswer() {
     setInput("");
     try {
       const r = await axios.post(`${BASE}/api/q/${token}/chat`, { message: msg });
-      // Replace optimistic history with the authoritative version from server.
       setQ(prev => ({ ...prev, chat_messages: r.data.history || prev.chat_messages }));
+      if (r.data.plan) setPendingPlan(r.data.plan);
       if (r.data.finalize) {
-        // Give the AI's final "thanks" bubble a moment on screen before
-        // switching to the done state.
+        // Fast-path DONE — server already applied everything.
         setTimeout(() => setDone(true), 800);
       }
     } catch (e) {
       toast.error(e.response?.data?.detail || "Send failed. Try again.");
-      // Roll back the optimistic message so the client doesn't lose it.
       setQ(prev => ({
         ...prev,
         chat_messages: (prev.chat_messages || []).filter((m, i, arr) => i !== arr.length - 1),
@@ -68,6 +82,36 @@ export default function AskClientAnswer() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const applyPlan = async () => {
+    if (!pendingPlan) return;
+    setBusy(true);
+    try {
+      await axios.post(`${BASE}/api/q/${token}/apply-plan`, { plan: pendingPlan });
+      setPendingPlan(null);
+      // Add a client bubble showing they said yes, then transition to done.
+      setQ(prev => ({
+        ...prev,
+        chat_messages: [
+          ...(prev.chat_messages || []),
+          { role: "client", content: "Yes, apply that." },
+          { role: "ai", content: "Done — everything's categorized and sent to your accountant. Thanks!" },
+        ],
+      }));
+      setTimeout(() => setDone(true), 900);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't apply the plan. Please type instead.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const rejectPlan = () => {
+    setPendingPlan(null);
+    setInput("");
+    // Focus input so client can re-explain.
+    setTimeout(() => document.querySelector('[data-testid="chat-input"]')?.focus(), 50);
   };
 
   const onKey = (e) => {
@@ -127,7 +171,18 @@ export default function AskClientAnswer() {
           {messages.map((m, i) => (
             <Bubble key={i} role={m.role} content={m.content} />
           ))}
-          {busy && <TypingBubble />}
+          {pendingPlan && (
+            <PlanCard
+              plan={pendingPlan}
+              busy={busy}
+              onApply={applyPlan}
+              onReject={rejectPlan}
+              txnCount={q.txns?.length || 0}
+              totalAbs={Math.abs((q.txns || []).reduce((s, t) => s + Number(t.amount || 0), 0))}
+              counterparty={q.counterparty_label}
+            />
+          )}
+          {busy && !pendingPlan && <TypingBubble />}
         </div>
 
         <div className="flex items-end gap-2">
@@ -166,7 +221,50 @@ function Bubble({ role, content }) {
         className={`max-w-[78%] text-sm rounded-lg px-3.5 py-2.5 whitespace-pre-wrap leading-relaxed
           ${isAi ? "bg-white border border-slate-200 text-slate-800" : "bg-cyan-600 text-white"}`}
       >
-        {content}
+        {isAi ? renderMarkdown(content) : content}
+      </div>
+    </div>
+  );
+}
+
+// Green plan card — rendered inline in the chat when the AI emits [[PLAN:...]]
+// because the mapping needs client confirmation (split, big money, unusual).
+function PlanCard({ plan, busy, onApply, onReject, txnCount, totalAbs, counterparty }) {
+  return (
+    <div className="flex items-start gap-2" data-testid="plan-card">
+      <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center bg-cyan-600 text-white">
+        <Sparkles size={14} />
+      </div>
+      <div className="max-w-[85%] rounded-lg border-2 border-emerald-400 bg-emerald-50/70 p-4 space-y-3">
+        <div className="text-sm text-slate-900">
+          <div className="font-semibold mb-1.5">Here's the plan{counterparty ? <> for <b>{counterparty}</b></> : ""}:</div>
+          <ul className="text-sm space-y-1 pl-1">
+            <li>• <b>{txnCount}</b> row{txnCount === 1 ? "" : "s"}{totalAbs ? <> totaling <b className="font-mono-num">${totalAbs.toFixed(2)}</b></> : ""} → <b>{plan.account_name}</b> ({plan.account_code})</li>
+            {plan.summary && <li>• Category: <i>{plan.summary}</i></li>}
+            {plan.create_rule && plan.rule_pattern && (
+              <li>• Also create a rule so future <b>{plan.rule_pattern}</b> charges auto-categorize.</li>
+            )}
+          </ul>
+        </div>
+        <div className="flex items-center gap-2 pt-1">
+          <button
+            onClick={onApply}
+            disabled={busy}
+            data-testid="plan-apply"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 text-sm font-semibold"
+          >
+            {busy ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle2 size={14} />}
+            Yes, apply{plan.create_rule ? " + create rule" : ""}
+          </button>
+          <button
+            onClick={onReject}
+            disabled={busy}
+            data-testid="plan-reject"
+            className="px-4 py-2 rounded-md border bg-white hover:bg-slate-50 text-sm text-slate-700"
+          >
+            No, thanks
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import os
 import secrets
+import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 
@@ -432,6 +433,7 @@ async def public_chat_turn(token: str, inp: ChatIn):
     tx_ids = q.get("txn_ids") or ([q["txn_id"]] if q.get("txn_id") else [])
     txns = await db.transactions.find({"id": {"$in": tx_ids}}).sort("date", 1).to_list(200) if tx_ids else []
     company = await db.companies.find_one({"id": q.get("company_id")}) or {}
+    coa = await db.accounts.find({"company_id": q.get("company_id")}).to_list(500)
 
     history = list(q.get("chat_messages") or [])
     now = now_iso()
@@ -444,6 +446,7 @@ async def public_chat_turn(token: str, inp: ChatIn):
         company_name=company.get("name") or "",
         txns=txns,
         history=history,
+        coa=coa,
     )
     history.append({"role": "ai", "content": ai_reply, "at": now_iso()})
     await db.client_questions.update_one(
@@ -451,25 +454,155 @@ async def public_chat_turn(token: str, inp: ChatIn):
         {"$set": {"chat_messages": history, "updated_at": now_iso()}},
     )
 
-    # Detect finalization marker. Format: [[DONE:<summary>]]
-    import re as _re
-    m = _re.search(r"\[\[DONE:(.+?)\]\]", ai_reply, flags=_re.S)
-    finalize = bool(m)
-    display_reply = _re.sub(r"\[\[DONE:.+?\]\]", "", ai_reply, flags=_re.S).strip()
-    if finalize:
-        summary = m.group(1).strip()
-        # Compose the final answer as the AI's summary + the last thing the
-        # client said, so the interpreter has the richest possible text.
-        answer_text = f"{summary}\n\nClient's own words: {client_msg}"
-        # Reuse the existing answer path so the interpreter runs and the
-        # proposal is stamped exactly like the single-textarea flow.
-        await public_answer_question(token, AnswerIn(answer=answer_text))
+    # Two markers the AI can emit:
+    #   [[DONE:{json}]] — high-confidence fast path, auto-apply immediately
+    #   [[PLAN:{json}]] — needs confirmation, render a green card client-side
+    import re as _re, json as _json
+    plan_match = _re.search(r"\[\[PLAN:(\{.+?\})\s*\]\]", ai_reply, flags=_re.S)
+    done_match = _re.search(r"\[\[DONE:(\{.+?\})\s*\]\]", ai_reply, flags=_re.S)
+    display_reply = _re.sub(r"\[\[(?:PLAN|DONE):.+?\]\]", "", ai_reply, flags=_re.S).strip()
+
+    plan = None
+    finalize = False
+    if done_match:
+        try:
+            plan = _json.loads(done_match.group(1))
+        except _json.JSONDecodeError:
+            plan = None
+        if plan:
+            # Fast path — apply immediately, close the question.
+            await _apply_client_plan(
+                token=token, q_doc=q, plan=plan, client_msg=client_msg, coa=coa,
+            )
+            finalize = True
+    elif plan_match:
+        try:
+            plan = _json.loads(plan_match.group(1))
+        except _json.JSONDecodeError:
+            plan = None
+        # Do NOT auto-apply — the client will click Yes or No on the card.
 
     return {
         "reply": display_reply,
-        "finalize": finalize,
+        "finalize": finalize,           # True only on fast-path DONE
+        "plan": plan if plan_match else None,  # Only PLAN cards go to frontend
         "history": history,
     }
+
+
+async def _apply_client_plan(*, token: str, q_doc: dict, plan: dict, client_msg: str, coa: list[dict]) -> None:
+    """Shared finalization logic used by both the fast-path DONE marker
+    and the client's 'Yes, apply' button on a PLAN card. Idempotent."""
+    cid = q_doc.get("company_id")
+    tx_ids = q_doc.get("txn_ids") or ([q_doc["txn_id"]] if q_doc.get("txn_id") else [])
+    account_code = plan.get("account_code")
+    acct = next((a for a in coa if a.get("code") == account_code), None)
+    if not acct:
+        # Unknown code — fall back to the plain-text interpreter path so the
+        # pro still gets *something* actionable rather than nothing.
+        await public_answer_question(
+            token,
+            AnswerIn(answer=f"{plan.get('summary') or ''}\n\nClient's own words: {client_msg}"),
+        )
+        return
+    now = now_iso()
+    # Directly categorize every txn — skip needs_review since the client
+    # confirmed. Also stamp the proposal for the audit trail.
+    proposal_doc = {
+        "account_code": acct["code"],
+        "account_id": acct["id"],
+        "account_name": acct["name"],
+        "confidence": float(plan.get("confidence") or 0.9),
+        "reasoning": plan.get("summary") or "",
+        "applies_to_all": True,
+        "requires_split": False,
+        "proposed_at": now,
+        "source_question_id": token,
+        "auto_applied": True,
+    }
+    existing = await db.transactions.find(
+        {"id": {"$in": tx_ids}, "company_id": cid}
+    ).to_list(200)
+    for t in existing:
+        ai_comment = (t.get("ai_comment") or "") + (
+            f"\n[Client chat {now[:10]}] {plan.get('summary') or ''}"
+            f"\n[Auto-applied → {acct['code']} {acct['name']}]"
+        )
+        await db.transactions.update_one(
+            {"id": t["id"]},
+            {"$set": {
+                "category_account_id": acct["id"],
+                "category_account_name": acct["name"],
+                "category_account_code": acct["code"],
+                "needs_review": False,
+                "human_reviewed": True,
+                "human_reviewed_at": now,
+                "human_reviewed_by": "client_chat",
+                "client_answer": plan.get("summary") or client_msg,
+                "client_answered_at": now,
+                "ai_comment": ai_comment,
+                "updated_at": now,
+            }},
+        )
+    # Optionally spawn a rule so future txns from this counterparty
+    # auto-categorize without ever asking.
+    if plan.get("create_rule") and plan.get("rule_pattern"):
+        rule_pattern = str(plan["rule_pattern"]).strip().upper()
+        if rule_pattern:
+            existing_rule = await db.rules.find_one({
+                "company_id": cid, "match_type": "description_contains",
+                "match_value": rule_pattern,
+            })
+            if not existing_rule:
+                await db.rules.insert_one({
+                    "id": str(uuid.uuid4()), "company_id": cid,
+                    "match_type": "description_contains",
+                    "match_value": rule_pattern,
+                    "account_code": acct["code"], "account_name": acct["name"],
+                    "created_by": "client_chat", "hits": len(existing),
+                    "created_at": now, "updated_at": now,
+                })
+    # Close the question.
+    await db.client_questions.update_one(
+        {"id": token},
+        {"$set": {
+            "status": "answered",
+            "answer": plan.get("summary") or client_msg,
+            "answered_at": now,
+            "ai_proposal": proposal_doc,
+        }},
+    )
+
+
+class PlanApplyIn(BaseModel):
+    plan: dict
+
+
+@router.post("/q/{token}/apply-plan")
+async def public_apply_plan(token: str, inp: PlanApplyIn):
+    """Client clicked the green button on a PLAN card. Server verifies the
+    plan against the CoA (never trusts client-side account codes blindly)
+    and runs the same finalization as the fast path."""
+    q = await db.client_questions.find_one({"id": token})
+    if not q:
+        raise HTTPException(404, "Question not found.")
+    if q.get("status") == "answered":
+        raise HTTPException(400, "This conversation is already closed.")
+    coa = await db.accounts.find({"company_id": q.get("company_id")}).to_list(500)
+    valid_codes = {a.get("code") for a in coa}
+    if inp.plan.get("account_code") not in valid_codes:
+        raise HTTPException(400, "Plan references an unknown account code.")
+    # Use the last client message as the audit trail if available.
+    last_client_msg = ""
+    for m in reversed(q.get("chat_messages") or []):
+        if m.get("role") == "client":
+            last_client_msg = m.get("content") or ""
+            break
+    await _apply_client_plan(
+        token=token, q_doc=q, plan=inp.plan,
+        client_msg=last_client_msg, coa=coa,
+    )
+    return {"status": "answered", "applied": True}
 
 
 @router.post("/q/{token}/answer")

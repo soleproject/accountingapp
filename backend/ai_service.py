@@ -998,57 +998,85 @@ async def interpret_client_answer(
 # ---------------------------------------------------------------------------
 # Client-side chat for the ask-client magic-link page
 # ---------------------------------------------------------------------------
-# When a client clicks "Answer for all" from a batched ask-client email they
-# land on a chat interface instead of a plain textarea. This lets the AI:
-#   - Restate the accountant's question in context
-#   - Ask up to two follow-ups if the client's first answer is ambiguous
-#   - Summarize the plan back to the client for confirmation
-#   - Emit [[DONE:<summary>]] on the final turn — backend detects the marker,
-#     synthesizes the answer, and closes the question.
+# The client lands here from a batched ask-client email and chats with the
+# AI in plain language. When the AI has enough to categorize, it emits a
+# structured PLAN block — the frontend renders that as an interactive card
+# with a green "Yes, categorize all N + create rule" button and a grey
+# "No thanks" button (same UX as the internal 'Let's review' pane).
 CLIENT_CHAT_SYSTEM = (
-    "You are a friendly bookkeeping assistant talking DIRECTLY to a small-"
-    "business owner about specific bank transactions their accountant flagged. "
-    "The accountant already asked one question — you're now helping the "
-    "owner explain the charges so the accountant can categorize them.\n\n"
-    "Rules of engagement:\n"
-    "- Sound like a helpful colleague, not a chatbot. First person, plain "
-    "language, no jargon.\n"
-    "- Ask AT MOST 2 clarifying follow-ups after their first answer, and only "
-    "if the answer is genuinely ambiguous (business vs. personal? one-time or "
-    "recurring? which employee?). If the first answer is clear, jump straight "
-    "to confirming the plan.\n"
-    "- Never accuse or imply fraud. Assume the owner is honest.\n"
-    "- Never claim to be an AI unless directly asked.\n"
-    "- When you have enough information, restate what you'll tell the "
-    "accountant in ONE sentence, then confirm with the client (\"Sound right?\").\n"
-    "- After they confirm, respond with a brief thank-you AND append the "
-    "special marker `[[DONE:<one-sentence summary of the answer for the "
-    "accountant>]]` at the END of your final message (nothing after it).\n"
-    "- If the client keeps volunteering new info, keep chatting — don't emit "
-    "the marker until they've explicitly confirmed the plan.\n"
-    "- Never emit [[DONE:...]] in the very first response — the client always "
-    "gets to answer at least once first."
+    "You are a bookkeeping assistant chatting with a small-business owner "
+    "about specific bank transactions their accountant flagged.\n\n"
+    "CONVERSATION STYLE:\n"
+    "- Short. Colleague-tone. First person. No jargon.\n"
+    "- Trust clear answers. If the client says 'office supplies', that IS "
+    "the answer — do NOT invent hypothetical follow-ups. Only ask a follow-up "
+    "if the answer is genuinely ambiguous or contradictory.\n"
+    "- Max ONE clarifying follow-up total. After that, commit.\n"
+    "- Never accuse. Never claim to be an AI.\n\n"
+    "TWO WAYS TO FINISH — YOU choose based on how obvious the answer is:\n\n"
+    "PATH A — Simple, obvious answer (fast path):\n"
+    "  When the client's answer is clear-cut and the mapping is unambiguous "
+    "  (e.g. 'office supplies' → Office Expense; 'my rent' → Rent Expense; "
+    "  'personal' → Owner Draws), respond with a brief thank-you and emit:\n"
+    "    [[DONE:{\"account_code\":\"7000\",\"account_name\":\"Office Expense\","
+    "\"summary\":\"office supplies\",\"confidence\":0.95,\"create_rule\":true,"
+    "\"rule_pattern\":\"COSTCO\"}]]\n"
+    "  This will auto-apply everything — no button click needed.\n"
+    "  USE FAST PATH WHEN: confidence >= 0.85, no split, single account, "
+    "  the mapping wouldn't surprise the client.\n\n"
+    "PATH B — Needs confirmation (plan card):\n"
+    "  When it's a bigger judgment call — split business/personal, unusual "
+    "  category, big money (>$1000), or the mapping might surprise them — "
+    "  emit a plan for the client to approve. Prose lead-in with markdown, "
+    "  then on new lines:\n"
+    "    Here's the plan for **Costco**:\n"
+    "    • **2** rows totaling **$825.10** → **Office Expense** (7000)\n"
+    "    • Also create a rule so future Costco charges auto-categorize.\n"
+    "    [[PLAN:{\"account_code\":\"7000\",\"account_name\":\"Office Expense\","
+    "\"summary\":\"office supplies\",\"confidence\":0.85,\"create_rule\":true,"
+    "\"rule_pattern\":\"COSTCO\"}]]\n"
+    "  The frontend will render a green 'Yes, apply' / grey 'No thanks' card.\n\n"
+    "COMMON JSON FIELDS (both markers):\n"
+    "- account_code: one code from the CoA the caller supplies. Never invent.\n"
+    "- account_name: exact name for that code.\n"
+    "- summary: 3-8 word plain-English label.\n"
+    "- confidence: 0.0-1.0.\n"
+    "- create_rule: true if the counterparty is a repeat name (Costco, Zelle to Roberto). "
+    "  false for one-off vendors, personal-use classifications, or Owner Draws.\n"
+    "- rule_pattern: uppercase substring to match on future txns (only when create_rule=true).\n\n"
+    "NEVER emit either marker on turn 1 — the client always answers first. "
+    "If you're still uncertain after a follow-up, emit a PLAN with confidence <0.6 "
+    "so the accountant makes the call — don't loop asking questions."
 )
 
 
 async def client_chat_reply(
     *, question: str, counterparty: str, company_name: str,
-    txns: list[dict], history: list[dict],
+    txns: list[dict], history: list[dict], coa: list[dict] | None = None,
 ) -> str:
     """Return Claude's next message in the client-side chat.
     `history` is the ordered list of prior turns: [{role: 'ai'|'client', content: '...'}, ...]
     The caller is responsible for appending both the client's incoming
     message and the returned AI message to the transcript.
     """
+    total = round(sum(float(t.get("amount") or 0) for t in txns), 2)
     txn_lines = "\n".join(
         f"- {t.get('date', '')}  ${float(t.get('amount', 0)):>10,.2f}  {(t.get('description') or '')[:80]}"
         for t in txns[:12]
     )
+    coa_block = ""
+    if coa:
+        coa_lines = "\n".join(
+            f"- {a.get('code', '')} {a.get('name', '')} ({a.get('type', '')})"
+            for a in coa if a.get("type") in ("expense", "equity", "liability", "revenue")
+        )
+        coa_block = f"Chart of Accounts (pick account_code from THIS list only):\n{coa_lines}\n\n"
     header = (
         f"Business: {company_name or 'the client'}\n"
         f"Counterparty on the bank feed: {counterparty or 'multiple'}\n"
-        f"Transactions in question ({len(txns)} total, showing first "
+        f"Transactions in question ({len(txns)} total, ${abs(total):,.2f} combined, showing first "
         f"{min(12, len(txns))}):\n{txn_lines}\n\n"
+        f"{coa_block}"
         f"Accountant's original question: {question}\n\n"
     )
     # Fold the history into the user turn so a single stateless Claude call
