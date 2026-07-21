@@ -17,28 +17,23 @@ export default function Reconciliation() {
   const { currentId } = useCompany();
   const [banks, setBanks] = useState([]);
   const [acctId, setAcctId] = useState("");
-  // Reconciliations are per-month by convention (matches Month Close +
-  // industry practice). `ym` is a "YYYY-MM" string; period_start / period_end
-  // are derived. `asOf` used for the preview call is period_end.
-  const [ym, setYm] = useState(() => {
-    // Default to the previous month — that's the one users usually reconcile.
-    const d = new Date();
-    d.setDate(1);
-    d.setMonth(d.getMonth() - 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  // Freeform date range — pro reconciles anything from a single week to a
+  // multi-year backfill. On Finish, the backend splits the range into ONE
+  // reconciliation doc per calendar month so the history table stays
+  // per-month even for large imports.
+  const [periodStart, setPeriodStart] = useState(() => {
+    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1);
+    return d.toISOString().slice(0, 10);
   });
-  const { periodStart, periodEnd } = useMemo(() => {
-    const [y, m] = ym.split("-").map(Number);
-    const last = new Date(y, m, 0).getDate();
-    return {
-      periodStart: `${y}-${String(m).padStart(2, "0")}-01`,
-      periodEnd:   `${y}-${String(m).padStart(2, "0")}-${String(last).padStart(2, "0")}`,
-    };
-  }, [ym]);
+  const [periodEnd, setPeriodEnd] = useState(() => {
+    const d = new Date(); d.setDate(0);  // last day of previous month
+    return d.toISOString().slice(0, 10);
+  });
   const asOf = periodEnd;
-  const [stmtBal, setStmtBal] = useState("");
+  const [openBal, setOpenBal] = useState("");
+  const [closeBal, setCloseBal] = useState("");
   const [preview, setPreview] = useState(null);
-  const [checked, setChecked] = useState(new Set()); // txn ids the user has ticked
+  const [checked, setChecked] = useState(new Set());
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState([]);
@@ -72,7 +67,11 @@ export default function Reconciliation() {
     const t = setTimeout(async () => {
       try {
         const r = await api.get(`/companies/${currentId}/reconciliations/preview`, {
-          params: { bank_account_id: acctId, as_of: asOf, statement_balance: parseFloat(stmtBal) || 0 },
+          params: {
+            bank_account_id: acctId, as_of: asOf,
+            opening_balance: parseFloat(openBal) || 0,
+            closing_balance: parseFloat(closeBal) || 0,
+          },
         });
         if (!cancelled) setPreview(r.data);
       } catch (e) {
@@ -80,7 +79,7 @@ export default function Reconciliation() {
       } finally { if (!cancelled) setLoading(false); }
     }, 300);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [currentId, acctId, asOf, stmtBal]);
+  }, [currentId, acctId, asOf, openBal, closeBal]);
 
   const clearedSum = useMemo(() => {
     if (!preview) return 0;
@@ -89,12 +88,12 @@ export default function Reconciliation() {
       .reduce((s, t) => s + Number(t.amount || 0), 0);
   }, [preview, checked]);
 
-  // Difference after applying user's tick marks.
-  // book_balance − sum(cleared_this_session) − statement_balance == 0 ⇢ done.
+  // Classic recon math:  closing − opening − sum(cleared) == 0  when done.
   const diffLive = useMemo(() => {
-    if (!preview) return 0;
-    return round2(preview.book_balance - clearedSum - preview.statement_balance);
-  }, [preview, clearedSum]);
+    const op = parseFloat(openBal) || 0;
+    const cl = parseFloat(closeBal) || 0;
+    return round2(cl - op - clearedSum);
+  }, [openBal, closeBal, clearedSum]);
   const isBalanced = Math.abs(diffLive) < 0.005;
 
   const toggle = (id) => {
@@ -114,15 +113,21 @@ export default function Reconciliation() {
     if (!isBalanced) return;
     setBusy(true);
     try {
-      await api.post(`/companies/${currentId}/reconciliations/complete`, {
+      const r = await api.post(`/companies/${currentId}/reconciliations/complete`, {
         bank_account_id: acctId,
         period_start: periodStart,
         period_end: periodEnd,
-        statement_balance: parseFloat(stmtBal) || 0,
+        opening_balance: parseFloat(openBal) || 0,
+        closing_balance: parseFloat(closeBal) || 0,
         cleared_txn_ids: [...checked],
       });
-      toast.success(`Reconciled ${checked.size} transactions.`);
-      setStmtBal("");
+      const n = r.data?.count || 1;
+      toast.success(
+        n > 1
+          ? `Reconciled ${checked.size} transactions across ${n} monthly reports.`
+          : `Reconciled ${checked.size} transactions.`
+      );
+      setOpenBal(""); setCloseBal("");
       setChecked(new Set());
       load();
     } catch (e) {
@@ -230,8 +235,8 @@ export default function Reconciliation() {
 
           <div className="p-4 space-y-4">
             {/* Setup */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+              <div className="md:col-span-1">
                 <div className="text-xs text-slate-500 mb-1 flex items-center gap-1">
                   <Building2 size={12} /> Bank account
                 </div>
@@ -246,29 +251,52 @@ export default function Reconciliation() {
               </div>
               <div>
                 <div className="text-xs text-slate-500 mb-1 flex items-center gap-1">
-                  <CalendarDays size={12} /> Statement month
+                  <CalendarDays size={12} /> Statement start
                 </div>
                 <input
-                  type="month" value={ym}
-                  onChange={(e) => setYm(e.target.value)}
+                  type="date" value={periodStart}
+                  onChange={(e) => setPeriodStart(e.target.value)}
                   className="w-full border rounded-md px-2 py-1.5 text-sm"
-                  data-testid="recon-as-of"
+                  data-testid="recon-period-start"
                 />
-                <div className="text-[10px] text-slate-400 font-mono-num mt-0.5">
-                  {periodStart} → {periodEnd}
-                </div>
               </div>
               <div>
-                <div className="text-xs text-slate-500 mb-1">Statement ending balance</div>
+                <div className="text-xs text-slate-500 mb-1 flex items-center gap-1">
+                  <CalendarDays size={12} /> Statement end
+                </div>
                 <input
-                  type="number" step="0.01" value={stmtBal}
-                  onChange={(e) => setStmtBal(e.target.value)}
+                  type="date" value={periodEnd}
+                  onChange={(e) => setPeriodEnd(e.target.value)}
+                  className="w-full border rounded-md px-2 py-1.5 text-sm"
+                  data-testid="recon-period-end"
+                />
+              </div>
+              <div>
+                <div className="text-xs text-slate-500 mb-1">Opening balance</div>
+                <input
+                  type="number" step="0.01" value={openBal}
+                  onChange={(e) => setOpenBal(e.target.value)}
+                  placeholder="e.g. 0.00"
+                  className="w-full border rounded-md px-2 py-1.5 text-sm font-mono-num"
+                  data-testid="recon-open-balance"
+                />
+              </div>
+              <div>
+                <div className="text-xs text-slate-500 mb-1">Ending balance</div>
+                <input
+                  type="number" step="0.01" value={closeBal}
+                  onChange={(e) => setCloseBal(e.target.value)}
                   placeholder="e.g. 12450.31"
                   className="w-full border rounded-md px-2 py-1.5 text-sm font-mono-num"
-                  data-testid="recon-stmt-balance"
+                  data-testid="recon-close-balance"
                 />
               </div>
             </div>
+            {spansMultipleMonths(periodStart, periodEnd) && (
+              <div className="text-[11px] text-cyan-800 bg-cyan-50 border border-cyan-100 rounded px-3 py-1.5">
+                This range spans multiple months. On Finish, we'll create <b>one reconciliation report per month</b> automatically.
+              </div>
+            )}
 
             {/* Live scoreboard + list */}
             {preview && (
@@ -276,7 +304,7 @@ export default function Reconciliation() {
                 <div className="lg:col-span-2 rounded-xl border overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-2 border-b bg-slate-50">
                     <div className="text-xs uppercase tracking-widest text-slate-500">
-                      Uncleared in {monthNameOf(ym)} · {preview.uncleared.length}
+                      Uncleared through {periodEnd} · {preview.uncleared.length}
                     </div>
                     <div className="flex items-center gap-2 text-xs">
                       <button onClick={tickAll} className="text-cyan-700 hover:underline" data-testid="recon-tick-all">Check all</button>
@@ -292,7 +320,7 @@ export default function Reconciliation() {
                     )}
                     {!loading && preview.uncleared.length === 0 && (
                       <div className="p-8 text-center text-slate-500 text-sm">
-                        Nothing to clear — everything through {monthNameOf(ym)} is already reconciled. 🎉
+                        Nothing to clear — everything through {periodEnd} is already reconciled. 🎉
                       </div>
                     )}
                     {!loading && preview.uncleared.map(t => (
@@ -318,6 +346,8 @@ export default function Reconciliation() {
                 </div>
                 <ScoreboardCard
                   preview={preview} clearedCount={checked.size} clearedSum={clearedSum}
+                  opening={parseFloat(openBal) || 0}
+                  closing={parseFloat(closeBal) || 0}
                   diff={diffLive} isBalanced={isBalanced}
                   onFinish={async () => { await finish(); setStartOpen(false); }} busy={busy}
                 />
@@ -405,12 +435,12 @@ export default function Reconciliation() {
   );
 }
 
-function ScoreboardCard({ preview, clearedCount, clearedSum, diff, isBalanced, onFinish, busy }) {
+function ScoreboardCard({ preview, clearedCount, clearedSum, opening, closing, diff, isBalanced, onFinish, busy }) {
   return (
     <div className={`rounded-xl border bg-white p-5 space-y-3 ${isBalanced ? "ring-2 ring-emerald-200" : ""}`} data-testid="recon-scoreboard">
       <div className="text-xs uppercase tracking-widest text-slate-500 mb-1">Reconciliation summary</div>
-      <Row label="Statement balance" value={preview.statement_balance} />
-      <Row label="Book balance" value={preview.book_balance} />
+      <Row label="Opening balance" value={opening} />
+      <Row label="Ending balance"  value={closing} />
       <Row label={`Cleared this session (${clearedCount})`} value={clearedSum} muted />
       <div className="border-t pt-3">
         <div className="flex items-center justify-between">
@@ -625,9 +655,12 @@ function MissingTier({ rows }) {
 
 function round2(v) { return Math.round(v * 100) / 100; }
 
-function monthNameOf(ymStr) {
-  const [y, m] = ymStr.split("-").map(Number);
-  return new Date(y, m - 1, 1).toLocaleString("en-US", { month: "long", year: "numeric" });
+function spansMultipleMonths(start, end) {
+  if (!start || !end) return false;
+  const s = new Date(start), e = new Date(end);
+  if (isNaN(s) || isNaN(e)) return false;
+  return s.getUTCFullYear() !== e.getUTCFullYear() ||
+         s.getUTCMonth() !== e.getUTCMonth();
 }
 
 // Prefer a "May 2026" label when the period spans a whole calendar month

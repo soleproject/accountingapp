@@ -114,19 +114,21 @@ async def preview_reconciliation(
     cid: str,
     bank_account_id: str = Query(...),
     as_of: str = Query(...),
-    statement_balance: float = Query(0.0),
+    opening_balance: float = Query(0.0),
+    closing_balance: float = Query(0.0),
     user: dict = Depends(get_current_user),
 ):
-    """Return uncleared items + running diff for the interactive UI."""
+    """Return uncleared items + diff (closing − opening − cleared_sum)."""
     await require_company(user, cid)
-    return await preview_recon(cid, bank_account_id, as_of, statement_balance)
+    return await preview_recon(cid, bank_account_id, as_of, opening_balance, closing_balance)
 
 
 class ReconCompleteIn(BaseModel):
     bank_account_id: str
-    period_start: Optional[str] = None
+    period_start: str
     period_end: str
-    statement_balance: float
+    opening_balance: float
+    closing_balance: float
     cleared_txn_ids: List[str]
 
 
@@ -141,7 +143,8 @@ async def complete_reconciliation(
             bank_account_id=inp.bank_account_id,
             period_start=inp.period_start,
             period_end=inp.period_end,
-            statement_balance=inp.statement_balance,
+            opening_balance=inp.opening_balance,
+            closing_balance=inp.closing_balance,
             cleared_txn_ids=inp.cleared_txn_ids,
             user_email=user.get("email") or user.get("id"),
         )

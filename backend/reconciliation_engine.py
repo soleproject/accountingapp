@@ -109,11 +109,13 @@ async def auto_clear_settled_plaid_txns(cid: str) -> dict:
 # ---------------------------------------------------------------------------
 
 async def preview_recon(
-    cid: str, bank_account_id: str, as_of: str, statement_balance: float,
+    cid: str, bank_account_id: str, as_of: str,
+    opening_balance: float = 0.0, closing_balance: float = 0.0,
 ) -> dict:
     """Return everything the reconciliation UI needs to render the interactive
     matcher: uncleared txns through `as_of`, book balance, and the starting
-    difference. Nothing is written."""
+    difference. Diff = closing − opening − cleared_sum (classic recon math,
+    reduces to 0 when the pro has ticked exactly the right items)."""
     # Book balance: sum of every posted txn for the bank account through as_of.
     pipe = [
         {"$match": {
@@ -127,7 +129,6 @@ async def preview_recon(
     agg = await db.transactions.aggregate(pipe).to_list(1)
     book_balance = round(float(agg[0]["total"]) if agg else 0.0, 2)
 
-    # Uncleared items = book txns not yet marked cleared.
     uncleared_docs = await db.transactions.find({
         "company_id": cid,
         "bank_account_id": bank_account_id,
@@ -147,10 +148,15 @@ async def preview_recon(
         "category_account_name": t.get("category_account_name"),
     } for t in uncleared_docs]
 
-    diff = round(book_balance - float(statement_balance), 2)
+    op = round(float(opening_balance), 2)
+    cl = round(float(closing_balance), 2)
+    # No cleared items yet on preview (client tracks the ticks locally).
+    diff = round(cl - op - 0.0, 2)
     return {
         "book_balance": book_balance,
-        "statement_balance": round(float(statement_balance), 2),
+        "opening_balance": op,
+        "closing_balance": cl,
+        "statement_balance": cl,
         "difference": diff,
         "uncleared": uncleared,
     }
@@ -158,63 +164,96 @@ async def preview_recon(
 
 async def complete_recon(
     cid: str, bank_account_id: str, period_end: str, period_start: Optional[str],
-    statement_balance: float, cleared_txn_ids: list[str], user_email: str,
+    opening_balance: float, closing_balance: float, cleared_txn_ids: list[str],
+    user_email: str,
 ) -> dict:
-    """Snapshot the reconciliation: write `cleared_at` on the ticked txns and
-    insert a `reconciliations` doc. Balance check enforced server-side."""
+    """Snapshot the reconciliation. If the range spans multiple calendar
+    months, split the input into ONE reconciliation doc per month (each with
+    its own opening/closing derived from a rolling sum), so the history list
+    shows a per-month report even when the pro reconciles a large backfill
+    in one go."""
     if not cleared_txn_ids:
         raise ValueError("Nothing selected to clear.")
+    if not period_start:
+        period_start = period_end
     now = now_iso()
-    # Compute the book / cleared totals AS-OF completion so the history row
-    # displays exactly the numbers the pro saw when they hit Finish. Without
-    # this, the list would use a different formula (statement - ledger) and
-    # the diff column would disagree with the interactive scoreboard.
-    book_agg = await db.transactions.aggregate([
-        {"$match": {"company_id": cid, "bank_account_id": bank_account_id,
-                    "posted": True, "date": {"$lte": period_end}}},
-        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
-    ]).to_list(1)
-    book_balance = round(float(book_agg[0]["total"]) if book_agg else 0.0, 2)
-    cleared_agg = await db.transactions.aggregate([
-        {"$match": {"company_id": cid, "id": {"$in": cleared_txn_ids}}},
-        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
-    ]).to_list(1)
-    cleared_sum = round(float(cleared_agg[0]["total"]) if cleared_agg else 0.0, 2)
-    stmt = round(float(statement_balance), 2)
-    diff = round(book_balance - cleared_sum - stmt, 2)
 
-    # Set cleared_at on the ticked txns.
-    await db.transactions.update_many(
-        {"company_id": cid, "id": {"$in": cleared_txn_ids}},
-        {"$set": {
-            "cleared_at": period_end,
-            "cleared_source": "manual",
-            "updated_at": now,
-        }},
-    )
-    rec_id = str(uuid.uuid4())
-    doc = {
-        "id": rec_id, "company_id": cid, "bank_account_id": bank_account_id,
-        "as_of": period_end,
-        "period_start": period_start,
-        "period_end": period_end,
-        "statement_balance": stmt,
-        "book_balance": book_balance,
-        "cleared_sum": cleared_sum,
-        "difference": diff,
-        "cleared_txn_ids": cleared_txn_ids,
-        "matched_count": len(cleared_txn_ids),
-        "source": "manual",
-        "status": "reconciled",
-        "completed_at": now, "completed_by": user_email,
-        "created_at": now, "updated_at": now,
-    }
-    await db.reconciliations.insert_one(doc)
-    await db.transactions.update_many(
-        {"company_id": cid, "id": {"$in": cleared_txn_ids}},
-        {"$set": {"cleared_reconciliation_id": rec_id}},
-    )
-    return {"id": rec_id, "cleared": len(cleared_txn_ids)}
+    # Fetch the cleared txns so we can group by month.
+    txns = await db.transactions.find(
+        {"company_id": cid, "id": {"$in": cleared_txn_ids}}
+    ).to_list(len(cleared_txn_ids) + 1)
+    if not txns:
+        raise ValueError("Selected transactions not found.")
+
+    # Group by (year, month) and compute per-month sums.
+    from collections import OrderedDict
+    buckets: "OrderedDict[tuple[int,int], list[dict]]" = OrderedDict()
+    def _key(t):
+        d = _parse_date(t.get("date")) or _parse_date(period_end)
+        return (d.year, d.month) if d else (0, 0)
+    for t in sorted(txns, key=lambda t: t.get("date") or ""):
+        buckets.setdefault(_key(t), []).append(t)
+
+    open_bal = round(float(opening_balance), 2)
+    close_bal = round(float(closing_balance), 2)
+    running = open_bal
+    created = []
+
+    # For each month in the range, create a reconciliation snapshot whose
+    # opening = the running balance at the start of that month and whose
+    # closing = opening + sum-of-that-month's cleared amounts.
+    for (yy, mm), rows in buckets.items():
+        last_day = _month_last_day(yy, mm)
+        p_start = f"{yy:04d}-{mm:02d}-01"
+        p_end = f"{yy:04d}-{mm:02d}-{last_day:02d}"
+        # Clamp to the user-provided range.
+        if period_start and p_start < period_start: p_start = period_start
+        if period_end and p_end > period_end: p_end = period_end
+        month_sum = round(sum(float(t.get("amount") or 0) for t in rows), 2)
+        month_open = running
+        month_close = round(running + month_sum, 2)
+        # For a partial-range last month, honor the user's stated closing.
+        is_last = (yy, mm) == next(reversed(buckets))
+        if is_last:
+            month_close = close_bal
+        rec_id = str(uuid.uuid4())
+        rec_txn_ids = [t["id"] for t in rows]
+        doc = {
+            "id": rec_id, "company_id": cid, "bank_account_id": bank_account_id,
+            "as_of": p_end,
+            "period_start": p_start,
+            "period_end": p_end,
+            "opening_balance": month_open,
+            "closing_balance": month_close,
+            "statement_balance": month_close,  # kept for legacy readers
+            "cleared_sum": month_sum,
+            "difference": round(month_close - month_open - month_sum, 2),
+            "cleared_txn_ids": rec_txn_ids,
+            "matched_count": len(rec_txn_ids),
+            "source": "manual",
+            "status": "reconciled",
+            "completed_at": now, "completed_by": user_email,
+            "created_at": now, "updated_at": now,
+        }
+        await db.reconciliations.insert_one(doc)
+        await db.transactions.update_many(
+            {"company_id": cid, "id": {"$in": rec_txn_ids}},
+            {"$set": {
+                "cleared_at": p_end,
+                "cleared_source": "manual",
+                "cleared_reconciliation_id": rec_id,
+                "updated_at": now,
+            }},
+        )
+        created.append(rec_id)
+        running = month_close
+
+    return {"created": created, "count": len(created), "total_cleared": len(cleared_txn_ids)}
+
+
+def _month_last_day(y: int, m: int) -> int:
+    from calendar import monthrange
+    return monthrange(y, m)[1]
 
 
 # ---------------------------------------------------------------------------
