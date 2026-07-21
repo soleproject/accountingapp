@@ -78,12 +78,19 @@ export default function Sidebar({ collapsed, onToggle }) {
       }`}
       data-testid="app-sidebar"
     >
-      <div className="h-16 shrink-0 flex items-center gap-2 px-4 border-b">
+      <div className="h-16 shrink-0 flex items-center gap-2 px-3 border-b">
         {logoUrl ? (
           <img
             src={logoUrl}
             alt="Firm logo"
-            className={collapsed ? "h-9 w-9 object-contain" : "h-9 max-w-[150px] object-contain"}
+            // Fill the ~64px-tall header. `h-12` gives 48px logo + a hair of
+            // breathing room. Cap width so a very wide wordmark doesn't crowd
+            // the collapse toggle; left-align so wordmarks read naturally.
+            className={
+              collapsed
+                ? "h-11 w-11 object-contain"
+                : "h-12 max-w-[180px] object-contain object-left flex-1 min-w-0"
+            }
             data-testid="sidebar-firm-logo"
           />
         ) : (
