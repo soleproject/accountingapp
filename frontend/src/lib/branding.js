@@ -1,4 +1,4 @@
-// Pro-firm branding: fetches the current pro's logo / theme once, applies
+// Pro-firm branding: fetches the current pro's logos / theme once, applies
 // CSS variables on the <html> element, and re-exposes the current branding
 // via a React context for consumers that need the raw values (Sidebar).
 //
@@ -9,20 +9,34 @@ import { createContext, useContext, useEffect, useState, useCallback } from "rea
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
-// Four presets swap the primary accent color; the sidebar keeps its light
-// look. Extending to sidebar-bg / topbar-bg is intentionally deferred to
-// slice B so we don't ship a half-cooked theming layer.
+// Four presets seed the theme tokens; individual tokens can then be
+// overridden via `theme_custom` in slice B.
 const PRESETS = {
-  default:  { primary: "#0F172A", accent: "#0891B2" }, // slate-900 + cyan-600
-  midnight: { primary: "#020617", accent: "#3B82F6" }, // slate-950 + blue-500
-  forest:   { primary: "#052E16", accent: "#16A34A" }, // green-950 + green-600
-  violet:   { primary: "#2E1065", accent: "#7C3AED" }, // violet-950 + violet-600
+  default:  { primary: "#0F172A", accent: "#0891B2", sidebar_bg: "#FFFFFF", sidebar_active_bg: "#F1F5F9", topbar_bg: "#FFFFFF" },
+  midnight: { primary: "#020617", accent: "#3B82F6", sidebar_bg: "#0F172A", sidebar_active_bg: "#1E293B", topbar_bg: "#0F172A" },
+  forest:   { primary: "#052E16", accent: "#16A34A", sidebar_bg: "#052E16", sidebar_active_bg: "#14532D", topbar_bg: "#052E16" },
+  violet:   { primary: "#2E1065", accent: "#7C3AED", sidebar_bg: "#2E1065", sidebar_active_bg: "#4C1D95", topbar_bg: "#2E1065" },
 };
+
+// Tokens exposed in the ProSettings custom-color picker. Order = display order.
+export const THEME_TOKEN_META = [
+  { key: "primary",           label: "Primary button" },
+  { key: "accent",            label: "Accent / links" },
+  { key: "sidebar_bg",        label: "Sidebar background" },
+  { key: "sidebar_active_bg", label: "Sidebar active item" },
+  { key: "topbar_bg",         label: "Top bar" },
+];
 
 const BrandingContext = createContext({
   branding: null,
   refresh: async () => {},
 });
+
+// Merge preset + optional per-token custom overrides into the final palette.
+export function resolvePalette(preset, custom) {
+  const base = PRESETS[preset] || PRESETS.default;
+  return { ...base, ...(custom || {}) };
+}
 
 export function BrandingProvider({ children }) {
   const { user } = useAuth();
@@ -43,13 +57,18 @@ export function BrandingProvider({ children }) {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  // Apply the theme preset as CSS variables on <html> so sitewide styles
-  // (primary buttons, focused rings, etc.) can pick them up.
+  // Push palette values to CSS custom properties on <html> so any consumer
+  // that reads `var(--brand-…)` picks them up. Kept side-effect-only so
+  // components don't need to subscribe to the same tokens they render.
   useEffect(() => {
     const preset = branding?.theme_preset || "default";
-    const p = PRESETS[preset] || PRESETS.default;
-    document.documentElement.style.setProperty("--brand-primary", p.primary);
-    document.documentElement.style.setProperty("--brand-accent", p.accent);
+    const p = resolvePalette(preset, branding?.theme_custom);
+    const root = document.documentElement;
+    root.style.setProperty("--brand-primary", p.primary);
+    root.style.setProperty("--brand-accent", p.accent);
+    root.style.setProperty("--brand-sidebar-bg", p.sidebar_bg);
+    root.style.setProperty("--brand-sidebar-active-bg", p.sidebar_active_bg);
+    root.style.setProperty("--brand-topbar-bg", p.topbar_bg);
   }, [branding]);
 
   return (

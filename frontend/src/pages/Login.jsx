@@ -1,8 +1,25 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
+import { api } from "@/lib/api";
 import { TID } from "@/constants/testIds";
 import { Sparkles, Loader2 } from "lucide-react";
+
+// Resolve a firm subdomain from either `?firm=acme` (works everywhere) or
+// the hostname's leftmost label if it looks like `acme.axiomledger.ai`.
+// Anything on preview / localhost / bare axiomledger.ai returns null.
+function detectFirmSubdomain() {
+  try {
+    const q = new URLSearchParams(window.location.search).get("firm");
+    if (q) return q.toLowerCase().trim();
+    const host = window.location.hostname;
+    if (host.includes("axiomledger.ai")) {
+      const first = host.split(".")[0];
+      if (first && !["www", "app", "axiomledger"].includes(first)) return first;
+    }
+  } catch { /* fall through */ }
+  return null;
+}
 
 export default function Login() {
   const { login } = useAuth();
@@ -11,6 +28,17 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  // Firm-branded login. `null` = default Axiom look; otherwise the payload
+  // returned by `/api/branding/by-subdomain/:sub`.
+  const [firm, setFirm] = useState(null);
+
+  useEffect(() => {
+    const sub = detectFirmSubdomain();
+    if (!sub) return;
+    api.get(`/branding/by-subdomain/${encodeURIComponent(sub)}`)
+      .then(r => setFirm(r.data))
+      .catch(() => setFirm(null));
+  }, []);
 
   const submit = async (e) => {
     e?.preventDefault();
@@ -74,12 +102,32 @@ export default function Login() {
 
       <div className="flex-1 flex items-center justify-center p-6">
         <form onSubmit={submit} className="w-full max-w-sm space-y-5">
-          <div className="lg:hidden flex items-center gap-2 mb-6">
-            <div className="w-8 h-8 rounded-lg bg-slate-900 flex items-center justify-center">
-              <Sparkles size={16} className="text-white" />
+          {firm ? (
+            <div className="flex items-center gap-3 mb-6" data-testid="login-firm-branding">
+              {(firm.logos?.logo_light || firm.logos?.icon_light) ? (
+                <img
+                  src={firm.logos.logo_light || firm.logos.icon_light}
+                  alt={firm.firm_name}
+                  className="h-10 max-w-[180px] object-contain"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-lg bg-slate-900 flex items-center justify-center">
+                  <Sparkles size={18} className="text-white" />
+                </div>
+              )}
+              <div>
+                <div className="font-heading font-bold text-slate-900">{firm.firm_name}</div>
+                <div className="text-[11px] text-slate-500">Powered by Axiom Ledger</div>
+              </div>
             </div>
-            <div className="font-heading font-bold">Axiom Ledger</div>
-          </div>
+          ) : (
+            <div className="lg:hidden flex items-center gap-2 mb-6">
+              <div className="w-8 h-8 rounded-lg bg-slate-900 flex items-center justify-center">
+                <Sparkles size={16} className="text-white" />
+              </div>
+              <div className="font-heading font-bold">Axiom Ledger</div>
+            </div>
+          )}
           <div>
             <h2 className="font-heading text-3xl font-bold tracking-tight">Sign in</h2>
             <p className="text-sm text-slate-500 mt-1">Welcome back. Let's get to the numbers.</p>

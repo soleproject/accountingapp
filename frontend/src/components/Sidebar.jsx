@@ -45,7 +45,12 @@ const ACCOUNTING = [
 export default function Sidebar({ collapsed, onToggle }) {
   const [inAccounting, setInAccounting] = useState(false);
   const { branding } = useBranding();
-  const logoUrl = branding?.logo_data_url || null;
+  // Prefer the compact "icon" mark when the sidebar is collapsed; fall back
+  // to the wordmark if only one has been uploaded.
+  const logos = branding?.logos || {};
+  const logoUrl = collapsed
+    ? (logos.icon_light || logos.logo_light || branding?.logo_data_url)
+    : (logos.logo_light || logos.icon_light || branding?.logo_data_url);
   const { user } = useAuth();
   const loc = useLocation();
 

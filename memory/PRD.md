@@ -464,3 +464,44 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   `dashboard-timeframe-next`, `dashboard-timeframe-reset`.
 - Verified end-to-end via screenshot on Bright Beans Coffee (July→May 2026 step-back
   shows different revenue/expense figures).
+
+### 2026-02-20 (later) — Enterprise branding + AI UX polish
+- **AI proposal follow-through**: The AI now proposes categorizations with a
+  yes/no closing question and emits a hidden `[[PROPOSAL:action=...]]` marker.
+  The client parses the marker into a `pendingIntentRef`, so short follow-ups
+  like "yes / do it / categorize it" execute against the current
+  selection (or focused row) via the existing bulk-reclassify endpoint.
+  The marker is stripped from both live streams and persisted transcripts.
+- **TTS markdown stripper** (`lib/speechText.js`) — silences `**bold**`,
+  headings, links, code fences so speechSynthesis reads text, not syntax.
+- **Plaid Link accessibility**: When Plaid's iframe is open, we knock its
+  z-index down by 1 and promote the AI panel to `position: fixed;
+  z-index: 2147483647` on the right so users can mute, stop TTS, or ask
+  questions without dismissing the modal. Plaid's centering is unchanged.
+- **Onboarding statement uploader**: Step 5 now embeds `StatementsTab` (via a
+  new `bare` prop that skips its own outer card) so onboarding matches the
+  Connections › Statements experience.
+- **Failed statement uploads**: The failure reason is surfaced inline in red
+  under the filename; Retry + Dismiss buttons appear on failed rows. The
+  original `File` object is retained on the entry so Retry re-uploads
+  without re-selection.
+- **Slice A branding** (2026-02-20):
+  - New profile chip in the topbar (initials avatar + name + dropdown).
+  - `/pro/settings` route with Logo upload, sign-in subdomain, 4 theme presets.
+  - Backend: `GET/PATCH/POST/DELETE /api/pro/branding[/logo]`.
+  - `lib/branding.js` applies `--brand-primary` / `--brand-accent` CSS vars.
+  - Sidebar swaps "Axiom LEDGER" for the uploaded logo (h-12 max-w-180 in
+    expanded state, h-11 square when collapsed).
+- **Slice B branding** (2026-02-20):
+  - 4 logo variants (`logo_light`, `logo_dark`, `icon_light`, `icon_dark`) —
+    sidebar picks the appropriate one based on collapsed state, with legacy
+    `logo_data_url` auto-migrated to `logos.logo_light` on read.
+  - Per-token custom colors (primary / accent / sidebar_bg / sidebar_active_bg
+    / topbar_bg) validated as `#RRGGBB` hex; presets + custom overrides merge
+    into the final palette.
+  - Live-preview card in ProSettings renders a mini app-chrome mock driven
+    directly by the palette so users see changes before saving.
+  - **Branded sign-in URLs** — public `GET /api/branding/by-subdomain/:sub`
+    (no auth) returns firm name + logos + theme; Login.jsx reads
+    `?firm=<sub>` (or the hostname's leftmost label in prod) and renders
+    the firm's logo above the sign-in form.
