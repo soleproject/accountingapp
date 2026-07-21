@@ -528,3 +528,28 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   - `GET /api/companies/{cid}/month-close/months?count=12`
   - `GET /api/companies/{cid}/month-close/{yyyy-mm}`
   - `POST /api/companies/{cid}/month-close/{yyyy-mm}/checkpoint`
+
+### 2026-02-20 (later) — Reconciliation R1+R2+R3 (NEW)
+- **R1 Plaid auto-clear** — nightly-safe idempotent job that sets `cleared_at`
+  on posted Plaid txns older than 5 days. Wired to run inline after every
+  `plaid_service.sync_transactions()` call plus exposed as
+  `POST /api/companies/:cid/reconciliations/auto-clear`. Also drives
+  Month Close's `recon` checkpoint (auto-green when 100% of the month's bank
+  txns are cleared).
+- **R2 Interactive matcher** — `/preview` returns book balance + uncleared list
+  + running diff; `/complete` writes cleared_at + snapshot doc + reconciliation
+  audit link.
+- **R3 Statement PDF matcher** — `/match-statement` accepts PDF/CSV, runs
+  Veryfi OCR, fuzzy-scores each extracted line (50% amount / 20% date / 30%
+  desc-Jaccard). Confidence tiers: ≥ 0.90 auto, 0.60-0.90 suggest, < 0.60
+  manual. `/apply-matches` bulk-clears the accepted ids.
+- **List / detail split**:
+  - `/accounting/reconciliation` — RocketSuite-style history table
+    (Period · Account · Status · Statement · Ledger · Diff · →). Interactive
+    matcher is now behind a "+ Start reconciliation" toggle.
+  - `/accounting/reconciliation/:rid` — detail page showing snapshot stats
+    (statement / ledger / matched / difference) + full list of cleared txns
+    with `cleared_source` pills (MANUAL / plaid_auto / statement_match).
+- New file `backend/reconciliation_engine.py`, updated
+  `backend/routes/reconciliation.py` (~150→220 lines), new frontend files
+  `pages/Reconciliation.jsx` (rewritten) + `pages/ReconciliationDetail.jsx`.

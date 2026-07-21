@@ -66,9 +66,37 @@ from reconciliation_engine import (
 
 @router.get("/companies/{cid}/reconciliations")
 async def list_recs(cid: str, user: dict = Depends(get_current_user)):
+    """List reconciliations enriched with computed `ledger_balance` (sum of
+    the cleared txns at snapshot time) and `diff = statement - ledger`.
+    Powers the RocketSuite-style history table."""
     await require_company(user, cid)
     docs = await db.reconciliations.find({"company_id": cid}).sort("as_of", -1).to_list(500)
-    return {"reconciliations": [coerce(d) for d in docs]}
+    # Fetch account names in one hit for the join.
+    all_bank_ids = list({d.get("bank_account_id") for d in docs if d.get("bank_account_id")})
+    accts = {a["id"]: a for a in await db.accounts.find({
+        "company_id": cid, "id": {"$in": all_bank_ids},
+    }).to_list(200)} if all_bank_ids else {}
+    out = []
+    for d in docs:
+        c = coerce(d)
+        bank = accts.get(c.get("bank_account_id")) or {}
+        # Ledger balance = sum of cleared_txn_ids amounts. Small doc, so
+        # doing this per-row is fine; if this ever gets slow we'd cache it.
+        ledger = 0.0
+        if c.get("cleared_txn_ids"):
+            agg = await db.transactions.aggregate([
+                {"$match": {"company_id": cid, "id": {"$in": c["cleared_txn_ids"]}}},
+                {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+            ]).to_list(1)
+            if agg: ledger = round(float(agg[0]["total"]), 2)
+        stmt = float(c.get("statement_balance") or 0.0)
+        c["account_name"] = bank.get("name")
+        c["account_last4"] = bank.get("mask") or bank.get("plaid_mask")
+        c["account_code"] = bank.get("code")
+        c["ledger_balance"] = ledger
+        c["diff"] = round(stmt - ledger, 2)
+        out.append(c)
+    return {"reconciliations": out}
 
 
 @router.get("/companies/{cid}/reconciliations/preview")
@@ -183,6 +211,35 @@ async def create_rec(cid: str, payload: dict, user: dict = Depends(get_current_u
     doc = {"id": rid, "company_id": cid, **payload, "created_at": now, "updated_at": now}
     await db.reconciliations.insert_one(doc)
     return {"id": rid}
+
+
+# NOTE: This parameterized GET must come AFTER every literal /reconciliations/*
+# route above (preview, complete, auto-clear, match-statement, apply-matches),
+# otherwise FastAPI will match `/preview` against `/{rid}` and 404.
+@router.get("/companies/{cid}/reconciliations/{rid}")
+async def get_rec_detail(cid: str, rid: str, user: dict = Depends(get_current_user)):
+    """Detail page — the reconciliation snapshot + every transaction it
+    cleared, so the pro can drill into any past close."""
+    await require_company(user, cid)
+    rec = await db.reconciliations.find_one({"id": rid, "company_id": cid})
+    if not rec:
+        raise HTTPException(404, "Reconciliation not found.")
+    rec = coerce(rec)
+    bank = None
+    if rec.get("bank_account_id"):
+        bank = await db.accounts.find_one({"id": rec["bank_account_id"], "company_id": cid})
+    txn_ids = rec.get("cleared_txn_ids") or []
+    txns = await db.transactions.find({
+        "company_id": cid, "id": {"$in": txn_ids},
+    }).sort("date", 1).to_list(2000) if txn_ids else []
+    ledger = round(sum(float(t.get("amount") or 0) for t in txns), 2)
+    rec["ledger_balance"] = ledger
+    rec["diff"] = round(float(rec.get("statement_balance") or 0.0) - ledger, 2)
+    return {
+        "reconciliation": rec,
+        "account": coerce(bank) if bank else None,
+        "transactions": [coerce(t) for t in txns],
+    }
 
 
 @router.get("/companies/{cid}/book-reviews")

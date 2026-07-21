@@ -28,6 +28,7 @@ import Communications from "@/pages/Communications";
 import GenericList from "@/pages/GenericList";
 import GeneralLedger from "@/pages/GeneralLedger";
 import Reconciliation from "@/pages/Reconciliation";
+import ReconciliationDetail from "@/pages/ReconciliationDetail";
 import BookReview from "@/pages/BookReview";
 import ClosePeriods from "@/pages/ClosePeriods";
 
@@ -82,6 +83,7 @@ function App() {
                 fields={[{k:"name",l:"Tag"},{k:"description",l:"Description"}]}
               />} />
               <Route path="/accounting/reconciliation" element={<Reconciliation />} />
+              <Route path="/accounting/reconciliation/:rid" element={<ReconciliationDetail />} />
               <Route path="/accounting/book-review" element={<BookReview />} />
               <Route path="/accounting/close-books" element={<ClosePeriods kind="month" />} />
               <Route path="/accounting/month-close" element={<MonthClose />} />

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import {
-  CheckCircle2, Loader2, Upload, RefreshCcw, FileText, Sparkles, ArrowRight,
-  CalendarDays, Building2,
+  CheckCircle2, Loader2, Upload, FileText, Sparkles, ArrowRight,
+  CalendarDays, Building2, Plus, ChevronRight, X,
 } from "lucide-react";
 
 // Reconciliation — Slice R1+R2+R3.
@@ -25,6 +26,10 @@ export default function Reconciliation() {
   const [history, setHistory] = useState([]);
   const [matchResult, setMatchResult] = useState(null);
   const [showMatchModal, setShowMatchModal] = useState(false);
+  // The interactive matcher lives behind a "+ Start new" button — the list
+  // of past reconciliations is now the primary surface, matching how QBO
+  // and Xero present recon history.
+  const [startOpen, setStartOpen] = useState(false);
   const fileRef = useRef(null);
 
   // Load bank/CC accounts + past reconciliations once we know the company.
@@ -150,7 +155,7 @@ export default function Reconciliation() {
         <div>
           <h1 className="font-heading text-3xl font-bold tracking-tight">Reconciliation</h1>
           <p className="text-slate-500 text-sm mt-1">
-            Match your books to bank statements. Plaid txns auto-clear after {5} days.
+            {history.length} reconciliation period{history.length === 1 ? "" : "s"} · Plaid txns auto-clear after 5 days.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -162,157 +167,199 @@ export default function Reconciliation() {
           >
             <Sparkles size={13} className="text-cyan-600" /> Auto-clear settled Plaid txns
           </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".pdf,.csv,image/*"
-            onChange={(e) => uploadStatement(e.target.files?.[0])}
-            className="hidden"
-            data-testid="recon-statement-input"
-          />
-          <button
-            onClick={() => fileRef.current?.click()}
-            disabled={busy || !acctId}
-            data-testid="recon-match-statement-btn"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-40"
-          >
-            <Upload size={13} /> Match statement PDF
-          </button>
-        </div>
-      </div>
-
-      {/* Setup card */}
-      <div className="rounded-xl border bg-white p-4" data-testid="recon-setup">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div>
-            <div className="text-xs text-slate-500 mb-1 flex items-center gap-1">
-              <Building2 size={12} /> Bank account
-            </div>
-            <select
-              value={acctId}
-              onChange={(e) => setAcctId(e.target.value)}
-              className="w-full border rounded-md px-2 py-1.5 text-sm"
-              data-testid="recon-account-select"
+          {!startOpen && (
+            <button
+              onClick={() => setStartOpen(true)}
+              data-testid="recon-start-new-btn"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md bg-slate-900 text-white hover:bg-slate-800"
             >
-              {banks.map(b => <option key={b.id} value={b.id}>{b.code} {b.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <div className="text-xs text-slate-500 mb-1 flex items-center gap-1">
-              <CalendarDays size={12} /> Statement date
-            </div>
-            <input
-              type="date" value={asOf}
-              onChange={(e) => setAsOf(e.target.value)}
-              className="w-full border rounded-md px-2 py-1.5 text-sm"
-              data-testid="recon-as-of"
-            />
-          </div>
-          <div>
-            <div className="text-xs text-slate-500 mb-1">Statement ending balance</div>
-            <input
-              type="number" step="0.01" value={stmtBal}
-              onChange={(e) => setStmtBal(e.target.value)}
-              placeholder="e.g. 12450.31"
-              className="w-full border rounded-md px-2 py-1.5 text-sm font-mono-num"
-              data-testid="recon-stmt-balance"
-            />
-          </div>
+              <Plus size={13} /> Start reconciliation
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Live scoreboard + list */}
-      {preview ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2 rounded-xl border bg-white overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-2 border-b bg-slate-50">
-              <div className="text-xs uppercase tracking-widest text-slate-500">
-                Uncleared through {asOf} · {preview.uncleared.length}
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <button onClick={tickAll} className="text-cyan-700 hover:underline" data-testid="recon-tick-all">Check all</button>
-                <span className="text-slate-300">·</span>
-                <button onClick={untickAll} className="text-slate-500 hover:underline" data-testid="recon-untick-all">Clear</button>
-              </div>
-            </div>
-            <div className="max-h-[500px] overflow-y-auto">
-              {loading && (
-                <div className="p-8 text-center text-slate-500 text-sm">
-                  <Loader2 size={16} className="animate-spin inline mr-2" />Loading…
-                </div>
-              )}
-              {!loading && preview.uncleared.length === 0 && (
-                <div className="p-8 text-center text-slate-500 text-sm">
-                  Nothing to clear — everything through {asOf} is already reconciled. 🎉
-                </div>
-              )}
-              {!loading && preview.uncleared.map(t => (
-                <label key={t.id}
-                  className="flex items-center gap-3 px-4 py-2 border-b last:border-b-0 hover:bg-slate-50 cursor-pointer text-sm"
-                  data-testid={`recon-row-${t.id}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked.has(t.id)}
-                    onChange={() => toggle(t.id)}
-                    className="accent-slate-900"
-                  />
-                  <span className="w-24 text-slate-500 font-mono-num text-xs">{t.date}</span>
-                  <span className="flex-1 truncate">{t.description}</span>
-                  <span className="text-slate-400 text-xs truncate max-w-[160px]">{t.category_account_name}</span>
-                  <span className={`font-mono-num tabular-nums w-28 text-right ${Number(t.amount) < 0 ? "text-red-700" : "text-emerald-700"}`}>
-                    {fmtMoney(t.amount)}
-                  </span>
-                </label>
-              ))}
+      {/* Collapsible: start-new interactive matcher */}
+      {startOpen && (
+        <div className="rounded-xl border bg-white overflow-hidden" data-testid="recon-start-new">
+          <div className="flex items-center justify-between px-4 py-2 border-b bg-slate-50">
+            <div className="font-heading font-semibold text-sm">New reconciliation</div>
+            <div className="flex items-center gap-2">
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".pdf,.csv,image/*"
+                onChange={(e) => uploadStatement(e.target.files?.[0])}
+                className="hidden"
+                data-testid="recon-statement-input"
+              />
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={busy || !acctId}
+                data-testid="recon-match-statement-btn"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border hover:bg-slate-50 disabled:opacity-40"
+              >
+                <Upload size={13} /> Match statement PDF
+              </button>
+              <button
+                onClick={() => setStartOpen(false)}
+                data-testid="recon-close-new-btn"
+                className="p-1.5 rounded-md hover:bg-slate-100"
+                title="Close"
+              >
+                <X size={14} className="text-slate-500" />
+              </button>
             </div>
           </div>
-          <ScoreboardCard
-            preview={preview} clearedCount={checked.size} clearedSum={clearedSum}
-            diff={diffLive} isBalanced={isBalanced}
-            onFinish={finish} busy={busy}
-          />
-        </div>
-      ) : (
-        <div className="rounded-xl border bg-white p-8 text-center text-slate-500 text-sm">
-          Pick an account to start.
+
+          <div className="p-4 space-y-4">
+            {/* Setup */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <div className="text-xs text-slate-500 mb-1 flex items-center gap-1">
+                  <Building2 size={12} /> Bank account
+                </div>
+                <select
+                  value={acctId}
+                  onChange={(e) => setAcctId(e.target.value)}
+                  className="w-full border rounded-md px-2 py-1.5 text-sm"
+                  data-testid="recon-account-select"
+                >
+                  {banks.map(b => <option key={b.id} value={b.id}>{b.code} {b.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <div className="text-xs text-slate-500 mb-1 flex items-center gap-1">
+                  <CalendarDays size={12} /> Statement date
+                </div>
+                <input
+                  type="date" value={asOf}
+                  onChange={(e) => setAsOf(e.target.value)}
+                  className="w-full border rounded-md px-2 py-1.5 text-sm"
+                  data-testid="recon-as-of"
+                />
+              </div>
+              <div>
+                <div className="text-xs text-slate-500 mb-1">Statement ending balance</div>
+                <input
+                  type="number" step="0.01" value={stmtBal}
+                  onChange={(e) => setStmtBal(e.target.value)}
+                  placeholder="e.g. 12450.31"
+                  className="w-full border rounded-md px-2 py-1.5 text-sm font-mono-num"
+                  data-testid="recon-stmt-balance"
+                />
+              </div>
+            </div>
+
+            {/* Live scoreboard + list */}
+            {preview && (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="lg:col-span-2 rounded-xl border overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-2 border-b bg-slate-50">
+                    <div className="text-xs uppercase tracking-widest text-slate-500">
+                      Uncleared through {asOf} · {preview.uncleared.length}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs">
+                      <button onClick={tickAll} className="text-cyan-700 hover:underline" data-testid="recon-tick-all">Check all</button>
+                      <span className="text-slate-300">·</span>
+                      <button onClick={untickAll} className="text-slate-500 hover:underline" data-testid="recon-untick-all">Clear</button>
+                    </div>
+                  </div>
+                  <div className="max-h-[500px] overflow-y-auto">
+                    {loading && (
+                      <div className="p-8 text-center text-slate-500 text-sm">
+                        <Loader2 size={16} className="animate-spin inline mr-2" />Loading…
+                      </div>
+                    )}
+                    {!loading && preview.uncleared.length === 0 && (
+                      <div className="p-8 text-center text-slate-500 text-sm">
+                        Nothing to clear — everything through {asOf} is already reconciled. 🎉
+                      </div>
+                    )}
+                    {!loading && preview.uncleared.map(t => (
+                      <label key={t.id}
+                        className="flex items-center gap-3 px-4 py-2 border-b last:border-b-0 hover:bg-slate-50 cursor-pointer text-sm"
+                        data-testid={`recon-row-${t.id}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked.has(t.id)}
+                          onChange={() => toggle(t.id)}
+                          className="accent-slate-900"
+                        />
+                        <span className="w-24 text-slate-500 font-mono-num text-xs">{t.date}</span>
+                        <span className="flex-1 truncate">{t.description}</span>
+                        <span className="text-slate-400 text-xs truncate max-w-[160px]">{t.category_account_name}</span>
+                        <span className={`font-mono-num tabular-nums w-28 text-right ${Number(t.amount) < 0 ? "text-red-700" : "text-emerald-700"}`}>
+                          {fmtMoney(t.amount)}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <ScoreboardCard
+                  preview={preview} clearedCount={checked.size} clearedSum={clearedSum}
+                  diff={diffLive} isBalanced={isBalanced}
+                  onFinish={async () => { await finish(); setStartOpen(false); }} busy={busy}
+                />
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {/* History table */}
-      {history.length > 0 && (
-        <div className="rounded-xl border bg-white overflow-hidden" data-testid="recon-history">
-          <div className="px-4 py-2 border-b bg-slate-50 text-xs uppercase tracking-widest text-slate-500">
-            Past reconciliations
-          </div>
-          <table className="w-full text-sm">
-            <thead className="text-xs uppercase text-slate-500 border-b">
-              <tr>
-                <th className="px-3 py-2 text-left">Date</th>
-                <th className="px-3 py-2 text-left">Account</th>
-                <th className="px-3 py-2 text-right">Statement</th>
-                <th className="px-3 py-2 text-center">Matched</th>
-                <th className="px-3 py-2 text-center">Source</th>
+      {/* History table — primary surface */}
+      <div className="rounded-xl border bg-white overflow-hidden" data-testid="recon-history">
+        <table className="w-full text-sm">
+          <thead className="text-[11px] uppercase text-slate-500 border-b bg-slate-50">
+            <tr>
+              <th className="px-4 py-2 text-left">Period</th>
+              <th className="px-4 py-2 text-left">Account</th>
+              <th className="px-4 py-2 text-center">Status</th>
+              <th className="px-4 py-2 text-right">Statement</th>
+              <th className="px-4 py-2 text-right">Ledger</th>
+              <th className="px-4 py-2 text-right">Diff</th>
+              <th className="px-4 py-2 w-8" />
+            </tr>
+          </thead>
+          <tbody>
+            {history.length === 0 && (
+              <tr><td colSpan={7} className="text-center py-10 text-slate-500 text-sm">
+                No reconciliations yet. Hit "+ Start reconciliation" or "Auto-clear settled Plaid txns" to begin.
+              </td></tr>
+            )}
+            {history.map(r => (
+              <tr key={r.id} className="border-b last:border-b-0 hover:bg-slate-50 cursor-pointer" data-testid={`recon-history-row-${r.id}`}>
+                <td className="px-4 py-2 font-mono-num text-xs text-cyan-700">
+                  <Link to={`/accounting/reconciliation/${r.id}`} className="hover:underline">
+                    {(r.period_start || r.as_of || "—")} → {(r.period_end || r.as_of || "—")}
+                  </Link>
+                </td>
+                <td className="px-4 py-2">
+                  <Link to={`/accounting/reconciliation/${r.id}`} className="hover:underline">
+                    {r.account_name || "—"}{r.account_last4 ? ` ···${r.account_last4}` : ""}
+                  </Link>
+                </td>
+                <td className="px-4 py-2 text-center">
+                  <span className={`text-[10px] uppercase px-2 py-0.5 rounded ${
+                    r.status === "reconciled" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700"
+                  }`}>
+                    {r.status || (r.source === "plaid_auto" ? "auto" : "open")}
+                  </span>
+                </td>
+                <td className="px-4 py-2 text-right font-mono-num tabular-nums">{fmtMoney(r.statement_balance || 0)}</td>
+                <td className="px-4 py-2 text-right font-mono-num tabular-nums">{fmtMoney(r.ledger_balance || 0)}</td>
+                <td className={`px-4 py-2 text-right font-mono-num tabular-nums ${
+                  Math.abs(r.diff || 0) < 0.005 ? "text-emerald-700" : "text-red-700"
+                }`}>{fmtMoney(r.diff || 0)}</td>
+                <td className="px-4 py-2 text-slate-300">
+                  <Link to={`/accounting/reconciliation/${r.id}`}><ChevronRight size={14} /></Link>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {history.slice(0, 10).map(r => (
-                <tr key={r.id} className="border-b last:border-b-0">
-                  <td className="px-3 py-2 font-mono-num text-slate-600">{r.as_of}</td>
-                  <td className="px-3 py-2">{banks.find(a => a.id === r.bank_account_id)?.name || r.account_id || "—"}</td>
-                  <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(r.statement_balance)}</td>
-                  <td className="px-3 py-2 text-center">{r.matched_count ?? "—"}</td>
-                  <td className="px-3 py-2 text-center">
-                    <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-100">
-                      {r.source || r.status || "manual"}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       {showMatchModal && matchResult && (
         <MatchResultModal
@@ -327,7 +374,6 @@ export default function Reconciliation() {
               });
               toast.success(`Cleared ${ids.length} matched transactions.`);
               setShowMatchModal(false); setMatchResult(null);
-              // Kick a preview refresh
               setStmtBal(s => s);
               load();
             } catch (e) {
