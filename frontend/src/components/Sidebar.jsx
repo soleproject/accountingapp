@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { TID } from "@/constants/testIds";
 import { useAuth } from "@/lib/auth";
+import { useBranding } from "@/lib/branding";
 
 const NAV_COLOR = "#64748B"; // single unified slate color for all left-nav icons
 
@@ -43,6 +44,8 @@ const ACCOUNTING = [
 
 export default function Sidebar({ collapsed, onToggle }) {
   const [inAccounting, setInAccounting] = useState(false);
+  const { branding } = useBranding();
+  const logoUrl = branding?.logo_data_url || null;
   const { user } = useAuth();
   const loc = useLocation();
 
@@ -76,14 +79,25 @@ export default function Sidebar({ collapsed, onToggle }) {
       data-testid="app-sidebar"
     >
       <div className="h-16 shrink-0 flex items-center gap-2 px-4 border-b">
-        <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-900 text-white shrink-0">
-          <Sparkles size={16} />
-        </div>
-        {!collapsed && (
-          <div>
-            <div className="font-heading font-bold text-slate-900 leading-tight">Axiom</div>
-            <div className="text-[10px] tracking-widest uppercase text-slate-500 leading-tight">Ledger</div>
-          </div>
+        {logoUrl ? (
+          <img
+            src={logoUrl}
+            alt="Firm logo"
+            className={collapsed ? "h-9 w-9 object-contain" : "h-9 max-w-[150px] object-contain"}
+            data-testid="sidebar-firm-logo"
+          />
+        ) : (
+          <>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-900 text-white shrink-0">
+              <Sparkles size={16} />
+            </div>
+            {!collapsed && (
+              <div>
+                <div className="font-heading font-bold text-slate-900 leading-tight">Axiom</div>
+                <div className="text-[10px] tracking-widest uppercase text-slate-500 leading-tight">Ledger</div>
+              </div>
+            )}
+          </>
         )}
         <button
           data-testid={TID.sidebarToggle}

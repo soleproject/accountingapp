@@ -155,3 +155,99 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
     }
 
 
+# ---------------------------------------------------------------------------
+# Pro branding — enterprise theming for firms managing their own clients.
+# All fields live under the user (pro) doc's `branding` sub-doc:
+#   { logo_data_url, signin_subdomain, theme_preset }
+# `logo_data_url` is a base64 data URL (capped at ~500 KB); this keeps the
+# feature single-service without introducing an object-storage dep for MVP.
+# ---------------------------------------------------------------------------
+
+_ALLOWED_PRESETS = {"default", "midnight", "forest", "violet"}
+_SUBDOMAIN_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$")
+_MAX_LOGO_BYTES = 512 * 1024  # 500 KB — plenty for a lossless PNG/SVG logo.
+
+
+class BrandingPatch(BaseModel):
+    signin_subdomain: Optional[str] = None
+    theme_preset: Optional[str] = None
+
+
+def _branding_out(user_doc: dict) -> dict:
+    b = (user_doc or {}).get("branding") or {}
+    return {
+        "logo_data_url": b.get("logo_data_url"),
+        "signin_subdomain": b.get("signin_subdomain"),
+        "theme_preset": b.get("theme_preset") or "default",
+    }
+
+
+@router.get("/pro/branding")
+async def get_pro_branding(user: dict = Depends(require_role("pro", "superadmin"))):
+    doc = await db.users.find_one({"id": user["id"]})
+    return _branding_out(doc or {})
+
+
+@router.patch("/pro/branding")
+async def patch_pro_branding(
+    inp: BrandingPatch,
+    user: dict = Depends(require_role("pro", "superadmin")),
+):
+    updates: dict = {}
+    if inp.theme_preset is not None:
+        if inp.theme_preset not in _ALLOWED_PRESETS:
+            raise HTTPException(400, f"Unknown theme preset — must be one of {sorted(_ALLOWED_PRESETS)}")
+        updates["branding.theme_preset"] = inp.theme_preset
+    if inp.signin_subdomain is not None:
+        sub = inp.signin_subdomain.strip().lower()
+        if sub == "":
+            updates["branding.signin_subdomain"] = None
+        else:
+            if not _SUBDOMAIN_RE.match(sub):
+                raise HTTPException(400, "Subdomain must be 1–32 chars, lowercase letters/digits/hyphens, no leading/trailing hyphen.")
+            # Uniqueness across all pros — first come, first served.
+            clash = await db.users.find_one({
+                "branding.signin_subdomain": sub,
+                "id": {"$ne": user["id"]},
+            })
+            if clash:
+                raise HTTPException(409, f"'{sub}' is already taken.")
+            updates["branding.signin_subdomain"] = sub
+    if updates:
+        await db.users.update_one({"id": user["id"]}, {"$set": updates})
+    doc = await db.users.find_one({"id": user["id"]})
+    return _branding_out(doc or {})
+
+
+@router.post("/pro/branding/logo")
+async def upload_pro_logo(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_role("pro", "superadmin")),
+):
+    # Accept PNG/JPG/SVG/WebP up to 500 KB. Store as a base64 data URL so the
+    # image round-trips in the same JSON call as the rest of the branding.
+    if file.content_type not in {"image/png", "image/jpeg", "image/svg+xml", "image/webp"}:
+        raise HTTPException(400, "Logo must be PNG, JPG, SVG, or WebP.")
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "Empty file.")
+    if len(raw) > _MAX_LOGO_BYTES:
+        raise HTTPException(400, f"Logo too large — max 500 KB (got {len(raw) // 1024} KB).")
+    import base64 as _b64
+    data_url = f"data:{file.content_type};base64,{_b64.b64encode(raw).decode('ascii')}"
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"branding.logo_data_url": data_url}},
+    )
+    return {"logo_data_url": data_url}
+
+
+@router.delete("/pro/branding/logo")
+async def delete_pro_logo(user: dict = Depends(require_role("pro", "superadmin"))):
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$unset": {"branding.logo_data_url": ""}},
+    )
+    return {"ok": True}
+
+

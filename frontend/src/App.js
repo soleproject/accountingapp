@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { CompanyProvider } from "@/lib/company";
+import { BrandingProvider } from "@/lib/branding";
 import Layout from "@/components/Layout";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
@@ -21,6 +22,7 @@ import Contacts from "@/pages/Contacts";
 import Connections from "@/pages/Connections";
 import StatementImportDetail from "@/pages/StatementImportDetail";
 import CompanySettings from "@/pages/CompanySettings";
+import ProSettings from "@/pages/ProSettings";
 import Communications from "@/pages/Communications";
 import GenericList from "@/pages/GenericList";
 import GeneralLedger from "@/pages/GeneralLedger";
@@ -40,7 +42,8 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <CompanyProvider>
-          <Routes>
+          <BrandingProvider>
+            <Routes>
             <Route path="/login" element={<Login />} />
             <Route element={<Protected><Layout /></Protected>}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
@@ -56,6 +59,7 @@ function App() {
               <Route path="/connections" element={<Connections />} />
               <Route path="/connections/imports/:importId" element={<StatementImportDetail />} />
               <Route path="/settings" element={<CompanySettings />} />
+              <Route path="/pro/settings" element={<ProSettings />} />
               <Route path="/communications" element={<Communications />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/reports/:kind" element={<ReportView />} />
@@ -87,6 +91,7 @@ function App() {
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
+          </BrandingProvider>
         </CompanyProvider>
       </AuthProvider>
     </BrowserRouter>
