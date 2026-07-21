@@ -907,3 +907,89 @@ async def draft_ask_client_question(
         f"totaling ${abs(total):,.2f}. Can you tell us what these were for so "
         f"we can categorize them correctly?"
     )
+
+
+# ---------------------------------------------------------------------------
+# Client-answer interpreter — closes the loop from ask-client → auto-categorize
+# ---------------------------------------------------------------------------
+# When a client answers a magic-link question, this parses their free-text
+# response against the Chart of Accounts to propose a category the pro can
+# accept with one click. Returns the same shape as `categorize_transaction`
+# plus an `applies_to_all` flag so the caller can decide whether to apply
+# the same category to every txn in the batch or hold for split-review.
+ANSWER_INTERPRETER_SYSTEM = (
+    "You are a US-GAAP bookkeeping AI. A small-business client just answered "
+    "an accountant's question about one or more bank transactions. Your job "
+    "is to turn their free-text answer into a categorization decision.\n\n"
+    "Output STRICT JSON: {\n"
+    "  \"account_code\": string,   // ONE code from the CoA below (choose the best fit)\n"
+    "  \"confidence\": float,       // 0.0-1.0\n"
+    "  \"reasoning\": string,       // one sentence explaining the choice\n"
+    "  \"applies_to_all\": bool,    // true if the answer covers every listed txn uniformly\n"
+    "  \"requires_split\": bool     // true only if the client explicitly says some are business, others personal\n"
+    "}\n\n"
+    "Rules:\n"
+    "- If the client says 'personal / owner draw / not business' → the account is Owner Draws (equity).\n"
+    "- If the client says 'payroll / employee / contractor payment' → Payroll Expense or Contractor Expense.\n"
+    "- If the client says 'loan / paid myself back / member contribution' → the equity or liability account.\n"
+    "- If the client says 'refund' → offset against the original expense category.\n"
+    "- Confidence rules:\n"
+    "  0.9+ : unambiguous mapping (e.g. \"office supplies\" → Office Expense).\n"
+    "  0.7-0.89 : likely correct.\n"
+    "  0.5-0.69 : reasonable guess.\n"
+    "  <0.5 : answer is vague / unclear — pro must decide.\n"
+    "- Never invent an account_code that isn't in the provided CoA."
+)
+
+
+async def interpret_client_answer(
+    *, answer: str, txns: list[dict], coa: list[dict],
+) -> dict:
+    """Given the client's free-text answer + the batch of txns it applies to
+    + the CoA, propose the best category. Fails soft — returns a low-
+    confidence placeholder that the pro can still see and act on."""
+    if not answer or not answer.strip():
+        return {
+            "account_code": "9999", "confidence": 0.0,
+            "reasoning": "No answer text.", "applies_to_all": True,
+            "requires_split": False,
+        }
+    coa_lines = "\n".join(f"- {a['code']} {a['name']} ({a.get('type', '')})" for a in coa)
+    txn_lines = "\n".join(
+        f"- {t.get('date', '')}  {float(t.get('amount', 0)):>10.2f}  {(t.get('description') or '')[:80]}"
+        for t in txns[:12]
+    )
+    prompt = (
+        f"Chart of Accounts:\n{coa_lines}\n\n"
+        f"Transactions the client's answer covers ({len(txns)} total, showing first {min(12, len(txns))}):\n{txn_lines}\n\n"
+        f"Client's answer (verbatim):\n\"\"\"{answer.strip()}\"\"\"\n\n"
+        f"Return the JSON now."
+    )
+    try:
+        chat = _new_chat(ANSWER_INTERPRETER_SYSTEM, f"answer-interp-{txns[0].get('id', 'x')[:8]}")
+        resp = await chat.send_message(UserMessage(text=prompt))
+        raw = resp if isinstance(resp, str) else str(resp)
+    except Exception as e:
+        return {
+            "account_code": "9999", "confidence": 0.0,
+            "reasoning": f"AI unavailable: {e}",
+            "applies_to_all": True, "requires_split": False,
+        }
+    data = _extract_json(raw) or {}
+    code = str(data.get("account_code") or "9999")
+    # Guard: only allow codes that actually exist in the CoA.
+    valid_codes = {a.get("code") for a in coa}
+    if code not in valid_codes:
+        code = "9999"
+    try:
+        conf = float(data.get("confidence", 0.5))
+    except (TypeError, ValueError):
+        conf = 0.5
+    return {
+        "account_code": code,
+        "confidence": max(0.0, min(1.0, conf)),
+        "reasoning": str(data.get("reasoning") or "")[:400],
+        "applies_to_all": bool(data.get("applies_to_all", True)),
+        "requires_split": bool(data.get("requires_split", False)),
+    }
+

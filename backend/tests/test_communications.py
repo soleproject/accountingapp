@@ -302,3 +302,99 @@ def test_suggest_batches_groups_by_counterparty_and_dedupes_asked():
             await db.communications.delete_many({"company_id": cid})
     _run(_go())
 
+
+
+def test_closed_loop_interpret_and_accept(monkeypatch):
+    """Client answers → AI stamps a proposal → pro accepts → txn is
+    categorized, human-reviewed, needs_review cleared, proposal removed."""
+    from routes.communications import (
+        AskClientBatchIn, ask_client_batch, AnswerIn, public_answer_question,
+        AcceptAllIn, accept_proposal_batch,
+    )
+    import ai_service
+
+    # Patch the interpreter so the test doesn't call the real LLM.
+    async def _fake_interp(*, answer, txns, coa):
+        return {
+            "account_code": "7200", "confidence": 0.95,
+            "reasoning": "Client said payroll → Payroll account.",
+            "applies_to_all": True, "requires_split": False,
+        }
+    monkeypatch.setattr(ai_service, "interpret_client_answer", _fake_interp)
+    # The dispatcher module re-imports; ensure the route sees the fake.
+    import routes.communications as rc
+    # public_answer_question does `from ai_service import interpret_client_answer`
+    # inside the function body, so patching ai_service module attr is sufficient.
+
+    async def _go():
+        cid = f"testcid_{uuid.uuid4().hex[:8]}"
+        uid = f"testpro_{uuid.uuid4().hex[:8]}"
+        tids = [f"testtxn_{uuid.uuid4().hex[:8]}" for _ in range(2)]
+        try:
+            await db.companies.insert_one({
+                "id": cid, "name": "Test Co", "contact_email": "owner@test.co",
+                "created_at": now_iso(), "updated_at": now_iso(),
+            })
+            await db.accounts.insert_one({
+                "id": "acct_payroll", "company_id": cid,
+                "code": "7200", "name": "Payroll", "type": "expense",
+                "created_at": now_iso(), "updated_at": now_iso(),
+            })
+            for tid in tids:
+                await db.transactions.insert_one({
+                    "id": tid, "company_id": cid,
+                    "date": "2026-07-20", "amount": -1200.0,
+                    "description": "Zelle to Roberto", "posted": True,
+                    "needs_review": True,
+                    "created_at": now_iso(), "updated_at": now_iso(),
+                })
+            user = {"id": uid, "email": "pro@test.co", "full_name": "Pro",
+                    "role": "pro"}
+
+            # Ask the batch.
+            res = await ask_client_batch(
+                cid,
+                AskClientBatchIn(
+                    txn_ids=tids,
+                    question="What were these Zelle payments for?",
+                    counterparty_label="Zelle",
+                ),
+                user=user,
+            )
+            token = res["question_id"]
+
+            # Client answers → interpreter stamps a proposal on every txn.
+            await public_answer_question(
+                token, AnswerIn(answer="Payroll advances to Roberto."),
+            )
+            for tid in tids:
+                t = await db.transactions.find_one({"id": tid})
+                assert t.get("ai_proposal_from_answer") is not None
+                p = t["ai_proposal_from_answer"]
+                assert p["account_code"] == "7200"
+                assert p["confidence"] == 0.95
+                assert p["account_id"] == "acct_payroll"
+
+            # Pro accepts the batch — one call applies to all txns.
+            acc = await accept_proposal_batch(
+                cid, AcceptAllIn(question_id=token),
+                user={"id": uid, "email": "pro@test.co", "role": "pro"},
+            )
+            assert acc["accepted"] == 2
+
+            for tid in tids:
+                t = await db.transactions.find_one({"id": tid})
+                assert t["category_account_id"] == "acct_payroll"
+                assert t["category_account_code"] == "7200"
+                assert t["human_reviewed"] is True
+                assert t["needs_review"] is False
+                assert "ai_proposal_from_answer" not in t
+                assert "[Accepted client-answer proposal" in t["ai_comment"]
+        finally:
+            await db.companies.delete_many({"id": cid})
+            await db.accounts.delete_many({"company_id": cid})
+            await db.transactions.delete_many({"company_id": cid})
+            await db.client_questions.delete_many({"company_id": cid})
+            await db.communications.delete_many({"company_id": cid})
+    _run(_go())
+

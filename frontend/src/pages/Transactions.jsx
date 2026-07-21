@@ -114,6 +114,43 @@ function AskClientLauncher({ registerRef, onAsked }) {
   );
 }
 
+// A tiny "client answered → AI proposes X" pill that renders below the
+// confidence chip when a client's magic-link reply produced a categorization
+// proposal. Accept applies the category with one click; dismiss drops the
+// proposal but keeps the answer text on the row.
+function ProposalPill({ proposal, onAccept, onDismiss }) {
+  const conf = Number(proposal?.confidence || 0);
+  const confColor = conf >= 0.8 ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+    : conf >= 0.5 ? "bg-amber-50 text-amber-800 border-amber-200"
+    : "bg-slate-50 text-slate-700 border-slate-200";
+  return (
+    <div
+      className={`mt-1 inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border ${confColor}`}
+      title={proposal.reasoning}
+      data-testid="proposal-pill"
+    >
+      <Sparkles size={9} />
+      <span>Client → <b>{proposal.account_name || proposal.account_code}</b></span>
+      <button
+        onClick={(e) => { e.stopPropagation(); onAccept(); }}
+        data-testid="proposal-accept"
+        title="Accept — apply this category"
+        className="ml-1 inline-flex items-center px-1 rounded hover:bg-white/60"
+      >
+        <Check size={10} />
+      </button>
+      <button
+        onClick={(e) => { e.stopPropagation(); onDismiss(); }}
+        data-testid="proposal-dismiss"
+        title="Dismiss proposal"
+        className="inline-flex items-center px-1 rounded hover:bg-white/60"
+      >
+        <X size={10} />
+      </button>
+    </div>
+  );
+}
+
 function ConfidenceChip({ conf, needs_review }) {
   const v = Number(conf || 0);
   // Needs-review always renders in an attention color regardless of the raw
@@ -873,7 +910,28 @@ export default function Transactions() {
                       />
                     </div>
                   </td>
-                  <td className="px-3 py-2"><ConfidenceChip conf={t.ai_confidence} needs_review={t.needs_review} /></td>
+                  <td className="px-3 py-2">
+                    <ConfidenceChip conf={t.ai_confidence} needs_review={t.needs_review} />
+                    {t.ai_proposal_from_answer && (
+                      <ProposalPill
+                        proposal={t.ai_proposal_from_answer}
+                        onAccept={async () => {
+                          try {
+                            await api.post(`/companies/${currentId}/transactions/${t.id}/accept-proposal`);
+                            toast.success(`Applied → ${t.ai_proposal_from_answer.account_name}`);
+                            load();
+                          } catch (e) { toast.error(e.response?.data?.detail || "Accept failed"); }
+                        }}
+                        onDismiss={async () => {
+                          try {
+                            await api.post(`/companies/${currentId}/transactions/${t.id}/dismiss-proposal`);
+                            toast.success("Proposal dismissed");
+                            load();
+                          } catch (e) { toast.error(e.response?.data?.detail || "Dismiss failed"); }
+                        }}
+                      />
+                    )}
+                  </td>
                   <td className={`px-3 py-2 text-right font-mono-num ${t.amount < 0 ? "text-slate-800" : "text-emerald-700 font-semibold"}`}>
                     {fmtMoney(t.amount)}
                   </td>

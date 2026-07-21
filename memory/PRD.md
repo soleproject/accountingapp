@@ -674,3 +674,38 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   `test_suggest_batches_groups_by_counterparty_and_dedupes_asked`) — 12/12
   passing across the communications + recon suites.
 
+
+### 2026-07-21 — Closed-Loop: Client Answer → AI Proposal → One-Click Accept
+- **`ai_service.interpret_client_answer(answer, txns, coa)`** — Claude parses
+  the client's free-text reply against the CoA and proposes
+  `{account_code, confidence, reasoning, applies_to_all, requires_split}`.
+  Guards: only allows `account_code` values that exist in the CoA;
+  fails soft with a low-confidence placeholder so the UI never breaks.
+- **Auto-fires** at the end of `public_answer_question` — every txn in the
+  batch is stamped with `ai_proposal_from_answer` (account_id, account_name,
+  account_code, confidence, reasoning, proposed_at, source_question_id).
+  The question doc also carries a copy under `ai_proposal` for review UIs.
+- **`POST /companies/{cid}/transactions/{tid}/accept-proposal`** — applies
+  the proposed category, sets `human_reviewed = true`, clears `needs_review`,
+  appends an accept-audit line to `ai_comment`, removes the proposal.
+- **`POST /companies/{cid}/communications/accept-proposal-batch`** —
+  one-shot accept for every txn tied to a `question_id`; the pro's "yes,
+  apply that to all N" button.
+- **`POST /companies/{cid}/transactions/{tid}/dismiss-proposal`** — drop
+  the proposal without applying it. Client's answer text and audit
+  comments remain on the row.
+- **`GET /companies/{cid}/communications/pending-proposals`** — list every
+  txn currently carrying a pending proposal (sorted by `client_answered_at`
+  desc) so a review inbox UI can group them.
+- **Frontend**: new `ProposalPill` component on the Confidence column of
+  each Transactions row — renders as a colored chip showing `Client →
+  <account name>` with inline ✓ Accept and ✕ Dismiss buttons. Hovering
+  the pill reveals the AI's reasoning.
+- **Live-verified**: sent a 3-txn Bright Idea Co batched ask → answered
+  once ("payroll advances to Roberto") → AI mapped to Payroll (7200) at
+  0.95 confidence → one-click accept-batch applied to all 3 txns; ledger
+  now has 3 categorized+reviewed Payroll charges, zero manual touches.
+- **Tests**: 1 new pytest case (`test_closed_loop_interpret_and_accept`,
+  monkeypatches the interpreter to keep tests offline) — 13/13 passing
+  across the communications + recon suites.
+

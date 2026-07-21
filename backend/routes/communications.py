@@ -443,7 +443,158 @@ async def public_answer_question(token: str, inp: AnswerIn):
                     "updated_at": now,
                 }},
             )
+
+        # Fire-and-forget AI interpretation of the answer against the CoA so
+        # a proposed category is waiting on the txn when the pro opens it.
+        # Any failure here just means no proposal — the answer text is still
+        # visible so the pro can categorize manually.
+        try:
+            from ai_service import interpret_client_answer
+            coa = await db.accounts.find(
+                {"company_id": q.get("company_id")}
+            ).to_list(500)
+            proposal = await interpret_client_answer(
+                answer=ans, txns=existing, coa=coa,
+            )
+            if proposal and proposal.get("account_code"):
+                acct = next(
+                    (a for a in coa if a.get("code") == proposal["account_code"]),
+                    None,
+                )
+                proposal_doc = {
+                    "account_code": proposal["account_code"],
+                    "account_id": (acct or {}).get("id"),
+                    "account_name": (acct or {}).get("name"),
+                    "confidence": proposal["confidence"],
+                    "reasoning": proposal["reasoning"],
+                    "applies_to_all": proposal["applies_to_all"],
+                    "requires_split": proposal["requires_split"],
+                    "proposed_at": now,
+                    "source_question_id": token,
+                }
+                # Stamp the proposal on every txn in the batch — the pro can
+                # accept/dismiss per-row from the Transactions list.
+                await db.transactions.update_many(
+                    {"id": {"$in": tx_ids}, "company_id": q.get("company_id")},
+                    {"$set": {"ai_proposal_from_answer": proposal_doc, "updated_at": now}},
+                )
+                # Also stash on the question so a review UI can group
+                # answered questions and their proposals in one place.
+                await db.client_questions.update_one(
+                    {"id": token},
+                    {"$set": {"ai_proposal": proposal_doc}},
+                )
+        except Exception:  # noqa: BLE001 — never fail the client's answer submission
+            pass
     return {"status": "answered", "txn_count": len(tx_ids)}
+
+
+# --------------------------------------------------------------------------
+# Closed-loop: accept / dismiss the AI's proposed category derived from a
+# client's answer. Sits on the communications router because the whole
+# thing is driven by the ask-client flow.
+# --------------------------------------------------------------------------
+@router.get("/companies/{cid}/communications/pending-proposals")
+async def list_pending_proposals(cid: str, user: dict = Depends(get_current_user)):
+    """Every transaction currently carrying a client-answer-derived AI
+    proposal that hasn't been accepted or dismissed yet."""
+    rows = await db.transactions.find({
+        "company_id": cid,
+        "ai_proposal_from_answer": {"$exists": True, "$ne": None},
+    }).sort("client_answered_at", -1).to_list(500)
+    return {"items": [coerce(t) for t in rows]}
+
+
+@router.post("/companies/{cid}/transactions/{tid}/accept-proposal")
+async def accept_proposal(cid: str, tid: str, user: dict = Depends(get_current_user)):
+    """Apply the AI's client-answer-derived category to a single txn,
+    clear the review flag, mark human-reviewed, drop the proposal doc."""
+    t = await db.transactions.find_one({"id": tid, "company_id": cid})
+    if not t:
+        raise HTTPException(404, "Transaction not found.")
+    proposal = t.get("ai_proposal_from_answer")
+    if not proposal:
+        raise HTTPException(400, "No proposal on this transaction.")
+    now = now_iso()
+    upd = {
+        "category_account_id": proposal.get("account_id"),
+        "category_account_name": proposal.get("account_name"),
+        "category_account_code": proposal.get("account_code"),
+        "needs_review": False,
+        "human_reviewed": True,
+        "human_reviewed_at": now,
+        "human_reviewed_by": user.get("email"),
+        "ai_comment": (t.get("ai_comment") or "") + f"\n[Accepted client-answer proposal {now[:10]}]: {proposal.get('reasoning')}",
+        "updated_at": now,
+    }
+    await db.transactions.update_one(
+        {"id": tid, "company_id": cid},
+        {"$set": upd, "$unset": {"ai_proposal_from_answer": ""}},
+    )
+    return {"accepted": True, "category_account_id": proposal.get("account_id")}
+
+
+class AcceptAllIn(BaseModel):
+    question_id: str
+
+
+@router.post("/companies/{cid}/communications/accept-proposal-batch")
+async def accept_proposal_batch(cid: str, inp: AcceptAllIn, user: dict = Depends(get_current_user)):
+    """Accept the client-answer proposal for EVERY txn tied to a given
+    question_id in one shot — the pro's "yes, apply that to all 5" button."""
+    q = await db.client_questions.find_one({"id": inp.question_id, "company_id": cid})
+    if not q:
+        raise HTTPException(404, "Question not found.")
+    tx_ids = q.get("txn_ids") or ([q["txn_id"]] if q.get("txn_id") else [])
+    if not tx_ids:
+        raise HTTPException(400, "Question has no linked txns.")
+    txns = await db.transactions.find({
+        "id": {"$in": tx_ids}, "company_id": cid,
+        "ai_proposal_from_answer": {"$exists": True, "$ne": None},
+    }).to_list(200)
+    if not txns:
+        raise HTTPException(400, "None of the linked txns has a pending proposal.")
+    now = now_iso()
+    accepted_ids: list[str] = []
+    for t in txns:
+        p = t["ai_proposal_from_answer"]
+        upd = {
+            "category_account_id": p.get("account_id"),
+            "category_account_name": p.get("account_name"),
+            "category_account_code": p.get("account_code"),
+            "needs_review": False,
+            "human_reviewed": True,
+            "human_reviewed_at": now,
+            "human_reviewed_by": user.get("email"),
+            "ai_comment": (t.get("ai_comment") or "") + f"\n[Accepted client-answer proposal {now[:10]}]: {p.get('reasoning')}",
+            "updated_at": now,
+        }
+        await db.transactions.update_one(
+            {"id": t["id"]},
+            {"$set": upd, "$unset": {"ai_proposal_from_answer": ""}},
+        )
+        accepted_ids.append(t["id"])
+    return {"accepted": len(accepted_ids), "txn_ids": accepted_ids}
+
+
+@router.post("/companies/{cid}/transactions/{tid}/dismiss-proposal")
+async def dismiss_proposal(cid: str, tid: str, user: dict = Depends(get_current_user)):
+    """Drop the proposal without applying it. The client's answer text +
+    the ai_comment audit line remain on the row."""
+    t = await db.transactions.find_one({"id": tid, "company_id": cid})
+    if not t:
+        raise HTTPException(404, "Transaction not found.")
+    if not t.get("ai_proposal_from_answer"):
+        return {"dismissed": False, "reason": "No proposal to dismiss."}
+    now = now_iso()
+    await db.transactions.update_one(
+        {"id": tid, "company_id": cid},
+        {"$set": {
+            "ai_comment": (t.get("ai_comment") or "") + f"\n[Dismissed client-answer proposal {now[:10]}]",
+            "updated_at": now,
+        }, "$unset": {"ai_proposal_from_answer": ""}},
+    )
+    return {"dismissed": True}
 
 
 # --------------------------------------------------------------------------
