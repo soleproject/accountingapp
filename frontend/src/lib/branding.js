@@ -43,12 +43,14 @@ export function BrandingProvider({ children }) {
   const [branding, setBranding] = useState(null);
 
   const refresh = useCallback(async () => {
-    if (!user || !["pro", "superadmin"].includes(user.role)) {
+    if (!user) {
       setBranding(null);
       return;
     }
+    // Every logged-in user hits the "effective" endpoint — pros see their
+    // own; client-users transparently inherit their managing pro's look.
     try {
-      const r = await api.get("/pro/branding");
+      const r = await api.get("/branding/effective");
       setBranding(r.data);
     } catch {
       setBranding(null);

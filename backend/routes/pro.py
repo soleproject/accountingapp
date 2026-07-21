@@ -212,6 +212,33 @@ async def get_pro_branding(user: dict = Depends(require_role("pro", "superadmin"
     return _branding_out(doc or {})
 
 
+@router.get("/branding/effective")
+async def get_effective_branding(user: dict = Depends(get_current_user)):
+    """Return the branding the current user should SEE (as opposed to
+    edit). Pros/superadmins see their own. Client-users (owners) inherit
+    the branding of the pro who manages any company they belong to —
+    that's how firm branding cascades into the client's app."""
+    if user.get("role") in {"pro", "superadmin"}:
+        doc = await db.users.find_one({"id": user["id"]})
+        return _branding_out(doc or {})
+    # Owner / client-user: find a managing pro through shared company
+    # memberships. If they belong to multiple firms, pick the most recent
+    # pro relationship — an edge case for now, and deterministic enough.
+    memberships = await db.memberships.find({"user_id": user["id"]}).to_list(200)
+    company_ids = [m["company_id"] for m in memberships if m.get("company_id")]
+    if not company_ids:
+        return _branding_out({})
+    pro_ms = await db.memberships.find({
+        "company_id": {"$in": company_ids},
+        "role": "pro",
+    }).sort("created_at", -1).to_list(50)
+    for pm in pro_ms:
+        pro = await db.users.find_one({"id": pm["user_id"]})
+        if pro:
+            return _branding_out(pro)
+    return _branding_out({})
+
+
 @router.patch("/pro/branding")
 async def patch_pro_branding(
     inp: BrandingPatch,
