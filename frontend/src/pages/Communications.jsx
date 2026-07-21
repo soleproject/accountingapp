@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { useCompany } from "@/lib/company";
-import { api } from "@/lib/api";
+import { api, fmtMoney } from "@/lib/api";
 import { toast } from "sonner";
 import {
   Inbox, Settings as SettingsIcon, Mail, CheckCircle2, XCircle,
-  MinusCircle, Send, RefreshCw, ExternalLink, Sparkles,
+  MinusCircle, Send, RefreshCw, ExternalLink, Sparkles, Wand2, Loader2,
 } from "lucide-react";
 
 const KIND_LABELS = {
@@ -36,13 +36,17 @@ export default function Communications() {
         <TabBtn active={tab === "inbox"} onClick={() => setTab("inbox")} testid="tab-inbox">
           <Inbox size={14} /> Inbox
         </TabBtn>
+        <TabBtn active={tab === "suggested"} onClick={() => setTab("suggested")} testid="tab-suggested">
+          <Wand2 size={14} /> AI Suggestions
+        </TabBtn>
         <TabBtn active={tab === "settings"} onClick={() => setTab("settings")} testid="tab-settings">
           <SettingsIcon size={14} /> Settings
         </TabBtn>
       </div>
 
-      {tab === "inbox"    && <InboxTab cid={currentId} />}
-      {tab === "settings" && <SettingsTab />}
+      {tab === "inbox"     && <InboxTab cid={currentId} />}
+      {tab === "suggested" && <SuggestedTab cid={currentId} />}
+      {tab === "settings"  && <SettingsTab />}
     </div>
   );
 }
@@ -249,5 +253,217 @@ function Switch({ on, onChange, disabled, testid }) {
           ${on ? "translate-x-4" : "translate-x-0.5"}`}
       />
     </button>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// AI Suggestions — cluster flagged txns by counterparty and let the pro
+// bulk-send one email per cluster.
+// ---------------------------------------------------------------------------
+function SuggestedTab({ cid }) {
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState(null);
+  const [edited, setEdited] = useState({});      // counterparty -> question override
+  const [selected, setSelected] = useState({});  // counterparty -> boolean
+  const [sending, setSending] = useState(false);
+
+  const load = async () => {
+    if (!cid) return;
+    setLoading(true);
+    try {
+      const r = await api.post(`/companies/${cid}/communications/ask-client/suggest`, {});
+      setData(r.data);
+      // Default: every suggestion pre-selected. The pro un-checks anything
+      // they don't want to send.
+      const s = {};
+      (r.data?.suggestions || []).forEach(x => { s[x.counterparty] = true; });
+      setSelected(s);
+      setEdited({});
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to generate suggestions");
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [cid]);
+
+  const sendOne = async (sug) => {
+    setSending(true);
+    try {
+      const r = await api.post(`/companies/${cid}/communications/ask-client/batch`, {
+        txn_ids: sug.txn_ids,
+        question: (edited[sug.counterparty] ?? sug.draft_question).trim(),
+        counterparty_label: sug.counterparty,
+      });
+      if (r.data?.status === "skipped_pref_off") {
+        toast.info(`Ask-client is off in Settings. Question was recorded but not emailed.`);
+      } else {
+        toast.success(`Sent — 1 email covering ${sug.count} ${sug.counterparty} txn${sug.count === 1 ? "" : "s"}.`);
+      }
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Send failed");
+    } finally { setSending(false); }
+  };
+
+  const sendAllSelected = async () => {
+    const picks = (data?.suggestions || []).filter(s => selected[s.counterparty]);
+    if (!picks.length) { toast.error("Nothing selected"); return; }
+    setSending(true);
+    let ok = 0, fail = 0, skipped = 0;
+    for (const sug of picks) {
+      try {
+        const r = await api.post(`/companies/${cid}/communications/ask-client/batch`, {
+          txn_ids: sug.txn_ids,
+          question: (edited[sug.counterparty] ?? sug.draft_question).trim(),
+          counterparty_label: sug.counterparty,
+        });
+        if (r.data?.status === "skipped_pref_off") skipped++;
+        else ok++;
+      } catch {
+        fail++;
+      }
+    }
+    setSending(false);
+    if (ok) toast.success(`Sent ${ok} email${ok === 1 ? "" : "s"}.${fail ? ` ${fail} failed.` : ""}${skipped ? ` ${skipped} pref-blocked.` : ""}`);
+    else if (skipped) toast.info(`All ${skipped} skipped — Ask-client is off in Settings.`);
+    else toast.error(`No emails sent — ${fail} failed.`);
+    load();
+  };
+
+  if (loading) return (
+    <div className="py-16 text-center text-sm text-slate-500" data-testid="suggested-loading">
+      <Loader2 className="animate-spin mx-auto mb-2" size={20} /> Analyzing flagged transactions…
+    </div>
+  );
+  const suggestions = data?.suggestions || [];
+  const selectedCount = suggestions.filter(s => selected[s.counterparty]).length;
+  const selectedTxns = suggestions.filter(s => selected[s.counterparty]).reduce((n, s) => n + s.count, 0);
+
+  return (
+    <div className="space-y-4" data-testid="suggested-tab">
+      <div className="rounded-xl border bg-cyan-50/50 border-cyan-200 p-4 flex items-start gap-3">
+        <Sparkles size={18} className="text-cyan-700 mt-0.5" />
+        <div className="flex-1">
+          <div className="text-sm text-slate-900 font-medium">
+            {suggestions.length
+              ? <>{suggestions.length} counterparty cluster{suggestions.length === 1 ? "" : "s"} · {data?.flagged_total || 0} flagged txns · {data?.already_asked_total || 0} already asked</>
+              : <>No open questions to bundle right now.</>
+            }
+          </div>
+          <div className="text-xs text-slate-600 mt-1">
+            AI grouped your flagged transactions by counterparty and drafted a question for each. Edit anything, then send one email per cluster.
+          </div>
+        </div>
+        <button
+          onClick={load}
+          disabled={loading}
+          data-testid="suggested-refresh"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border bg-white hover:bg-slate-50"
+        >
+          <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> Refresh
+        </button>
+      </div>
+
+      {suggestions.length > 0 && (
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs text-slate-500">
+            {selectedCount} of {suggestions.length} selected · {selectedTxns} txns covered
+          </div>
+          <button
+            onClick={sendAllSelected}
+            disabled={sending || !selectedCount}
+            data-testid="suggested-send-all"
+            className="inline-flex items-center gap-1.5 px-4 py-1.5 text-sm rounded-md bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-50"
+          >
+            <Send size={13} /> {sending ? "Sending…" : `Send ${selectedCount} email${selectedCount === 1 ? "" : "s"}`}
+          </button>
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {suggestions.map(sug => (
+          <SuggestionCard
+            key={sug.counterparty}
+            sug={sug}
+            question={edited[sug.counterparty] ?? sug.draft_question}
+            selected={Boolean(selected[sug.counterparty])}
+            onToggle={(v) => setSelected(prev => ({ ...prev, [sug.counterparty]: v }))}
+            onChangeQuestion={(v) => setEdited(prev => ({ ...prev, [sug.counterparty]: v }))}
+            onSendNow={() => sendOne(sug)}
+            sending={sending}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SuggestionCard({ sug, question, selected, onToggle, onChangeQuestion, onSendNow, sending }) {
+  const [expanded, setExpanded] = useState(sug.count <= 3);
+  return (
+    <div
+      className={`rounded-xl border bg-white p-4 ${selected ? "ring-1 ring-cyan-200" : ""}`}
+      data-testid={`suggestion-${sug.counterparty}`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3 flex-1">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={(e) => onToggle(e.target.checked)}
+            className="mt-1 accent-cyan-600"
+            data-testid={`suggestion-check-${sug.counterparty}`}
+          />
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <div className="text-sm font-semibold text-slate-900">{sug.counterparty}</div>
+              <span className="text-xs text-slate-500">
+                {sug.count} txn{sug.count === 1 ? "" : "s"} · <span className="font-mono-num">{fmtMoney(sug.total)}</span>
+              </span>
+            </div>
+            <textarea
+              value={question}
+              onChange={(e) => onChangeQuestion(e.target.value)}
+              rows={3}
+              className="mt-2 w-full text-sm border rounded-md px-3 py-2 bg-slate-50"
+              data-testid={`suggestion-question-${sug.counterparty}`}
+            />
+            <button
+              onClick={() => setExpanded(v => !v)}
+              className="mt-2 text-xs text-slate-500 hover:text-slate-800"
+              data-testid={`suggestion-expand-${sug.counterparty}`}
+            >
+              {expanded ? "Hide" : "Show"} {sug.count} transaction{sug.count === 1 ? "" : "s"}
+            </button>
+            {expanded && (
+              <div className="mt-2 rounded-md border bg-slate-50 divide-y">
+                {sug.sample_txns.map(t => (
+                  <div key={t.id} className="grid grid-cols-[110px_1fr_100px] items-center gap-3 px-3 py-1.5 text-xs">
+                    <span className="text-slate-500 font-mono-num">{t.date}</span>
+                    <span className="text-slate-800 truncate">{t.description}</span>
+                    <span className={`text-right font-mono-num ${Number(t.amount) < 0 ? "text-slate-800" : "text-emerald-700 font-semibold"}`}>
+                      {fmtMoney(t.amount)}
+                    </span>
+                  </div>
+                ))}
+                {sug.count > sug.sample_txns.length && (
+                  <div className="px-3 py-1.5 text-xs text-slate-400 italic">
+                    …plus {sug.count - sug.sample_txns.length} more
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+        <button
+          onClick={onSendNow}
+          disabled={sending}
+          data-testid={`suggestion-send-${sug.counterparty}`}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border hover:bg-slate-50 disabled:opacity-40 whitespace-nowrap"
+        >
+          <Send size={12} /> Send this
+        </button>
+      </div>
+    </div>
   );
 }

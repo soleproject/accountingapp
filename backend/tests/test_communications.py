@@ -171,3 +171,134 @@ def test_ask_client_flow_end_to_end():
             await db.client_questions.delete_many({"company_id": cid})
             await db.communications.delete_many({"company_id": cid})
     _run(_go())
+
+
+def test_ask_client_batch_answer_applies_to_all_txns():
+    """One batched question / one answer → all txns in the batch get the
+    same `client_answer` and their own ai_comment audit entry."""
+    from routes.communications import (
+        AskClientBatchIn, ask_client_batch, AnswerIn, public_answer_question,
+        public_get_question,
+    )
+
+    async def _go():
+        cid = f"testcid_{uuid.uuid4().hex[:8]}"
+        uid = f"testpro_{uuid.uuid4().hex[:8]}"
+        tids = [f"testtxn_{uuid.uuid4().hex[:8]}" for _ in range(3)]
+        try:
+            await db.companies.insert_one({
+                "id": cid, "name": "Test Co", "contact_email": "owner@test.co",
+                "created_at": now_iso(), "updated_at": now_iso(),
+            })
+            for tid in tids:
+                await db.transactions.insert_one({
+                    "id": tid, "company_id": cid,
+                    "date": "2026-07-20", "amount": -25.0,
+                    "description": "Amazon charge", "posted": True,
+                    "created_at": now_iso(), "updated_at": now_iso(),
+                })
+            user = {"id": uid, "email": "pro@test.co", "full_name": "Pro",
+                    "role": "pro"}
+            res = await ask_client_batch(
+                cid,
+                AskClientBatchIn(
+                    txn_ids=tids,
+                    question="What were these 3 Amazon charges for?",
+                    counterparty_label="Amazon",
+                ),
+                user=user,
+            )
+            assert res["status"] == "sent"
+            assert res["txn_count"] == 3
+            token = res["question_id"]
+
+            # Magic-link payload includes all 3 txns.
+            payload = await public_get_question(token)
+            assert payload["batched"] is True
+            assert len(payload["txns"]) == 3
+
+            # Client answers ONCE.
+            done = await public_answer_question(
+                token, AnswerIn(answer="Books for the office."),
+            )
+            assert done["txn_count"] == 3
+
+            # Every txn in the batch now carries the same answer.
+            for tid in tids:
+                t = await db.transactions.find_one({"id": tid})
+                assert t["client_answer"] == "Books for the office."
+                assert "[Client answered" in t["ai_comment"]
+                assert t["client_question_id"] == token
+        finally:
+            await db.companies.delete_many({"id": cid})
+            await db.transactions.delete_many({"company_id": cid})
+            await db.client_questions.delete_many({"company_id": cid})
+            await db.communications.delete_many({"company_id": cid})
+    _run(_go())
+
+
+def test_suggest_batches_groups_by_counterparty_and_dedupes_asked():
+    """The suggest endpoint clusters flagged txns by contact/merchant and
+    excludes any txn already covered by a pending client_question."""
+    from routes.communications import SuggestBatchIn, suggest_ask_client_batches
+
+    async def _go():
+        cid = f"testcid_{uuid.uuid4().hex[:8]}"
+        uid = f"testpro_{uuid.uuid4().hex[:8]}"
+        try:
+            await db.companies.insert_one({
+                "id": cid, "name": "Test Co",
+                "created_at": now_iso(), "updated_at": now_iso(),
+            })
+            # 3 flagged Amazon txns + 2 flagged Costco + 1 already-asked
+            already_asked_id = f"testtxn_{uuid.uuid4().hex[:8]}"
+            for i in range(3):
+                await db.transactions.insert_one({
+                    "id": f"testtxn_{uuid.uuid4().hex[:8]}", "company_id": cid,
+                    "date": f"2026-07-{i+1:02d}", "amount": -20.0 - i,
+                    "description": "AMAZON MKTP", "contact_name": "Amazon",
+                    "needs_review": True, "posted": True,
+                    "created_at": now_iso(), "updated_at": now_iso(),
+                })
+            for i in range(2):
+                await db.transactions.insert_one({
+                    "id": f"testtxn_{uuid.uuid4().hex[:8]}", "company_id": cid,
+                    "date": f"2026-07-{i+10:02d}", "amount": -412.55,
+                    "description": "COSTCO", "contact_name": "Costco",
+                    "needs_review": True, "posted": True,
+                    "created_at": now_iso(), "updated_at": now_iso(),
+                })
+            # One already-asked txn that must NOT reappear in suggestions.
+            await db.transactions.insert_one({
+                "id": already_asked_id, "company_id": cid,
+                "date": "2026-07-20", "amount": -50.0,
+                "description": "AMAZON MKTP", "contact_name": "Amazon",
+                "needs_review": True, "posted": True,
+                "client_question_id": "some_existing_token",
+                "created_at": now_iso(), "updated_at": now_iso(),
+            })
+            await db.client_questions.insert_one({
+                "id": "some_existing_token", "company_id": cid,
+                "txn_id": already_asked_id, "txn_ids": [already_asked_id],
+                "status": "pending", "question": "...", "sent_at": now_iso(),
+            })
+
+            res = await suggest_ask_client_batches(
+                cid, SuggestBatchIn(max_groups=10, min_group_size=1),
+                user={"id": uid, "role": "pro"},
+            )
+            counterparties = {s["counterparty"] for s in res["suggestions"]}
+            assert "Amazon" in counterparties
+            assert "Costco" in counterparties
+            amazon = next(s for s in res["suggestions"] if s["counterparty"] == "Amazon")
+            # 3 in the group — NOT 4 (the already-asked one is excluded).
+            assert amazon["count"] == 3
+            assert already_asked_id not in amazon["txn_ids"]
+            assert res["already_asked_total"] >= 1
+        finally:
+            await db.companies.delete_many({"id": cid})
+            await db.transactions.delete_many({"company_id": cid})
+            await db.client_questions.delete_many({"company_id": cid})
+            await db.communications.delete_many({"company_id": cid})
+    _run(_go())
+

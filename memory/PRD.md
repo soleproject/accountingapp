@@ -638,3 +638,39 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - **Known follow-up**: the daily digest currently ships via an endpoint,
   not a scheduled task. A single-line cron / APScheduler tick will
   activate the "auto-send at 8am" behavior when the pro wants it.
+
+### 2026-07-21 — AI-Suggested Batched Ask-Client
+- **`ai_service.draft_ask_client_question()`** — takes a counterparty label
+  + a cluster of flagged txns and asks Claude to draft ONE concise, friendly
+  question referencing the shared context (counts, totals, common
+  possibilities). Fails soft: deterministic fallback string if the LLM
+  errors, so the UI never blocks.
+- **`POST /companies/{cid}/communications/ask-client/suggest`** — clusters
+  flagged transactions (`needs_review = true` OR `ai_confidence < 0.6`) by
+  contact_name / merchant, drafts a question per group in parallel, ranks
+  by (cluster size, absolute total). Automatically excludes any txn
+  already covered by a pending `client_question` so the pro never asks
+  twice about the same charge.
+- **`POST /companies/{cid}/communications/ask-client/batch`** — sends ONE
+  email covering N txns. `client_question` doc now stores `txn_ids` array
+  (single-txn flow also populates the array for parity). Every listed
+  txn is stamped `needs_review = true` + `client_question_id = token`.
+- **`email_templates.ask_client_batch()`** — new inline-CSS template that
+  renders a table of every txn in the batch + one shared question.
+- **Public magic-link updates**: `GET /api/q/{token}` now returns
+  `{txns: [...], batched: bool, counterparty_label}`. `POST /q/{token}/answer`
+  applies the single answer to every txn in the batch — client_answer,
+  client_answered_at, and an ai_comment audit entry per txn.
+- **Frontend**: new "AI Suggestions" tab on `/communications`. Cards show
+  counterparty · count · total, editable draft question, expandable txn
+  list, per-cluster "Send this", bulk "Send N emails" button. All clusters
+  pre-selected — pro unchecks the ones they don't want.
+- **Answer page** (`/q/:token`) — renders a table of every txn when batched,
+  changes heading to "Hi — questions about {counterparty}" for clarity.
+- **Live-verified**: sent a real batched email covering 5 Zelle payments to
+  michael@bigsaas.ai; answered once via magic-link; verified all 5 txns
+  received the `client_answer` and audit trail.
+- **Tests**: 2 new pytest cases (`test_ask_client_batch_answer_applies_to_all_txns`,
+  `test_suggest_batches_groups_by_counterparty_and_dedupes_asked`) — 12/12
+  passing across the communications + recon suites.
+

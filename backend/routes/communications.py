@@ -96,6 +96,22 @@ class AskClientIn(BaseModel):
     to: Optional[EmailStr] = None  # override if the txn's contact has no email
 
 
+class AskClientBatchIn(BaseModel):
+    """Ask about MULTIPLE transactions in a single email. Client sees a
+    table of the txns on the magic-link page; their answer is applied to
+    every listed txn."""
+    txn_ids: List[str]
+    question: str
+    counterparty_label: Optional[str] = None  # for the subject line
+    to: Optional[EmailStr] = None
+
+
+class SuggestBatchIn(BaseModel):
+    """Optional filters when generating suggestions."""
+    max_groups: int = 8
+    min_group_size: int = 1
+
+
 async def _resolve_client_email(cid: str) -> tuple[Optional[str], str]:
     """Return `(email, display_name)` for the client-owner of a company.
     Falls back to the company's `contact_email` if no owner membership exists."""
@@ -135,6 +151,7 @@ async def ask_client_about_txn(
     q_doc = {
         "id": token,   # token IS the id, used as the magic-link path
         "company_id": cid, "txn_id": tid,
+        "txn_ids": [tid],   # array form for batched flow parity
         "asked_by_user_id": user["id"],
         "asked_by_name": user.get("full_name") or user.get("email"),
         "question": inp.question,
@@ -181,14 +198,192 @@ async def ask_client_about_txn(
     return {"status": result["status"], "question_id": token, "communication_id": result["id"]}
 
 
+# --------------------------------------------------------------------------
+# AI-suggested batching — cluster flagged txns by counterparty so the pro
+# sends ONE email per merchant instead of one per transaction.
+# --------------------------------------------------------------------------
+@router.post("/companies/{cid}/communications/ask-client/suggest")
+async def suggest_ask_client_batches(
+    cid: str,
+    inp: SuggestBatchIn = None,
+    user: dict = Depends(require_role("pro", "superadmin")),
+):
+    """Return clusters of currently-flagged transactions grouped by
+    counterparty, each with an AI-drafted question ready to send.
+
+    Skips any txn that already has a pending client_question so the pro
+    isn't offered to ask twice about the same charge.
+    """
+    from collections import defaultdict
+    from ai_service import draft_ask_client_question
+    inp = inp or SuggestBatchIn()
+
+    # Fetch flagged, still-open txns.
+    txns = await db.transactions.find({
+        "company_id": cid,
+        "$or": [
+            {"needs_review": True},
+            {"ai_confidence": {"$lt": 0.6}, "human_reviewed": {"$ne": True}},
+        ],
+        "client_question_id": {"$in": [None, ""]},
+    }).sort("date", -1).to_list(500)
+
+    # Also exclude any txn already covered by a pending client_question.
+    pending_qs = await db.client_questions.find({
+        "company_id": cid, "status": "pending",
+    }, {"txn_ids": 1, "txn_id": 1}).to_list(500)
+    covered_ids: set[str] = set()
+    for q in pending_qs:
+        for x in (q.get("txn_ids") or []):
+            covered_ids.add(x)
+        if q.get("txn_id"):
+            covered_ids.add(q["txn_id"])
+    txns = [t for t in txns if t["id"] not in covered_ids]
+
+    # Cluster by contact_name if present, else a normalized merchant/description.
+    def _key(t: dict) -> str:
+        if t.get("contact_name"):
+            return t["contact_name"]
+        m = (t.get("merchant") or t.get("description") or "").strip()
+        return m.split(" ")[0].upper()[:40] if m else "UNKNOWN"
+
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for t in txns:
+        groups[_key(t)].append(t)
+
+    # Rank groups: bigger clusters first, then bigger absolute totals.
+    ranked = sorted(
+        groups.items(),
+        key=lambda kv: (len(kv[1]), sum(abs(float(x.get("amount") or 0)) for x in kv[1])),
+        reverse=True,
+    )
+    ranked = [(k, v) for k, v in ranked if len(v) >= max(1, inp.min_group_size)]
+    ranked = ranked[: max(1, inp.max_groups)]
+
+    company = await db.companies.find_one({"id": cid})
+    company_name = (company or {}).get("name") or ""
+
+    # Draft questions in parallel (Claude calls, bounded to `max_groups`).
+    async def _draft(k: str, ts: list[dict]) -> dict:
+        q = await draft_ask_client_question(
+            counterparty=k, txns=ts, company_name=company_name,
+        )
+        total = round(sum(float(x.get("amount") or 0) for x in ts), 2)
+        return {
+            "counterparty": k,
+            "txn_ids": [t["id"] for t in ts],
+            "count": len(ts),
+            "total": total,
+            "draft_question": q,
+            "sample_txns": [
+                {
+                    "id": t["id"], "date": t.get("date"),
+                    "description": t.get("description"),
+                    "amount": t.get("amount"),
+                }
+                for t in ts[:5]
+            ],
+        }
+    suggestions = await asyncio.gather(*[_draft(k, v) for k, v in ranked]) if ranked else []
+    return {
+        "suggestions": suggestions,
+        "flagged_total": len(txns),
+        "already_asked_total": len(covered_ids),
+    }
+
+
+@router.post("/companies/{cid}/communications/ask-client/batch")
+async def ask_client_batch(
+    cid: str, inp: AskClientBatchIn,
+    user: dict = Depends(require_role("pro", "superadmin")),
+):
+    """Send ONE email covering multiple transactions from the same
+    counterparty. Client's single reply applies to every listed txn."""
+    if not inp.txn_ids:
+        raise HTTPException(400, "txn_ids is required.")
+    txns = await db.transactions.find(
+        {"id": {"$in": inp.txn_ids}, "company_id": cid}
+    ).sort("date", 1).to_list(200)
+    if not txns:
+        raise HTTPException(404, "None of the txns were found.")
+
+    company = await db.companies.find_one({"id": cid})
+    to_email = str(inp.to) if inp.to else None
+    if not to_email:
+        to_email, _ = await _resolve_client_email(cid)
+    if not to_email:
+        raise HTTPException(400, "No client email on file — set one on the company profile or pass `to`.")
+
+    token = secrets.token_urlsafe(24)
+    expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    q_doc = {
+        "id": token,
+        "company_id": cid,
+        "txn_id": txns[0]["id"],  # legacy single-value
+        "txn_ids": [t["id"] for t in txns],
+        "asked_by_user_id": user["id"],
+        "asked_by_name": user.get("full_name") or user.get("email"),
+        "question": inp.question,
+        "status": "pending",
+        "answer": None,
+        "sent_at": now_iso(),
+        "expires_at": expires,
+        "to_email": to_email,
+        "counterparty_label": inp.counterparty_label or "",
+    }
+    await db.client_questions.insert_one(q_doc)
+
+    # Stamp every txn with the same question_id + review flag.
+    await db.transactions.update_many(
+        {"id": {"$in": [t["id"] for t in txns]}, "company_id": cid},
+        {"$set": {
+            "needs_review": True,
+            "client_question_id": token,
+            "updated_at": now_iso(),
+        }},
+    )
+
+    _, client_name = await _resolve_client_email(cid)
+    magic_url = f"{public_base_url()}/q/{token}"
+    subject, html = tmpl.ask_client_batch(
+        pro_name=user.get("full_name") or user.get("email") or "Your accountant",
+        company_name=(company or {}).get("name") or "",
+        counterparty=inp.counterparty_label or "these transactions",
+        txns=txns,
+        question=inp.question,
+        magic_url=magic_url,
+    )
+    result = await dispatch(
+        kind="ask_client",  # uses the same pref as single-txn ask-client
+        to=to_email,
+        subject=subject,
+        html=html,
+        initiating_user_id=user["id"],
+        company_id=cid,
+        related={"txn_ids": [t["id"] for t in txns], "question_id": token, "batched": True},
+    )
+    if result["status"] == "failed":
+        raise HTTPException(502, result.get("error") or "Email send failed")
+    return {
+        "status": result["status"], "question_id": token,
+        "communication_id": result["id"], "txn_count": len(txns),
+    }
+
+
 # ---- Public magic-link endpoints (no auth) ------------------------------
 @router.get("/q/{token}")
 async def public_get_question(token: str):
     q = await db.client_questions.find_one({"id": token})
     if not q:
         raise HTTPException(404, "Question not found or expired.")
-    txn = await db.transactions.find_one({"id": q.get("txn_id")})
+    tx_ids = q.get("txn_ids") or ([q["txn_id"]] if q.get("txn_id") else [])
+    txns = await db.transactions.find({"id": {"$in": tx_ids}}).sort("date", 1).to_list(200) if tx_ids else []
     company = await db.companies.find_one({"id": q.get("company_id")})
+    tx_list = [
+        {"id": t.get("id"), "date": t.get("date"),
+         "description": t.get("description"), "amount": t.get("amount")}
+        for t in txns
+    ]
     return {
         "question": q.get("question"),
         "status": q.get("status"),
@@ -198,11 +393,11 @@ async def public_get_question(token: str):
         "answered_at": q.get("answered_at"),
         "expires_at": q.get("expires_at"),
         "company_name": (company or {}).get("name"),
-        "txn": {
-            "date": (txn or {}).get("date"),
-            "description": (txn or {}).get("description"),
-            "amount": (txn or {}).get("amount"),
-        } if txn else None,
+        "counterparty_label": q.get("counterparty_label"),
+        "batched": len(tx_list) > 1,
+        # Legacy single-txn key retained for older frontend callers.
+        "txn": tx_list[0] if tx_list else None,
+        "txns": tx_list,
     }
 
 
@@ -229,20 +424,26 @@ async def public_answer_question(token: str, inp: AnswerIn):
         {"id": token},
         {"$set": {"status": "answered", "answer": ans, "answered_at": now}},
     )
-    # Push the answer onto the transaction so the Pro sees it in-context.
-    await db.transactions.update_one(
-        {"id": q.get("txn_id"), "company_id": q.get("company_id")},
-        {"$set": {
-            "client_answer": ans,
-            "client_answered_at": now,
-            "ai_comment": (
-                await db.transactions.find_one({"id": q.get("txn_id")})
-                or {}
-            ).get("ai_comment", "") + f"\n[Client answered {now[:10]}]: {ans}",
-            "updated_at": now,
-        }},
-    )
-    return {"status": "answered"}
+    tx_ids = q.get("txn_ids") or ([q["txn_id"]] if q.get("txn_id") else [])
+    if tx_ids:
+        # Apply the answer to every txn in the batch. Each txn gets an
+        # ai_comment note so the pro sees the audit trail per-row without
+        # having to fetch the client_question doc.
+        existing = await db.transactions.find(
+            {"id": {"$in": tx_ids}, "company_id": q.get("company_id")}
+        ).to_list(200)
+        for t in existing:
+            new_comment = (t.get("ai_comment") or "") + f"\n[Client answered {now[:10]}]: {ans}"
+            await db.transactions.update_one(
+                {"id": t["id"]},
+                {"$set": {
+                    "client_answer": ans,
+                    "client_answered_at": now,
+                    "ai_comment": new_comment,
+                    "updated_at": now,
+                }},
+            )
+    return {"status": "answered", "txn_count": len(tx_ids)}
 
 
 # --------------------------------------------------------------------------

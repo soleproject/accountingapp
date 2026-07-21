@@ -838,3 +838,72 @@ async def cpa_review(
         "say": str(data.get("say") or "")[:280],
         "resolution": resolution,
     }
+
+
+
+# ---------------------------------------------------------------------------
+# Ask-client question drafter
+# ---------------------------------------------------------------------------
+# Given a cluster of flagged transactions from the same counterparty, ask
+# Claude to draft ONE concise, friendly question the pro can send to the
+# client. The question should reference the shared counterparty and the
+# ambiguity (e.g. "several $12–$45 Amazon charges — business or personal?").
+#
+# Fails soft: on any error returns a sensible fallback string so the UI
+# never blocks on this.
+ASK_CLIENT_DRAFTER_SYSTEM = (
+    "You are helping an accountant write a short, friendly, professional "
+    "question to send to their small-business client about ambiguous "
+    "transactions on the bank feed.\n\n"
+    "Rules:\n"
+    "- ONE question, 1-3 sentences max. No greeting or sign-off (the email "
+    "template wraps that).\n"
+    "- Reference the counterparty and the ambiguity concretely (e.g. amount "
+    "range, count, common possibilities).\n"
+    "- Never accuse or imply fraud. Assume good faith.\n"
+    "- Never mention that you're an AI or that the accountant used AI.\n"
+    "- Output STRICT JSON: {\"question\": \"...\"}."
+)
+
+
+async def draft_ask_client_question(
+    *, counterparty: str, txns: list[dict], company_name: str = ""
+) -> str:
+    """Return a single question string for the pro to send. `txns` is a
+    list of dicts with at least `date`, `amount`, `description` keys."""
+    if not txns:
+        return f"Can you tell us what these {counterparty} charges were for?"
+    sample = txns[: min(6, len(txns))]
+    total = round(sum(float(t.get("amount") or 0) for t in sample), 2)
+    lines = "\n".join(
+        f"- {t.get('date', '')}  ${float(t.get('amount', 0)):,.2f}  {t.get('description', '')[:80]}"
+        for t in sample
+    )
+    prompt = (
+        f"Client business: {company_name or 'the client'}\n"
+        f"Counterparty on the bank feed: {counterparty}\n"
+        f"{len(txns)} transaction(s) total (showing first {len(sample)}, "
+        f"combined ${total:,.2f}):\n{lines}\n\n"
+        "Draft the question."
+    )
+    try:
+        chat = _new_chat(ASK_CLIENT_DRAFTER_SYSTEM, f"ask-client-drafter-{counterparty[:20]}")
+        resp = await chat.send_message(UserMessage(text=prompt))
+        raw = resp if isinstance(resp, str) else str(resp)
+        data = _extract_json(raw)
+        q = (data or {}).get("question")
+        if isinstance(q, str) and q.strip():
+            return q.strip()
+    except Exception:
+        pass
+    # Deterministic fallback so the UI never blocks.
+    if len(txns) == 1:
+        return (
+            f"What was the ${abs(float(txns[0].get('amount') or 0)):,.2f} "
+            f"charge from {counterparty} on {txns[0].get('date', '')} for?"
+        )
+    return (
+        f"We noticed {len(txns)} recent transactions from {counterparty} "
+        f"totaling ${abs(total):,.2f}. Can you tell us what these were for so "
+        f"we can categorize them correctly?"
+    )

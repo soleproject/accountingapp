@@ -77,6 +77,55 @@ def ask_client(*, pro_name: str, company_name: str, txn: dict, question: str, ma
 
 
 # --------------------------------------------------------------------------
+# 1b. Ask-client — BATCHED (one email covering multiple txns from same
+# counterparty). Client sees a table of every txn; their single answer is
+# applied to all of them by the answer endpoint.
+# --------------------------------------------------------------------------
+def ask_client_batch(*, pro_name: str, company_name: str, counterparty: str, txns: list[dict], question: str, magic_url: str) -> tuple[str, str]:
+    rows = ""
+    total = 0.0
+    for t in txns[:25]:  # cap the visible list; full list still in the app
+        amt = float(t.get("amount") or 0)
+        total += amt
+        rows += f"""
+          <tr>
+            <td style="padding:5px 8px 5px 0;font-size:12px;color:#64748b;font-family:monospace;">{escape(t.get('date', ''))}</td>
+            <td style="padding:5px 8px;font-size:12px;color:#0f172a;">{escape((t.get('description') or '')[:60])}</td>
+            <td style="padding:5px 8px;font-size:12px;color:#0f172a;text-align:right;font-family:monospace;white-space:nowrap;">${abs(amt):,.2f}{' out' if amt < 0 else ' in'}</td>
+          </tr>
+        """
+    more = f"<tr><td colspan=3 style='padding:6px 0;font-size:11px;color:#94a3b8;font-style:italic;'>… plus {len(txns) - 25} more (see the ledger for the full list)</td></tr>" if len(txns) > 25 else ""
+    inner = f"""
+      <div style="{_H1}">{len(txns)} questions about {escape(counterparty)}</div>
+      <div style="{_P}">
+        {escape(pro_name)} is reviewing your books for <b>{escape(company_name)}</b>
+        and needs a hand identifying these {escape(counterparty)} transactions:
+      </div>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+             style="margin:12px 0 8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;width:100%;">
+        <tr style="color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.06em;">
+          <td style="padding:6px 8px 6px 0;">Date</td>
+          <td style="padding:6px 8px;">Description</td>
+          <td style="padding:6px 8px;text-align:right;">Amount</td>
+        </tr>
+        {rows}
+        {more}
+        <tr><td colspan=3 style="border-top:1px solid #e2e8f0;padding:8px 0 4px;font-size:12px;color:#0f172a;font-weight:600;text-align:right;">
+          Combined: ${abs(total):,.2f}{' out' if total < 0 else ' in'}
+        </td></tr>
+      </table>
+      <div style="{_P}"><b>{escape(pro_name)} asks:</b><br>{escape(question)}</div>
+      <div style="padding:16px 0 8px;">
+        <a href="{magic_url}" style="{_BTN}">Answer for all → </a>
+      </div>
+      <div style="{_MUTE}">
+        One answer covers every transaction listed above. Link stays valid 30 days.
+      </div>
+    """
+    return f"{len(txns)} questions about {counterparty}", _wrap(inner)
+
+
+# --------------------------------------------------------------------------
 # 2. Daily Pro digest
 # --------------------------------------------------------------------------
 def daily_pro_digest(*, pro_name: str, companies: list[dict], firm_totals: dict, app_url: str) -> tuple[str, str]:
