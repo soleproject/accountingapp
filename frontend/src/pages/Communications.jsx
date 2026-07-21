@@ -9,8 +9,8 @@ import {
 } from "lucide-react";
 
 const KIND_LABELS = {
-  ask_client:            { label: "Pro Ask Client",     hint: "Pro manually asks the client about flagged transactions" },
   ai_ask_client:         { label: "AI Ask Client",      hint: "AI autonomously emails clients about unrecognized transactions (max 3/day per client, one txn per email)" },
+  ask_client:            { label: "Pro Ask Client",     hint: "Pro manually asks the client about flagged transactions" },
   daily_pro_digest:      { label: "Daily digest",       hint: "Morning summary of your firm's Needs Attention" },
   dunning:               { label: "A/R dunning",        hint: "Reminders to customers about overdue invoices" },
   overdue_bill_client:   { label: "Overdue A/P",        hint: "Reminders to the client about overdue bills" },
