@@ -709,3 +709,38 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   monkeypatches the interpreter to keep tests offline) — 13/13 passing
   across the communications + recon suites.
 
+
+### 2026-07-21 — Client-Facing AI Chat (magic-link answer page)
+- **`ai_service.client_chat_reply()`** — Claude system prompt for a
+  friendly, colleague-tone conversation. Rules baked in: max 2 follow-ups,
+  never accuse, restate the plan before finalizing, emit `[[DONE:<summary>]]`
+  only after the client has confirmed. Never emit DONE on turn 1.
+- **`POST /api/q/{token}/chat`** — public, no-auth, one turn per call.
+  Persists the transcript on `client_questions.chat_messages`. When Claude
+  emits `[[DONE:<summary>]]`, backend strips the marker from the visible
+  reply, composes an answer = `summary + "\n\nClient's own words: ..."`,
+  and threads through the existing `public_answer_question` flow so the
+  interpreter runs and the proposal is stamped on every txn.
+- **Rewrote `/q/:token` frontend** as a chat panel matching the app's
+  "Let's review transaction" experience:
+  - Header states the counterparty + N txns
+  - Collapsible txn detail panel
+  - Message bubbles (Bot + Client avatars, cyan-branded, no jargon)
+  - Typing indicator during AI turns
+  - Autoscroll, Enter-to-send, Shift+Enter for newlines
+  - Optimistic client message with rollback on error
+  - Resumable — a client who closes the tab and re-opens the link picks
+    up the transcript exactly where they left off
+- **Email template** now advertises "Chat with our AI →" so the CTA
+  matches what the client actually sees.
+- **Live-verified**: A 3-turn conversation about a Widget LLC batch → AI
+  asked "one-time or recurring?" → client answered → AI restated the plan
+  → client confirmed → interpreter mapped to **Legal & Professional Fees
+  (6500) @ 0.85 confidence** (correctly avoiding Payroll because the
+  client said "not an employee"). Proposal now sits on all 3 txns ready
+  for one-click accept.
+- **Tests**: `test_client_chat_finalizes_and_stamps_proposal` — verifies
+  the DONE marker is stripped from the visible reply, the question
+  finalizes, proposals land on every txn, and post-finalization turns are
+  refused. 14/14 tests pass across the communications + recon suites.
+

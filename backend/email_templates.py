@@ -66,11 +66,11 @@ def ask_client(*, pro_name: str, company_name: str, txn: dict, question: str, ma
       </table>
       <div style="{_P}"><b>{escape(pro_name)} asks:</b><br>{escape(question)}</div>
       <div style="padding:16px 0 8px;">
-        <a href="{magic_url}" style="{_BTN}">Answer this question →</a>
+        <a href="{magic_url}" style="{_BTN}">Chat with our AI →</a>
       </div>
       <div style="{_MUTE}">
-        This link is private to you and stays valid for 30 days. If you
-        don't recognize the transaction, reply here anyway — we'll flag it.
+        This link is private to you and stays valid for 30 days. Our AI will
+        walk you through it — you can just type like you're texting a friend.
       </div>
     """
     return f"Quick question — {desc[:40]}", _wrap(inner)
@@ -116,10 +116,10 @@ def ask_client_batch(*, pro_name: str, company_name: str, counterparty: str, txn
       </table>
       <div style="{_P}"><b>{escape(pro_name)} asks:</b><br>{escape(question)}</div>
       <div style="padding:16px 0 8px;">
-        <a href="{magic_url}" style="{_BTN}">Answer for all → </a>
+        <a href="{magic_url}" style="{_BTN}">Chat with our AI → </a>
       </div>
       <div style="{_MUTE}">
-        One answer covers every transaction listed above. Link stays valid 30 days.
+        One quick chat covers every transaction listed above. Link stays valid 30 days.
       </div>
     """
     return f"{len(txns)} questions about {counterparty}", _wrap(inner)

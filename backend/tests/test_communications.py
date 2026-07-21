@@ -398,3 +398,104 @@ def test_closed_loop_interpret_and_accept(monkeypatch):
             await db.communications.delete_many({"company_id": cid})
     _run(_go())
 
+
+
+def test_client_chat_finalizes_and_stamps_proposal(monkeypatch):
+    """AI chat conversation → [[DONE:...]] marker → question is closed and
+    the interpreter stamps a proposal on every txn in the batch."""
+    from routes.communications import (
+        AskClientBatchIn, ask_client_batch, ChatIn, public_chat_turn,
+    )
+    import ai_service
+
+    # Deterministic AI responses so the test is offline. First call from the
+    # client → AI asks a follow-up. Second call → AI emits [[DONE:...]].
+    call_count = {"n": 0}
+    async def _fake_chat_reply(**_):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return "Got it — was this a one-time thing or recurring?"
+        return (
+            "Thanks — I'll tell your accountant this was a one-time payment "
+            "for a consulting project. [[DONE:one-time consulting engagement, "
+            "categorize as Legal & Professional Fees]]"
+        )
+    monkeypatch.setattr(ai_service, "client_chat_reply", _fake_chat_reply)
+
+    # Interpreter also stubbed so we don't hit Claude.
+    async def _fake_interp(*, answer, txns, coa):
+        return {
+            "account_code": "6500", "confidence": 0.85,
+            "reasoning": "One-time consulting → Legal & Professional Fees.",
+            "applies_to_all": True, "requires_split": False,
+        }
+    monkeypatch.setattr(ai_service, "interpret_client_answer", _fake_interp)
+
+    async def _go():
+        cid = f"testcid_{uuid.uuid4().hex[:8]}"
+        uid = f"testpro_{uuid.uuid4().hex[:8]}"
+        tids = [f"testtxn_{uuid.uuid4().hex[:8]}" for _ in range(2)]
+        try:
+            await db.companies.insert_one({
+                "id": cid, "name": "Test Co", "contact_email": "owner@test.co",
+                "created_at": now_iso(), "updated_at": now_iso(),
+            })
+            await db.accounts.insert_one({
+                "id": "acct_legal", "company_id": cid,
+                "code": "6500", "name": "Legal & Professional Fees",
+                "type": "expense",
+                "created_at": now_iso(), "updated_at": now_iso(),
+            })
+            for tid in tids:
+                await db.transactions.insert_one({
+                    "id": tid, "company_id": cid,
+                    "date": "2026-07-20", "amount": -2200.0,
+                    "description": "WIDGET LLC", "posted": True,
+                    "needs_review": True,
+                    "created_at": now_iso(), "updated_at": now_iso(),
+                })
+            user = {"id": uid, "email": "pro@test.co", "role": "pro"}
+
+            # 1. Pro asks the batch.
+            res = await ask_client_batch(
+                cid,
+                AskClientBatchIn(
+                    txn_ids=tids,
+                    question="What were these Widget LLC payments for?",
+                    counterparty_label="Widget LLC",
+                ),
+                user=user,
+            )
+            token = res["question_id"]
+
+            # 2. Client's 1st turn → AI asks a follow-up, no finalize.
+            r1 = await public_chat_turn(token, ChatIn(message="Consulting"))
+            assert r1["finalize"] is False
+            assert "one-time" in r1["reply"]
+
+            # 3. Client's 2nd turn → AI emits [[DONE]] and finalizes.
+            r2 = await public_chat_turn(token, ChatIn(message="One-time"))
+            assert r2["finalize"] is True
+            # The DONE marker must NOT leak into the visible reply.
+            assert "[[DONE:" not in r2["reply"]
+
+            # Question is closed and proposals are on every txn.
+            q = await db.client_questions.find_one({"id": token})
+            assert q["status"] == "answered"
+            for tid in tids:
+                t = await db.transactions.find_one({"id": tid})
+                assert t.get("ai_proposal_from_answer")
+                assert t["ai_proposal_from_answer"]["account_code"] == "6500"
+
+            # A 3rd turn after finalization must be refused.
+            with pytest.raises(Exception) as ei:
+                await public_chat_turn(token, ChatIn(message="oh wait"))
+            assert "already closed" in str(ei.value)
+        finally:
+            await db.companies.delete_many({"id": cid})
+            await db.accounts.delete_many({"company_id": cid})
+            await db.transactions.delete_many({"company_id": cid})
+            await db.client_questions.delete_many({"company_id": cid})
+            await db.communications.delete_many({"company_id": cid})
+    _run(_go())
+

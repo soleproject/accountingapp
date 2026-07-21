@@ -395,14 +395,81 @@ async def public_get_question(token: str):
         "company_name": (company or {}).get("name"),
         "counterparty_label": q.get("counterparty_label"),
         "batched": len(tx_list) > 1,
-        # Legacy single-txn key retained for older frontend callers.
         "txn": tx_list[0] if tx_list else None,
         "txns": tx_list,
+        "chat_messages": q.get("chat_messages") or [],
     }
 
 
 class AnswerIn(BaseModel):
     answer: str
+
+
+class ChatIn(BaseModel):
+    message: str
+
+
+@router.post("/q/{token}/chat")
+async def public_chat_turn(token: str, inp: ChatIn):
+    """One turn of the client-side chat. Public — auth is the token itself.
+    Persists the transcript on the client_questions doc and finalizes the
+    question (running the interpreter + stamping the proposal) as soon as
+    the AI emits a `[[DONE:...]]` marker."""
+    q = await db.client_questions.find_one({"id": token})
+    if not q:
+        raise HTTPException(404, "Question not found.")
+    if q.get("status") == "answered":
+        raise HTTPException(400, "This conversation is already closed.")
+    expires = q.get("expires_at")
+    if expires and expires < now_iso():
+        await db.client_questions.update_one({"id": token}, {"$set": {"status": "expired"}})
+        raise HTTPException(410, "This link has expired.")
+
+    client_msg = (inp.message or "").strip()
+    if not client_msg:
+        raise HTTPException(400, "Message is required.")
+
+    tx_ids = q.get("txn_ids") or ([q["txn_id"]] if q.get("txn_id") else [])
+    txns = await db.transactions.find({"id": {"$in": tx_ids}}).sort("date", 1).to_list(200) if tx_ids else []
+    company = await db.companies.find_one({"id": q.get("company_id")}) or {}
+
+    history = list(q.get("chat_messages") or [])
+    now = now_iso()
+    history.append({"role": "client", "content": client_msg, "at": now})
+
+    from ai_service import client_chat_reply
+    ai_reply = await client_chat_reply(
+        question=q.get("question") or "",
+        counterparty=q.get("counterparty_label") or "",
+        company_name=company.get("name") or "",
+        txns=txns,
+        history=history,
+    )
+    history.append({"role": "ai", "content": ai_reply, "at": now_iso()})
+    await db.client_questions.update_one(
+        {"id": token},
+        {"$set": {"chat_messages": history, "updated_at": now_iso()}},
+    )
+
+    # Detect finalization marker. Format: [[DONE:<summary>]]
+    import re as _re
+    m = _re.search(r"\[\[DONE:(.+?)\]\]", ai_reply, flags=_re.S)
+    finalize = bool(m)
+    display_reply = _re.sub(r"\[\[DONE:.+?\]\]", "", ai_reply, flags=_re.S).strip()
+    if finalize:
+        summary = m.group(1).strip()
+        # Compose the final answer as the AI's summary + the last thing the
+        # client said, so the interpreter has the richest possible text.
+        answer_text = f"{summary}\n\nClient's own words: {client_msg}"
+        # Reuse the existing answer path so the interpreter runs and the
+        # proposal is stamped exactly like the single-textarea flow.
+        await public_answer_question(token, AnswerIn(answer=answer_text))
+
+    return {
+        "reply": display_reply,
+        "finalize": finalize,
+        "history": history,
+    }
 
 
 @router.post("/q/{token}/answer")

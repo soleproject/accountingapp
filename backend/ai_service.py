@@ -993,3 +993,80 @@ async def interpret_client_answer(
         "requires_split": bool(data.get("requires_split", False)),
     }
 
+
+
+# ---------------------------------------------------------------------------
+# Client-side chat for the ask-client magic-link page
+# ---------------------------------------------------------------------------
+# When a client clicks "Answer for all" from a batched ask-client email they
+# land on a chat interface instead of a plain textarea. This lets the AI:
+#   - Restate the accountant's question in context
+#   - Ask up to two follow-ups if the client's first answer is ambiguous
+#   - Summarize the plan back to the client for confirmation
+#   - Emit [[DONE:<summary>]] on the final turn — backend detects the marker,
+#     synthesizes the answer, and closes the question.
+CLIENT_CHAT_SYSTEM = (
+    "You are a friendly bookkeeping assistant talking DIRECTLY to a small-"
+    "business owner about specific bank transactions their accountant flagged. "
+    "The accountant already asked one question — you're now helping the "
+    "owner explain the charges so the accountant can categorize them.\n\n"
+    "Rules of engagement:\n"
+    "- Sound like a helpful colleague, not a chatbot. First person, plain "
+    "language, no jargon.\n"
+    "- Ask AT MOST 2 clarifying follow-ups after their first answer, and only "
+    "if the answer is genuinely ambiguous (business vs. personal? one-time or "
+    "recurring? which employee?). If the first answer is clear, jump straight "
+    "to confirming the plan.\n"
+    "- Never accuse or imply fraud. Assume the owner is honest.\n"
+    "- Never claim to be an AI unless directly asked.\n"
+    "- When you have enough information, restate what you'll tell the "
+    "accountant in ONE sentence, then confirm with the client (\"Sound right?\").\n"
+    "- After they confirm, respond with a brief thank-you AND append the "
+    "special marker `[[DONE:<one-sentence summary of the answer for the "
+    "accountant>]]` at the END of your final message (nothing after it).\n"
+    "- If the client keeps volunteering new info, keep chatting — don't emit "
+    "the marker until they've explicitly confirmed the plan.\n"
+    "- Never emit [[DONE:...]] in the very first response — the client always "
+    "gets to answer at least once first."
+)
+
+
+async def client_chat_reply(
+    *, question: str, counterparty: str, company_name: str,
+    txns: list[dict], history: list[dict],
+) -> str:
+    """Return Claude's next message in the client-side chat.
+    `history` is the ordered list of prior turns: [{role: 'ai'|'client', content: '...'}, ...]
+    The caller is responsible for appending both the client's incoming
+    message and the returned AI message to the transcript.
+    """
+    txn_lines = "\n".join(
+        f"- {t.get('date', '')}  ${float(t.get('amount', 0)):>10,.2f}  {(t.get('description') or '')[:80]}"
+        for t in txns[:12]
+    )
+    header = (
+        f"Business: {company_name or 'the client'}\n"
+        f"Counterparty on the bank feed: {counterparty or 'multiple'}\n"
+        f"Transactions in question ({len(txns)} total, showing first "
+        f"{min(12, len(txns))}):\n{txn_lines}\n\n"
+        f"Accountant's original question: {question}\n\n"
+    )
+    # Fold the history into the user turn so a single stateless Claude call
+    # sees the full context. Cheaper than maintaining sessions and gives us
+    # deterministic behavior on retry.
+    convo = "\n".join(
+        f"{'YOU' if m['role'] == 'ai' else 'CLIENT'}: {m['content']}"
+        for m in history
+    )
+    prompt = header + "Conversation so far:\n" + (convo or "(none yet — the client just opened the link)") + "\n\nWrite your next message now."
+    try:
+        chat = _new_chat(CLIENT_CHAT_SYSTEM, f"client-chat-{txns[0].get('id', 'x')[:8]}")
+        resp = await chat.send_message(UserMessage(text=prompt))
+        return resp if isinstance(resp, str) else str(resp)
+    except Exception as e:
+        return (
+            "Sorry — I'm having trouble reaching our AI right now. "
+            "Please just type what you can and hit send; your accountant will pick it up. "
+            f"({e.__class__.__name__})"
+        )
+
