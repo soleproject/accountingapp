@@ -45,7 +45,15 @@ SCHEDULER_INTERVAL_SECONDS = int(os.environ.get("AI_ASK_CLIENT_INTERVAL_SEC", "3
 SEND_TZ = os.environ.get("AI_ASK_CLIENT_TZ", "America/New_York")
 SEND_START_HOUR = int(os.environ.get("AI_ASK_CLIENT_START_HOUR", "6"))
 SEND_END_HOUR = int(os.environ.get("AI_ASK_CLIENT_END_HOUR", "20"))
+# Auto-archive answered AI Ask Client conversations older than N days so
+# the default view stays crisp without pros manually archiving each week.
+AUTO_ARCHIVE_DAYS = int(os.environ.get("AI_ASK_CLIENT_AUTO_ARCHIVE_DAYS", "30"))
 KIND = "ai_ask_client"
+
+# Module-level marker for "when did we last auto-archive". Updated in
+# `_loop`. Idempotent — running twice in a day is a no-op because we
+# filter on `archived: {"$ne": True}` in the update.
+_LAST_AUTO_ARCHIVE_RUN: Optional[str] = None
 
 
 def _in_send_window(now: Optional[datetime] = None) -> bool:
@@ -243,6 +251,29 @@ async def process_company(cid: str) -> dict:
     }
 
 
+async def auto_archive_old_answered(days: int = AUTO_ARCHIVE_DAYS) -> int:
+    """Auto-archive AI Ask Client conversations that were answered more
+    than ``days`` days ago and haven't been archived yet. Returns the
+    number of rows archived. Idempotent — safe to call repeatedly."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    now = now_iso()
+    result = await db.client_questions.update_many(
+        {
+            "flow_type": KIND,
+            "status": "answered",
+            "archived": {"$ne": True},
+            "answered_at": {"$lt": cutoff, "$ne": None},
+        },
+        {"$set": {
+            "archived": True,
+            "archived_at": now,
+            "archived_by": "auto_archive",
+            "updated_at": now,
+        }},
+    )
+    return result.modified_count
+
+
 async def run_once() -> dict:
     """Iterate every company and process it. Called by the scheduler tick
     and by the manual-run HTTP endpoint. Never raises — per-company
@@ -267,10 +298,25 @@ _TASK: Optional[asyncio.Task] = None
 
 
 async def _loop() -> None:
+    global _LAST_AUTO_ARCHIVE_RUN
     # Small warm-up so we don't spam on process restart loops.
     await asyncio.sleep(30)
     while True:
         try:
+            # --- Nightly-ish auto-archive: run at most once per calendar day.
+            today = datetime.now(timezone.utc).date().isoformat()
+            if _LAST_AUTO_ARCHIVE_RUN != today:
+                try:
+                    n = await auto_archive_old_answered()
+                    _LAST_AUTO_ARCHIVE_RUN = today
+                    if n:
+                        logger.info(
+                            "AI ask-client auto-archive: %s answered conversations older than %sd archived",
+                            n, AUTO_ARCHIVE_DAYS,
+                        )
+                except Exception:  # noqa: BLE001
+                    logger.exception("AI ask-client auto-archive failed — will retry next tick")
+
             if _in_send_window():
                 summary = await run_once()
                 if summary["sent"]:

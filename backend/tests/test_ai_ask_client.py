@@ -262,3 +262,71 @@ def test_send_window_gates_scheduler_hours():
     assert sched._in_send_window(datetime(2026, 7, 21, 19, 59, tzinfo=tz)) is True
     assert sched._in_send_window(datetime(2026, 7, 21, 20, 0, tzinfo=tz)) is False
     assert sched._in_send_window(datetime(2026, 7, 21, 5, 59, tzinfo=tz)) is False
+
+
+def test_auto_archive_moves_old_answered_and_leaves_recent_alone():
+    """Answered ai_ask_client conversations older than the configured
+    cutoff auto-archive; recent, unanswered, or non-ai rows are left
+    untouched. Running twice is a no-op (second call archives 0)."""
+    from datetime import datetime, timezone, timedelta
+    import uuid
+
+    async def _go():
+        cid = f"testcid_{uuid.uuid4().hex[:8]}"
+        try:
+            now = datetime.now(timezone.utc)
+            old_iso = (now - timedelta(days=sched.AUTO_ARCHIVE_DAYS + 5)).isoformat()
+            recent_iso = (now - timedelta(days=2)).isoformat()
+
+            # Case A — old + answered + ai + not archived  → SHOULD archive.
+            a = f"a_{uuid.uuid4().hex[:8]}"
+            await db.client_questions.insert_one({
+                "id": a, "company_id": cid, "flow_type": "ai_ask_client",
+                "status": "answered", "answered_at": old_iso,
+                "sent_at": old_iso, "counterparty_label": "Old Vendor",
+            })
+            # Case B — old but ALREADY archived → left as-is (no double archive).
+            b = f"b_{uuid.uuid4().hex[:8]}"
+            await db.client_questions.insert_one({
+                "id": b, "company_id": cid, "flow_type": "ai_ask_client",
+                "status": "answered", "answered_at": old_iso, "archived": True,
+                "sent_at": old_iso,
+            })
+            # Case C — old + answered but flow=pro_ask_client → NOT touched.
+            c = f"c_{uuid.uuid4().hex[:8]}"
+            await db.client_questions.insert_one({
+                "id": c, "company_id": cid, "flow_type": "pro_ask_client",
+                "status": "answered", "answered_at": old_iso,
+                "sent_at": old_iso,
+            })
+            # Case D — recent, answered, ai → NOT yet.
+            d = f"d_{uuid.uuid4().hex[:8]}"
+            await db.client_questions.insert_one({
+                "id": d, "company_id": cid, "flow_type": "ai_ask_client",
+                "status": "answered", "answered_at": recent_iso,
+                "sent_at": recent_iso,
+            })
+            # Case E — old + PENDING (not answered) → NOT touched.
+            e = f"e_{uuid.uuid4().hex[:8]}"
+            await db.client_questions.insert_one({
+                "id": e, "company_id": cid, "flow_type": "ai_ask_client",
+                "status": "pending", "sent_at": old_iso,
+            })
+
+            n1 = await sched.auto_archive_old_answered()
+            assert n1 == 1, f"expected exactly 1 archived, got {n1}"
+
+            docs = {x["id"]: x for x in await db.client_questions.find({"company_id": cid}).to_list(50)}
+            assert docs[a]["archived"] is True
+            assert docs[a]["archived_by"] == "auto_archive"
+            assert docs[b]["archived"] is True   # already was
+            assert not docs[c].get("archived")   # pro-flow untouched
+            assert not docs[d].get("archived")   # recent untouched
+            assert not docs[e].get("archived")   # pending untouched
+
+            # Second call is idempotent — nothing new to archive.
+            n2 = await sched.auto_archive_old_answered()
+            assert n2 == 0
+        finally:
+            await db.client_questions.delete_many({"company_id": cid})
+    _run(_go())
