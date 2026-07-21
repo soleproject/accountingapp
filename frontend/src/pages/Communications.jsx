@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   Inbox, Settings as SettingsIcon, Mail, CheckCircle2, XCircle,
   MinusCircle, Send, RefreshCw, ExternalLink, Sparkles, Wand2, Loader2,
-  MessageSquare, Bot, User as UserIcon, ChevronDown, ChevronRight,
+  MessageSquare, Bot, User as UserIcon, ChevronDown, ChevronRight, Search,
 } from "lucide-react";
 
 const KIND_LABELS = {
@@ -38,6 +38,9 @@ export default function Communications() {
         <TabBtn active={tab === "inbox"} onClick={() => setTab("inbox")} testid="tab-inbox">
           <Inbox size={14} /> Inbox
         </TabBtn>
+        <TabBtn active={tab === "aiaskclient"} onClick={() => setTab("aiaskclient")} testid="tab-aiaskclient">
+          <Sparkles size={14} /> AI Ask Client
+        </TabBtn>
         <TabBtn active={tab === "suggested"} onClick={() => setTab("suggested")} testid="tab-suggested">
           <Wand2 size={14} /> AI Suggestions
         </TabBtn>
@@ -49,10 +52,11 @@ export default function Communications() {
         </TabBtn>
       </div>
 
-      {tab === "inbox"     && <InboxTab cid={currentId} />}
-      {tab === "suggested" && <SuggestedTab cid={currentId} />}
-      {tab === "ailogs"    && <AiLogsTab cid={currentId} />}
-      {tab === "settings"  && <SettingsTab />}
+      {tab === "inbox"       && <InboxTab cid={currentId} />}
+      {tab === "aiaskclient" && <AiAskClientTab cid={currentId} />}
+      {tab === "suggested"   && <SuggestedTab cid={currentId} />}
+      {tab === "ailogs"      && <AiLogsTab cid={currentId} />}
+      {tab === "settings"    && <SettingsTab />}
     </div>
   );
 }
@@ -286,6 +290,151 @@ function Switch({ on, onChange, disabled, testid }) {
           ${on ? "translate-x-4" : "translate-x-0.5"}`}
       />
     </button>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// AI Ask Client — dedicated view of every autonomous AI-initiated
+// conversation for this company, searchable and with a one-click "Run now"
+// button so pros can force the scheduler to fire outside its business-hour
+// window.
+// ---------------------------------------------------------------------------
+function AiAskClientTab({ cid }) {
+  const [items, setItems] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all"); // all | pending | answered
+  const [expanded, setExpanded] = useState({});
+  const load = async () => {
+    if (!cid) return;
+    setBusy(true);
+    try {
+      const r = await api.get(`/companies/${cid}/communications/ai-logs`);
+      // Only the AI-initiated conversations belong on this tab.
+      const rows = (r.data?.items || []).filter(x => x.flow_type === "ai_ask_client");
+      setItems(rows);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to load AI Ask Client log");
+    } finally { setBusy(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [cid]);
+
+  const runNow = async () => {
+    if (!cid) return;
+    setRunning(true);
+    try {
+      const r = await api.post(`/communications/ai-ask-client/run?for_company_id=${cid}`);
+      const s = r.data?.details?.[0] || {};
+      if (s.status === "sent") toast.success("AI just emailed the client about a new flagged transaction.");
+      else if (s.status === "no_candidates") toast.info("Nothing new for the AI to ask about right now.");
+      else if (s.status === "daily_cap_reached") toast.info("Daily cap of 3 emails reached for this client.");
+      else if (s.status === "pref_off") toast.info("AI Ask Client is turned off in Settings.");
+      else if (s.status === "no_client_email") toast.error("No client email on file for this company.");
+      else toast.info(`Result: ${s.status || "no-op"}`);
+      setTimeout(load, 700);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Run failed");
+    } finally { setRunning(false); }
+  };
+
+  const toggle = (id) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
+
+  // Client-side search across counterparty, question text, answer text,
+  // and the recipient email so pros can find any conversation quickly.
+  const q = query.trim().toLowerCase();
+  const filtered = items.filter(x => {
+    if (statusFilter !== "all" && x.status !== statusFilter) return false;
+    if (!q) return true;
+    const hay = [
+      x.counterparty_label, x.question, x.answer, x.to_email,
+      ...(x.linked_txns || []).map(t => `${t.description} ${t.category_account_name || ""}`),
+    ].filter(Boolean).join(" ").toLowerCase();
+    return hay.includes(q);
+  });
+
+  const answered = items.filter(x => x.status === "answered").length;
+  const pending = items.filter(x => x.status !== "answered").length;
+
+  return (
+    <div className="space-y-4" data-testid="aiaskclient-tab">
+      <div className="rounded-xl border bg-fuchsia-50/50 border-fuchsia-200 p-4 flex items-start gap-3">
+        <Sparkles size={18} className="text-fuchsia-700 mt-0.5" />
+        <div className="flex-1">
+          <div className="text-sm text-slate-900 font-medium">
+            {items.length} AI-initiated conversation{items.length === 1 ? "" : "s"} for this client
+            {items.length > 0 && (
+              <span className="text-slate-500 font-normal"> · {answered} answered · {pending} awaiting</span>
+            )}
+          </div>
+          <div className="text-xs text-slate-600 mt-1">
+            The AI autonomously emails this client about new flagged transactions each hour between 6am–8pm ET, max 3 emails per day, one focused transaction per email.
+          </div>
+        </div>
+        <button
+          onClick={runNow}
+          disabled={running || busy}
+          data-testid="aiaskclient-run-now"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md bg-fuchsia-600 text-white hover:bg-fuchsia-700 disabled:opacity-40"
+        >
+          <Sparkles size={13} className={running ? "animate-pulse" : ""} /> {running ? "Running…" : "Run now"}
+        </button>
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-[240px]">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by vendor, question, answer, or email…"
+            data-testid="aiaskclient-search"
+            className="w-full text-sm border rounded-md pl-8 pr-3 py-1.5"
+          />
+        </div>
+        <div className="flex items-center gap-1 rounded-md border bg-white p-0.5" data-testid="aiaskclient-status-filter">
+          {["all", "pending", "answered"].map(s => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(s)}
+              data-testid={`aiaskclient-filter-${s}`}
+              className={`px-2.5 py-1 text-xs rounded capitalize transition
+                ${statusFilter === s ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={load}
+          disabled={busy}
+          data-testid="aiaskclient-refresh"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border hover:bg-slate-50"
+        >
+          <RefreshCw size={13} className={busy ? "animate-spin" : ""} /> Refresh
+        </button>
+      </div>
+
+      <div className="space-y-2">
+        {!filtered.length && !busy && (
+          <div className="rounded-xl border bg-white p-8 text-center text-sm text-slate-500" data-testid="aiaskclient-empty">
+            {items.length === 0
+              ? "No AI Ask Client conversations yet for this client. The scheduler will fire the next time a fresh flagged transaction appears."
+              : `No conversations match "${query}".`}
+          </div>
+        )}
+        {filtered.map(log => (
+          <AiLogRow
+            key={log.id}
+            log={log}
+            open={expanded[log.id]}
+            onToggle={() => toggle(log.id)}
+          />
+        ))}
+      </div>
+    </div>
   );
 }
 
