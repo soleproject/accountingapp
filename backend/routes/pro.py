@@ -219,6 +219,68 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
     }
 
 
+@router.post("/pro/clients/{cid}/resend-welcome")
+async def resend_welcome_email(cid: str, user: dict = Depends(require_role("pro", "superadmin"))):
+    """Re-mint a fresh magic-link token for the client-owner of ``cid`` and
+    email them the "Set your password" welcome again. Used when a client
+    says "I never got the invite." Restrictions:
+      * Pro must be a member of the company.
+      * If the client has already set their password (i.e. successfully
+        used a prior magic-link), we skip the mint + refuse with 409 so
+        the Pro doesn't accidentally wipe a working account. If the Pro
+        really needs to reset, they can direct the client to whatever
+        password-recovery flow we ship in the future.
+    """
+    # Membership check — Pro must be on this company.
+    m = await db.memberships.find_one({
+        "company_id": cid, "user_id": user["id"], "role": "pro",
+    })
+    if not m and user["role"] != "superadmin":
+        raise HTTPException(403, "You don't manage this client.")
+
+    company = await db.companies.find_one({"id": cid})
+    if not company:
+        raise HTTPException(404, "Company not found.")
+    owner_m = await db.memberships.find_one({"company_id": cid, "role": "owner"})
+    if not owner_m:
+        raise HTTPException(404, "Client has no owner on file.")
+    owner = await db.users.find_one({"id": owner_m["user_id"]})
+    if not owner:
+        raise HTTPException(404, "Client user missing.")
+    if not owner.get("must_set_password"):
+        raise HTTPException(
+            409,
+            "This client has already set their own password. They can sign in directly, "
+            "or use the standard password-recovery flow if they forgot it.",
+        )
+    if not owner.get("email"):
+        raise HTTPException(400, "Client has no email on file.")
+
+    from email_dispatcher import dispatch, public_base_url
+    import email_templates as _tmpl
+    from routes.auth import mint_password_set_token
+
+    token = await mint_password_set_token(owner["id"], purpose="client_welcome_resend")
+    pro_name = user.get("full_name") or user.get("name") or user.get("email") or "Your accountant"
+    firm_name = (user.get("branding") or {}).get("firm_name") or None
+    subject, html = _tmpl.client_welcome_first_time(
+        client_name=owner.get("name") or "there",
+        pro_name=pro_name, firm_name=firm_name,
+        company_name=company.get("name") or "",
+        set_password_url=f"{public_base_url()}/set-password/{token}",
+    )
+    result = await dispatch(
+        kind="client_welcome", to=owner["email"],
+        subject=f"[Re-sent] {subject}", html=html,
+        initiating_user_id=user["id"], company_id=cid,
+        related={"resend": True, "password_set_token": token},
+    )
+    if result["status"] == "failed":
+        raise HTTPException(502, result.get("error") or "Email send failed")
+    return {"status": result["status"], "sent_to": owner["email"], "communication_id": result["id"]}
+
+
+
 # ---------------------------------------------------------------------------
 # Pro branding — enterprise theming for firms managing their own clients.
 # All fields live under the user (pro) doc's `branding` sub-doc:

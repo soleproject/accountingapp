@@ -4,7 +4,7 @@ import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
 import {
   AlertTriangle, CheckCircle2, ArrowRight, Plus, X, Loader2, UserPlus,
-  BellRing, Wand2, FileWarning, ReceiptText, ScrollText, Sparkles,
+  BellRing, Wand2, FileWarning, ReceiptText, ScrollText, Sparkles, MailPlus,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -13,7 +13,24 @@ export default function ProClients() {
   const [firm, setFirm] = useState(null);
   const [creating, setCreating] = useState(false);
   const [showOnlyAction, setShowOnlyAction] = useState(false);
+  const [resending, setResending] = useState({});
   const { switchCompany, refresh } = useCompany();
+
+  const resendWelcome = async (cid, name) => {
+    if (resending[cid]) return;
+    setResending(prev => ({ ...prev, [cid]: true }));
+    try {
+      const r = await api.post(`/pro/clients/${cid}/resend-welcome`);
+      toast.success(`Sent — ${name}'s owner will get a fresh "Set your password" email at ${r.data.sent_to}.`, { duration: 6000 });
+    } catch (e) {
+      const detail = e.response?.data?.detail || "Couldn't re-send the invite.";
+      // 409 = already active — surface a friendly info toast instead of error.
+      if (e.response?.status === 409) toast.info(detail);
+      else toast.error(detail);
+    } finally {
+      setResending(prev => ({ ...prev, [cid]: false }));
+    }
+  };
 
   const load = async () => {
     const [c, a] = await Promise.all([
@@ -120,13 +137,24 @@ export default function ProClients() {
               <div className="flex-1">
                 {act > 0 && <ClientActionSummary c={c} />}
               </div>
-              <button
-                onClick={() => { switchCompany(c.id); window.location.href = "/dashboard"; }}
-                className="mt-3 w-full inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs"
-                data-testid={`open-books-${c.id}`}
-              >
-                Open books <ArrowRight size={12} />
-              </button>
+              <div className="mt-3 flex items-center gap-1.5">
+                <button
+                  onClick={() => { switchCompany(c.id); window.location.href = "/dashboard"; }}
+                  className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs"
+                  data-testid={`open-books-${c.id}`}
+                >
+                  Open books <ArrowRight size={12} />
+                </button>
+                <button
+                  onClick={() => resendWelcome(c.id, c.name)}
+                  disabled={resending[c.id]}
+                  data-testid={`resend-welcome-${c.id}`}
+                  title="Re-send the client's Set-your-password invite email"
+                  className="inline-flex items-center justify-center w-8 h-[30px] rounded-md border border-slate-200 text-slate-500 hover:text-cyan-700 hover:border-cyan-300 hover:bg-cyan-50 disabled:opacity-50"
+                >
+                  {resending[c.id] ? <Loader2 size={12} className="animate-spin" /> : <MailPlus size={12} />}
+                </button>
+              </div>
             </div>
           );
         })}
