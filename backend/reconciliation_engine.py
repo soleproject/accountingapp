@@ -165,6 +165,24 @@ async def complete_recon(
     if not cleared_txn_ids:
         raise ValueError("Nothing selected to clear.")
     now = now_iso()
+    # Compute the book / cleared totals AS-OF completion so the history row
+    # displays exactly the numbers the pro saw when they hit Finish. Without
+    # this, the list would use a different formula (statement - ledger) and
+    # the diff column would disagree with the interactive scoreboard.
+    book_agg = await db.transactions.aggregate([
+        {"$match": {"company_id": cid, "bank_account_id": bank_account_id,
+                    "posted": True, "date": {"$lte": period_end}}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+    ]).to_list(1)
+    book_balance = round(float(book_agg[0]["total"]) if book_agg else 0.0, 2)
+    cleared_agg = await db.transactions.aggregate([
+        {"$match": {"company_id": cid, "id": {"$in": cleared_txn_ids}}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+    ]).to_list(1)
+    cleared_sum = round(float(cleared_agg[0]["total"]) if cleared_agg else 0.0, 2)
+    stmt = round(float(statement_balance), 2)
+    diff = round(book_balance - cleared_sum - stmt, 2)
+
     # Set cleared_at on the ticked txns.
     await db.transactions.update_many(
         {"company_id": cid, "id": {"$in": cleared_txn_ids}},
@@ -180,7 +198,10 @@ async def complete_recon(
         "as_of": period_end,
         "period_start": period_start,
         "period_end": period_end,
-        "statement_balance": round(float(statement_balance), 2),
+        "statement_balance": stmt,
+        "book_balance": book_balance,
+        "cleared_sum": cleared_sum,
+        "difference": diff,
         "cleared_txn_ids": cleared_txn_ids,
         "matched_count": len(cleared_txn_ids),
         "source": "manual",
@@ -189,7 +210,6 @@ async def complete_recon(
         "created_at": now, "updated_at": now,
     }
     await db.reconciliations.insert_one(doc)
-    # Backfill reconciliation_id onto the cleared txns for audit.
     await db.transactions.update_many(
         {"company_id": cid, "id": {"$in": cleared_txn_ids}},
         {"$set": {"cleared_reconciliation_id": rec_id}},

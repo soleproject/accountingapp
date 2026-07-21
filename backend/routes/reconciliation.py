@@ -80,21 +80,31 @@ async def list_recs(cid: str, user: dict = Depends(get_current_user)):
     for d in docs:
         c = coerce(d)
         bank = accts.get(c.get("bank_account_id")) or {}
-        # Ledger balance = sum of cleared_txn_ids amounts. Small doc, so
-        # doing this per-row is fine; if this ever gets slow we'd cache it.
-        ledger = 0.0
-        if c.get("cleared_txn_ids"):
-            agg = await db.transactions.aggregate([
-                {"$match": {"company_id": cid, "id": {"$in": c["cleared_txn_ids"]}}},
-                {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
-            ]).to_list(1)
-            if agg: ledger = round(float(agg[0]["total"]), 2)
+        # Prefer the "as-completed" numbers stored by complete_recon(); fall
+        # back to a live sum for legacy freeform docs that never had them.
+        if c.get("cleared_sum") is not None:
+            ledger = float(c["cleared_sum"])
+        else:
+            ledger = 0.0
+            if c.get("cleared_txn_ids"):
+                agg = await db.transactions.aggregate([
+                    {"$match": {"company_id": cid, "id": {"$in": c["cleared_txn_ids"]}}},
+                    {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+                ]).to_list(1)
+                if agg: ledger = round(float(agg[0]["total"]), 2)
         stmt = float(c.get("statement_balance") or 0.0)
+        # Use the stored `difference` when present (matches what the pro saw
+        # on the interactive scoreboard at Finish time). Otherwise best-effort
+        # display as statement − ledger.
+        if c.get("difference") is not None:
+            diff = float(c["difference"])
+        else:
+            diff = round(stmt - ledger, 2)
         c["account_name"] = bank.get("name")
         c["account_last4"] = bank.get("mask") or bank.get("plaid_mask")
         c["account_code"] = bank.get("code")
         c["ledger_balance"] = ledger
-        c["diff"] = round(stmt - ledger, 2)
+        c["diff"] = diff
         out.append(c)
     return {"reconciliations": out}
 
@@ -233,9 +243,15 @@ async def get_rec_detail(cid: str, rid: str, user: dict = Depends(get_current_us
     txns = await db.transactions.find({
         "company_id": cid, "id": {"$in": txn_ids},
     }).sort("date", 1).to_list(2000) if txn_ids else []
-    ledger = round(sum(float(t.get("amount") or 0) for t in txns), 2)
+    if rec.get("cleared_sum") is not None:
+        ledger = float(rec["cleared_sum"])
+    else:
+        ledger = round(sum(float(t.get("amount") or 0) for t in txns), 2)
     rec["ledger_balance"] = ledger
-    rec["diff"] = round(float(rec.get("statement_balance") or 0.0) - ledger, 2)
+    if rec.get("difference") is not None:
+        rec["diff"] = float(rec["difference"])
+    else:
+        rec["diff"] = round(float(rec.get("statement_balance") or 0.0) - ledger, 2)
     return {
         "reconciliation": rec,
         "account": coerce(bank) if bank else None,
