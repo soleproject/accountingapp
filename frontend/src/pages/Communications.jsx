@@ -107,24 +107,6 @@ function InboxTab({ cid }) {
     } finally { setBusy(false); }
   };
 
-  const runAiAskClient = async () => {
-    if (!cid) return;
-    setBusy(true);
-    try {
-      const r = await api.post(`/communications/ai-ask-client/run?for_company_id=${cid}`);
-      const s = r.data?.details?.[0] || {};
-      if (s.status === "sent") toast.success("AI asked the client about a new flagged transaction.");
-      else if (s.status === "no_candidates") toast.info("Nothing new to ask about right now.");
-      else if (s.status === "daily_cap_reached") toast.info("Daily cap of 3 emails reached for this client.");
-      else if (s.status === "pref_off") toast.info("AI Ask Client is off in Settings.");
-      else if (s.status === "no_client_email") toast.error("No client email on file for this company.");
-      else toast.info(`Result: ${s.status || "no-op"}`);
-      setTimeout(load, 600);
-    } catch (e) {
-      toast.error(e.response?.data?.detail || "Run failed");
-    } finally { setBusy(false); }
-  };
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -146,15 +128,6 @@ function InboxTab({ cid }) {
             <Send size={13} /> Send test
           </button>
         </div>
-        <button
-          onClick={runAiAskClient}
-          disabled={busy}
-          data-testid="run-ai-ask-client"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md bg-fuchsia-600 text-white hover:bg-fuchsia-700 disabled:opacity-40"
-          title="Trigger the AI Ask Client scheduler for this company now (respects daily cap + pref)"
-        >
-          <Sparkles size={13} /> Run AI Ask Client now
-        </button>
         <button
           onClick={load}
           disabled={busy}
@@ -304,7 +277,6 @@ function Switch({ on, onChange, disabled, testid }) {
 function AiAskClientTab({ cid }) {
   const [items, setItems] = useState([]);
   const [busy, setBusy] = useState(false);
-  const [running, setRunning] = useState(false);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all"); // all | pending | answered | archived
   const [expanded, setExpanded] = useState({});
@@ -320,24 +292,6 @@ function AiAskClientTab({ cid }) {
     } finally { setBusy(false); }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [cid]);
-
-  const runNow = async () => {
-    if (!cid) return;
-    setRunning(true);
-    try {
-      const r = await api.post(`/communications/ai-ask-client/run?for_company_id=${cid}`);
-      const s = r.data?.details?.[0] || {};
-      if (s.status === "sent") toast.success("AI just emailed the client about a new flagged transaction.");
-      else if (s.status === "no_candidates") toast.info("Nothing new for the AI to ask about right now.");
-      else if (s.status === "daily_cap_reached") toast.info("Daily cap of 3 emails reached for this client.");
-      else if (s.status === "pref_off") toast.info("AI Ask Client is turned off in Settings.");
-      else if (s.status === "no_client_email") toast.error("No client email on file for this company.");
-      else toast.info(`Result: ${s.status || "no-op"}`);
-      setTimeout(load, 700);
-    } catch (e) {
-      toast.error(e.response?.data?.detail || "Run failed");
-    } finally { setRunning(false); }
-  };
 
   const toggleArchive = async (log) => {
     const wasArchived = Boolean(log.archived);
@@ -401,14 +355,6 @@ function AiAskClientTab({ cid }) {
             The AI autonomously emails this client about new flagged transactions each hour between 6am–8pm ET, max 3 emails per day, one focused transaction per email.
           </div>
         </div>
-        <button
-          onClick={runNow}
-          disabled={running || busy}
-          data-testid="aiaskclient-run-now"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md bg-fuchsia-600 text-white hover:bg-fuchsia-700 disabled:opacity-40"
-        >
-          <Sparkles size={13} className={running ? "animate-pulse" : ""} /> {running ? "Running…" : "Run now"}
-        </button>
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">

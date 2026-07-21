@@ -42,32 +42,40 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 ### Feb 2026 — AI Ask Client (autonomous email loop) + rename to Pro Ask Client
 - Renamed the existing "Ask Client" flow to **"Pro Ask Client"** everywhere in the
   UI (Communications inbox/logs/settings, `AskClientButton` trigger + modal title).
-  Wire pref key `ask_client` was kept for backward-compat with the existing
-  `comms_prefs`.
 - Added new **"AI Ask Client"** flow — the AI autonomously scans every company
-  every hour for freshly-flagged transactions (<3 days old, `needs_review=True`,
-  no existing `client_question_id`) and emails the client-owner a magic-link
-  chat about ONE focused transaction per email.
+  every hour between **6am–8pm America/New_York** (opt-out `AI_ASK_CLIENT_TZ`,
+  `AI_ASK_CLIENT_START_HOUR`, `AI_ASK_CLIENT_END_HOUR` env vars) for freshly-
+  flagged transactions (<3 days old, `needs_review=True`, no existing
+  `client_question_id`) and emails the client-owner a magic-link chat about
+  ONE focused transaction per email.
   - Opt-out (default ON) via `comms_prefs.ai_ask_client`.
-  - Per-client-email daily cap of **3 emails / calendar day** (counted from the
-    `communications` audit log where `kind=ai_ask_client` and `status=sent`).
-  - New `/api/communications/ai-ask-client/run` endpoint (Pro/Superadmin) —
-    triggers the loop on demand; the Communications inbox now has a "Run AI
-    Ask Client now" button that runs it for the currently-selected company.
-  - New `GET /api/q/{token}/next` public endpoint — after the client finishes
-    an AI question, the magic-link chat fetches the next pending
-    `ai_ask_client` question for the same email and shows a "Got a minute
-    for one more?" chain prompt (`AskClientAnswer.jsx`).
-  - `flow_type` field added to every `client_questions` doc
-    (`"pro_ask_client"` | `"ai_ask_client"`); AI Logs tab shows a coloured
-    flow badge per row.
-  - Background scheduler = `/app/backend/ai_ask_client_scheduler.py`,
-    registered via `server.py` startup. In-process asyncio loop; interval
-    configurable via `AI_ASK_CLIENT_INTERVAL_SEC`; disable via
-    `AI_ASK_CLIENT_SCHEDULER_DISABLED=1`.
-  - Tests: `/app/backend/tests/test_ai_ask_client.py` — 4 passing tests
-    (single-txn fresh pick, daily-cap short-circuit, pref-off short-circuit,
-    chaining endpoint).
+  - Per-client-email daily cap of **3 emails / calendar day**.
+  - `flow_type` on every `client_questions` doc distinguishes pro vs. ai.
+  - Email template is intentionally minimal ("Hi — quick one on
+    <Company>: <question>" + one-line txn card + "Reply →" CTA).
+- **Chain prompt** in `AskClientAnswer.jsx`: after resolving one txn, the
+  new `GET /api/q/{token}/next` endpoint first looks for another pending
+  `ai_ask_client` question for the same email; if none, spins up a fresh
+  in-session question from the company's remaining candidates. Chained
+  questions are stamped `in_session_chain: true`.
+- **Voice input** on the client chat via Web Speech API — mic pulses red
+  while listening, transcript streams live into the textbox.
+- **AI Ask Client tab** in Communications — dedicated, searchable list of
+  every autonomous conversation for the currently-selected client, with:
+    * `All · Pending · Answered · Archived` filter pills
+    * per-row archive/restore icon (soft-delete via
+      `POST /api/companies/{cid}/communications/questions/{token}/archive`)
+    * client-side search across counterparty / question / answer / email
+- **AI Suggestions caching** — the `POST /communications/ask-client/suggest`
+  endpoint now caches per (company, params) for 5 min using the existing
+  `infra.get_cache()` layer. All ask-client sends + Plaid sync completion
+  invalidate. Refresh button passes `force_refresh=true`. Turns
+  "open the tab" from 4–8 Claude calls into 1 first-open + N cached reads.
+- Tests: `/app/backend/tests/test_ai_ask_client.py` — 5 tests
+  (single-txn fresh pick, daily-cap short-circuit, pref-off short-circuit,
+  chaining endpoint, send-window boundaries). All 12 communications tests
+  pass. Scheduler auto-starts at boot (log:
+  `AI ask-client scheduler started (interval=3600s window=06:00–20:00 America/New_York)`).
 
 ### Feb 2026 — Mega-Approve: include needs_review categorized rows
 - **`bulk-approve-ai-ready`** (mega button): stopped excluding `needs_review=true` rows.
