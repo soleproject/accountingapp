@@ -55,31 +55,25 @@ def ai_ask_client(*, pro_name: str, company_name: str, txn: dict, question: str,
     desc = txn.get("description") or "(no description)"
     amt = float(txn.get("amount") or 0)
     amt_str = f"${abs(amt):,.2f}" + (" out" if amt < 0 else " in")
-    from_line = (
-        f"{escape(pro_name)}'s AI assistant is helping keep your books for "
-        f"<b>{escape(company_name)}</b> on track, and needs a hand identifying "
-        f"this recent transaction:"
-    )
     inner = f"""
-      <div style="{_H1}">Quick question about a transaction</div>
-      <div style="{_P}">{from_line}</div>
+      <div style="{_P}">Hi — quick one on <b>{escape(company_name)}</b>:</div>
+      <div style="font-size:16px;color:#0f172a;line-height:1.55;padding:6px 0 10px;">
+        {escape(question)}
+      </div>
       <table role="presentation" cellpadding="0" cellspacing="0" border="0"
-             style="margin:12px 0 8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 18px;width:100%;">
-        <tr><td style="{_TABLE_KEY}">Date</td><td style="{_TABLE_VAL}">{escape(date)}</td></tr>
-        <tr><td style="{_TABLE_KEY}">Description</td><td style="{_TABLE_VAL}">{escape(desc)}</td></tr>
-        <tr><td style="{_TABLE_KEY}">Amount</td><td style="{_TABLE_VAL}">{escape(amt_str)}</td></tr>
+             style="margin:4px 0 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;width:100%;">
+        <tr>
+          <td style="{_TABLE_KEY}">{escape(date)}</td>
+          <td style="{_TABLE_VAL}">{escape(desc)}</td>
+          <td style="{_TABLE_VAL};text-align:right;font-family:monospace;">{escape(amt_str)}</td>
+        </tr>
       </table>
-      <div style="{_P}">{escape(question)}</div>
-      <div style="padding:16px 0 8px;">
-        <a href="{magic_url}" style="{_BTN}">Chat with our AI →</a>
+      <div style="padding:6px 0 4px;">
+        <a href="{magic_url}" style="{_BTN}">Reply →</a>
       </div>
-      <div style="{_MUTE}">
-        Takes ~30 seconds. Once you're done, the AI will offer to walk you
-        through any other transactions that still need clarifying — one at a
-        time, only if you have a moment.
-      </div>
+      <div style="{_MUTE}">Takes ~20 seconds. Private link for {escape(company_name)}.</div>
     """
-    return f"Quick question — {desc[:40]}", _wrap(inner)
+    return f"Quick one — {desc[:40]}", _wrap(inner)
 
 
 # --------------------------------------------------------------------------
