@@ -8,11 +8,12 @@ import { toast } from "sonner";
 import {
   Check, Wand2, Split, Link as LinkIcon, RotateCw, Plus, X, Trash2, AlertTriangle, ShieldCheck,
   ChevronLeft, ChevronRight, Search, Calendar, XCircle, Tag, Sparkles, MoreHorizontal,
-  List as ListIcon, LayoutGrid, ArrowLeftRight,
+  List as ListIcon, LayoutGrid, ArrowLeftRight, HelpCircle,
 } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import CleanupCopilot from "@/components/CleanupCopilot";
 import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
+import AskClientButton from "@/components/AskClientButton";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
 import { ContactBadge } from "@/components/ContactBadge";
 import { emitAction, useActionListener } from "@/lib/createBus";
@@ -23,7 +24,7 @@ const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
 // AI re-categorize, Split, and Link-to-invoice/bill. Opens on click, closes
 // on outside click or Escape. Positioned above the button so the menu never
 // clips off the bottom of the viewport on the last few rows.
-function RowMoreMenu({ t, onRecategorize, onSplit, onLink, onDelete }) {
+function RowMoreMenu({ t, onRecategorize, onSplit, onLink, onDelete, onAskClient }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef(null);
   const menuRef = useRef(null);
@@ -75,6 +76,14 @@ function RowMoreMenu({ t, onRecategorize, onSplit, onLink, onDelete }) {
             <span>Link to invoice / bill</span>
             <LinkIcon size={13} className="text-blue-600" />
           </button>
+          <button
+            data-testid={`txn-ask-client-${t.id}`}
+            onClick={handle(onAskClient)}
+            className={item}
+          >
+            <span>Ask client about this</span>
+            <HelpCircle size={13} className="text-cyan-600" />
+          </button>
           <div className="my-1 border-t border-slate-100" />
           <button data-testid={TID.deleteBtn} onClick={handle(onDelete)} className={`${item} text-red-600 hover:bg-red-50`}>
             <span>Delete</span>
@@ -83,6 +92,25 @@ function RowMoreMenu({ t, onRecategorize, onSplit, onLink, onDelete }) {
         </div>
       )}
     </div>
+  );
+}
+
+// Single modal instance shared across all rows. The row menu calls
+// `registerRef.current(txn)` to pop it open with that transaction — cheaper
+// than mounting one AskClientButton per row for large lists.
+function AskClientLauncher({ registerRef, onAsked }) {
+  const [txn, setTxn] = useState(null);
+  useEffect(() => {
+    registerRef.current = (t) => setTxn(t);
+    return () => { registerRef.current = null; };
+  }, [registerRef]);
+  return (
+    <AskClientButton
+      txn={txn}
+      open={Boolean(txn)}
+      onClose={() => setTxn(null)}
+      onAsked={() => { onAsked?.(); setTxn(null); }}
+    />
   );
 }
 
@@ -135,6 +163,9 @@ export default function Transactions() {
   // "list" (default) or "rollup" — toggled by the two icons in the toolbar.
   const [view, setView] = useState("list");
   const [rollup, setRollup] = useState(null);
+  // Imperative handle so the row-menu action can pop the AskClient modal
+  // for any transaction without mounting one modal per row.
+  const askClientRef = useRef(null);
   const [rollupBusy, setRollupBusy] = useState(false);
 
   // Debounce free-text search so a fast typist doesn't hammer the API.
@@ -894,6 +925,7 @@ export default function Transactions() {
                         onSplit={() => setSplitting(t)}
                         onLink={() => setLinking(t)}
                         onDelete={() => del(t.id)}
+                        onAskClient={() => askClientRef.current?.(t)}
                       />
                     </div>
                   </td>
@@ -915,6 +947,7 @@ export default function Transactions() {
           filtersActive={filtersActive}
           onClearFilters={clearFilters}
         />
+        <AskClientLauncher registerRef={askClientRef} onAsked={load} />
         </>
         )}
       </div>

@@ -25,6 +25,7 @@ import CompanySettings from "@/pages/CompanySettings";
 import ProSettings from "@/pages/ProSettings";
 import MonthClose from "@/pages/MonthClose";
 import Communications from "@/pages/Communications";
+import AskClientAnswer from "@/pages/AskClientAnswer";
 import GenericList from "@/pages/GenericList";
 import GeneralLedger from "@/pages/GeneralLedger";
 import Reconciliation from "@/pages/Reconciliation";
@@ -47,6 +48,7 @@ function App() {
           <BrandingProvider>
             <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/q/:token" element={<AskClientAnswer />} />
             <Route element={<Protected><Layout /></Protected>}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<Dashboard />} />

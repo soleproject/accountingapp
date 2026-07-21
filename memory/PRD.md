@@ -586,3 +586,55 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - Tests: `backend/tests/test_recon_plaid_bootstrap.py` (5 cases: creates
   real recons, refuses on ledger/Plaid disagreement, refuses on non-Plaid
   txns, idempotent, purges only placeholders).
+
+
+### 2026-07-21 — Communications Hub (Resend-backed, 7 flows, per-user toggles)
+- **Integration**: Resend v2.34 via async `email_service.send_email()`.
+  Verified sender: `no-reply@accountingapp.ai`. Domain verified in Resend
+  dashboard.
+- **Central dispatcher** `email_dispatcher.dispatch(kind, ...)` — single
+  choke point that: (a) checks the initiating user's pref for `kind`,
+  (b) if disabled → logs `skipped_pref_off` and returns without hitting
+  Resend, (c) otherwise sends and logs the outcome to `communications`.
+  Failures NEVER raise — callers get `{status: sent|failed|skipped_pref_off}`.
+- **7 email flows**, all defaulted to ON:
+  1. `ask_client` — Pro emails client owner a magic-link asking about a
+     txn. Client's answer flows back onto the txn via `client_answer` +
+     `ai_comment` audit trail. Public routes `GET/POST /api/q/{token}`.
+  2. `daily_pro_digest` — Needs-Attention roll-up across the pro's firm.
+     Fires from `POST /api/communications/daily-digest/run` (called by
+     the pro manually today; wire a cron for auto-daily later).
+  3. `dunning` — customer-facing A/R chase for an overdue invoice.
+  4. `overdue_bill_client` — client-facing A/P reminder listing all past-
+     due bills for the company.
+  5. `plaid_reauth` — alert client that a bank connection needs re-auth.
+  6. `onboarding_followup` — nudge client to finish their onboarding step.
+  7. `month_close_signoff` — ask client to sign off on a closed month.
+- **Data model**: three new collections
+  - `communications` — audit log (id, kind, to, subject, status, resend_id,
+    user_id, company_id, contact_id, related, sent_at).
+  - `comms_prefs` — per-user pref toggles (one doc per user, merged with
+    DEFAULT_PREFS which are all-True).
+  - `client_questions` — magic-link tokens for the ask-client flow
+    (id=token, question, status, answer, expires_at 30d, to_email).
+- **UI** (`/communications`):
+  - **Inbox tab** — audit log with status pills (Sent / Failed / Skipped),
+    "Send test email" input, refresh button.
+  - **Settings tab** — 7 toggle rows, saves instantly on click, respects
+    `PUT /api/settings/communications`.
+- **Ask Client integration**: new item in the transaction row-menu ("Ask
+  client about this") opens a shared modal (single instance across all
+  rows via an imperative ref). On send, the txn is marked `needs_review`,
+  the question is appended to `ai_comment`, and a token is minted.
+- **Public magic-link page** `/q/:token` — no auth, renders txn context +
+  question + textarea. On answer, updates the question doc and pushes
+  onto the transaction. Second-answer attempts return a 400.
+- **Tests**: `backend/tests/test_communications.py` (4 cases):
+  defaults all-on, pref-off blocks send + audits skipped, sent status
+  captures Resend id, full ask-client → magic-link → answer round-trip.
+- **Live-verified** end-to-end: sent a real ask-client email to
+  michael@bigsaas.ai, answered it via the magic-link, verified the answer
+  appears on the transaction. Resend accepted every send.
+- **Known follow-up**: the daily digest currently ships via an endpoint,
+  not a scheduled task. A single-line cron / APScheduler tick will
+  activate the "auto-send at 8am" behavior when the pro wants it.
