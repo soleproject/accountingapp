@@ -6,6 +6,7 @@ import {
   Inbox, Settings as SettingsIcon, Mail, CheckCircle2, XCircle,
   MinusCircle, Send, RefreshCw, ExternalLink, Sparkles, Wand2, Loader2,
   MessageSquare, Bot, User as UserIcon, ChevronDown, ChevronRight, Search,
+  Archive, ArchiveRestore,
 } from "lucide-react";
 
 const KIND_LABELS = {
@@ -305,14 +306,13 @@ function AiAskClientTab({ cid }) {
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all"); // all | pending | answered
+  const [statusFilter, setStatusFilter] = useState("all"); // all | pending | answered | archived
   const [expanded, setExpanded] = useState({});
   const load = async () => {
     if (!cid) return;
     setBusy(true);
     try {
       const r = await api.get(`/companies/${cid}/communications/ai-logs`);
-      // Only the AI-initiated conversations belong on this tab.
       const rows = (r.data?.items || []).filter(x => x.flow_type === "ai_ask_client");
       setItems(rows);
     } catch (e) {
@@ -339,13 +339,37 @@ function AiAskClientTab({ cid }) {
     } finally { setRunning(false); }
   };
 
+  const toggleArchive = async (log) => {
+    const wasArchived = Boolean(log.archived);
+    // Optimistic update — flip the flag right away, roll back on error.
+    setItems(prev => prev.map(x => x.id === log.id ? { ...x, archived: !wasArchived } : x));
+    try {
+      await api.post(
+        `/companies/${cid}/communications/questions/${log.id}/archive`,
+        { archived: !wasArchived },
+      );
+      toast.success(wasArchived ? "Restored from archive." : "Archived.");
+    } catch (e) {
+      setItems(prev => prev.map(x => x.id === log.id ? { ...x, archived: wasArchived } : x));
+      toast.error(e.response?.data?.detail || "Archive failed");
+    }
+  };
+
   const toggle = (id) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
 
-  // Client-side search across counterparty, question text, answer text,
-  // and the recipient email so pros can find any conversation quickly.
+  // Filter semantics:
+  //   all      → everything NOT archived (default clean view)
+  //   pending  → status=pending, NOT archived
+  //   answered → status=answered, NOT archived
+  //   archived → ONLY archived (any status)
   const q = query.trim().toLowerCase();
   const filtered = items.filter(x => {
-    if (statusFilter !== "all" && x.status !== statusFilter) return false;
+    if (statusFilter === "archived") {
+      if (!x.archived) return false;
+    } else {
+      if (x.archived) return false;
+      if (statusFilter !== "all" && x.status !== statusFilter) return false;
+    }
     if (!q) return true;
     const hay = [
       x.counterparty_label, x.question, x.answer, x.to_email,
@@ -354,8 +378,10 @@ function AiAskClientTab({ cid }) {
     return hay.includes(q);
   });
 
-  const answered = items.filter(x => x.status === "answered").length;
-  const pending = items.filter(x => x.status !== "answered").length;
+  const activeItems = items.filter(x => !x.archived);
+  const answered = activeItems.filter(x => x.status === "answered").length;
+  const pending = activeItems.filter(x => x.status !== "answered").length;
+  const archived = items.filter(x => x.archived).length;
 
   return (
     <div className="space-y-4" data-testid="aiaskclient-tab">
@@ -363,9 +389,12 @@ function AiAskClientTab({ cid }) {
         <Sparkles size={18} className="text-fuchsia-700 mt-0.5" />
         <div className="flex-1">
           <div className="text-sm text-slate-900 font-medium">
-            {items.length} AI-initiated conversation{items.length === 1 ? "" : "s"} for this client
-            {items.length > 0 && (
+            {activeItems.length} AI-initiated conversation{activeItems.length === 1 ? "" : "s"} for this client
+            {activeItems.length > 0 && (
               <span className="text-slate-500 font-normal"> · {answered} answered · {pending} awaiting</span>
+            )}
+            {archived > 0 && (
+              <span className="text-slate-500 font-normal"> · {archived} archived</span>
             )}
           </div>
           <div className="text-xs text-slate-600 mt-1">
@@ -395,7 +424,7 @@ function AiAskClientTab({ cid }) {
           />
         </div>
         <div className="flex items-center gap-1 rounded-md border bg-white p-0.5" data-testid="aiaskclient-status-filter">
-          {["all", "pending", "answered"].map(s => (
+          {["all", "pending", "answered", "archived"].map(s => (
             <button
               key={s}
               onClick={() => setStatusFilter(s)}
@@ -404,6 +433,9 @@ function AiAskClientTab({ cid }) {
                 ${statusFilter === s ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
             >
               {s}
+              {s === "archived" && archived > 0 && (
+                <span className={`ml-1 text-[10px] ${statusFilter === s ? "opacity-80" : "text-slate-400"}`}>{archived}</span>
+              )}
             </button>
           ))}
         </div>
@@ -422,7 +454,9 @@ function AiAskClientTab({ cid }) {
           <div className="rounded-xl border bg-white p-8 text-center text-sm text-slate-500" data-testid="aiaskclient-empty">
             {items.length === 0
               ? "No AI Ask Client conversations yet for this client. The scheduler will fire the next time a fresh flagged transaction appears."
-              : `No conversations match "${query}".`}
+              : statusFilter === "archived"
+                ? "Nothing archived yet."
+                : `No conversations match "${query || statusFilter}".`}
           </div>
         )}
         {filtered.map(log => (
@@ -431,6 +465,7 @@ function AiAskClientTab({ cid }) {
             log={log}
             open={expanded[log.id]}
             onToggle={() => toggle(log.id)}
+            onArchive={() => toggleArchive(log)}
           />
         ))}
       </div>
@@ -443,6 +478,16 @@ function AiAskClientTab({ cid }) {
 // AI Suggestions — cluster flagged txns by counterparty and let the pro
 // bulk-send one email per cluster.
 // ---------------------------------------------------------------------------
+function timeAgo(iso) {
+  if (!iso) return "";
+  const secs = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (secs < 60) return "just now";
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  return `${hrs}h ago`;
+}
+
 function SuggestedTab({ cid }) {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
@@ -450,11 +495,12 @@ function SuggestedTab({ cid }) {
   const [selected, setSelected] = useState({});  // counterparty -> boolean
   const [sending, setSending] = useState(false);
 
-  const load = async () => {
+  const load = async ({ force = false } = {}) => {
     if (!cid) return;
     setLoading(true);
     try {
-      const r = await api.post(`/companies/${cid}/communications/ask-client/suggest`, {});
+      const url = `/companies/${cid}/communications/ask-client/suggest${force ? "?force_refresh=true" : ""}`;
+      const r = await api.post(url, {});
       setData(r.data);
       // Default: every suggestion pre-selected. The pro un-checks anything
       // they don't want to send.
@@ -534,13 +580,17 @@ function SuggestedTab({ cid }) {
           </div>
           <div className="text-xs text-slate-600 mt-1">
             AI grouped your flagged transactions by counterparty and drafted a question for each. Edit anything, then send one email per cluster.
+            {data?.cached_at && (
+              <> · <span title={`Analyzed ${new Date(data.cached_at).toLocaleTimeString()}. Cached 5 min — click Refresh to re-run.`} className="text-slate-400">cached {timeAgo(data.cached_at)}</span></>
+            )}
           </div>
         </div>
         <button
-          onClick={load}
+          onClick={() => load({ force: true })}
           disabled={loading}
           data-testid="suggested-refresh"
           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border bg-white hover:bg-slate-50"
+          title="Bypass the 5-min cache and re-analyze flagged transactions"
         >
           <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> Refresh
         </button>
@@ -709,51 +759,69 @@ function AiLogsTab({ cid }) {
   );
 }
 
-function AiLogRow({ log, open, onToggle }) {
+function AiLogRow({ log, open, onToggle, onArchive }) {
   const isAnswered = log.status === "answered";
   const category = log.linked_txns.find(t => t.category_account_name)?.category_account_name;
   const total = log.linked_txns.reduce((s, t) => s + Number(t.amount || 0), 0);
+  const isArchived = Boolean(log.archived);
   return (
-    <div className="rounded-xl border bg-white" data-testid={`ailog-${log.id}`}>
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center gap-3 p-3 text-left hover:bg-slate-50 rounded-xl"
-        data-testid={`ailog-toggle-${log.id}`}
-      >
-        {open ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-medium text-slate-900">{log.counterparty_label || "Client question"}</span>
-            {log.flow_type === "ai_ask_client" ? (
-              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-800 border border-fuchsia-200" data-testid={`ailog-flow-ai-${log.id}`}>
-                <Sparkles size={10} /> AI Ask Client
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-800 border border-cyan-200" data-testid={`ailog-flow-pro-${log.id}`}>
-                Pro Ask Client
-              </span>
-            )}
-            <span className="text-xs text-slate-500">· {log.txn_count} txn{log.txn_count === 1 ? "" : "s"}</span>
-            <span className="text-xs text-slate-500 font-mono-num">· {fmtMoney(Math.abs(total))}</span>
-            {isAnswered && category && (
-              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
-                <CheckCircle2 size={10} /> {category}
-              </span>
-            )}
-            {!isAnswered && (
-              <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
-                Awaiting client
-              </span>
-            )}
+    <div className={`rounded-xl border bg-white ${isArchived ? "opacity-70" : ""}`} data-testid={`ailog-${log.id}`}>
+      <div className="flex items-center gap-1 pr-2">
+        <button
+          onClick={onToggle}
+          className="flex-1 flex items-center gap-3 p-3 text-left hover:bg-slate-50 rounded-l-xl"
+          data-testid={`ailog-toggle-${log.id}`}
+        >
+          {open ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-medium text-slate-900">{log.counterparty_label || "Client question"}</span>
+              {log.flow_type === "ai_ask_client" ? (
+                <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-800 border border-fuchsia-200" data-testid={`ailog-flow-ai-${log.id}`}>
+                  <Sparkles size={10} /> AI Ask Client
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-800 border border-cyan-200" data-testid={`ailog-flow-pro-${log.id}`}>
+                  Pro Ask Client
+                </span>
+              )}
+              <span className="text-xs text-slate-500">· {log.txn_count} txn{log.txn_count === 1 ? "" : "s"}</span>
+              <span className="text-xs text-slate-500 font-mono-num">· {fmtMoney(Math.abs(total))}</span>
+              {isAnswered && category && (
+                <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                  <CheckCircle2 size={10} /> {category}
+                </span>
+              )}
+              {!isAnswered && (
+                <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                  Awaiting client
+                </span>
+              )}
+              {isArchived && (
+                <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                  <Archive size={10} /> Archived
+                </span>
+              )}
+            </div>
+            <div className="text-xs text-slate-500 mt-0.5 truncate">
+              {log.question}
+            </div>
           </div>
-          <div className="text-xs text-slate-500 mt-0.5 truncate">
-            {log.question}
+          <div className="text-xs text-slate-400 font-mono-num whitespace-nowrap">
+            {(log.sent_at || "").replace("T", " ").slice(0, 16)}
           </div>
-        </div>
-        <div className="text-xs text-slate-400 font-mono-num whitespace-nowrap">
-          {(log.sent_at || "").replace("T", " ").slice(0, 16)}
-        </div>
-      </button>
+        </button>
+        {onArchive && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onArchive(); }}
+            data-testid={`ailog-archive-${log.id}`}
+            title={isArchived ? "Restore from archive" : "Archive"}
+            className="p-2 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+          >
+            {isArchived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+          </button>
+        )}
+      </div>
 
       {open && (
         <div className="border-t px-4 py-4 space-y-4" data-testid={`ailog-expanded-${log.id}`}>

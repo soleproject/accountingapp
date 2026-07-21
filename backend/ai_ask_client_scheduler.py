@@ -226,6 +226,14 @@ async def process_company(cid: str) -> dict:
         company_id=cid,
         related={"txn_id": txn["id"], "question_id": token, "auto": True},
     )
+    # If we sent, the AI Suggestions cache for this company is now stale
+    # (this txn is now covered). Best-effort invalidate.
+    if result.get("status") == "sent":
+        try:
+            from infra import get_cache
+            await get_cache().ainvalidate(cid)
+        except Exception:  # noqa: BLE001
+            pass
     return {
         "cid": cid,
         "status": result["status"],

@@ -28,6 +28,15 @@ from email_dispatcher import (
     dispatch, get_prefs, set_prefs, public_base_url, DEFAULT_PREFS,
 )
 import email_templates as tmpl
+from infra import get_cache
+
+# How long a set of AI-drafted ask-client suggestions is considered fresh.
+# The heaviest part of the endpoint is a Claude Sonnet call per counterparty
+# cluster — caching for 5 min turns "tab open" into a single Mongo read for
+# every re-visit within the window. Every write path that could change the
+# underlying pool of flagged transactions (Plaid sync completion, category
+# updates, ask-client sends) invalidates via `cache.ainvalidate(cid)`.
+_SUGGEST_TTL_SECONDS = 300
 
 router = APIRouter(prefix="/api")
 
@@ -198,6 +207,12 @@ async def ask_client_about_txn(
     )
     if result["status"] == "failed":
         raise HTTPException(502, result.get("error") or "Email send failed")
+    # Suggestions cache no longer includes this txn — invalidate so a fresh
+    # open of the AI Suggestions tab reflects reality.
+    try:
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001 — cache miss is safe
+        pass
     return {"status": result["status"], "question_id": token, "communication_id": result["id"]}
 
 
@@ -209,6 +224,7 @@ async def ask_client_about_txn(
 async def suggest_ask_client_batches(
     cid: str,
     inp: SuggestBatchIn = None,
+    force_refresh: bool = Query(False, description="Bypass the 5-min cache and re-run all Claude drafts."),
     user: dict = Depends(require_role("pro", "superadmin")),
 ):
     """Return clusters of currently-flagged transactions grouped by
@@ -216,83 +232,110 @@ async def suggest_ask_client_batches(
 
     Skips any txn that already has a pending client_question so the pro
     isn't offered to ask twice about the same charge.
+
+    Cached for 5 minutes per (company, params) so repeatedly opening the
+    Communications → AI Suggestions tab doesn't re-run one Claude call per
+    counterparty every time. Any Plaid-sync completion, ask-client send,
+    or category update invalidates the cache via `cache.ainvalidate(cid)`.
+    Pass ``force_refresh=true`` to bypass.
     """
     from collections import defaultdict
     from ai_service import draft_ask_client_question
     inp = inp or SuggestBatchIn()
 
-    # Fetch flagged, still-open txns.
-    txns = await db.transactions.find({
-        "company_id": cid,
-        "$or": [
-            {"needs_review": True},
-            {"ai_confidence": {"$lt": 0.6}, "human_reviewed": {"$ne": True}},
-        ],
-        "client_question_id": {"$in": [None, ""]},
-    }).sort("date", -1).to_list(500)
-
-    # Also exclude any txn already covered by a pending client_question.
-    pending_qs = await db.client_questions.find({
-        "company_id": cid, "status": "pending",
-    }, {"txn_ids": 1, "txn_id": 1}).to_list(500)
-    covered_ids: set[str] = set()
-    for q in pending_qs:
-        for x in (q.get("txn_ids") or []):
-            covered_ids.add(x)
-        if q.get("txn_id"):
-            covered_ids.add(q["txn_id"])
-    txns = [t for t in txns if t["id"] not in covered_ids]
-
-    # Cluster by contact_name if present, else a normalized merchant/description.
-    def _key(t: dict) -> str:
-        if t.get("contact_name"):
-            return t["contact_name"]
-        m = (t.get("merchant") or t.get("description") or "").strip()
-        return m.split(" ")[0].upper()[:40] if m else "UNKNOWN"
-
-    groups: dict[str, list[dict]] = defaultdict(list)
-    for t in txns:
-        groups[_key(t)].append(t)
-
-    # Rank groups: bigger clusters first, then bigger absolute totals.
-    ranked = sorted(
-        groups.items(),
-        key=lambda kv: (len(kv[1]), sum(abs(float(x.get("amount") or 0)) for x in kv[1])),
-        reverse=True,
+    cache = get_cache()
+    key = cache.key(
+        "ask_client_suggest",
+        company_id=cid,
+        max_groups=inp.max_groups, min_group_size=inp.min_group_size,
     )
-    ranked = [(k, v) for k, v in ranked if len(v) >= max(1, inp.min_group_size)]
-    ranked = ranked[: max(1, inp.max_groups)]
 
-    company = await db.companies.find_one({"id": cid})
-    company_name = (company or {}).get("name") or ""
-
-    # Draft questions in parallel (Claude calls, bounded to `max_groups`).
-    async def _draft(k: str, ts: list[dict]) -> dict:
-        q = await draft_ask_client_question(
-            counterparty=k, txns=ts, company_name=company_name,
-        )
-        total = round(sum(float(x.get("amount") or 0) for x in ts), 2)
-        return {
-            "counterparty": k,
-            "txn_ids": [t["id"] for t in ts],
-            "count": len(ts),
-            "total": total,
-            "draft_question": q,
-            "sample_txns": [
-                {
-                    "id": t["id"], "date": t.get("date"),
-                    "description": t.get("description"),
-                    "amount": t.get("amount"),
-                }
-                for t in ts[:5]
+    async def compute():
+        # Fetch flagged, still-open txns.
+        txns = await db.transactions.find({
+            "company_id": cid,
+            "$or": [
+                {"needs_review": True},
+                {"ai_confidence": {"$lt": 0.6}, "human_reviewed": {"$ne": True}},
             ],
+            "client_question_id": {"$in": [None, ""]},
+        }).sort("date", -1).to_list(500)
+
+        # Also exclude any txn already covered by a pending client_question.
+        pending_qs = await db.client_questions.find({
+            "company_id": cid, "status": "pending",
+        }, {"txn_ids": 1, "txn_id": 1}).to_list(500)
+        covered_ids: set[str] = set()
+        for q in pending_qs:
+            for x in (q.get("txn_ids") or []):
+                covered_ids.add(x)
+            if q.get("txn_id"):
+                covered_ids.add(q["txn_id"])
+        txns = [t for t in txns if t["id"] not in covered_ids]
+
+        # Cluster by contact_name if present, else a normalized merchant/description.
+        def _key(t: dict) -> str:
+            if t.get("contact_name"):
+                return t["contact_name"]
+            m = (t.get("merchant") or t.get("description") or "").strip()
+            return m.split(" ")[0].upper()[:40] if m else "UNKNOWN"
+
+        groups: dict[str, list[dict]] = defaultdict(list)
+        for t in txns:
+            groups[_key(t)].append(t)
+
+        # Rank groups: bigger clusters first, then bigger absolute totals.
+        ranked = sorted(
+            groups.items(),
+            key=lambda kv: (len(kv[1]), sum(abs(float(x.get("amount") or 0)) for x in kv[1])),
+            reverse=True,
+        )
+        ranked = [(k, v) for k, v in ranked if len(v) >= max(1, inp.min_group_size)]
+        ranked = ranked[: max(1, inp.max_groups)]
+
+        company = await db.companies.find_one({"id": cid})
+        company_name = (company or {}).get("name") or ""
+
+        # Draft questions in parallel (Claude calls, bounded to `max_groups`).
+        async def _draft(k: str, ts: list[dict]) -> dict:
+            q = await draft_ask_client_question(
+                counterparty=k, txns=ts, company_name=company_name,
+            )
+            total = round(sum(float(x.get("amount") or 0) for x in ts), 2)
+            return {
+                "counterparty": k,
+                "txn_ids": [t["id"] for t in ts],
+                "count": len(ts),
+                "total": total,
+                "draft_question": q,
+                "sample_txns": [
+                    {
+                        "id": t["id"], "date": t.get("date"),
+                        "description": t.get("description"),
+                        "amount": t.get("amount"),
+                    }
+                    for t in ts[:5]
+                ],
+            }
+        suggestions = await asyncio.gather(*[_draft(k, v) for k, v in ranked]) if ranked else []
+        from datetime import datetime, timezone as _tz
+        return {
+            "suggestions": suggestions,
+            "flagged_total": len(txns),
+            "already_asked_total": len(covered_ids),
+            "cached_at": datetime.now(_tz.utc).isoformat(),
         }
-    suggestions = await asyncio.gather(*[_draft(k, v) for k, v in ranked]) if ranked else []
-    return {
-        "suggestions": suggestions,
-        "flagged_total": len(txns),
-        "already_asked_total": len(covered_ids),
-    }
+
+    if force_refresh:
+        # Nuke the entry so this call recomputes AND future readers see fresh.
+        try:
+            # ReportCache uses a delete API on the underlying store; the
+            # safest cross-implementation path is a full-company invalidate,
+            # then compute + write back below.
+            await cache.ainvalidate(cid)
+        except Exception:  # noqa: BLE001 — cache miss is safe
+            pass
+    return await cache.get_or_compute(key, _SUGGEST_TTL_SECONDS, compute)
 
 
 @router.post("/companies/{cid}/communications/ask-client/batch")
@@ -368,6 +411,11 @@ async def ask_client_batch(
     )
     if result["status"] == "failed":
         raise HTTPException(502, result.get("error") or "Email send failed")
+    # Suggestions cache no longer includes these txns — invalidate.
+    try:
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
     return {
         "status": result["status"], "question_id": token,
         "communication_id": result["id"], "txn_count": len(txns),
@@ -749,12 +797,45 @@ async def list_ai_conversation_logs(
             "answered_at": q.get("answered_at"),
             "status": q.get("status"),
             "answer": q.get("answer"),
+            "archived": bool(q.get("archived", False)),
+            "archived_at": q.get("archived_at"),
             "ai_proposal": q.get("ai_proposal"),
             "chat_messages": q.get("chat_messages") or [],
             "linked_txns": linked,
             "txn_count": len(linked),
         })
     return {"items": items}
+
+
+class ArchiveIn(BaseModel):
+    archived: bool = True
+
+
+@router.post("/companies/{cid}/communications/questions/{token}/archive")
+async def archive_client_question(
+    cid: str, token: str, inp: ArchiveIn,
+    user: dict = Depends(require_role("pro", "superadmin")),
+):
+    """Archive (or un-archive) a client-question so it stops appearing in
+    the default AI Ask Client view. Archiving is a soft-delete — the doc,
+    the transcript, and the linked transactions all remain fully intact.
+    Idempotent — calling twice is a no-op."""
+    q = await db.client_questions.find_one({"id": token, "company_id": cid})
+    if not q:
+        raise HTTPException(404, "Question not found.")
+    now = now_iso()
+    await db.client_questions.update_one(
+        {"id": token, "company_id": cid},
+        {"$set": {
+            "archived": bool(inp.archived),
+            "archived_at": now if inp.archived else None,
+            "archived_by": user.get("email") if inp.archived else None,
+            "updated_at": now,
+        }},
+    )
+    return {"archived": bool(inp.archived), "id": token}
+
+
 
 
 @router.get("/companies/{cid}/communications/pending-proposals")
