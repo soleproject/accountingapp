@@ -29,6 +29,7 @@ from pydantic import BaseModel
 from db import db, now_iso, coerce
 from auth import get_current_user
 from deps import require_company
+from reconciliation_engine import month_recon_state
 
 router = APIRouter(prefix="/api")
 
@@ -119,6 +120,13 @@ async def _month_status(cid: str, year: int, month: int) -> dict:
     inv_auto_green = (invoices_open == 0)
     bill_auto_green = (bills_open == 0)
 
+    # Reconciliation: auto-green when every posted bank txn in the month
+    # already has a `cleared_at` timestamp. The engine tells us the split
+    # between plaid_auto / statement_match / manual so the UI can show
+    # "Auto (Plaid)" vs "Signed by X" as appropriate.
+    recon_state = await month_recon_state(cid, start, end)
+    recon_auto_green = recon_state.get("green", False)
+
     return {
         "year": year,
         "month": month,
@@ -147,7 +155,11 @@ async def _month_status(cid: str, year: int, month: int) -> dict:
                 "signed_by": bill_sign.get("signed_by") if bill_sign else None,
             },
             "recon": {
-                "green": bool(recon_sign),
+                "green": bool(recon_sign) or recon_auto_green,
+                "auto": recon_auto_green and not recon_sign,
+                "total": recon_state.get("total", 0),
+                "cleared": recon_state.get("cleared", 0),
+                "sources": recon_state.get("sources", {}),
                 "signed_at": recon_sign.get("signed_at") if recon_sign else None,
                 "signed_by": recon_sign.get("signed_by") if recon_sign else None,
             },

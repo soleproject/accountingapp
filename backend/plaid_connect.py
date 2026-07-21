@@ -473,10 +473,18 @@ async def sync_plaid_history_for_account(
 
     # Filter to just this account's txns
     account_txns = [t for t in synced["added"] if t["account_id"] == plaid_account_id]
-    return await categorize_and_insert_plaid_txns(
+    result = await categorize_and_insert_plaid_txns(
         cid, account_txns, ledger_bank, coa, accts,
         categorize_fn, is_period_closed_fn,
     )
+    # Fire the R1 auto-clear pass so newly-settled txns move to cleared without
+    # user intervention. Cheap idempotent op — safe to call after every sync.
+    try:
+        from reconciliation_engine import auto_clear_settled_plaid_txns
+        await auto_clear_settled_plaid_txns(cid)
+    except Exception:  # noqa: BLE001 — never break sync on the auto-clear pass
+        pass
+    return result
 
 
 # ---------- Whole flow: connect a single Plaid account ----------
