@@ -13,20 +13,43 @@ export default function ProSettings() {
   const { branding, refresh } = useBranding();
   const [subdomain, setSubdomain] = useState("");
   const [preset, setPreset] = useState("default");
-  // Local, unsaved custom palette overrides. Server round-trips them only
-  // on Save so the user can experiment without committing.
+  // Local, unsaved custom palette overrides. Auto-saved with a short debounce
+  // whenever the user edits a color, so there's no separate "Save" step to
+  // discover. Debounce lets sliders/pickers dispatch bursts without flooding
+  // the API.
   const [custom, setCustom] = useState({});
-  const [dirty, setDirty] = useState(false);
+  // Bumped whenever the user actually edits (not on initial load) — the
+  // debounced saver only runs when this changes.
+  const [customEditTick, setCustomEditTick] = useState(0);
+  const [customSaving, setCustomSaving] = useState(false);
+  const [customSavedAt, setCustomSavedAt] = useState(null);
   const [savingSub, setSavingSub] = useState(false);
-  const [savingTheme, setSavingTheme] = useState(false);
 
   useEffect(() => {
     if (!branding) return;
     setSubdomain(branding.signin_subdomain || "");
     setPreset(branding.theme_preset || "default");
     setCustom(branding.theme_custom || {});
-    setDirty(false);
   }, [branding]);
+
+  // Debounced auto-save for custom colors. Kicks in only when the user
+  // actually edits (customEditTick), not on the initial state hydration
+  // from `branding` above.
+  useEffect(() => {
+    if (customEditTick === 0) return;
+    const t = setTimeout(async () => {
+      setCustomSaving(true);
+      try {
+        await api.patch("/pro/branding", { theme_custom: custom });
+        await refresh();
+        setCustomSavedAt(Date.now());
+      } catch (e) {
+        toast.error(e.response?.data?.detail || "Save failed");
+      } finally { setCustomSaving(false); }
+    }, 450);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customEditTick]);
 
   if (user && !["pro", "superadmin"].includes(user.role)) {
     return (
@@ -51,11 +74,13 @@ export default function ProSettings() {
 
   const pickPreset = async (p) => {
     setPreset(p);
+    setCustom({});
     try {
       // Preset change also clears any lingering per-token custom overrides
       // so the new preset shows exactly as designed.
       await api.patch("/pro/branding", { theme_preset: p, theme_custom: {} });
       await refresh();
+      toast.success(`Theme set to ${p.charAt(0).toUpperCase() + p.slice(1)}.`);
     } catch (e) {
       toast.error(e.response?.data?.detail || "Save failed");
     }
@@ -63,34 +88,23 @@ export default function ProSettings() {
 
   const editToken = (key, val) => {
     setCustom(c => ({ ...c, [key]: val }));
-    setDirty(true);
+    setCustomEditTick(t => t + 1);
   };
 
   const clearToken = (key) => {
     setCustom(c => { const n = { ...c }; delete n[key]; return n; });
-    setDirty(true);
-  };
-
-  const saveTheme = async () => {
-    setSavingTheme(true);
-    try {
-      await api.patch("/pro/branding", { theme_custom: custom });
-      await refresh();
-      toast.success("Theme saved.");
-    } catch (e) {
-      toast.error(e.response?.data?.detail || "Save failed");
-    } finally { setSavingTheme(false); }
+    setCustomEditTick(t => t + 1);
   };
 
   const resetTheme = async () => {
-    setSavingTheme(true);
+    setCustom({});
     try {
       await api.patch("/pro/branding", { theme_custom: {} });
       await refresh();
       toast.success("Reverted to preset defaults.");
     } catch (e) {
       toast.error(e.response?.data?.detail || "Reset failed");
-    } finally { setSavingTheme(false); }
+    }
   };
 
   const preview = resolvePalette(preset, custom);
@@ -229,21 +243,25 @@ export default function ProSettings() {
                 onClear={() => clearToken(t.key)}
               />
             ))}
-            <div className="flex items-center gap-2 pt-3">
-              <button
-                onClick={saveTheme}
-                disabled={savingTheme || !dirty}
-                data-testid="branding-theme-save"
-                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-800 disabled:opacity-40"
-              >
-                {savingTheme ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-                Save theme
-              </button>
+            <div className="flex items-center gap-3 pt-3">
+              {customSaving ? (
+                <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-500" data-testid="branding-theme-status">
+                  <Loader2 size={12} className="animate-spin" /> Saving…
+                </span>
+              ) : customSavedAt ? (
+                <span className="inline-flex items-center gap-1.5 text-[11px] text-emerald-700" data-testid="branding-theme-status">
+                  <Check size={12} /> Saved. Changes apply everywhere.
+                </span>
+              ) : (
+                <span className="text-[11px] text-slate-400" data-testid="branding-theme-status">
+                  Changes save automatically.
+                </span>
+              )}
               <button
                 onClick={resetTheme}
-                disabled={savingTheme || Object.keys(custom).length === 0}
+                disabled={Object.keys(custom).length === 0}
                 data-testid="branding-theme-reset"
-                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                className="ml-auto inline-flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-40"
               >
                 <RotateCcw size={13} /> Reset to preset
               </button>

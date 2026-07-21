@@ -83,18 +83,19 @@ export default function Sidebar({ collapsed, onToggle }) {
       }`}
       data-testid="app-sidebar"
     >
-      <div className="h-16 shrink-0 flex items-center gap-2 px-3 border-b">
+      <div className="h-16 shrink-0 flex items-center gap-2 px-2 border-b">
         {logoUrl ? (
           <img
             src={logoUrl}
             alt="Firm logo"
-            // Fill the ~64px-tall header. `h-12` gives 48px logo + a hair of
-            // breathing room. Cap width so a very wide wordmark doesn't crowd
-            // the collapse toggle; left-align so wordmarks read naturally.
+            // Fill the ~64px-tall header aggressively — customers upload their
+            // brand and expect it to feel like theirs. h-14 leaves ~4px above
+            // and below; max-w-[210px] lets a wide wordmark spread while
+            // still leaving room for the collapse toggle at the right.
             className={
               collapsed
-                ? "h-11 w-11 object-contain"
-                : "h-12 max-w-[180px] object-contain object-left flex-1 min-w-0"
+                ? "h-12 w-12 object-contain"
+                : "h-14 max-w-[210px] object-contain object-left flex-1 min-w-0"
             }
             data-testid="sidebar-firm-logo"
           />
