@@ -39,6 +39,34 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Role-based write-guard enforcement (Feature #3 finish)
+- New middleware `/app/backend/role_guard.py` (`RoleWriteGuardMiddleware`)
+  enforces the 4-tier permission model at the HTTP layer for every
+  `/api/companies/{cid}/*` route:
+  * ``owner`` / ``pro`` / ``superadmin`` — all writes pass.
+  * ``editor`` — all writes pass.
+  * ``reviewer`` — writes only on paths matching
+    ``/approve|/reject|/review|/signoff|/mega-approve`` (regex-audited),
+    everything else returns 403 "review-only".
+  * ``viewer`` — all writes return 403 "read-only".
+- Guard is method-scoped (only POST/PATCH/PUT/DELETE) so reads and CORS
+  pre-flight remain unaffected. Non-``/api/companies/*`` URLs bypass the
+  guard entirely (auth, admin, invites, magic-link public routes).
+- JWT is decoded in middleware without going through the dep chain; if
+  the token is missing/invalid we fall through so the endpoint's own
+  auth dep returns 401 as before.
+- Also added companion dep helpers `require_company_write` and
+  `require_company_review` in `deps.py` for anywhere we want in-handler
+  role checks going forward.
+- Tests: new `/app/backend/tests/test_role_guard.py` — 5 cases
+  (viewer reads OK / viewer write 403, reviewer create 403 / reviewer
+  approve OK, editor write OK, owner write OK, guard doesn't block
+  non-company URLs). All pass.
+- Smoke-tested via curl: pro POST reaches the endpoint (returns real
+  422 from pydantic, not a guard 403), pro GET still returns data. Zero
+  existing endpoints needed retrofit — 138 `require_company` call
+  sites unchanged.
+
 ### Feb 2026 — Team invitations (Feature #3) — 4-tier permissions + firm staff
 - New `invites` collection with unified schema supporting 4 invite flavours:
   * Company-scoped invites (role: `editor`, `reviewer`, `viewer`) via

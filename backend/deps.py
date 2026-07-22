@@ -35,6 +35,64 @@ async def require_company(user: dict, company_id: str) -> dict:
     return coerce(c)
 
 
+# --------------------------------------------------------------------------
+# Role-based write guards (Feb 2026 — Feature #3 enforcement).
+#
+# Roles: viewer < reviewer < editor < owner/pro/superadmin
+#   * viewer   — read-only
+#   * reviewer — read + approve/reject; NO create/update/delete
+#   * editor   — read + review + full write on transactions/JEs/etc.
+#   * owner/pro/superadmin — everything
+#
+# The guards accept `user` and `company_id` positional args to match the
+# ergonomics of the existing `require_company` helper, and return the
+# same company doc so callers can use it directly.
+# --------------------------------------------------------------------------
+
+# Strictly-increasing privilege ladder. "owner" / "pro" / "superadmin"
+# are absolute — they always pass every guard.
+_WRITE_ROLES  = {"owner", "pro", "editor"}
+_REVIEW_ROLES = {"owner", "pro", "editor", "reviewer"}
+
+
+async def _role_at_company(user: dict, company_id: str) -> str | None:
+    """Return the user's effective role at ``company_id`` — falling back to
+    the global user.role for superadmins. ``None`` means no membership."""
+    if user["role"] == "superadmin":
+        return "superadmin"
+    m = await db.memberships.find_one({"user_id": user["id"], "company_id": company_id})
+    return (m or {}).get("role")
+
+
+async def require_company_write(user: dict, company_id: str) -> dict:
+    """Same as ``require_company`` but additionally forbids
+    reviewer/viewer memberships from write operations (returns 403)."""
+    company = await require_company(user, company_id)
+    role = await _role_at_company(user, company_id)
+    if role and role not in _WRITE_ROLES and user["role"] != "superadmin":
+        raise HTTPException(
+            403,
+            f"Your role on this company ({role}) is read-only for this action. "
+            "Ask an owner or editor to make the change.",
+        )
+    return company
+
+
+async def require_company_review(user: dict, company_id: str) -> dict:
+    """Same as ``require_company`` but forbids ``viewer`` from taking
+    approve/reject actions. Reviewers ARE allowed here (that's the point
+    of the reviewer role)."""
+    company = await require_company(user, company_id)
+    role = await _role_at_company(user, company_id)
+    if role and role not in _REVIEW_ROLES and user["role"] != "superadmin":
+        raise HTTPException(
+            403,
+            f"Your role on this company ({role}) is read-only. "
+            "Only reviewers and above can approve or reject.",
+        )
+    return company
+
+
 async def log_ai(company_id: str, kind: str, count: int = 1):
     existing = await db.ai_activity.find_one({"company_id": company_id, "type": kind})
     if existing:

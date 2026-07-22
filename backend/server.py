@@ -49,6 +49,12 @@ app = FastAPI(title="Axiom Ledger API")
 for router in ALL_ROUTERS:
     app.include_router(router)
 
+# Role-based write guard — blocks viewer/reviewer writes on
+# /api/companies/{cid}/... routes. Register BEFORE CORS so CORS
+# pre-flight OPTIONS never hits the guard.
+from role_guard import RoleWriteGuardMiddleware
+app.add_middleware(RoleWriteGuardMiddleware)
+
 # CORS
 app.add_middleware(
     CORSMiddleware,
