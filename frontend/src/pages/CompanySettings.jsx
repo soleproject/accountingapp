@@ -4,7 +4,6 @@ import { useCompany } from "@/lib/company";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Settings2, Save, Trash2, AlertTriangle, Loader2 } from "lucide-react";
-import TeamPanel from "@/components/TeamPanel";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
@@ -157,11 +156,6 @@ export default function CompanySettings() {
             Save changes
           </button>
         </div>
-      </div>
-
-      {/* --- Team & permissions --- */}
-      <div className="rounded-xl border bg-white p-5">
-        <TeamPanel mode="company" companyId={currentId} />
       </div>
 
       {/* --- Danger zone --- */}

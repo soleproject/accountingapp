@@ -39,6 +39,15 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Team & permissions moved to its own page
+- Team-management UI removed from Company Settings; now lives at `/team`
+  on the new `CompanyTeam.jsx` page (mirrors the `ProTeam` page pattern).
+- Profile dropdown adjustments:
+  * Pros — "Firm staff" → `/pro/team` (unchanged).
+  * Clients (and any non-Pro / non-superadmin) — new "Team & permissions"
+    → `/team`.
+- Same `TeamPanel` component powers both pages; only the mode differs.
+
 ### Feb 2026 — Login rate-limit (credential-stuffing defence)
 - `/api/auth/login` — max **5 failed attempts per email per 10-minute
   sliding window**. On lockout, endpoint returns a real **HTTP 429** with

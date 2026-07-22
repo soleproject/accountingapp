@@ -121,6 +121,16 @@ function ProfileMenu() {
               <User size={14} className="text-slate-500" /> Firm staff
             </Link>
           )}
+          {!isPro && user?.role !== "superadmin" && (
+            <Link
+              to="/team"
+              onClick={() => setOpen(false)}
+              data-testid="profile-menu-team"
+              className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50"
+            >
+              <User size={14} className="text-slate-500" /> Team &amp; permissions
+            </Link>
+          )}
           <button
             onClick={() => { setOpen(false); setPwOpen(true); }}
             data-testid="profile-menu-change-password"

@@ -29,6 +29,7 @@ import AskClientAnswer from "@/pages/AskClientAnswer";
 import SetPassword from "@/pages/SetPassword";
 import AcceptInvite from "@/pages/AcceptInvite";
 import ProTeam from "@/pages/ProTeam";
+import CompanyTeam from "@/pages/CompanyTeam";
 import GenericList from "@/pages/GenericList";
 import GeneralLedger from "@/pages/GeneralLedger";
 import Reconciliation from "@/pages/Reconciliation";
@@ -70,6 +71,7 @@ function App() {
               <Route path="/settings" element={<CompanySettings />} />
               <Route path="/pro/settings" element={<ProSettings />} />
               <Route path="/pro/team" element={<ProTeam />} />
+              <Route path="/team" element={<CompanyTeam />} />
               <Route path="/communications" element={<Communications />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/reports/:kind" element={<ReportView />} />
