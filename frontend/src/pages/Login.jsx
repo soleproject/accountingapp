@@ -6,16 +6,20 @@ import { TID } from "@/constants/testIds";
 import { Sparkles, Loader2 } from "lucide-react";
 
 // Resolve a firm subdomain from either `?firm=acme` (works everywhere) or
-// the hostname's leftmost label if it looks like `acme.axiomledger.ai`.
-// Anything on preview / localhost / bare axiomledger.ai returns null.
+// the hostname's leftmost label if it looks like `acme.<PRIVATE_LABEL_ROOT>`.
+// Anything on preview / localhost / bare root returns null.
+const PRIVATE_LABEL_ROOT = (process.env.REACT_APP_PRIVATE_LABEL_ROOT || "accountingapp.ai").toLowerCase();
 function detectFirmSubdomain() {
   try {
     const q = new URLSearchParams(window.location.search).get("firm");
     if (q) return q.toLowerCase().trim();
     const host = window.location.hostname;
-    if (host.includes("axiomledger.ai")) {
+    if (host.endsWith(`.${PRIVATE_LABEL_ROOT}`)) {
       const first = host.split(".")[0];
-      if (first && !["www", "app", "axiomledger"].includes(first)) return first;
+      // Reserved labels (platform infra) never resolve to a firm.
+      if (first && !["www", "app", "api", "admin", "cdn", "assets"].includes(first)) {
+        return first;
+      }
     }
   } catch { /* fall through */ }
   return null;

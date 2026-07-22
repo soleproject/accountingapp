@@ -144,7 +144,7 @@ export default function ProSettings() {
           <h2 className="font-heading font-semibold">Sign-in address</h2>
         </div>
         <p className="text-sm text-slate-500 mb-4">
-          Give your clients a branded sign-in URL — they log in at your own subdomain with no Axiom branding.
+          Give your clients a branded sign-in URL — they log in at your own subdomain with no SmartBooks branding.
           Works instantly once saved.
         </p>
         <div className="flex items-center gap-2 flex-wrap">
@@ -156,7 +156,7 @@ export default function ProSettings() {
             data-testid="branding-subdomain-input"
             maxLength={32}
           />
-          <span className="text-sm text-slate-500">.axiomledger.ai</span>
+          <span className="text-sm text-slate-500">.{(process.env.REACT_APP_PRIVATE_LABEL_ROOT || "accountingapp.ai")}</span>
           <button
             onClick={saveSubdomain}
             disabled={savingSub}

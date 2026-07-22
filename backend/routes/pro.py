@@ -464,9 +464,9 @@ async def delete_pro_logo(
 
 # ---------------------------------------------------------------------------
 # Public branded-login lookup — unauthenticated on purpose. The login page
-# hits this with the subdomain from either the hostname (acme.axiomledger.ai)
+# hits this with the subdomain from either the hostname (acme.<root>)
 # or a `?firm=acme` query param to render the firm's logo/theme before the
-# user has any credentials.
+# user has any credentials. Root domain configured via PRIVATE_LABEL_ROOT.
 # ---------------------------------------------------------------------------
 
 @router.get("/branding/by-subdomain/{sub}")
