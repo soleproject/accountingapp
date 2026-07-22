@@ -148,7 +148,8 @@ async def mint_password_set_token(user_id: str, *, purpose: str = "welcome", ttl
 @router.get("/auth/password-set/{token}")
 async def password_set_check(token: str):
     """Public — check whether a magic-link token is redeemable, and if
-    so return the email it belongs to so the UI can greet the user."""
+    so return the email + purpose so the UI can greet the user
+    correctly ("Welcome" vs. "Reset your password")."""
     doc = await db.password_set_tokens.find_one({"id": token})
     if not doc:
         raise HTTPException(404, "This link is invalid.")
@@ -159,7 +160,10 @@ async def password_set_check(token: str):
     u = await db.users.find_one({"id": doc["user_id"]})
     if not u:
         raise HTTPException(404, "Account no longer exists.")
-    return {"email": u["email"], "name": u.get("name"), "role": u.get("role")}
+    return {
+        "email": u["email"], "name": u.get("name"), "role": u.get("role"),
+        "purpose": doc.get("purpose") or "welcome",
+    }
 
 
 class PasswordSetIn(BaseModel):
@@ -199,5 +203,47 @@ async def password_set_redeem(token: str, inp: PasswordSetIn):
         "token": jwt_token,
         "user": {"id": u["id"], "email": u["email"], "name": u["name"], "role": u["role"]},
     }
+
+
+# ----------------------------------------------------------------------
+# Forgot-password (public magic-link reset).
+#
+# Anti-enumeration: always returns 200 whether or not the email exists.
+# If it does, we mint a fresh password-set token with purpose=reset and
+# send the reset email via Resend. Reuses the same token-check + redeem
+# endpoints as the initial welcome flow — the redeem path issues a JWT
+# on success so the user is logged in immediately.
+# ----------------------------------------------------------------------
+
+class ForgotPasswordIn(BaseModel):
+    email: EmailStr
+
+
+@router.post("/auth/forgot-password")
+async def forgot_password(inp: ForgotPasswordIn):
+    email = str(inp.email).lower()
+    u = await db.users.find_one({"email": email})
+    if not u:
+        # Silent success — do NOT leak whether the address is registered.
+        return {"ok": True}
+    try:
+        token = await mint_password_set_token(u["id"], purpose="reset", ttl_days=1)
+        from email_dispatcher import dispatch, public_base_url
+        import email_templates as _tmpl
+        subject, html = _tmpl.password_reset(
+            name=u.get("name") or u["email"].split("@")[0],
+            magic_url=f"{public_base_url()}/set-password/{token}",
+        )
+        await dispatch(
+            kind="password_reset", to=email,
+            subject=subject, html=html,
+            initiating_user_id=u["id"],
+            related={"purpose": "reset"},
+        )
+    except Exception:  # noqa: BLE001 — never leak errors, just log
+        import logging as _lg
+        _lg.getLogger(__name__).exception("Password-reset email failed for %s", email)
+    return {"ok": True}
+
 
 

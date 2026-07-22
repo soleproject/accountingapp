@@ -28,6 +28,7 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
   // Firm-branded login. `null` = default Axiom look; otherwise the payload
   // returned by `/api/branding/by-subdomain/:sub`.
   const [firm, setFirm] = useState(null);
@@ -161,6 +162,17 @@ export default function Login() {
             {busy && <Loader2 size={14} className="animate-spin" />} Sign in
           </button>
 
+          <div className="text-center">
+            <button
+              type="button"
+              onClick={() => setForgotOpen(true)}
+              data-testid="forgot-password-link"
+              className="text-xs text-slate-500 hover:text-cyan-700 hover:underline"
+            >
+              Forgot password?
+            </button>
+          </div>
+
           <div className="pt-4 border-t space-y-2">
             <div className="text-[11px] uppercase tracking-wider text-slate-500">Demo accounts</div>
             <button type="button" data-testid={TID.demoClient} onClick={() => demo("client@axiom.ai", "client123")}
@@ -177,6 +189,84 @@ export default function Login() {
             </button>
           </div>
         </form>
+      </div>
+      {forgotOpen && <ForgotPasswordModal onClose={() => setForgotOpen(false)} initialEmail={email} />}
+    </div>
+  );
+}
+
+function ForgotPasswordModal({ onClose, initialEmail }) {
+  const [email, setEmail] = useState(initialEmail || "");
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const submit = async (e) => {
+    e?.preventDefault?.();
+    if (!email.trim()) return;
+    setBusy(true);
+    try {
+      await api.post("/auth/forgot-password", { email });
+      // Always show success regardless of whether the email exists —
+      // matches the backend's anti-enumeration behavior.
+      setSent(true);
+    } catch {
+      setSent(true);
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl shadow-2xl w-full max-w-md"
+        onClick={(e) => e.stopPropagation()}
+        data-testid="forgot-password-modal"
+      >
+        {!sent ? (
+          <form onSubmit={submit}>
+            <div className="p-5 border-b">
+              <h3 className="font-heading text-lg font-semibold text-slate-900">Reset your password</h3>
+              <p className="text-xs text-slate-500 mt-1">
+                Enter your email and we'll send you a link to set a new one. It'll be valid for 24 hours.
+              </p>
+            </div>
+            <div className="p-5">
+              <label className="text-xs text-slate-600">Email</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoFocus required
+                data-testid="forgot-password-email"
+                className="w-full mt-1 border rounded-md px-3 py-2 text-sm"
+              />
+            </div>
+            <div className="px-5 py-3 border-t flex justify-end gap-2">
+              <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-md border text-sm">Cancel</button>
+              <button
+                type="submit" disabled={busy || !email.trim()}
+                data-testid="forgot-password-submit"
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-cyan-600 text-white text-sm hover:bg-cyan-700 disabled:opacity-50"
+              >
+                {busy && <Loader2 size={13} className="animate-spin" />} Send reset link
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="p-6 text-center" data-testid="forgot-password-sent">
+            <div className="text-3xl">📬</div>
+            <h3 className="font-heading text-lg font-semibold text-slate-900 mt-2">Check your inbox</h3>
+            <p className="text-sm text-slate-600 mt-2">
+              If <b>{email}</b> is registered, we've sent a reset link. It'll expire in 24 hours.
+            </p>
+            <p className="text-xs text-slate-400 mt-3">
+              Didn't see it? Check your spam folder, or try a different email.
+            </p>
+            <button
+              onClick={onClose}
+              className="mt-5 px-4 py-2 rounded-md bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800"
+            >
+              Got it
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

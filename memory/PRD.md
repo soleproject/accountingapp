@@ -39,6 +39,29 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Forgot-password (public self-service reset)
+- New public endpoint `POST /api/auth/forgot-password` — anti-enumeration:
+  returns 200 for every request regardless of whether the email is
+  registered. If it exists, mints a fresh `password_set_tokens` row with
+  `purpose: "reset"` (24-hour TTL) and fires a Resend email using the new
+  `password_reset` template.
+- Reuses the existing `password-set/{token}` GET+POST endpoints from the
+  welcome flow — same single-use atomic claim + JWT-on-redeem plumbing.
+- `password_set_check` now returns `purpose` so the UI can adapt copy
+  ("Reset your password" vs. "Welcome, pick a password").
+- Frontend Login page — new "Forgot password?" link below Sign-in that
+  opens a modal (`ForgotPasswordModal`). Two states: entry (email
+  input) and sent (📬 confirmation, echoes back the email so the user
+  knows which inbox to check).
+- `SetPassword.jsx` now branches on `purpose` — reset flow shows
+  "Pick a new password" heading + "Reset your password" eyebrow instead
+  of the "Welcome" tone.
+- Also added `password_reset` to `email_dispatcher.DEFAULT_PREFS` (opt-out).
+- End-to-end curl-verified: unknown email → silent 200, known email →
+  200 + token minted, GET /password-set returns `purpose: "reset"`,
+  POST redeems + returns JWT. Screenshot confirms the modal and
+  success state render correctly.
+
 ### Feb 2026 — Post-accept team management (grant/revoke/remove)
 - Four new endpoints to edit teams after invites have been accepted:
   * `PUT /api/pro/staff/{user_id}/access` — reset a firm-staff member's

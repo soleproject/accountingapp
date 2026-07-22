@@ -45,6 +45,32 @@ def _wrap(inner: str) -> str:
 
 
 # --------------------------------------------------------------------------
+# Password reset (self-service forgot-password magic link).
+# One-time token, valid for 24 hours, minted only when the address is
+# actually registered — but the endpoint returns 200 either way to
+# prevent enumeration attacks.
+# --------------------------------------------------------------------------
+def password_reset(*, name: str, magic_url: str) -> tuple[str, str]:
+    inner = f"""
+      <div style="{_H1}">Reset your password</div>
+      <div style="{_P}">
+        Hi {escape(name)},<br><br>
+        Someone (hopefully you) asked to reset the password on your Axiom
+        Ledger account. Tap below and pick a new one.
+      </div>
+      <div style="padding:14px 0 6px;">
+        <a href="{magic_url}" style="{_BTN}">Set a new password →</a>
+      </div>
+      <div style="{_MUTE}">
+        This link is unique to you and expires in 24 hours. If you
+        didn't request this, just ignore the email — your existing
+        password still works.
+      </div>
+    """
+    return "Reset your Axiom Ledger password", _wrap(inner)
+
+
+# --------------------------------------------------------------------------
 # Team invite — unified template for the 4 invite flavours (company teammate,
 # firm-staff pro, superadmin, new-pro bootstrap). Body content adapts to the
 # role via ``role_label`` + ``role_description`` from the caller.

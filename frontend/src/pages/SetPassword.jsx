@@ -22,6 +22,7 @@ export default function SetPassword() {
   const [status, setStatus] = useState("checking"); // checking | ok | expired | invalid | used
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
+  const [purpose, setPurpose] = useState("welcome");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
@@ -32,6 +33,7 @@ export default function SetPassword() {
       .then((r) => {
         setEmail(r.data.email || "");
         setName(r.data.name || "");
+        setPurpose(r.data.purpose || "welcome");
         setStatus("ok");
       })
       .catch((e) => {
@@ -76,13 +78,19 @@ export default function SetPassword() {
         {status === "ok" && (
           <div data-testid="setpw-form">
             <div className="flex items-center gap-2 text-cyan-700 mb-1">
-              <KeyRound size={18} /> <span className="text-xs uppercase tracking-widest font-semibold">Set your password</span>
+              <KeyRound size={18} /> <span className="text-xs uppercase tracking-widest font-semibold">
+                {purpose === "reset" ? "Reset your password" : "Set your password"}
+              </span>
             </div>
             <h1 className="font-heading text-2xl font-semibold text-slate-900">
-              Welcome{name ? `, ${name.split(" ")[0]}` : ""}!
+              {purpose === "reset"
+                ? "Pick a new password"
+                : `Welcome${name ? `, ${name.split(" ")[0]}` : ""}!`}
             </h1>
             <p className="text-sm text-slate-600 mt-2">
-              Pick a password for <b>{email}</b> and you'll be logged in.
+              {purpose === "reset"
+                ? <>Set a new password for <b>{email}</b> and we'll sign you in.</>
+                : <>Pick a password for <b>{email}</b> and you'll be logged in.</>}
             </p>
             <div className="mt-5 space-y-3">
               <div>
