@@ -27,6 +27,8 @@ import MonthClose from "@/pages/MonthClose";
 import Communications from "@/pages/Communications";
 import AskClientAnswer from "@/pages/AskClientAnswer";
 import SetPassword from "@/pages/SetPassword";
+import AcceptInvite from "@/pages/AcceptInvite";
+import ProTeam from "@/pages/ProTeam";
 import GenericList from "@/pages/GenericList";
 import GeneralLedger from "@/pages/GeneralLedger";
 import Reconciliation from "@/pages/Reconciliation";
@@ -50,6 +52,7 @@ function App() {
             <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/set-password/:token" element={<SetPassword />} />
+            <Route path="/invite/:token" element={<AcceptInvite />} />
             <Route path="/q/:token" element={<AskClientAnswer />} />
             <Route element={<Protected><Layout /></Protected>}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
@@ -66,6 +69,7 @@ function App() {
               <Route path="/connections/imports/:importId" element={<StatementImportDetail />} />
               <Route path="/settings" element={<CompanySettings />} />
               <Route path="/pro/settings" element={<ProSettings />} />
+              <Route path="/pro/team" element={<ProTeam />} />
               <Route path="/communications" element={<Communications />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/reports/:kind" element={<ReportView />} />

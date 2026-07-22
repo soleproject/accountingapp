@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { TID } from "@/constants/testIds";
 import { Users, Building, Briefcase, Shield } from "lucide-react";
+import TeamPanel from "@/components/TeamPanel";
 
 export default function SuperadminDash() {
   const [data, setData] = useState(null);
@@ -67,6 +68,10 @@ export default function SuperadminDash() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div className="rounded-xl border bg-white p-5">
+        <TeamPanel mode="admin" />
       </div>
     </div>
   );

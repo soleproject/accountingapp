@@ -45,6 +45,7 @@ DEFAULT_PREFS = {
     "ai_ask_client":            True,   # Fully-automated AI-initiated ask-client (opt-out)
     "client_welcome":           True,   # First-time client onboarding email
     "client_welcome_returning": True,   # "We added another company to your login"
+    "team_invite":              True,   # Team/staff/pro/superadmin invitations
     "dunning":                  True,
     "overdue_bill_client":      True,
     "plaid_reauth":             True,

@@ -39,6 +39,40 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Team invitations (Feature #3) — 4-tier permissions + firm staff
+- New `invites` collection with unified schema supporting 4 invite flavours:
+  * Company-scoped invites (role: `editor`, `reviewer`, `viewer`) via
+    `POST /api/companies/{cid}/invites`.
+  * Pro firm-staff invites (role: `pro`, with picked `company_ids`) via
+    `POST /api/pro/invites`.
+  * Superadmin invites (role: `superadmin` or bootstrap-new `pro`) via
+    `POST /api/admin/invites`.
+- `GET /api/invites/{token}` (public) — preview payload with inviter, role,
+  company list, and whether the invitee needs to set a password.
+- `POST /api/invites/{token}/accept` (public) — atomic single-use claim,
+  creates/attaches user, materializes memberships, returns JWT so
+  invitee is logged in immediately. Role auto-upgrades if the invitee
+  already has a lower company role.
+- `GET /api/companies/{cid}/team` — active members + pending invites.
+- `GET /api/pro/team` — firm staff (users with pro-membership on any of
+  the current Pro's clients) + Pro's pending invites.
+- `DELETE /api/invites/{id}` — only inviter or superadmin can revoke.
+- Unified `team_invite` email template (adapts label/description by role).
+- New public page `/invite/:token` (`AcceptInvite.jsx`) with checking /
+  ok / expired / used / revoked / superseded / invalid states.
+- Reusable `TeamPanel` React component mounted in three surfaces:
+  * `CompanySettings` → invite editors/reviewers/viewers to one company.
+  * `ProTeam` (new page at `/pro/team`) → invite firm staff, pick per-invitee
+    client access via checkbox picker.
+  * `SuperadminDash` → invite pros or superadmins.
+- Profile-menu dropdown now includes "Firm staff" link (Pros/superadmins).
+- End-to-end curl-tested: pro-invite → magic-link check → team roster →
+  accept → new-user JWT → login → cleanup. Company-invite + revoke also
+  verified: revoked invite returns 410 "This invitation was revoked."
+- Also shipped in this session: "Re-send welcome email" mail-plus icon on
+  every ProClients card (`POST /api/pro/clients/{cid}/resend-welcome`),
+  409-guarded so it won't wipe a client who's already active.
+
 ### Feb 2026 — Client welcome emails + self-service password change
 - New Pro-flow client-create now sends one of two automated welcome emails:
   * **First-time client** (`kind: client_welcome`) — magic-link "Set your

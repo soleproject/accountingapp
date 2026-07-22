@@ -45,6 +45,53 @@ def _wrap(inner: str) -> str:
 
 
 # --------------------------------------------------------------------------
+# Team invite — unified template for the 4 invite flavours (company teammate,
+# firm-staff pro, superadmin, new-pro bootstrap). Body content adapts to the
+# role via ``role_label`` + ``role_description`` from the caller.
+# --------------------------------------------------------------------------
+def team_invite(*, invitee_name: str, inviter_name: str,
+                role_label: str, role_description: str,
+                company_names: list[str], magic_url: str) -> tuple[str, str]:
+    if company_names:
+        row_lines = "".join(
+            f"<div style='padding:4px 0;color:#0f172a;font-size:13px;'>· {escape(n)}</div>"
+            for n in company_names
+        )
+        companies_html = (
+            "<div style='margin:12px 0;background:#f8fafc;border:1px solid #e2e8f0;"
+            "border-radius:8px;padding:12px 14px;'>"
+            "<div style='font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#64748b;padding-bottom:4px;'>"
+            f"Access to {len(company_names)} {'company' if len(company_names) == 1 else 'companies'}"
+            "</div>"
+            f"{row_lines}"
+            "</div>"
+        )
+    else:
+        companies_html = ""
+
+    inner = f"""
+      <div style="{_H1}">You've been invited to Axiom Ledger</div>
+      <div style="{_P}">
+        Hi {escape(invitee_name)},<br><br>
+        <b>{escape(inviter_name)}</b> invited you to join Axiom Ledger as an
+        <b>{escape(role_label)}</b> — {escape(role_description)}
+      </div>
+      {companies_html}
+      <div style="{_P}">
+        Set a password and you'll be in — this magic link is unique to you.
+      </div>
+      <div style="padding:14px 0 6px;">
+        <a href="{magic_url}" style="{_BTN}">Accept invitation →</a>
+      </div>
+      <div style="{_MUTE}">
+        This invitation expires in 14 days. If it does, ask
+        {escape(inviter_name)} to re-send it.
+      </div>
+    """
+    return f"You're invited to Axiom Ledger — {role_label}", _wrap(inner)
+
+
+# --------------------------------------------------------------------------
 # Client welcome — first company (magic-link password set).
 # Sent by `pro_create_client` when the client's email is brand-new to the
 # platform. The client hasn't chosen a password yet — clicking the button
