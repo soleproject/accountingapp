@@ -370,6 +370,16 @@ function AttentionTile({ attention }) {
   } = attention;
 
   const total = flagged + rules + ovInv + ovBill + unrecon;
+  // Priority for the single "rainbow shimmer" card. Order matters — only the
+  // FIRST bucket in this list that has count > 0 lights up so the user's eye
+  // lands on the most urgent action first. Order: overdue bills → overdue
+  // invoices → flagged → suggested rules → unreconciled.
+  const priorityKey =
+    ovBill  > 0 ? "ovBill"  :
+    ovInv   > 0 ? "ovInv"   :
+    flagged > 0 ? "flagged" :
+    rules   > 0 ? "rules"   :
+    unrecon > 0 ? "unrecon" : null;
   if (total === 0) {
     return (
       <div
@@ -403,6 +413,7 @@ function AttentionTile({ attention }) {
           count={flagged}
           label="Flagged for review"
           hint="AI wants your call before posting"
+          highlight={priorityKey === "flagged"}
         />
         <AttentionCard
           testid="attention-rules"
@@ -412,6 +423,7 @@ function AttentionTile({ attention }) {
           count={rules}
           label="Suggested rules"
           hint={rules > 0 ? "1-click accept to auto-categorize repeats" : "None pending"}
+          highlight={priorityKey === "rules"}
         />
         <AttentionCard
           testid="attention-overdue-invoices"
@@ -421,6 +433,7 @@ function AttentionTile({ attention }) {
           count={ovInv}
           label="Overdue invoices"
           hint={ovInv > 0 ? "Past-due customer invoices" : "All paid or current"}
+          highlight={priorityKey === "ovInv"}
         />
         <AttentionCard
           testid="attention-overdue-bills"
@@ -430,6 +443,7 @@ function AttentionTile({ attention }) {
           count={ovBill}
           label="Overdue bills"
           hint={ovBill > 0 ? "Past-due vendor bills" : "All paid or current"}
+          highlight={priorityKey === "ovBill"}
         />
         <AttentionCard
           testid="attention-reconcile"
@@ -446,6 +460,7 @@ function AttentionTile({ attention }) {
                       ? ` +${unreconciled_accounts.length - 2} more` : "")
               : `Reconciled within ${staleness_days} days`
           }
+          highlight={priorityKey === "unrecon"}
         />
       </div>
     </div>
@@ -459,13 +474,19 @@ const TONE_CLS = {
   muted:  { bg: "hover:bg-slate-50",  fg: "text-slate-500",  ring: "bg-slate-100" },
 };
 
-function AttentionCard({ testid, to, icon: Icon, tone, count, label, hint }) {
+function AttentionCard({ testid, to, icon: Icon, tone, count, label, hint, highlight }) {
   const t = TONE_CLS[tone] || TONE_CLS.muted;
+  // When highlight === true we swap the default divider styling for a
+  // 3px rainbow border + shimmer (see .attention-rainbow in index.css).
+  // Adding relative + z-10 pulls the card above the sibling dividers so
+  // the border isn't clipped by the parent's `divide-x` rule.
   return (
     <Link
       to={to}
       data-testid={testid}
-      className={`px-5 py-4 flex items-start gap-3 transition ${t.bg}`}
+      className={`px-5 py-4 flex items-start gap-3 transition ${t.bg} ${
+        highlight ? "attention-rainbow relative z-10" : ""
+      }`}
     >
       <div className={`w-9 h-9 rounded-full flex items-center justify-center ${t.ring}`}>
         <Icon size={16} className={t.fg} />
