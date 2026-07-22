@@ -1,6 +1,8 @@
 # Nixpacks tells Railway which Node version to use for the React build.
+# nodejs_22 pulls Node 22.x — some tooling in the CRA/ESLint chain
+# requires Node 20.19+ or 22, and pinning to 22 keeps things clean.
 [phases.setup]
-nixPkgs = ["nodejs_20", "yarn"]
+nixPkgs = ["nodejs_22", "yarn"]
 
 [phases.install]
 cmds = ["yarn install --frozen-lockfile"]
