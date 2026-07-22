@@ -1,16 +1,24 @@
-"""AI service: categorization + chat via Claude Sonnet 4.5 (emergentintegrations)."""
+"""AI service: categorization + chat via a swappable LLM (OpenAI / Anthropic).
+
+Model + provider are set via env vars (LLM_PROVIDER, LLM_MODEL) so the
+same code runs on Emergent, Railway, or self-hosted. See `llm_client.py`.
+"""
 from __future__ import annotations
 import os
 import json
 import re
 import hashlib
 from typing import AsyncGenerator, Optional
-from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
+from llm_client import LlmChat, UserMessage, TextDelta, StreamDone
 
-EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
-MODEL_PROVIDER = "anthropic"
-MODEL_NAME = "claude-sonnet-4-5-20250929"
-MODEL_HAIKU = "claude-haiku-4-5-20251001"  # cheap + fast — used for contact extraction
+# Primary model for heavy reasoning (categorization, journal entries,
+# CPA reviewer). Env-driven so a Railway deploy can swap gpt-4o-mini ↔
+# gpt-4o ↔ claude-sonnet-4-5 with a single variable and no code change.
+MODEL_PROVIDER = os.environ.get("LLM_PROVIDER", "openai").lower()
+MODEL_NAME = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+# Cheap+fast model for lightweight tasks (contact name extraction,
+# intent parsing). Falls back to the primary when not set.
+MODEL_HAIKU = os.environ.get("LLM_MODEL_FAST", MODEL_NAME)
 
 CATEGORIZATION_SYSTEM = (
     "You are an expert US-GAAP bookkeeper categorizing bank transactions for a small business.\n\n"
@@ -141,7 +149,7 @@ ASSISTANT_SYSTEM = (
 
 def _new_chat(system: str, session_id: str, model_name: str = MODEL_NAME) -> LlmChat:
     return LlmChat(
-        api_key=EMERGENT_LLM_KEY,
+        api_key="",  # unused — llm_client reads OPENAI_API_KEY / ANTHROPIC_API_KEY from env
         session_id=session_id,
         system_message=system,
     ).with_model(MODEL_PROVIDER, model_name)

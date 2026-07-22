@@ -27,7 +27,7 @@ from ai_service import (
     onboarding_interview_questions, onboarding_interview_synthesize,
     parse_voice_intent, _new_chat, _extract_json,
 )
-from emergentintegrations.llm.chat import UserMessage
+from llm_client import UserMessage
 import reports as R
 import plaid_service
 import plaid_connect
