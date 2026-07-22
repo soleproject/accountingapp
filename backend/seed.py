@@ -164,6 +164,7 @@ async def seed():
             })
 
     # Contacts
+    from contact_resolver import normalize_contact_name
     contacts = []
     for name, kind in [
         ("Acme Corp", "customer"), ("Widget LLC", "customer"), ("Bright Idea Co", "customer"),
@@ -173,6 +174,7 @@ async def seed():
         cid = str(uuid.uuid4())
         contacts.append({
             "id": cid, "company_id": company_id, "name": name, "type": kind,
+            "normalized_name": normalize_contact_name(name),
             "email": f"contact@{name.lower().replace(' ', '')}.com",
             "phone": "", "address": "", "created_at": now, "updated_at": now,
         })
