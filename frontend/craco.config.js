@@ -2,9 +2,12 @@
 const path = require("path");
 require("dotenv").config();
 
-// Check if we're in development/preview mode (not production build)
-// Craco sets NODE_ENV=development for start, NODE_ENV=production for build
-const isDevServer = process.env.NODE_ENV !== "production";
+// Craco sets NODE_ENV=development for start, NODE_ENV=production for build.
+// Strict `=== "development"` (instead of `!== "production"`) so that any
+// host that leaves NODE_ENV unset during the build phase (e.g. Railway
+// nixpacks) does NOT accidentally inject the visual-edits/react-refresh
+// runtime into the production bundle.
+const isDevServer = process.env.NODE_ENV === "development";
 
 // Environment variable overrides
 const config = {

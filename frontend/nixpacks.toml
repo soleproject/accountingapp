@@ -8,7 +8,9 @@ nixPkgs = ["nodejs_22", "yarn"]
 cmds = ["yarn install --frozen-lockfile"]
 
 [phases.build]
-cmds = ["yarn build"]
+# Explicitly set NODE_ENV=production during build so craco/react-scripts
+# emit a real production bundle (no react-refresh, no dev HMR runtime).
+cmds = ["NODE_ENV=production yarn build"]
 
 [start]
 # `serve` is a tiny static file server; -s makes it SPA-friendly (all
