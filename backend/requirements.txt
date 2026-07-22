@@ -4,6 +4,7 @@ aiosignal==1.4.0
 annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio==4.14.2
+anthropic==0.117.1
 arq==0.28.0
 ast_serialize==0.6.0
 attrs==26.1.0
@@ -23,7 +24,7 @@ distro==1.9.0
 dnspython==2.8.0
 ecdsa==0.19.2
 email-validator==2.3.0
-emergentintegrations==0.2.0
+emergentintegrations==0.2.0  ; sys_platform == "never"  # legacy — code now uses llm_client.py; kept in file for reference but never installed
 execnet==2.1.2
 fakeredis==2.36.2
 fastapi==0.110.1
@@ -61,7 +62,7 @@ jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
 librt==0.13.0
 limits==5.8.0
-litellm @ https://customer-assets.emergentagent.com/internal-asset/library/litellm-1.80.0-py3-none-any.whl#sha256=adf398c513273de9341f61822296c6b2145f7f2dc4a69daf3ac04829f5bde3f8
+litellm==1.80.0
 markdown-it-py==4.2.0
 MarkupSafe==3.0.3
 mccabe==0.7.0

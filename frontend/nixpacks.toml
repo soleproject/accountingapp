@@ -1,0 +1,14 @@
+# Nixpacks tells Railway which Node version to use for the React build.
+[phases.setup]
+nixPkgs = ["nodejs_20", "yarn"]
+
+[phases.install]
+cmds = ["yarn install --frozen-lockfile"]
+
+[phases.build]
+cmds = ["yarn build"]
+
+[start]
+# `serve` is a tiny static file server; -s makes it SPA-friendly (all
+# unknown routes fall back to index.html so React Router works).
+cmd = "npx --yes serve -s build -l $PORT"
