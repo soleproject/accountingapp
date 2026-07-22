@@ -219,9 +219,45 @@ class ForgotPasswordIn(BaseModel):
     email: EmailStr
 
 
+# --- Rate limits for /auth/forgot-password -------------------------------
+# Per-email, sliding-window counter stored in Mongo. Kept intentionally
+# silent — legitimate users NEVER see a 429; instead, over-limit requests
+# just silently no-op (matches the anti-enumeration behaviour of the main
+# endpoint). This blunts anyone spamming the endpoint to flood an inbox.
+_FORGOT_LIMIT_WINDOW_SECONDS = 15 * 60
+_FORGOT_LIMIT_MAX_PER_WINDOW = 3
+
+
+async def _forgot_password_rate_limited(email: str) -> bool:
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    cutoff = (_dt.now(_tz.utc) - _td(seconds=_FORGOT_LIMIT_WINDOW_SECONDS)).isoformat()
+    count = await db.auth_rate_limits.count_documents({
+        "action": "forgot_password", "email": email, "ts": {"$gte": cutoff},
+    })
+    return count >= _FORGOT_LIMIT_MAX_PER_WINDOW
+
+
+async def _record_forgot_password_attempt(email: str) -> None:
+    await db.auth_rate_limits.insert_one({
+        "action": "forgot_password", "email": email,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    })
+
+
 @router.post("/auth/forgot-password")
 async def forgot_password(inp: ForgotPasswordIn):
     email = str(inp.email).lower()
+    # Rate-limit hit → silent no-op (still 200). Never reveals whether
+    # the address is registered *or* whether it's rate-limited.
+    if await _forgot_password_rate_limited(email):
+        import logging as _lg
+        _lg.getLogger(__name__).warning(
+            "Forgot-password rate limit hit for %s (max %s / %ss)",
+            email, _FORGOT_LIMIT_MAX_PER_WINDOW, _FORGOT_LIMIT_WINDOW_SECONDS,
+        )
+        return {"ok": True}
+    await _record_forgot_password_attempt(email)
+
     u = await db.users.find_one({"email": email})
     if not u:
         # Silent success — do NOT leak whether the address is registered.

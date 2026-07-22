@@ -45,6 +45,10 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   registered. If it exists, mints a fresh `password_set_tokens` row with
   `purpose: "reset"` (24-hour TTL) and fires a Resend email using the new
   `password_reset` template.
+- **Rate-limited**: max 3 requests per email per 15-minute window. Enforced
+  via new `auth_rate_limits` Mongo collection. Over-limit requests
+  silently no-op (still return 200) so the throttle is invisible to
+  attackers while blocking inbox-flood attacks. Legit users never see a 429.
 - Reuses the existing `password-set/{token}` GET+POST endpoints from the
   welcome flow — same single-use atomic claim + JWT-on-redeem plumbing.
 - `password_set_check` now returns `purpose` so the UI can adapt copy
@@ -57,10 +61,8 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   "Pick a new password" heading + "Reset your password" eyebrow instead
   of the "Welcome" tone.
 - Also added `password_reset` to `email_dispatcher.DEFAULT_PREFS` (opt-out).
-- End-to-end curl-verified: unknown email → silent 200, known email →
-  200 + token minted, GET /password-set returns `purpose: "reset"`,
-  POST redeems + returns JWT. Screenshot confirms the modal and
-  success state render correctly.
+- Verified: 5 rapid attempts → 5 × HTTP 200 responses, but only 3 tokens
+  actually minted (4th and 5th silently blocked).
 
 ### Feb 2026 — Post-accept team management (grant/revoke/remove)
 - Four new endpoints to edit teams after invites have been accepted:
