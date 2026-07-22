@@ -377,12 +377,14 @@ async def patch_pro_branding(
             raise HTTPException(400, f"Unknown theme preset — must be one of {sorted(_ALLOWED_PRESETS)}")
         updates["branding.theme_preset"] = inp.theme_preset
     if inp.signin_subdomain is not None:
-        sub = inp.signin_subdomain.strip().lower()
-        if sub == "":
+        from subdomain_util import validate_subdomain
+        sub_raw = inp.signin_subdomain.strip().lower()
+        if sub_raw == "":
             updates["branding.signin_subdomain"] = None
         else:
-            if not _SUBDOMAIN_RE.match(sub):
-                raise HTTPException(400, "Subdomain must be 1–32 chars, lowercase letters/digits/hyphens, no leading/trailing hyphen.")
+            ok, err, sub = validate_subdomain(sub_raw)
+            if not ok:
+                raise HTTPException(400, err)
             clash = await db.users.find_one({
                 "branding.signin_subdomain": sub,
                 "id": {"$ne": user["id"]},
@@ -471,19 +473,94 @@ async def delete_pro_logo(
 
 @router.get("/branding/by-subdomain/{sub}")
 async def branding_by_subdomain(sub: str):
-    sub = (sub or "").strip().lower()
-    if not _SUBDOMAIN_RE.match(sub):
-        raise HTTPException(400, "Invalid subdomain.")
-    owner = await db.users.find_one({"branding.signin_subdomain": sub})
+    from subdomain_util import validate_subdomain
+    ok, err, sub_norm = validate_subdomain(sub or "")
+    if not ok:
+        raise HTTPException(400, err)
+    owner = await db.users.find_one({"branding.signin_subdomain": sub_norm})
     if not owner:
         raise HTTPException(404, "No firm registered on that subdomain.")
     b = _branding_out(owner)
     # Never leak owner PII — return only the visual bits + a friendly name.
     return {
-        "firm_name": owner.get("name") or owner.get("firm_name") or sub.title(),
+        "firm_name": owner.get("name") or owner.get("firm_name") or sub_norm.title(),
         "logos": b["logos"],
         "theme_preset": b["theme_preset"],
         "theme_custom": b["theme_custom"],
+    }
+
+
+@router.get("/branding/by-host")
+async def branding_by_host(host: str = Query(..., description="Full hostname (e.g. acme.accountingapp.ai)")):
+    """Server-side host → brand resolver.
+
+    Mirrors Rocket Suite's `resolveHostBrand`. Frontend can pass its current
+    `window.location.hostname` here to get the correct brand for the sign-in
+    gate WITHOUT needing to know the private-label root — that's kept
+    server-side so it can change without a frontend rebuild.
+
+    Returns one of three modes:
+      • {mode: "platform"}                    — SmartBooks brand
+      • {mode: "firm",   firm_name, logos, …} — a firm's white-label brand
+      • {mode: "neutral"}                     — bare root or unknown label
+    """
+    from subdomain_util import PRIMARY_HOST, PRIVATE_LABEL_ROOT, subdomain_from_host
+    h = (host or "").split(":", 1)[0].strip().lower()
+    if not h:
+        return {"mode": "neutral"}
+    if h == PRIMARY_HOST:
+        return {"mode": "platform"}
+    label = subdomain_from_host(h)
+    if label:
+        owner = await db.users.find_one({"branding.signin_subdomain": label})
+        if owner:
+            b = _branding_out(owner)
+            return {
+                "mode": "firm",
+                "firm_name": owner.get("name") or owner.get("firm_name") or label.title(),
+                "logos": b["logos"],
+                "theme_preset": b["theme_preset"],
+                "theme_custom": b["theme_custom"],
+            }
+        # Valid subdomain shape but no firm claims it — neutral, not platform.
+        return {"mode": "neutral"}
+    if h == PRIVATE_LABEL_ROOT or h.endswith(f".{PRIVATE_LABEL_ROOT}"):
+        return {"mode": "neutral"}
+    return {"mode": "platform"}
+
+
+@router.get("/branding/subdomain-available")
+async def branding_subdomain_available(
+    sub: str = Query(..., description="Candidate subdomain label"),
+    user=Depends(get_current_user),
+):
+    """Live availability check for the Enterprise Settings input. Returns
+    {available, reason?, normalized} so the UI can gate the Save button."""
+    from subdomain_util import validate_subdomain
+    ok, err, norm = validate_subdomain(sub)
+    if not ok:
+        return {"available": False, "reason": err, "normalized": norm}
+    clash = await db.users.find_one({
+        "branding.signin_subdomain": norm,
+        "id": {"$ne": user["id"]},
+    })
+    if clash:
+        return {"available": False, "reason": f"'{norm}' is already taken.", "normalized": norm}
+    return {"available": True, "normalized": norm}
+
+
+@router.get("/branding/config")
+async def branding_config():
+    """Public config the frontend needs to render the sign-in gate.
+
+    Currently just the private-label root domain so the ProSettings UI can
+    show the correct `.accountingapp.ai` suffix without a rebuild if ops
+    changes it later.
+    """
+    from subdomain_util import PRIMARY_HOST, PRIVATE_LABEL_ROOT
+    return {
+        "private_label_root": PRIVATE_LABEL_ROOT,
+        "primary_host": PRIMARY_HOST,
     }
 
 

@@ -24,6 +24,17 @@ export default function ProSettings() {
   const [customSaving, setCustomSaving] = useState(false);
   const [customSavedAt, setCustomSavedAt] = useState(null);
   const [savingSub, setSavingSub] = useState(false);
+  // Public branding config — private-label root domain (e.g. "accountingapp.ai").
+  // Fetched from the backend so ops can change it via env var without a rebuild.
+  const [labelRoot, setLabelRoot] = useState("accountingapp.ai");
+  // Live availability check state: null=idle, "checking", "ok", or an error string.
+  const [subStatus, setSubStatus] = useState(null);
+
+  useEffect(() => {
+    api.get("/branding/config")
+      .then(r => setLabelRoot(r.data?.private_label_root || "accountingapp.ai"))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!branding) return;
@@ -31,6 +42,23 @@ export default function ProSettings() {
     setPreset(branding.theme_preset || "default");
     setCustom(branding.theme_custom || {});
   }, [branding]);
+
+  // Debounced availability check as the user types. Prevents them saving a
+  // taken/invalid subdomain — reflects the same rules the backend enforces.
+  useEffect(() => {
+    if (!subdomain || subdomain === (branding?.signin_subdomain || "")) {
+      setSubStatus(null);
+      return;
+    }
+    setSubStatus("checking");
+    const t = setTimeout(async () => {
+      try {
+        const r = await api.get(`/branding/subdomain-available?sub=${encodeURIComponent(subdomain)}`);
+        setSubStatus(r.data?.available ? "ok" : (r.data?.reason || "Unavailable"));
+      } catch { setSubStatus("Check failed"); }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [subdomain, branding?.signin_subdomain]);
 
   // Debounced auto-save for custom colors. Kicks in only when the user
   // actually edits (customEditTick), not on the initial state hydration
@@ -156,10 +184,10 @@ export default function ProSettings() {
             data-testid="branding-subdomain-input"
             maxLength={32}
           />
-          <span className="text-sm text-slate-500">.{(process.env.REACT_APP_PRIVATE_LABEL_ROOT || "accountingapp.ai")}</span>
+          <span className="text-sm text-slate-500">.{labelRoot}</span>
           <button
             onClick={saveSubdomain}
-            disabled={savingSub}
+            disabled={savingSub || (subStatus && subStatus !== "ok" && subStatus !== null && subStatus !== "checking" ? true : false)}
             className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-800 disabled:opacity-50"
             data-testid="branding-subdomain-save"
           >
@@ -167,22 +195,49 @@ export default function ProSettings() {
             Save
           </button>
         </div>
-        {branding?.signin_subdomain && (
-          <p className="text-[11px] text-slate-500 mt-2">
-            Preview:{" "}
-            <a
-              href={`/login?firm=${branding.signin_subdomain}`}
-              target="_blank"
-              rel="noreferrer"
-              className="text-cyan-700 hover:underline font-mono-num"
-              data-testid="branding-subdomain-preview-link"
-            >
-              /login?firm={branding.signin_subdomain}
-            </a>
+        {/* Live availability + validation feedback under the input */}
+        {subStatus === "checking" && (
+          <p className="text-[11px] text-slate-500 mt-2">Checking availability…</p>
+        )}
+        {subStatus === "ok" && (
+          <p className="text-[11px] text-emerald-600 mt-2" data-testid="branding-subdomain-available">
+            ✓ Available — clients will sign in at{" "}
+            <span className="font-mono-num">{subdomain}.{labelRoot}</span>
           </p>
         )}
+        {subStatus && subStatus !== "ok" && subStatus !== "checking" && (
+          <p className="text-[11px] text-rose-600 mt-2" data-testid="branding-subdomain-error">{subStatus}</p>
+        )}
+        {branding?.signin_subdomain && (
+          <div className="text-[11px] text-slate-500 mt-2 space-y-1">
+            <div>
+              Live at:{" "}
+              <a
+                href={`https://${branding.signin_subdomain}.${labelRoot}/login`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-cyan-700 hover:underline font-mono-num"
+                data-testid="branding-subdomain-live-link"
+              >
+                {branding.signin_subdomain}.{labelRoot}
+              </a>
+            </div>
+            <div>
+              Preview here:{" "}
+              <a
+                href={`/login?firm=${branding.signin_subdomain}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-cyan-700 hover:underline font-mono-num"
+                data-testid="branding-subdomain-preview-link"
+              >
+                /login?firm={branding.signin_subdomain}
+              </a>
+            </div>
+          </div>
+        )}
         <p className="text-[11px] text-slate-400 mt-2">
-          1–32 chars, lowercase letters, digits, and hyphens. Must be unique across all firms.
+          3–40 chars, lowercase letters, digits, and hyphens. Must be unique across all firms.
         </p>
       </section>
 

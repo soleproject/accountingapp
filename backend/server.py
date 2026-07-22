@@ -44,7 +44,7 @@ from deps import (  # noqa: E402,F401
 )
 import plaid_service  # noqa: E402,F401 — tests monkeypatch srv.plaid_service
 
-app = FastAPI(title="Axiom Ledger API")
+app = FastAPI(title="SmartBooks API")
 
 for router in ALL_ROUTERS:
     app.include_router(router)
@@ -56,10 +56,24 @@ from role_guard import RoleWriteGuardMiddleware
 app.add_middleware(RoleWriteGuardMiddleware)
 
 # CORS
+# ------------------------------------------------------------------
+# CORS_ORIGINS       — comma-separated exact origins (platform host + any
+#                      one-off allow-list entries). Empty → falls back to "*".
+# CORS_ORIGIN_REGEX  — a single regex that matches acceptable origins. This
+#                      is REQUIRED to allow the wildcard private-label root
+#                      (e.g. any `https://<firm>.accountingapp.ai`) because
+#                      FastAPI's `allow_origins` does not do glob matching.
+# Example Railway settings:
+#   CORS_ORIGINS=https://app.smartbookssoftware.ai,https://accountingapp.ai
+#   CORS_ORIGIN_REGEX=^https://[a-z0-9-]+\.accountingapp\.ai$
+# ------------------------------------------------------------------
+_cors_origins_env = os.environ.get("CORS_ORIGINS", "*")
+_cors_origin_regex = os.environ.get("CORS_ORIGIN_REGEX")  # None means no regex match
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_origins=[o.strip() for o in _cors_origins_env.split(",") if o.strip()],
+    allow_origin_regex=_cors_origin_regex,
     allow_methods=["*"], allow_headers=["*"],
 )
 

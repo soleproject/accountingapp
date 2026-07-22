@@ -5,25 +5,11 @@ import { api } from "@/lib/api";
 import { TID } from "@/constants/testIds";
 import { Sparkles, Loader2 } from "lucide-react";
 
-// Resolve a firm subdomain from either `?firm=acme` (works everywhere) or
-// the hostname's leftmost label if it looks like `acme.<PRIVATE_LABEL_ROOT>`.
-// Anything on preview / localhost / bare root returns null.
-const PRIVATE_LABEL_ROOT = (process.env.REACT_APP_PRIVATE_LABEL_ROOT || "accountingapp.ai").toLowerCase();
-function detectFirmSubdomain() {
-  try {
-    const q = new URLSearchParams(window.location.search).get("firm");
-    if (q) return q.toLowerCase().trim();
-    const host = window.location.hostname;
-    if (host.endsWith(`.${PRIVATE_LABEL_ROOT}`)) {
-      const first = host.split(".")[0];
-      // Reserved labels (platform infra) never resolve to a firm.
-      if (first && !["www", "app", "api", "admin", "cdn", "assets"].includes(first)) {
-        return first;
-      }
-    }
-  } catch { /* fall through */ }
-  return null;
-}
+// Sign-in gate branding is now server-resolved via /api/branding/by-host,
+// which knows PRIVATE_LABEL_ROOT + PRIMARY_HOST. Frontend just passes the
+// current window.location.hostname and gets back {mode, firm_name?, logos?, …}.
+// A `?firm=acme` query param short-circuits to a direct firm lookup for
+// preview environments where the host doesn't match the real root.
 
 export default function Login() {
   const { login } = useAuth();
@@ -33,16 +19,36 @@ export default function Login() {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [forgotOpen, setForgotOpen] = useState(false);
-  // Firm-branded login. `null` = default Axiom look; otherwise the payload
-  // returned by `/api/branding/by-subdomain/:sub`.
+  // Sign-in gate brand mode. One of:
+  //   null      → still loading — show nothing to avoid flashing wrong brand
+  //   "platform"→ SmartBooks brand (default; `app.smartbookssoftware.ai`)
+  //   "neutral" → bare private-label root or unknown subdomain
+  //   "firm"    → a specific firm's white-label brand (logos + colors)
+  // When "firm", `firm` state holds { firm_name, logos, theme_preset, theme_custom }.
+  const [mode, setMode] = useState(null);
   const [firm, setFirm] = useState(null);
 
   useEffect(() => {
-    const sub = detectFirmSubdomain();
-    if (!sub) return;
-    api.get(`/branding/by-subdomain/${encodeURIComponent(sub)}`)
-      .then(r => setFirm(r.data))
-      .catch(() => setFirm(null));
+    // 1. `?firm=acme` explicit override wins — great for previews and dev
+    //    where the host doesn't match the real private-label root.
+    const q = new URLSearchParams(window.location.search).get("firm");
+    if (q) {
+      api.get(`/branding/by-subdomain/${encodeURIComponent(q.toLowerCase().trim())}`)
+        .then(r => { setFirm(r.data); setMode("firm"); })
+        .catch(() => setMode("platform"));  // unknown ?firm → platform brand
+      return;
+    }
+    // 2. Otherwise ask the backend to resolve the current host. The backend
+    //    knows PRIVATE_LABEL_ROOT + PRIMARY_HOST and returns one of
+    //    {platform, neutral, firm}. Doing this server-side means changing
+    //    the private-label root is an env-var flip, not a rebuild.
+    api.get(`/branding/by-host?host=${encodeURIComponent(window.location.hostname)}`)
+      .then(r => {
+        const m = r.data?.mode || "platform";
+        setMode(m);
+        if (m === "firm") setFirm(r.data);
+      })
+      .catch(() => setMode("platform"));
   }, []);
 
   const submit = async (e) => {
@@ -73,6 +79,10 @@ export default function Login() {
 
   return (
     <div className="min-h-screen w-full flex bg-[#F5F6F8]">
+      {/* Left marketing panel — only on the SmartBooks brand. Hidden when a
+          firm is white-labeling OR on the neutral private-label root, so
+          clients never see the platform's marketing copy. */}
+      {mode === "platform" && (
       <div className="hidden lg:flex flex-1 relative overflow-hidden bg-gradient-to-br from-slate-900 to-slate-800 text-white p-12">
         <div className="absolute inset-0 opacity-[0.04]" style={{
           backgroundImage: "radial-gradient(circle at 30% 20%, white 1px, transparent 1px)",
@@ -109,10 +119,12 @@ export default function Login() {
           <div className="text-xs text-slate-400">© SmartBooks, Inc.</div>
         </div>
       </div>
+      )}
 
       <div className="flex-1 flex items-center justify-center p-6">
         <form onSubmit={submit} className="w-full max-w-sm space-y-5">
-          {firm ? (
+          {/* Firm white-label header */}
+          {mode === "firm" && firm && (
             <div className="flex items-center gap-3 mb-6" data-testid="login-firm-branding">
               {(firm.logos?.logo_light || firm.logos?.icon_light) ? (
                 <img
@@ -127,10 +139,14 @@ export default function Login() {
               )}
               <div>
                 <div className="font-heading font-bold text-slate-900">{firm.firm_name}</div>
-                <div className="text-[11px] text-slate-500">Powered by SmartBooks</div>
+                {/* No "Powered by" — firm's clients get a fully white-labeled
+                    experience. Firms that want platform attribution can turn
+                    it on in Enterprise Settings (future flag). */}
               </div>
             </div>
-          ) : (
+          )}
+          {/* SmartBooks header on mobile (mirrors the left marketing panel) */}
+          {mode === "platform" && (
             <div className="lg:hidden flex items-center gap-2 mb-6">
               <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
                 <Sparkles size={16} className="text-white" />
@@ -138,6 +154,8 @@ export default function Login() {
               <div className="font-heading font-bold">SmartBooks</div>
             </div>
           )}
+          {/* Neutral (bare root or unknown subdomain) — deliberately empty:
+              no logo, no brand. Just the sign-in form. */}
           <div>
             <h2 className="font-heading text-3xl font-bold tracking-tight">Sign in</h2>
             <p className="text-sm text-slate-500 mt-1">Welcome back. Let's get to the numbers.</p>
