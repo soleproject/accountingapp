@@ -442,7 +442,7 @@ function Wrap({ children, wide }) {
       <div className={`${wide ? "max-w-2xl" : "max-w-xl"} mx-auto bg-white rounded-xl shadow-sm border p-6 sm:p-8`}>
         {children}
         <div className="mt-6 pt-4 border-t text-xs text-slate-400 text-center">
-          Axiom Ledger · <span className="font-mono-num">accountingapp.ai</span>
+          SmartBooks · <span className="font-mono-num">smartbookssoftware.ai</span>
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-"""Axiom Ledger — Superadmin routes.
+"""SmartBooks — Superadmin routes.
 
 Auto-extracted from server.py during the Feb 2026 modularization refactor.
 Behaviour is intentionally identical to the pre-split codebase.
@@ -71,7 +71,7 @@ async def admin_overview(user: dict = Depends(require_role("superadmin"))):
 
 class TestEmailIn(BaseModel):
     to: EmailStr
-    subject: Optional[str] = "Axiom Ledger — test email"
+    subject: Optional[str] = "SmartBooks — test email"
     html: Optional[str] = None
 
 
@@ -92,7 +92,7 @@ async def admin_test_email(
         <table role="presentation" width="520" cellpadding="0" cellspacing="0" border="0"
                style="background:#ffffff;border-radius:12px;padding:32px;border:1px solid #e2e8f0;">
           <tr><td style="font-size:22px;font-weight:600;color:#0f172a;padding-bottom:8px;">
-            Test email from Axiom Ledger
+            Test email from SmartBooks
           </td></tr>
           <tr><td style="font-size:14px;color:#475569;line-height:1.55;padding-bottom:24px;">
             Delivery pipeline is live. This message was sent by
@@ -108,7 +108,7 @@ async def admin_test_email(
     try:
         resp = await send_email(
             to=str(inp.to),
-            subject=inp.subject or "Axiom Ledger — test email",
+            subject=inp.subject or "SmartBooks — test email",
             html=inp.html or default_html,
         )
     except EmailError as e:

@@ -116,7 +116,7 @@ def _labels_for_email(*, role: str, count: int) -> tuple[str, str]:
     """Return (short role label, friendly description) used in the invite
     email body."""
     if role == "pro":
-        return ("Accounting professional", f"you'll have Pro-level access to {count} client{'' if count == 1 else 's'} in Axiom Ledger.")
+        return ("Accounting professional", f"you'll have Pro-level access to {count} client{'' if count == 1 else 's'} in SmartBooks.")
     if role == "superadmin":
         return ("Superadmin", "you'll have full platform-level access.")
     verbs = {"editor": "categorize, post journal entries, and reconcile",

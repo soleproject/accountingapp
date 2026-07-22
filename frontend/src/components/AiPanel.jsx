@@ -2320,7 +2320,7 @@ export default function AiPanel({ collapsed, onToggle }) {
           <Sparkles size={14} className="text-white" />
         </div>
         <div>
-          <div className="font-heading font-semibold text-sm">Axiom Assistant</div>
+          <div className="font-heading font-semibold text-sm">SmartBooks Assistant</div>
           <div className="text-[11px] text-slate-500">GAAP-aware bookkeeper</div>
         </div>
         <button

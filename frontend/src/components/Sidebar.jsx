@@ -103,12 +103,12 @@ export default function Sidebar({ collapsed, onToggle }) {
           />
         ) : (
           <>
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-900 text-white shrink-0">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-blue-600 text-white shrink-0">
               <Sparkles size={16} />
             </div>
             {!collapsed && (
               <div>
-                <div className="font-heading font-bold text-slate-900 leading-tight">Axiom</div>
+                <div className="font-heading font-bold text-slate-900 leading-tight">SmartBooks</div>
                 <div className="text-[10px] tracking-widest uppercase text-slate-500 leading-tight">Ledger</div>
               </div>
             )}

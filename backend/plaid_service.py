@@ -30,7 +30,7 @@ _config = plaid.Configuration(
 _client = plaid_api.PlaidApi(plaid.ApiClient(_config))
 
 
-def create_link_token(user_id: str, client_name: str = "Axiom Ledger", webhook_url: str | None = None,
+def create_link_token(user_id: str, client_name: str = "SmartBooks", webhook_url: str | None = None,
                       access_token_for_update: str | None = None) -> str:
     """Create a Plaid Link token. When `access_token_for_update` is provided,
     the token is generated in **update mode** for that existing Item — this

@@ -98,7 +98,7 @@ function InboxTab({ cid }) {
     if (!testTo.trim()) { toast.error("Enter an email address"); return; }
     setBusy(true);
     try {
-      const r = await api.post(`/admin/test-email`, { to: testTo, subject: "Test from Axiom Ledger" });
+      const r = await api.post(`/admin/test-email`, { to: testTo, subject: "Test from SmartBooks" });
       toast.success(`Sent — Resend id ${(r.data?.id || "").slice(0, 8)}…`);
       setTestTo("");
       setTimeout(load, 800);

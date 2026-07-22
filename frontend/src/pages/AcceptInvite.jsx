@@ -85,7 +85,7 @@ export default function AcceptInvite() {
               <UserPlus size={18} /> <span className="text-xs uppercase tracking-widest font-semibold">Invitation</span>
             </div>
             <h1 className="font-heading text-2xl font-semibold text-slate-900">
-              You're invited to Axiom Ledger
+              You're invited to SmartBooks
             </h1>
             <p className="text-sm text-slate-600 mt-2">
               <b>{preview.inviter_name}</b> invited <b>{preview.email}</b> to join as{" "}

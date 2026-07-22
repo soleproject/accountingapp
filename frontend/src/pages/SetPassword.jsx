@@ -55,7 +55,7 @@ export default function SetPassword() {
       const r = await axios.post(`${BASE}/api/auth/password-set/${token}`, { password });
       localStorage.setItem("token", r.data.token);
       localStorage.setItem("user", JSON.stringify(r.data.user));
-      toast.success("You're in! Welcome to Axiom Ledger.");
+      toast.success("You're in! Welcome to SmartBooks.");
       // Full reload so AuthProvider picks up the new token cleanly.
       window.location.replace("/");
     } catch (e) {

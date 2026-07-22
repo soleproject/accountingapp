@@ -22,7 +22,7 @@ _WRAP_OPEN = """
 _WRAP_CLOSE = """
     </table>
     <div style="max-width:560px;margin:16px auto 0;color:#94a3b8;font-size:11px;line-height:1.5;text-align:center;">
-      Sent by Axiom Ledger · <span style="font-family:monospace;">accountingapp.ai</span>
+      Sent by SmartBooks · <span style="font-family:monospace;">smartbookssoftware.ai</span>
     </div>
   </td></tr>
 </table>
@@ -67,7 +67,7 @@ def password_reset(*, name: str, magic_url: str) -> tuple[str, str]:
         password still works.
       </div>
     """
-    return "Reset your Axiom Ledger password", _wrap(inner)
+    return "Reset your SmartBooks password", _wrap(inner)
 
 
 # --------------------------------------------------------------------------
@@ -96,10 +96,10 @@ def team_invite(*, invitee_name: str, inviter_name: str,
         companies_html = ""
 
     inner = f"""
-      <div style="{_H1}">You've been invited to Axiom Ledger</div>
+      <div style="{_H1}">You've been invited to SmartBooks</div>
       <div style="{_P}">
         Hi {escape(invitee_name)},<br><br>
-        <b>{escape(inviter_name)}</b> invited you to join Axiom Ledger as an
+        <b>{escape(inviter_name)}</b> invited you to join SmartBooks as an
         <b>{escape(role_label)}</b> — {escape(role_description)}
       </div>
       {companies_html}
@@ -114,7 +114,7 @@ def team_invite(*, invitee_name: str, inviter_name: str,
         {escape(inviter_name)} to re-send it.
       </div>
     """
-    return f"You're invited to Axiom Ledger — {role_label}", _wrap(inner)
+    return f"You're invited to SmartBooks — {role_label}", _wrap(inner)
 
 
 # --------------------------------------------------------------------------
@@ -129,11 +129,11 @@ def client_welcome_first_time(*, client_name: str, pro_name: str,
                               set_password_url: str) -> tuple[str, str]:
     firm = firm_name or pro_name
     inner = f"""
-      <div style="{_H1}">Welcome to Axiom Ledger 👋</div>
+      <div style="{_H1}">Welcome to SmartBooks 👋</div>
       <div style="{_P}">
         Hi {escape(client_name)},<br><br>
         <b>{escape(pro_name)}</b> at {escape(firm)} just set up
-        <b>{escape(company_name)}</b>'s books here on Axiom Ledger — a modern,
+        <b>{escape(company_name)}</b>'s books here on SmartBooks — a modern,
         AI-assisted accounting platform.
       </div>
       <div style="{_P}">
@@ -151,7 +151,7 @@ def client_welcome_first_time(*, client_name: str, pro_name: str,
         re-send it.
       </div>
     """
-    return f"Welcome to Axiom Ledger — set your password", _wrap(inner)
+    return f"Welcome to SmartBooks — set your password", _wrap(inner)
 
 
 # --------------------------------------------------------------------------
@@ -174,7 +174,7 @@ def client_welcome_returning(*, client_name: str, pro_name: str,
       <div style="{_P}">
         Hi {escape(client_name)},<br><br>
         <b>{escape(pro_name)}</b> at {escape(firm)} just added
-        <b>{escape(company_name)}</b> to your existing Axiom Ledger account.
+        <b>{escape(company_name)}</b> to your existing SmartBooks account.
       </div>
       <div style="{_P}">{others}</div>
       <div style="padding:14px 0 6px;">
