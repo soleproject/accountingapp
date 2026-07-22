@@ -2321,7 +2321,7 @@ export default function AiPanel({ collapsed, onToggle }) {
         </div>
         <div>
           <div className="font-heading font-semibold text-sm">Axiom Assistant</div>
-          <div className="text-[11px] text-slate-500">Claude Sonnet 4.5 · GAAP-aware</div>
+          <div className="text-[11px] text-slate-500">GAAP-aware bookkeeper</div>
         </div>
         <button
           onClick={() => setVoiceOn(v => !v)}
