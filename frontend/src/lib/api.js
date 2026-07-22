@@ -7,7 +7,13 @@ export const api = axios.create({ baseURL: API });
 
 api.interceptors.request.use((cfg) => {
   const t = localStorage.getItem("axiom_token");
-  if (t) cfg.headers.Authorization = `Bearer ${t}`;
+  // Guard against the literal string "undefined" that can end up in
+  // localStorage if a prior login response was mis-shaped (setItem stores
+  // any non-string as a stringified value). Only send the header on a
+  // real JWT.
+  if (t && t !== "undefined" && t !== "null") {
+    cfg.headers.Authorization = `Bearer ${t}`;
+  }
   return cfg;
 });
 
