@@ -55,9 +55,22 @@ router = APIRouter(prefix="/api")
 
 @router.get("/companies")
 async def list_companies(user: dict = Depends(get_current_user)):
+    """Return every company the current user has access to, enriched with
+    the owner's name + email so the top-left switcher can group by owner
+    (helpful for Pros managing many client companies)."""
     ids = await company_ids_for_user(user)
     docs = await db.companies.find({"id": {"$in": ids}}).to_list(1000)
-    return {"companies": [coerce(d) for d in docs]}
+    # Batch-fetch owner users so we don't make one query per company.
+    owner_ids = list({d.get("owner_user_id") for d in docs if d.get("owner_user_id")})
+    owners = {u["id"]: u for u in await db.users.find({"id": {"$in": owner_ids}}).to_list(1000)}
+    enriched = []
+    for d in docs:
+        row = coerce(d)
+        owner = owners.get(d.get("owner_user_id"))
+        row["owner_name"] = (owner or {}).get("name")
+        row["owner_email"] = (owner or {}).get("email")
+        enriched.append(row)
+    return {"companies": enriched}
 
 
 @router.post("/companies")

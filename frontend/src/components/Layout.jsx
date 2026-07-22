@@ -5,7 +5,7 @@ import AiPanel from "./AiPanel";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
-import { ChevronDown, LogOut, MessageSquare, Settings2, User, KeyRound, Loader2, X } from "lucide-react";
+import { ChevronDown, LogOut, MessageSquare, Settings2, User, KeyRound, Loader2, X, Search } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { AiFocusProvider } from "@/lib/aiFocus";
 import { useActionListener } from "@/lib/createBus";
@@ -14,7 +14,54 @@ import { api } from "@/lib/api";
 function CompanySwitcher() {
   const { companies, current, switchCompany } = useCompany();
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const searchRef = useRef(null);
+
+  // Reset & auto-focus the search field every time the dropdown opens.
+  useEffect(() => {
+    if (open) {
+      setQuery("");
+      setTimeout(() => searchRef.current?.focus(), 40);
+    }
+  }, [open]);
+
   if (!companies?.length) return null;
+
+  // Filter first (search matches company name, business type, owner name
+  // or owner email — all searchable per the spec), then group by owner.
+  const q = query.trim().toLowerCase();
+  const filtered = companies.filter(c => {
+    if (!q) return true;
+    const hay = [c.name, c.business_type, c.owner_name, c.owner_email]
+      .filter(Boolean).join(" ").toLowerCase();
+    return hay.includes(q);
+  });
+
+  // Group into { ownerKey: {label, email, companies:[]} }. Owners with
+  // no name fall back to their email; owners with neither (edge case)
+  // land in a "Unassigned" bucket so nothing silently disappears.
+  const groups = new Map();
+  for (const c of filtered) {
+    const key = c.owner_email || c.owner_name || "__unassigned__";
+    if (!groups.has(key)) {
+      groups.set(key, {
+        label: c.owner_name || c.owner_email || "Unassigned",
+        email: c.owner_email || "",
+        companies: [],
+      });
+    }
+    groups.get(key).companies.push(c);
+  }
+  // Sort owner buckets so the current company's owner is first —
+  // more likely what you're switching within.
+  const orderedGroups = [...groups.entries()].sort(([a], [b]) => {
+    const isCurA = current?.owner_email === a || current?.owner_name === a;
+    const isCurB = current?.owner_email === b || current?.owner_name === b;
+    if (isCurA && !isCurB) return -1;
+    if (isCurB && !isCurA) return 1;
+    return groups.get(a).label.localeCompare(groups.get(b).label);
+  });
+
   return (
     <div className="relative">
       <button
@@ -26,18 +73,58 @@ function CompanySwitcher() {
         <ChevronDown size={14} className="text-slate-500" />
       </button>
       {open && (
-        <div className="absolute z-50 top-full mt-1 w-72 rounded-md border bg-white shadow-lg py-1">
-          {companies.map(c => (
-            <button
-              key={c.id}
-              data-testid={`${TID.companySwitcherOption}-${c.id}`}
-              onClick={() => { switchCompany(c.id); setOpen(false); }}
-              className="w-full text-left px-3 py-2 hover:bg-slate-50 text-sm"
-            >
-              <div className="font-medium">{c.name}</div>
-              <div className="text-[11px] text-slate-500">{c.business_type || "—"}</div>
-            </button>
-          ))}
+        <div
+          className="absolute z-50 top-full mt-1 w-80 rounded-md border bg-white shadow-lg py-1"
+          data-testid="company-switcher-dropdown"
+        >
+          <div className="px-2 pt-1 pb-2 border-b">
+            <div className="relative">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                ref={searchRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search company or owner…"
+                data-testid="company-switcher-search"
+                className="w-full text-xs border rounded px-7 py-1.5 focus:outline-none focus:border-cyan-400"
+              />
+            </div>
+          </div>
+          <div className="max-h-[420px] overflow-y-auto">
+            {orderedGroups.length === 0 && (
+              <div className="px-3 py-6 text-center text-xs text-slate-500" data-testid="company-switcher-empty">
+                No matches for “{query}”.
+              </div>
+            )}
+            {orderedGroups.map(([key, group]) => (
+              <div key={key} className="py-1" data-testid={`switcher-group-${key}`}>
+                <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-500 flex items-center gap-1.5">
+                  <User size={10} className="text-slate-400" />
+                  {group.label}
+                  {group.email && group.email !== group.label && (
+                    <span className="text-slate-400 font-normal normal-case tracking-normal truncate">· {group.email}</span>
+                  )}
+                </div>
+                {group.companies.map(c => {
+                  const active = current?.id === c.id;
+                  return (
+                    <button
+                      key={c.id}
+                      data-testid={`${TID.companySwitcherOption}-${c.id}`}
+                      onClick={() => { switchCompany(c.id); setOpen(false); }}
+                      className={`w-full text-left px-3 py-1.5 hover:bg-slate-50 text-sm flex items-center justify-between ${active ? "bg-cyan-50" : ""}`}
+                    >
+                      <div className="min-w-0">
+                        <div className={`font-medium truncate ${active ? "text-cyan-800" : "text-slate-900"}`}>{c.name}</div>
+                        <div className="text-[11px] text-slate-500 truncate">{c.business_type || "—"}</div>
+                      </div>
+                      {active && <div className="text-[10px] uppercase tracking-widest text-cyan-700 font-semibold ml-2 flex-shrink-0">Current</div>}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

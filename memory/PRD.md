@@ -39,6 +39,21 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Company switcher: grouped by owner + searchable
+- `GET /api/companies` now enriches every row with `owner_name` +
+  `owner_email` (single batched user lookup so it stays fast).
+- Top-left switcher redesigned:
+  * **Search input** auto-focuses on open — matches on company name,
+    business type, owner name, or owner email.
+  * **Owner groups** — companies bucketed under the owner's name +
+    email header. Current company's owner bubbles to the top; other
+    owners sorted alphabetically.
+  * **Active state** — current company gets a cyan tint + a "Current"
+    pill so you never accidentally switch away.
+  * **Empty state** when nothing matches the query.
+  * Scrollable at 420px so Pros with dozens of clients still get a
+    usable list.
+
 ### Feb 2026 — Team & permissions moved to its own page
 - Team-management UI removed from Company Settings; now lives at `/team`
   on the new `CompanyTeam.jsx` page (mirrors the `ProTeam` page pattern).
