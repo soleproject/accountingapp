@@ -39,6 +39,26 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Connect Accounts: reference-image table layout
+- Replaced the two-column card layout in `PlaidAccountsDropdown` with a
+  clean unified table matching the user's reference image:
+  * Columns: **Institution · Account · Scope · Last sync ·
+    Raw / Promoted · Mapping & promotion · Actions**.
+  * **Scope** = "In books" (emerald pill) or "Excluded" (slate pill).
+  * **Raw / Promoted** shows txn count over posted count (available
+    accounts always show `n / 0`).
+  * **Mapping & promotion** shows the GL account code + name the account
+    is linked to (or the AI-suggested target for excluded accounts).
+  * **Actions** — "Re-sync" for in-books, "Add to books" (emerald) for
+    excluded. "Add all to books" bulk button in the header for the
+    common case.
+- Backend `plaid_status` now returns `institution_name` + `last_sync_at`
+  so the table can render Institution and Last-Sync columns without an
+  extra round-trip.
+- Legacy `AccountRow` component kept in the file for any parent still
+  referencing it; new `AccountTableRow` renders the row markup for the
+  redesigned table.
+
 ### Feb 2026 — Company switcher: grouped by owner + searchable
 - `GET /api/companies` now enriches every row with `owner_name` +
   `owner_email` (single batched user lookup so it stays fast).

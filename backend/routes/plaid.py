@@ -349,6 +349,8 @@ async def plaid_list_accounts(cid: str, user: dict = Depends(get_current_user)):
     return {
         "linked": True,
         "item_id": item.get("item_id"),
+        "institution_name": item.get("institution_name") or item.get("institution_id") or "—",
+        "last_sync_at": item.get("last_sync_at"),
         "connected": connected,
         "available": available,
         "coverage": coverage,

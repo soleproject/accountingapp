@@ -441,6 +441,13 @@ function PlaidAccountsDropdown({ expanded, onToggle, status, loading, onRefresh,
   const total = (status.connected?.length || 0) + (status.available?.length || 0);
   const hasAvailable = (status.available?.length || 0) > 0;
 
+  // Table renders both flavours in a single flat list — SCOPE badge
+  // distinguishes IN BOOKS (connected) vs EXCLUDED (available-to-add).
+  const rows = [
+    ...(status.connected || []).map(a => ({ ...a, _connected: true })),
+    ...(status.available || []).map(a => ({ ...a, _connected: false })),
+  ];
+
   return (
     <div className="mt-3 border rounded-md" data-testid="plaid-accounts-dropdown">
       <div className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 rounded-md">
@@ -454,7 +461,7 @@ function PlaidAccountsDropdown({ expanded, onToggle, status, loading, onRefresh,
           <span className="text-sm font-medium">Linked accounts</span>
           <span className="text-[11px] text-slate-500">
             {status.linked
-              ? `${status.connected?.length || 0} connected · ${status.available?.length || 0} available`
+              ? `${status.connected?.length || 0} in books · ${status.available?.length || 0} excluded`
               : "No Plaid item linked yet"}
           </span>
         </button>
@@ -466,7 +473,7 @@ function PlaidAccountsDropdown({ expanded, onToggle, status, loading, onRefresh,
             data-testid="plaid-connect-all-btn"
             className="text-[11px] px-2 py-1 rounded-md bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50"
           >
-            Connect all
+            Add all to books
           </button>
         )}
         <button
@@ -480,54 +487,47 @@ function PlaidAccountsDropdown({ expanded, onToggle, status, loading, onRefresh,
       </div>
 
       {expanded && (
-        <div className="border-t px-3 py-3 space-y-4">
+        <div className="border-t">
           {!status.linked && total === 0 && (
-            <div className="text-xs text-slate-500 italic">
+            <div className="px-4 py-6 text-xs text-slate-500 italic">
               Launch Plaid Link above to connect a bank. Once linked, all accounts on the
               institution will appear here — the ones already pulling transactions and the ones
-              still available to activate.
+              still available to add.
             </div>
           )}
-
-          {status.connected?.length > 0 && (
-            <div data-testid="plaid-accounts-connected">
-              <div className="text-[10px] uppercase tracking-widest font-semibold text-emerald-700 mb-1.5 flex items-center gap-1">
-                <PlugZap size={11} /> Connected ({status.connected.length})
-              </div>
-              <div className="space-y-1.5">
-                {status.connected.map(a => (
-                  <AccountRow key={a.account_id} a={a} connected />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {status.available?.length > 0 && (
-            <div data-testid="plaid-accounts-available">
-              <div className="text-[10px] uppercase tracking-widest font-semibold text-slate-500 mb-1.5 flex items-center gap-1">
-                <CircleDashed size={11} /> Available — not yet syncing ({status.available.length})
-              </div>
-              <div className="space-y-1.5">
-                {status.available.map(a => (
-                  <AccountRow
-                    key={a.account_id}
-                    a={a}
-                    onConnect={() => onConnectOne(a.account_id, a.name)}
-                    connecting={connecting === a.account_id}
-                    anyConnecting={!!connecting}
-                  />
-                ))}
-              </div>
-              <div className="mt-2 text-[11px] text-slate-500">
-                Connecting will auto-map to the suggested ledger account, import full Plaid history
-                (skipping periods already covered by QBO), and post the opening balance from the
-                earliest transaction.
-              </div>
-            </div>
-          )}
-
           {status.linked && total === 0 && (
-            <div className="text-xs text-slate-500 italic">This Plaid item returned no accounts.</div>
+            <div className="px-4 py-6 text-xs text-slate-500 italic">This Plaid item returned no accounts.</div>
+          )}
+          {rows.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm" data-testid="plaid-accounts-table">
+                <thead>
+                  <tr className="bg-slate-50 text-[10px] uppercase tracking-widest text-slate-500 border-b">
+                    <th className="text-left px-3 py-2 font-semibold">Institution</th>
+                    <th className="text-left px-3 py-2 font-semibold">Account</th>
+                    <th className="text-left px-3 py-2 font-semibold">Scope</th>
+                    <th className="text-left px-3 py-2 font-semibold">Last sync</th>
+                    <th className="text-right px-3 py-2 font-semibold">Raw / Promoted</th>
+                    <th className="text-left px-3 py-2 font-semibold">Mapping &amp; promotion</th>
+                    <th className="text-right px-3 py-2 font-semibold"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {rows.map(a => (
+                    <AccountTableRow
+                      key={a.account_id}
+                      a={a}
+                      institution={status.institution_name || "—"}
+                      lastSyncAt={status.last_sync_at}
+                      onConnect={a._connected ? null : () => onConnectOne(a.account_id, a.name)}
+                      onResync={onRefresh}
+                      connecting={connecting === a.account_id}
+                      anyConnecting={!!connecting}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}
@@ -535,6 +535,81 @@ function PlaidAccountsDropdown({ expanded, onToggle, status, loading, onRefresh,
   );
 }
 
+function AccountTableRow({ a, institution, lastSyncAt, onConnect, onResync, connecting, anyConnecting }) {
+  const connected = !!a._connected;
+  const subtype = ((a.type || "").replace(/AccountType\('|'\)/g, "") + " / " +
+                   (a.subtype || "").replace(/AccountSubtype\('|'\)/g, "")).replace(/_/g, " ").trim();
+  const mappingLabel = connected
+    ? (a.ledger_account_code ? `${a.ledger_account_code} · ${a.ledger_account_name}` : "—")
+    : (a.suggested_ledger_code ? `→ ${a.suggested_ledger_code} · ${a.suggested_ledger_name}` : "—");
+  const raw = a.transaction_count ?? 0;
+  const promoted = connected ? raw : 0;   // Available accounts have 0 promoted by definition.
+  return (
+    <tr
+      className={connected ? "hover:bg-slate-50/50" : "bg-slate-50/30 hover:bg-slate-50/60"}
+      data-testid={`plaid-row-${connected ? "connected" : "available"}-${a.account_id}`}
+    >
+      <td className="px-3 py-2.5 text-slate-700 whitespace-nowrap">{institution}</td>
+      <td className="px-3 py-2.5">
+        <div className="font-medium text-slate-900 truncate">
+          {a.name}
+          {a.mask && <span className="text-slate-400 ml-1 font-mono-num">···{a.mask}</span>}
+        </div>
+        <div className="text-[11px] text-slate-500">{subtype}</div>
+      </td>
+      <td className="px-3 py-2.5">
+        {connected ? (
+          <span className="inline-block text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 uppercase tracking-widest">In books</span>
+        ) : (
+          <span className="inline-block text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-200 text-slate-700 uppercase tracking-widest">Excluded</span>
+        )}
+      </td>
+      <td className="px-3 py-2.5 text-slate-600 font-mono-num text-[11px] whitespace-nowrap">
+        {connected
+          ? (a.last_transaction_date || (lastSyncAt ? new Date(lastSyncAt).toLocaleString() : "idle"))
+          : "—"}
+      </td>
+      <td className="px-3 py-2.5 text-right font-mono-num text-slate-700 whitespace-nowrap">
+        {raw.toLocaleString()} / {promoted.toLocaleString()}
+      </td>
+      <td className="px-3 py-2.5">
+        <div className={`text-[11px] font-mono-num truncate max-w-[240px] ${connected ? "text-slate-700" : "text-slate-500"}`}>
+          {mappingLabel}
+        </div>
+        {connected && a.opening_balance != null && (
+          <div className="text-[10px] text-slate-400 font-mono-num">
+            opening ${Number(a.opening_balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {a.opening_as_of ? ` · ${a.opening_as_of}` : ""}
+          </div>
+        )}
+      </td>
+      <td className="px-3 py-2.5 text-right whitespace-nowrap">
+        {connected ? (
+          <button
+            type="button"
+            onClick={onResync}
+            data-testid={`plaid-row-resync-${a.account_id}`}
+            className="text-[11px] px-2.5 py-1 rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
+          >
+            Re-sync
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onConnect}
+            disabled={connecting || anyConnecting}
+            data-testid={`plaid-row-add-${a.account_id}`}
+            className="text-[11px] px-2.5 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 inline-flex items-center gap-1"
+          >
+            {connecting ? <><Loader2 size={10} className="animate-spin" /> Adding…</> : "Add to books"}
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+// Legacy card row — kept for backward-compat if any parent still uses it.
 function AccountRow({ a, connected = false, onConnect, connecting = false, anyConnecting = false }) {
   const ledgerBadge = connected
     ? (a.ledger_account_code ? `${a.ledger_account_code} ${a.ledger_account_name}` : null)
