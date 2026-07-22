@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import PlaidLinkButton from "@/components/PlaidLinkButton";
@@ -10,6 +11,10 @@ import { Link2, CheckCircle2, ChevronDown, ChevronRight, PlugZap, CircleDashed, 
 
 export default function Connections() {
   const { currentId } = useCompany();
+  const [searchParams] = useSearchParams();
+  // Allow the voice-command router (and any deep-link email) to jump
+  // straight to a specific tab via ``?tab=statements`` or ``?tab=plaid``.
+  const initialTab = searchParams.get("tab") === "statements" ? "statements" : "plaid";
   const [accounts, setAccounts] = useState([]);
   const [busy, setBusy] = useState(false);
   const [imported, setImported] = useState(0);
@@ -146,7 +151,7 @@ export default function Connections() {
         </p>
       </div>
 
-      <Tabs defaultValue="plaid" className="space-y-4">
+      <Tabs defaultValue={initialTab} className="space-y-4">
         <TabsList className="h-10 bg-slate-100 p-1 rounded-lg">
           <TabsTrigger value="plaid" data-testid="connections-tab-plaid"
             className="data-[state=active]:bg-white data-[state=active]:shadow-sm px-4 py-1.5 rounded-md text-sm">

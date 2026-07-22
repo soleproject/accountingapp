@@ -39,6 +39,18 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — AI Axiom: knows about bank-statement upload
+- System prompt (`ai_service.py`) now enumerates every major page + a
+  "PAGES & FEATURES" section, with an explicit callout that
+  `/connections → Load account statements` accepts PDF uploads via
+  Veryfi OCR. Axiom no longer says "you can't upload statements —
+  connect via Plaid instead"; it now says YES and navigates.
+- `voiceCommands.js` — new nav intents:
+  * `upload / import / add / load statements` → `/connections?tab=statements`
+  * `where / how do I upload statements` → same
+- `Connections.jsx` — reads `?tab=` from URL and opens the matching tab
+  on mount, so voice-nav and deep-links land on the right surface.
+
 ### Feb 2026 — Connect Accounts: reference-image table layout
 - Replaced the two-column card layout in `PlaidAccountsDropdown` with a
   clean unified table matching the user's reference image:

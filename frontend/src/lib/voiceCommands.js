@@ -28,6 +28,8 @@ function NAV(inner) {
 
 const NAV_ROUTES = [
   // Specific patterns FIRST — the resolver returns on first match.
+  { pat: /\b(?:upload|import|add|load)\s+(?:a\s+|bank\s+|credit[\s-]?card\s+)?(?:bank\s+)?statements?\b/i, url: "/connections?tab=statements", say: "Opening Load account statements" },
+  { pat: /\b(?:where\s+(?:do|can)\s+i|how\s+(?:do|can)\s+i)\s+upload\s+(?:a\s+)?(?:bank\s+)?statements?\b/i, url: "/connections?tab=statements", say: "Opening Load account statements" },
   { pat: /\b(?:show (?:me )?)?(?:flagged|for review|needs? review) transactions?\b/i,         url: "/accounting/transactions?filter=review", say: "Showing flagged transactions" },
   { pat: /\b(?:show (?:me )?)?overdue invoices?\b/i,                                          url: "/invoices?filter=overdue",      say: "Showing overdue invoices" },
   { pat: /\b(?:show (?:me )?)?overdue bills?\b/i,                                             url: "/bills?filter=overdue",         say: "Showing overdue bills" },
