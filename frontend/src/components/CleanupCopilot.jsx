@@ -707,9 +707,6 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                     </button>
                   )}
                 </div>
-                <div className="text-xs text-slate-500 mb-2">
-                  Total volume: ${selectedAmount.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2})}. Each row is one <span className="font-medium">vendor × category</span> bucket — vendors split across multiple accounts appear here as separate rows so you can approve, exclude, or override each independently.
-                </div>
                 <div className="mb-2">
                   <input
                     data-testid="mega-vendor-search"
