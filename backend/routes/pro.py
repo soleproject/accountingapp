@@ -322,6 +322,10 @@ def _logos_from(b: dict) -> dict:
 def _branding_out(user_doc: dict) -> dict:
     b = (user_doc or {}).get("branding") or {}
     return {
+        # The firm's display name — falls back to the user's own name so
+        # newly-signed-up pros get something sensible in the tab title / UI
+        # before they've set Enterprise Settings explicitly.
+        "firm_name": b.get("firm_name") or (user_doc or {}).get("name") or None,
         "logos": _logos_from(b),
         # Preserved for backwards-compat with older frontend builds; new
         # clients should read `logos.logo_light` instead.

@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { CompanyProvider } from "@/lib/company";
 import { BrandingProvider } from "@/lib/branding";
+import { useHostTitle } from "@/lib/useHostTitle";
 import Layout from "@/components/Layout";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
@@ -44,12 +45,18 @@ function Protected({ children }) {
   return children;
 }
 
+// Sits inside BrandingProvider so the hook can read the signed-in user's
+// firm branding. Renders nothing — its only job is to keep document.title
+// in sync with the current host + logged-in firm.
+function HostTitle() { useHostTitle(); return null; }
+
 function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
         <CompanyProvider>
           <BrandingProvider>
+            <HostTitle />
             <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/set-password/:token" element={<SetPassword />} />
