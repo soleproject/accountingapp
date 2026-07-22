@@ -39,6 +39,35 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Post-accept team management (grant/revoke/remove)
+- Four new endpoints to edit teams after invites have been accepted:
+  * `PUT /api/pro/staff/{user_id}/access` — reset a firm-staff member's
+    client access to exactly the picked list (diffs against current,
+    adds missing / removes stale). Scoped to companies the current Pro
+    manages; can't touch memberships elsewhere.
+  * `DELETE /api/pro/staff/{user_id}` — remove a staff member from every
+    one of the current Pro's clients in one action. User account stays;
+    memberships on other Pros' clients are untouched.
+  * `PATCH /api/companies/{cid}/team/{user_id}` — change a company
+    teammate's role (editor ↔ reviewer ↔ viewer). Refuses to re-role
+    owners or Pros.
+  * `DELETE /api/companies/{cid}/team/{user_id}` — remove a teammate
+    from a single company. Owner/Pro memberships are structural and
+    can't be removed here.
+- Frontend `TeamPanel.jsx` — every member row now has an expand chevron.
+  When expanded:
+    * Pro mode: full checkbox picker of the Pro's 9 clients with
+      Select-all / Clear quick actions, "Remove from firm" (rose) +
+      "Save changes" (cyan, dirty-tracked).
+    * Company mode: role pill toggle + "Remove from company" +
+      "Save changes".
+  Owner/Pro rows show the expand chevron but hide the destructive
+  buttons — they're read-only in this UI to prevent accidental damage.
+- End-to-end curl-verified: idempotent PUT (no-op when list matches),
+  cross-firm cid rejected with 403, missing member returns 404, delete
+  of non-existent user returns `removed: 0`. UI screenshot confirms
+  expandable rows with client picker + save/remove buttons render.
+
 ### Feb 2026 — Role-based write-guard enforcement (Feature #3 finish)
 - New middleware `/app/backend/role_guard.py` (`RoleWriteGuardMiddleware`)
   enforces the 4-tier permission model at the HTTP layer for every

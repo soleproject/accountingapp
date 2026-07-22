@@ -333,6 +333,142 @@ async def revoke_invite(invite_id: str, user: dict = Depends(get_current_user)):
 
 
 # ==========================================================================
+# Membership-management (post-accept team edits)
+# ==========================================================================
+
+class StaffAccessIn(BaseModel):
+    """New complete list of client company IDs the staff member should
+    have access to. Diffed against current — memberships are added or
+    removed to match exactly."""
+    company_ids: list[str]
+
+
+@router.put("/pro/staff/{user_id}/access")
+async def update_pro_staff_access(
+    user_id: str, inp: StaffAccessIn,
+    user: dict = Depends(require_role("pro", "superadmin")),
+):
+    """Reset a firm-staff member's access to exactly the listed companies
+    (which must all be companies the CURRENT Pro manages). Adds any
+    missing ``pro`` memberships and removes any that are no longer in the
+    list. Never touches memberships on companies the current Pro does not
+    manage — a staff member's access via a different Pro stays intact."""
+    if user["role"] == "pro":
+        my = await db.memberships.find(
+            {"user_id": user["id"], "role": "pro"},
+        ).to_list(1000)
+        allowed = {m["company_id"] for m in my}
+    else:
+        allowed = None   # superadmin — no restriction
+
+    picked = set(inp.company_ids)
+    if allowed is not None and not picked.issubset(allowed):
+        raise HTTPException(403, "You can only grant access to your own client companies.")
+
+    # Current memberships (constrained to the current Pro's client set).
+    existing = await db.memberships.find({
+        "user_id": user_id, "role": "pro",
+        **({"company_id": {"$in": list(allowed)}} if allowed is not None else {}),
+    }).to_list(1000)
+    existing_ids = {m["company_id"] for m in existing}
+
+    to_add = picked - existing_ids
+    to_remove = existing_ids - picked
+
+    now = now_iso()
+    if to_add:
+        await db.memberships.insert_many([
+            {
+                "id": str(uuid.uuid4()),
+                "user_id": user_id, "company_id": cid, "role": "pro",
+                "created_at": now, "granted_by": user["id"],
+            }
+            for cid in to_add
+        ])
+    if to_remove:
+        await db.memberships.delete_many({
+            "user_id": user_id, "role": "pro",
+            "company_id": {"$in": list(to_remove)},
+        })
+
+    return {"added": list(to_add), "removed": list(to_remove), "total": len(picked)}
+
+
+@router.delete("/pro/staff/{user_id}")
+async def remove_pro_staff(
+    user_id: str, user: dict = Depends(require_role("pro", "superadmin")),
+):
+    """Revoke ALL of a staff member's ``pro`` memberships on the current
+    Pro's clients. The user account itself is NOT deleted — they may
+    still have memberships on other Pros' clients, or a login unrelated
+    to this firm. This is effectively "archive from my firm"."""
+    if user["role"] == "pro":
+        my = await db.memberships.find(
+            {"user_id": user["id"], "role": "pro"},
+        ).to_list(1000)
+        my_cids = [m["company_id"] for m in my]
+        result = await db.memberships.delete_many({
+            "user_id": user_id, "role": "pro",
+            "company_id": {"$in": my_cids},
+        })
+    else:
+        # Superadmin can nuke all pro memberships for this user.
+        result = await db.memberships.delete_many({
+            "user_id": user_id, "role": "pro",
+        })
+    return {"removed": result.deleted_count}
+
+
+class CompanyMemberPatch(BaseModel):
+    role: Literal["editor", "reviewer", "viewer"]
+
+
+@router.patch("/companies/{cid}/team/{user_id}")
+async def update_company_member_role(
+    cid: str, user_id: str, inp: CompanyMemberPatch,
+    user: dict = Depends(get_current_user),
+):
+    """Change a company teammate's role (editor/reviewer/viewer).
+    Owners on the company cannot be re-roled here — that requires
+    ownership transfer, which isn't in scope for this feature."""
+    m = await db.memberships.find_one({"user_id": user_id, "company_id": cid})
+    if not m:
+        raise HTTPException(404, "Member not found on this company.")
+    if m["role"] in {"owner", "pro"}:
+        raise HTTPException(400, "Owner and Pro memberships can't be re-roled here.")
+
+    my = await db.memberships.find_one({"user_id": user["id"], "company_id": cid})
+    if user["role"] != "superadmin" and (my or {}).get("role") not in {"owner", "pro"}:
+        raise HTTPException(403, "Only owners or Pros can change teammate roles.")
+
+    await db.memberships.update_one(
+        {"id": m["id"]},
+        {"$set": {"role": inp.role, "updated_at": now_iso()}},
+    )
+    return {"user_id": user_id, "role": inp.role}
+
+
+@router.delete("/companies/{cid}/team/{user_id}")
+async def remove_company_member(
+    cid: str, user_id: str, user: dict = Depends(get_current_user),
+):
+    """Remove a teammate (editor/reviewer/viewer) from a specific
+    company. Owner and Pro memberships cannot be removed here."""
+    m = await db.memberships.find_one({"user_id": user_id, "company_id": cid})
+    if not m:
+        raise HTTPException(404, "Member not found on this company.")
+    if m["role"] in {"owner", "pro"}:
+        raise HTTPException(400, "Owner and Pro memberships can't be removed here.")
+
+    my = await db.memberships.find_one({"user_id": user["id"], "company_id": cid})
+    if user["role"] != "superadmin" and (my or {}).get("role") not in {"owner", "pro"}:
+        raise HTTPException(403, "Only owners or Pros can remove teammates.")
+
+    await db.memberships.delete_one({"id": m["id"]})
+    return {"ok": True}
+
+
+# ==========================================================================
 # Endpoints — PUBLIC accept (magic-link)
 # ==========================================================================
 

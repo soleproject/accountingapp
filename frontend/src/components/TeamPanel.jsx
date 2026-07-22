@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { UserPlus, Loader2, X, Trash2, Users, MailCheck, ShieldCheck } from "lucide-react";
+import { UserPlus, Loader2, X, Trash2, Users, MailCheck, ShieldCheck, ChevronDown, ChevronRight, Save } from "lucide-react";
 
 const COMPANY_ROLE_OPTIONS = [
   { value: "editor",   label: "Editor",   hint: "Post JEs, categorize, reconcile" },
@@ -92,18 +92,14 @@ export default function TeamPanel({ mode, companyId, availableCompanies = [] }) 
           <SectionHeading label="Active members" count={team.members?.length || 0} />
           <div className="rounded-xl border bg-white divide-y" data-testid={`team-members-${mode}`}>
             {(team.members || []).map((m) => (
-              <div key={`${m.user_id}-${(m.role || "").toString()}`} className="flex items-center justify-between p-3 text-sm">
-                <div>
-                  <div className="font-medium text-slate-900">{m.name || m.email}</div>
-                  <div className="text-xs text-slate-500">{m.email}</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {mode === "pro" && m.company_ids?.length > 0 && (
-                    <span className="text-xs text-slate-500">{m.company_ids.length} clients</span>
-                  )}
-                  <RoleBadge role={m.role || "pro"} />
-                </div>
-              </div>
+              <MemberRow
+                key={`${m.user_id}-${(m.role || "").toString()}`}
+                member={m}
+                mode={mode}
+                companyId={companyId}
+                availableCompanies={availableCompanies}
+                onChanged={load}
+              />
             ))}
             {!team.members?.length && !loading && (
               <div className="p-6 text-center text-sm text-slate-500">
@@ -148,6 +144,166 @@ export default function TeamPanel({ mode, companyId, availableCompanies = [] }) 
     </div>
   );
 }
+
+function MemberRow({ member, mode, companyId, availableCompanies, onChanged }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [pickedCids, setPickedCids] = useState(member.company_ids || []);
+  const [role, setRole] = useState(member.role || "editor");
+
+  const dirty =
+    mode === "pro"
+      ? JSON.stringify([...pickedCids].sort()) !== JSON.stringify([...(member.company_ids || [])].sort())
+      : role !== member.role;
+
+  const saveAccess = async () => {
+    setBusy(true);
+    try {
+      await api.put(`/pro/staff/${member.user_id}/access`, { company_ids: pickedCids });
+      toast.success(`${member.name || member.email}'s access updated.`);
+      onChanged();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't save");
+    } finally { setBusy(false); }
+  };
+
+  const saveRole = async () => {
+    setBusy(true);
+    try {
+      await api.patch(`/companies/${companyId}/team/${member.user_id}`, { role });
+      toast.success(`Role updated to ${role}.`);
+      onChanged();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't save");
+    } finally { setBusy(false); }
+  };
+
+  const remove = async () => {
+    const who = member.name || member.email;
+    const msg = mode === "pro"
+      ? `Remove ${who} from your firm? They'll lose access to every client. This does not delete their account.`
+      : `Remove ${who} from this company?`;
+    if (!window.confirm(msg)) return;
+    setBusy(true);
+    try {
+      if (mode === "pro") {
+        await api.delete(`/pro/staff/${member.user_id}`);
+      } else {
+        await api.delete(`/companies/${companyId}/team/${member.user_id}`);
+      }
+      toast.success(`${who} removed.`);
+      onChanged();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't remove");
+    } finally { setBusy(false); }
+  };
+
+  // Owner/Pro roles on a company are structural — no re-role, no removal.
+  const structural = ["owner", "pro"].includes(member.role);
+
+  return (
+    <div data-testid={`team-member-${member.user_id}`}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between p-3 text-sm text-left hover:bg-slate-50"
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          {open ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
+          <div className="min-w-0">
+            <div className="font-medium text-slate-900 truncate">{member.name || member.email}</div>
+            <div className="text-xs text-slate-500 truncate">{member.email}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {mode === "pro" && member.company_ids?.length > 0 && (
+            <span className="text-xs text-slate-500">{member.company_ids.length} clients</span>
+          )}
+          <RoleBadge role={member.role || "pro"} />
+        </div>
+      </button>
+
+      {open && (
+        <div className="p-4 pt-2 border-t bg-slate-50/50 space-y-3" data-testid={`team-member-expand-${member.user_id}`}>
+          {mode === "pro" && (
+            <div>
+              <div className="text-xs font-semibold text-slate-700 mb-1">
+                Client access <span className="font-normal text-slate-500">({pickedCids.length} of {availableCompanies.length})</span>
+              </div>
+              <div className="rounded-md border bg-white max-h-52 overflow-y-auto">
+                {availableCompanies.length === 0 && (
+                  <div className="p-3 text-xs text-slate-500 text-center">No clients on file.</div>
+                )}
+                {availableCompanies.map(c => (
+                  <label key={c.id} className="flex items-center gap-2 p-2 text-sm hover:bg-slate-50 cursor-pointer border-b last:border-b-0">
+                    <input
+                      type="checkbox"
+                      checked={pickedCids.includes(c.id)}
+                      onChange={(e) => setPickedCids(prev => e.target.checked ? [...prev, c.id] : prev.filter(x => x !== c.id))}
+                      data-testid={`team-member-client-${member.user_id}-${c.id}`}
+                    />
+                    <span className="flex-1">{c.name}</span>
+                    <span className="text-xs text-slate-400">{c.business_type || ""}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-2">
+                <button
+                  onClick={() => setPickedCids(availableCompanies.map(c => c.id))}
+                  className="text-cyan-700 hover:underline"
+                >Select all</button>
+                <button
+                  onClick={() => setPickedCids([])}
+                  className="text-slate-500 hover:underline"
+                >Clear</button>
+              </div>
+            </div>
+          )}
+
+          {mode === "company" && !structural && (
+            <div>
+              <div className="text-xs font-semibold text-slate-700 mb-1">Role</div>
+              <div className="flex items-center gap-1 rounded-md border bg-white p-0.5 w-fit">
+                {["editor", "reviewer", "viewer"].map(r => (
+                  <button
+                    key={r}
+                    onClick={() => setRole(r)}
+                    data-testid={`team-member-role-${member.user_id}-${r}`}
+                    className={`px-2.5 py-1 text-xs rounded capitalize transition
+                      ${role === r ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+                  >{r}</button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-2 pt-1">
+            {!structural && (
+              <button
+                onClick={remove}
+                disabled={busy}
+                data-testid={`team-member-remove-${member.user_id}`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+              >
+                <Trash2 size={12} /> {mode === "pro" ? "Remove from firm" : "Remove from company"}
+              </button>
+            )}
+            {structural && <div />}
+            <button
+              onClick={mode === "pro" ? saveAccess : saveRole}
+              disabled={busy || !dirty || structural}
+              data-testid={`team-member-save-${member.user_id}`}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs rounded-md bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-40"
+            >
+              {busy ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+              Save changes
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 function SectionHeading({ label, count }) {
   return (
