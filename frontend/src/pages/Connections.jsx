@@ -165,21 +165,7 @@ export default function Connections() {
             <div className="flex items-center gap-2">
               <Link2 size={16} className="text-cyan-600" />
               <h3 className="font-heading font-semibold">Plaid — Bank &amp; Card Feeds</h3>
-          {status.linked && (
-            <PlaidBackfillButton companyId={currentId} onDone={loadStatus} />
-          )}
-          <button data-testid="plaid-manual-sync-btn" onClick={manualSync} disabled={syncing}
-                  className="ml-auto text-xs px-3 py-1 rounded-md border border-slate-300 hover:bg-slate-50 disabled:opacity-50">
-            {syncing ? "Syncing…" : "Manual Sync (webhook fallback)"}
-          </button>
-          {status.linked && (
-            <button data-testid="plaid-reset-resync-btn" onClick={resetResync} disabled={syncing || (activeJob && activeJob.status !== "completed" && activeJob.status !== "failed")}
-                    className="text-xs px-3 py-1 rounded-md border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-50"
-                    title="Nulls the stored cursor and re-pulls Plaid's entire 730-day history. Use when only ~30 days imported at connect time.">
-              Re-sync full history
-            </button>
-          )}
-        </div>
+            </div>
 
         {activeJob && activeJob.status !== "completed" && activeJob.status !== "failed" && (
           <div data-testid="plaid-active-job"
