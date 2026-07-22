@@ -108,7 +108,13 @@ async def dispatch(
     related: Optional[dict] = None,
 ) -> dict:
     """Send an email of a given `kind` on behalf of `initiating_user_id` and
-    write one row to the audit log. Never raises."""
+    write one row to the audit log. Never raises.
+
+    When `initiating_user_id` is a pro with a firm_name set in their
+    branding, the outbound email uses the firm's white-label sender
+    (`{firm} <no-reply@accountingapp.ai>`). This keeps clients' inboxes
+    free of "SmartBooks" branding when they signed up under a firm.
+    """
     if kind not in DEFAULT_PREFS:
         # Unknown kinds are a coding bug, but we still audit-log the attempt
         # rather than swallow silently.
@@ -123,6 +129,7 @@ async def dispatch(
     # Check pref — but only if we know who's initiating the send. System-
     # level flows (e.g. daily cron) may pass None; skip the pref check in
     # that case since there's no user to have opted out.
+    firm_name: Optional[str] = None
     if initiating_user_id:
         prefs = await get_prefs(initiating_user_id)
         if not prefs.get(kind, True):
@@ -133,9 +140,17 @@ async def dispatch(
                 "contact_id": contact_id, "related": related or {},
             })
             return {"status": "skipped_pref_off", "id": log_id}
+        # Look up the initiator's firm branding once — used to pick the
+        # firm-white-label From address in send_email.
+        u = await db.users.find_one({"id": initiating_user_id})
+        if u and (u.get("branding") or {}).get("firm_name"):
+            firm_name = u["branding"]["firm_name"]
 
     try:
-        resp = await send_email(to=to, subject=subject, html=html, text=text, reply_to=reply_to)
+        resp = await send_email(
+            to=to, subject=subject, html=html, text=text, reply_to=reply_to,
+            firm_name=firm_name,
+        )
     except EmailError as e:
         log_id = await _log({
             "kind": kind, "to": to, "subject": subject,
