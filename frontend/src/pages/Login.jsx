@@ -48,7 +48,12 @@ export default function Login() {
       const u = await login(email, password);
       nav(u.role === "superadmin" ? "/admin" : u.role === "pro" ? "/pro/clients" : "/dashboard");
     } catch (e) {
-      setErr(e.response?.data?.detail || "Login failed");
+      setErr(
+        // 429 lockout returns `detail: {message, retry_after_seconds}` — surface the human copy.
+        e.response?.data?.detail?.message
+        || (typeof e.response?.data?.detail === "string" ? e.response.data.detail : null)
+        || "Login failed",
+      );
     } finally { setBusy(false); }
   };
 

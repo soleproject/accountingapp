@@ -39,6 +39,24 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Login rate-limit (credential-stuffing defence)
+- `/api/auth/login` — max **5 failed attempts per email per 10-minute
+  sliding window**. On lockout, endpoint returns a real **HTTP 429** with
+  a friendly `{message, retry_after_seconds}` body — unlike the
+  forgot-password anti-enumeration silent-block, here we want the user
+  to KNOW they're locked out (attackers already know, and legit users
+  otherwise blame the app).
+- Only FAILED attempts are recorded. A successful login **clears** the
+  user's failure records so a lockout auto-releases the moment they
+  remember their password.
+- Reuses the same `auth_rate_limits` Mongo collection with a new
+  `action: "login_fail"` discriminator.
+- Frontend Login page now unpacks the structured 429 payload (`detail.message`)
+  and shows the friendly copy in the red error banner.
+- Verified: 5×401 followed by 6th attempt with CORRECT password returned
+  429 with the lockout message; after clearing records, login works
+  again immediately.
+
 ### Feb 2026 — Forgot-password (public self-service reset)
 - New public endpoint `POST /api/auth/forgot-password` — anti-enumeration:
   returns 200 for every request regardless of whether the email is

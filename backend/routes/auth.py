@@ -51,13 +51,67 @@ from deps import (
 router = APIRouter(prefix="/api")
 
 
+# --- Login rate-limit (credential-stuffing defence) ----------------------
+# Only FAILED attempts count. On lockout we surface a real 429 with a
+# retry-after hint — unlike forgot-password, letting the user know
+# they're locked out is helpful (they might otherwise assume the site is
+# broken). Attackers already know they're being throttled.
+_LOGIN_LIMIT_WINDOW_SECONDS = 10 * 60
+_LOGIN_LIMIT_MAX_FAILURES = 5
+
+
+async def _login_failures_recent(email: str) -> int:
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=_LOGIN_LIMIT_WINDOW_SECONDS)).isoformat()
+    return await db.auth_rate_limits.count_documents({
+        "action": "login_fail", "email": email, "ts": {"$gte": cutoff},
+    })
+
+
+async def _record_login_failure(email: str) -> None:
+    await db.auth_rate_limits.insert_one({
+        "action": "login_fail", "email": email,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+async def _clear_login_failures(email: str) -> None:
+    await db.auth_rate_limits.delete_many({"action": "login_fail", "email": email})
+
+
 # ----------------------- Auth endpoints -----------------------
 
 @router.post("/auth/login")
 async def login(inp: LoginIn):
-    u = await db.users.find_one({"email": inp.email.lower()})
+    email = inp.email.lower()
+
+    # Locked-out branch. Surface the wait time (in minutes, rounded up)
+    # so the user knows what's going on. The window is a sliding count,
+    # so "retry in ~N minutes" is an upper bound — the real unlock
+    # happens as older failure records age out one-by-one.
+    if await _login_failures_recent(email) >= _LOGIN_LIMIT_MAX_FAILURES:
+        raise HTTPException(
+            429,
+            detail={
+                "message": (
+                    f"Too many failed sign-in attempts. Please wait up to "
+                    f"{_LOGIN_LIMIT_WINDOW_SECONDS // 60} minutes and try again, "
+                    "or use Forgot password if you're stuck."
+                ),
+                "retry_after_seconds": _LOGIN_LIMIT_WINDOW_SECONDS,
+            },
+        )
+
+    u = await db.users.find_one({"email": email})
     if not u or not verify_password(inp.password, u["password"]):
+        # Only failed attempts are recorded — a legit user who logs in
+        # cleanly never adds to their own count.
+        await _record_login_failure(email)
         raise HTTPException(401, "Invalid credentials")
+
+    # Clean slate on successful login so a locked-out user who
+    # eventually remembers their password isn't stuck.
+    await _clear_login_failures(email)
+
     token = create_token(u["id"], u["role"])
     return {"token": token, "user": {"id": u["id"], "email": u["email"],
             "name": u["name"], "role": u["role"]}}
