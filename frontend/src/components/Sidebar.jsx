@@ -24,6 +24,7 @@ const NAV = [
   { to: "/communications", label: "Communications", icon: Inbox },
   { to: "/accounting/transactions", label: "Transactions", icon: ArrowLeftRight },
   { to: "/accounting/month-close", label: "Month Close", icon: CalendarCheck },
+  { to: "/my-businesses", label: "My Businesses", icon: Briefcase },
   { to: "/settings", label: "Settings", icon: Settings2 },
 ];
 

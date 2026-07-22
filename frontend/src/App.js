@@ -25,6 +25,7 @@ import StatementImportDetail from "@/pages/StatementImportDetail";
 import CompanySettings from "@/pages/CompanySettings";
 import ProSettings from "@/pages/ProSettings";
 import MonthClose from "@/pages/MonthClose";
+import MyBusinesses from "@/pages/MyBusinesses";
 import Communications from "@/pages/Communications";
 import AskClientAnswer from "@/pages/AskClientAnswer";
 import SetPassword from "@/pages/SetPassword";
@@ -104,6 +105,7 @@ function App() {
               <Route path="/accounting/book-review" element={<BookReview />} />
               <Route path="/accounting/close-books" element={<ClosePeriods kind="month" />} />
               <Route path="/accounting/month-close" element={<MonthClose />} />
+              <Route path="/my-businesses" element={<MyBusinesses />} />
               <Route path="/accounting/year-end" element={<ClosePeriods kind="year" />} />
               <Route path="/accounting/chart-of-accounts" element={<ChartOfAccounts />} />
               <Route path="/accounting/journal-entries" element={<JournalEntries />} />
