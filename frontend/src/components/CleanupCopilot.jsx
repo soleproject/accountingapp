@@ -87,7 +87,7 @@ function pitchFor(action, progress) {
   return action.why || action.label;
 }
 
-export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null, inlineTitle = null, inlineSubtitle = null }) {
+export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null, inlineTitle = null, inlineSubtitle = null, initialViewMode = null }) {
   const navigate = useNavigate();
   const { focus } = useAiFocus();
   const [data, setData] = useState(null);
@@ -120,7 +120,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   //   "rows"     → flat list ordered by row count desc (the AI's original order)
   //   "category" → grouped by effective account code so all buckets going
   //                to e.g. "6800 · Supplies & Materials" cluster together
-  const [megaViewMode, setMegaViewMode] = useState(inline ? "category" : "rows");
+  const [megaViewMode, setMegaViewMode] = useState(initialViewMode || (inline ? "category" : "rows"));
   // Stepper mode: which group index is currently focused. Only used when
   // megaViewMode === "stepper". Reset to 0 whenever the mode is entered
   // or the underlying group list is refreshed.
