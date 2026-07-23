@@ -85,7 +85,7 @@ function pitchFor(action, progress) {
   return action.why || action.label;
 }
 
-export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false }) {
+export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null }) {
   const { focus } = useAiFocus();
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -1104,12 +1104,17 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
           // Inline rendering: the "report" version of the bucket review.
           // Same body, no overlay, no click-outside-to-close, no viewport
           // height cap. Sits as a normal page section under the copilot
-          // banner.
-          <div className="mt-4" data-testid="mega-approve-inline">
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col p-5">
-              {renderMegaBody()}
+          // banner. Optional `reportHeader` (title + description) renders
+          // above the report card — matches the Transactions page pattern
+          // where the copilot banner comes first, then the section title.
+          <>
+            {reportHeader}
+            <div className="mt-4" data-testid="mega-approve-inline">
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col p-5">
+                {renderMegaBody()}
+              </div>
             </div>
-          </div>
+          </>
         ) : (
           <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-[2px] flex items-center justify-center p-4"
                data-testid="mega-approve-modal"
