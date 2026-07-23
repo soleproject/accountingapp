@@ -174,12 +174,43 @@ async def dispatch(
 # Public URL builder — reused by every "here's a link to reply" email.
 # --------------------------------------------------------------------------
 
-def public_base_url() -> str:
-    """Best-effort public base URL for magic-link emails. Prefers an explicit
-    PUBLIC_APP_URL, falls back to PUBLIC_BACKEND_URL (works because the
-    frontend and backend are served from the same host in this deployment)."""
-    return (
-        os.environ.get("PUBLIC_APP_URL")
-        or os.environ.get("PUBLIC_BACKEND_URL")
-        or ""
-    ).rstrip("/")
+def public_base_url(firm_slug: str | None = None) -> str:
+    """Best-effort public **frontend** base URL for magic-link emails.
+
+    Resolution order:
+      1. If ``firm_slug`` is given and ``PRIVATE_LABEL_HOST_TEMPLATE`` is
+         set (e.g. ``https://{slug}.accountingapp.ai``), build the
+         firm-branded URL so a client onboarded via a private-label pro
+         gets a magic link on their firm's subdomain (not the platform).
+      2. ``PUBLIC_APP_URL`` — the platform frontend (e.g.
+         ``https://app.smartbookssoftware.ai``). This is the one that
+         MUST be set in prod — it's the host where the React SPA lives
+         and knows how to render ``/set-password/{token}``.
+      3. ``PRIMARY_HOST`` — bare hostname, we add ``https://``.
+      4. ``PUBLIC_BACKEND_URL`` — LAST resort. Only correct in preview
+         environments where the backend and frontend share a host. In
+         production this returns the API domain which has no SPA
+         routes, so magic links 404. Kept here purely as a legacy
+         fallback; production must set ``PUBLIC_APP_URL``.
+    """
+    if firm_slug:
+        template = os.environ.get("PRIVATE_LABEL_HOST_TEMPLATE")
+        if template:
+            return template.replace("{slug}", firm_slug).rstrip("/")
+    for env_key in ("PUBLIC_APP_URL",):
+        v = os.environ.get(env_key)
+        if v:
+            return v.rstrip("/")
+    primary = os.environ.get("PRIMARY_HOST")
+    if primary:
+        # PRIMARY_HOST is a bare hostname; make it a full URL.
+        return f"https://{primary.strip().lstrip('https://').lstrip('http://').rstrip('/')}"
+    fallback = os.environ.get("PUBLIC_BACKEND_URL")
+    if fallback:
+        import logging as _lg
+        _lg.getLogger(__name__).warning(
+            "public_base_url falling back to PUBLIC_BACKEND_URL — set PUBLIC_APP_URL "
+            "on the backend env or magic-link emails will 404 in production."
+        )
+        return fallback.rstrip("/")
+    return ""
