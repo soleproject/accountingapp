@@ -3,7 +3,7 @@ import { api } from "@/lib/api";
 import { useActionListener, emitAction } from "@/lib/createBus";
 import { useAiFocus } from "@/lib/aiFocus";
 import { stripMarkdownForSpeech } from "@/lib/speechText";
-import { Sparkles, PlayCircle, ArrowRight, Loader2 } from "lucide-react";
+import { Sparkles, PlayCircle, ArrowRight, Loader2, ListOrdered, LayoutList } from "lucide-react";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
 
 // Compact SVG donut: reviewed (emerald), ai (indigo), uncategorized (rose),
@@ -113,6 +113,11 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   const [megaBusy, setMegaBusy] = useState(false);
   const [megaSelected, setMegaSelected] = useState(new Set());
   const [megaSearch, setMegaSearch] = useState("");
+  // Bucket list view mode:
+  //   "rows"     → flat list ordered by row count desc (the AI's original order)
+  //   "category" → grouped by effective account code so all buckets going
+  //                to e.g. "6800 · Supplies & Materials" cluster together
+  const [megaViewMode, setMegaViewMode] = useState("rows");
   const [megaUndo, setMegaUndo] = useState(null);  // {batch_id, count, rules_created, expires}
   // Per-vendor category overrides: Map<contact_id, account_id>. When present,
   // the mega-approve call sends `overrides` and the vendor's row gets
@@ -547,6 +552,35 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   const filteredVendors = megaSearch.trim()
     ? megaVendors.filter(v => (v.contact_name || "").toLowerCase().includes(megaSearch.trim().toLowerCase()))
     : megaVendors;
+
+  // When view mode = "category", cluster filteredVendors into groups keyed by
+  // their effective account (user override wins over AI pick). Each group
+  // header shows the account name + how many buckets/rows sit under it, so
+  // the user can eyeball outliers ("why does Owner's Draw have 3 vendors?").
+  // We do it here — not in a memo — because filteredVendors is already
+  // recomputed on every render (cheap enough at ~200 vendors max).
+  const megaGroups = (() => {
+    if (megaViewMode !== "category") return null;
+    const map = new Map();
+    for (const v of filteredVendors) {
+      const overrideId = megaOverrides[v.key];
+      const acct = overrideId
+        ? accounts.find(a => a.id === overrideId)
+        : accounts.find(a => a.id === v.account?.id)
+          || accounts.find(a => String(a.code) === String(v.account?.code))
+          || v.account;
+      const gkey = acct?.id || acct?.code || "__none__";
+      if (!map.has(gkey)) {
+        map.set(gkey, { account: acct, vendors: [], totalRows: 0, totalAmount: 0 });
+      }
+      const g = map.get(gkey);
+      g.vendors.push(v);
+      g.totalRows += v.count;
+      g.totalAmount += v.amount;
+    }
+    // Sort groups by total rows desc (biggest categories first).
+    return Array.from(map.values()).sort((a, b) => b.totalRows - a.totalRows);
+  })();
   const selectedRows = megaVendors.reduce(
     (s, v) => s + (megaSelected.has(v.key) ? v.count : 0), 0
   );
@@ -688,24 +722,56 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                   <div className="text-base font-semibold text-slate-900">
                     Approve <span data-testid="mega-selected-rows">{selectedRows.toLocaleString()}</span> rows across <span data-testid="mega-selected-vendors">{selectedBuckets}</span> {selectedBuckets === 1 ? "bucket" : "buckets"}?
                   </div>
-                  {howToRunning ? (
-                    <button
-                      data-testid="mega-howto-cancel"
-                      onClick={cancelHowTo}
-                      className="shrink-0 text-xs px-2 py-1 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                    >
-                      Stop tour
-                    </button>
-                  ) : (
-                    <button
-                      data-testid="mega-howto"
-                      onClick={runHowTo}
-                      className="shrink-0 inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-fuchsia-300 bg-fuchsia-50 text-fuchsia-700 hover:bg-fuchsia-100"
-                      title="Have the AI walk you through this screen"
-                    >
-                      <Sparkles size={12} /> How To
-                    </button>
-                  )}
+                  <div className="flex items-center gap-2 shrink-0">
+                    {/* View-mode toggle: order-by-rows vs. group-by-category.
+                        Tiny paired icon-buttons that visually echo the
+                        "How To" button on the right so the header row
+                        doesn't feel unbalanced. */}
+                    <div className="inline-flex rounded-md border border-slate-200 bg-white overflow-hidden">
+                      <button
+                        data-testid="mega-view-rows"
+                        onClick={() => setMegaViewMode("rows")}
+                        title="Sort by row count (most rows first)"
+                        className={`p-1.5 transition ${
+                          megaViewMode === "rows"
+                            ? "bg-slate-900 text-white"
+                            : "text-slate-500 hover:bg-slate-50"
+                        }`}
+                      >
+                        <ListOrdered size={14} />
+                      </button>
+                      <button
+                        data-testid="mega-view-category"
+                        onClick={() => setMegaViewMode("category")}
+                        title="Group buckets by category"
+                        className={`p-1.5 transition border-l border-slate-200 ${
+                          megaViewMode === "category"
+                            ? "bg-slate-900 text-white"
+                            : "text-slate-500 hover:bg-slate-50"
+                        }`}
+                      >
+                        <LayoutList size={14} />
+                      </button>
+                    </div>
+                    {howToRunning ? (
+                      <button
+                        data-testid="mega-howto-cancel"
+                        onClick={cancelHowTo}
+                        className="text-xs px-2 py-1 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                      >
+                        Stop tour
+                      </button>
+                    ) : (
+                      <button
+                        data-testid="mega-howto"
+                        onClick={runHowTo}
+                        className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-fuchsia-300 bg-fuchsia-50 text-fuchsia-700 hover:bg-fuchsia-100"
+                        title="Have the AI walk you through this screen"
+                      >
+                        <Sparkles size={12} /> How To
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="mb-2">
                   <input
@@ -733,7 +799,11 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                   </div>
                 </div>
                 <div className="space-y-1 mb-3 flex-1 min-h-[240px] overflow-y-auto pr-1" data-testid="mega-vendor-list">
-                  {filteredVendors.map((c) => {
+                  {(() => {
+                    // Row renderer — closes over accounts, megaSelected, etc.
+                    // Same JSX regardless of view mode, just interpose group
+                    // headers when megaViewMode === "category".
+                    const renderRow = (c) => {
                     const on = megaSelected.has(c.key);
                     // Effective account = user override (if any) else AI's pick.
                     const overrideId = megaOverrides[c.key];
@@ -862,10 +932,36 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                         </button>
                       </div>
                     );
-                  })}
-                  {filteredVendors.length === 0 && (
-                    <div className="text-[11px] text-slate-500 text-center py-4">No vendors match &quot;{megaSearch}&quot;</div>
-                  )}
+                    };
+                    if (filteredVendors.length === 0) {
+                      return (
+                        <div className="text-[11px] text-slate-500 text-center py-4">
+                          No vendors match &quot;{megaSearch}&quot;
+                        </div>
+                      );
+                    }
+                    if (megaViewMode === "category" && megaGroups) {
+                      return megaGroups.map(g => (
+                        <div key={g.account?.id || g.account?.code || "__none__"} className="mb-2">
+                          <div
+                            className="sticky top-0 z-10 bg-slate-100 border border-slate-200 rounded-t px-3 py-1.5 flex items-center gap-2 text-[11px]"
+                            data-testid={`mega-group-${g.account?.code || "none"}`}
+                          >
+                            <span className="font-semibold text-slate-800">
+                              {g.account?.code ? `${g.account.code} · ` : ""}{g.account?.name || "Uncategorized"}
+                            </span>
+                            <span className="text-slate-500 ml-auto tabular-nums">
+                              {g.totalRows.toLocaleString()} rows · {g.vendors.length} {g.vendors.length === 1 ? "bucket" : "buckets"} · ${Math.round(g.totalAmount).toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="space-y-1">
+                            {g.vendors.map(renderRow)}
+                          </div>
+                        </div>
+                      ));
+                    }
+                    return filteredVendors.map(renderRow);
+                  })()}
                 </div>
                 <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 mb-3">
                   ⚠ You&apos;ll have 60 seconds to Undo after applying. Undo restores each row&apos;s original category too.
