@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useActionListener, emitAction } from "@/lib/createBus";
 import { useAiFocus } from "@/lib/aiFocus";
@@ -87,6 +88,7 @@ function pitchFor(action, progress) {
 }
 
 export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null, inlineTitle = null, inlineSubtitle = null }) {
+  const navigate = useNavigate();
   const { focus } = useAiFocus();
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -1125,7 +1127,17 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
               <button
                 key="approve"
                 data-testid="cleanup-mega-approve"
-                onClick={openMega}
+                onClick={() => {
+                  // On the Transactions page (`!inline`) route to the
+                  // dedicated review page instead of opening the modal
+                  // in place — the modal is now the AI Cleanup Review
+                  // report living at its own URL.
+                  if (!inline) {
+                    navigate("/accounting/ai-cleanup-review");
+                  } else {
+                    openMega();
+                  }
+                }}
                 disabled={megaBusy}
                 className={
                   shimmerApprove
