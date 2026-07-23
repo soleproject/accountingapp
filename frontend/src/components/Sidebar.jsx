@@ -32,6 +32,7 @@ const NAV = [
 
 const ACCOUNTING = [
   { to: "/accounting/transactions", label: "Transactions", icon: ArrowLeftRight },
+  { to: "/accounting/ai-cleanup-review", label: "AI Cleanup Review", icon: Sparkles },
   { to: "/accounting/month-close", label: "Month Close", icon: CalendarCheck },
   { to: "/accounting/inventory", label: "Inventory", icon: Boxes },
   { to: "/accounting/assets", label: "Assets", icon: Building2 },

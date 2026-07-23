@@ -85,7 +85,7 @@ function pitchFor(action, progress) {
   return action.why || action.label;
 }
 
-export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger }) {
+export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false }) {
   const { focus } = useAiFocus();
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -117,7 +117,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   //   "rows"     → flat list ordered by row count desc (the AI's original order)
   //   "category" → grouped by effective account code so all buckets going
   //                to e.g. "6800 · Supplies & Materials" cluster together
-  const [megaViewMode, setMegaViewMode] = useState("rows");
+  const [megaViewMode, setMegaViewMode] = useState(inline ? "category" : "rows");
   const [megaUndo, setMegaUndo] = useState(null);  // {batch_id, count, rules_created, expires}
   // Per-vendor category overrides: Map<contact_id, account_id>. When present,
   // the mega-approve call sends `overrides` and the vendor's row gets
@@ -614,6 +614,24 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
       onApplyAction?.(primary);
     }
   }, [autoTrigger, data, primary, onApplyAction]);
+
+  // Inline mode (dedicated /accounting/review-report page): auto-open the
+  // bucket report as soon as the copilot has scanned the books, and
+  // re-open whenever the book changes (unlike the modal, we don't want
+  // the report to close permanently after one dry-run).
+  const inlineOpenRef = useRef(false);
+  useEffect(() => {
+    if (!inline || !data) return;
+    if (megaPreview) return;      // already open
+    if (inlineOpenRef.current) return;
+    inlineOpenRef.current = true;
+    openMega();
+  }, [inline, data, megaPreview]);
+  useEffect(() => {
+    // Reset the guard when the current company changes so re-selecting a
+    // company on the report page re-fires the dry-run.
+    inlineOpenRef.current = false;
+  }, [currentId]);
   // Derived state for the mega-approve modal (kept out of state so it stays
   // in sync with megaSelected + megaSearch without an effect).
   const megaVendors = megaPreview?.vendors || [];
@@ -659,130 +677,19 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     (s, v) => s + (megaSelected.has(v.key) ? 1 : 0), 0
   );
 
-  return (
-    <div data-testid="cleanup-copilot" className="rounded-xl border border-slate-200 bg-gradient-to-br from-indigo-50/40 via-white to-fuchsia-50/40 shadow-sm p-4">
-      <div className="flex items-center gap-4 flex-wrap">
-        <Donut progress={data?.progress} />
-        <div className="flex-1 min-w-[280px]">
-          <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
-            <Sparkles size={12} className="text-fuchsia-500" /> AI Cleanup Copilot
-          </div>
-          <div className="mt-1 text-sm text-slate-800 leading-snug">
-            {busy && !data ? (
-              <span className="inline-flex items-center gap-2 text-slate-500">
-                <Loader2 size={13} className="animate-spin" /> Scanning your books…
-              </span>
-            ) : (
-              pitchFor(primary, data?.progress)
-            )}
-          </div>
-          {data?.progress?.total ? (
-            <div className="mt-1 text-[11px] text-slate-500">
-              {data.progress.reviewed} reviewed · {data.progress.ai_categorized} AI-categorized · {data.progress.uncategorized} uncategorized · {data.progress.flagged} flagged
-            </div>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-2">
-          {(() => {
-            const aiReadyCount = data?.progress?.mega_ready_rows || 0;
-            const hasApprove = aiReadyCount > 0;
-            const hasFixNow = !!primary;
-            const shimmerApprove = hasApprove;
-            const shimmerFixNow = !hasApprove && hasFixNow;
-
-            // Build both buttons as JSX and then order them so the
-            // shimmering one comes FIRST. The Sparkles/AI icon rides with
-            // the shimmering CTA — the other one is plain.
-            const approveBtn = (
-              <button
-                key="approve"
-                data-testid="cleanup-mega-approve"
-                onClick={openMega}
-                disabled={megaBusy}
-                className={
-                  shimmerApprove
-                    ? "ai-shimmer-btn inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md disabled:opacity-50"
-                    : "inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                }
-                title={
-                  hasApprove
-                    ? `${aiReadyCount} AI-categorized rows waiting for sign-off`
-                    : "Approve every vendor whose AI opinion is unanimous"
-                }
-              >
-                {shimmerApprove && <Sparkles size={13} className="text-fuchsia-500" />}
-                {megaBusy ? "Scanning…" : "Approve AI Categorized"}
-              </button>
-            );
-            const fixNowBtn = primary ? (
-              <button
-                key="fixnow"
-                data-testid="cleanup-primary-cta"
-                onClick={() => onApplyAction?.(primary)}
-                className={
-                  shimmerFixNow
-                    ? "ai-shimmer-btn inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md"
-                    : "inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                }
-              >
-                {shimmerFixNow && <Sparkles size={13} className="text-fuchsia-500" />}
-                Let's review <ArrowRight size={13} />
-              </button>
-            ) : null;
-
-            // Shimmering CTA goes first; the other one (if it exists) trails.
-            const buttons = shimmerApprove
-              ? [approveBtn, fixNowBtn]
-              : [fixNowBtn, approveBtn];
-            return buttons.filter(Boolean);
-          })()}
-          <button
-            data-testid="cleanup-start-session"
-            onClick={() => onStartSession?.(data?.progress?.flagged || 0)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-          >
-            <PlayCircle size={13} /> Individual Review
-          </button>
-        </div>
-      </div>
-
-      {rest.length > 0 && (
-        <div className="mt-3 flex items-center gap-1.5 flex-wrap">
-          {rest.map((a, i) => {
-            const style = KIND_STYLES[a.kind] || KIND_STYLES.flagged_batch;
-            return (
-              <button
-                key={i}
-                data-testid={`cleanup-chip-${a.kind}-${a.contact_id || i}`}
-                onClick={() => onApplyAction?.(a)}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded-full border ${style.chipCls}`}
-                title={a.why}
-              >
-                <span>{style.dot}</span>
-                <span>{a.label}</span>
-                {"count" in a && (
-                  <span className="ml-0.5 px-1 rounded bg-white/60 font-mono-num">{a.count}</span>
-                )}
-              </button>
-            );
-          })}
-          {total > 0 && actions.length < 3 && (
-            <span className="text-[11px] text-slate-500">Nothing else urgent — you're in good shape.</span>
-          )}
-        </div>
-      )}
-      {megaPreview && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-[2px] flex items-center justify-center p-4"
-             data-testid="mega-approve-modal"
-             onClick={() => !megaBusy && setMegaPreview(null)}>
-          <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[92vh] flex flex-col p-5"
-               onClick={(e) => e.stopPropagation()}>
+  // Extracted so the mega-approve UI can render either as a fixed-
+  // position modal (default) or inline as a page section (when the
+  // parent passes `inline`).
+  const renderMegaBody = () => (
+    <>
             {megaPreview.total_rows === 0 ? (
               <>
                 <div className="text-base font-semibold text-slate-900 mb-1">Nothing to approve</div>
                 <div className="text-sm text-slate-600 mb-4">No AI-categorized-unreviewed rows found for vendors with a unanimous AI opinion. You're clean.</div>
-                <button onClick={() => setMegaPreview(null)}
-                        className="w-full py-2 rounded-md bg-slate-900 text-white text-sm font-medium">Close</button>
+                {!inline && (
+                  <button onClick={() => setMegaPreview(null)}
+                          className="w-full py-2 rounded-md bg-slate-900 text-white text-sm font-medium">Close</button>
+                )}
               </>
             ) : (
               <>
@@ -1056,14 +963,16 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                   </span>
                 </label>
                 <div className="flex gap-2">
-                  <button
-                    data-testid="mega-approve-cancel"
-                    onClick={() => setMegaPreview(null)}
-                    disabled={megaBusy}
-                    className="flex-1 py-2 rounded-md border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                  >
-                    Cancel
-                  </button>
+                  {!inline && (
+                    <button
+                      data-testid="mega-approve-cancel"
+                      onClick={() => setMegaPreview(null)}
+                      disabled={megaBusy}
+                      className="flex-1 py-2 rounded-md border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                  )}
                   <button
                     data-testid="mega-approve-confirm"
                     onClick={applyMega}
@@ -1075,8 +984,142 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                 </div>
               </>
             )}
+    </>
+  );
+
+  return (
+    <div data-testid="cleanup-copilot" className="rounded-xl border border-slate-200 bg-gradient-to-br from-indigo-50/40 via-white to-fuchsia-50/40 shadow-sm p-4">
+      <div className="flex items-center gap-4 flex-wrap">
+        <Donut progress={data?.progress} />
+        <div className="flex-1 min-w-[280px]">
+          <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+            <Sparkles size={12} className="text-fuchsia-500" /> AI Cleanup Copilot
           </div>
+          <div className="mt-1 text-sm text-slate-800 leading-snug">
+            {busy && !data ? (
+              <span className="inline-flex items-center gap-2 text-slate-500">
+                <Loader2 size={13} className="animate-spin" /> Scanning your books…
+              </span>
+            ) : (
+              pitchFor(primary, data?.progress)
+            )}
+          </div>
+          {data?.progress?.total ? (
+            <div className="mt-1 text-[11px] text-slate-500">
+              {data.progress.reviewed} reviewed · {data.progress.ai_categorized} AI-categorized · {data.progress.uncategorized} uncategorized · {data.progress.flagged} flagged
+            </div>
+          ) : null}
         </div>
+        <div className="flex items-center gap-2">
+          {(() => {
+            const aiReadyCount = data?.progress?.mega_ready_rows || 0;
+            const hasApprove = aiReadyCount > 0;
+            const hasFixNow = !!primary;
+            const shimmerApprove = hasApprove;
+            const shimmerFixNow = !hasApprove && hasFixNow;
+
+            // Build both buttons as JSX and then order them so the
+            // shimmering one comes FIRST. The Sparkles/AI icon rides with
+            // the shimmering CTA — the other one is plain.
+            const approveBtn = (
+              <button
+                key="approve"
+                data-testid="cleanup-mega-approve"
+                onClick={openMega}
+                disabled={megaBusy}
+                className={
+                  shimmerApprove
+                    ? "ai-shimmer-btn inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md disabled:opacity-50"
+                    : "inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                }
+                title={
+                  hasApprove
+                    ? `${aiReadyCount} AI-categorized rows waiting for sign-off`
+                    : "Approve every vendor whose AI opinion is unanimous"
+                }
+              >
+                {shimmerApprove && <Sparkles size={13} className="text-fuchsia-500" />}
+                {megaBusy ? "Scanning…" : "Approve AI Categorized"}
+              </button>
+            );
+            const fixNowBtn = primary ? (
+              <button
+                key="fixnow"
+                data-testid="cleanup-primary-cta"
+                onClick={() => onApplyAction?.(primary)}
+                className={
+                  shimmerFixNow
+                    ? "ai-shimmer-btn inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md"
+                    : "inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                }
+              >
+                {shimmerFixNow && <Sparkles size={13} className="text-fuchsia-500" />}
+                Let's review <ArrowRight size={13} />
+              </button>
+            ) : null;
+
+            // Shimmering CTA goes first; the other one (if it exists) trails.
+            const buttons = shimmerApprove
+              ? [approveBtn, fixNowBtn]
+              : [fixNowBtn, approveBtn];
+            return buttons.filter(Boolean);
+          })()}
+          <button
+            data-testid="cleanup-start-session"
+            onClick={() => onStartSession?.(data?.progress?.flagged || 0)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+          >
+            <PlayCircle size={13} /> Individual Review
+          </button>
+        </div>
+      </div>
+
+      {rest.length > 0 && (
+        <div className="mt-3 flex items-center gap-1.5 flex-wrap">
+          {rest.map((a, i) => {
+            const style = KIND_STYLES[a.kind] || KIND_STYLES.flagged_batch;
+            return (
+              <button
+                key={i}
+                data-testid={`cleanup-chip-${a.kind}-${a.contact_id || i}`}
+                onClick={() => onApplyAction?.(a)}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded-full border ${style.chipCls}`}
+                title={a.why}
+              >
+                <span>{style.dot}</span>
+                <span>{a.label}</span>
+                {"count" in a && (
+                  <span className="ml-0.5 px-1 rounded bg-white/60 font-mono-num">{a.count}</span>
+                )}
+              </button>
+            );
+          })}
+          {total > 0 && actions.length < 3 && (
+            <span className="text-[11px] text-slate-500">Nothing else urgent — you're in good shape.</span>
+          )}
+        </div>
+      )}
+      {megaPreview && (
+        inline ? (
+          // Inline rendering: the "report" version of the bucket review.
+          // Same body, no overlay, no click-outside-to-close, no viewport
+          // height cap. Sits as a normal page section under the copilot
+          // banner.
+          <div className="mt-4" data-testid="mega-approve-inline">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col p-5">
+              {renderMegaBody()}
+            </div>
+          </div>
+        ) : (
+          <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-[2px] flex items-center justify-center p-4"
+               data-testid="mega-approve-modal"
+               onClick={() => !megaBusy && setMegaPreview(null)}>
+            <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[92vh] flex flex-col p-5"
+                 onClick={(e) => e.stopPropagation()}>
+              {renderMegaBody()}
+            </div>
+          </div>
+        )
       )}
       {megaUndo && (
         <div className="fixed bottom-6 right-6 z-[70] max-w-sm bg-slate-900 text-white rounded-lg shadow-2xl px-4 py-3 flex items-center gap-3"
