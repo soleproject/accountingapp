@@ -184,6 +184,66 @@ async def admin_usage(
          "unit_price_usd": SERVICE_UNIT_PRICE_USD.get("plaid_linked_item")},
     ]
     summary["plaid_items_active"] = plaid_active
+
+    # Enrich per-company + per-user rollups with display names so the UI
+    # doesn't have to make N follow-up requests. Also attach live Plaid
+    # item counts + monthly cost per company so the enterprise view
+    # reflects the real bill, not just AI usage.
+    company_ids = [r["company_id"] for r in summary.get("by_company", [])]
+    user_ids = [r["user_id"] for r in summary.get("by_user", [])]
+
+    companies_by_id = {}
+    if company_ids:
+        docs = await db.companies.find({"id": {"$in": company_ids}}).to_list(2000)
+        companies_by_id = {d["id"]: d for d in docs}
+
+    users_by_id = {}
+    if user_ids:
+        udocs = await db.users.find({"id": {"$in": user_ids}}).to_list(2000)
+        users_by_id = {d["id"]: d for d in udocs}
+
+    # Plaid item counts per company — needed so the enterprise table
+    # includes the same bank fee we already surface in by_service.
+    plaid_by_company: dict[str, int] = {}
+    plaid_docs = await db.plaid_items.find({}).to_list(2000)
+    for pi in plaid_docs:
+        cid = pi.get("company_id")
+        if cid:
+            plaid_by_company[cid] = plaid_by_company.get(cid, 0) + 1
+
+    # Any company with a Plaid item but no AI events yet still shows up.
+    for cid, count in plaid_by_company.items():
+        if not any(r["company_id"] == cid for r in summary.get("by_company", [])):
+            summary["by_company"].append({
+                "company_id": cid, "events": 0, "cost_cents": 0.0, "unique_users": 0,
+            })
+
+    for row in summary.get("by_company", []):
+        cdoc = companies_by_id.get(row["company_id"]) or {}
+        row["name"] = cdoc.get("name") or "(unknown)"
+        row["business_type"] = cdoc.get("business_type") or ""
+        row["owner_user_id"] = cdoc.get("owner_user_id")
+        pcount = plaid_by_company.get(row["company_id"], 0)
+        row["plaid_items"] = pcount
+        row["plaid_cost_cents"] = pcount * plaid_rate * 100
+        # Total including plaid recurring — the "true bill" per enterprise.
+        row["total_cost_cents"] = row["cost_cents"] + row["plaid_cost_cents"]
+    # Drop rows that are pure Plaid orphans (no matching company doc AND
+    # no AI events). Those are stale test/dev items and only clutter the
+    # dashboard — the numbers are still counted in the by_service Plaid
+    # row so we don't lose the cost.
+    summary["by_company"] = [
+        r for r in summary["by_company"]
+        if r.get("name") != "(unknown)" or r.get("events", 0) > 0
+    ]
+    summary["by_company"].sort(key=lambda r: r["total_cost_cents"], reverse=True)
+
+    for row in summary.get("by_user", []):
+        udoc = users_by_id.get(row["user_id"]) or {}
+        row["name"] = udoc.get("name")
+        row["email"] = udoc.get("email")
+        row["role"] = udoc.get("role")
+
     return summary
 
 

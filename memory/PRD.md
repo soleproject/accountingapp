@@ -1165,3 +1165,23 @@ re-summarised without a data migration.
   recorder, service recorder, request-context propagation, summary
   aggregation, and superadmin RBAC on the endpoint. All pass.
 
+
+
+### Per-Enterprise & Per-User Breakdowns (Feb 23, 2026 — same-day extension)
+- `get_summary` now also emits `by_company` (with `unique_users` per company)
+  and `by_user` rollups
+- `require_company` in `deps.py` sets both `user_id` + `company_id` in
+  the ContextVar so every AI call inside a company-scoped route
+  automatically attributes to that enterprise — no call-site changes
+  needed
+- `/api/admin/usage` response enriches each row with `name` / `email` /
+  `role` from the users + companies collections
+- Plaid items are joined per-company so the enterprise row shows
+  "true monthly bill" (AI + Plaid subscription combined)
+- Orphaned Plaid items (from deleted companies) are filtered out of the
+  enterprise table but still counted in the by_service Plaid line
+- Frontend adds **By Enterprise** and **By User** tables below the
+  existing feature/service tables, with role badges (SUPERADMIN / PRO /
+  CLIENT) on the user rows
+- Added `test_get_summary_aggregates_by_company_and_user` — verified
+  events dedupe correctly per company + user

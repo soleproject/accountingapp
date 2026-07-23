@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import {
   Activity, DollarSign, Users, TrendingUp, Zap, Loader2, ChevronRight,
+  Building2, UserRound,
 } from "lucide-react";
 
 /**
@@ -69,6 +70,8 @@ export default function SuperadminUsage() {
   const byFeature = data?.by_feature || [];
   const byService = data?.by_service || [];
   const byCategory = data?.by_category || [];
+  const byCompany = data?.by_company || [];
+  const byUser = data?.by_user || [];
   const expected = data?.expected_services || [];
 
   // Category chip totals — sum from byCategory response (unfiltered).
@@ -217,6 +220,97 @@ export default function SuperadminUsage() {
           </div>
         </div>
       </div>
+
+      {/* Per Enterprise (Company) + Per User */}
+      <div className="grid lg:grid-cols-2 gap-4 mt-4">
+        <div className="bg-white rounded-lg border border-slate-200 overflow-hidden" data-testid="usage-by-company">
+          <div className="px-4 py-3 border-b border-slate-100 font-medium text-slate-700 text-sm flex items-center gap-2">
+            <Building2 size={14} className="text-slate-400" />
+            By Enterprise
+            <span className="text-slate-400 font-normal ml-1">({rangeLabel(range)})</span>
+          </div>
+          {byCompany.length === 0 ? (
+            <div className="p-8 text-center text-slate-400 text-sm">
+              {loading ? "Loading…" : "No enterprise events in this range yet."}
+            </div>
+          ) : (
+            <div className="max-h-[520px] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide sticky top-0">
+                  <tr>
+                    <th className="text-left px-4 py-2 font-medium">Enterprise</th>
+                    <th className="text-right px-4 py-2 font-medium">Users</th>
+                    <th className="text-right px-4 py-2 font-medium">Events</th>
+                    <th className="text-right px-4 py-2 font-medium">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {byCompany.map(c => (
+                    <tr key={c.company_id} data-testid={`company-row-${c.company_id}`}>
+                      <td className="px-4 py-2">
+                        <div className="font-medium text-slate-900 text-sm">{c.name || "—"}</div>
+                        {c.plaid_items > 0 && (
+                          <div className="text-[11px] text-slate-500">
+                            AI ${(c.cost_cents / 100).toFixed(4).replace(/0+$/, "").replace(/\.$/, "") || "0"} · Plaid ${(c.plaid_cost_cents / 100).toFixed(2)} ({c.plaid_items} item{c.plaid_items === 1 ? "" : "s"})
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-right text-slate-600 tabular-nums text-xs">{compact(c.unique_users || 0)}</td>
+                      <td className="px-4 py-2 text-right text-slate-600 tabular-nums text-xs">{compact(c.events)}</td>
+                      <td className="px-4 py-2 text-right font-medium text-slate-900 tabular-nums">
+                        {money(c.total_cost_cents)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white rounded-lg border border-slate-200 overflow-hidden" data-testid="usage-by-user">
+          <div className="px-4 py-3 border-b border-slate-100 font-medium text-slate-700 text-sm flex items-center gap-2">
+            <UserRound size={14} className="text-slate-400" />
+            By User
+            <span className="text-slate-400 font-normal ml-1">({rangeLabel(range)})</span>
+          </div>
+          {byUser.length === 0 ? (
+            <div className="p-8 text-center text-slate-400 text-sm">
+              {loading ? "Loading…" : "No user-attributed events in this range yet."}
+            </div>
+          ) : (
+            <div className="max-h-[520px] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide sticky top-0">
+                  <tr>
+                    <th className="text-left px-4 py-2 font-medium">User</th>
+                    <th className="text-left px-4 py-2 font-medium">Role</th>
+                    <th className="text-right px-4 py-2 font-medium">Events</th>
+                    <th className="text-right px-4 py-2 font-medium">Cost</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {byUser.map(u => (
+                    <tr key={u.user_id} data-testid={`user-row-${u.user_id}`}>
+                      <td className="px-4 py-2">
+                        <div className="font-medium text-slate-900 text-sm">{u.name || "—"}</div>
+                        <div className="text-[11px] text-slate-500">{u.email || u.user_id}</div>
+                      </td>
+                      <td className="px-4 py-2">
+                        <RoleBadge role={u.role} />
+                      </td>
+                      <td className="px-4 py-2 text-right text-slate-600 tabular-nums text-xs">{compact(u.events)}</td>
+                      <td className="px-4 py-2 text-right font-medium text-slate-900 tabular-nums">
+                        {money(u.cost_cents)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -294,4 +388,18 @@ function ServiceRow({ row }) {
 
 function rangeLabel(key) {
   return RANGES.find(r => r.key === key)?.label || key;
+}
+
+function RoleBadge({ role }) {
+  if (!role) return <span className="text-xs text-slate-400">—</span>;
+  const tone = {
+    superadmin: "bg-indigo-50 text-indigo-700 border-indigo-100",
+    pro: "bg-cyan-50 text-cyan-700 border-cyan-100",
+    client: "bg-emerald-50 text-emerald-700 border-emerald-100",
+  }[role] || "bg-slate-50 text-slate-600 border-slate-100";
+  return (
+    <span className={`inline-block px-1.5 py-0.5 rounded border text-[10px] font-medium uppercase tracking-wide ${tone}`}>
+      {role}
+    </span>
+  );
 }

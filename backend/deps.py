@@ -32,6 +32,15 @@ async def require_company(user: dict, company_id: str) -> dict:
     c = await db.companies.find_one({"id": company_id})
     if not c:
         raise HTTPException(404, "Company not found")
+    # Attach company id to the request-scoped ai_usage context so every
+    # LLM / Veryfi / Resend call made inside this handler gets tagged
+    # with the right company for cost attribution. Non-fatal if the
+    # tracker isn't importable in some slim test envs.
+    try:
+        from ai_usage import set_request_context
+        set_request_context(user_id=user["id"], company_id=company_id)
+    except Exception:
+        pass
     return coerce(c)
 
 

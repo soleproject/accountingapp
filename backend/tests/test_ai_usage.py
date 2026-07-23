@@ -117,6 +117,42 @@ def test_get_summary_aggregates_by_feature_and_service():
     _run(_t())
 
 
+def test_get_summary_aggregates_by_company_and_user():
+    """Per-enterprise + per-user rollups must dedupe users per company and
+    sum events + cost correctly across mixed ContextVar-tagged calls."""
+    async def _t():
+        await db.ai_usage_events.delete_many({"feature": "test-perco"})
+        # co-1 gets 2 events from 2 different users; co-2 gets 1 event.
+        ai_usage.set_request_context(user_id="pc-u-a", company_id="pc-co-1")
+        await ai_usage.record_llm(
+            feature="test-perco", provider="openai", model="gpt-4o-mini",
+            input_tokens=100, output_tokens=50,
+        )
+        ai_usage.set_request_context(user_id="pc-u-b", company_id="pc-co-1")
+        await ai_usage.record_llm(
+            feature="test-perco", provider="openai", model="gpt-4o-mini",
+            input_tokens=200, output_tokens=100,
+        )
+        ai_usage.set_request_context(user_id="pc-u-a", company_id="pc-co-2")
+        await ai_usage.record_llm(
+            feature="test-perco", provider="openai", model="gpt-4o-mini",
+            input_tokens=100, output_tokens=50,
+        )
+
+        s = await ai_usage.get_summary(range_key="7d")
+        cos = {r["company_id"]: r for r in s["by_company"] if r["company_id"].startswith("pc-co")}
+        assert cos["pc-co-1"]["events"] == 2
+        assert cos["pc-co-1"]["unique_users"] == 2
+        assert cos["pc-co-2"]["events"] == 1
+
+        users = {r["user_id"]: r for r in s["by_user"] if r["user_id"].startswith("pc-u")}
+        assert users["pc-u-a"]["events"] == 2
+        assert users["pc-u-b"]["events"] == 1
+
+        await db.ai_usage_events.delete_many({"feature": "test-perco"})
+    _run(_t())
+
+
 def test_admin_usage_endpoint_requires_superadmin():
     async def _t():
         from httpx import AsyncClient, ASGITransport

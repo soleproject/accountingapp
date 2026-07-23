@@ -262,6 +262,32 @@ async def get_summary(range_key: str = "month", category: str | None = None) -> 
         k = _cat(e.get("service", ""))
         by_category[k] = by_category.get(k, 0.0) + float(e.get("cost_cents") or 0)
 
+    # Per-company rollup (enterprise view).
+    by_company: dict[str, dict] = {}
+    for e in events:
+        cid = e.get("company_id")
+        if not cid:
+            continue
+        row = by_company.setdefault(cid, {"company_id": cid, "events": 0, "cost_cents": 0.0, "unique_users": set()})
+        row["events"] += 1
+        row["cost_cents"] += float(e.get("cost_cents") or 0)
+        if e.get("user_id"):
+            row["unique_users"].add(e["user_id"])
+    for row in by_company.values():
+        row["unique_users"] = len(row["unique_users"])
+    by_company_list = sorted(by_company.values(), key=lambda r: r["cost_cents"], reverse=True)
+
+    # Per-user rollup.
+    by_user: dict[str, dict] = {}
+    for e in events:
+        uid = e.get("user_id")
+        if not uid:
+            continue
+        row = by_user.setdefault(uid, {"user_id": uid, "events": 0, "cost_cents": 0.0})
+        row["events"] += 1
+        row["cost_cents"] += float(e.get("cost_cents") or 0)
+    by_user_list = sorted(by_user.values(), key=lambda r: r["cost_cents"], reverse=True)
+
     return {
         "range": range_key,
         "since": since,
@@ -274,6 +300,8 @@ async def get_summary(range_key: str = "month", category: str | None = None) -> 
         "by_feature": by_feature_list,
         "by_service": by_service_list,
         "by_category": [{"category": k, "cost_cents": v} for k, v in sorted(by_category.items(), key=lambda kv: -kv[1])],
+        "by_company": by_company_list,
+        "by_user": by_user_list,
     }
 
 
