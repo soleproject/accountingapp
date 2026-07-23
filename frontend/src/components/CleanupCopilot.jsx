@@ -1074,7 +1074,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         </div>
       </div>
 
-      {rest.length > 0 && (
+      {rest.length > 0 && !inline && (
         <div className="mt-3 flex items-center gap-1.5 flex-wrap">
           {rest.map((a, i) => {
             const style = KIND_STYLES[a.kind] || KIND_STYLES.flagged_batch;
