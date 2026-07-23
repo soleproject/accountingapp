@@ -200,6 +200,10 @@ export default function Login() {
             </button>
           </div>
 
+          <div className="text-center text-xs text-slate-500">
+            No account? <a href="/signup" className="text-cyan-700 hover:underline" data-testid="signup-link">Create one</a>
+          </div>
+
           <div className="pt-4 border-t space-y-2">
             <div className="text-[11px] uppercase tracking-wider text-slate-500">Demo accounts</div>
             <button type="button" data-testid={TID.demoClient} onClick={() => demo("client@axiom.ai", "client123")}

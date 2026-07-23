@@ -121,16 +121,54 @@ async def login(inp: LoginIn):
 async def signup(inp: SignupIn):
     if await db.users.find_one({"email": inp.email.lower()}):
         raise HTTPException(400, "Email already registered")
+    from referral_util import resolve_referrer_id
+    referrer_id = await resolve_referrer_id(inp.ref)
     uid = str(uuid.uuid4())
     now = now_iso()
-    await db.users.insert_one({
+    doc = {
         "id": uid, "email": inp.email.lower(), "name": inp.name,
         "password": hash_password(inp.password), "role": inp.role,
         "created_at": now, "updated_at": now,
-    })
+    }
+    if referrer_id:
+        # Immutable link — never overwritten even if the referring user
+        # changes their slug or is deleted. Downstream revenue share reads
+        # this field as the source of truth.
+        doc["referred_by_user_id"] = referrer_id
+    await db.users.insert_one(doc)
     token = create_token(uid, inp.role)
     return {"token": token, "user": {"id": uid, "email": inp.email.lower(),
             "name": inp.name, "role": inp.role}}
+
+
+# ----------------------------------------------------------------------
+# Affiliate — every user has a shareable referral slug + link.
+# ----------------------------------------------------------------------
+@router.get("/share")
+async def share_info(user: dict = Depends(get_current_user)):
+    """Return the current user's affiliate assets: their slug, the shareable
+    link (built from PRIMARY_HOST), and a lightweight earnings summary.
+
+    The link uses the platform host by default, but the frontend can
+    override to a firm subdomain when the referrer is a pro who wants
+    their firm-branded URL to be the share destination.
+    """
+    from referral_util import mint_slug_for_user
+    slug = await mint_slug_for_user(user["id"])
+    host = os.environ.get("PRIMARY_HOST", "app.smartbookssoftware.ai")
+    link = f"https://{host}/signup?ref={slug}"
+    # Placeholder counts until the Stripe webhook lands next session; the
+    # UI can already render the empty state without a code change once
+    # `payments` + `user_referral_revenue_share` collections exist.
+    referred_count = await db.users.count_documents({"referred_by_user_id": user["id"]})
+    return {
+        "slug": slug,
+        "link": link,
+        "referred_count": referred_count,
+        "paying_count": 0,       # populated by Stripe webhook (P2 session)
+        "earnings_cents": 0,      # populated by revenue-share ledger (P2 session)
+        "pending_cents": 0,
+    }
 
 
 @router.get("/auth/me")

@@ -5,6 +5,8 @@ import { BrandingProvider } from "@/lib/branding";
 import { useHostTitle } from "@/lib/useHostTitle";
 import Layout from "@/components/Layout";
 import Login from "@/pages/Login";
+import Signup from "@/pages/Signup";
+import Share from "@/pages/Share";
 import Dashboard from "@/pages/Dashboard";
 import Transactions from "@/pages/Transactions";
 import Reports from "@/pages/Reports";
@@ -60,6 +62,7 @@ function App() {
             <HostTitle />
             <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
             <Route path="/set-password/:token" element={<SetPassword />} />
             <Route path="/invite/:token" element={<AcceptInvite />} />
             <Route path="/q/:token" element={<AskClientAnswer />} />
@@ -106,6 +109,7 @@ function App() {
               <Route path="/accounting/close-books" element={<ClosePeriods kind="month" />} />
               <Route path="/accounting/month-close" element={<MonthClose />} />
               <Route path="/my-businesses" element={<MyBusinesses />} />
+              <Route path="/share" element={<Share />} />
               <Route path="/accounting/year-end" element={<ClosePeriods kind="year" />} />
               <Route path="/accounting/chart-of-accounts" element={<ChartOfAccounts />} />
               <Route path="/accounting/journal-entries" element={<JournalEntries />} />

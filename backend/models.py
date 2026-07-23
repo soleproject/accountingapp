@@ -19,6 +19,9 @@ class SignupIn(BaseModel):
     password: str
     name: str
     role: str = "client"
+    # Optional affiliate referral slug — set on the user as
+    # `referred_by_user_id` for later revenue-share crediting.
+    ref: str | None = None
 
 
 class CompanyCreate(BaseModel):
