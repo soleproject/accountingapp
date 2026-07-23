@@ -4,7 +4,7 @@ import {
   LayoutDashboard, FileText, Receipt, CreditCard, ScrollText, BarChart3,
   Users, Link2, Inbox, ChevronRight, ArrowLeft, ArrowLeftRight, Boxes,
   Building2, Wallet, Tags, CheckCheck, ClipboardCheck, CalendarCheck, Calendar,
-  BookOpen, Notebook, ListTree, Sparkles, Shield, Briefcase, Wand2, PanelLeftClose, PanelLeft, Settings2, Share2,
+  BookOpen, Notebook, ListTree, Sparkles, Shield, Briefcase, Wand2, PanelLeftClose, PanelLeft, Settings2, Share2, Activity,
 } from "lucide-react";
 import { TID } from "@/constants/testIds";
 import { useAuth } from "@/lib/auth";
@@ -149,6 +149,9 @@ export default function Sidebar({ collapsed, onToggle }) {
           <>
             {user?.role === "superadmin" && (
               <Item to="/admin" label="Superadmin" icon={Shield} />
+            )}
+            {user?.role === "superadmin" && (
+              <Item to="/admin/usage" label="Usage & Costs" icon={Activity} />
             )}
             {(user?.role === "pro" || user?.role === "superadmin") && (
               <Item to="/pro/clients" label="Clients" icon={Briefcase} />

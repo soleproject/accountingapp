@@ -47,6 +47,15 @@ async def get_current_user(cred: Optional[HTTPAuthorizationCredentials] = Depend
     user = await db.users.find_one({"id": payload["sub"]})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    # Stash user id in the request-scoped context so downstream LLM /
+    # service calls can attribute their cost rows without every route
+    # having to plumb the user id through. Failure is non-fatal —
+    # ai_usage will just log the event with a null user_id.
+    try:
+        from ai_usage import set_request_context
+        set_request_context(user_id=user["id"])
+    except Exception:
+        pass
     return coerce(user)
 
 

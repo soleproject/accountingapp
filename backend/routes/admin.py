@@ -116,3 +116,76 @@ async def admin_test_email(
     return {"sent": True, "id": resp.get("id"), "to": str(inp.to)}
 
 
+# ----------------------- Superadmin — AI Usage & Costs -----------------------
+
+@router.get("/admin/usage")
+async def admin_usage(
+    range: str = Query("month", pattern=r"^(7d|30d|90d|month|all)$"),
+    category: Optional[str] = Query(None, pattern=r"^(all|llm|bank|email|ocr)$"),
+    user: dict = Depends(require_role("superadmin")),
+):
+    """AI + external-API spend rollup.
+
+    ``range`` — 7d / 30d / 90d / month / all
+    ``category`` — filter chip: llm / bank / email / ocr (omit for All)
+
+    Response payload matches what the SuperadminUsage frontend expects:
+        totals, by_feature, by_service, by_category.
+
+    Also includes ``plaid_items_active`` — a live count of connected
+    Plaid items so the dashboard can show the monthly recurring cost row
+    (Plaid bills per-item-per-month, and we don't emit an event per
+    billing period — the count IS the cost driver).
+    """
+    from ai_usage import get_summary, SERVICE_UNIT_PRICE_USD
+    summary = await get_summary(range_key=range, category=category)
+
+    # Live Plaid item count → synthetic "plaid-linked-item-monthly" row.
+    plaid_active = await db.plaid_items.count_documents({"revoked_at": None}) \
+        if await db.plaid_items.count_documents({}) else 0
+    if plaid_active == 0:
+        # Fallback for older docs that never had ``revoked_at`` set.
+        plaid_active = await db.plaid_items.count_documents({})
+    plaid_rate = SERVICE_UNIT_PRICE_USD.get("plaid_linked_item", 0.30)
+    plaid_row = {
+        "service": "plaid_linked_item",
+        "quantity": plaid_active,
+        "unit": "item",
+        "unit_price_usd": plaid_rate,
+        "cost_cents": plaid_active * plaid_rate * 100,
+        "events": plaid_active,
+    }
+
+    # Merge into by_service — replace any logged plaid_linked_item row so
+    # the live count wins over historical estimates.
+    by_service = [r for r in summary["by_service"] if r["service"] != "plaid_linked_item"]
+    if plaid_active > 0:
+        by_service.append(plaid_row)
+        # And roll into totals + category "bank"
+        summary["totals"]["cost_cents"] += plaid_row["cost_cents"]
+        for cat_row in summary["by_category"]:
+            if cat_row["category"] == "bank":
+                cat_row["cost_cents"] += plaid_row["cost_cents"]
+                break
+        else:
+            summary["by_category"].append({"category": "bank", "cost_cents": plaid_row["cost_cents"]})
+    by_service.sort(key=lambda r: r["cost_cents"], reverse=True)
+    summary["by_service"] = by_service
+
+    # Return also the list of "expected" services so the UI can render
+    # placeholder rows for integrations not yet used (matches the mock).
+    summary["expected_services"] = [
+        {"service": "openai_llm", "label": "OpenAI — LLM tokens", "unit": "token"},
+        {"service": "veryfi_ocr", "label": "Veryfi OCR", "unit": "document",
+         "unit_price_usd": SERVICE_UNIT_PRICE_USD.get("veryfi_ocr")},
+        {"service": "resend_email", "label": "Resend email", "unit": "email",
+         "unit_price_usd": SERVICE_UNIT_PRICE_USD.get("resend_email")},
+        {"service": "plaid_linked_item", "label": "Plaid linked items", "unit": "item",
+         "unit_price_usd": SERVICE_UNIT_PRICE_USD.get("plaid_linked_item")},
+    ]
+    summary["plaid_items_active"] = plaid_active
+    return summary
+
+
+
+

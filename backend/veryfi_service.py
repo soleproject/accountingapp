@@ -31,6 +31,12 @@ async def process_bank_statement(file_bytes: bytes, filename: str, content_type:
     if r.status_code >= 400:
         # Fall back to generic documents endpoint (some accounts may not have bank-statement product enabled)
         return await process_generic_document(file_bytes, filename, content_type)
+    # Log cost — one document = one billable unit.
+    try:
+        from ai_usage import record_service
+        await record_service(feature="veryfi-bank-statement", service="veryfi_ocr", quantity=1, unit="document")
+    except Exception:
+        pass
     return r.json()
 
 
@@ -41,6 +47,11 @@ async def process_generic_document(file_bytes: bytes, filename: str, content_typ
     async with httpx.AsyncClient(timeout=120.0) as client:
         r = await client.post(url, headers=_headers(), files=files)
     r.raise_for_status()
+    try:
+        from ai_usage import record_service
+        await record_service(feature="veryfi-document", service="veryfi_ocr", quantity=1, unit="document")
+    except Exception:
+        pass
     return r.json()
 
 

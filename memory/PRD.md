@@ -1108,3 +1108,60 @@ as paid_out after cutting a manual payment.
   invoice.paid idempotency across different event ids, and superadmin
   mark-paid role guard + status flip. All pass under xdist.
 
+
+## AI Usage & Cost Monitoring (Feb 23, 2026) ✅
+
+### Overview
+Superadmin dashboard tracking every billable AI + external-API event
+across the platform. One row per LLM call / OCR / email / linked item in
+`ai_usage_events`; aggregated at read time so historical rows can be
+re-summarised without a data migration.
+
+### Cost recorder (`/app/backend/ai_usage.py`)
+- Pricing tables (USD per 1M tokens for LLMs; USD per unit for flat services):
+    * OpenAI: gpt-4o-mini/4o/4.1-mini/4.1/5/5-mini
+    * Anthropic: sonnet-4.5, haiku-4.5
+    * Veryfi OCR: $0.16 / document
+    * Plaid linked items: $0.30 / item / month
+    * Resend email: $0.0004 / email
+- `record_llm(feature, provider, model, input_tokens, output_tokens, ...)` — computes cost + inserts row
+- `record_service(feature, service, quantity, ...)` — flat-rate services
+- `set_request_context(user_id, company_id)` — request-scoped ContextVars, populated by `get_current_user` so every AI call attributes to the initiating user without call-site plumbing
+- `get_summary(range_key, category)` — totals, by_feature, by_service, by_category rollups
+- All recorders are non-raising — a broken tracker never takes down user-facing AI
+
+### LLM instrumentation (`/app/backend/llm_client.py`)
+- `LlmChat(..., feature="ai-…")` — every call site tags itself
+- OpenAI streaming: `stream_options={"include_usage": True}` — pulls prompt/completion tokens from the final chunk
+- OpenAI non-streaming: reads `resp.usage.prompt_tokens/completion_tokens`
+- Anthropic streaming: reads `stream.get_final_message().usage.input_tokens/output_tokens`
+- Anthropic non-streaming: reads `resp.usage`
+- Fire-and-forget cost logging via `_record_usage` — one Mongo insert per call
+
+### Feature tags applied across `ai_service.py`
+`ai-categorize`, `resolve-contact`, `ai-chat`, `suggest-coa`,
+`ai-onboarding-questions`, `ai-onboarding-synthesize`, `ai-voice-intent`,
+`ai-review`, `ai-ask-client-draft`, `ai-answer-interpret`,
+`ai-client-chat`
+
+### Backend endpoint
+- `GET /api/admin/usage?range={7d|30d|90d|month|all}&category={llm|bank|email|ocr}` (superadmin only)
+    * Returns: totals, by_feature, by_service, by_category, expected_services, plaid_items_active
+    * Plaid row is synthetic (live-count × monthly rate) so it always reflects current active items even without emitted events
+
+### Frontend page (`/admin/usage`)
+- Range chips (Last 7/30/90 days, This month) + category chips (all/llm/bank/email/ocr) with running $ totals
+- 4 KPI cards: Total cost, Total events, Unique users, Avg cost / event
+- **By Feature** table — kebab-case verb / events / cost
+- **All Cost Categories** table — service label / quantity / rate / cost. Unused services render dimmed placeholder rows (matches mockup)
+- Sidebar link "Usage & Costs" appears only for superadmin
+
+### Persistence
+- `ai_usage_events` collection — one document per billable event, indexed on `ts DESC`, `service`, `feature`
+
+### Tests
+- `/app/backend/tests/test_ai_usage.py` — 8 pytest cases covering
+  price math (known model + prefix match + unknown fallback), LLM
+  recorder, service recorder, request-context propagation, summary
+  aggregation, and superadmin RBAC on the endpoint. All pass.
+

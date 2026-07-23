@@ -98,4 +98,15 @@ async def send_email(
     if not resp or not resp.get("id"):
         raise EmailError(f"Resend returned unexpected shape: {resp!r}")
     logger.info("Resend accepted email id=%s to=%s from=%s subject=%r", resp["id"], recipients, from_addr, subject)
+    # Log cost — one email per recipient (Resend bills per-message).
+    try:
+        from ai_usage import record_service
+        await record_service(
+            feature="resend-email",
+            service="resend_email",
+            quantity=len(recipients),
+            unit="email",
+        )
+    except Exception:
+        pass
     return resp

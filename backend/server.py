@@ -132,6 +132,8 @@ async def startup():
     import statements
     await job_queue.ensure_jobs_indexes()
     await statements.ensure_indexes()
+    import ai_usage
+    await ai_usage.ensure_indexes()
     sync_tasks.register_all()
     # AI Ask Client — hourly autonomous email loop (opt-out per pro).
     import ai_ask_client_scheduler

@@ -85,7 +85,7 @@ def _anthropic():
 # Chat object
 # ---------------------------------------------------------------------------
 class LlmChat:
-    def __init__(self, api_key: str = "", session_id: str = "", system_message: str = ""):
+    def __init__(self, api_key: str = "", session_id: str = "", system_message: str = "", feature: str = "ai-unknown"):
         # api_key is accepted for signature-compat with the old
         # emergentintegrations call — we use env-based keys instead so
         # the same code works on any host.
@@ -93,6 +93,9 @@ class LlmChat:
         self.session_id = session_id
         self.provider = DEFAULT_PROVIDER
         self.model = DEFAULT_MODEL
+        # Feature label used by ai_usage cost tracker — every call site
+        # sets this to a stable kebab-case verb (e.g. "ai-categorize").
+        self.feature = feature or "ai-unknown"
 
     def with_model(self, provider: str, model: str) -> "LlmChat":
         # Legacy calls pass ("anthropic", "claude-sonnet-4-5-…"). We honor
@@ -128,18 +131,30 @@ class LlmChat:
                 {"role": "user", "content": text},
             ],
             stream=True,
+            # Ask OpenAI to include a final usage chunk so we can log tokens.
+            stream_options={"include_usage": True},
         )
+        input_tokens = 0
+        output_tokens = 0
         async for chunk in stream:
             try:
-                delta = chunk.choices[0].delta.content
+                delta = chunk.choices[0].delta.content if chunk.choices else None
             except (IndexError, AttributeError):
                 delta = None
             if delta:
                 yield TextDelta(content=delta)
+            # Last chunk carries usage stats when include_usage=True.
+            usage = getattr(chunk, "usage", None)
+            if usage:
+                input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+                output_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+        await self._record_usage("openai", input_tokens, output_tokens)
         yield StreamDone()
 
     async def _stream_anthropic(self, text: str):
         client = _anthropic()
+        input_tokens = 0
+        output_tokens = 0
         async with client.messages.stream(
             model=self.model,
             system=self.system,
@@ -149,6 +164,12 @@ class LlmChat:
             async for delta in stream.text_stream:
                 if delta:
                     yield TextDelta(content=delta)
+            final = await stream.get_final_message()
+            usage = getattr(final, "usage", None)
+            if usage:
+                input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+                output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+        await self._record_usage("anthropic", input_tokens, output_tokens)
         yield StreamDone()
 
     # ------------------------------------------------------------------
@@ -164,6 +185,13 @@ class LlmChat:
                 messages=[{"role": "user", "content": msg.text}],
                 max_tokens=4096,
             )
+            usage = getattr(resp, "usage", None)
+            if usage:
+                await self._record_usage(
+                    "anthropic",
+                    int(getattr(usage, "input_tokens", 0) or 0),
+                    int(getattr(usage, "output_tokens", 0) or 0),
+                )
             # Anthropic returns a list of content blocks; join text parts.
             parts = []
             for block in getattr(resp, "content", []) or []:
@@ -180,10 +208,33 @@ class LlmChat:
                 {"role": "user", "content": msg.text},
             ],
         )
+        usage = getattr(resp, "usage", None)
+        if usage:
+            await self._record_usage(
+                "openai",
+                int(getattr(usage, "prompt_tokens", 0) or 0),
+                int(getattr(usage, "completion_tokens", 0) or 0),
+            )
         try:
             return resp.choices[0].message.content or ""
         except (IndexError, AttributeError):
             return ""
+
+    async def _record_usage(self, provider: str, input_tokens: int, output_tokens: int) -> None:
+        """Fire-and-forget cost logger. Import inside so a missing
+        collection never breaks the LLM path."""
+        try:
+            from ai_usage import record_llm
+            await record_llm(
+                feature=self.feature,
+                provider=provider,
+                model=self.model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("llm_client cost log failed")
 
     # ------------------------------------------------------------------
     def _resolve_provider(self) -> str:

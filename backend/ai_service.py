@@ -147,11 +147,12 @@ ASSISTANT_SYSTEM = (
 )
 
 
-def _new_chat(system: str, session_id: str, model_name: str = MODEL_NAME) -> LlmChat:
+def _new_chat(system: str, session_id: str, model_name: str = MODEL_NAME, feature: str = "ai-unknown") -> LlmChat:
     return LlmChat(
         api_key="",  # unused — llm_client reads OPENAI_API_KEY / ANTHROPIC_API_KEY from env
         session_id=session_id,
         system_message=system,
+        feature=feature,
     ).with_model(MODEL_PROVIDER, model_name)
 
 
@@ -192,7 +193,7 @@ async def categorize_transaction(
         f"{pfc_block}\n\n"
         f"Return the JSON now."
     )
-    chat = _new_chat(CATEGORIZATION_SYSTEM, f"cat-{merchant}")
+    chat = _new_chat(CATEGORIZATION_SYSTEM, f"cat-{merchant}", feature="ai-categorize")
     text = ""
     try:
         async for ev in chat.stream_message(UserMessage(text=prompt)):
@@ -230,7 +231,7 @@ async def resolve_contact_ai(
     # session_id — lets the LLM cache reuse anything reusable, and makes
     # debugging simpler (session id maps to a specific description string).
     sid = hashlib.md5(description.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
-    chat = _new_chat(CONTACT_EXTRACTION_SYSTEM, f"contact-{sid}", model_name=MODEL_HAIKU)
+    chat = _new_chat(CONTACT_EXTRACTION_SYSTEM, f"contact-{sid}", model_name=MODEL_HAIKU, feature="resolve-contact")
     text = ""
     try:
         async for ev in chat.stream_message(UserMessage(text=user_prompt)):
@@ -304,7 +305,7 @@ async def chat_stream(
     if context:
         prompt = f"Context (focused transaction):\n{json.dumps(context, indent=2)}\n\nUser: {user_text}"
     overlay = TERSENESS_OVERLAYS.get(terseness or "balanced", "")
-    chat = _new_chat(ASSISTANT_SYSTEM + overlay, session_id)
+    chat = _new_chat(ASSISTANT_SYSTEM + overlay, session_id, feature="ai-chat")
     try:
         async for ev in chat.stream_message(UserMessage(text=prompt)):
             if isinstance(ev, TextDelta):
@@ -362,6 +363,7 @@ async def suggest_chart_of_accounts(
         "You are a CPA designing a GAAP chart of accounts tailored to a specific US business. "
         "You return ONLY a valid JSON array of account objects — no wrapper, no prose.",
         f"coa-{business_type}-{hashlib.md5((description or '').encode()).hexdigest()[:6]}",
+        feature="suggest-coa",
     )
     text = ""
     try:
@@ -432,6 +434,7 @@ async def onboarding_interview_questions(
     chat = _new_chat(
         "You are a CPA designing an onboarding interview. Return ONLY a JSON array.",
         f"interview-{business_type}-{hashlib.md5((description or '').encode()).hexdigest()[:6]}",
+        feature="ai-onboarding-questions",
     )
     text = ""
     try:
@@ -529,6 +532,7 @@ async def onboarding_interview_synthesize(
         "You are a CPA refining a chart of accounts + seeding categorization rules based on "
         "onboarding interview answers. Return ONLY a JSON object with keys 'accounts' and 'rules'.",
         f"synth-{business_type}-{hashlib.md5(str(answers).encode()).hexdigest()[:6]}",
+        feature="ai-onboarding-synthesize",
     )
     text = ""
     try:
@@ -631,7 +635,7 @@ async def parse_voice_intent(text: str) -> dict:
         return {"intent": "none", "confidence": 0.0, "prefill": {}, "say": ""}
 
     sid = hashlib.md5(text.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
-    chat = _new_chat(INTENT_SYSTEM, f"intent-{sid}", model_name=MODEL_HAIKU)
+    chat = _new_chat(INTENT_SYSTEM, f"intent-{sid}", model_name=MODEL_HAIKU, feature="ai-voice-intent")
     raw = ""
     try:
         async for ev in chat.stream_message(UserMessage(text=f"Utterance: {text!r}\n\nReturn the JSON now.")):
@@ -792,7 +796,7 @@ async def cpa_review(
     )
 
     sid = hashlib.md5(f"cpa-{contact_name}-{user_message}".encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
-    chat = _new_chat(CPA_REVIEWER_SYSTEM, f"cpa-review-{sid}", model_name=MODEL_NAME)
+    chat = _new_chat(CPA_REVIEWER_SYSTEM, f"cpa-review-{sid}", model_name=MODEL_NAME, feature="ai-review")
     raw = ""
     try:
         async for ev in chat.stream_message(UserMessage(text=user_prompt)):
@@ -906,7 +910,7 @@ async def draft_ask_client_question(
         "Draft the question."
     )
     try:
-        chat = _new_chat(ASK_CLIENT_DRAFTER_SYSTEM, f"ask-client-drafter-{counterparty[:20]}")
+        chat = _new_chat(ASK_CLIENT_DRAFTER_SYSTEM, f"ask-client-drafter-{counterparty[:20]}", feature="ai-ask-client-draft")
         resp = await chat.send_message(UserMessage(text=prompt))
         raw = resp if isinstance(resp, str) else str(resp)
         data = _extract_json(raw)
@@ -985,7 +989,7 @@ async def interpret_client_answer(
         f"Return the JSON now."
     )
     try:
-        chat = _new_chat(ANSWER_INTERPRETER_SYSTEM, f"answer-interp-{txns[0].get('id', 'x')[:8]}")
+        chat = _new_chat(ANSWER_INTERPRETER_SYSTEM, f"answer-interp-{txns[0].get('id', 'x')[:8]}", feature="ai-answer-interpret")
         resp = await chat.send_message(UserMessage(text=prompt))
         raw = resp if isinstance(resp, str) else str(resp)
     except Exception as e:
@@ -1107,7 +1111,7 @@ async def client_chat_reply(
     )
     prompt = header + "Conversation so far:\n" + (convo or "(none yet — the client just opened the link)") + "\n\nWrite your next message now."
     try:
-        chat = _new_chat(CLIENT_CHAT_SYSTEM, f"client-chat-{txns[0].get('id', 'x')[:8]}")
+        chat = _new_chat(CLIENT_CHAT_SYSTEM, f"client-chat-{txns[0].get('id', 'x')[:8]}", feature="ai-client-chat")
         resp = await chat.send_message(UserMessage(text=prompt))
         return resp if isinstance(resp, str) else str(resp)
     except Exception as e:

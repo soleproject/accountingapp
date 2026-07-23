@@ -16,6 +16,7 @@ import JournalEntries from "@/pages/JournalEntries";
 import Rules from "@/pages/Rules";
 import Onboarding from "@/pages/Onboarding";
 import SuperadminDash from "@/pages/SuperadminDash";
+import SuperadminUsage from "@/pages/SuperadminUsage";
 import ProClients from "@/pages/ProClients";
 import Invoices from "@/pages/Invoices";
 import Bills from "@/pages/Bills";
@@ -72,6 +73,7 @@ function App() {
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/onboarding" element={<Onboarding />} />
               <Route path="/admin" element={<SuperadminDash />} />
+              <Route path="/admin/usage" element={<SuperadminUsage />} />
               <Route path="/pro/clients" element={<ProClients />} />
               <Route path="/invoices" element={<Invoices />} />
               <Route path="/bills" element={<Bills />} />
