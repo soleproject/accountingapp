@@ -6,6 +6,7 @@ import { useAiFocus } from "@/lib/aiFocus";
 import { stripMarkdownForSpeech } from "@/lib/speechText";
 import { Sparkles, PlayCircle, ArrowRight, Loader2, ListOrdered, LayoutList, Focus } from "lucide-react";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
+import AccountPicker from "@/components/AccountPicker";
 import { accountDefinition } from "@/lib/accountDefinitions";
 
 // Compact SVG donut: reviewed (emerald), ai (indigo), uncategorized (rose),
@@ -295,6 +296,12 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         { detail: { message: `Couldn't approve ${vendor.contact_name}. Try again.`, type: "error" } }));
     }
   };
+  const scrollToTop = () => {
+    try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch { /* ie11 fallback */ window.scrollTo(0, 0); }
+  };
+  const gotoPrev = () => { setFocusedGroupIdx(i => Math.max(0, i - 1)); scrollToTop(); };
+  const gotoNext = () => { setFocusedGroupIdx(i => Math.min((megaGroups?.length || 1) - 1, i + 1)); scrollToTop(); };
+
   const toggleVendor = (key) => {
     setMegaSelected(prev => {
       const next = new Set(prev);
@@ -852,14 +859,15 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                           <span className="font-semibold text-slate-900 truncate max-w-[220px] inline-block align-middle">{c.contact_name}</span>
                         </button>
                         <div className={`min-w-0 flex-1 flex items-center gap-1 rounded ${hi(2)}`}>
-                          <select
-                            data-testid={`mega-vendor-cat-${c.key}`}
+                          <AccountPicker
+                            testId={`mega-vendor-cat-${c.key}`}
                             value={effAccount?.id || ""}
-                            onChange={(e) => {
-                              const newId = e.target.value;
+                            accounts={accounts}
+                            companyId={currentId}
+                            isOverridden={isOverridden}
+                            onChange={(newId) => {
                               setMegaOverrides(prev => {
                                 const next = { ...prev };
-                                // If user reverts to the AI's original account (by id), clear the override.
                                 if (newId === c.account?.id) {
                                   delete next[c.key];
                                 } else if (newId) {
@@ -867,27 +875,15 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                                 }
                                 return next;
                               });
+                              // If a brand-new account was just created,
+                              // reload the accounts list so the label
+                              // renders correctly.
+                              if (!accounts.find(a => a.id === newId)) {
+                                window.dispatchEvent(new CustomEvent("axiom:action",
+                                  { detail: { kind: "accounts:changed", at: Date.now() } }));
+                              }
                             }}
-                            onClick={(e) => e.stopPropagation()}
-                            className={`min-w-0 flex-1 max-w-[340px] px-2.5 py-1 rounded-md border text-[13px] font-medium truncate ${
-                              isOverridden
-                                ? "bg-amber-50 border-amber-300 text-amber-900"
-                                : "bg-white border-slate-300 text-slate-800"
-                            }`}
-                          >
-                            {/* Grouped options by type for readability. */}
-                            {["expense", "cogs", "revenue", "asset", "liability", "equity"].map(kind => {
-                              const opts = accounts.filter(a => (a.type || "").toLowerCase() === kind);
-                              if (opts.length === 0) return null;
-                              return (
-                                <optgroup key={kind} label={kind.toUpperCase()}>
-                                  {opts.map(a => (
-                                    <option key={a.id} value={a.id}>{a.code} · {a.name}</option>
-                                  ))}
-                                </optgroup>
-                              );
-                            })}
-                          </select>
+                          />
                           <span data-testid={`mega-vendor-info-${c.key}`} className={`rounded ${hi(3)}`}>
                             <AccountInfoTooltip account={effAccount} />
                           </span>
@@ -960,7 +956,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                           <div className="flex items-center gap-2 mb-3">
                             <button
                               data-testid={`stepper-prev`}
-                              onClick={() => setFocusedGroupIdx(i => Math.max(0, i - 1))}
+                              onClick={gotoPrev}
                               disabled={idx === 0}
                               className="text-xs px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                             >
@@ -968,7 +964,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                             </button>
                             <button
                               data-testid={`stepper-next`}
-                              onClick={() => setFocusedGroupIdx(i => Math.min(megaGroups.length - 1, i + 1))}
+                              onClick={gotoNext}
                               disabled={idx >= megaGroups.length - 1}
                               className="text-xs px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                             >
@@ -991,7 +987,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                           <div className="flex items-center gap-2 mt-3 pt-3 border-t border-slate-100">
                             <button
                               data-testid="stepper-prev-bottom"
-                              onClick={() => setFocusedGroupIdx(i => Math.max(0, i - 1))}
+                              onClick={gotoPrev}
                               disabled={idx === 0}
                               className="text-xs px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                             >
@@ -999,7 +995,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                             </button>
                             <button
                               data-testid="stepper-next-bottom"
-                              onClick={() => setFocusedGroupIdx(i => Math.min(megaGroups.length - 1, i + 1))}
+                              onClick={gotoNext}
                               disabled={idx >= megaGroups.length - 1}
                               className="text-xs px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                             >
