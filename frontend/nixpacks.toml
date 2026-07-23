@@ -5,14 +5,17 @@
 nixPkgs = ["nodejs_22", "yarn"]
 
 [phases.install]
-# `yarn cache clean` nukes stale offline-mirror entries in Railway's
-# persistent build cache mount before install. Prevents the ENOENT
-# failure mode where a manifest entry exists but the tarball never
-# fully materialized (has-symbols corruption seen Feb 2026). The
-# `--network-timeout` also helps on flakey Nixpacks builder networks
-# — the default 30s is not enough for larger transitive graphs.
+# Clear stale tarballs from the persistent yarn cache mount *without*
+# unlinking the mount root itself (that fails with EBUSY on Railway's
+# Docker cache volume). `find ... -mindepth 1 -delete` empties the
+# contents in place. The `|| true` keeps the build going on the first
+# deploy when the cache dir doesn't exist yet.
+#
+# The `--network-timeout 600000` bumps yarn's default 30s to 10 min to
+# survive Railway's occasionally-throttled builder network — the root
+# cause of partial-download corruption we hit Feb 2026.
 cmds = [
-  "yarn cache clean",
+  "find /usr/local/share/.cache/yarn/v6 -mindepth 1 -delete 2>/dev/null || true",
   "yarn install --frozen-lockfile --network-timeout 600000",
 ]
 
