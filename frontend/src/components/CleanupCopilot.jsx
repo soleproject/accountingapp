@@ -988,7 +988,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   );
 
   return (
-    <div data-testid="cleanup-copilot" className="rounded-xl border border-slate-200 bg-gradient-to-br from-indigo-50/60 via-white to-fuchsia-50/60 shadow-md p-4">
+    <div data-testid="cleanup-copilot" className="rounded-xl border border-slate-200 bg-gradient-to-br from-indigo-50/40 via-white to-fuchsia-50/40 shadow-sm p-4">
       <div className="flex items-center gap-4 flex-wrap">
         <Donut progress={data?.progress} />
         <div className="flex-1 min-w-[280px]">
