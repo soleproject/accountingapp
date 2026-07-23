@@ -5,6 +5,7 @@ import { useAiFocus } from "@/lib/aiFocus";
 import { stripMarkdownForSpeech } from "@/lib/speechText";
 import { Sparkles, PlayCircle, ArrowRight, Loader2, ListOrdered, LayoutList, Focus } from "lucide-react";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
+import { accountDefinition } from "@/lib/accountDefinitions";
 
 // Compact SVG donut: reviewed (emerald), ai (indigo), uncategorized (rose),
 // flagged (amber), rest of total (slate). All slice sizes are proportional
@@ -85,7 +86,7 @@ function pitchFor(action, progress) {
   return action.why || action.label;
 }
 
-export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null }) {
+export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null, inlineTitle = null, inlineSubtitle = null }) {
   const { focus } = useAiFocus();
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -951,26 +952,9 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                       }
                       return (
                         <div data-testid={`mega-stepper-${g.account?.code || "none"}`}>
-                          {/* Info card — group name + account definition */}
-                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 mb-3">
-                            <div className="flex items-baseline justify-between gap-3">
-                              <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
-                                Group {idx + 1} of {megaGroups.length}
-                              </div>
-                              <div className="text-[11px] text-slate-500 tabular-nums">
-                                {g.totalRows.toLocaleString()} rows · {g.vendors.length} {g.vendors.length === 1 ? "bucket" : "buckets"} · ${Math.round(g.totalAmount).toLocaleString()}
-                              </div>
-                            </div>
-                            <div className="mt-1 font-heading font-semibold text-lg text-slate-900">
-                              {g.account?.code ? `${g.account.code} · ` : ""}{g.account?.name || "Uncategorized"}
-                            </div>
-                            {g.account?.description && (
-                              <div className="text-xs text-slate-600 mt-1 leading-snug">
-                                {g.account.description}
-                              </div>
-                            )}
-                          </div>
-                          {/* Same bulk-approve button as grouped mode, at the top for reach */}
+                          {/* Info card was moved to the page header (top-right,
+                              next to the "AI Cleanup Review" title). Only the
+                              navigation and rows render here. */}
                           <div className="flex items-center gap-2 mb-3">
                             <button
                               data-testid={`stepper-prev`}
@@ -1190,19 +1174,69 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     </div>
     {megaPreview && (
       inline ? (
-        // Inline rendering: the "report" version of the bucket review.
-        // Renders OUTSIDE the copilot card so the copilot banner and
-        // the report each get their own visual container. The optional
-        // `reportHeader` (title + description) sits between the two
-        // cards — matches the Transactions page pattern.
-        <>
-          {reportHeader}
-          <div className="mt-4" data-testid="mega-approve-inline">
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col p-5">
-              {renderMegaBody()}
-            </div>
-          </div>
-        </>
+        // Inline rendering: two-column header (title left, group info
+        // card right) followed by the report body. The group info card
+        // is only meaningful in stepper mode — otherwise it's suppressed
+        // so the header collapses to a single-column title.
+        (() => {
+          let currentGroup = null;
+          if (megaViewMode === "stepper" && megaGroups && megaGroups.length > 0) {
+            const idx = Math.min(focusedGroupIdx, megaGroups.length - 1);
+            currentGroup = megaGroups[idx];
+          }
+          return (
+            <>
+              {(inlineTitle || currentGroup) && (
+                <div className="mt-6 mb-3 flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    {inlineTitle && (
+                      <h1 className="text-3xl font-heading font-bold text-slate-900 leading-tight">
+                        {inlineTitle}
+                      </h1>
+                    )}
+                    {inlineSubtitle && (
+                      <div className="text-sm text-slate-500 mt-1">
+                        {inlineSubtitle}
+                      </div>
+                    )}
+                  </div>
+                  {currentGroup && (
+                    <div
+                      className="w-[420px] shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3"
+                      data-testid="stepper-info-card"
+                    >
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+                          Group {Math.min(focusedGroupIdx, megaGroups.length - 1) + 1} of {megaGroups.length}
+                        </span>
+                        <span className="text-[10px] text-slate-500 tabular-nums">
+                          {currentGroup.totalRows.toLocaleString()} rows · {currentGroup.vendors.length} {currentGroup.vendors.length === 1 ? "bucket" : "buckets"} · ${Math.round(currentGroup.totalAmount).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 font-heading font-semibold text-base text-slate-900 truncate">
+                        {currentGroup.account?.code ? `${currentGroup.account.code} · ` : ""}{currentGroup.account?.name || "Uncategorized"}
+                      </div>
+                      {(() => {
+                        const def = currentGroup.account ? accountDefinition(currentGroup.account) : null;
+                        return def ? (
+                          <div className="text-[11px] text-slate-600 mt-1 leading-snug line-clamp-3">
+                            {def}
+                          </div>
+                        ) : null;
+                      })()}
+                    </div>
+                  )}
+                </div>
+              )}
+              {reportHeader}
+              <div className="mt-4" data-testid="mega-approve-inline">
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col p-5">
+                  {renderMegaBody()}
+                </div>
+              </div>
+            </>
+          );
+        })()
       ) : (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-[2px] flex items-center justify-center p-4"
              data-testid="mega-approve-modal"
