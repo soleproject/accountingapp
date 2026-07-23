@@ -296,6 +296,74 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     });
   };
 
+  // Approve every bucket in a category group in one request. Same
+  // optimistic-then-rollback pattern as `approveOne` — we build the
+  // keys array + overrides map from the group's vendors, remove them
+  // from the modal state up-front, and roll back on failure.
+  const approveGroup = async (group) => {
+    if (!currentId || !group?.vendors?.length) return;
+    const vendors = group.vendors;
+    const keySet = new Set(vendors.map(v => v.key));
+    const overrides = {};
+    for (const v of vendors) {
+      const o = megaOverrides[v.key];
+      if (o) overrides[v.key] = o;
+    }
+    // Optimistic pop.
+    const removedTotals = vendors.reduce(
+      (acc, v) => {
+        acc.rows += v.count;
+        acc.amt += v.amount;
+        return acc;
+      },
+      { rows: 0, amt: 0 },
+    );
+    setMegaPreview(mp => mp ? {
+      ...mp,
+      vendors: mp.vendors.filter(v => !keySet.has(v.key)),
+      total_rows: mp.total_rows - removedTotals.rows,
+      total_buckets: (mp.total_buckets || 0) - vendors.length,
+      total_amount: mp.total_amount - removedTotals.amt,
+    } : mp);
+    setMegaSelected(prev => {
+      const n = new Set(prev);
+      for (const k of keySet) n.delete(k);
+      return n;
+    });
+    try {
+      const r = await api.post(
+        `/companies/${currentId}/transactions/bulk-approve-ai-ready`,
+        {
+          dry_run: false,
+          keys: Array.from(keySet),
+          auto_create_rules: autoCreateRules,
+          ...(Object.keys(overrides).length ? { overrides } : {}),
+        }
+      );
+      window.dispatchEvent(new CustomEvent("axiom:action",
+        { detail: { kind: "txns:changed", at: Date.now() } }));
+      if (r.data?.batch_id && r.data?.updated) {
+        setMegaUndo({
+          batch_id: r.data.batch_id,
+          count: r.data.updated,
+          rules_created: (r.data.rules_created || []).length,
+          expires: Date.now() + 60_000,
+        });
+      }
+    } catch (e) {
+      // Roll back — put vendors back at the top and re-select them.
+      setMegaPreview(mp => mp ? {
+        ...mp,
+        vendors: [...vendors, ...mp.vendors],
+        total_rows: mp.total_rows + removedTotals.rows,
+        total_buckets: (mp.total_buckets || 0) + vendors.length,
+        total_amount: mp.total_amount + removedTotals.amt,
+      } : mp);
+      window.dispatchEvent(new CustomEvent("axiom:toast",
+        { detail: { message: `Couldn't approve group. Try again.`, type: "error" } }));
+    }
+  };
+
   const load = async () => {
     if (!currentId) return;
     setBusy(true);
@@ -950,9 +1018,17 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                             <span className="font-semibold text-slate-800">
                               {g.account?.code ? `${g.account.code} · ` : ""}{g.account?.name || "Uncategorized"}
                             </span>
-                            <span className="text-slate-500 ml-auto tabular-nums">
+                            <span className="text-slate-500 tabular-nums">
                               {g.totalRows.toLocaleString()} rows · {g.vendors.length} {g.vendors.length === 1 ? "bucket" : "buckets"} · ${Math.round(g.totalAmount).toLocaleString()}
                             </span>
+                            <button
+                              data-testid={`mega-group-approve-${g.account?.code || "none"}`}
+                              onClick={() => approveGroup(g)}
+                              className="ml-auto shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 text-[11px] font-semibold transition"
+                              title={`Approve all ${g.vendors.length} ${g.vendors.length === 1 ? "bucket" : "buckets"} (${g.totalRows} rows) under ${g.account?.name || "this category"}`}
+                            >
+                              Approve group →
+                            </button>
                           </div>
                           <div className="space-y-1">
                             {g.vendors.map(renderRow)}
