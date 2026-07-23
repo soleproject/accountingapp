@@ -3,7 +3,7 @@ import { api } from "@/lib/api";
 import { useActionListener, emitAction } from "@/lib/createBus";
 import { useAiFocus } from "@/lib/aiFocus";
 import { stripMarkdownForSpeech } from "@/lib/speechText";
-import { Sparkles, PlayCircle, ArrowRight, Loader2, ListOrdered, LayoutList } from "lucide-react";
+import { Sparkles, PlayCircle, ArrowRight, Loader2, ListOrdered, LayoutList, Focus } from "lucide-react";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
 
 // Compact SVG donut: reviewed (emerald), ai (indigo), uncategorized (rose),
@@ -118,6 +118,10 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   //   "category" → grouped by effective account code so all buckets going
   //                to e.g. "6800 · Supplies & Materials" cluster together
   const [megaViewMode, setMegaViewMode] = useState(inline ? "category" : "rows");
+  // Stepper mode: which group index is currently focused. Only used when
+  // megaViewMode === "stepper". Reset to 0 whenever the mode is entered
+  // or the underlying group list is refreshed.
+  const [focusedGroupIdx, setFocusedGroupIdx] = useState(0);
   const [megaUndo, setMegaUndo] = useState(null);  // {batch_id, count, rules_created, expires}
   // Per-vendor category overrides: Map<contact_id, account_id>. When present,
   // the mega-approve call sends `overrides` and the vendor's row gets
@@ -349,6 +353,11 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
           rules_created: (r.data.rules_created || []).length,
           expires: Date.now() + 60_000,
         });
+      }
+      // Stepper: the approved group is filtered out — the same index
+      // now points at the next group. Clamp so we don't overshoot the end.
+      if (megaViewMode === "stepper") {
+        setFocusedGroupIdx(idx => Math.max(0, Math.min(idx, (megaGroups?.length || 1) - 2)));
       }
     } catch (e) {
       // Roll back — put vendors back at the top and re-select them.
@@ -646,7 +655,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   // We do it here — not in a memo — because filteredVendors is already
   // recomputed on every render (cheap enough at ~200 vendors max).
   const megaGroups = (() => {
-    if (megaViewMode !== "category") return null;
+    if (megaViewMode !== "category" && megaViewMode !== "stepper") return null;
     const map = new Map();
     for (const v of filteredVendors) {
       const overrideId = megaOverrides[v.key];
@@ -726,6 +735,18 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                         }`}
                       >
                         <LayoutList size={14} />
+                      </button>
+                      <button
+                        data-testid="mega-view-stepper"
+                        onClick={() => { setMegaViewMode("stepper"); setFocusedGroupIdx(0); }}
+                        title="Review one category at a time (stepper)"
+                        className={`p-1.5 transition border-l border-slate-200 ${
+                          megaViewMode === "stepper"
+                            ? "bg-slate-900 text-white"
+                            : "text-slate-500 hover:bg-slate-50"
+                        }`}
+                      >
+                        <Focus size={14} />
                       </button>
                     </div>
                     {howToRunning ? (
@@ -912,6 +933,72 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                       return (
                         <div className="text-[11px] text-slate-500 text-center py-4">
                           No vendors match &quot;{megaSearch}&quot;
+                        </div>
+                      );
+                    }
+                    if (megaViewMode === "stepper" && megaGroups) {
+                      // Stepper: show ONE group + info card + prev/next nav.
+                      // Clamp the index in case the list shrank underneath us.
+                      const idx = Math.min(focusedGroupIdx, megaGroups.length - 1);
+                      const g = megaGroups[idx];
+                      if (!g) {
+                        return (
+                          <div className="text-center py-10 text-slate-500 text-sm" data-testid="stepper-done">
+                            <div className="text-emerald-700 font-semibold text-base mb-1">All groups reviewed 🎉</div>
+                            Nothing left to approve in this cycle.
+                          </div>
+                        );
+                      }
+                      return (
+                        <div data-testid={`mega-stepper-${g.account?.code || "none"}`}>
+                          {/* Info card — group name + account definition */}
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 mb-3">
+                            <div className="flex items-baseline justify-between gap-3">
+                              <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
+                                Group {idx + 1} of {megaGroups.length}
+                              </div>
+                              <div className="text-[11px] text-slate-500 tabular-nums">
+                                {g.totalRows.toLocaleString()} rows · {g.vendors.length} {g.vendors.length === 1 ? "bucket" : "buckets"} · ${Math.round(g.totalAmount).toLocaleString()}
+                              </div>
+                            </div>
+                            <div className="mt-1 font-heading font-semibold text-lg text-slate-900">
+                              {g.account?.code ? `${g.account.code} · ` : ""}{g.account?.name || "Uncategorized"}
+                            </div>
+                            {g.account?.description && (
+                              <div className="text-xs text-slate-600 mt-1 leading-snug">
+                                {g.account.description}
+                              </div>
+                            )}
+                          </div>
+                          {/* Same bulk-approve button as grouped mode, at the top for reach */}
+                          <div className="flex items-center gap-2 mb-3">
+                            <button
+                              data-testid={`stepper-prev`}
+                              onClick={() => setFocusedGroupIdx(i => Math.max(0, i - 1))}
+                              disabled={idx === 0}
+                              className="text-xs px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                            >
+                              ← Previous
+                            </button>
+                            <button
+                              data-testid={`stepper-next`}
+                              onClick={() => setFocusedGroupIdx(i => Math.min(megaGroups.length - 1, i + 1))}
+                              disabled={idx >= megaGroups.length - 1}
+                              className="text-xs px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                            >
+                              Skip to next →
+                            </button>
+                            <button
+                              data-testid={`stepper-approve-group`}
+                              onClick={() => approveGroup(g)}
+                              className="ml-auto inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 text-xs font-semibold"
+                            >
+                              Approve group ({g.vendors.length}) →
+                            </button>
+                          </div>
+                          <div className="space-y-1">
+                            {g.vendors.map(renderRow)}
+                          </div>
                         </div>
                       );
                     }
