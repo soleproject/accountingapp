@@ -1185,3 +1185,12 @@ re-summarised without a data migration.
   CLIENT) on the user rows
 - Added `test_get_summary_aggregates_by_company_and_user` — verified
   events dedupe correctly per company + user
+
+### Categorization Source Breakdown (Feb 23, 2026 — same-day extension)
+- Added `categorization_sources_overall` + `categorization_sources` (per company) to `/api/admin/usage`
+- Buckets transactions by `ai_source`: `pfc_*` → Plaid PFC, `memory` → merchant cache, `rule/rules` → company rules, `ai` → LLM, everything else → "Manual / other"
+- Frontend renders:
+    * Big "Zero-AI cost path" percentage KPI + stacked horizontal bar + 5-way legend
+    * Per-enterprise mini stacked bar in the By Enterprise table with "% AI" tag
+- Purpose: proves the deterministic layers (Plaid PFC → merchant cache → rules → LLM) are pulling their weight so LLM cost stays near zero even on brand-new client onboardings
+

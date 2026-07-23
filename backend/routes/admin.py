@@ -185,6 +185,39 @@ async def admin_usage(
     ]
     summary["plaid_items_active"] = plaid_active
 
+    # Categorization-source breakdown across the transactions ledger —
+    # proves the deterministic pre-LLM layers are pulling their weight.
+    # Bucketed into four buckets the UI groups on: pfc / cache / rule / ai.
+    def _bucket(ai_source: str | None, cache_hit: bool) -> str:
+        s = (ai_source or "").lower()
+        if s.startswith("pfc_"):
+            return "pfc"
+        if s == "memory" or cache_hit:
+            return "cache"
+        if s in ("rule", "rules"):
+            return "rule"
+        if s == "ai":
+            return "ai"
+        # Manually-created / opening_balance / unknown → don't inflate
+        # any specific category.
+        return "other"
+
+    cat_pipeline = [
+        {"$match": {"category_account_id": {"$ne": None}}},
+        {"$project": {"ai_source": 1, "cache_hit": 1, "company_id": 1}},
+    ]
+    buckets_overall: dict[str, int] = {"pfc": 0, "cache": 0, "rule": 0, "ai": 0, "other": 0}
+    buckets_by_company: dict[str, dict[str, int]] = {}
+    async for t in db.transactions.aggregate(cat_pipeline):
+        b = _bucket(t.get("ai_source"), bool(t.get("cache_hit")))
+        buckets_overall[b] += 1
+        cid = t.get("company_id")
+        if cid:
+            row = buckets_by_company.setdefault(cid, {"pfc": 0, "cache": 0, "rule": 0, "ai": 0, "other": 0})
+            row[b] += 1
+
+    summary["categorization_sources_overall"] = buckets_overall
+
     # Enrich per-company + per-user rollups with display names so the UI
     # doesn't have to make N follow-up requests. Also attach live Plaid
     # item counts + monthly cost per company so the enterprise view
@@ -228,6 +261,10 @@ async def admin_usage(
         row["plaid_cost_cents"] = pcount * plaid_rate * 100
         # Total including plaid recurring — the "true bill" per enterprise.
         row["total_cost_cents"] = row["cost_cents"] + row["plaid_cost_cents"]
+        row["categorization_sources"] = buckets_by_company.get(
+            row["company_id"],
+            {"pfc": 0, "cache": 0, "rule": 0, "ai": 0, "other": 0},
+        )
     # Drop rows that are pure Plaid orphans (no matching company doc AND
     # no AI events). Those are stale test/dev items and only clutter the
     # dashboard — the numbers are still counted in the by_service Plaid

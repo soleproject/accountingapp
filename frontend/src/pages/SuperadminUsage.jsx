@@ -73,6 +73,7 @@ export default function SuperadminUsage() {
   const byCompany = data?.by_company || [];
   const byUser = data?.by_user || [];
   const expected = data?.expected_services || [];
+  const catSources = data?.categorization_sources_overall || null;
 
   // Category chip totals — sum from byCategory response (unfiltered).
   const catTotals = useMemo(() => {
@@ -158,6 +159,11 @@ export default function SuperadminUsage() {
           icon={TrendingUp} accent="amber"
         />
       </div>
+
+      {/* Categorization source breakdown — proves the deterministic
+          layers (Plaid PFC + cross-tenant merchant cache + rules) are
+          doing the heavy lifting so LLM cost stays near zero. */}
+      {catSources && <CategorizationSourcesCard sources={catSources} />}
 
       <div className="grid lg:grid-cols-2 gap-4">
         {/* By Feature */}
@@ -245,13 +251,31 @@ export default function SuperadminUsage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {byCompany.map(c => (
+                  {byCompany.map(c => {
+                    const src = c.categorization_sources || {};
+                    const srcTotal = (src.pfc || 0) + (src.cache || 0) + (src.rule || 0) + (src.ai || 0) + (src.other || 0);
+                    return (
                     <tr key={c.company_id} data-testid={`company-row-${c.company_id}`}>
                       <td className="px-4 py-2">
                         <div className="font-medium text-slate-900 text-sm">{c.name || "—"}</div>
                         {c.plaid_items > 0 && (
                           <div className="text-[11px] text-slate-500">
                             AI ${(c.cost_cents / 100).toFixed(4).replace(/0+$/, "").replace(/\.$/, "") || "0"} · Plaid ${(c.plaid_cost_cents / 100).toFixed(2)} ({c.plaid_items} item{c.plaid_items === 1 ? "" : "s"})
+                          </div>
+                        )}
+                        {srcTotal > 0 && (
+                          <div className="mt-1.5 flex items-center gap-2">
+                            <div className="flex h-1.5 flex-1 max-w-[180px] rounded-full overflow-hidden border border-slate-100">
+                              {SOURCE_META.map(m => {
+                                const n = src[m.key] || 0;
+                                if (n === 0) return null;
+                                const pct = (n / srcTotal) * 100;
+                                return <div key={m.key} className={m.tone} style={{ width: `${pct}%` }} title={`${m.label}: ${n}`} />;
+                              })}
+                            </div>
+                            <span className="text-[10px] text-slate-400 tabular-nums">
+                              {src.ai > 0 ? `${((src.ai / srcTotal) * 100).toFixed(1)}% AI` : "0% AI"}
+                            </span>
                           </div>
                         )}
                       </td>
@@ -261,7 +285,8 @@ export default function SuperadminUsage() {
                         {money(c.total_cost_cents)}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -388,6 +413,82 @@ function ServiceRow({ row }) {
 
 function rangeLabel(key) {
   return RANGES.find(r => r.key === key)?.label || key;
+}
+
+/* Deterministic-vs-AI source palette. Colors chosen to match the KPI accents
+   already in use — no new palette introduced. */
+const SOURCE_META = [
+  { key: "pfc",   label: "Plaid PFC",    tone: "bg-cyan-500",    tip: "Categorized deterministically from Plaid's Personal Finance Category tag — no AI, no rules needed." },
+  { key: "cache", label: "Merchant cache", tone: "bg-emerald-500", tip: "Cross-tenant merchant cache hit — a merchant your platform has categorized before for any client." },
+  { key: "rule",  label: "Company rule", tone: "bg-indigo-500",  tip: "Company-specific rule matched (created after ≥2 human approvals of the same merchant → account)." },
+  { key: "ai",    label: "LLM",          tone: "bg-amber-500",   tip: "Fell through the deterministic layers → billable OpenAI call." },
+  { key: "other", label: "Manual / other", tone: "bg-slate-400", tip: "Manually entered, opening balance, or uncategorized." },
+];
+
+function CategorizationSourcesCard({ sources }) {
+  const total = (sources.pfc || 0) + (sources.cache || 0) + (sources.rule || 0) + (sources.ai || 0) + (sources.other || 0);
+  if (total === 0) return null;
+  const aiPct = (sources.ai / total) * 100;
+  const deterministicPct = ((sources.pfc + sources.cache + sources.rule) / total) * 100;
+  return (
+    <div className="bg-white rounded-lg border border-slate-200 p-5 mb-4" data-testid="usage-cat-sources">
+      <div className="flex items-baseline justify-between mb-3">
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-slate-500">Categorization source</div>
+          <div className="text-sm text-slate-500 mt-0.5">
+            <span className="font-semibold text-slate-900 tabular-nums">{compact(total)}</span> categorized transactions across the platform
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-2xl font-heading font-bold text-emerald-700 tabular-nums">{deterministicPct.toFixed(1)}%</div>
+          <div className="text-[11px] uppercase tracking-wide text-slate-500">Zero-AI cost path</div>
+        </div>
+      </div>
+      <StackedBar sources={sources} total={total} />
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-4">
+        {SOURCE_META.map(m => {
+          const n = sources[m.key] || 0;
+          const pct = total > 0 ? (n / total) * 100 : 0;
+          return (
+            <div key={m.key} title={m.tip} className="flex items-center gap-2">
+              <div className={`w-2.5 h-2.5 rounded-sm ${m.tone}`} />
+              <div className="min-w-0">
+                <div className="text-[11px] text-slate-500 truncate">{m.label}</div>
+                <div className="text-sm font-medium text-slate-900 tabular-nums">
+                  {compact(n)} <span className="text-slate-400 text-xs">({pct.toFixed(1)}%)</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {aiPct > 0 && (
+        <div className="mt-3 text-[11px] text-slate-500">
+          LLM ran on <span className="font-semibold text-amber-700">{aiPct.toFixed(2)}%</span> of transactions — the rest bypassed AI via deterministic layers.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StackedBar({ sources, total }) {
+  return (
+    <div className="flex h-3 w-full rounded-full overflow-hidden border border-slate-100">
+      {SOURCE_META.map(m => {
+        const n = sources[m.key] || 0;
+        if (n === 0) return null;
+        const pct = (n / total) * 100;
+        return (
+          <div
+            key={m.key}
+            className={m.tone}
+            style={{ width: `${pct}%` }}
+            title={`${m.label}: ${compact(n)} (${pct.toFixed(1)}%)`}
+          />
+        );
+      })}
+    </div>
+  );
 }
 
 function RoleBadge({ role }) {
