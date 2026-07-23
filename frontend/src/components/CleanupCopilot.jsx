@@ -983,6 +983,34 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                           <div className="space-y-1">
                             {g.vendors.map(renderRow)}
                           </div>
+                          {/* Duplicate the nav at the bottom so the CPA
+                              doesn't have to scroll back up after
+                              inspecting a long bucket list. */}
+                          <div className="flex items-center gap-2 mt-3 pt-3 border-t border-slate-100">
+                            <button
+                              data-testid="stepper-prev-bottom"
+                              onClick={() => setFocusedGroupIdx(i => Math.max(0, i - 1))}
+                              disabled={idx === 0}
+                              className="text-xs px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                            >
+                              ← Previous
+                            </button>
+                            <button
+                              data-testid="stepper-next-bottom"
+                              onClick={() => setFocusedGroupIdx(i => Math.min(megaGroups.length - 1, i + 1))}
+                              disabled={idx >= megaGroups.length - 1}
+                              className="text-xs px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                            >
+                              Skip to next →
+                            </button>
+                            <button
+                              data-testid="stepper-approve-group-bottom"
+                              onClick={() => approveGroup(g)}
+                              className="ml-auto inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 text-xs font-semibold"
+                            >
+                              Approve group ({g.vendors.length}) →
+                            </button>
+                          </div>
                         </div>
                       );
                     }
