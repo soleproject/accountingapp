@@ -1242,7 +1242,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                   </div>
                   {currentGroup && (
                     <div
-                      className="w-[420px] shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3"
+                      className="w-[420px] shrink-0 rounded-lg bg-white border border-cyan-400 ring-1 ring-cyan-100 shadow-sm px-4 py-3"
                       data-testid="stepper-info-card"
                     >
                       <div className="flex items-baseline justify-between gap-2">
