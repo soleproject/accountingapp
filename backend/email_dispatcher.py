@@ -47,6 +47,7 @@ DEFAULT_PREFS = {
     "client_welcome_returning": True,   # "We added another company to your login"
     "password_reset":           True,   # Forgot-password magic link
     "team_invite":              True,   # Team/staff/pro/superadmin invitations
+    "stripe_welcome":           True,   # Post-Stripe-checkout welcome + set-password magic link
     "dunning":                  True,
     "overdue_bill_client":      True,
     "plaid_reauth":             True,

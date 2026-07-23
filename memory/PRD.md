@@ -1048,3 +1048,63 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   linked correctly to their 15+ transactions with resulting categories
   (Office Supplies, Product Sales, Payroll, Legal & Professional Fees).
 
+
+## Stripe Billing & Affiliate Revenue Share (Feb 23, 2026) ✅
+
+### Overview
+Stripe webhook + billing dashboards live at `/api/stripe/webhook`. Auto-
+creates user accounts on successful Stripe checkout, tracks every paid
+invoice in `platform_payments`, and credits 20% of gross to the referring
+affiliate in `referral_earnings`. No automatic payout — accrued balance is
+displayed in each affiliate's `/share` dashboard, superadmin marks batches
+as paid_out after cutting a manual payment.
+
+### Backend (`/app/backend/routes/stripe_billing.py`)
+- `POST /api/stripe/webhook` — verifies `STRIPE_WEBHOOK_SECRET` signature,
+  dedupes by Stripe event id in `stripe_webhook_events`, fans out on:
+    * `checkout.session.completed` → find-or-create user (client role,
+      random password), link `stripe_customer_id` +
+      `stripe_subscription_id`, resolve `client_reference_id` as
+      referral slug → set `referred_by_user_id`, send welcome email
+      with magic-link `set-password` token (14-day TTL).
+    * `invoice.paid` → insert `platform_payments` row (idempotent on
+      `stripe_invoice_id`), if payer has `referred_by_user_id` credit
+      20% (basis points `AFFILIATE_SHARE_BPS=2000`) to
+      `referral_earnings` with `status="accrued"`.
+    * `customer.subscription.deleted|updated` → update user's
+      `subscription_status`, `subscription_canceled_at`.
+- `GET /api/billing/me` — signed-in user's subscription + invoice history.
+- `GET /api/billing/pro/clients` — pros see every client owner's billing status.
+- `GET /api/billing/superadmin` — platform revenue totals, recent
+  payments, top affiliates by accrued/paid_out.
+- `GET /api/billing/affiliate/me` — earnings breakdown for `/share` page.
+- `POST /api/billing/superadmin/mark-paid` — bulk-flip `referral_earnings`
+  from `accrued` → `paid_out`.
+- New email template `stripe_welcome` + `stripe_welcome` pref key.
+
+### Frontend
+- New `/billing` route (`Billing.jsx`): role-aware dispatch. Everyone sees
+  "My subscription" + payment history; pros additionally see "Client
+  billing" table; superadmin also sees platform revenue KPIs + recent
+  payments + top affiliates rail.
+- Sidebar link "Billing" between "My Businesses" and "Refer & earn".
+- Live earnings counts on `/share` page now backed by `referral_earnings`.
+
+### Persistence (Mongo collections)
+- `platform_payments` — one row per paid Stripe invoice, keyed on `stripe_invoice_id`.
+- `referral_earnings` — one row per (payment, referrer), status = accrued|paid_out.
+- `stripe_webhook_events` — event id → received_at, for idempotent dedupe.
+
+### Env vars consumed
+- `STRIPE_SECRET_KEY` (user-rotated live key on Railway)
+- `STRIPE_WEBHOOK_SECRET` (`whsec_...` from Stripe Dashboard → Webhooks)
+- `AFFILIATE_SHARE_BPS` (defaults to 2000 = 20%)
+- `PRIMARY_HOST` (default `app.smartbookssoftware.ai`)
+
+### Tests
+- `/app/backend/tests/test_stripe_billing.py` — 7 pytest cases covering
+  signature verification (reject bad, accept good), event dedup by id,
+  auto-user-creation, referral slug crediting, 20% share math,
+  invoice.paid idempotency across different event ids, and superadmin
+  mark-paid role guard + status flip. All pass under xdist.
+

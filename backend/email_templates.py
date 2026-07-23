@@ -473,6 +473,35 @@ def month_close_signoff(*, client_name: str, company_name: str, month_label: str
 
 
 # --------------------------------------------------------------------------
+# Stripe checkout welcome — sent by the Stripe webhook when a brand-new
+# email pays for a subscription. Includes a magic link to set the
+# password (the account was auto-created with a random one they never
+# see). Purposefully lighter tone than the pro-invited flow — the buyer
+# knows they signed up because *they* just paid Stripe.
+# --------------------------------------------------------------------------
+def stripe_welcome(*, name: str, magic_url: str) -> tuple[str, str]:
+    inner = f"""
+      <div style="{_H1}">Payment received — let's get you set up</div>
+      <div style="{_P}">
+        Hi {escape(name)},<br><br>
+        Thanks for subscribing to SmartBooks. Your account is created and
+        ready — pick a password and you're in.
+      </div>
+      <div style="padding:14px 0 6px;">
+        <a href="{magic_url}" style="{_BTN}">Set your password →</a>
+      </div>
+      <div style="{_MUTE}">
+        This link is unique to you and expires in 14 days. If it does,
+        head to <b>Forgot password</b> on the sign-in page to get a fresh
+        one. Have questions about your subscription? Just reply to this
+        email.
+      </div>
+    """
+    return "Welcome to SmartBooks — set your password", _wrap(inner)
+
+
+
+# --------------------------------------------------------------------------
 # Tiny local escape (avoid pulling markupsafe just for these).
 # --------------------------------------------------------------------------
 def escape(s) -> str:

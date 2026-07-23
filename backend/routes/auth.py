@@ -157,17 +157,24 @@ async def share_info(user: dict = Depends(get_current_user)):
     slug = await mint_slug_for_user(user["id"])
     host = os.environ.get("PRIMARY_HOST", "app.smartbookssoftware.ai")
     link = f"https://{host}/signup?ref={slug}"
-    # Placeholder counts until the Stripe webhook lands next session; the
-    # UI can already render the empty state without a code change once
-    # `payments` + `user_referral_revenue_share` collections exist.
+    # Live counts. `paying_count` = distinct referred users who've paid
+    # at least one invoice; `earnings_cents` = total accrued+paid_out
+    # revenue share owed to this referrer; `pending_cents` = accrued but
+    # not yet paid out.
     referred_count = await db.users.count_documents({"referred_by_user_id": user["id"]})
+    earnings_docs = await db.referral_earnings.find(
+        {"referrer_user_id": user["id"]}
+    ).to_list(2000)
+    accrued = sum(int(e.get("share_cents") or 0) for e in earnings_docs if e.get("status") == "accrued")
+    paid_out = sum(int(e.get("share_cents") or 0) for e in earnings_docs if e.get("status") == "paid_out")
+    paying = len({e.get("referred_user_id") for e in earnings_docs if e.get("referred_user_id")})
     return {
         "slug": slug,
         "link": link,
         "referred_count": referred_count,
-        "paying_count": 0,       # populated by Stripe webhook (P2 session)
-        "earnings_cents": 0,      # populated by revenue-share ledger (P2 session)
-        "pending_cents": 0,
+        "paying_count": paying,
+        "earnings_cents": accrued + paid_out,
+        "pending_cents": accrued,
     }
 
 
