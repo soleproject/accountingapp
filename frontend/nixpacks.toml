@@ -5,7 +5,16 @@
 nixPkgs = ["nodejs_22", "yarn"]
 
 [phases.install]
-cmds = ["yarn install --frozen-lockfile"]
+# `yarn cache clean` nukes stale offline-mirror entries in Railway's
+# persistent build cache mount before install. Prevents the ENOENT
+# failure mode where a manifest entry exists but the tarball never
+# fully materialized (has-symbols corruption seen Feb 2026). The
+# `--network-timeout` also helps on flakey Nixpacks builder networks
+# — the default 30s is not enough for larger transitive graphs.
+cmds = [
+  "yarn cache clean",
+  "yarn install --frozen-lockfile --network-timeout 600000",
+]
 
 [phases.build]
 # Explicitly set NODE_ENV=production during build so craco/react-scripts
