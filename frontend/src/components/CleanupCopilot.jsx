@@ -988,6 +988,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   );
 
   return (
+    <>
     <div data-testid="cleanup-copilot" className="rounded-xl border border-slate-200 bg-gradient-to-br from-indigo-50/40 via-white to-fuchsia-50/40 shadow-sm p-4">
       <div className="flex items-center gap-4 flex-wrap">
         <Donut progress={data?.progress} />
@@ -1099,33 +1100,33 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
           )}
         </div>
       )}
-      {megaPreview && (
-        inline ? (
-          // Inline rendering: the "report" version of the bucket review.
-          // Same body, no overlay, no click-outside-to-close, no viewport
-          // height cap. Sits as a normal page section under the copilot
-          // banner. Optional `reportHeader` (title + description) renders
-          // above the report card — matches the Transactions page pattern
-          // where the copilot banner comes first, then the section title.
-          <>
-            {reportHeader}
-            <div className="mt-4" data-testid="mega-approve-inline">
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col p-5">
-                {renderMegaBody()}
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-[2px] flex items-center justify-center p-4"
-               data-testid="mega-approve-modal"
-               onClick={() => !megaBusy && setMegaPreview(null)}>
-            <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[92vh] flex flex-col p-5"
-                 onClick={(e) => e.stopPropagation()}>
+    </div>
+    {megaPreview && (
+      inline ? (
+        // Inline rendering: the "report" version of the bucket review.
+        // Renders OUTSIDE the copilot card so the copilot banner and
+        // the report each get their own visual container. The optional
+        // `reportHeader` (title + description) sits between the two
+        // cards — matches the Transactions page pattern.
+        <>
+          {reportHeader}
+          <div className="mt-4" data-testid="mega-approve-inline">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col p-5">
               {renderMegaBody()}
             </div>
           </div>
-        )
-      )}
+        </>
+      ) : (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-[2px] flex items-center justify-center p-4"
+             data-testid="mega-approve-modal"
+             onClick={() => !megaBusy && setMegaPreview(null)}>
+          <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[92vh] flex flex-col p-5"
+               onClick={(e) => e.stopPropagation()}>
+            {renderMegaBody()}
+          </div>
+        </div>
+      )
+    )}
       {megaUndo && (
         <div className="fixed bottom-6 right-6 z-[70] max-w-sm bg-slate-900 text-white rounded-lg shadow-2xl px-4 py-3 flex items-center gap-3"
              data-testid="mega-undo-toast">
@@ -1154,6 +1155,6 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
           </button>
         </div>
       )}
-    </div>
+    </>
   );
 }
