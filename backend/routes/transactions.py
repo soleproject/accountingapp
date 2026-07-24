@@ -1593,7 +1593,18 @@ async def apply_multi_bulk_approve(cid: str, inp: MultiBulkApproveIn, user: dict
         ids = g.get("txn_ids") or []
         if not acct_id or not ids:
             continue
+        # Self-heal: the LLM CPA reviewer sometimes returns the account CODE
+        # (e.g. "6500") as `existing_account_id` instead of the UUID. Try `id`
+        # first, then fall back to `code`, then a case-insensitive `name`
+        # match — so 0-row updates from a malformed acct id become impossible.
         acct = await db.accounts.find_one({"id": acct_id, "company_id": cid})
+        if not acct:
+            acct = await db.accounts.find_one({"code": str(acct_id), "company_id": cid})
+        if not acct:
+            acct = await db.accounts.find_one({
+                "company_id": cid,
+                "name": {"$regex": f"^{re.escape(str(acct_id))}$", "$options": "i"},
+            })
         if not acct:
             continue
         # Only actionable rows: not already approved AND in an open period.
