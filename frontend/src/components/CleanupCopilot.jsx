@@ -1129,7 +1129,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                   // in place — the modal is now the AI Cleanup Review
                   // report living at its own URL.
                   if (!inline) {
-                    navigate("/accounting/ai-cleanup-review");
+                    navigate("/accounting/ai-cleanup-review?view=stepper");
                   } else {
                     openMega();
                   }
