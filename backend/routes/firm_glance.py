@@ -393,7 +393,17 @@ async def _monthly_todos(cid: str) -> dict:
             r["accounts"].add(cat_id)
         elif contact and is_uncategorized:
             per_contact_uncategorized[contact] = per_contact_uncategorized.get(contact, 0) + 1
-        elif not contact and (is_uncategorized or t.get("needs_review")):
+        elif not contact and is_uncategorized:
+            # Gap C fix (Feb 2026): drop the `OR needs_review` branch. Rows
+            # that are categorized-but-flagged with no contact are already
+            # counted in Step 1 (they enter `ai_ready_by_contact` via the
+            # `not is_uncategorized` branch above when a contact exists;
+            # for no-contact flagged rows the AI Cleanup Copilot's mega-
+            # approve endpoint excludes them anyway — see line 434 in
+            # transactions.py "rows without a contact_id"). Keeping the
+            # OR-needs_review clause double-counted them here without a
+            # working approve path, cluttering the Step 3 queue with
+            # rows the CPA couldn't act on from this workflow.
             no_contact_review += 1
 
     # Step 1 count = every (contact, account) BUCKET eligible for batch
