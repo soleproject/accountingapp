@@ -396,14 +396,22 @@ async def _monthly_todos(cid: str) -> dict:
         elif not contact and (is_uncategorized or t.get("needs_review")):
             no_contact_review += 1
 
-    # Only contacts with UNANIMOUS AI opinion feed Step 1 — matches the
-    # cleanup-suggestions endpoint (`len(r["accounts"]) == 1`). Reported
-    # count = # of DISTINCT categories those contacts will approve into.
-    unanimous_categories: set[str] = set()
-    for r in ai_ready_by_contact.values():
-        if len(r["accounts"]) == 1:
-            unanimous_categories.add(next(iter(r["accounts"])))
-    ai_ready_txns = len(unanimous_categories)
+    # Step 1 count = every (contact, account) BUCKET eligible for batch
+    # approval on the AI Cleanup Review page. Split contacts (Costco →
+    # Food AND Costco → Travel) surface as 2 buckets — the mega-approve
+    # endpoint (`bulk_approve_ai_ready`) already handles them as separate
+    # rows and refuses to create rules for split vendors (see
+    # `_is_rule_noise_merchant` + `buckets_per_contact > 1` guard in
+    # `/app/backend/routes/transactions.py` line 620-622), so exposing
+    # split contacts on the dashboard is safe.
+    #
+    # Feb 2026 fix: previously this counted only UNANIMOUS contacts
+    # (`len(r["accounts"]) == 1`) which under-reported by hiding split
+    # buckets — 205 LLC checklist said "Step 1: 0 categories · done"
+    # while 18 AI-categorized rows still needed review because Costco
+    # (and friends) had 2 accounts per contact.
+    ai_ready_buckets = sum(len(r["accounts"]) for r in ai_ready_by_contact.values())
+    ai_ready_txns = ai_ready_buckets
 
     # A vendor "group" is eligible for batch review at 1+ uncategorized rows —
     # even a single leftover from a known contact belongs in the Let's Review
