@@ -17,6 +17,7 @@ import AskClientButton from "@/components/AskClientButton";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
 import { ContactBadge } from "@/components/ContactBadge";
 import { emitAction, useActionListener } from "@/lib/createBus";
+import { useLetsReviewNav } from "@/pages/LetsReview";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
 
@@ -176,6 +177,15 @@ function ConfidenceChip({ conf, needs_review }) {
 export default function Transactions() {
   const { currentId } = useCompany();
   const { setFocus } = useAiFocus();
+  const [params] = useSearchParams();
+  // Read the "Let's Review" URL params up-front so `load()` (defined
+  // below) can reference them without hitting a TDZ error.
+  const isLetsReview = params.get("letsReview") === "1";
+  const lrContactId = params.get("contact_id") || "";
+  const lrContactName = params.get("contact_name") || "";
+  const lrIdx = parseInt(params.get("idx") || "1", 10);
+  const lrTotal = parseInt(params.get("total") || "1", 10);
+  const letsReviewNav = useLetsReviewNav();
   const [txns, setTxns] = useState([]);
   const [accts, setAccts] = useState([]);
   const [invoices, setInvoices] = useState([]);
@@ -226,6 +236,9 @@ export default function Transactions() {
     if (debouncedSearch) params.set("q", debouncedSearch);
     if (dateFrom) params.set("date_from", dateFrom);
     if (dateTo) params.set("date_to", dateTo);
+    // "Let's Review" mode pins the list to a single contact so the
+    // stepper walks vendor-by-vendor without the user re-typing filters.
+    if (isLetsReview && lrContactId) params.set("contact_id", lrContactId);
     params.set("page", String(page));
     params.set("limit", String(pageSize));
     const qs = `?${params.toString()}`;
@@ -243,7 +256,7 @@ export default function Transactions() {
     setSelected(new Set());
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize, debouncedSearch, dateFrom, dateTo]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize, debouncedSearch, dateFrom, dateTo, isLetsReview, lrContactId]);
   // Reset page when filters narrow/widen.
   useEffect(() => { setPage(p => (p === 1 ? p : 1)); }, [debouncedSearch, dateFrom, dateTo]);
 
@@ -405,7 +418,6 @@ export default function Transactions() {
   };
   const filtersActive = Boolean(debouncedSearch || dateFrom || dateTo || (filter !== "all"));
 
-  const [params] = useSearchParams();
   // Voice-command deep-link support: /accounting/transactions?q=Walmart or
   // ?date_from=2026-07-15&date_to=2026-07-15. On mount / URL change, hydrate
   // the toolbar state so the user sees a filtered view immediately.
@@ -655,11 +667,46 @@ export default function Transactions() {
       />
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
-          <h1 className="font-heading text-3xl font-bold tracking-tight">Transactions</h1>
+          <h1 className="font-heading text-3xl font-bold tracking-tight">
+            {isLetsReview ? "AI Transaction Questions" : "Transactions"}
+          </h1>
           <p className="text-slate-500 text-sm mt-1">
-            AI has posted the confident ones. Review the flagged. Hover a row to give the assistant context.
+            {isLetsReview
+              ? "One vendor at a time. Answer the AI's questions and post them in bulk."
+              : "AI has posted the confident ones. Review the flagged. Hover a row to give the assistant context."}
           </p>
         </div>
+        {isLetsReview && lrContactName && (
+          <div
+            className="rounded-lg border-2 border-indigo-200 bg-indigo-50/50 px-4 py-2 text-right shrink-0"
+            data-testid="lets-review-info-box"
+          >
+            <div className="text-[10px] uppercase tracking-wider text-indigo-700 font-semibold">
+              Contact {lrIdx} of {lrTotal}
+            </div>
+            <div className="font-heading text-lg font-bold text-slate-900 leading-tight">
+              {lrContactName}
+            </div>
+            <div className="mt-2 flex items-center gap-1 justify-end">
+              <button
+                onClick={() => letsReviewNav.prev && letsReviewNav.prev()}
+                disabled={!letsReviewNav.prev}
+                data-testid="lets-review-prev"
+                className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                ← Prev
+              </button>
+              <button
+                onClick={() => letsReviewNav.next && letsReviewNav.next()}
+                disabled={!letsReviewNav.next}
+                data-testid="lets-review-next"
+                className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Next →
+              </button>
+            </div>
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <button
             data-testid="detect-transfers-btn"

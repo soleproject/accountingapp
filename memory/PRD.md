@@ -1362,3 +1362,16 @@ Fix: `_monthly_todos()` now mirrors `cleanup_suggestions()`'s `ai_ready_by_conta
 - Registered in `App.js` alongside the existing `/accounting/ai-cleanup-review` route
 - Verified visually on 419 LLC: opened at "Venmo · CONTACT 1 OF 5" with all 20 rows listed, AccountPicker + rule checkbox + Approve 20 → button ready
 
+
+## Let's Review Rebuilt as Transactions Clone (Feb 24, 2026) ✅
+Rewrote `/accounting/lets-review` per user feedback ("literally could have cloned the transactions page with that filter and added the box for the contact info"):
+
+- `LetsReview.jsx` is now a **thin router** — fetches `/cleanup-suggestions`, filters to `kind=contact_in_uncat`, picks the first group (or the one specified via `?contact_id=`), then redirects to `/accounting/transactions?letsReview=1&contact_id=X&contact_name=Y&idx=A&total=B&filter=uncategorized`. Also fires the `cleanup-inquiry` bus event so the AI Copilot chat populates immediately.
+- `Transactions.jsx` gained lightweight overrides driven by those URL params:
+    * Title swaps to **"AI Transaction Questions"** (from "Transactions") with the tagline *"One vendor at a time. Answer the AI's questions and post them in bulk."*
+    * Contact info box appears top-right in the same slot as AI Cleanup Review's "Group X of Y" box: **"CONTACT 1 OF 5 · Venmo"** with **← Prev / Next →** buttons
+    * `load()` adds `contact_id=X` to the request so the table is pre-filtered to that vendor
+- New exported `useLetsReviewNav()` hook in `LetsReview.jsx` handles Prev/Next navigation without duplicating the group-fetch logic
+- Every existing Transactions feature (search, date filters, per-row actions, AI Copilot chip strip, chat side-panel, "Approve AI Categorized" flow) works unchanged
+- Setup checklist Step 2 Review button continues to link to `/accounting/lets-review` — user drops straight into the vendor stepper with the Copilot's questions ready in chat
+
