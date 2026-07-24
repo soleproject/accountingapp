@@ -352,22 +352,38 @@ async def _monthly_todos(cid: str) -> dict:
     """
     txns = await db.transactions.find({"company_id": cid}).to_list(50000)
 
+    # Bucket the unreviewed rows into the three checklist steps.
+    #   Step 1 · "Review AI categorized" — AI has assigned a REAL income /
+    #            expense account (not the 6999/4999/9999 placeholders) AND
+    #            we know the vendor. Stepper mode approves these one click.
+    #   Step 2 · "Let's review"          — vendor groups where 3+ rows are
+    #            still sitting in an uncategorized placeholder. The user
+    #            picks one account for the whole vendor at once.
+    #   Step 3 · "Individual review"     — no-contact rows that can't be
+    #            grouped by vendor (future: cluster by description).
+    UNCAT_CODES = {"6999", "4999", "9999"}
     ai_ready_txns = 0
-    ai_ready_contacts: set[str] = set()
+    per_contact_uncategorized: dict[str, int] = {}
     no_contact_review = 0
     for t in txns:
         if t.get("human_reviewed"):
             continue
-        has_real_cat = (
-            t.get("category_account_id")
-            and t.get("category_account_code") not in ("9999", "6999", "4999")
-        )
         contact = t.get("contact_id")
-        if has_real_cat and contact:
+        code = t.get("category_account_code")
+        has_cat_id = bool(t.get("category_account_id"))
+        is_uncategorized = (not has_cat_id) or (code in UNCAT_CODES)
+
+        if contact and not is_uncategorized:
             ai_ready_txns += 1
-            ai_ready_contacts.add(contact)
-        if not contact and (t.get("needs_review") or not t.get("category_account_id")):
+        elif contact and is_uncategorized:
+            per_contact_uncategorized[contact] = per_contact_uncategorized.get(contact, 0) + 1
+        elif not contact and (is_uncategorized or t.get("needs_review")):
             no_contact_review += 1
+
+    # A vendor "group" is eligible for batch review at 3+ uncategorized rows,
+    # matching the Cleanup Copilot's "N transactions are sitting in
+    # Uncategorized" chip threshold.
+    step2_groups = sum(1 for n in per_contact_uncategorized.values() if n >= 3)
 
     steps = {
         "step1": {
@@ -382,8 +398,8 @@ async def _monthly_todos(cid: str) -> dict:
         "step2": {
             "key": "grouped_review",
             "title": "Let's review",
-            "subtitle": "Batch-approve vendor groups where all rows land in one account.",
-            "count": len(ai_ready_contacts),
+            "subtitle": "Batch-categorize vendor groups where 3+ rows are still uncategorized.",
+            "count": step2_groups,
             "unit": "vendor groups",
             "cta_label": "Review",
             "cta_link": "/accounting/ai-cleanup-review?mode=grouped",
