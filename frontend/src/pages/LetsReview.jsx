@@ -20,31 +20,13 @@ export default function LetsReview() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const [groups, setGroups] = useState(null);
-  const [refining, setRefining] = useState(false);
 
   useEffect(() => {
     if (!currentId) return;
-    let cancelled = false;
-    (async () => {
-      // Silently re-resolve contacts before showing the queue so
-      // mis-tagged rows (e.g. from a poisoned learning-cache era) get
-      // corrected without the CPA needing to click anything. Backend
-      // rate-limits to once per hour per company, so this is safe to
-      // call on every mount.
-      setRefining(true);
-      try {
-        await api.post(`/companies/${currentId}/contacts/re-resolve`);
-      } catch (e) {
-        // Non-blocking: proceed with whatever contact data we have.
-      }
-      if (cancelled) return;
-      setRefining(false);
-      const r = await api.get(`/companies/${currentId}/transactions/cleanup-suggestions`);
-      if (cancelled) return;
+    api.get(`/companies/${currentId}/transactions/cleanup-suggestions`).then(r => {
       const gs = (r.data?.top_actions || []).filter(a => a.kind === "contact_in_uncat");
       setGroups(gs);
-    })();
-    return () => { cancelled = true; };
+    });
   }, [currentId]);
 
   const currentIdx = useMemo(() => {
@@ -91,14 +73,7 @@ export default function LetsReview() {
   }, [groups, currentIdx, navigate]);
 
   if (!groups) {
-    return (
-      <div className="p-6 text-sm text-slate-500 flex items-center gap-2" data-testid="lets-review-loading">
-        <Sparkles size={14} className={refining ? "animate-pulse text-cyan-500" : "text-slate-400"} />
-        {refining
-          ? "AI is re-checking contact tags for accuracy…"
-          : "Loading vendor groups…"}
-      </div>
-    );
+    return <div className="p-6 text-sm text-slate-500">Loading vendor groups…</div>;
   }
   if (groups.length === 0) {
     return (

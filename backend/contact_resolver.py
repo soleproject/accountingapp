@@ -37,12 +37,43 @@ _NOISY_MERCHANT = re.compile(
 )
 
 
+# Generic payment-channel merchant names that Plaid returns for P2P /
+# money-transfer flows where the ACTUAL counterparty lives in the
+# description (Zelle → "Zelle payment to Kevin Petersen Conf# …", PayPal
+# → "PAYPAL DES:INST XFER … INDN:EIMORLAIN UGALI …", etc.). Fast-pathing
+# these would tag every row with the channel name (or, worse, latch onto
+# the first-seen counterparty and misroute the rest) — so we force the AI
+# resolver to parse the description and pick the real payee.
+_PAYMENT_CHANNEL_MERCHANTS: set[str] = {
+    "zelle", "zelle payment", "zelle transfer",
+    "paypal", "paypal transfer", "paypal payment",
+    "venmo", "venmo payment", "venmo cashout",
+    "cash app", "cashapp", "square cash",
+    "apple pay", "apple cash", "google pay",
+    "wire", "wire transfer", "ach", "ach transfer",
+    "check", "checks", "e-check", "echeck",
+    "atm", "atm withdrawal", "atm deposit",
+    "internal transfer", "online transfer", "bank transfer",
+}
+
+
 def looks_noisy(merchant: str | None) -> bool:
-    """True when the merchant string is really a raw bank memo that the AI
-    resolver should extract from (not treated as a clean name)."""
+    """True when the merchant string is really a raw bank memo (or a
+    generic payment-channel label like "Zelle") that the AI resolver
+    should extract from — not treated as a clean vendor name.
+
+    Feb 2026 fix: added the `_PAYMENT_CHANNEL_MERCHANTS` set. Previously
+    Plaid rows where `merchant_name == "Zelle"` would take the fast path
+    and every Zelle txn (regardless of counterparty) got tagged to a
+    single "Zelle" contact — or worse, latched onto the first-seen
+    counterparty (Kevin Petersen / Romeo Ugali mix-up on 1253 LLC).
+    """
     if not merchant:
         return False
     if len(merchant) > 45:      # clean names are almost always short
+        return True
+    m_key = " ".join(merchant.lower().split())
+    if m_key in _PAYMENT_CHANNEL_MERCHANTS:
         return True
     return bool(_NOISY_MERCHANT.search(merchant))
 
