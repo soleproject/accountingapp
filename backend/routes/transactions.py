@@ -223,40 +223,77 @@ _DESC_STOPWORDS: set[str] = {
     "trace", "auth", "authnum", "authno", "posted", "pending",
 }
 
+# Substrings that mark the transition from "the real description" to
+# per-txn noise (confirmation numbers, opaque references, memo fields).
+# Whatever follows one of these is dropped so a `Confirmation# XXXXX12345`
+# suffix doesn't leak into the group signature and shatter otherwise
+# identical rows into thousands of singletons.
+_NOISE_MARKERS: tuple[str, ...] = (
+    "confirmation#", "conf#", "ref#", "auth#", "trace#", "id#",
+    "confirmation", "reference", "authorization",
+    "note:", "memo:", "desc:",
+)
+
 
 def _desc_group_key(description: str) -> tuple[str, str]:
     """Return `(group_key, human_label)` for a no-contact transaction.
 
-    Strategy: normalize the description (lowercase, strip punctuation, drop
-    tokens that contain digits or are pure stopwords), then take the first
-    three surviving tokens as the group signature. Two rows sharing that
-    3-word prefix belong to the same group. `human_label` is the same tokens
-    title-cased, ready for the stepper info box.
+    Strategy:
+      1. Lop off everything at/after a noise marker (`Confirmation#`,
+         `Ref#`, `Note:`, etc.) so per-txn junk stops leaking in.
+      2. Split remaining text into tokens; drop pure filler (stopwords,
+         single-char tokens).
+      3. Keep short numeric identifiers (≤ 6 digits — bank account or
+         check number tail) because that's what differentiates
+         "Transfer to CHK 6278" from "Transfer to CHK 7984".
+      4. Drop mostly-non-alpha tokens like `XXXXX28270` that survive
+         step 1 (i.e. tokens where < 2 chars are non-'x' letters).
+      5. Take up to the first 5 surviving tokens as the group signature.
+         Bumped from 3 → 5 so account-identifier tails have room to land.
 
-    Rows with essentially no words fall into a single `"__misc__"` bucket
-    labelled "Misc / one-off" so the CPA can still walk them at the end.
+    `human_label` is title-cased with identifier tails upper-cased.
+    Empty inputs fall into a `__misc__` "Misc / one-off" bucket.
     """
     if not description:
         return ("__misc__", "Misc / one-off")
     lowered = description.lower()
-    # Split on any non-alphanumeric; drop empties, stopwords, and any token
-    # that contains a digit (usually a ref/conf/txn id, not a semantic word).
+    # 1. Truncate at first noise marker.
+    for marker in _NOISE_MARKERS:
+        idx = lowered.find(marker)
+        if idx > 0:
+            lowered = lowered[:idx]
+            break
+    # 2-4. Tokenize + filter.
     tokens = [t for t in re.split(r"[^a-z0-9]+", lowered) if t]
     keep: list[str] = []
     for t in tokens:
-        if any(ch.isdigit() for ch in t):
-            continue
         if t in _DESC_STOPWORDS:
             continue
         if len(t) < 2:
             continue
+        if t.isdigit():
+            # Short digit runs (3-6 chars) = account / check numbers → keep.
+            # 1-2 chars = date fragments (`07`, `16`) or single-digit noise
+            # that shouldn't split otherwise-identical groups. 7+ chars =
+            # one-off confirmation IDs → drop.
+            if len(t) < 3 or len(t) > 6:
+                continue
+        elif any(ch.isdigit() for ch in t):
+            # Mixed alnum like "XXXXX28270" — keep only when the token
+            # has genuine letters (≥ 2 non-'x' alpha chars).
+            n_alpha = sum(1 for ch in t if ch.isalpha() and ch != "x")
+            if n_alpha < 2:
+                continue
         keep.append(t)
-        if len(keep) >= 3:
+        if len(keep) >= 5:
             break
     if not keep:
         return ("__misc__", "Misc / one-off")
     group_key = " ".join(keep)
-    label = " ".join(w.capitalize() for w in keep)
+    label = " ".join(
+        w.upper() if (w.isdigit() and len(w) <= 6) else w.capitalize()
+        for w in keep
+    )
     return (group_key, label)
 
 
@@ -896,9 +933,15 @@ async def list_transactions(
         # contains every token of the group signature (order-independent).
         # This mirrors the token-set the `_desc_group_key` helper uses to
         # bucket rows, so filtering the list matches the group counts.
+        # Bumped from 3 → 5 tokens so account-identifier tails (e.g. "6278")
+        # meaningfully differentiate "Transfer to CHK 6278" from "…7984".
         tokens = [t for t in re.split(r"\s+", desc_group.strip()) if t]
-        for tok in tokens[:3]:
+        for tok in tokens[:5]:
             pat = re.escape(tok)
+            # Digit-only tail (an account #) requires a word-boundary match
+            # so "6278" doesn't accidentally match a substring like "62789".
+            if tok.isdigit():
+                pat = rf"(^|[^0-9]){pat}([^0-9]|$)"
             query.setdefault("$and", []).append({"$or": [
                 {"description": {"$regex": pat, "$options": "i"}},
                 {"merchant":    {"$regex": pat, "$options": "i"}},
