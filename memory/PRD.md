@@ -1332,3 +1332,15 @@ Two follow-ups requested after seeing the Review-button flow in action:
 - `CleanupCopilot.jsx` listens for `chat-cta:restart-tour` and re-invokes `runHowTo()` (guarded so it can't stack while a tour is already running)
 - Aborted tours (user hits "Stop tour") do NOT post the CTA — keeps the chat clean
 - Verified: tour completed → "Re-play tour" bubble rendered → click re-started the walkthrough with fresh sparkles and new narration bubbles
+
+
+## Coached Step Transitions in Setup Checklist (Feb 24, 2026) ✅
+- When a Setup-mode step count flips from >0 → 0, `DashboardTodos.jsx` posts an assistant bubble to the AI chat with a **"Jump to Step N+1"** CTA so the whole checklist feels like one continuous coached experience instead of three independent buttons
+- Coaching messages:
+    * Step 1 → 2: **"Nice — X categor(y|ies) approved. Ready for the vendor batches?"** + **"Jump to Step 2"** CTA (navigates to `/accounting/transactions?filter=uncategorized`)
+    * Step 2 → 3: **"Great work — X vendor group(s) sorted. Time for the no-contact review."** + **"Jump to Step 3"** CTA
+    * All 3 done: **"Books are clean. First close is ready when you are."** (no CTA — checklist auto-hides)
+- Cross-reload aware: previous counts are persisted in `localStorage` under `todo_prev_counts:{userId}:{companyId}` so a user who approves work and then opens the dashboard in a new tab still sees the coaching moment
+- Idempotent: fires at most once per user + company + step (`coach_seen:{userId}:{companyId}:step{N}` gate)
+- New `chat-cta:jump-to-step` listener in `DashboardTodos.jsx` handles the click (via react-router `useNavigate`)
+- Verified end-to-end: seeded Step1=1 → saved baseline → flipped to reviewed → reload → coach bubble appeared → clicked "Jump to Step 2" → navigated to Transactions with uncategorized filter

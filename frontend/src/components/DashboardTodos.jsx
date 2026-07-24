@@ -11,14 +11,18 @@
 //                steps; the Needs-your-attention shimmer keeps its
 //                current behavior.
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useCompany } from "@/lib/company";
+import { useAuth } from "@/lib/auth";
+import { emitAction, useActionListener } from "@/lib/createBus";
 import {
   X, Check, CheckCircle2, ArrowRight as ArrowRightIcon, ListChecks,
 } from "lucide-react";
 
 export default function DashboardTodos({ todos }) {
   const { currentId } = useCompany();
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const today = new Date().toISOString().slice(0, 10);
   const key = todos?.checklist_key || "unknown";
   const dismissKey = `todo_dismissed:${currentId || "_"}:${key}:${today}`;
@@ -40,6 +44,98 @@ export default function DashboardTodos({ todos }) {
     try { localStorage.removeItem(dismissKey); } catch { /* ignore */ }
     setDismissed(false);
   };
+
+  // --------- Coached transitions between checklist steps ---------
+  // When a Setup-mode step flips from >0 → 0, post an assistant bubble to
+  // the AI chat with a "Jump to Step N+1" CTA so the checklist feels like
+  // one continuous coached experience rather than three independent
+  // buttons. Fires at most once per user + company + step (localStorage-
+  // gated) so users aren't re-nudged after re-syncs surface fresh work.
+  //
+  // The "previous counts" snapshot is ALSO persisted in localStorage —
+  // otherwise a cold reload between the "1 category" state and the
+  // "0 categories" state would remount with no baseline and miss the
+  // transition. Persisting means the coach still fires when the user
+  // approves work then bounces back to the dashboard on a new tab.
+  useEffect(() => {
+    if (!todos) return;
+    if (todos.mode !== "setup") return;
+    if (!currentId || !user?.id) return;
+
+    const prevKey = `todo_prev_counts:${user.id}:${currentId}`;
+    const nowCounts = {
+      1: todos.step1?.count ?? 0,
+      2: todos.step2?.count ?? 0,
+      3: todos.step3?.count ?? 0,
+    };
+    let prev = null;
+    try {
+      const raw = localStorage.getItem(prevKey);
+      if (raw) prev = JSON.parse(raw);
+    } catch { /* ignore */ }
+    try { localStorage.setItem(prevKey, JSON.stringify(nowCounts)); }
+    catch { /* ignore */ }
+    if (!prev) return; // First time we've seen this pair — establish baseline.
+
+    const seenKeyFor = (n) => `coach_seen:${user.id}:${currentId}:step${n}`;
+    const alreadyCoached = (n) => {
+      try { return localStorage.getItem(seenKeyFor(n)) === "1"; }
+      catch { return false; }
+    };
+    const markCoached = (n) => {
+      try { localStorage.setItem(seenKeyFor(n), "1"); } catch { /* ignore */ }
+    };
+
+    // Coach when Step N just hit 0 AND there's still work left downstream.
+    const coach = (n, msg, ctaLabel, ctaActionKey, ctaData) => {
+      if ((prev[n] ?? 0) === 0 || nowCounts[n] > 0) return;
+      if (alreadyCoached(n)) return;
+      markCoached(n);
+      emitAction("ai-chat-say-with-cta", {
+        message: msg,
+        cta: { label: ctaLabel, actionKey: ctaActionKey, data: ctaData || {} },
+      });
+    };
+
+    const completedInStep1 = prev[1];
+    const completedInStep2 = prev[2];
+
+    if (nowCounts[2] > 0 || nowCounts[3] > 0) {
+      coach(
+        1,
+        `Nice — ${completedInStep1} categor${completedInStep1 === 1 ? "y" : "ies"} approved. Ready for the vendor batches?`,
+        "Jump to Step 2",
+        "jump-to-step",
+        { link: todos.step2?.cta_link },
+      );
+    }
+    if (nowCounts[3] > 0) {
+      coach(
+        2,
+        `Great work — ${completedInStep2} vendor group${completedInStep2 === 1 ? "" : "s"} sorted. Time for the no-contact review.`,
+        "Jump to Step 3",
+        "jump-to-step",
+        { link: todos.step3?.cta_link },
+      );
+    }
+    if (nowCounts[1] === 0 && nowCounts[2] === 0 && nowCounts[3] === 0) {
+      const seen3 = seenKeyFor(3);
+      try {
+        if (localStorage.getItem(seen3) !== "1") {
+          localStorage.setItem(seen3, "1");
+          emitAction("ai-chat-say", {
+            message: "Books are clean. First close is ready when you are.",
+          });
+        }
+      } catch { /* ignore */ }
+    }
+  }, [todos, currentId, user?.id]);
+
+  // "Jump to Step N" chat CTA → navigate to that step's cta_link.
+  useActionListener("chat-cta:jump-to-step", (payload) => {
+    const link = payload?.link;
+    if (link) navigate(link);
+  });
 
   if (!todos) {
     // First render before Dashboard.jsx's fetch resolves.
