@@ -18,6 +18,7 @@ import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
 import { ContactBadge } from "@/components/ContactBadge";
 import { emitAction, useActionListener } from "@/lib/createBus";
 import { useLetsReviewNav } from "@/pages/LetsReview";
+import { useNoContactReviewNav } from "@/pages/NoContactReview";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
 
@@ -188,6 +189,14 @@ export default function Transactions() {
   const lrCount = parseInt(params.get("count") || "0", 10);
   const lrTotalAmount = parseFloat(params.get("total_amount") || "0");
   const letsReviewNav = useLetsReviewNav();
+  // No-Contact Review (Step 3) — same params as Let's Review but keyed on a
+  // description signature instead of a contact_id. `ncr*` state feeds the
+  // stepper info box and drives the `desc_group` server filter.
+  const isNoContactReview = params.get("noContactReview") === "1";
+  const ncrGroupKey = params.get("group_key") || "";
+  const ncrLabel = params.get("label") || "";
+  const noContactReviewNav = useNoContactReviewNav();
+  const isReviewMode = isLetsReview || isNoContactReview;
   const [txns, setTxns] = useState([]);
   const [accts, setAccts] = useState([]);
   const [invoices, setInvoices] = useState([]);
@@ -241,6 +250,14 @@ export default function Transactions() {
     // "Let's Review" mode pins the list to a single contact so the
     // stepper walks vendor-by-vendor without the user re-typing filters.
     if (isLetsReview && lrContactId) params.set("contact_id", lrContactId);
+    // "No-Contact Review" (Step 3) pins the list to a description-signature
+    // group so the CPA walks bank-feed noise one bucket at a time.
+    if (isNoContactReview) {
+      params.set("no_contact", "1");
+      if (ncrGroupKey && ncrGroupKey !== "__misc__") {
+        params.set("desc_group", ncrGroupKey);
+      }
+    }
     params.set("page", String(page));
     params.set("limit", String(pageSize));
     const qs = `?${params.toString()}`;
@@ -258,7 +275,7 @@ export default function Transactions() {
     setSelected(new Set());
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize, debouncedSearch, dateFrom, dateTo, isLetsReview, lrContactId]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize, debouncedSearch, dateFrom, dateTo, isLetsReview, lrContactId, isNoContactReview, ncrGroupKey]);
   // Reset page when filters narrow/widen.
   useEffect(() => { setPage(p => (p === 1 ? p : 1)); }, [debouncedSearch, dateFrom, dateTo]);
 
@@ -628,7 +645,7 @@ export default function Transactions() {
       <CleanupCopilot
         currentId={currentId}
         autoTrigger={params.get("auto") === "1"}
-        hideChips={isLetsReview}
+        hideChips={isReviewMode}
         onApplyAction={(a) => {
           // Filter the list first so the user sees exactly what the AI is about
           // to touch, then kick off a conversational inquiry in the AI panel.
@@ -669,14 +686,20 @@ export default function Transactions() {
         }}
       />
       <div className="flex items-start justify-between flex-wrap gap-3">
-        <div className={isLetsReview ? "flex-1 min-w-0" : ""}>
+        <div className={isReviewMode ? "flex-1 min-w-0" : ""}>
           <h1 className="font-heading text-3xl font-bold tracking-tight">
-            {isLetsReview ? "AI Transaction Questions" : "Transactions"}
+            {isLetsReview
+              ? "AI Transaction Questions"
+              : isNoContactReview
+                ? "No-Contact Review"
+                : "Transactions"}
           </h1>
           <p className="text-slate-500 text-sm mt-1">
             {isLetsReview
               ? "One vendor at a time. Answer the AI's questions and post them in bulk."
-              : "AI has posted the confident ones. Review the flagged. Hover a row to give the assistant context."}
+              : isNoContactReview
+                ? "One group at a time. Bank-feed rows without a contact, grouped by description."
+                : "AI has posted the confident ones. Review the flagged. Hover a row to give the assistant context."}
           </p>
         </div>
         {isLetsReview && lrContactName && (
@@ -729,8 +752,58 @@ export default function Transactions() {
             </div>
           </div>
         )}
+        {isNoContactReview && ncrLabel && (
+          <div
+            className="w-[420px] shrink-0 rounded-lg bg-white border border-cyan-400 ring-1 ring-cyan-100 shadow-sm px-4 py-3"
+            data-testid="no-contact-review-info-box"
+          >
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+                Group {lrIdx} of {lrTotal}
+              </span>
+              {(lrCount > 0 || lrTotalAmount) ? (
+                <span
+                  className="text-[10px] text-slate-500 tabular-nums"
+                  data-testid="no-contact-review-group-totals"
+                >
+                  <span data-testid="no-contact-review-group-count">
+                    {lrCount.toLocaleString()} txn{lrCount === 1 ? "" : "s"}
+                  </span>
+                  <span className="mx-1">·</span>
+                  <span data-testid="no-contact-review-group-total-amount">
+                    {fmtMoney(lrTotalAmount)}
+                  </span>
+                </span>
+              ) : null}
+            </div>
+            <div
+              className="mt-0.5 font-heading font-semibold text-base text-slate-900 truncate"
+              title={ncrLabel}
+            >
+              {ncrLabel}
+            </div>
+            <div className="mt-2 flex items-center gap-1 justify-end">
+              <button
+                onClick={() => noContactReviewNav.prev && noContactReviewNav.prev()}
+                disabled={!noContactReviewNav.prev}
+                data-testid="no-contact-review-prev"
+                className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                ← Prev
+              </button>
+              <button
+                onClick={() => noContactReviewNav.next && noContactReviewNav.next()}
+                disabled={!noContactReviewNav.next}
+                data-testid="no-contact-review-next"
+                className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Next →
+              </button>
+            </div>
+          </div>
+        )}
         <div className="flex items-center gap-2">
-          {!isLetsReview && (
+          {!isReviewMode && (
             <button
               data-testid="detect-transfers-btn"
               onClick={detectTransfers}
@@ -742,7 +815,7 @@ export default function Transactions() {
               {xferBusy ? "Scanning…" : "Detect transfers"}
             </button>
           )}
-          {!isLetsReview && (
+          {!isReviewMode && (
             <div className="inline-flex rounded-md border bg-white overflow-hidden">
               {[
                 { k: "all",           label: "All" },
@@ -766,7 +839,7 @@ export default function Transactions() {
               ))}
             </div>
           )}
-          {!isLetsReview && (
+          {!isReviewMode && (
             <button
               data-testid={TID.txnAddBtn}
               onClick={() => setCreating(true)}

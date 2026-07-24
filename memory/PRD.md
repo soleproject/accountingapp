@@ -39,6 +39,35 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Step 2 opens to 1+ vendor groups + Step 3 stepper page
+- **Step 2 (Let's Review) — no minimum**: `cleanup_suggestions` forces
+  `_thresh_uncat = 1` and `firm_glance._monthly_todos` counts every
+  contact with ≥1 uncategorized row. Vendors with a single leftover no
+  longer disappear from the stepper — the CPA can burn the queue down
+  to zero without switching tools.
+- **Step 3 (No-Contact Review) — dedicated page**:
+  - New backend `GET /companies/{cid}/transactions/no-contact-groups`
+    normalizes descriptions (lowercase, strip punctuation, drop
+    stopwords + tokens that contain digits), takes the first three
+    surviving tokens as a group signature, and returns
+    `[{group_key, label, count, total_amount}]` sorted by count desc.
+  - Empty-token rows collapse into a `__misc__` "Misc / one-off" bucket
+    so nothing is orphaned.
+  - `list_transactions` gained two filter params: `no_contact=1`
+    (contact_id null / missing / empty) and `desc_group=<tokens>` (Mongo
+    `$and` of case-insensitive regex per token).
+  - New frontend `NoContactReview.jsx` — thin router that fetches the
+    groups and redirects to `/accounting/transactions?noContactReview=1&
+    group_key=…&label=…&idx=X&total=Y&count=N&total_amount=Z` (mirrors
+    the LetsReview → Transactions handoff pattern).
+  - `Transactions.jsx` picks up `noContactReview=1` and re-uses every
+    Let's-Review affordance: hides chips / tabs / Manual-Txn / Detect
+    Transfers, shows a right-aligned info card ("GROUP 1 OF 3 · 94 txns
+    · $304,809.12 · Online Banking Transfer") with Prev / Next stepper.
+  - Dashboard Step 3 tile now links to `/accounting/no-contact-review`;
+    `coming_soon` badge removed.
+
+
 ### Feb 2026 — Let's Review focus-mode UI cleanup
 - `Transactions.jsx` in `isLetsReview` mode now HIDES: "Detect transfers"
   button, the "All / To do / Approved" filter tabs, and the "Manual

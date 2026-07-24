@@ -134,7 +134,12 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
        sum(1 for cats in split_by_contact.values() if len(cats) >= 3) + \
        sum(1 for r in ai_ready_by_contact.values() if r["count"] >= 3 and len(r["accounts"]) == 1) < 5:
         _t = 2
-    _thresh_uncat = _t
+    # Step 2 (Let's Review) must also surface vendor groups with just 1–2
+    # uncategorized rows so the stepper burns down the queue completely —
+    # otherwise a contact with a single leftover txn is invisible to the
+    # cleanup flow. Split / AI-ready buckets still use the adaptive
+    # threshold (their signal only makes sense at 2+ rows).
+    _thresh_uncat = 1
     _thresh_split = _t
     _thresh_ai_ready = _t
 
@@ -206,6 +211,112 @@ async def cleanup_suggestions(cid: str, user: dict = Depends(get_current_user)):
         },
         "top_actions": top_actions[:50],
     }
+
+
+# Tokens filtered out when computing a description "group signature". These are
+# the boilerplate words that appear in almost every bank-feed row — grouping on
+# them would collapse every txn into one giant bucket. Trimmed conservatively:
+# only the connective glue, not the intent words (POS, ACH, WIRE, ZELLE etc.).
+_DESC_STOPWORDS: set[str] = {
+    "the", "a", "an", "of", "to", "for", "from", "on", "at", "and", "or",
+    "in", "by", "with", "into", "via", "ref", "id", "no", "num", "conf",
+    "trace", "auth", "authnum", "authno", "posted", "pending",
+}
+
+
+def _desc_group_key(description: str) -> tuple[str, str]:
+    """Return `(group_key, human_label)` for a no-contact transaction.
+
+    Strategy: normalize the description (lowercase, strip punctuation, drop
+    tokens that contain digits or are pure stopwords), then take the first
+    three surviving tokens as the group signature. Two rows sharing that
+    3-word prefix belong to the same group. `human_label` is the same tokens
+    title-cased, ready for the stepper info box.
+
+    Rows with essentially no words fall into a single `"__misc__"` bucket
+    labelled "Misc / one-off" so the CPA can still walk them at the end.
+    """
+    if not description:
+        return ("__misc__", "Misc / one-off")
+    lowered = description.lower()
+    # Split on any non-alphanumeric; drop empties, stopwords, and any token
+    # that contains a digit (usually a ref/conf/txn id, not a semantic word).
+    tokens = [t for t in re.split(r"[^a-z0-9]+", lowered) if t]
+    keep: list[str] = []
+    for t in tokens:
+        if any(ch.isdigit() for ch in t):
+            continue
+        if t in _DESC_STOPWORDS:
+            continue
+        if len(t) < 2:
+            continue
+        keep.append(t)
+        if len(keep) >= 3:
+            break
+    if not keep:
+        return ("__misc__", "Misc / one-off")
+    group_key = " ".join(keep)
+    label = " ".join(w.capitalize() for w in keep)
+    return (group_key, label)
+
+
+@router.get("/companies/{cid}/transactions/no-contact-groups")
+async def no_contact_groups(cid: str, user: dict = Depends(get_current_user)):
+    """Step 3 of the cleanup checklist — powers the No-Contact Review stepper.
+
+    Groups uncategorized (or otherwise needs-review) transactions WITHOUT a
+    contact_id by the first three meaningful tokens of their description, so
+    the CPA can burn through bank-feed noise ("Wire Transfer X", "ATM
+    Withdrawal Y") one group at a time — same page template & UX as Step 2's
+    Let's Review. Returns groups sorted by count desc, labelled for display.
+    """
+    await require_company(user, cid)
+    # Pull only the fields we need to keep memory bounded on large books.
+    cursor = db.transactions.find(
+        {
+            "company_id": cid,
+            "$or": [
+                {"contact_id": None},
+                {"contact_id": {"$exists": False}},
+                {"contact_id": ""},
+            ],
+            "human_reviewed": {"$ne": True},
+        },
+        {"description": 1, "merchant": 1, "amount": 1,
+         "category_account_id": 1, "category_account_code": 1, "needs_review": 1},
+    )
+    UNCAT_CODES = {"9999", "6999", "4999"}
+    from collections import defaultdict
+    groups: dict[str, dict] = defaultdict(
+        lambda: {"count": 0, "amount": 0.0, "label": ""}
+    )
+    async for t in cursor:
+        code = t.get("category_account_code")
+        has_cat_id = bool(t.get("category_account_id"))
+        is_uncategorized = (not has_cat_id) or (code in UNCAT_CODES)
+        needs_review = bool(t.get("needs_review"))
+        if not (is_uncategorized or needs_review):
+            continue
+        desc = t.get("description") or t.get("merchant") or ""
+        key, label = _desc_group_key(desc)
+        g = groups[key]
+        g["count"] += 1
+        g["amount"] += abs(float(t.get("amount") or 0.0))
+        g["label"] = label
+    ordered = sorted(
+        (
+            {
+                "group_key": k,
+                "label": v["label"],
+                "count": v["count"],
+                "total_amount": round(v["amount"], 2),
+            }
+            for k, v in groups.items()
+        ),
+        key=lambda g: (-g["count"], g["label"]),
+    )
+    return {"groups": ordered, "total_groups": len(ordered)}
+
 
 
 class BulkApproveAiReadyIn(BaseModel):
@@ -713,6 +824,8 @@ async def list_transactions(
     date_to: Optional[str] = None,
     contact_id: Optional[str] = None,
     category_account_id: Optional[str] = None,
+    no_contact: Optional[bool] = None,
+    desc_group: Optional[str] = None,
 ):
     await require_company(user, cid)
     query: dict = {"company_id": cid}
@@ -744,6 +857,15 @@ async def list_transactions(
         query["human_reviewed"] = True
     if contact_id:
         query["contact_id"] = contact_id
+    if no_contact:
+        # No-Contact Review (Step 3): match rows with a null / missing /
+        # empty contact_id so we don't leak "known-vendor" rows into the
+        # description-grouped bucket.
+        query.setdefault("$and", []).append({"$or": [
+            {"contact_id": None},
+            {"contact_id": {"$exists": False}},
+            {"contact_id": ""},
+        ]})
     if category_account_id:
         query["category_account_id"] = category_account_id
     if date_from or date_to:
@@ -769,6 +891,18 @@ async def list_transactions(
             query.setdefault("$and", []).append({"$or": search_or})
         else:
             query["$or"] = search_or
+    if desc_group:
+        # No-Contact Review (Step 3): narrow to rows whose description
+        # contains every token of the group signature (order-independent).
+        # This mirrors the token-set the `_desc_group_key` helper uses to
+        # bucket rows, so filtering the list matches the group counts.
+        tokens = [t for t in re.split(r"\s+", desc_group.strip()) if t]
+        for tok in tokens[:3]:
+            pat = re.escape(tok)
+            query.setdefault("$and", []).append({"$or": [
+                {"description": {"$regex": pat, "$options": "i"}},
+                {"merchant":    {"$regex": pat, "$options": "i"}},
+            ]})
     # Clamp inputs to sane bounds. limit=0 returns everything (used by exports
     # and legacy callers that expect the full list).
     page = max(1, int(page or 1))

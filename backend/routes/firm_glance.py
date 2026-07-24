@@ -397,10 +397,10 @@ async def _monthly_todos(cid: str) -> dict:
             unanimous_categories.add(next(iter(r["accounts"])))
     ai_ready_txns = len(unanimous_categories)
 
-    # A vendor "group" is eligible for batch review at 3+ uncategorized rows,
-    # matching the Cleanup Copilot's "N transactions are sitting in
-    # Uncategorized" chip threshold.
-    step2_groups = sum(1 for n in per_contact_uncategorized.values() if n >= 3)
+    # A vendor "group" is eligible for batch review at 1+ uncategorized rows —
+    # even a single leftover from a known contact belongs in the Let's Review
+    # stepper so the CPA doesn't have to switch tools to close it out.
+    step2_groups = sum(1 for n in per_contact_uncategorized.values() if n >= 1)
 
     steps = {
         "step1": {
@@ -415,7 +415,7 @@ async def _monthly_todos(cid: str) -> dict:
         "step2": {
             "key": "grouped_review",
             "title": "Let's review",
-            "subtitle": "Batch-categorize vendor groups where 3+ rows are still uncategorized.",
+            "subtitle": "Batch-categorize vendor groups where 1+ rows are still uncategorized.",
             "count": step2_groups,
             "unit": "vendor groups",
             "cta_label": "Review",
@@ -429,12 +429,11 @@ async def _monthly_todos(cid: str) -> dict:
         "step3": {
             "key": "individual_review",
             "title": "Individual review",
-            "subtitle": "No-contact rows grouped by similar description. Coming soon.",
+            "subtitle": "No-contact rows grouped by similar description — walk one group at a time.",
             "count": no_contact_review,
             "unit": "transactions",
             "cta_label": "Review",
-            "cta_link": "/accounting/transactions?filter=needs-review&no_contact=1",
-            "coming_soon": True,
+            "cta_link": "/accounting/no-contact-review",
         },
     }
 
