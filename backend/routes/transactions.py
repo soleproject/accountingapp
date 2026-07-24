@@ -1389,6 +1389,12 @@ async def detect_transfer_pairs(cid: str, dry_run: bool = False, date_since: str
 
         # Debit leg is the negative amount, credit is the positive one.
         debit, credit = (src, winner) if amt < 0 else (winner, src)
+        dd = _delta_days(winner)
+        # Confidence score: exact amount is already required, so the only
+        # remaining fuzziness is the date-delta. Same-day = 1.0, then decays.
+        # Used to sort the Transfer Review table so the CPA burns through
+        # certain matches first and eyeballs the fuzzy ones at the end.
+        conf = {0: 1.0, 1: 0.9, 2: 0.75, 3: 0.6}.get(dd, 0.5)
         pairs.append({
             "pair_id": str(uuid.uuid4()),
             "debit_leg": {
@@ -1405,7 +1411,8 @@ async def detect_transfer_pairs(cid: str, dry_run: bool = False, date_since: str
                 "bank_account_name": credit.get("bank_account_name"),
                 "description": credit.get("description") or credit.get("merchant") or "",
             },
-            "date_delta_days": _delta_days(winner),
+            "date_delta_days": dd,
+            "confidence": conf,
         })
         consumed.add(src["id"])
         consumed.add(winner["id"])
@@ -1441,7 +1448,7 @@ async def detect_transfer_pairs(cid: str, dry_run: bool = False, date_since: str
 
     return {
         "ok": True,
-        "pairs": pairs,
+        "pairs": sorted(pairs, key=lambda p: (-p["confidence"], p["date_delta_days"])),
         "updated": updated,
         "dry_run": dry_run,
     }
@@ -1461,6 +1468,101 @@ async def detect_transfers(cid: str, inp: DetectTransfersIn = DetectTransfersIn(
     """
     await require_company(user, cid)
     return await detect_transfer_pairs(cid, dry_run=inp.dry_run, date_since=inp.date_since)
+
+
+@router.get("/companies/{cid}/transactions/transfer-pairs")
+async def transfer_pairs(cid: str, user: dict = Depends(get_current_user)):
+    """Step 3a of the cleanup checklist — powers the Transfer Review stepper.
+
+    Returns candidate intercompany-transfer pairs (dry-run, no DB mutation),
+    sorted by descending confidence. The Transfer Review page lets the CPA
+    approve pairs one-at-a-time or in batches; nothing books until the user
+    hits Approve. Same signature as `detect_transfer_pairs` — just wraps a
+    dry_run=True call so the frontend has a clean, semantic endpoint.
+    """
+    await require_company(user, cid)
+    return await detect_transfer_pairs(cid, dry_run=True)
+
+
+class TransferPairLeg(BaseModel):
+    debit_id: str
+    credit_id: str
+
+
+class BookTransferPairsIn(BaseModel):
+    pairs: list[TransferPairLeg]
+
+
+@router.post("/companies/{cid}/transactions/transfer-pairs/book")
+async def book_transfer_pairs(cid: str, inp: BookTransferPairsIn, user: dict = Depends(get_current_user)):
+    """Book a caller-selected set of transfer pairs. Each pair is validated
+    server-side (opposite-sign, equal magnitude within $0.01, different
+    bank accounts) before mutation so a stale UI can't book a bad pair.
+
+    Response: `{ok, updated, skipped: [{reason, debit_id, credit_id}]}` so
+    the Transfer Review page can surface any pairs the server refused.
+    """
+    await require_company(user, cid)
+    if not inp.pairs:
+        return {"ok": True, "updated": 0, "skipped": []}
+    xfer = await _ensure_transfer_account(cid)
+    updated = 0
+    skipped: list[dict] = []
+    for p in inp.pairs:
+        # Fetch both legs together; bail if either is missing or already
+        # human_reviewed (idempotent — re-clicking Approve is a no-op).
+        docs = await db.transactions.find({
+            "id": {"$in": [p.debit_id, p.credit_id]},
+            "company_id": cid,
+        }).to_list(2)
+        by_id = {d["id"]: d for d in docs}
+        d_leg = by_id.get(p.debit_id)
+        c_leg = by_id.get(p.credit_id)
+        if not d_leg or not c_leg:
+            skipped.append({"reason": "leg_not_found", "debit_id": p.debit_id, "credit_id": p.credit_id})
+            continue
+        if d_leg.get("human_reviewed") and c_leg.get("human_reviewed"):
+            # Both already booked — nothing to do, but not an error.
+            continue
+        # Sanity: opposite-sign, equal magnitude within $0.01, different bank.
+        try:
+            da = float(d_leg.get("amount") or 0.0)
+            ca = float(c_leg.get("amount") or 0.0)
+        except Exception:
+            skipped.append({"reason": "bad_amount", "debit_id": p.debit_id, "credit_id": p.credit_id})
+            continue
+        if not (da < 0 and ca > 0 and abs(abs(da) - abs(ca)) < 0.01):
+            skipped.append({"reason": "not_a_pair", "debit_id": p.debit_id, "credit_id": p.credit_id})
+            continue
+        if d_leg.get("bank_account_id") == c_leg.get("bank_account_id"):
+            skipped.append({"reason": "same_bank", "debit_id": p.debit_id, "credit_id": p.credit_id})
+            continue
+        pair_id = str(uuid.uuid4())
+        for leg in (d_leg, c_leg):
+            if await is_period_closed(cid, leg.get("date") or ""):
+                skipped.append({"reason": "closed_period", "debit_id": p.debit_id, "credit_id": p.credit_id})
+                continue
+            res = await db.transactions.update_one(
+                {"id": leg["id"], "company_id": cid, "human_reviewed": {"$ne": True}},
+                {"$set": {
+                    "category_account_id": xfer["id"],
+                    "category_account_code": xfer["code"],
+                    "category_account_name": xfer["name"],
+                    "is_internal_transfer": True,
+                    "transfer_pair_id": pair_id,
+                    "human_reviewed": True,
+                    "needs_review": False,
+                    "posted": True,
+                    "ai_source": "internal_transfer_review",
+                    "ai_confidence": 1.0,
+                    "updated_at": now_iso(),
+                }},
+            )
+            updated += res.modified_count
+    if updated:
+        await log_ai(cid, "internal_transfer_review", updated)
+    return {"ok": True, "updated": updated, "skipped": skipped}
+
 
 
 

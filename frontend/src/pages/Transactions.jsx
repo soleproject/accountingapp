@@ -832,18 +832,6 @@ export default function Transactions() {
         )}
         <div className="flex items-center gap-2">
           {!isReviewMode && (
-            <button
-              data-testid="detect-transfers-btn"
-              onClick={detectTransfers}
-              disabled={xferBusy}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
-              title="Scan for internal transfers between company-owned bank accounts"
-            >
-              <ArrowLeftRight size={14} />
-              {xferBusy ? "Scanning…" : "Detect transfers"}
-            </button>
-          )}
-          {!isReviewMode && (
             <div className="inline-flex rounded-md border bg-white overflow-hidden">
               {[
                 { k: "all",           label: "All" },

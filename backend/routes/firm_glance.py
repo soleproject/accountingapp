@@ -18,6 +18,7 @@ from db import db
 from auth import get_current_user
 from deps import require_company, DASH_CACHE_TTL
 from infra import get_cache
+from routes.transactions import detect_transfer_pairs
 import reports as R
 
 router = APIRouter(prefix="/api")
@@ -371,9 +372,16 @@ async def _monthly_todos(cid: str) -> dict:
     ai_ready_by_contact: dict[str, dict] = {}
     per_contact_uncategorized: dict[str, int] = {}
     no_contact_review = 0
+    # Step 3a — Intercompany Transfers. Rough upper-bound count = unreviewed
+    # rows sitting on real bank/CC accounts. The actual pair count comes
+    # from the detector on the Transfer Review page; this is just enough to
+    # show the CPA that there's work to do (and to satisfy `is_complete`).
+    unreviewed_bank_txns = 0
     for t in txns:
         if t.get("human_reviewed"):
             continue
+        if t.get("bank_account_id"):
+            unreviewed_bank_txns += 1
         contact = t.get("contact_id")
         code = t.get("category_account_code")
         cat_id = t.get("category_account_id")
@@ -402,6 +410,16 @@ async def _monthly_todos(cid: str) -> dict:
     # stepper so the CPA doesn't have to switch tools to close it out.
     step2_groups = sum(1 for n in per_contact_uncategorized.values() if n >= 1)
 
+    # Step 3a — actual pair count from the same detector the Transfer Review
+    # page runs. Keeps the dashboard number honest so a 0 in the widget
+    # means truly zero pairs, not just "some unreviewed bank rows exist".
+    try:
+        _tp = await detect_transfer_pairs(cid, dry_run=True)
+        transfer_pairs_count = len(_tp.get("pairs") or [])
+    except Exception:
+        # Fall back to the cheap upper bound if the detector chokes.
+        transfer_pairs_count = unreviewed_bank_txns // 2
+
     steps = {
         "step1": {
             "key": "ai_categorized",
@@ -427,13 +445,13 @@ async def _monthly_todos(cid: str) -> dict:
             "cta_link": "/accounting/lets-review",
         },
         "step3": {
-            "key": "individual_review",
-            "title": "Individual review",
-            "subtitle": "No-contact rows grouped by similar description — walk one group at a time.",
-            "count": no_contact_review,
-            "unit": "transactions",
+            "key": "intercompany_transfers",
+            "title": "Intercompany transfers",
+            "subtitle": "Match & book internal moves between company-owned bank / credit-card accounts.",
+            "count": transfer_pairs_count,
+            "unit": "pairs",
             "cta_label": "Review",
-            "cta_link": "/accounting/no-contact-review",
+            "cta_link": "/accounting/transfer-review",
         },
     }
 

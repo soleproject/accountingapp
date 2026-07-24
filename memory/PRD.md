@@ -39,6 +39,40 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Step 3a Transfer Review (retire auto-book)
+- **Retired the one-click "Detect transfers" button** on `Transactions.jsx`.
+  Auto-book was error-prone (no reject path once posted) — replaced with a
+  dedicated review UI at `/accounting/transfer-review`.
+- **Backend** in `/app/backend/routes/transactions.py`:
+  - `detect_transfer_pairs` now stamps each pair with a `confidence` score
+    (same-day = 1.0, decays to 0.5 at ±3 days) and returns pairs sorted
+    by descending confidence.
+  - New `GET /companies/{cid}/transactions/transfer-pairs` — dry-run
+    detector wrapper; nothing books until the CPA approves.
+  - New `POST /companies/{cid}/transactions/transfer-pairs/book` —
+    accepts `{pairs:[{debit_id, credit_id}, ...]}`, revalidates each
+    (opposite-sign, equal magnitude within $0.01, different bank
+    account, open period) before mutation, returns
+    `{ok, updated, skipped:[{reason, debit_id, credit_id}]}`.
+- **Frontend** — new `/app/frontend/src/pages/TransferReview.jsx`:
+  - Hybrid layout — batch table with checkboxes + "Book selected" for
+    speed, per-row **Inspect** button opens a detailed 2-column
+    debit/credit card with big Approve / Not-a-transfer buttons.
+  - Confidence badge (green ≥95 %, cyan ≥80, amber ≥65, slate else) and
+    date-delta pill on every row; sub-75 % rows dim slightly.
+  - Empty state offers a "Continue to No-Contact Review →" link so the
+    stepper chains into Step 3b (still TBD with user).
+  - Registered at `/accounting/transfer-review` in `App.js`.
+- **Dashboard Step 3 rewired** in `firm_glance.py`:
+  - `key: "intercompany_transfers"`, `title: "Intercompany transfers"`,
+    `subtitle: "Match & book internal moves between company-owned bank
+    / credit-card accounts."`, `unit: "pairs"`,
+    `cta_link: "/accounting/transfer-review"`.
+  - `count` sourced from the real detector via
+    `detect_transfer_pairs(cid, dry_run=True)` so the widget number =
+    the review page number.
+
+
 ### Feb 2026 — Step 2 opens to 1+ vendor groups + Step 3 stepper page
 - **Step 2 (Let's Review) — no minimum**: `cleanup_suggestions` forces
   `_thresh_uncat = 1` and `firm_glance._monthly_todos` counts every
