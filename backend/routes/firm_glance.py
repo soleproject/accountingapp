@@ -393,7 +393,7 @@ async def _monthly_todos(cid: str) -> dict:
             "count": ai_ready_txns,
             "unit": "transactions",
             "cta_label": "Review",
-            "cta_link": "/accounting/ai-cleanup-review?mode=stepper",
+            "cta_link": "/accounting/ai-cleanup-review?view=stepper",
         },
         "step2": {
             "key": "grouped_review",
@@ -402,7 +402,12 @@ async def _monthly_todos(cid: str) -> dict:
             "count": step2_groups,
             "unit": "vendor groups",
             "cta_label": "Review",
-            "cta_link": "/accounting/ai-cleanup-review?mode=grouped",
+            # The AI Cleanup Review page only handles AI-categorized rows
+            # (Step 1's flow). Uncategorized-vendor batch-categorization
+            # (Step 2's flow) is driven by the Copilot chips on the
+            # Transactions page — that's where "Let's review" filters the
+            # table to a vendor's uncategorized rows for one-click bulk fix.
+            "cta_link": "/accounting/transactions?filter=uncategorized",
         },
         "step3": {
             "key": "individual_review",

@@ -1293,3 +1293,12 @@ re-summarised without a data migration.
     * `AttentionTile` accepts a new `suppressShimmer` prop; when true, `priorityKey` is forced to `null` so no attention card gets highlighted.
     * `ClassicDashboard` computes `suppressAttentionShimmer = todos?.mode === "setup" && todos?.visible && !todos?.is_complete`.
 - Verified visually on Bright Beans: Setup mode shows the shimmer around Step 3 (first incomplete) with a plain Needs-your-attention section; after inserting a demo May-2026 close_period, Close mode shows plain checklist steps with the shimmer back on the "3 Overdue invoices" card.
+
+## Fix: Checklist Review Buttons Land on the Correct View (Feb 24, 2026) ✅
+Two bugs discovered when clicking Review from the Setup checklist:
+
+1. **Step 1 stepper never activated.** `AICleanupReview.jsx` reads the `?view=` query param, but my backend was emitting `?mode=stepper` in the cta_link. Renamed the params in `firm_glance.py` to `?view=stepper` / `?view=category` and extended `AICleanupReview.jsx` to also accept `?view=category` (grouped mode) and `?view=grouped` as an alias.
+2. **Step 2 pointed at the wrong page entirely.** AI Cleanup Review only surfaces AI-categorized-unreviewed vendor groups (Step 1 material). Step 2's "Let's review" is about *uncategorized* vendor groups (Venmo, Summit Christian Church, etc.), which is driven by the Copilot chips on the **Transactions** page. Repointed Step 2 to `/accounting/transactions?filter=uncategorized` so clicking Review lands where the batch-categorization chips actually live.
+
+Verified on 419 LLC: clicking Step 2 Review now lands on Transactions page with the Copilot showing chips for Eimorlain Ugali Co (15), Summit Christian Church (15), Dad & Babe (8), Summit Church Summitnv.org Nv (3) — exactly the 4 vendor groups counted by the checklist (Venmo was truncated from the chip display but is present in the "20 Venmo transactions" copilot summary).
+

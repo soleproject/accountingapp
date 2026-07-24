@@ -5,15 +5,21 @@ import CleanupCopilot from "@/components/CleanupCopilot";
 /**
  * AI Categorized Transaction Review Report.
  *
- * Reads `?view=stepper` from the URL so the Dashboard's "Flagged for
- * review" card can deep-link straight into single-category stepper
- * review — matches the expectation that reviewers want to zoom in on
- * one flagged category at a time without navigating menus.
+ * Reads `?view=` from the URL so the Dashboard's checklist / attention
+ * cards can deep-link straight into the mode the CPA needs:
+ *   • `?view=stepper`  → single-group-at-a-time stepper (Step 1 in Setup)
+ *   • `?view=category` → all vendor groups side-by-side (Step 2 in Setup)
+ *   • (unset)          → default grouped view (inline layout)
  */
 export default function AICleanupReview() {
   const { currentId } = useCompany();
   const [params] = useSearchParams();
-  const initialView = params.get("view") === "stepper" ? "stepper" : null;
+  const rawView = params.get("view");
+  const initialView =
+    rawView === "stepper" ? "stepper"
+    : rawView === "category" || rawView === "grouped" ? "category"
+    : rawView === "rows" ? "rows"
+    : null;
 
   return (
     <div className="p-6 max-w-6xl mx-auto" data-testid="ai-cleanup-review-page">
