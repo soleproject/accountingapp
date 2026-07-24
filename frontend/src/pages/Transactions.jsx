@@ -190,33 +190,6 @@ export default function Transactions() {
   const lrCount = parseInt(params.get("count") || "0", 10);
   const lrTotalAmount = parseFloat(params.get("total_amount") || "0");
   const letsReviewNav = useLetsReviewNav();
-  // "Re-check contacts with AI" — one-click re-resolves every unreviewed
-  // txn's contact via the LLM, fixing mis-tagged rows without needing a
-  // curl call. Kept as local state so the button can show its own spinner.
-  const [reResolveBusy, setReResolveBusy] = useState(false);
-  const runReResolveContacts = async () => {
-    if (reResolveBusy || !currentId) return;
-    setReResolveBusy(true);
-    try {
-      const r = await api.post(`/companies/${currentId}/contacts/re-resolve`);
-      const n = r.data?.updated || 0;
-      const wiped = r.data?.cache_deleted || 0;
-      if (n === 0) {
-        toast.info(`Every contact was already correct (invalidated ${wiped} cache entries).`);
-      } else {
-        toast.success(
-          `Re-tagged ${n} row${n === 1 ? "" : "s"} · invalidated ${wiped} cache entries. Reloading queue…`
-        );
-      }
-      // Bounce through the parent stepper page so groups re-fetch fresh
-      // and the URL params land on the top-of-queue vendor.
-      setTimeout(() => navigate("/accounting/lets-review", { replace: true }), 600);
-    } catch (e) {
-      toast.error("Could not re-check contacts — try again?");
-    } finally {
-      setReResolveBusy(false);
-    }
-  };
   // No-Contact Review (Step 3) — same params as Let's Review but keyed on a
   // description signature instead of a contact_id. `ncr*` state feeds the
   // stepper info box and drives the `desc_group` server filter.
@@ -795,18 +768,6 @@ export default function Transactions() {
               title={lrContactName}
             >
               {lrContactName}
-            </div>
-            <div className="mt-2">
-              <button
-                onClick={runReResolveContacts}
-                disabled={reResolveBusy}
-                data-testid="lets-review-recheck-contacts"
-                title="Ask the AI to re-check every remaining row's contact from scratch. Fixes rows tagged to the wrong vendor (e.g. Kevin Petersen showing as Romeo Ugali)."
-                className="w-full inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-md border border-cyan-300 bg-gradient-to-r from-cyan-50 to-indigo-50 hover:from-cyan-100 hover:to-indigo-100 text-[11px] font-medium text-cyan-900 disabled:opacity-60 disabled:cursor-wait"
-              >
-                <Sparkles size={12} className={reResolveBusy ? "animate-pulse" : ""} />
-                {reResolveBusy ? "Re-checking with AI…" : "Re-check contacts with AI"}
-              </button>
             </div>
             <div className="mt-2 flex items-center gap-1 justify-end">
               <button

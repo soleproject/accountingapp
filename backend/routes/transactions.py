@@ -1525,10 +1525,25 @@ async def re_resolve_contacts(cid: str, user: dict = Depends(get_current_user)):
     Ugali / Dad & Babe / Larry Brown rows to the first cached Romeo Ugali
     contact). Only touches unreviewed rows so human decisions are preserved.
 
-    Response: `{ok, cache_deleted, updated}` — count of txns whose contact
-    was reassigned.
+    Idempotent + rate-limited: if the company was re-resolved within the
+    last hour, returns the cached result immediately. Called silently by
+    the Let's Review page on first visit so the user never has to click a
+    "fix contacts" button — contact accuracy is a background invariant.
+
+    Response: `{ok, cache_deleted, updated, cached?, resolved_at}`.
     """
     await require_company(user, cid)
+    # Rate-limit: skip if we ran this in the last hour.
+    company = await db.companies.find_one({"id": cid}, {"contacts_re_resolved_at": 1})
+    last = (company or {}).get("contacts_re_resolved_at")
+    if last:
+        try:
+            last_dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
+            if (datetime.now(timezone.utc) - last_dt).total_seconds() < 3600:
+                return {"ok": True, "cache_deleted": 0, "updated": 0,
+                        "cached": True, "resolved_at": last}
+        except Exception:
+            pass
     # 1. Wipe the poisoned cache for this company. Fresh signatures will
     #    re-populate correctly on the next resolve.
     cache_res = await db.contact_learning_cache.delete_many({"company_id": cid})
@@ -1540,7 +1555,9 @@ async def re_resolve_contacts(cid: str, user: dict = Depends(get_current_user)):
          "contact_id": 1, "contact_name": 1},
     ).to_list(5000)
     if not unreviewed:
-        return {"ok": True, "cache_deleted": cache_res.deleted_count, "updated": 0}
+        resolved_at = now_iso()
+        await db.companies.update_one({"id": cid}, {"$set": {"contacts_re_resolved_at": resolved_at}})
+        return {"ok": True, "cache_deleted": cache_res.deleted_count, "updated": 0, "resolved_at": resolved_at}
     items = [
         {
             "merchant_name": t.get("merchant_name"),
@@ -1569,7 +1586,10 @@ async def re_resolve_contacts(cid: str, user: dict = Depends(get_current_user)):
             }},
         )
         updated += 1
-    return {"ok": True, "cache_deleted": cache_res.deleted_count, "updated": updated}
+    resolved_at = now_iso()
+    await db.companies.update_one({"id": cid}, {"$set": {"contacts_re_resolved_at": resolved_at}})
+    return {"ok": True, "cache_deleted": cache_res.deleted_count,
+            "updated": updated, "resolved_at": resolved_at}
 
 
 @router.post("/companies/{cid}/transactions/transfer-pairs/unbook")
