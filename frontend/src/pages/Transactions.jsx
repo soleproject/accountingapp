@@ -252,12 +252,21 @@ export default function Transactions() {
     // stepper walks vendor-by-vendor without the user re-typing filters.
     if (isLetsReview && lrContactId) params.set("contact_id", lrContactId);
     // "No-Contact Review" (Step 3) pins the list to a description-signature
-    // group so the CPA walks bank-feed noise one bucket at a time.
+    // group so the CPA walks bank-feed noise one bucket at a time. Also
+    // hard-force `status=unapproved` so rows already decisioned (e.g.
+    // AI-categorized to 3200 Inter-Account Transfer) drop off the view —
+    // the CPA should only see rows still waiting for a call.
     if (isNoContactReview) {
       params.set("no_contact", "1");
+      params.set("status", "unapproved");
       if (ncrGroupKey && ncrGroupKey !== "__misc__") {
         params.set("desc_group", ncrGroupKey);
       }
+    }
+    // Same rule for Let's Review — hide anything already human-reviewed so
+    // the vendor stepper only shows work that's still open.
+    if (isLetsReview) {
+      params.set("status", "unapproved");
     }
     params.set("page", String(page));
     params.set("limit", String(pageSize));
