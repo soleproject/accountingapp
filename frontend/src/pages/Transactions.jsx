@@ -668,7 +668,7 @@ export default function Transactions() {
         }}
       />
       <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
+        <div className={isLetsReview ? "flex-1 min-w-0" : ""}>
           <h1 className="font-heading text-3xl font-bold tracking-tight">
             {isLetsReview ? "AI Transaction Questions" : "Transactions"}
           </h1>
@@ -680,36 +680,40 @@ export default function Transactions() {
         </div>
         {isLetsReview && lrContactName && (
           <div
-            className="rounded-xl border-2 border-indigo-300 bg-gradient-to-br from-indigo-50 to-white px-6 py-4 text-right shrink-0 shadow-sm min-w-[280px]"
+            className="w-[420px] shrink-0 rounded-lg bg-white border border-cyan-400 ring-1 ring-cyan-100 shadow-sm px-4 py-3"
             data-testid="lets-review-info-box"
           >
-            <div className="text-[11px] uppercase tracking-wider text-indigo-700 font-semibold">
-              Contact {lrIdx} of {lrTotal}
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+                Contact {lrIdx} of {lrTotal}
+              </span>
+              {(lrCount > 0 || lrTotalAmount) ? (
+                <span
+                  className="text-[10px] text-slate-500 tabular-nums"
+                  data-testid="lets-review-contact-totals"
+                >
+                  <span data-testid="lets-review-contact-count">
+                    {lrCount.toLocaleString()} txn{lrCount === 1 ? "" : "s"}
+                  </span>
+                  <span className="mx-1">·</span>
+                  <span data-testid="lets-review-contact-total-amount">
+                    {fmtMoney(lrTotalAmount)}
+                  </span>
+                </span>
+              ) : null}
             </div>
-            <div className="font-heading text-2xl font-bold text-slate-900 leading-tight mt-1">
+            <div
+              className="mt-0.5 font-heading font-semibold text-base text-slate-900 truncate"
+              title={lrContactName}
+            >
               {lrContactName}
             </div>
-            {(lrCount > 0 || lrTotalAmount) ? (
-              <div
-                className="mt-2 flex items-center justify-end gap-3 text-sm text-slate-700"
-                data-testid="lets-review-contact-totals"
-              >
-                <span className="font-mono-num" data-testid="lets-review-contact-count">
-                  <span className="font-semibold text-slate-900">{lrCount.toLocaleString()}</span>
-                  <span className="text-slate-500 ml-1">txn{lrCount === 1 ? "" : "s"}</span>
-                </span>
-                <span className="text-slate-300">·</span>
-                <span className="font-mono-num font-semibold text-slate-900" data-testid="lets-review-contact-total-amount">
-                  {fmtMoney(lrTotalAmount)}
-                </span>
-              </div>
-            ) : null}
-            <div className="mt-3 flex items-center gap-1 justify-end">
+            <div className="mt-2 flex items-center gap-1 justify-end">
               <button
                 onClick={() => letsReviewNav.prev && letsReviewNav.prev()}
                 disabled={!letsReviewNav.prev}
                 data-testid="lets-review-prev"
-                className="text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2.5 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 ← Prev
               </button>
@@ -717,7 +721,7 @@ export default function Transactions() {
                 onClick={() => letsReviewNav.next && letsReviewNav.next()}
                 disabled={!letsReviewNav.next}
                 data-testid="lets-review-next"
-                className="text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2.5 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Next →
               </button>
