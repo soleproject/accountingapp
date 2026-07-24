@@ -832,7 +832,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                       <div
                         key={c.key}
                         data-testid={`mega-vendor-${c.key}`}
-                        className={`w-full flex items-center gap-2.5 rounded border px-3 py-2 text-sm transition-colors ${
+                        className={`w-full flex md:grid md:grid-cols-[auto_240px_minmax(200px,1fr)_auto_auto_auto] items-center gap-2.5 rounded border px-3 py-2 text-sm transition-colors ${
                           isTourRow && howToStep === 0
                             ? "ai-shimmer-btn"
                             : isTourActive
@@ -853,10 +853,10 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                         </button>
                         <button
                           onClick={() => toggleVendor(c.key)}
-                          className="min-w-0 shrink-0 text-left"
+                          className="min-w-0 shrink-0 text-left md:w-full md:shrink"
                           title={c.contact_name}
                         >
-                          <span className="font-semibold text-slate-900 truncate max-w-[220px] inline-block align-middle">{c.contact_name}</span>
+                          <span className="font-semibold text-slate-900 truncate max-w-[220px] md:max-w-full inline-block md:block align-middle">{c.contact_name}</span>
                         </button>
                         <div className={`min-w-0 flex-1 flex items-center gap-1 rounded ${hi(2)}`}>
                           <AccountPicker

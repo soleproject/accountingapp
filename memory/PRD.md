@@ -1194,3 +1194,8 @@ re-summarised without a data migration.
     * Per-enterprise mini stacked bar in the By Enterprise table with "% AI" tag
 - Purpose: proves the deterministic layers (Plaid PFC → merchant cache → rules → LLM) are pulling their weight so LLM cost stays near zero even on brand-new client onboardings
 
+
+## AI Cleanup Review — Column-aligned Category Picker (Feb 24, 2026) ✅
+- Vendor rows in `CleanupCopilot.jsx` mega/stepper view now use CSS grid at `md:` breakpoint (`md:grid md:grid-cols-[auto_240px_minmax(200px,1fr)_auto_auto_auto]`) so every `AccountPicker` dropdown lines up in a clean vertical column regardless of merchant-name length
+- Falls back to the original flexbox layout on screens narrower than `md` (768px) so the row still wraps gracefully on tablets / phones
+- No API or data-model changes; verified visually with a temporary set of 18 unreviewed AI-categorized rows across 6 vendors on Bright Beans Coffee Co.
