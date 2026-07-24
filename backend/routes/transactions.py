@@ -266,10 +266,14 @@ def _desc_group_key(description: str) -> tuple[str, str]:
     # 2-4. Tokenize + filter.
     tokens = [t for t in re.split(r"[^a-z0-9]+", lowered) if t]
     keep: list[str] = []
-    for t in tokens:
+    for idx, t in enumerate(tokens):
         if t in _DESC_STOPWORDS:
             continue
         if len(t) < 2:
+            continue
+        if all(ch == "x" for ch in t):
+            # Pure `x`-mask placeholder for redacted digits — never useful
+            # as a group signature (`xxx` / `xxxxx` etc.).
             continue
         if t.isdigit():
             # Short digit runs (3-6 chars) = account / check numbers → keep.
@@ -278,9 +282,19 @@ def _desc_group_key(description: str) -> tuple[str, str]:
             # one-off confirmation IDs → drop.
             if len(t) < 3 or len(t) > 6:
                 continue
+            # 4-digit tokens in the first two token positions are almost
+            # always MMDD transaction dates baked into the bank descriptor
+            # (`CHECKCARD 0206 …`, `POS 0731 …`). Drop them so recurring
+            # charges from the same vendor on different days share a
+            # group. `mm ∈ [1,12]` + `dd ∈ [1,31]` = 65 % of 4-digit space,
+            # so account IDs like `6278` (mm=62 invalid) still pass.
+            if len(t) == 4 and idx < 2:
+                mm, dd = int(t[:2]), int(t[2:])
+                if 1 <= mm <= 12 and 1 <= dd <= 31:
+                    continue
         elif any(ch.isdigit() for ch in t):
-            # Mixed alnum like "XXXXX28270" — keep only when the token
-            # has genuine letters (≥ 2 non-'x' alpha chars).
+            # Mixed alnum like "XXXXX28270" or "xx04204" — keep only when
+            # the token has genuine letters (≥ 2 non-'x' alpha chars).
             n_alpha = sum(1 for ch in t if ch.isalpha() and ch != "x")
             if n_alpha < 2:
                 continue
