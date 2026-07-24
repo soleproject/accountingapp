@@ -185,6 +185,8 @@ export default function Transactions() {
   const lrContactName = params.get("contact_name") || "";
   const lrIdx = parseInt(params.get("idx") || "1", 10);
   const lrTotal = parseInt(params.get("total") || "1", 10);
+  const lrCount = parseInt(params.get("count") || "0", 10);
+  const lrTotalAmount = parseFloat(params.get("total_amount") || "0");
   const letsReviewNav = useLetsReviewNav();
   const [txns, setTxns] = useState([]);
   const [accts, setAccts] = useState([]);
@@ -678,21 +680,36 @@ export default function Transactions() {
         </div>
         {isLetsReview && lrContactName && (
           <div
-            className="rounded-lg border-2 border-indigo-200 bg-indigo-50/50 px-4 py-2 text-right shrink-0"
+            className="rounded-xl border-2 border-indigo-300 bg-gradient-to-br from-indigo-50 to-white px-6 py-4 text-right shrink-0 shadow-sm min-w-[280px]"
             data-testid="lets-review-info-box"
           >
-            <div className="text-[10px] uppercase tracking-wider text-indigo-700 font-semibold">
+            <div className="text-[11px] uppercase tracking-wider text-indigo-700 font-semibold">
               Contact {lrIdx} of {lrTotal}
             </div>
-            <div className="font-heading text-lg font-bold text-slate-900 leading-tight">
+            <div className="font-heading text-2xl font-bold text-slate-900 leading-tight mt-1">
               {lrContactName}
             </div>
-            <div className="mt-2 flex items-center gap-1 justify-end">
+            {(lrCount > 0 || lrTotalAmount) ? (
+              <div
+                className="mt-2 flex items-center justify-end gap-3 text-sm text-slate-700"
+                data-testid="lets-review-contact-totals"
+              >
+                <span className="font-mono-num" data-testid="lets-review-contact-count">
+                  <span className="font-semibold text-slate-900">{lrCount.toLocaleString()}</span>
+                  <span className="text-slate-500 ml-1">txn{lrCount === 1 ? "" : "s"}</span>
+                </span>
+                <span className="text-slate-300">·</span>
+                <span className="font-mono-num font-semibold text-slate-900" data-testid="lets-review-contact-total-amount">
+                  {fmtMoney(lrTotalAmount)}
+                </span>
+              </div>
+            ) : null}
+            <div className="mt-3 flex items-center gap-1 justify-end">
               <button
                 onClick={() => letsReviewNav.prev && letsReviewNav.prev()}
                 disabled={!letsReviewNav.prev}
                 data-testid="lets-review-prev"
-                className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2.5 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 ← Prev
               </button>
@@ -700,7 +717,7 @@ export default function Transactions() {
                 onClick={() => letsReviewNav.next && letsReviewNav.next()}
                 disabled={!letsReviewNav.next}
                 data-testid="lets-review-next"
-                className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2.5 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Next →
               </button>
@@ -708,45 +725,51 @@ export default function Transactions() {
           </div>
         )}
         <div className="flex items-center gap-2">
-          <button
-            data-testid="detect-transfers-btn"
-            onClick={detectTransfers}
-            disabled={xferBusy}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
-            title="Scan for internal transfers between company-owned bank accounts"
-          >
-            <ArrowLeftRight size={14} />
-            {xferBusy ? "Scanning…" : "Detect transfers"}
-          </button>
-          <div className="inline-flex rounded-md border bg-white overflow-hidden">
-            {[
-              { k: "all",           label: "All" },
-              { k: "unapproved",    label: "To do" },
-              { k: "reviewed",      label: "Approved" },
-            ].map(({ k, label }) => (
-              <button
-                key={k}
-                data-testid={k === "review" ? TID.txnFilterReview : `txn-filter-${k}`}
-                onClick={() => { setFilter(k); setPage(1); }}
-                className={`px-3 py-1.5 text-xs font-medium border-r border-slate-200 last:border-r-0 ${filter === k ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
-              >
-                {label}
-                {filter === k && (
-                  <span data-testid={`txn-filter-count-${k}`}
-                        className="ml-1.5 px-1.5 py-0.5 rounded bg-white/20 font-mono-num">
-                    {pagination.total}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-          <button
-            data-testid={TID.txnAddBtn}
-            onClick={() => setCreating(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs"
-          >
-            <Plus size={13} /> Manual Transaction
-          </button>
+          {!isLetsReview && (
+            <button
+              data-testid="detect-transfers-btn"
+              onClick={detectTransfers}
+              disabled={xferBusy}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+              title="Scan for internal transfers between company-owned bank accounts"
+            >
+              <ArrowLeftRight size={14} />
+              {xferBusy ? "Scanning…" : "Detect transfers"}
+            </button>
+          )}
+          {!isLetsReview && (
+            <div className="inline-flex rounded-md border bg-white overflow-hidden">
+              {[
+                { k: "all",           label: "All" },
+                { k: "unapproved",    label: "To do" },
+                { k: "reviewed",      label: "Approved" },
+              ].map(({ k, label }) => (
+                <button
+                  key={k}
+                  data-testid={k === "review" ? TID.txnFilterReview : `txn-filter-${k}`}
+                  onClick={() => { setFilter(k); setPage(1); }}
+                  className={`px-3 py-1.5 text-xs font-medium border-r border-slate-200 last:border-r-0 ${filter === k ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+                >
+                  {label}
+                  {filter === k && (
+                    <span data-testid={`txn-filter-count-${k}`}
+                          className="ml-1.5 px-1.5 py-0.5 rounded bg-white/20 font-mono-num">
+                      {pagination.total}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+          {!isLetsReview && (
+            <button
+              data-testid={TID.txnAddBtn}
+              onClick={() => setCreating(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs"
+            >
+              <Plus size={13} /> Manual Transaction
+            </button>
+          )}
         </div>
       </div>
 

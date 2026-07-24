@@ -51,6 +51,8 @@ export default function LetsReview() {
       contact_name: g.contact_name,
       idx: String(currentIdx + 1),
       total: String(groups.length),
+      count: String(g.count ?? 0),
+      total_amount: String(g.total_amount ?? 0),
       filter: "uncategorized",
     }).toString();
     // Give the Transactions Copilot a beat to mount its listener before

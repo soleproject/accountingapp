@@ -39,6 +39,22 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Let's Review focus-mode UI cleanup
+- `Transactions.jsx` in `isLetsReview` mode now HIDES: "Detect transfers"
+  button, the "All / To do / Approved" filter tabs, and the "Manual
+  Transaction" button — keeps the surface distraction-free while the CPA
+  walks vendor-by-vendor.
+- Contact info box (top-right) enlarged: `rounded-xl` + `border-2
+  border-indigo-300`, gradient `from-indigo-50 to-white`, `px-6 py-4`,
+  `min-w-[280px]`, vendor name at `text-2xl font-bold`.
+- Box now surfaces the **total transaction count** and **total dollar
+  amount** for the current contact (e.g., "20 txns · $5,905.00"),
+  passed as new URL params `count` + `total_amount` from
+  `LetsReview.jsx`.
+- New `data-testid`s: `lets-review-contact-totals`,
+  `lets-review-contact-count`, `lets-review-contact-total-amount`.
+
+
 ### Feb 2026 — AI Axiom: knows about bank-statement upload
 - System prompt (`ai_service.py`) now enumerates every major page + a
   "PAGES & FEATURES" section, with an explicit callout that
