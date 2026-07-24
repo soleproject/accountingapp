@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useAiFocus } from "@/lib/aiFocus";
@@ -179,6 +179,7 @@ export default function Transactions() {
   const { currentId } = useCompany();
   const { setFocus } = useAiFocus();
   const [params] = useSearchParams();
+  const navigate = useNavigate();
   // Read the "Let's Review" URL params up-front so `load()` (defined
   // below) can reference them without hitting a TDZ error.
   const isLetsReview = params.get("letsReview") === "1";
@@ -313,6 +314,33 @@ export default function Transactions() {
   useEffect(() => { loadRef.current = load; });
   // AI-panel actions (approve-with-suggestion / bulk-approve-rule) reload us.
   useActionListener("txns:changed", () => { loadRef.current?.(); });
+
+  // Auto-advance the Let's-Review / No-Contact-Review stepper. When the AI
+  // Panel finishes bulk-categorizing the current contact/group it emits a
+  // `cleanup-completed` event — but our stepper URL params still point at
+  // the just-cleared contact, so the info card and the (now-empty) txn list
+  // stay stuck. Kick the user forward by re-routing to the parent stepper
+  // page, which re-fetches fresh groups and picks up the next uncleared
+  // one. Live state ferried through a ref because `useActionListener`
+  // binds once (its `[]` deps), so a naive closure would see stale values.
+  const reviewCtxRef = useRef({});
+  useEffect(() => {
+    reviewCtxRef.current = {
+      isLetsReview, isNoContactReview, lrContactId, ncrGroupKey, navigate,
+    };
+  }, [isLetsReview, isNoContactReview, lrContactId, ncrGroupKey, navigate]);
+  useActionListener("cleanup-completed", (payload) => {
+    const ctx = reviewCtxRef.current;
+    if (!ctx.isLetsReview && !ctx.isNoContactReview) return;
+    const completedCid = payload?.contact_id || payload?.contactId;
+    if (ctx.isLetsReview && completedCid && completedCid === ctx.lrContactId) {
+      // Delay slightly so the toast + "Done" chat message land before the
+      // page jumps — matches the 1.2s auto-advance timer in CleanupCopilot.
+      setTimeout(() => ctx.navigate("/accounting/lets-review", { replace: true }), 900);
+    } else if (ctx.isNoContactReview && (payload?.kind === "no_contact_group" || payload?.group_key)) {
+      setTimeout(() => ctx.navigate("/accounting/no-contact-review", { replace: true }), 900);
+    }
+  });
 
   // Refs used by the "apply-categorize-proposal" listener below — the
   // useActionListener hook binds its handler once, so we ferry live state
