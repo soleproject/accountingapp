@@ -214,6 +214,14 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
       );
       setMegaPreview(null);
       setMegaSelected(new Set());
+      // Reset the inline auto-open guard so the report page re-fetches
+      // and re-opens on the leftover uncategorized rows. Without this,
+      // clicking "Approve X rows" cleared the preview and the effect at
+      // line ~692 short-circuited (inlineOpenRef stuck at true) — the
+      // page went blank below the copilot header until the user
+      // reloaded. See bug repro at /accounting/ai-cleanup-review?view=
+      // stepper on 1213 LLC after Approve.
+      inlineOpenRef.current = false;
       load();
       window.dispatchEvent(new CustomEvent("axiom:action",
         { detail: { kind: "txns:changed", at: Date.now() } }));
