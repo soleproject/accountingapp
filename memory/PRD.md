@@ -1273,3 +1273,12 @@ re-summarised without a data migration.
 - 2 additional pytests (`test_firm_glance_monthly_todos_shape`, `test_firm_glance_todos_setup_mode_when_no_month_closed`) — total **10 pytests all passing**
 - Verified both modes visually on Bright Beans (0 closed months → Setup mode; after seeding one May-2026 close_periods → June 2026 Closing Tasks)
 
+
+## To-Do Checklist Now Shows on ALL Dashboard Views (Feb 24, 2026) ✅
+- Extracted the checklist container from `FirmAtAGlance.jsx` into a shared component `frontend/components/DashboardTodos.jsx`
+- Mounted `<DashboardTodos />` in `Dashboard.jsx` right above the view swap so the checklist appears above **Classic**, **Firm at a Glance**, and **Business Overview** views uniformly
+- Component fetches `/dashboard/firm-glance` and reads only the `todos` sub-object (backend response is cached 15s so no duplicate work when Firm-at-a-Glance also fetches the endpoint)
+- Dismiss/reopen state, per-day localStorage key, and completion-hiding all preserved — same behavior across all views
+- Removed the checklist mount + helper components from `FirmAtAGlance.jsx` (cleaner separation of concerns)
+- Verified visually — Setup Checklist → Set Up: Review Books renders identically on Classic, Firm at a Glance, and Business Overview
+

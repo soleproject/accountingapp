@@ -59,6 +59,7 @@ function labelFor(anchor, mode) {
 import FirstConnectWelcome from "@/components/FirstConnectWelcome";
 import FirmAtAGlance from "@/components/FirmAtAGlance";
 import BusinessOverview from "@/components/BusinessOverview";
+import DashboardTodos from "@/components/DashboardTodos";
 import { LayoutGrid, Sparkle, Grid3x3 } from "lucide-react";
 
 const kindLabel = {
@@ -239,6 +240,8 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
+
+      <DashboardTodos />
 
       {viewMode === "firm" ? (
         <FirmAtAGlance userName={user?.name || user?.email} />
