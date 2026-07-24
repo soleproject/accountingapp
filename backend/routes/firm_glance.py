@@ -333,15 +333,22 @@ async def _expenses_breakdown(cid: str, start: str, end: str, month: Optional[st
 
 
 async def _monthly_todos(cid: str) -> dict:
-    """Three-step monthly-close checklist rendered above `Firm at a glance`.
-      step 1 · Review AI Categorized  — # of AI-categorized unreviewed txns
-                                        WITH a contact (bulk-approve stepper)
-      step 2 · Let's review           — # of distinct vendor groups those
-                                        rows belong to (grouped-mode review)
-      step 3 · Individual review      — # of no-contact unreviewed txns
-                                        (future: grouped by similar description)
-    Counts are `as of now` — NOT scoped to the anchor month — so the checklist
-    always reflects true bookkeeping backlog even when browsing prior months.
+    """Context-aware close-cycle checklist rendered above `Firm at a glance`.
+
+    Two modes drive the header title & subtitle:
+      • "setup"  — company.onboarding_complete is False. Show until the
+                   onboarding boolean flips true (usually by the onboarding
+                   interview / Plaid-connect flow).
+      • "close"  — on/after day 3 of the current calendar month AND the prior
+                   month has not been fully closed (no close_periods doc with
+                   status='closed' covering the prior month for this company).
+
+    When neither mode applies (setup done AND prior month closed OR before
+    day 3), the checklist is hidden by default — but the frontend can still
+    request it via the "To Do" link since the payload is always returned.
+
+    Step counts are `as of now` (not month-scoped) so that browsing older
+    months in the P&L / Expenses pickers doesn't hide backlog.
     """
     txns = await db.transactions.find({"company_id": cid}).to_list(50000)
 
@@ -359,11 +366,10 @@ async def _monthly_todos(cid: str) -> dict:
         if has_real_cat and contact:
             ai_ready_txns += 1
             ai_ready_contacts.add(contact)
-        # No-contact bucket: still needs a human eye
         if not contact and (t.get("needs_review") or not t.get("category_account_id")):
             no_contact_review += 1
 
-    return {
+    steps = {
         "step1": {
             "key": "ai_categorized",
             "title": "Review AI categorized",
@@ -389,12 +395,78 @@ async def _monthly_todos(cid: str) -> dict:
             "count": no_contact_review,
             "unit": "transactions",
             "cta_label": "Review",
-            # Deep-link the transactions page to the "needs review + no contact"
-            # filter — closest existing surface until the grouped-by-description
-            # UI ships.
             "cta_link": "/accounting/transactions?filter=needs-review&no_contact=1",
             "coming_soon": True,
         },
+    }
+
+    is_complete = all((s["count"] or 0) == 0 for s in steps.values())
+
+    # -------- Determine mode / visibility --------
+    # Setup mode = post-onboarding but no month has been closed yet (books
+    # still being brought current). Monthly close mode = at least one prior
+    # month has been closed, and the user is now in steady-state monthly
+    # rhythm. If a month is currently unclosed and we're past day 3, surface
+    # it as the target.
+    company = await db.companies.find_one({"id": cid}) or {}
+    today = datetime.now(timezone.utc).date()
+
+    onboarding_done = bool(company.get("onboarding_complete"))
+    closed_months = await db.close_periods.count_documents({
+        "company_id": cid,
+        "status": "closed",
+        "kind": {"$in": ["month", "period"]},
+    })
+
+    # Prior calendar month info (used by close mode + fallback)
+    if today.month == 1:
+        prev_y, prev_m = today.year - 1, 12
+    else:
+        prev_y, prev_m = today.year, today.month - 1
+    prev_start = f"{prev_y:04d}-{prev_m:02d}-01"
+    prev_month_name = datetime(prev_y, prev_m, 1).strftime("%B")
+    prev_month_closed = await db.close_periods.find_one({
+        "company_id": cid,
+        "period_start": {"$lte": prev_start},
+        "period_end": {"$gte": prev_start},
+        "status": "closed",
+        "kind": {"$in": ["month", "period"]},
+    })
+
+    if onboarding_done and closed_months == 0:
+        # Books are freshly imported; user is still in the initial cleanup pass.
+        mode = "setup"
+        checklist_key = "setup"
+        title = "Set Up: Review Books"
+        subtitle = "Bring your books up to date before your first month-end close."
+        visible = not is_complete
+    elif today.day >= 3 and not prev_month_closed and not is_complete:
+        # In steady state, surface prior-month close on day 3+ of the current month.
+        mode = "close"
+        checklist_key = f"close-{prev_y:04d}-{prev_m:02d}"
+        title = f"{prev_month_name} {prev_y} Closing Tasks"
+        subtitle = f"Wrap up {prev_month_name} by finishing these three reviews."
+        visible = True
+    else:
+        # Nothing to auto-surface — but the "To Do" pill can still reopen the
+        # most relevant checklist so the user has a manual way in.
+        if closed_months == 0:
+            mode, checklist_key, title = "setup", "setup", "Set Up: Review Books"
+        else:
+            mode = "close"
+            checklist_key = f"close-{prev_y:04d}-{prev_m:02d}"
+            title = f"{prev_month_name} {prev_y} Closing Tasks"
+        subtitle = "All caught up." if is_complete else "Nothing surfacing right now."
+        visible = False
+
+    return {
+        "mode": mode,
+        "checklist_key": checklist_key,
+        "title": title,
+        "subtitle": subtitle,
+        "visible": visible,
+        "is_complete": is_complete,
+        **steps,
     }
 
 

@@ -9,7 +9,7 @@ import {
 import {
   Send, AlertTriangle, PauseCircle, CheckCircle2, ChevronDown,
   Wallet2, TrendingUp, TrendingDown, Building2, ArrowRight, Mail, X,
-  Check, ArrowRight as ArrowRightIcon,
+  Check, ArrowRight as ArrowRightIcon, ListChecks,
 } from "lucide-react";
 
 // --------------- helpers ---------------
@@ -102,8 +102,9 @@ export default function FirmAtAGlance({ userName }) {
         </h1>
       </div>
 
-      {/* Monthly close 3-step to-do list */}
-      <MonthlyTodos todos={data?.todos} loading={loading} />
+      {/* Monthly close 3-step to-do list — context-aware
+          (Set Up: Review Books | {Month} {Year} Closing Tasks) */}
+      <MonthlyTodosContainer todos={data?.todos} loading={loading} companyId={currentId} />
 
       <div className="flex items-center justify-between">
         <h2 className="font-heading text-lg font-semibold text-slate-800">Firm at a glance</h2>
@@ -357,24 +358,106 @@ export default function FirmAtAGlance({ userName }) {
 
 // --------------- sub-components ---------------
 
-function MonthlyTodos({ todos, loading }) {
-  const steps = todos ? [todos.step1, todos.step2, todos.step3] : [null, null, null];
+// Container manages dismissal state (per-day, localStorage) and toggling
+// between the full checklist card and a compact "To Do (N items)" reopen
+// pill. Backend already decides `visible` based on onboarding + close_periods.
+function MonthlyTodosContainer({ todos, loading, companyId }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const key = todos?.checklist_key || "unknown";
+  const dismissKey = `todo_dismissed:${companyId || "_"}:${key}:${today}`;
+
+  // Read the "dismissed today" flag from localStorage.
+  const [dismissed, setDismissed] = useState(() => {
+    try { return localStorage.getItem(dismissKey) === "1"; }
+    catch { return false; }
+  });
+  // Re-read whenever the checklist key changes (month rollover, mode switch)
+  useEffect(() => {
+    try { setDismissed(localStorage.getItem(dismissKey) === "1"); }
+    catch { /* ignore */ }
+  }, [dismissKey]);
+
+  const dismiss = () => {
+    try { localStorage.setItem(dismissKey, "1"); } catch { /* ignore */ }
+    setDismissed(true);
+  };
+  const reopen = () => {
+    try { localStorage.removeItem(dismissKey); } catch { /* ignore */ }
+    setDismissed(false);
+  };
+
+  if (loading && !todos) {
+    return (
+      <div className="rounded-xl border bg-white p-5 animate-pulse">
+        <div className="h-4 w-40 bg-slate-100 rounded" />
+        <div className="mt-3 h-16 bg-slate-100 rounded" />
+      </div>
+    );
+  }
+
+  if (!todos) return null;
+  // Fully done — hide completely (no reopen link either).
+  if (todos.is_complete) return null;
+
+  // Actively surfaced or user explicitly reopened
+  if (todos.visible && !dismissed) {
+    return <MonthlyTodos todos={todos} onDismiss={dismiss} />;
+  }
+
+  // Not surfacing right now (dismissed today OR before day 3, etc.)
+  // Offer a compact "To Do" pill so the user can pull it back up.
+  const totalItems =
+    (todos.step1?.count || 0) + (todos.step2?.count || 0) + (todos.step3?.count || 0);
+  return (
+    <div className="flex justify-end">
+      <button
+        type="button"
+        onClick={reopen}
+        data-testid="dashboard-todo-reopen"
+        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 px-3 py-1.5 text-xs font-medium shadow-sm transition-colors"
+      >
+        <ListChecks size={14} className="text-indigo-600" />
+        <span>To Do</span>
+        {totalItems > 0 && (
+          <span className="inline-flex items-center justify-center rounded-full bg-indigo-600 text-white text-[10px] font-bold h-4 min-w-4 px-1">
+            {totalItems}
+          </span>
+        )}
+      </button>
+    </div>
+  );
+}
+
+function MonthlyTodos({ todos, onDismiss }) {
+  const steps = [todos.step1, todos.step2, todos.step3];
+  const doneCount = steps.filter(s => (s?.count ?? 0) === 0).length;
   return (
     <div className="rounded-xl border bg-white p-5" data-testid="dashboard-todos">
-      <div className="flex items-center justify-between mb-4">
-        <div>
+      <div className="flex items-start justify-between gap-3 mb-4">
+        <div className="min-w-0">
           <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
-            Monthly close checklist
+            {todos.mode === "setup" ? "Setup checklist" : "Monthly close checklist"}
           </div>
-          <div className="text-sm text-slate-700 mt-0.5">
-            Three steps to close the books faster.
+          <div className="font-heading text-lg font-semibold text-slate-900 mt-0.5">
+            {todos.title}
           </div>
+          <div className="text-xs text-slate-500 mt-0.5">{todos.subtitle}</div>
         </div>
-        {todos && (
+        <div className="flex items-center gap-3 shrink-0">
           <div className="text-[11px] text-slate-500">
-            {[todos.step1, todos.step2, todos.step3].filter(s => (s?.count ?? 0) === 0).length} of 3 done
+            {doneCount} of 3 done
           </div>
-        )}
+          <button
+            type="button"
+            onClick={onDismiss}
+            data-testid="dashboard-todo-dismiss"
+            className="text-slate-400 hover:text-slate-700 rounded p-1 hover:bg-slate-100 transition-colors"
+            aria-label="Dismiss checklist"
+            title="Hide until tomorrow"
+          >
+            <X size={16} />
+          </button>
+        </div>
       </div>
 
       {/* Steps rail — connector line runs behind the number circles */}
@@ -386,7 +469,6 @@ function MonthlyTodos({ todos, loading }) {
               key={i}
               index={i + 1}
               step={step}
-              loading={loading}
               isLast={i === steps.length - 1}
             />
           ))}
@@ -396,9 +478,9 @@ function MonthlyTodos({ todos, loading }) {
   );
 }
 
-function TodoStep({ index, step, loading, isLast }) {
-  const done = !loading && step && (step.count || 0) === 0;
+function TodoStep({ index, step }) {
   const count = step?.count ?? 0;
+  const done = count === 0;
   return (
     <div className="relative flex items-start gap-3" data-testid={`dashboard-todo-step-${index}`}>
       {/* Numbered / checked circle */}

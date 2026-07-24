@@ -1253,3 +1253,23 @@ re-summarised without a data migration.
 - Frontend: `MonthlyTodos` + `TodoStep` sub-components added to `components/FirmAtAGlance.jsx`
 - 1 additional pytest (`test_firm_glance_monthly_todos_shape`) — now 9 pytests total, all passing
 
+
+## Context-aware To-Do Checklist (Setup vs Monthly Close) + Dismiss/Reopen (Feb 24, 2026) ✅
+### Two modes
+- **Setup — "Set Up: Review Books"** — surfaced when `company.onboarding_complete = True` but the company has **zero** `close_periods` docs (books being brought current for the first time). Subtitle: _"Bring your books up to date before your first month-end close."_
+- **Monthly Close — "{PrevMonth} {Year} Closing Tasks"** — surfaces on/after **day 3** of the current calendar month for the **prior month**, only if that prior month has not been closed. Subtitle: _"Wrap up {Month} by finishing these three reviews."_
+- Header pill shows either `SETUP CHECKLIST` or `MONTHLY CLOSE CHECKLIST` depending on mode
+
+### Lifecycle
+- Backend returns `todos.visible`, `todos.is_complete`, `todos.mode`, `todos.checklist_key`
+- User can dismiss via X button → stored in `localStorage` under `todo_dismissed:{companyId}:{checklistKey}:{YYYY-MM-DD}` (per-company, per-checklist, per-day)
+- When dismissed, a small **"To Do (N items)"** pill replaces the full checklist — clicking it clears the dismissal for the day and re-shows the full card
+- When all 3 steps hit zero (`is_complete: true`), backend returns `visible: false` and the frontend hides **both** the checklist and the pill entirely — nothing to do, nothing to reopen
+- Dismissal resets automatically at midnight (new date suffix in localStorage key) — if tasks are still incomplete, checklist reappears the next day
+
+### Files
+- `backend/routes/firm_glance.py::_monthly_todos()` — new mode / visibility logic driven by `companies.onboarding_complete` + `close_periods` (count all-time + prior-month coverage query)
+- `frontend/components/FirmAtAGlance.jsx` — new `MonthlyTodosContainer` (dismissal + reopen state, per-day localStorage), refactored `MonthlyTodos` (title/subtitle + X button), unchanged `TodoStep`
+- 2 additional pytests (`test_firm_glance_monthly_todos_shape`, `test_firm_glance_todos_setup_mode_when_no_month_closed`) — total **10 pytests all passing**
+- Verified both modes visually on Bright Beans (0 closed months → Setup mode; after seeding one May-2026 close_periods → June 2026 Closing Tasks)
+

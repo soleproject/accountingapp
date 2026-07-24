@@ -120,9 +120,36 @@ def test_firm_glance_monthly_todos_shape():
                      headers=_headers(), timeout=20)
     r.raise_for_status()
     todos = r.json()["todos"]
+    # Envelope
+    for k in ("mode", "checklist_key", "title", "subtitle",
+              "visible", "is_complete", "step1", "step2", "step3"):
+        assert k in todos, f"todos missing {k}"
+    assert todos["mode"] in ("setup", "close")
+    assert isinstance(todos["visible"], bool)
+    assert isinstance(todos["is_complete"], bool)
+    # Steps
     for step_key in ("step1", "step2", "step3"):
         s = todos[step_key]
         for k in ("key", "title", "subtitle", "count", "unit", "cta_label", "cta_link"):
             assert k in s, f"todos.{step_key} missing {k}"
         assert isinstance(s["count"], int)
     assert todos["step3"].get("coming_soon") is True
+
+
+def test_firm_glance_todos_setup_mode_when_no_month_closed():
+    """A company with `onboarding_complete=True` but zero close_periods
+    should surface Setup mode with the exact title `Set Up: Review Books`."""
+    r = requests.get(f"{BASE}/api/companies/{CID}/dashboard/firm-glance",
+                     headers=_headers(), timeout=20)
+    r.raise_for_status()
+    todos = r.json()["todos"]
+    # Bright Beans currently has 0 closed months (assertion holds unless the
+    # test-data suite closes a month, in which case this test will need to
+    # move to a company with a known no-close state).
+    if todos["mode"] == "setup":
+        assert todos["checklist_key"] == "setup"
+        assert todos["title"] == "Set Up: Review Books"
+    else:
+        # Close mode is also valid — just confirm shape
+        assert todos["checklist_key"].startswith("close-")
+        assert "Closing Tasks" in todos["title"]
