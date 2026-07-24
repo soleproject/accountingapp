@@ -180,7 +180,6 @@ export default function Reconciliation() {
       const r = await api.post(`/companies/${currentId}/reconciliations/auto-clear`);
       toast.success(`Auto-cleared ${r.data.cleared} Plaid transactions.`);
       // Refresh preview so newly-cleared items disappear from the list.
-      setStmtBal(s => s);  // trigger the debounced reload
       load();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Auto-clear failed");
@@ -564,7 +563,6 @@ export default function Reconciliation() {
               });
               toast.success(`Cleared ${ids.length} matched transactions.`);
               setShowMatchModal(false); setMatchResult(null);
-              setStmtBal(s => s);
               load();
             } catch (e) {
               toast.error(e.response?.data?.detail || "Apply failed");

@@ -57,6 +57,8 @@ function labelFor(anchor, mode) {
   return `${monthName} ${y}`;
 }
 import FirstConnectWelcome from "@/components/FirstConnectWelcome";
+import FirmAtAGlance from "@/components/FirmAtAGlance";
+import { LayoutGrid, Sparkle } from "lucide-react";
 
 const kindLabel = {
   categorize: "Transactions Categorized",
@@ -82,12 +84,23 @@ const kindColor = {
 
 export default function Dashboard() {
   const { currentId, current } = useCompany();
+  const { user } = useAuth();
   const [totals, setTotals] = useState(null);
   const [activity, setActivity] = useState([]);
   const [income, setIncome] = useState(null);
   const [metrics, setMetrics] = useState(null);
   const [attention, setAttention] = useState(null);
   const [syncStatus, setSyncStatus] = useState(null);
+  // Dashboard view mode — "classic" (original) or "firm" (QBO-style Firm at
+  // a Glance). Persisted per-user in localStorage so it sticks across sessions.
+  const [viewMode, setViewMode] = useState(() => {
+    try { return localStorage.getItem("dashboard_view") || "classic"; }
+    catch { return "classic"; }
+  });
+  const changeView = (m) => {
+    setViewMode(m);
+    try { localStorage.setItem("dashboard_view", m); } catch { /* ignore */ }
+  };
   // Income-snapshot timeframe — user asked for a way to step back through
   // prior months / years. `mode` is one of "ytd" | "month" | "year";
   // `anchor` is a YYYY-MM string that arrow-navigates within the chosen mode.
@@ -194,6 +207,68 @@ export default function Dashboard() {
         companyName={current?.name}
       />
 
+      {/* View toggle — Classic vs Firm at a Glance */}
+      <div className="flex justify-end">
+        <div
+          role="tablist"
+          aria-label="Dashboard view"
+          className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 p-0.5"
+          data-testid="dashboard-view-toggle"
+        >
+          {[
+            { key: "classic", label: "Classic", Icon: LayoutGrid },
+            { key: "firm",    label: "Firm at a Glance", Icon: Sparkle },
+          ].map(({ key, label, Icon }) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={viewMode === key}
+              onClick={() => changeView(key)}
+              data-testid={`dashboard-view-${key}`}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                viewMode === key
+                  ? "bg-white text-slate-900 shadow-sm border border-slate-200"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <Icon size={12} />
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {viewMode === "firm" ? (
+        <FirmAtAGlance userName={user?.name || user?.email} />
+      ) : (
+        <ClassicDashboard
+          current={current}
+          attention={attention}
+          totals={totals}
+          income={income}
+          metrics={metrics}
+          activity={activity}
+          tfMode={tfMode}
+          tfAnchor={tfAnchor}
+          setTfMode={setTfMode}
+          setTfAnchor={setTfAnchor}
+        />
+      )}
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------
+// Classic dashboard content (extracted from the original render so we
+// can toggle between it and Firm at a Glance without duplicating state
+// or data-fetching logic above).
+// -----------------------------------------------------------------
+function ClassicDashboard({
+  current, attention, totals, income, metrics, activity,
+  tfMode, tfAnchor, setTfMode, setTfAnchor,
+}) {
+  return (
+    <>
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="font-heading text-3xl font-bold tracking-tight">Dashboard</h1>
@@ -353,7 +428,7 @@ export default function Dashboard() {
           </Link>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 

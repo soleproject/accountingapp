@@ -26,6 +26,7 @@ from routes.anomaly import router as anomaly_router  # noqa: F401
 from routes.communications import router as communications_router  # noqa: F401
 from routes.invites import router as invites_router  # noqa: F401
 from routes.stripe_billing import router as stripe_billing_router  # noqa: F401
+from routes.firm_glance import router as firm_glance_router  # noqa: F401
 from routes.root import router as root_router  # noqa: F401
 
 ALL_ROUTERS = [
@@ -55,5 +56,6 @@ ALL_ROUTERS = [
     communications_router,
     invites_router,
     stripe_billing_router,
+    firm_glance_router,
     root_router,
 ]

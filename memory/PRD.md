@@ -1199,3 +1199,19 @@ re-summarised without a data migration.
 - Vendor rows in `CleanupCopilot.jsx` mega/stepper view now use CSS grid at `md:` breakpoint (`md:grid md:grid-cols-[auto_240px_minmax(200px,1fr)_auto_auto_auto]`) so every `AccountPicker` dropdown lines up in a clean vertical column regardless of merchant-name length
 - Falls back to the original flexbox layout on screens narrower than `md` (768px) so the row still wraps gracefully on tablets / phones
 - No API or data-model changes; verified visually with a temporary set of 18 unreviewed AI-categorized rows across 6 vendors on Bright Beans Coffee Co.
+
+
+## Dashboard: "Firm at a Glance" Toggle View (Feb 24, 2026) ✅
+- Added a `Classic ↔ Firm at a Glance` segmented toggle at the top-right of `/dashboard` (persisted per-user in `localStorage` under `dashboard_view`)
+- Classic view is the pre-existing dashboard content, now extracted into a `ClassicDashboard` sub-component inside `pages/Dashboard.jsx`
+- New view: `components/FirmAtAGlance.jsx` — QBO-Accountant-style overview inspired by user reference screenshot:
+    * Centered "Good morning/afternoon/evening, {firstName}!" greeting
+    * "Firm at a glance" band with company name and active month
+    * **Sales & Get Paid Funnel** card (Not paid / Paid / Deposited columns with colored top-stripe + amber "N overdue invoices" / rose "on hold" / emerald "N deposited" badges, plus a "Create a new payment request" CTA column)
+    * **Bank Accounts** panel (today's total bank balance + per-account rows with balance + "N to review" deep-link into Reconcile)
+    * **Profit & Loss** card (net profit, signed % delta vs last quarter, Income and Expense bars with per-side "N to review" counts, "View profit and loss report" link)
+    * **Expenses** card (donut chart of top-5 expense categories + "Other" roll-up, signed % delta vs last month, colored legend)
+- New backend endpoint `GET /api/companies/{cid}/dashboard/firm-glance?month=YYYY-MM&basis=accrual` in `backend/routes/firm_glance.py` — packages all four panels into a single 15s-cached response
+- Delta calculations: P&L compares current month's net profit to the AVERAGE month of the prior calendar quarter; Expenses compares to previous month total
+- 4 pytests in `backend/tests/test_firm_glance.py` — all passing (default month, explicit month, bank-account fields, expense category colors)
+- Verified visually on Bright Beans Coffee Co. — funnel + banks + P&L + donut all render with real data; toggle switches instantly and preserves selection across reloads
