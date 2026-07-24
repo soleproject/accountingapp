@@ -109,17 +109,24 @@ async def ensure_contact_index() -> None:
 def _cache_signature(text: str | None) -> str:
     """Stable key for the learning cache.
 
-    Strips digits + per-row punctuation so identical bank memos with different
-    ref numbers hash to the same key. E.g.
+    Strips digits + per-row punctuation so identical bank memos with
+    different ref numbers hash to the same key. E.g.
         'CITI CARD ONLINE DES:PAYMENT ID:XXX INDN:X CO ID:CITICTP WEB'
         'CITI CARD ONLINE DES:PAYMENT ID:YYY INDN:Y CO ID:CITICTP WEB'
-    both → 'citi card online despayment'
+    both → 'citi card online despayment indn x co id citictp web'.
+
+    Cap at ~120 chars so we retain the counterparty portion of long ACH
+    memos (INDN: / ORIG: / /Org= / /Bnf= fields that name the actual payee)
+    — the old 4-token / 40-char cap dropped that data, causing every
+    'PAYPAL DES:INST XFER …' row to false-collide regardless of who the
+    real counterparty was (bug repro Feb 2026: Romeo Ugali cache hit
+    hijacked Eimorlain Ugali, Dad & Babe, and Larry Brown rows).
     """
     if not text:
         return ""
     s = re.sub(r"\d+", "", text.lower())
     s = re.sub(r"[^a-z\s]+", " ", s)
-    return " ".join(s.split()[:4])[:40]
+    return " ".join(s.split())[:120]
 
 
 async def _lookup_learning_cache(company_id: str, signature: str) -> dict | None:

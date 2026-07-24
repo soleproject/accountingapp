@@ -25,7 +25,7 @@ from auth import (
 from ai_service import (
     categorize_transaction, chat_stream, suggest_chart_of_accounts,
     onboarding_interview_questions, onboarding_interview_synthesize,
-    parse_voice_intent,
+    parse_voice_intent, resolve_contact_ai,
 )
 import reports as R
 import plaid_service
@@ -1514,6 +1514,62 @@ async def detect_transfer_pairs(cid: str, dry_run: bool = False, date_since: str
 class DetectTransfersIn(BaseModel):
     dry_run: bool = False
     date_since: Optional[str] = None  # ISO YYYY-MM-DD; None = scan everything
+
+
+@router.post("/companies/{cid}/contacts/re-resolve")
+async def re_resolve_contacts(cid: str, user: dict = Depends(get_current_user)):
+    """Nuke this company's poisoned `contact_learning_cache` and re-run the
+    contact resolver on every unreviewed transaction. Fixes rows that were
+    mis-tagged when the cache signature was too shallow (Feb 2026 bug —
+    `PAYPAL DES:INST XFER …` short-signature collision hijacked Eimorlain
+    Ugali / Dad & Babe / Larry Brown rows to the first cached Romeo Ugali
+    contact). Only touches unreviewed rows so human decisions are preserved.
+
+    Response: `{ok, cache_deleted, updated}` — count of txns whose contact
+    was reassigned.
+    """
+    await require_company(user, cid)
+    # 1. Wipe the poisoned cache for this company. Fresh signatures will
+    #    re-populate correctly on the next resolve.
+    cache_res = await db.contact_learning_cache.delete_many({"company_id": cid})
+    # 2. Pull every unreviewed row that has a description we can resolve
+    #    against. Cap at 5000 to bound the LLM budget per invocation.
+    unreviewed = await db.transactions.find(
+        {"company_id": cid, "human_reviewed": {"$ne": True}},
+        {"id": 1, "description": 1, "merchant": 1, "merchant_name": 1,
+         "contact_id": 1, "contact_name": 1},
+    ).to_list(5000)
+    if not unreviewed:
+        return {"ok": True, "cache_deleted": cache_res.deleted_count, "updated": 0}
+    items = [
+        {
+            "merchant_name": t.get("merchant_name"),
+            "merchant": t.get("merchant"),
+            "description": t.get("description"),
+        }
+        for t in unreviewed
+    ]
+    resolved = await contact_resolver.resolve_contacts_batch(
+        cid, items, ai_fallback_fn=resolve_contact_ai, concurrency=5,
+    )
+    # 3. Update rows whose contact_id actually changed. No-op writes are
+    #    skipped so we don't churn `updated_at` on already-correct rows.
+    updated = 0
+    for t, r in zip(unreviewed, resolved):
+        new_id = r.get("contact_id")
+        new_name = r.get("contact_name")
+        if t.get("contact_id") == new_id and t.get("contact_name") == new_name:
+            continue
+        await db.transactions.update_one(
+            {"id": t["id"], "company_id": cid},
+            {"$set": {
+                "contact_id": new_id,
+                "contact_name": new_name,
+                "updated_at": now_iso(),
+            }},
+        )
+        updated += 1
+    return {"ok": True, "cache_deleted": cache_res.deleted_count, "updated": updated}
 
 
 @router.post("/companies/{cid}/transactions/transfer-pairs/unbook")
