@@ -1315,3 +1315,10 @@ Two follow-ups requested after seeing the Review-button flow in action:
 - `AICleanupReview.jsx` reads it and forwards `autoStartTour` prop to `CleanupCopilot`
 - `CleanupCopilot.jsx` gained a one-shot effect that fires `runHowTo()` 500ms after `megaPreview.vendors` are hydrated (guarded by `autoTourFiredRef` so it never re-fires within the same mount, even if the preview data re-loads)
 - Tour narration is spoken (browser Speech Synthesis) AND posted into the AI chat side-panel as assistant bubbles, so the walkthrough is available even if audio is muted
+
+
+## First-Run Gate on Auto-Tour (Feb 24, 2026) ✅
+- Auto-tour now runs **once per user + company pair** instead of on every visit
+- After the tour kicks off, `CleanupCopilot.jsx` writes `tour_seen:<userId>:<companyId>` to localStorage; the auto-start effect skips the tour when the flag is present
+- The manual "How To" button in the toolbar always runs the tour, so CPAs can replay it deliberately whenever needed
+- Guarded so a null `user.id` / `currentId` short-circuits cleanly (defensive against auth-hook race on first mount)

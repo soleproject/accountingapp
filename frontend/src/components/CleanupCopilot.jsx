@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { useActionListener, emitAction } from "@/lib/createBus";
 import { useAiFocus } from "@/lib/aiFocus";
 import { stripMarkdownForSpeech } from "@/lib/speechText";
@@ -91,6 +92,7 @@ function pitchFor(action, progress) {
 export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null, inlineTitle = null, inlineSubtitle = null, initialViewMode = null, autoStartTour = false }) {
   const navigate = useNavigate();
   const { focus } = useAiFocus();
+  const { user } = useAuth();
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   // Permanent dismissal (contact was actually handled, not just skipped).
@@ -503,7 +505,10 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
 
   // Auto-start the "How To" walkthrough on entry when the parent asked us
   // to (via `autoStartTour` prop, wired to `?tour=1` from Setup checklist
-  // Step 1). Fires once per mount as soon as the preview data has vendors.
+  // Step 1). First-run only — once the tour plays for a given user+company
+  // pair, we persist `tour_seen:<uid>:<cid>` in localStorage and skip on
+  // subsequent visits so CPAs juggling many clients aren't re-narrated.
+  // The manual "How To" button in the toolbar still always works.
   const autoTourFiredRef = useRef(false);
   useEffect(() => {
     if (!autoStartTour) return;
@@ -511,11 +516,22 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     if (howToRunning) return;
     const vendors = megaPreview?.vendors || [];
     if (vendors.length === 0) return;
+    if (!currentId || !user?.id) return;
+    const seenKey = `tour_seen:${user.id}:${currentId}`;
+    try {
+      if (localStorage.getItem(seenKey) === "1") return;
+    } catch { /* localStorage disabled — just play the tour */ }
     autoTourFiredRef.current = true;
     // Give React a beat to render the vendor rows before the tour tries
     // to highlight the first one.
-    setTimeout(() => runHowTo(), 500);
-  }, [autoStartTour, megaPreview, howToRunning]); // eslint-disable-line react-hooks/exhaustive-deps
+    setTimeout(() => {
+      runHowTo();
+      // Stamp AFTER kickoff so an aborted mid-tour doesn't accidentally
+      // preserve "unseen" state — user still gets the guided experience
+      // once, and can re-trigger via the manual button if they want it.
+      try { localStorage.setItem(seenKey, "1"); } catch { /* ignore */ }
+    }, 500);
+  }, [autoStartTour, megaPreview, howToRunning, currentId, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useActionListener("cleanup-completed", async (payload) => {
     const cid = payload?.contact_id;
