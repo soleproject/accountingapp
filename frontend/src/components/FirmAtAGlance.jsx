@@ -9,6 +9,7 @@ import {
 import {
   Send, AlertTriangle, PauseCircle, CheckCircle2, ChevronDown,
   Wallet2, TrendingUp, TrendingDown, Building2, ArrowRight, Mail, X,
+  Check, ArrowRight as ArrowRightIcon,
 } from "lucide-react";
 
 // --------------- helpers ---------------
@@ -100,6 +101,9 @@ export default function FirmAtAGlance({ userName }) {
           {greeting}
         </h1>
       </div>
+
+      {/* Monthly close 3-step to-do list */}
+      <MonthlyTodos todos={data?.todos} loading={loading} />
 
       <div className="flex items-center justify-between">
         <h2 className="font-heading text-lg font-semibold text-slate-800">Firm at a glance</h2>
@@ -352,6 +356,115 @@ export default function FirmAtAGlance({ userName }) {
 }
 
 // --------------- sub-components ---------------
+
+function MonthlyTodos({ todos, loading }) {
+  const steps = todos ? [todos.step1, todos.step2, todos.step3] : [null, null, null];
+  return (
+    <div className="rounded-xl border bg-white p-5" data-testid="dashboard-todos">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
+            Monthly close checklist
+          </div>
+          <div className="text-sm text-slate-700 mt-0.5">
+            Three steps to close the books faster.
+          </div>
+        </div>
+        {todos && (
+          <div className="text-[11px] text-slate-500">
+            {[todos.step1, todos.step2, todos.step3].filter(s => (s?.count ?? 0) === 0).length} of 3 done
+          </div>
+        )}
+      </div>
+
+      {/* Steps rail — connector line runs behind the number circles */}
+      <div className="relative">
+        <div className="absolute left-0 right-0 top-6 h-0.5 bg-slate-100 -z-0" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 relative">
+          {steps.map((step, i) => (
+            <TodoStep
+              key={i}
+              index={i + 1}
+              step={step}
+              loading={loading}
+              isLast={i === steps.length - 1}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TodoStep({ index, step, loading, isLast }) {
+  const done = !loading && step && (step.count || 0) === 0;
+  const count = step?.count ?? 0;
+  return (
+    <div className="relative flex items-start gap-3" data-testid={`dashboard-todo-step-${index}`}>
+      {/* Numbered / checked circle */}
+      <div
+        className={`relative z-10 shrink-0 w-12 h-12 rounded-full border-2 flex items-center justify-center font-heading font-bold text-lg transition-colors ${
+          done
+            ? "bg-emerald-500 border-emerald-500 text-white"
+            : count > 0
+              ? "bg-white border-indigo-500 text-indigo-600"
+              : "bg-white border-slate-300 text-slate-400"
+        }`}
+        aria-label={done ? "Step complete" : `Step ${index}`}
+      >
+        {done ? <Check size={20} /> : index}
+      </div>
+
+      {/* Body */}
+      <div className="flex-1 min-w-0 rounded-lg border border-slate-200 bg-slate-50/40 hover:bg-slate-50 transition-colors p-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <div className="text-sm font-semibold text-slate-900 truncate">
+                Step {index}: {step?.title || (loading ? "Loading…" : "")}
+              </div>
+              {step?.coming_soon && (
+                <span className="text-[9px] uppercase tracking-wider text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                  Preview
+                </span>
+              )}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">
+              {step?.subtitle || " "}
+            </div>
+          </div>
+          {step && (
+            <div className="text-right shrink-0">
+              <div className={`font-mono-num text-2xl font-bold leading-none ${done ? "text-emerald-600" : count > 0 ? "text-slate-900" : "text-slate-400"}`}>
+                {count}
+              </div>
+              <div className="text-[9px] uppercase tracking-wider text-slate-400 mt-0.5">
+                {step.unit}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {step && !done && (
+          <Link
+            to={step.cta_link}
+            data-testid={`dashboard-todo-cta-${index}`}
+            className="mt-3 inline-flex items-center gap-1 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-3 py-1.5 transition-colors"
+          >
+            {step.cta_label}
+            <ArrowRightIcon size={12} />
+          </Link>
+        )}
+        {step && done && (
+          <div className="mt-3 inline-flex items-center gap-1 text-emerald-700 text-xs font-medium">
+            <CheckCircle2 size={13} />
+            All caught up
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function MonthPicker({ value, onChange, options }) {
   return (

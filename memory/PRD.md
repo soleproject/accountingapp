@@ -1239,3 +1239,17 @@ re-summarised without a data migration.
 - 4 additional pytests in `test_firm_glance.py` (overdue-invoices shape, business-overview default month, sales 6-month series, bank categorization) → all 8 pass
 - Seeded 3 demo overdue invoices on Bright Beans Coffee Co. (2 with contact emails, 1 without) so the popover has real data
 
+
+## Monthly-Close 3-Step To-Do Checklist (Feb 24, 2026) ✅
+- QBO-style horizontal "1 → 2 → 3" progress card added above **Firm at a glance** section (only rendered in the Firm-at-a-Glance dashboard view)
+- Each step shows a numbered/checked circle, title, subtitle, big count, unit label, and a Review CTA → the circle turns green with a ✓ and shows "All caught up" when count = 0
+- Header includes an "X of 3 done" summary badge
+- Steps:
+    1. **Review AI categorized** — count = # of AI-categorized unreviewed txns with a real category + contact_id → deep-links to `/accounting/ai-cleanup-review?mode=stepper`
+    2. **Let's review** — count = # of distinct vendor groups the Step-1 txns belong to → deep-links to `/accounting/ai-cleanup-review?mode=grouped`
+    3. **Individual review** — count = # of no-contact unreviewed txns → deep-links to `/accounting/transactions?filter=needs-review&no_contact=1` (marked with a "Preview" pill; will be replaced by the future "grouped by similar description" review UI)
+- New `_monthly_todos()` helper in `backend/routes/firm_glance.py` (as-of-now counts, NOT month-scoped, so switching the month picker doesn't hide backlog)
+- `firm-glance` endpoint response extended with a `todos` field (step1/step2/step3 with count, cta_link, coming_soon flag)
+- Frontend: `MonthlyTodos` + `TodoStep` sub-components added to `components/FirmAtAGlance.jsx`
+- 1 additional pytest (`test_firm_glance_monthly_todos_shape`) — now 9 pytests total, all passing
+

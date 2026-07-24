@@ -24,7 +24,7 @@ def test_firm_glance_default_month():
                      headers=_headers(), timeout=20)
     assert r.status_code == 200, r.text
     body = r.json()
-    for k in ("month", "month_label", "sales_funnel", "bank_accounts",
+    for k in ("month", "month_label", "todos", "sales_funnel", "bank_accounts",
               "profit_loss", "expenses"):
         assert k in body, f"missing key {k} in response"
     # sales funnel shape
@@ -113,3 +113,16 @@ def test_business_overview_bank_accounts_categorized():
     for a in r.json()["bank_accounts"]["accounts"]:
         assert a["category"] in ("checking", "savings")
         assert "bank_balance" in a and "in_books" in a
+
+
+def test_firm_glance_monthly_todos_shape():
+    r = requests.get(f"{BASE}/api/companies/{CID}/dashboard/firm-glance",
+                     headers=_headers(), timeout=20)
+    r.raise_for_status()
+    todos = r.json()["todos"]
+    for step_key in ("step1", "step2", "step3"):
+        s = todos[step_key]
+        for k in ("key", "title", "subtitle", "count", "unit", "cta_label", "cta_link"):
+            assert k in s, f"todos.{step_key} missing {k}"
+        assert isinstance(s["count"], int)
+    assert todos["step3"].get("coming_soon") is True

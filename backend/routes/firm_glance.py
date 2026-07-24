@@ -332,6 +332,72 @@ async def _expenses_breakdown(cid: str, start: str, end: str, month: Optional[st
     }
 
 
+async def _monthly_todos(cid: str) -> dict:
+    """Three-step monthly-close checklist rendered above `Firm at a glance`.
+      step 1 · Review AI Categorized  — # of AI-categorized unreviewed txns
+                                        WITH a contact (bulk-approve stepper)
+      step 2 · Let's review           — # of distinct vendor groups those
+                                        rows belong to (grouped-mode review)
+      step 3 · Individual review      — # of no-contact unreviewed txns
+                                        (future: grouped by similar description)
+    Counts are `as of now` — NOT scoped to the anchor month — so the checklist
+    always reflects true bookkeeping backlog even when browsing prior months.
+    """
+    txns = await db.transactions.find({"company_id": cid}).to_list(50000)
+
+    ai_ready_txns = 0
+    ai_ready_contacts: set[str] = set()
+    no_contact_review = 0
+    for t in txns:
+        if t.get("human_reviewed"):
+            continue
+        has_real_cat = (
+            t.get("category_account_id")
+            and t.get("category_account_code") not in ("9999", "6999", "4999")
+        )
+        contact = t.get("contact_id")
+        if has_real_cat and contact:
+            ai_ready_txns += 1
+            ai_ready_contacts.add(contact)
+        # No-contact bucket: still needs a human eye
+        if not contact and (t.get("needs_review") or not t.get("category_account_id")):
+            no_contact_review += 1
+
+    return {
+        "step1": {
+            "key": "ai_categorized",
+            "title": "Review AI categorized",
+            "subtitle": "One-click approve the AI's high-confidence categorizations.",
+            "count": ai_ready_txns,
+            "unit": "transactions",
+            "cta_label": "Review",
+            "cta_link": "/accounting/ai-cleanup-review?mode=stepper",
+        },
+        "step2": {
+            "key": "grouped_review",
+            "title": "Let's review",
+            "subtitle": "Batch-approve vendor groups where all rows land in one account.",
+            "count": len(ai_ready_contacts),
+            "unit": "vendor groups",
+            "cta_label": "Review",
+            "cta_link": "/accounting/ai-cleanup-review?mode=grouped",
+        },
+        "step3": {
+            "key": "individual_review",
+            "title": "Individual review",
+            "subtitle": "No-contact rows grouped by similar description. Coming soon.",
+            "count": no_contact_review,
+            "unit": "transactions",
+            "cta_label": "Review",
+            # Deep-link the transactions page to the "needs review + no contact"
+            # filter — closest existing surface until the grouped-by-description
+            # UI ships.
+            "cta_link": "/accounting/transactions?filter=needs-review&no_contact=1",
+            "coming_soon": True,
+        },
+    }
+
+
 @router.get("/companies/{cid}/dashboard/firm-glance")
 async def firm_glance(
     cid: str,
@@ -347,15 +413,17 @@ async def firm_glance(
     key = cache.key("firm_glance", company_id=cid, s=start, e=end, b=basis, d=today_iso)
 
     async def compute():
-        funnel, banks, pl, exp = await asyncio.gather(
+        funnel, banks, pl, exp, todos = await asyncio.gather(
             _sales_funnel(cid, start, end, today_iso),
             _bank_accounts_panel(cid, today_iso),
             _pl_card(cid, start, end, month, basis),
             _expenses_breakdown(cid, start, end, month, basis),
+            _monthly_todos(cid),
         )
         return {
             "month": start[:7],
             "month_label": label,
+            "todos": todos,
             "sales_funnel": funnel,
             "bank_accounts": banks,
             "profit_loss": pl,
