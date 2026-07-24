@@ -1282,3 +1282,14 @@ re-summarised without a data migration.
 - Removed the checklist mount + helper components from `FirmAtAGlance.jsx` (cleaner separation of concerns)
 - Verified visually — Setup Checklist → Set Up: Review Books renders identically on Classic, Firm at a Glance, and Business Overview
 
+
+
+## Contextual Rainbow-Shimmer on Setup Checklist (Feb 24, 2026) ✅
+- **Setup mode**: the existing `.attention-rainbow` shimmer border now moves onto the FIRST incomplete step of the Setup checklist (Step 1 → 2 → 3 as counts hit zero). Simultaneously, the Needs-your-attention priority-card shimmer is **suppressed** so the user's eye only lands on the checklist step.
+- **Close mode**: no shimmer on any checklist step — the Needs-your-attention shimmer retains its original priority-card behavior (Overdue bills → Overdue invoices → Flagged → Rules → Unreconciled).
+- Implementation:
+    * Lifted `todos` fetch from `DashboardTodos.jsx` up to `Dashboard.jsx` (single source of truth for both surfaces)
+    * `DashboardTodos` now receives `todos` as a prop; computes `highlightIdx = mode === "setup" ? steps.findIndex(s => count > 0) : -1` and applies `attention-rainbow relative z-10` to that step's body only.
+    * `AttentionTile` accepts a new `suppressShimmer` prop; when true, `priorityKey` is forced to `null` so no attention card gets highlighted.
+    * `ClassicDashboard` computes `suppressAttentionShimmer = todos?.mode === "setup" && todos?.visible && !todos?.is_complete`.
+- Verified visually on Bright Beans: Setup mode shows the shimmer around Step 3 (first incomplete) with a plain Needs-your-attention section; after inserting a demo May-2026 close_period, Close mode shows plain checklist steps with the shimmer back on the "3 Overdue invoices" card.

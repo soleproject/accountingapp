@@ -93,6 +93,10 @@ export default function Dashboard() {
   const [metrics, setMetrics] = useState(null);
   const [attention, setAttention] = useState(null);
   const [syncStatus, setSyncStatus] = useState(null);
+  // Shared todos state — powers the DashboardTodos card AND drives whether
+  // the Needs-your-attention shimmer is suppressed (during Setup mode the
+  // shimmer moves onto the checklist step instead).
+  const [todos, setTodos] = useState(null);
   // Dashboard view mode — "classic" (original) or "firm" (QBO-style Firm at
   // a Glance). Persisted per-user in localStorage so it sticks across sessions.
   const [viewMode, setViewMode] = useState(() => {
@@ -134,6 +138,11 @@ export default function Dashboard() {
         .then(r => { if (!cancelled) setMetrics(r.data); }).catch(() => {});
       api.get(`/companies/${currentId}/dashboard/attention`)
         .then(r => { if (!cancelled) setAttention(r.data); }).catch(() => {});
+      // Todos live inside the firm-glance payload (cached 15s server-side).
+      // Fetching here lets us share the state between DashboardTodos and
+      // the Needs-your-attention shimmer suppression logic.
+      api.get(`/companies/${currentId}/dashboard/firm-glance`)
+        .then(r => { if (!cancelled) setTodos(r.data?.todos || null); }).catch(() => {});
     };
 
     // -------- Cheap sync-status poll (single Mongo lookup) -------------
@@ -241,7 +250,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <DashboardTodos />
+      <DashboardTodos todos={todos} />
 
       {viewMode === "firm" ? (
         <FirmAtAGlance userName={user?.name || user?.email} />
@@ -259,6 +268,7 @@ export default function Dashboard() {
           tfAnchor={tfAnchor}
           setTfMode={setTfMode}
           setTfAnchor={setTfAnchor}
+          todos={todos}
         />
       )}
     </div>
@@ -273,7 +283,14 @@ export default function Dashboard() {
 function ClassicDashboard({
   current, attention, totals, income, metrics, activity,
   tfMode, tfAnchor, setTfMode, setTfAnchor,
+  todos,
 }) {
+  // During Setup mode we move the "highlight" rainbow off the Needs-your-
+  // attention section and onto the checklist itself (that's where the user
+  // should look first). In Close mode we leave the Needs-your-attention
+  // shimmer alone — it's the primary priority cue in steady state.
+  const suppressAttentionShimmer =
+    todos?.mode === "setup" && todos?.visible && !todos?.is_complete;
   return (
     <>
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -285,7 +302,7 @@ function ClassicDashboard({
         </div>
       </div>
 
-      <AttentionTile attention={attention} />
+      <AttentionTile attention={attention} suppressShimmer={suppressAttentionShimmer} />
 
       {totals && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -439,7 +456,7 @@ function ClassicDashboard({
   );
 }
 
-function AttentionTile({ attention }) {
+function AttentionTile({ attention, suppressShimmer = false }) {
   if (!attention) return null;
   const {
     flagged_count: flagged = 0,
@@ -456,12 +473,17 @@ function AttentionTile({ attention }) {
   // FIRST bucket in this list that has count > 0 lights up so the user's eye
   // lands on the most urgent action first. Order: overdue bills → overdue
   // invoices → flagged → suggested rules → unreconciled.
-  const priorityKey =
+  //
+  // When `suppressShimmer` is set (e.g. during Setup mode where the shimmer
+  // belongs on the checklist), we zero out `priorityKey` so no attention
+  // card gets highlighted — cleaner than two competing shimmers on-screen.
+  const priorityKey = suppressShimmer ? null : (
     ovBill  > 0 ? "ovBill"  :
     ovInv   > 0 ? "ovInv"   :
     flagged > 0 ? "flagged" :
     rules   > 0 ? "rules"   :
-    unrecon > 0 ? "unrecon" : null;
+    unrecon > 0 ? "unrecon" : null
+  );
   if (total === 0) {
     return (
       <div

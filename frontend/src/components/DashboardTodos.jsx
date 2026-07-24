@@ -2,37 +2,23 @@
 // surfaces above the toggle content on every dashboard view (Classic,
 // Firm at a Glance, Business Overview).
 //
-// Backend drives the mode + visibility:
-//   • "setup"  → "Set Up: Review Books" (company hasn't closed a month yet)
-//   • "close"  → "{PrevMonth} {Year} Closing Tasks" (day 3+, prior month
-//                still open)
-//
-// The container also handles per-day dismissal via localStorage and a
-// compact "To Do (N)" reopen pill when dismissed.
+// Backend drives the mode + visibility (fetched by Dashboard.jsx and
+// passed in as a prop so the same object drives the Needs-your-attention
+// shimmer-suppression logic too).
+//   • "setup"  → "Set Up: Review Books"  ← shimmer moves onto the first
+//                incomplete step in this checklist (steer the user here)
+//   • "close"  → "{PrevMonth} {Year} Closing Tasks"  ← no shimmer on
+//                steps; the Needs-your-attention shimmer keeps its
+//                current behavior.
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import {
   X, Check, CheckCircle2, ArrowRight as ArrowRightIcon, ListChecks,
 } from "lucide-react";
 
-export default function DashboardTodos() {
+export default function DashboardTodos({ todos }) {
   const { currentId } = useCompany();
-  const [todos, setTodos] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!currentId) return;
-    setLoading(true);
-    // Firm-glance is cached backend-side (15s), so calling it for todos
-    // alongside FirmAtAGlance's own render is cheap.
-    api.get(`/companies/${currentId}/dashboard/firm-glance`)
-      .then(r => setTodos(r.data?.todos || null))
-      .catch(() => setTodos(null))
-      .finally(() => setLoading(false));
-  }, [currentId]);
-
   const today = new Date().toISOString().slice(0, 10);
   const key = todos?.checklist_key || "unknown";
   const dismissKey = `todo_dismissed:${currentId || "_"}:${key}:${today}`;
@@ -55,7 +41,8 @@ export default function DashboardTodos() {
     setDismissed(false);
   };
 
-  if (loading && !todos) {
+  if (!todos) {
+    // First render before Dashboard.jsx's fetch resolves.
     return (
       <div className="rounded-xl border bg-white p-5 animate-pulse">
         <div className="h-4 w-40 bg-slate-100 rounded" />
@@ -63,7 +50,6 @@ export default function DashboardTodos() {
       </div>
     );
   }
-  if (!todos) return null;
   if (todos.is_complete) return null;
 
   if (todos.visible && !dismissed) {
@@ -95,6 +81,11 @@ export default function DashboardTodos() {
 function MonthlyTodos({ todos, onDismiss }) {
   const steps = [todos.step1, todos.step2, todos.step3];
   const doneCount = steps.filter(s => (s?.count ?? 0) === 0).length;
+  // Only Setup mode shifts the rainbow shimmer onto the checklist. In
+  // Close mode the shimmer stays on the Needs-your-attention section.
+  const highlightIdx = todos.mode === "setup"
+    ? steps.findIndex(s => (s?.count ?? 0) > 0)
+    : -1;
   return (
     <div className="rounded-xl border bg-white p-5" data-testid="dashboard-todos">
       <div className="flex items-start justify-between gap-3 mb-4">
@@ -128,7 +119,12 @@ function MonthlyTodos({ todos, onDismiss }) {
         <div className="absolute left-0 right-0 top-6 h-0.5 bg-slate-100 -z-0" />
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 relative">
           {steps.map((step, i) => (
-            <TodoStep key={i} index={i + 1} step={step} />
+            <TodoStep
+              key={i}
+              index={i + 1}
+              step={step}
+              highlight={i === highlightIdx}
+            />
           ))}
         </div>
       </div>
@@ -136,9 +132,16 @@ function MonthlyTodos({ todos, onDismiss }) {
   );
 }
 
-function TodoStep({ index, step }) {
+function TodoStep({ index, step, highlight }) {
   const count = step?.count ?? 0;
   const done = count === 0;
+  // Apply the same rainbow-outline shimmer used by the "Needs your
+  // attention" priority card — draws the eye to the single active step
+  // during Setup mode.
+  const bodyBase = "flex-1 min-w-0 rounded-lg p-3 transition-colors";
+  const bodyClass = highlight
+    ? `${bodyBase} attention-rainbow relative z-10`
+    : `${bodyBase} border border-slate-200 bg-slate-50/40 hover:bg-slate-50`;
   return (
     <div className="relative flex items-start gap-3" data-testid={`dashboard-todo-step-${index}`}>
       <div
@@ -153,7 +156,7 @@ function TodoStep({ index, step }) {
       >
         {done ? <Check size={20} /> : index}
       </div>
-      <div className="flex-1 min-w-0 rounded-lg border border-slate-200 bg-slate-50/40 hover:bg-slate-50 transition-colors p-3">
+      <div className={bodyClass}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
