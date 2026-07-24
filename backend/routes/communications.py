@@ -1152,6 +1152,13 @@ async def send_dunning(cid: str, inp: DunningIn, user: dict = Depends(require_ro
     )
     if result["status"] == "failed":
         raise HTTPException(502, result.get("error") or "Send failed")
+    # Stamp the invoice so the Firm-at-a-Glance overdue popover can show
+    # "Reminder sent Xh ago" and disable rapid re-sends.
+    await db.invoices.update_one(
+        {"id": inp.invoice_id, "company_id": cid},
+        {"$set": {"last_reminder_sent_at": now_iso(),
+                  "last_reminder_to": to_email}},
+    )
     return result
 
 

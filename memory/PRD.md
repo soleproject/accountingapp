@@ -1215,3 +1215,27 @@ re-summarised without a data migration.
 - Delta calculations: P&L compares current month's net profit to the AVERAGE month of the prior calendar quarter; Expenses compares to previous month total
 - 4 pytests in `backend/tests/test_firm_glance.py` — all passing (default month, explicit month, bank-account fields, expense category colors)
 - Verified visually on Bright Beans Coffee Co. — funnel + banks + P&L + donut all render with real data; toggle switches instantly and preserves selection across reloads
+
+## Inline "Send Reminder" + Business Overview View (Feb 24, 2026) ✅
+### Send reminder (dunning) from the Firm at a Glance card
+- The amber "N overdue invoices" badge on the Sales & Get Paid funnel is now a **clickable Popover** listing every overdue invoice with per-row `Send reminder` button
+- Each row shows: customer name, invoice #, days overdue, amount, email on file (or an inline editor if the contact has no email yet)
+- Button hits the existing `POST /api/companies/{cid}/communications/dunning` endpoint (Resend-backed, `kind="dunning"`, logs a Communication row)
+- Backend now stamps `last_reminder_sent_at` and `last_reminder_to` on the invoice doc so the popover shows a green "Reminder sent" pill for 24h and prevents accidental re-sends
+- `firm-glance` endpoint payload extended with `sales_funnel.not_paid.overdue_invoices[]` (id, number, contact_name, contact_email, amount, days_overdue, due_date, last_reminder_sent_at) — one round-trip powers the card + popover
+
+### Business Overview toggle (3rd dashboard view)
+- Added third `Business Overview` option to the Dashboard toggle. Toggles now: **Classic ▸ Firm at a Glance ▸ Business Overview** (persisted in localStorage)
+- New `components/BusinessOverview.jsx` — QBO-Client 6-card grid inspired by the reference screenshot:
+    * **Invoices** — $X unpaid last 365 days split into Overdue + Not due yet with orange & slate bars; $Y paid last 30 days split into Not deposited + Deposited with emerald bars
+    * **Expenses** — big total + donut chart + 5-item legend with per-slice amounts
+    * **Bank accounts** — grouped by Checking/Savings, showing Bank Balance vs In QuickBooks per account (orange if diverges)
+    * **Profit and Loss** — net income + Income (↑) and Expenses (↓) bars
+    * **Sales** — this-quarter total + 6-month line chart (inline SVG, no external chart lib)
+    * **Discover** — marketing/upsell card ("Streamline your firm with AI Copilot" → Try AI Cleanup Review)
+- New backend endpoint `GET /api/companies/{cid}/dashboard/business-overview?month=YYYY-MM` (single 15s-cached call packages all 6 cards' data)
+
+### Tests & seed
+- 4 additional pytests in `test_firm_glance.py` (overdue-invoices shape, business-overview default month, sales 6-month series, bank categorization) → all 8 pass
+- Seeded 3 demo overdue invoices on Bright Beans Coffee Co. (2 with contact emails, 1 without) so the popover has real data
+

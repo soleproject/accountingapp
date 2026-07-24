@@ -70,3 +70,46 @@ def test_firm_glance_expense_categories_have_colors():
     for c in cats:
         assert "name" in c and "amount" in c and "color" in c
         assert c["color"].startswith("#")
+
+
+def test_firm_glance_overdue_invoices_list_shape():
+    r = requests.get(f"{BASE}/api/companies/{CID}/dashboard/firm-glance",
+                     headers=_headers(), timeout=20)
+    r.raise_for_status()
+    not_paid = r.json()["sales_funnel"]["not_paid"]
+    assert "overdue_invoices" in not_paid
+    for inv in not_paid["overdue_invoices"]:
+        for k in ("id", "number", "contact_name", "amount", "days_overdue", "due_date"):
+            assert k in inv, f"missing {k} in overdue invoice"
+
+
+def test_business_overview_default_month():
+    r = requests.get(f"{BASE}/api/companies/{CID}/dashboard/business-overview",
+                     headers=_headers(), timeout=20)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    for k in ("month", "month_label", "invoices", "bank_accounts",
+              "expenses", "profit_loss", "sales"):
+        assert k in body, f"missing {k}"
+    for k in ("unpaid_365", "overdue", "paid_30", "deposited", "not_deposited"):
+        assert k in body["invoices"]
+
+
+def test_business_overview_sales_series_has_6_months():
+    r = requests.get(f"{BASE}/api/companies/{CID}/dashboard/business-overview",
+                     headers=_headers(), timeout=20)
+    r.raise_for_status()
+    sales = r.json()["sales"]
+    assert isinstance(sales["months"], list)
+    assert len(sales["months"]) == 6
+    for m in sales["months"]:
+        assert "month" in m and "label" in m and "amount" in m
+
+
+def test_business_overview_bank_accounts_categorized():
+    r = requests.get(f"{BASE}/api/companies/{CID}/dashboard/business-overview",
+                     headers=_headers(), timeout=20)
+    r.raise_for_status()
+    for a in r.json()["bank_accounts"]["accounts"]:
+        assert a["category"] in ("checking", "savings")
+        assert "bank_balance" in a and "in_books" in a

@@ -58,7 +58,8 @@ function labelFor(anchor, mode) {
 }
 import FirstConnectWelcome from "@/components/FirstConnectWelcome";
 import FirmAtAGlance from "@/components/FirmAtAGlance";
-import { LayoutGrid, Sparkle } from "lucide-react";
+import BusinessOverview from "@/components/BusinessOverview";
+import { LayoutGrid, Sparkle, Grid3x3 } from "lucide-react";
 
 const kindLabel = {
   categorize: "Transactions Categorized",
@@ -218,6 +219,7 @@ export default function Dashboard() {
           {[
             { key: "classic", label: "Classic", Icon: LayoutGrid },
             { key: "firm",    label: "Firm at a Glance", Icon: Sparkle },
+            { key: "business", label: "Business Overview", Icon: Grid3x3 },
           ].map(({ key, label, Icon }) => (
             <button
               key={key}
@@ -240,6 +242,8 @@ export default function Dashboard() {
 
       {viewMode === "firm" ? (
         <FirmAtAGlance userName={user?.name || user?.email} />
+      ) : viewMode === "business" ? (
+        <BusinessOverview />
       ) : (
         <ClassicDashboard
           current={current}

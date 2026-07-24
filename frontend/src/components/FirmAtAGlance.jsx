@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import {
+  Popover, PopoverContent, PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   Send, AlertTriangle, PauseCircle, CheckCircle2, ChevronDown,
-  Wallet2, TrendingUp, TrendingDown, Building2, ArrowRight,
+  Wallet2, TrendingUp, TrendingDown, Building2, ArrowRight, Mail, X,
 } from "lucide-react";
 
 // --------------- helpers ---------------
@@ -136,13 +140,33 @@ export default function FirmAtAGlance({ userName }) {
               title="Not paid"
               amount={data?.sales_funnel?.not_paid?.amount}
               stripe="bg-emerald-400"
-              badgeIcon={<AlertTriangle size={11} />}
-              badgeText={data?.sales_funnel?.not_paid?.overdue_count
-                ? `${data.sales_funnel.not_paid.overdue_count} overdue invoices`
-                : null}
-              badgeTone="amber"
               loading={loading}
               testId="firm-glance-not-paid"
+              footer={
+                data?.sales_funnel?.not_paid?.overdue_count ? (
+                  <OverduePopover
+                    overdueCount={data.sales_funnel.not_paid.overdue_count}
+                    invoices={data.sales_funnel.not_paid.overdue_invoices || []}
+                    onReminderSent={(iid, sentAt) => {
+                      setData(d => {
+                        if (!d) return d;
+                        return {
+                          ...d,
+                          sales_funnel: {
+                            ...d.sales_funnel,
+                            not_paid: {
+                              ...d.sales_funnel.not_paid,
+                              overdue_invoices: d.sales_funnel.not_paid.overdue_invoices.map(
+                                inv => inv.id === iid ? { ...inv, last_reminder_sent_at: sentAt } : inv
+                              ),
+                            },
+                          },
+                        };
+                      });
+                    }}
+                  />
+                ) : null
+              }
             />
             <FunnelCol
               title="Paid"
@@ -344,7 +368,7 @@ function MonthPicker({ value, onChange, options }) {
   );
 }
 
-function FunnelCol({ title, amount, stripe, badgeIcon, badgeText, badgeTone, loading, testId }) {
+function FunnelCol({ title, amount, stripe, badgeIcon, badgeText, badgeTone, loading, testId, footer }) {
   const toneMap = {
     amber:   "bg-amber-50 text-amber-700",
     rose:    "bg-rose-50 text-rose-700",
@@ -363,7 +387,133 @@ function FunnelCol({ title, amount, stripe, badgeIcon, badgeText, badgeTone, loa
           <span>{badgeText}</span>
         </div>
       )}
+      {footer && <div className="mt-2">{footer}</div>}
     </div>
+  );
+}
+
+// ------- Overdue-invoices popover with inline "Send reminder" ---------
+function OverduePopover({ overdueCount, invoices, onReminderSent }) {
+  const { currentId } = useCompany();
+  const [open, setOpen] = useState(false);
+  const [sending, setSending] = useState({}); // id → boolean
+  const [emailOverrides, setEmailOverrides] = useState({}); // id → email
+
+  const sendReminder = async (inv) => {
+    const email = emailOverrides[inv.id] ?? inv.contact_email ?? "";
+    if (!email) {
+      toast.error("This customer doesn't have an email on file. Enter one to send.");
+      return;
+    }
+    setSending(s => ({ ...s, [inv.id]: true }));
+    try {
+      await api.post(`/companies/${currentId}/communications/dunning`, {
+        invoice_id: inv.id,
+        to: email,
+      });
+      const sentAt = new Date().toISOString();
+      onReminderSent?.(inv.id, sentAt);
+      toast.success(`Reminder sent to ${email} — logged in Communications`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to send reminder");
+    } finally {
+      setSending(s => ({ ...s, [inv.id]: false }));
+    }
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          className="inline-flex items-center gap-1 rounded-full bg-amber-50 text-amber-700 px-2 py-0.5 text-[10px] font-medium hover:bg-amber-100 transition"
+          data-testid="firm-glance-overdue-trigger"
+        >
+          <AlertTriangle size={11} />
+          <span>{overdueCount} overdue invoice{overdueCount === 1 ? "" : "s"}</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="w-[420px] p-0 border-slate-200 shadow-xl"
+        data-testid="firm-glance-overdue-popover"
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b bg-amber-50/70">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={14} className="text-amber-600" />
+            <div className="text-sm font-semibold text-slate-900">
+              {overdueCount} overdue invoice{overdueCount === 1 ? "" : "s"}
+            </div>
+          </div>
+          <button
+            onClick={() => setOpen(false)}
+            className="text-slate-400 hover:text-slate-600"
+            aria-label="Close"
+          >
+            <X size={14} />
+          </button>
+        </div>
+        <div className="max-h-[380px] overflow-y-auto">
+          {invoices.length === 0 ? (
+            <div className="text-xs text-slate-500 p-4">No overdue invoices to load.</div>
+          ) : invoices.map(inv => {
+            const emailOnFile = inv.contact_email;
+            const displayEmail = emailOverrides[inv.id] ?? emailOnFile ?? "";
+            const recentlySent = inv.last_reminder_sent_at
+              && (Date.now() - new Date(inv.last_reminder_sent_at).getTime()) < 24 * 3600 * 1000;
+            return (
+              <div key={inv.id} className="px-4 py-3 border-b last:border-b-0" data-testid={`overdue-row-${inv.id}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-slate-900 truncate">{inv.contact_name}</div>
+                    <div className="text-[11px] text-slate-500">
+                      #{inv.number || "—"} · {inv.days_overdue} day{inv.days_overdue === 1 ? "" : "s"} overdue
+                    </div>
+                  </div>
+                  <div className="font-mono-num text-sm font-semibold text-slate-900 shrink-0">
+                    {fmtMoney(inv.amount)}
+                  </div>
+                </div>
+                {!emailOnFile && (
+                  <div className="mt-2">
+                    <input
+                      type="email"
+                      placeholder="customer@example.com"
+                      value={emailOverrides[inv.id] || ""}
+                      onChange={(e) => setEmailOverrides(prev => ({ ...prev, [inv.id]: e.target.value }))}
+                      className="w-full text-xs rounded-md border border-slate-200 px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                      data-testid={`overdue-email-input-${inv.id}`}
+                    />
+                  </div>
+                )}
+                <div className="mt-2 flex items-center justify-between">
+                  <div className="text-[10px] text-slate-400 truncate">
+                    {displayEmail && <span className="inline-flex items-center gap-1"><Mail size={10} />{displayEmail}</span>}
+                  </div>
+                  {recentlySent ? (
+                    <div className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-medium">
+                      <CheckCircle2 size={12} /> Reminder sent
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => sendReminder(inv)}
+                      disabled={sending[inv.id] || !displayEmail}
+                      data-testid={`overdue-send-${inv.id}`}
+                      className="inline-flex items-center gap-1 rounded-md bg-indigo-600 text-white px-2.5 py-1 text-[11px] font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                    >
+                      <Send size={11} />
+                      {sending[inv.id] ? "Sending…" : "Send reminder"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="px-4 py-2 border-t bg-slate-50 text-[10px] text-slate-500">
+          Each reminder is logged in the Communications inbox.
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
