@@ -356,13 +356,16 @@ async def _monthly_todos(cid: str) -> dict:
     #   Step 1 · "Review AI categorized" — AI has assigned a REAL income /
     #            expense account (not the 6999/4999/9999 placeholders) AND
     #            we know the vendor. Stepper mode approves these one click.
+    #            Count reported = # of DISTINCT categories the CPA will
+    #            walk through, not raw txns (matches the "Group X of Y"
+    #            stepper info box).
     #   Step 2 · "Let's review"          — vendor groups where 3+ rows are
     #            still sitting in an uncategorized placeholder. The user
     #            picks one account for the whole vendor at once.
     #   Step 3 · "Individual review"     — no-contact rows that can't be
     #            grouped by vendor (future: cluster by description).
     UNCAT_CODES = {"6999", "4999", "9999"}
-    ai_ready_txns = 0
+    ai_ready_categories: set[str] = set()
     per_contact_uncategorized: dict[str, int] = {}
     no_contact_review = 0
     for t in txns:
@@ -370,15 +373,18 @@ async def _monthly_todos(cid: str) -> dict:
             continue
         contact = t.get("contact_id")
         code = t.get("category_account_code")
-        has_cat_id = bool(t.get("category_account_id"))
+        cat_id = t.get("category_account_id")
+        has_cat_id = bool(cat_id)
         is_uncategorized = (not has_cat_id) or (code in UNCAT_CODES)
 
         if contact and not is_uncategorized:
-            ai_ready_txns += 1
+            ai_ready_categories.add(cat_id)
         elif contact and is_uncategorized:
             per_contact_uncategorized[contact] = per_contact_uncategorized.get(contact, 0) + 1
         elif not contact and (is_uncategorized or t.get("needs_review")):
             no_contact_review += 1
+
+    ai_ready_txns = len(ai_ready_categories)
 
     # A vendor "group" is eligible for batch review at 3+ uncategorized rows,
     # matching the Cleanup Copilot's "N transactions are sitting in
@@ -391,9 +397,9 @@ async def _monthly_todos(cid: str) -> dict:
             "title": "Review AI categorized",
             "subtitle": "One-click approve the AI's high-confidence categorizations.",
             "count": ai_ready_txns,
-            "unit": "transactions",
+            "unit": "categories",
             "cta_label": "Review",
-            "cta_link": "/accounting/ai-cleanup-review?view=stepper",
+            "cta_link": "/accounting/ai-cleanup-review?view=stepper&tour=1",
         },
         "step2": {
             "key": "grouped_review",

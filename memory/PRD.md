@@ -1302,3 +1302,16 @@ Two bugs discovered when clicking Review from the Setup checklist:
 
 Verified on 419 LLC: clicking Step 2 Review now lands on Transactions page with the Copilot showing chips for Eimorlain Ugali Co (15), Summit Christian Church (15), Dad & Babe (8), Summit Church Summitnv.org Nv (3) — exactly the 4 vendor groups counted by the checklist (Venmo was truncated from the chip display but is present in the "20 Venmo transactions" copilot summary).
 
+
+
+## Setup Checklist Refinements: Step 1 Categories + Auto-Tour (Feb 24, 2026) ✅
+Two follow-ups requested after seeing the Review-button flow in action:
+
+**1. Step 1 count changed from raw transactions → distinct categories**
+- Backend `_monthly_todos` now tracks a set of `category_account_id` values across all AI-ready transactions (rather than counting raw txns). Step 1 unit label changed from `transactions` → `categories` so the checklist number matches the "GROUP X OF Y" stepper info box on the AI Cleanup Review page. Verified on Bright Beans (seeded 39 unreviewed AI-categorized txns → Step 1 correctly reported **6 categories**).
+
+**2. AI Cleanup Review page auto-plays the "How To" tour on entry**
+- Added `?tour=1` to Step 1's `cta_link` (`/accounting/ai-cleanup-review?view=stepper&tour=1`)
+- `AICleanupReview.jsx` reads it and forwards `autoStartTour` prop to `CleanupCopilot`
+- `CleanupCopilot.jsx` gained a one-shot effect that fires `runHowTo()` 500ms after `megaPreview.vendors` are hydrated (guarded by `autoTourFiredRef` so it never re-fires within the same mount, even if the preview data re-loads)
+- Tour narration is spoken (browser Speech Synthesis) AND posted into the AI chat side-panel as assistant bubbles, so the walkthrough is available even if audio is muted

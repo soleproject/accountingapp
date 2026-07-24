@@ -88,7 +88,7 @@ function pitchFor(action, progress) {
   return action.why || action.label;
 }
 
-export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null, inlineTitle = null, inlineSubtitle = null, initialViewMode = null }) {
+export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null, inlineTitle = null, inlineSubtitle = null, initialViewMode = null, autoStartTour = false }) {
   const navigate = useNavigate();
   const { focus } = useAiFocus();
   const [data, setData] = useState(null);
@@ -500,6 +500,23 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     setHowToRunning(false);
     setHowToTargetKey(null);
   };
+
+  // Auto-start the "How To" walkthrough on entry when the parent asked us
+  // to (via `autoStartTour` prop, wired to `?tour=1` from Setup checklist
+  // Step 1). Fires once per mount as soon as the preview data has vendors.
+  const autoTourFiredRef = useRef(false);
+  useEffect(() => {
+    if (!autoStartTour) return;
+    if (autoTourFiredRef.current) return;
+    if (howToRunning) return;
+    const vendors = megaPreview?.vendors || [];
+    if (vendors.length === 0) return;
+    autoTourFiredRef.current = true;
+    // Give React a beat to render the vendor rows before the tour tries
+    // to highlight the first one.
+    setTimeout(() => runHowTo(), 500);
+  }, [autoStartTour, megaPreview, howToRunning]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useActionListener("cleanup-completed", async (payload) => {
     const cid = payload?.contact_id;
     const wasSkip = !!payload?.skipped;
