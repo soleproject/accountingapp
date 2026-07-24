@@ -445,13 +445,33 @@ async def _monthly_todos(cid: str) -> dict:
             "cta_link": "/accounting/lets-review",
         },
         "step3": {
-            "key": "intercompany_transfers",
-            "title": "Intercompany transfers",
-            "subtitle": "Match & book internal moves between company-owned bank / credit-card accounts.",
-            "count": transfer_pairs_count,
-            "unit": "pairs",
+            "key": "intercompany_transfers" if transfer_pairs_count > 0 else "individual_review",
+            # Step 3 is a two-phase tile: transfers first (fast, high-signal),
+            # then no-contact "individual review" rows once every pair is
+            # booked. Combined count keeps the checklist alive until BOTH
+            # phases are truly zero, so the CPA can't accidentally close the
+            # books with bank-feed noise still uncategorized.
+            "title": (
+                "Intercompany transfers" if transfer_pairs_count > 0
+                else "Individual review"
+            ),
+            "subtitle": (
+                "Match & book internal moves between company-owned bank / credit-card accounts."
+                if transfer_pairs_count > 0
+                else "No-contact rows grouped by similar description — walk one group at a time."
+            ),
+            "count": transfer_pairs_count + no_contact_review,
+            "unit": "pairs" if transfer_pairs_count > 0 else "transactions",
             "cta_label": "Review",
-            "cta_link": "/accounting/transfer-review",
+            "cta_link": (
+                "/accounting/transfer-review" if transfer_pairs_count > 0
+                else "/accounting/no-contact-review"
+            ),
+            # Surface both sub-counts so the frontend can render a
+            # progress-style breadcrumb inside the tile ("3a: 12 pairs
+            # · 3b: 79 rows") without having to make a second API call.
+            "transfer_pairs_count": transfer_pairs_count,
+            "no_contact_count": no_contact_review,
         },
     }
 
