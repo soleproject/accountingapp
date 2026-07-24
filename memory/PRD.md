@@ -1344,3 +1344,9 @@ Two follow-ups requested after seeing the Review-button flow in action:
 - Idempotent: fires at most once per user + company + step (`coach_seen:{userId}:{companyId}:step{N}` gate)
 - New `chat-cta:jump-to-step` listener in `DashboardTodos.jsx` handles the click (via react-router `useNavigate`)
 - Verified end-to-end: seeded Step1=1 → saved baseline → flipped to reviewed → reload → coach bubble appeared → clicked "Jump to Step 2" → navigated to Transactions with uncategorized filter
+
+## Bug Fix: Step 1 Count Now Matches AI Cleanup Review Page (Feb 24, 2026) ✅
+User reported the dashboard showed **"28 categories"** in Step 1 while the AI Cleanup Review page said **"Nothing to approve"** for the same company (335 LLC). Root cause: my Step 1 filter counted every unreviewed row with a real category + contact, but the AI Cleanup Review page only surfaces vendors whose AI-categorized rows agree on ONE unanimous account (`len(r["accounts"]) == 1` in `cleanup-suggestions`).
+
+Fix: `_monthly_todos()` now mirrors `cleanup_suggestions()`'s `ai_ready_by_contact` structure — it groups unreviewed rows by contact, keeps a set of `category_account_id` per contact, and only counts distinct categories from contacts with unanimous opinion. Result: Step 1's count is always in sync with what the CPA will actually see on the AI Cleanup Review page. Verified via curl against Bright Beans and 419 LLC.
+

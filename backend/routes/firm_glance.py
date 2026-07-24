@@ -353,19 +353,22 @@ async def _monthly_todos(cid: str) -> dict:
     txns = await db.transactions.find({"company_id": cid}).to_list(50000)
 
     # Bucket the unreviewed rows into the three checklist steps.
-    #   Step 1 · "Review AI categorized" — AI has assigned a REAL income /
-    #            expense account (not the 6999/4999/9999 placeholders) AND
-    #            we know the vendor. Stepper mode approves these one click.
-    #            Count reported = # of DISTINCT categories the CPA will
-    #            walk through, not raw txns (matches the "Group X of Y"
-    #            stepper info box).
+    #   Step 1 · "Review AI categorized" — Rows the AI Cleanup Review page
+    #            will ACTUALLY surface: real category, has a contact, AND the
+    #            contact's AI-categorized rows all agree on the same account
+    #            (unanimous opinion). Count reported = # of DISTINCT
+    #            categories the CPA will walk through (matches the stepper's
+    #            "Group X of Y").
     #   Step 2 · "Let's review"          — vendor groups where 3+ rows are
     #            still sitting in an uncategorized placeholder. The user
     #            picks one account for the whole vendor at once.
     #   Step 3 · "Individual review"     — no-contact rows that can't be
     #            grouped by vendor (future: cluster by description).
     UNCAT_CODES = {"6999", "4999", "9999"}
-    ai_ready_categories: set[str] = set()
+    # Per-contact accumulator mirroring transactions.py::cleanup_suggestions
+    # `ai_ready_by_contact` so Step 1's count is always in sync with what the
+    # user will see on the AI Cleanup Review page.
+    ai_ready_by_contact: dict[str, dict] = {}
     per_contact_uncategorized: dict[str, int] = {}
     no_contact_review = 0
     for t in txns:
@@ -378,13 +381,21 @@ async def _monthly_todos(cid: str) -> dict:
         is_uncategorized = (not has_cat_id) or (code in UNCAT_CODES)
 
         if contact and not is_uncategorized:
-            ai_ready_categories.add(cat_id)
+            r = ai_ready_by_contact.setdefault(contact, {"accounts": set(), "primary_acct": cat_id})
+            r["accounts"].add(cat_id)
         elif contact and is_uncategorized:
             per_contact_uncategorized[contact] = per_contact_uncategorized.get(contact, 0) + 1
         elif not contact and (is_uncategorized or t.get("needs_review")):
             no_contact_review += 1
 
-    ai_ready_txns = len(ai_ready_categories)
+    # Only contacts with UNANIMOUS AI opinion feed Step 1 — matches the
+    # cleanup-suggestions endpoint (`len(r["accounts"]) == 1`). Reported
+    # count = # of DISTINCT categories those contacts will approve into.
+    unanimous_categories: set[str] = set()
+    for r in ai_ready_by_contact.values():
+        if len(r["accounts"]) == 1:
+            unanimous_categories.add(next(iter(r["accounts"])))
+    ai_ready_txns = len(unanimous_categories)
 
     # A vendor "group" is eligible for batch review at 3+ uncategorized rows,
     # matching the Cleanup Copilot's "N transactions are sitting in
