@@ -89,7 +89,7 @@ function pitchFor(action, progress) {
   return action.why || action.label;
 }
 
-export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null, inlineTitle = null, inlineSubtitle = null, initialViewMode = null, autoStartTour = false }) {
+export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null, inlineTitle = null, inlineSubtitle = null, initialViewMode = null, autoStartTour = false, hideChips = false }) {
   const navigate = useNavigate();
   const { focus } = useAiFocus();
   const { user } = useAuth();
@@ -1232,7 +1232,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         </div>
       </div>
 
-      {rest.length > 0 && !inline && (
+      {rest.length > 0 && !inline && !hideChips && (
         <div className="mt-3 flex items-center gap-1.5 flex-wrap">
           {rest.map((a, i) => {
             const style = KIND_STYLES[a.kind] || KIND_STYLES.flagged_batch;

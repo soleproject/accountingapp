@@ -628,6 +628,7 @@ export default function Transactions() {
       <CleanupCopilot
         currentId={currentId}
         autoTrigger={params.get("auto") === "1"}
+        hideChips={isLetsReview}
         onApplyAction={(a) => {
           // Filter the list first so the user sees exactly what the AI is about
           // to touch, then kick off a conversational inquiry in the AI panel.
