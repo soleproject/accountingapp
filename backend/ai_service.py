@@ -274,9 +274,34 @@ async def resolve_contact_ai(
                 result["has_counterparty"] = False
     # If model returned an unknown id, discard
     if result["match_existing_id"]:
-        known_ids = {c["id"] for c in existing_contacts}
-        if result["match_existing_id"] not in known_ids:
+        known = {c["id"]: c["name"] for c in existing_contacts}
+        if result["match_existing_id"] not in known:
             result["match_existing_id"] = None
+        else:
+            # Defensive fuzzy check: reject the match if the existing contact
+            # name doesn't share a meaningful word with the extracted name.
+            # Guards against LLM hallucination where extracted_name says
+            # "Kevin Petersen" but match_existing_id points at "Romeo Ugali"
+            # (Feb 2026 prod repro on 1253 LLC — the "Zelle payment to Kevin
+            # Petersen" row got tagged Romeo Ugali because the model
+            # over-matched a nearby example).
+            extracted = (result.get("extracted_name") or "").lower()
+            matched = known[result["match_existing_id"]].lower()
+            def _sig_words(s: str) -> set[str]:
+                # Keep tokens ≥ 3 chars and alpha-only; skip common corp
+                # suffixes so `PayPal` still matches `PayPal Inc.`.
+                _skip = {"inc", "llc", "corp", "co", "ltd", "the", "and"}
+                return {
+                    t for t in re.split(r"[^a-z]+", s)
+                    if len(t) >= 3 and t not in _skip
+                }
+            e_words = _sig_words(extracted)
+            m_words = _sig_words(matched)
+            if e_words and m_words and not (e_words & m_words):
+                # Zero-overlap — the LLM matched two entirely different names.
+                # Drop the match; downstream will create a new contact from
+                # extracted_name (or match via the normalized-key lookup).
+                result["match_existing_id"] = None
     return result
 
 
