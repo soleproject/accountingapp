@@ -610,6 +610,18 @@ export default function AiPanel({ collapsed, onToggle }) {
     if (msg) setMessages(m => [...m, { role: "assistant", content: msg }]);
   });
 
+  // Same as `ai-chat-say` but attaches a clickable CTA to the bubble
+  // (e.g. the "Re-play tour" button posted by CleanupCopilot when its
+  // walkthrough finishes). Payload: { message, cta: { label, actionKey } }.
+  // Clicking the button emits `chat-cta:<actionKey>` so the originating
+  // component can react without AiPanel knowing about specific features.
+  useActionListener("ai-chat-say-with-cta", (payload) => {
+    const msg = (payload?.message || "").trim();
+    const cta = payload?.cta;
+    if (!msg || !cta?.label || !cta?.actionKey) return;
+    setMessages(m => [...m, { role: "assistant", content: msg, cta }]);
+  });
+
   // Sibling action fired by the mega-approve modal's per-vendor sparkle
   // button. Primes the chat with the ENTIRE vendor bucket's context (count,
   // dollar volume, current category, whether it's been overridden vs. the
@@ -2461,6 +2473,24 @@ export default function AiPanel({ collapsed, onToggle }) {
                   className="text-[11px] px-2 py-0.5 rounded-full border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
                 >
                   or skip {m.skipContact?.name || "this contact"} →
+                </button>
+              </div>
+            )}
+            {m.cta && (
+              <div className="mt-2">
+                <button
+                  data-testid={`chat-cta-${m.cta.actionKey}`}
+                  onClick={() => {
+                    // Fire a namespaced action so the originating
+                    // component (CleanupCopilot for `restart-tour`, etc.)
+                    // can react. Also strip the CTA after click so it
+                    // can't be double-invoked from the same bubble.
+                    emitAction(`chat-cta:${m.cta.actionKey}`, m.cta.data || {});
+                    setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, cta: null } : mm2));
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-3 py-1.5 transition-colors"
+                >
+                  {m.cta.label}
                 </button>
               </div>
             )}

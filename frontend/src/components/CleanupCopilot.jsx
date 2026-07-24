@@ -501,7 +501,24 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     setHowToStep(null);
     setHowToRunning(false);
     setHowToTargetKey(null);
+    // Post a final assistant bubble with a "Re-play tour" CTA so users
+    // who dismissed the narration on autopilot can rewind without
+    // hunting for the toolbar's "How To" button. AiPanel renders the
+    // button; clicking it emits `chat-cta:restart-tour`, which we
+    // listen for below to re-run the walkthrough.
+    if (!howToAbortRef.current) {
+      emitAction("ai-chat-say-with-cta", {
+        message: "That's the whole tour. Ready to review your books.",
+        cta: { label: "Re-play tour", actionKey: "restart-tour" },
+      });
+    }
   };
+
+  // "Re-play tour" button in the AI chat panel → re-run the walkthrough.
+  useActionListener("chat-cta:restart-tour", () => {
+    if (howToRunning) return;
+    runHowTo();
+  });
 
   // Auto-start the "How To" walkthrough on entry when the parent asked us
   // to (via `autoStartTour` prop, wired to `?tour=1` from Setup checklist

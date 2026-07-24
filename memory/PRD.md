@@ -1322,3 +1322,13 @@ Two follow-ups requested after seeing the Review-button flow in action:
 - After the tour kicks off, `CleanupCopilot.jsx` writes `tour_seen:<userId>:<companyId>` to localStorage; the auto-start effect skips the tour when the flag is present
 - The manual "How To" button in the toolbar always runs the tour, so CPAs can replay it deliberately whenever needed
 - Guarded so a null `user.id` / `currentId` short-circuits cleanly (defensive against auth-hook race on first mount)
+
+
+## "Re-play tour" Button in AI Chat Panel (Feb 24, 2026) ✅
+- After the "How To" walkthrough finishes, `CleanupCopilot.jsx` posts one final assistant bubble to the AI chat side-panel: **"That's the whole tour. Ready to review your books."** with an indigo **"Re-play tour"** button underneath
+- New generic bubble-CTA plumbing:
+    * `AiPanel.jsx` listens for `ai-chat-say-with-cta` action → pushes `{ role, content, cta: { label, actionKey } }` onto its messages array
+    * Renders the button below the bubble; on click emits `chat-cta:<actionKey>` and strips the CTA from that bubble so it can't be double-clicked
+- `CleanupCopilot.jsx` listens for `chat-cta:restart-tour` and re-invokes `runHowTo()` (guarded so it can't stack while a tour is already running)
+- Aborted tours (user hits "Stop tour") do NOT post the CTA — keeps the chat clean
+- Verified: tour completed → "Re-play tour" bubble rendered → click re-started the walkthrough with fresh sparkles and new narration bubbles
