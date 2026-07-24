@@ -10,6 +10,7 @@ import Share from "@/pages/Share";
 import Dashboard from "@/pages/Dashboard";
 import Transactions from "@/pages/Transactions";
 import AICleanupReview from "@/pages/AICleanupReview";
+import LetsReview from "@/pages/LetsReview";
 import Reports from "@/pages/Reports";
 import ReportView from "@/pages/ReportView";
 import ChartOfAccounts from "@/pages/ChartOfAccounts";
@@ -92,6 +93,7 @@ function App() {
               <Route path="/reports/:kind" element={<ReportView />} />
               <Route path="/accounting/transactions" element={<Transactions />} />
               <Route path="/accounting/ai-cleanup-review" element={<AICleanupReview />} />
+              <Route path="/accounting/lets-review" element={<LetsReview />} />
               <Route path="/accounting/inventory" element={<GenericList
                 path="inventory" title="Inventory"
                 fields={[{k:"name",l:"Item Name"},{k:"sku",l:"SKU"},{k:"quantity",l:"Qty",t:"number"},{k:"unit_cost",l:"Unit Cost",t:"number"}]}

@@ -1350,3 +1350,15 @@ User reported the dashboard showed **"28 categories"** in Step 1 while the AI Cl
 
 Fix: `_monthly_todos()` now mirrors `cleanup_suggestions()`'s `ai_ready_by_contact` structure — it groups unreviewed rows by contact, keeps a set of `category_account_id` per contact, and only counts distinct categories from contacts with unanimous opinion. Result: Step 1's count is always in sync with what the CPA will actually see on the AI Cleanup Review page. Verified via curl against Bright Beans and 419 LLC.
 
+
+## New Page: "Let's Review" Contact-Grouped Stepper (Feb 24, 2026) ✅
+- New route `/accounting/lets-review` with `frontend/pages/LetsReview.jsx` — a dedicated stepper that walks a CPA through one uncategorized-vendor group at a time
+- Mirrors the AI Cleanup Review page's shape, but the "Group X of Y" info box shows the CURRENT CONTACT (e.g. "Venmo · 20 txns · $5,905.00") instead of a category — matching the user's mental model that Step 2 is "batch this vendor into one category"
+- Powered by the existing `/cleanup-suggestions` endpoint (`kind=contact_in_uncat` filter). Each group loads its own uncategorized rows via `/transactions?contact_id=X&status=uncategorized`
+- Single AccountPicker + "Also save a rule so future {vendor} rows auto-post here" checkbox + big **Approve N →** button
+- Uses the existing `apply-bulk-approve-rule` endpoint so the flow benefits from every rule / audit / journal-entry side effect the Transactions page already ships
+- Previous / Skip / Next navigation between contacts; the current group drops from the list on successful approval
+- **Setup checklist Step 2's Review button now deep-links here** (`/accounting/lets-review`) instead of the Transactions page — the coach `Jump to Step 2` CTA follows the same link since it uses the backend-provided value
+- Registered in `App.js` alongside the existing `/accounting/ai-cleanup-review` route
+- Verified visually on 419 LLC: opened at "Venmo · CONTACT 1 OF 5" with all 20 rows listed, AccountPicker + rule checkbox + Approve 20 → button ready
+
