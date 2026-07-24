@@ -1459,6 +1459,50 @@ class DetectTransfersIn(BaseModel):
     date_since: Optional[str] = None  # ISO YYYY-MM-DD; None = scan everything
 
 
+@router.post("/companies/{cid}/transactions/transfer-pairs/unbook")
+async def unbook_auto_detected_transfers(cid: str, user: dict = Depends(get_current_user)):
+    """Revert every transfer previously booked by the retired one-click
+    `internal_transfer_detector`. Useful for CPAs who want to re-review
+    those pairs through the new Transfer Review UI (which requires per-pair
+    approval). Only touches rows stamped by the OLD auto-booker — pairs
+    that were approved through the new `internal_transfer_review` flow are
+    left alone since the user already OK'd them explicitly.
+
+    Response: `{ok, unbooked}` — count of TXN LEGS reverted, not pairs.
+    """
+    await require_company(user, cid)
+    query = {
+        "company_id": cid,
+        "is_internal_transfer": True,
+        "ai_source": "internal_transfer_detector",
+    }
+    # Don't touch legs whose date falls in a closed period — that's the same
+    # guardrail the booker respects, and un-doing it would violate the lock.
+    docs = await db.transactions.find(query, {"id": 1, "date": 1}).to_list(10000)
+    to_unbook: list[str] = []
+    for d in docs:
+        if not await is_period_closed(cid, d.get("date") or ""):
+            to_unbook.append(d["id"])
+    if not to_unbook:
+        return {"ok": True, "unbooked": 0}
+    res = await db.transactions.update_many(
+        {"id": {"$in": to_unbook}, "company_id": cid},
+        {"$set": {
+            "human_reviewed": False,
+            "posted": False,
+            "needs_review": True,
+            "is_internal_transfer": False,
+            "updated_at": now_iso(),
+        }, "$unset": {
+            "category_account_id": "",
+            "category_account_code": "",
+            "category_account_name": "",
+            "transfer_pair_id": "",
+        }},
+    )
+    return {"ok": True, "unbooked": res.modified_count}
+
+
 @router.post("/companies/{cid}/transactions/detect-transfers")
 async def detect_transfers(cid: str, inp: DetectTransfersIn = DetectTransfersIn(), user: dict = Depends(get_current_user)):
     """Batch-scan the company's unreviewed txns for internal-transfer pairs

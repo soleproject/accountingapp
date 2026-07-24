@@ -218,6 +218,40 @@ export default function TransferReview() {
               Back to Dashboard
             </Link>
           </div>
+          <div className="mt-6 pt-4 border-t border-slate-100">
+            <div className="text-[11px] text-slate-400 mb-2">
+              Previously auto-booked by the retired one-click detector?
+              Un-book them here to re-review through this page.
+            </div>
+            <button
+              onClick={async () => {
+                if (busy) return;
+                setBusy(true);
+                try {
+                  const r = await api.post(
+                    `/companies/${currentId}/transactions/transfer-pairs/unbook`
+                  );
+                  const n = r.data?.unbooked || 0;
+                  if (n === 0) {
+                    toast.info("Nothing to un-book — all previously detected pairs are still open.");
+                  } else {
+                    toast.success(`Un-booked ${n} transfer leg${n === 1 ? "" : "s"} — reloading queue…`);
+                    await load();
+                  }
+                } catch (e) {
+                  toast.error("Could not un-book — try again?");
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              disabled={busy}
+              data-testid="transfer-review-unbook"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-xs text-slate-700 disabled:opacity-50"
+            >
+              <ArrowLeftRight size={12} />
+              {busy ? "Un-booking…" : "Un-book previous auto-detections"}
+            </button>
+          </div>
         </div>
       </div>
     );

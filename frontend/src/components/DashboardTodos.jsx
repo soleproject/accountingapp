@@ -264,6 +264,44 @@ function TodoStep({ index, step, highlight }) {
                   Preview
                 </span>
               )}
+              {/* Two-phase Step 3: filled dot = transfers done, hollow dot */}
+              {/* = no-contact review still open. Gives the CPA a "halfway  */}
+              {/* there" cue without cluttering the tile layout.            */}
+              {typeof step?.transfer_pairs_count === "number" &&
+                typeof step?.no_contact_count === "number" &&
+                (step.transfer_pairs_count + step.no_contact_count > 0) && (
+                <span
+                  className="inline-flex items-center gap-0.5 shrink-0"
+                  data-testid={`todo-step-${index}-phase-dots`}
+                  title={
+                    step.transfer_pairs_count > 0
+                      ? `Phase 1: ${step.transfer_pairs_count} transfer pair${step.transfer_pairs_count === 1 ? "" : "s"} pending`
+                      : `Phase 2: ${step.no_contact_count} no-contact row${step.no_contact_count === 1 ? "" : "s"} pending`
+                  }
+                >
+                  <span
+                    className={`inline-block w-1.5 h-1.5 rounded-full ${
+                      step.transfer_pairs_count === 0
+                        ? "bg-emerald-500"
+                        : "bg-indigo-500"
+                    }`}
+                    aria-label="Phase 1 status"
+                  />
+                  <span
+                    className={`inline-block w-1.5 h-1.5 rounded-full ${
+                      step.transfer_pairs_count > 0
+                        ? "border border-slate-300 bg-white"
+                        : step.no_contact_count === 0
+                          ? "bg-emerald-500"
+                          : "bg-indigo-500"
+                    }`}
+                    aria-label="Phase 2 status"
+                  />
+                  <span className="ml-1 text-[9px] uppercase tracking-wider text-slate-400 font-semibold">
+                    {step.transfer_pairs_count > 0 ? "1/2" : "2/2"}
+                  </span>
+                </span>
+              )}
             </div>
             <div className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">
               {step?.subtitle || " "}
