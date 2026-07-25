@@ -928,6 +928,9 @@ async def list_transactions(
     date_to: Optional[str] = None,
     contact_id: Optional[str] = None,
     category_account_id: Optional[str] = None,
+    bank_account_id: Optional[str] = None,
+    amount_min: Optional[float] = None,
+    amount_max: Optional[float] = None,
     no_contact: Optional[bool] = None,
     desc_group: Optional[str] = None,
 ):
@@ -972,6 +975,21 @@ async def list_transactions(
         ]})
     if category_account_id:
         query["category_account_id"] = category_account_id
+    if bank_account_id:
+        # Bank / credit-card account filter. Matches transactions that
+        # hit this specific bank feed row (Plaid item or manual account).
+        query["bank_account_id"] = bank_account_id
+    if amount_min is not None or amount_max is not None:
+        # Amount range filter — matches on the ABSOLUTE amount so the CPA
+        # doesn't have to remember the sign convention (debits are stored
+        # negative). Uses `$expr` + `$abs` so both a $500 expense and a
+        # $500 deposit match "amount between $400 and $600".
+        conds = []
+        if amount_min is not None:
+            conds.append({"$gte": [{"$abs": "$amount"}, float(amount_min)]})
+        if amount_max is not None:
+            conds.append({"$lte": [{"$abs": "$amount"}, float(amount_max)]})
+        query["$expr"] = {"$and": conds} if len(conds) > 1 else conds[0]
     if date_from or date_to:
         date_clause: dict = {}
         if date_from:

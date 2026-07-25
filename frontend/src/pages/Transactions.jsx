@@ -327,6 +327,14 @@ export default function Transactions() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  // Advanced filter panel — hidden by default, toggled via the
+  // "Advanced filter" link next to the date picker.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [filterBankAccountId, setFilterBankAccountId] = useState("");
+  const [filterCategoryId, setFilterCategoryId] = useState("");
+  const [filterContactId, setFilterContactId] = useState("");
+  const [filterAmountMin, setFilterAmountMin] = useState("");
+  const [filterAmountMax, setFilterAmountMax] = useState("");
   // "list" (default) or "rollup" — toggled by the two icons in the toolbar.
   const [view, setView] = useState("list");
   const [rollup, setRollup] = useState(null);
@@ -356,6 +364,13 @@ export default function Transactions() {
     if (debouncedSearch) params.set("q", debouncedSearch);
     if (dateFrom) params.set("date_from", dateFrom);
     if (dateTo) params.set("date_to", dateTo);
+    // Advanced filter params — only include when set so the URL stays
+    // clean for the common "no advanced filters" case.
+    if (filterBankAccountId) params.set("bank_account_id", filterBankAccountId);
+    if (filterCategoryId) params.set("category_account_id", filterCategoryId);
+    if (filterContactId) params.set("contact_id", filterContactId);
+    if (filterAmountMin) params.set("amount_min", filterAmountMin);
+    if (filterAmountMax) params.set("amount_max", filterAmountMax);
     // "Let's Review" mode pins the list to a single contact so the
     // stepper walks vendor-by-vendor without the user re-typing filters.
     if (isLetsReview && lrContactId) params.set("contact_id", lrContactId);
@@ -393,7 +408,33 @@ export default function Transactions() {
     setSelected(new Set());
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize, debouncedSearch, dateFrom, dateTo, isLetsReview, lrContactId, isNoContactReview, ncrGroupKey]);
+  // Options for the advanced-filter panel — bank accounts + contacts.
+  // Fetched once per company (not on every filter change) since these
+  // reference tables change infrequently relative to txns.
+  const [filterBankOptions, setFilterBankOptions] = useState([]);
+  const [filterContactOptions, setFilterContactOptions] = useState([]);
+  useEffect(() => {
+    if (!currentId) return;
+    Promise.all([
+      api.get(`/companies/${currentId}/plaid/accounts`).catch(() => ({ data: {} })),
+      api.get(`/companies/${currentId}/contacts?limit=500`).catch(() => ({ data: {} })),
+    ]).then(([banksRes, contactsRes]) => {
+      // Plaid-linked accounts: each `connected` row has a `bank_account_id`
+      // that matches the txn `bank_account_id`. Fall back to
+      // deriving from currently-loaded txns if the endpoint returns nothing
+      // (manual-only companies).
+      const connected = (banksRes.data?.connected || []).map((b) => ({
+        id: b.bank_account_id || b.account_id,
+        name: b.name || b.official_name || "Account",
+      })).filter((b) => b.id);
+      setFilterBankOptions(connected);
+      setFilterContactOptions((contactsRes.data?.contacts || []).map((c) => ({
+        id: c.id, name: c.name || c.display_name || "—",
+      })));
+    });
+  }, [currentId]);
+
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize, debouncedSearch, dateFrom, dateTo, isLetsReview, lrContactId, isNoContactReview, ncrGroupKey, filterBankAccountId, filterCategoryId, filterContactId, filterAmountMin, filterAmountMax]);
   // Reset page when filters narrow/widen.
   useEffect(() => { setPage(p => (p === 1 ? p : 1)); }, [debouncedSearch, dateFrom, dateTo]);
 
@@ -579,8 +620,14 @@ export default function Transactions() {
 
   const clearFilters = () => {
     setSearch(""); setDateFrom(""); setDateTo(""); setFilter("all");
+    setFilterBankAccountId(""); setFilterCategoryId(""); setFilterContactId("");
+    setFilterAmountMin(""); setFilterAmountMax("");
   };
-  const filtersActive = Boolean(debouncedSearch || dateFrom || dateTo || (filter !== "all"));
+  const advancedActive = Boolean(
+    filterBankAccountId || filterCategoryId || filterContactId ||
+    filterAmountMin || filterAmountMax
+  );
+  const filtersActive = Boolean(debouncedSearch || dateFrom || dateTo || (filter !== "all") || advancedActive);
 
   // Voice-command deep-link support: /accounting/transactions?q=Walmart or
   // ?date_from=2026-07-15&date_to=2026-07-15. On mount / URL change, hydrate
@@ -1128,6 +1175,21 @@ export default function Transactions() {
             aria-label="To date"
           />
         </div>
+        <button
+          data-testid="txn-advanced-toggle"
+          onClick={() => setAdvancedOpen((v) => !v)}
+          className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border ${
+            advancedOpen || advancedActive
+              ? "border-slate-900 bg-slate-900 text-white"
+              : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+          }`}
+          title="Toggle advanced filters (accounts, categories, contacts, amount range)"
+        >
+          {advancedOpen ? "Hide advanced" : "Advanced filter"}
+          {advancedActive && !advancedOpen && (
+            <span className="ml-0.5 inline-block w-1.5 h-1.5 rounded-full bg-cyan-400" />
+          )}
+        </button>
         {filtersActive && (
           <button
             data-testid={TID.txnFiltersClear}
@@ -1138,6 +1200,100 @@ export default function Transactions() {
           </button>
         )}
       </div>
+
+      {advancedOpen && (
+        <div
+          data-testid="txn-advanced-panel"
+          className="rounded-lg border border-slate-200 bg-white px-4 py-3"
+        >
+          <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-2">
+            Advanced filters
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">
+                Bank account
+              </label>
+              <select
+                data-testid="txn-filter-bank"
+                value={filterBankAccountId}
+                onChange={(e) => setFilterBankAccountId(e.target.value)}
+                className="w-full px-2 py-1.5 rounded-md border border-slate-300 bg-white text-xs text-slate-800"
+              >
+                <option value="">All accounts</option>
+                {filterBankOptions.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">
+                Category
+              </label>
+              <select
+                data-testid="txn-filter-category"
+                value={filterCategoryId}
+                onChange={(e) => setFilterCategoryId(e.target.value)}
+                className="w-full px-2 py-1.5 rounded-md border border-slate-300 bg-white text-xs text-slate-800"
+              >
+                <option value="">All categories</option>
+                {(accts || [])
+                  .filter((a) =>
+                    ["expense", "income", "cost_of_goods_sold",
+                     "other_income", "other_expense", "equity", "asset", "liability"].includes(a.type)
+                  )
+                  .map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.code} · {a.name}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">
+                Contact
+              </label>
+              <select
+                data-testid="txn-filter-contact"
+                value={filterContactId}
+                onChange={(e) => setFilterContactId(e.target.value)}
+                className="w-full px-2 py-1.5 rounded-md border border-slate-300 bg-white text-xs text-slate-800"
+              >
+                <option value="">All contacts</option>
+                {filterContactOptions.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">
+                Amount range
+              </label>
+              <div className="flex items-center gap-1">
+                <input
+                  data-testid="txn-filter-amount-min"
+                  type="number"
+                  step="0.01"
+                  placeholder="Min"
+                  value={filterAmountMin}
+                  onChange={(e) => setFilterAmountMin(e.target.value)}
+                  className="w-full px-2 py-1.5 rounded-md border border-slate-300 bg-white text-xs text-slate-800 font-mono-num"
+                />
+                <span className="text-slate-400 text-xs">–</span>
+                <input
+                  data-testid="txn-filter-amount-max"
+                  type="number"
+                  step="0.01"
+                  placeholder="Max"
+                  value={filterAmountMax}
+                  onChange={(e) => setFilterAmountMax(e.target.value)}
+                  className="w-full px-2 py-1.5 rounded-md border border-slate-300 bg-white text-xs text-slate-800 font-mono-num"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {ruleSuggestion && (
         <div
