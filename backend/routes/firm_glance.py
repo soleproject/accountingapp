@@ -464,17 +464,18 @@ async def _monthly_todos(cid: str) -> dict:
         },
         "step3": {
             "key": "intercompany_transfers" if transfer_pairs_count > 0 else "individual_review",
-            # Step 3 is a two-phase tile: transfers first (fast, high-signal),
-            # then no-contact "individual review" rows once every pair is
-            # booked. Combined count keeps the checklist alive until BOTH
-            # phases are truly zero, so the CPA can't accidentally close the
-            # books with bank-feed noise still uncategorized.
+            # Step 3 is a two-phase tile: intercompany transfers first
+            # (Step 3A — fast, high-signal), then no-contact "individual
+            # review" rows (Step 3B) once every pair is booked. Combined
+            # count keeps the checklist alive until BOTH phases are truly
+            # zero, so the CPA can't accidentally close the books with
+            # bank-feed noise still uncategorized.
             "title": (
-                "Intercompany transfers" if transfer_pairs_count > 0
-                else "Individual review"
+                "Step 3A: Intercompany transfers" if transfer_pairs_count > 0
+                else "Step 3B: Individual review"
             ),
             "subtitle": (
-                "Match & book internal moves between company-owned bank / credit-card accounts."
+                "Approve intercompany moves grouped by bank pair — one bank ↔ bank set at a time."
                 if transfer_pairs_count > 0
                 else "No-contact rows grouped by similar description — walk one group at a time."
             ),

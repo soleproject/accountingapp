@@ -151,9 +151,56 @@ export default function TransferReview() {
     () => (pairs || []).filter((p) => !rejected.has(p.pair_id)),
     [pairs, rejected]
   );
+
+  // Group visible pairs by the canonical bank-pair key
+  // ({source_bank_id}::{dest_bank_id}) so the CPA reviews all transfers
+  // between the same two accounts in one screen. Sort groups by pair
+  // count desc so heaviest routes come first.
+  const bankGroups = useMemo(() => {
+    const buckets = new Map();
+    for (const p of visible) {
+      const dId = p.debit_leg.bank_account_id || "";
+      const cId = p.credit_leg.bank_account_id || "";
+      const key = `${dId}::${cId}`;
+      if (!buckets.has(key)) {
+        buckets.set(key, {
+          key,
+          from_id: dId,
+          from_name: p.debit_leg.bank_account_name || "—",
+          to_id: cId,
+          to_name: p.credit_leg.bank_account_name || "—",
+          pairs: [],
+          total_amount: 0,
+        });
+      }
+      const b = buckets.get(key);
+      b.pairs.push(p);
+      b.total_amount += Math.abs(parseFloat(p.debit_leg.amount) || 0);
+    }
+    return Array.from(buckets.values()).sort(
+      (a, b) => b.pairs.length - a.pairs.length
+    );
+  }, [visible]);
+
+  // Which bank-pair group is currently on-screen. Snaps back to 0
+  // whenever the underlying groups list shrinks below the current
+  // index (e.g. after Approve All burns down the current group).
+  const [groupIdx, setGroupIdx] = useState(0);
+  useEffect(() => {
+    if (groupIdx >= bankGroups.length && bankGroups.length > 0) {
+      setGroupIdx(bankGroups.length - 1);
+    }
+    if (bankGroups.length === 0) setGroupIdx(0);
+  }, [bankGroups.length, groupIdx]);
+  const currentGroup = bankGroups[groupIdx] || null;
+  const currentGroupPairIds = useMemo(
+    () => (currentGroup?.pairs || []).map((p) => p.pair_id),
+    [currentGroup]
+  );
+
   const inspecting = useMemo(
-    () => visible.find((p) => p.pair_id === inspectPairId) || null,
-    [visible, inspectPairId]
+    () => (currentGroup?.pairs || []).find((p) => p.pair_id === inspectPairId) || null,
+    [currentGroup, inspectPairId]
   );
 
   const toggle = (id) => {
@@ -165,11 +212,33 @@ export default function TransferReview() {
     });
   };
   const toggleAll = () => {
-    if (selected.size === visible.length && visible.length > 0) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(visible.map((p) => p.pair_id)));
-    }
+    const ids = currentGroupPairIds;
+    // If every pair in this group is already selected, unselect all.
+    const allSelected = ids.length > 0 && ids.every((id) => selected.has(id));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        ids.forEach((id) => next.delete(id));
+      } else {
+        ids.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  };
+  // Reset per-group selection when switching bank pairs so the "N
+  // selected" counter reflects only what's on screen.
+  useEffect(() => {
+    setSelected(new Set());
+    setInspectPairId(null);
+  }, [currentGroup?.key]);
+
+  // Skip this bank-pair group without booking anything — hide every pair
+  // in the current group locally so the stepper advances to the next
+  // bank-pair. The rows will re-appear on next visit until the CPA
+  // explicitly books or unbooks them.
+  const skipGroup = () => {
+    if (!currentGroup) return;
+    setRejected((r) => new Set([...r, ...currentGroupPairIds]));
   };
 
   const book = async (pairIds) => {
@@ -221,29 +290,64 @@ export default function TransferReview() {
         <div className="flex-1 min-w-0">
           <h1 className="font-heading text-3xl font-bold tracking-tight">Transfer Review</h1>
           <p className="text-slate-500 text-sm mt-1">
-            Intercompany moves between company-owned accounts. Nothing books until you approve.
+            Step 3A · Intercompany moves between company-owned accounts. Nothing books until you approve.
           </p>
         </div>
-        <div className="w-[420px] shrink-0 rounded-lg bg-white border border-cyan-400 ring-1 ring-cyan-100 shadow-sm px-4 py-3" data-testid="transfer-review-info-box">
+        <div className="w-[460px] shrink-0 rounded-lg bg-white border border-cyan-400 ring-1 ring-cyan-100 shadow-sm px-4 py-3" data-testid="transfer-review-info-box">
           <div className="flex items-baseline justify-between gap-2">
             <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
-              {visible.length} pending pair{visible.length === 1 ? "" : "s"}
+              Bank pair {groupIdx + 1} of {bankGroups.length}
             </span>
             <span className="text-[10px] text-slate-500 tabular-nums">
-              {selected.size} selected
+              {(currentGroup?.pairs?.length || 0)} pair{(currentGroup?.pairs?.length || 0) === 1 ? "" : "s"}
+              {" · "}
+              {fmtMoney(currentGroup?.total_amount || 0)}
             </span>
           </div>
-          <div className="mt-0.5 font-heading font-semibold text-base text-slate-900">
-            Step 3a — Intercompany Transfers
+          <div className="mt-0.5 font-heading font-semibold text-sm text-slate-900 flex items-center gap-1.5 min-w-0" title={`${currentGroup?.from_name} → ${currentGroup?.to_name}`}>
+            <span className="truncate">{currentGroup?.from_name || "—"}</span>
+            <ArrowLeftRight size={14} className="shrink-0 text-cyan-600" />
+            <span className="truncate">{currentGroup?.to_name || "—"}</span>
           </div>
-          <div className="mt-2 flex items-center gap-2 justify-end">
+          <div className="text-[10px] uppercase tracking-wider text-cyan-700 font-semibold mt-1">
+            Intercompany Transfers
+          </div>
+          <div className="mt-2 flex items-center gap-2">
             <button
-              onClick={() => book(Array.from(selected))}
-              disabled={busy || selected.size === 0}
-              data-testid="transfer-book-selected"
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => book(currentGroupPairIds)}
+              disabled={busy || !currentGroup || currentGroupPairIds.length === 0}
+              data-testid="transfer-approve-all-group"
+              className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Check size={12} /> Book selected ({selected.size})
+              <Check size={12} />
+              {busy ? "Booking…" : `Approve all ${currentGroupPairIds.length}`}
+            </button>
+            <button
+              onClick={skipGroup}
+              disabled={busy || !currentGroup}
+              data-testid="transfer-skip-group"
+              title="Hide every pair in this bank-pair group locally — they'll come back on next visit."
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-xs text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <X size={12} /> Not intercompany
+            </button>
+          </div>
+          <div className="mt-2 flex items-center gap-1 justify-end">
+            <button
+              onClick={() => setGroupIdx((i) => Math.max(0, i - 1))}
+              disabled={groupIdx <= 0}
+              data-testid="transfer-review-prev"
+              className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              ← Prev
+            </button>
+            <button
+              onClick={() => setGroupIdx((i) => Math.min(bankGroups.length - 1, i + 1))}
+              disabled={groupIdx >= bankGroups.length - 1}
+              data-testid="transfer-review-next"
+              className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Next →
             </button>
           </div>
         </div>
@@ -268,7 +372,10 @@ export default function TransferReview() {
               <th className="w-10 px-3 py-2">
                 <input
                   type="checkbox"
-                  checked={selected.size === visible.length && visible.length > 0}
+                  checked={
+                    currentGroupPairIds.length > 0 &&
+                    currentGroupPairIds.every((id) => selected.has(id))
+                  }
                   onChange={toggleAll}
                   data-testid="transfer-toggle-all"
                   className="rounded"
@@ -283,7 +390,7 @@ export default function TransferReview() {
             </tr>
           </thead>
           <tbody>
-            {visible.map((p) => {
+            {(currentGroup?.pairs || []).map((p) => {
               const dim = p.confidence < 0.75;
               const isSel = selected.has(p.pair_id);
               return (
@@ -333,7 +440,19 @@ export default function TransferReview() {
         </table>
       </div>
 
-      <div className="flex items-center gap-3 justify-end text-xs text-slate-500">
+      <div className="flex items-center gap-3 justify-between text-xs text-slate-500">
+        <div>
+          {selected.size > 0 && currentGroup && (
+            <button
+              onClick={() => book(Array.from(selected))}
+              disabled={busy}
+              data-testid="transfer-book-selected"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold disabled:opacity-50"
+            >
+              <Check size={12} /> Book only selected ({selected.size})
+            </button>
+          )}
+        </div>
         <Link to="/dashboard" className="hover:text-slate-700" data-testid="transfer-review-exit">
           Back to Dashboard
         </Link>
