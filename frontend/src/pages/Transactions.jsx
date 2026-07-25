@@ -190,6 +190,54 @@ export default function Transactions() {
   const lrCount = parseInt(params.get("count") || "0", 10);
   const lrTotalAmount = parseFloat(params.get("total_amount") || "0");
   const letsReviewNav = useLetsReviewNav();
+  // Inline bulk-categorize dropdown in the Let's-Review info card — lets
+  // the CPA one-click categorize every currently-visible row for the
+  // contact into a chosen GAAP account, bypassing the AI chat entirely.
+  const [bulkCatBusy, setBulkCatBusy] = useState(false);
+  const bulkCategorizeCurrentContact = async (accountId) => {
+    if (!accountId || bulkCatBusy || !currentId) return;
+    const acct = accts.find((a) => a.id === accountId);
+    const ids = (txns || []).map((t) => t.id);
+    if (ids.length === 0) {
+      toast.info("No visible rows to categorize.");
+      return;
+    }
+    setBulkCatBusy(true);
+    try {
+      const res = await api.post(
+        `/companies/${currentId}/transactions/apply-multi-bulk-approve-rule`,
+        {
+          contact_id: lrContactId || null,
+          contact_name: lrContactName || "",
+          groups: [{
+            txn_ids: ids,
+            category_account_id: accountId,
+            rule_label: acct ? `${acct.code || ""} ${acct.name || ""}`.trim() : "",
+          }],
+          // Skip rule creation from the dropdown — it's a one-shot
+          // decision the CPA is making without the AI's help; they can
+          // always create a persistent rule from Contacts later.
+          create_rules: false,
+        }
+      );
+      const updated = res.data?.updated || 0;
+      toast.success(
+        `Categorized ${updated} ${lrContactName || "contact"} row${updated === 1 ? "" : "s"} to ${acct?.name || "the selected account"}.`
+      );
+      // Fire the same event AiPanel emits after bulk-approve so the
+      // Transactions page's cleanup-completed listener auto-advances the
+      // Let's Review stepper to the next uncleared contact.
+      emitAction("cleanup-completed", {
+        contact_id: lrContactId,
+        kind: "contact_in_uncat",
+        count: updated,
+      });
+    } catch (e) {
+      toast.error("Bulk-categorize failed — try again?");
+    } finally {
+      setBulkCatBusy(false);
+    }
+  };
   // No-Contact Review (Step 3) — same params as Let's Review but keyed on a
   // description signature instead of a contact_id. `ncr*` state feeds the
   // stepper info box and drives the `desc_group` server filter.
@@ -768,6 +816,38 @@ export default function Transactions() {
               title={lrContactName}
             >
               {lrContactName}
+            </div>
+            <div className="mt-2">
+              <label className="text-[9px] uppercase tracking-wider text-slate-500 font-semibold block mb-1">
+                Bulk-categorize all {(txns || []).length} row{(txns || []).length === 1 ? "" : "s"}
+              </label>
+              <select
+                data-testid="lets-review-bulk-category"
+                disabled={bulkCatBusy || (txns || []).length === 0}
+                value=""
+                onChange={(e) => bulkCategorizeCurrentContact(e.target.value)}
+                title="Categorize every currently-visible row for this contact into the chosen account. Bypasses the AI chat."
+                className="w-full px-2 py-1.5 rounded-md border border-cyan-300 bg-white text-xs font-medium text-slate-800 hover:border-cyan-400 disabled:opacity-60 disabled:cursor-wait"
+              >
+                <option value="" disabled>
+                  {bulkCatBusy ? "Applying…" : "Choose category…"}
+                </option>
+                {(accts || [])
+                  .filter((a) =>
+                    // Show accounts that are semantically postable — expense
+                    // + income + COGS + other-income/expense. Bank/AR/AP/
+                    // Equity/Uncat-sink exclude themselves: the CPA can't
+                    // mass-code Zelle rows to 'Chase Checking'.
+                    ["expense", "income", "cost_of_goods_sold",
+                     "other_income", "other_expense"].includes(a.type)
+                    && !["9999", "6999", "4999"].includes(a.code)
+                  )
+                  .map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.code} · {a.name}
+                    </option>
+                  ))}
+              </select>
             </div>
             <div className="mt-2 flex items-center gap-1 justify-end">
               <button
