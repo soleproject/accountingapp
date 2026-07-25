@@ -32,6 +32,7 @@ export default function AICleanupReview() {
       <CleanupCopilot
         currentId={currentId}
         inline
+        forceStep={1}
         initialViewMode={initialView}
         autoStartTour={autoStartTour}
         inlineTitle="AI Cleanup Review"

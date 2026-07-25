@@ -190,7 +190,7 @@ function NextStepCard({ currentId, inline, onClose }) {
   );
 }
 
-export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null, inlineTitle = null, inlineSubtitle = null, initialViewMode = null, autoStartTour = false, hideChips = false }) {
+export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null, inlineTitle = null, inlineSubtitle = null, initialViewMode = null, autoStartTour = false, hideChips = false, forceStep = null }) {
   const navigate = useNavigate();
   const { focus } = useAiFocus();
   const { user } = useAuth();
@@ -517,20 +517,30 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   }, [currentId, data]);
   // Pick the earliest step still open (count > 0). That's the step the CPA
   // is currently on — matches the dashboard checklist numbering.
+  // Pick the step to show in the header badge:
+  //   • If `forceStep` prop is set, always show that step (used on the
+  //     AI Cleanup Review page, which is definitionally Step 1 — the
+  //     badge should read "Step 1" even if the CPA has already burned
+  //     Step 1 down to zero).
+  //   • Otherwise, pick the earliest step still open (count > 0) —
+  //     matches the dashboard checklist numbering.
   const activeStep = (() => {
     if (!checklistTodos) return null;
-    for (const n of [1, 2, 3]) {
+    const pickers = forceStep
+      ? [forceStep]
+      : [1, 2, 3];
+    for (const n of pickers) {
       const s = checklistTodos[`step${n}`];
-      if (s && (s.count || 0) > 0) {
-        return {
-          n,
-          title: s.title,
-          subtitle: s.subtitle || "",
-          count: s.count,
-          unit: s.unit,
-          cta_link: s.cta_link || "",
-        };
-      }
+      if (!s) continue;
+      if (!forceStep && (s.count || 0) === 0) continue;
+      return {
+        n,
+        title: s.title,
+        subtitle: s.subtitle || "",
+        count: s.count || 0,
+        unit: s.unit,
+        cta_link: s.cta_link || "",
+      };
     }
     return null;
   })();
