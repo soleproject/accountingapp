@@ -535,6 +535,10 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
       if (!forceStep && (s.count || 0) === 0) continue;
       return {
         n,
+        // sub_label = "3A"/"3B" when firm-glance splits a step into
+        // sub-phases; fall back to the numeric n for steps 1/2 which
+        // aren't split.
+        display: s.sub_label || String(n),
         title: s.title,
         subtitle: s.subtitle || "",
         count: s.count || 0,
@@ -1332,7 +1336,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
               >
                 <div className="flex-1 min-w-0">
                   <div className="font-heading font-semibold text-slate-900 text-[15px] leading-tight truncate">
-                    Step {activeStep.n}: {activeStep.title}
+                    Step {activeStep.display}: {activeStep.title}
                   </div>
                   {activeStep.subtitle && (
                     <div className="mt-1 text-[12px] text-slate-500 leading-snug line-clamp-2">
@@ -1357,12 +1361,12 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                 type="button"
                 data-testid="cleanup-active-step-badge"
                 onClick={() => activeStep.cta_link && navigate(activeStep.cta_link)}
-                title={`Go to Step ${activeStep.n} — ${activeStep.title}`}
+                title={`Go to Step ${activeStep.display} — ${activeStep.title}`}
                 className="ai-shimmer-bubble hidden md:flex items-center gap-4 w-[400px] max-w-[42vw] rounded-xl px-4 py-3 shadow-sm text-left cursor-pointer transition-shadow hover:shadow-md"
               >
                 <div className="flex-1 min-w-0">
                   <div className="font-heading font-semibold text-slate-900 text-[15px] leading-tight truncate">
-                    Step {activeStep.n}: {activeStep.title}
+                    Step {activeStep.display}: {activeStep.title}
                   </div>
                   {activeStep.subtitle && (
                     <div className="mt-1 text-[12px] text-slate-500 leading-snug line-clamp-2">

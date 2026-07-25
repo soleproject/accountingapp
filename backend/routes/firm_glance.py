@@ -471,9 +471,13 @@ async def _monthly_todos(cid: str) -> dict:
             # zero, so the CPA can't accidentally close the books with
             # bank-feed noise still uncategorized.
             "title": (
-                "Step 3A: Intercompany transfers" if transfer_pairs_count > 0
-                else "Step 3B: Individual review"
+                "Intercompany transfers" if transfer_pairs_count > 0
+                else "Individual review"
             ),
+            # Sub-step label ("3A" / "3B") for the copilot step badge so
+            # it renders "Step 3A: …" without doubling the "Step 3:"
+            # prefix that the card auto-adds.
+            "sub_label": ("3A" if transfer_pairs_count > 0 else "3B"),
             "subtitle": (
                 "Approve intercompany moves grouped by bank pair — one bank ↔ bank set at a time."
                 if transfer_pairs_count > 0

@@ -14,6 +14,7 @@ import { ArrowLeftRight, Check, X, Info, Sparkles } from "lucide-react";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
+import CleanupCopilot from "@/components/CleanupCopilot";
 
 function ConfBadge({ conf, delta }) {
   const tone =
@@ -286,6 +287,14 @@ export default function TransferReview() {
 
   return (
     <div className="p-6 space-y-4" data-testid="transfer-review-page">
+      <CleanupCopilot
+        currentId={currentId}
+        inline
+        forceStep={3}
+        hideChips
+        inlineTitle="AI Cleanup Copilot"
+        inlineSubtitle="Approve intercompany moves grouped by bank pair. Nothing books until you sign off."
+      />
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div className="flex-1 min-w-0">
           <h1 className="font-heading text-3xl font-bold tracking-tight">Transfer Review</h1>
