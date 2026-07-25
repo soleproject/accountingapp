@@ -11,6 +11,7 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { emitAction } from "@/lib/createBus";
 import { Sparkles } from "lucide-react";
+import { NextStepCard } from "@/components/CleanupCopilot";
 
 export default function NoContactReview() {
   const { currentId } = useCompany();
@@ -70,20 +71,21 @@ export default function NoContactReview() {
     );
   }
   if (groups.length === 0) {
+    // Same "next step or dashboard" affordance as LetsReview / AICleanupReview
+    // — hand the CPA a real handoff instead of a dead-end panel.
     return (
       <div className="p-6 max-w-3xl mx-auto">
-        <div className="rounded-xl border bg-white p-8 text-center">
-          <Sparkles className="mx-auto text-emerald-500 mb-2" size={28} />
-          <div className="font-semibold text-slate-900">Nothing to review</div>
-          <div className="text-sm text-slate-500 mt-1">
-            No uncategorized no-contact transactions. You're clean.
+        <div className="rounded-xl border bg-white p-6">
+          <div className="flex items-center gap-2 mb-3">
+            <Sparkles className="text-emerald-500" size={18} />
+            <div className="font-heading font-semibold text-slate-900">
+              Nice — Step 3 is clean
+            </div>
           </div>
-          <Link
-            to="/dashboard"
-            className="mt-4 inline-block text-xs text-indigo-600 hover:text-indigo-800"
-          >
-            Back to Dashboard →
-          </Link>
+          <div className="text-sm text-slate-500 mb-4">
+            No uncategorized no-contact transactions left for this company.
+          </div>
+          <NextStepCard currentId={currentId} />
         </div>
       </div>
     );

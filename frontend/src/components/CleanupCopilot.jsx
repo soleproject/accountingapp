@@ -97,7 +97,7 @@ function pitchFor(action, progress) {
 // is done). The dashboard chat sometimes shows its own "next step"
 // bubble, but this in-page card is the primary hand-off so the CPA
 // never feels stranded after a successful mass-approve.
-function NextStepCard({ currentId, inline, onClose }) {
+export function NextStepCard({ currentId, inline, onClose }) {
   const navigate = useNavigate();
   const [next, setNext] = useState(null);
   useEffect(() => {

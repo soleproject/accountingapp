@@ -14,6 +14,7 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { emitAction } from "@/lib/createBus";
 import { ArrowLeft, ArrowRight, Sparkles } from "lucide-react";
+import { NextStepCard } from "@/components/CleanupCopilot";
 
 export default function LetsReview() {
   const { currentId } = useCompany();
@@ -76,20 +77,24 @@ export default function LetsReview() {
     return <div className="p-6 text-sm text-slate-500">Loading vendor groups…</div>;
   }
   if (groups.length === 0) {
+    // Mirror the AI Cleanup Review page's "done" affordance: instead of a
+    // dead-end "Nothing to review" panel, hand the CPA the next step's
+    // Start card (routes to Step 3 if there's work, or Dashboard if the
+    // whole checklist is clean). Wrapped in the same rounded shell so the
+    // page still has a clear "you finished this step" moment.
     return (
       <div className="p-6 max-w-3xl mx-auto">
-        <div className="rounded-xl border bg-white p-8 text-center">
-          <Sparkles className="mx-auto text-emerald-500 mb-2" size={28} />
-          <div className="font-semibold text-slate-900">Nothing to review</div>
-          <div className="text-sm text-slate-500 mt-1">
-            No uncategorized vendor groups. You're clean.
+        <div className="rounded-xl border bg-white p-6">
+          <div className="flex items-center gap-2 mb-3">
+            <Sparkles className="text-emerald-500" size={18} />
+            <div className="font-heading font-semibold text-slate-900">
+              Nice — Step 2 is clean
+            </div>
           </div>
-          <Link
-            to="/dashboard"
-            className="mt-4 inline-block text-xs text-indigo-600 hover:text-indigo-800"
-          >
-            Back to Dashboard →
-          </Link>
+          <div className="text-sm text-slate-500 mb-4">
+            No uncategorized vendor groups left for this company.
+          </div>
+          <NextStepCard currentId={currentId} />
         </div>
       </div>
     );
