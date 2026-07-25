@@ -451,7 +451,7 @@ async def bulk_approve_ai_ready(
     # independently-approvable row in the modal.
     buckets = defaultdict(lambda: {
         "count": 0, "amount": 0.0, "contact_name": "",
-        "account": None, "txn_ids": [],
+        "account": None, "txn_ids": [], "flagged_count": 0,
     })
     async for t in db.transactions.find({
         "company_id": cid,
@@ -466,6 +466,11 @@ async def bulk_approve_ai_ready(
         b["amount"] += abs(float(t.get("amount") or 0.0))
         b["contact_name"] = t.get("contact_name") or ""
         b["txn_ids"].append(t["id"])
+        # Track how many rows in this bucket are `needs_review=True` so the
+        # UI can render a "N flagged" pill — makes it clear that flagged
+        # rows ARE part of the mega-approve batch, not hidden until later.
+        if t.get("needs_review"):
+            b["flagged_count"] += 1
         if b["account"] is None:
             b["account"] = {
                 "id": t.get("category_account_id"),
@@ -499,6 +504,7 @@ async def bulk_approve_ai_ready(
         "contact_id": b["contact_id"],
         "contact_name": b["contact_name"],
         "count": b["count"],
+        "flagged_count": b["flagged_count"],
         "amount": round(b["amount"], 2),
         "account": b["account"] or {},
     } for k, b in eligible]

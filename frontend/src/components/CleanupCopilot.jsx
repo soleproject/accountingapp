@@ -947,7 +947,18 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                           </span>
                         </div>
                         <div className={`text-right shrink-0 rounded px-1 ${hi(4)}`}>
-                          <div className="font-mono-num text-slate-900 text-sm">{c.count} rows</div>
+                          <div className="font-mono-num text-slate-900 text-sm flex items-center justify-end gap-1.5">
+                            {c.count} rows
+                            {c.flagged_count > 0 && (
+                              <span
+                                data-testid={`mega-vendor-flagged-${c.key}`}
+                                title={`${c.flagged_count} of these row${c.flagged_count === 1 ? " is" : "s are"} flagged for review — approving this bucket clears them alongside the confident rows.`}
+                                className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-amber-100 border border-amber-300 text-amber-800 text-[10px] font-semibold font-mono-num"
+                              >
+                                ⚠ {c.flagged_count} flagged
+                              </span>
+                            )}
+                          </div>
                           <div className="font-mono-num text-slate-500 text-xs">${c.amount.toLocaleString("en-US", {maximumFractionDigits: 0})}</div>
                         </div>
                         <button
