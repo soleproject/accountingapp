@@ -1320,75 +1320,14 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
             </div>
           )}
           {(() => {
-            const aiReadyCount = data?.progress?.mega_ready_rows || 0;
-            const hasApprove = aiReadyCount > 0;
-            const hasFixNow = !!primary;
-            const shimmerApprove = hasApprove;
-            const shimmerFixNow = !hasApprove && hasFixNow;
-
-            // Build both buttons as JSX and then order them so the
-            // shimmering one comes FIRST. The Sparkles/AI icon rides with
-            // the shimmering CTA — the other one is plain.
-            const approveBtn = (
-              <button
-                key="approve"
-                data-testid="cleanup-mega-approve"
-                onClick={() => {
-                  // On the Transactions page (`!inline`) route to the
-                  // dedicated review page instead of opening the modal
-                  // in place — the modal is now the AI Cleanup Review
-                  // report living at its own URL.
-                  if (!inline) {
-                    navigate("/accounting/ai-cleanup-review?view=stepper");
-                  } else {
-                    openMega();
-                  }
-                }}
-                disabled={megaBusy}
-                className={
-                  shimmerApprove
-                    ? "ai-shimmer-btn inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md disabled:opacity-50"
-                    : "inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                }
-                title={
-                  hasApprove
-                    ? `${aiReadyCount} AI-categorized rows waiting for sign-off`
-                    : "Approve every vendor whose AI opinion is unanimous"
-                }
-              >
-                {shimmerApprove && <Sparkles size={13} className="text-fuchsia-500" />}
-                {megaBusy ? "Scanning…" : "Approve AI Categorized"}
-              </button>
-            );
-            const fixNowBtn = primary ? (
-              <button
-                key="fixnow"
-                data-testid="cleanup-primary-cta"
-                onClick={() => onApplyAction?.(primary)}
-                className={
-                  shimmerFixNow
-                    ? "ai-shimmer-btn inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md"
-                    : "inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                }
-              >
-                {shimmerFixNow && <Sparkles size={13} className="text-fuchsia-500" />}
-                Let's review <ArrowRight size={13} />
-              </button>
-            ) : null;
-
-            // Shimmering CTA goes first; the other one (if it exists) trails.
-            const buttons = shimmerApprove
-              ? [approveBtn, fixNowBtn]
-              : [fixNowBtn, approveBtn];
-            return buttons.filter(Boolean);
+            // The three action buttons (Let's review / Approve AI
+            // Categorized / Individual Review) were retired at the
+            // user's request — the CPA reaches those flows via the
+            // dashboard checklist tiles now. Keep the computed data
+            // (mega-ready count, primary action) available for other
+            // components that read `data.progress`.
+            return null;
           })()}
-          <button
-            data-testid="cleanup-start-session"
-            onClick={() => onStartSession?.(data?.progress?.flagged || 0)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-          >
-            <PlayCircle size={13} /> Individual Review
-          </button>
         </div>
       </div>
 
