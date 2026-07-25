@@ -290,10 +290,9 @@ export default function TransferReview() {
       <CleanupCopilot
         currentId={currentId}
         inline
+        headerOnly
         forceStep={3}
         hideChips
-        inlineTitle="AI Cleanup Copilot"
-        inlineSubtitle="Approve intercompany moves grouped by bank pair. Nothing books until you sign off."
       />
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div className="flex-1 min-w-0">

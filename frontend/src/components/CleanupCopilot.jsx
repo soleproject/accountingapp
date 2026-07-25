@@ -190,7 +190,7 @@ export function NextStepCard({ currentId, inline, onClose }) {
   );
 }
 
-export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null, inlineTitle = null, inlineSubtitle = null, initialViewMode = null, autoStartTour = false, hideChips = false, forceStep = null }) {
+export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null, inlineTitle = null, inlineSubtitle = null, initialViewMode = null, autoStartTour = false, hideChips = false, forceStep = null, headerOnly = false }) {
   const navigate = useNavigate();
   const { focus } = useAiFocus();
   const { user } = useAuth();
@@ -844,12 +844,12 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   // the report to close permanently after one dry-run).
   const inlineOpenRef = useRef(false);
   useEffect(() => {
-    if (!inline || !data) return;
+    if (!inline || !data || headerOnly) return;
     if (megaPreview) return;      // already open
     if (inlineOpenRef.current) return;
     inlineOpenRef.current = true;
     openMega();
-  }, [inline, data, megaPreview]);
+  }, [inline, data, megaPreview, headerOnly]);
   useEffect(() => {
     // Reset the guard when the current company changes so re-selecting a
     // company on the report page re-fires the dry-run.
@@ -1423,7 +1423,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         </div>
       )}
     </div>
-    {megaPreview && (
+    {megaPreview && !headerOnly && (
       inline ? (
         // Inline rendering: two-column header (title left, group info
         // card right) followed by the report body. The group info card
