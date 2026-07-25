@@ -707,6 +707,17 @@ async def bulk_approve_ai_ready(
         if rules_created:
             await log_ai(cid, "rule_created", len(rules_created))
 
+    # Invalidate the firm-glance / dashboard cache so the Step 1 badge,
+    # setup-checklist tile counts, and business-overview widgets refresh
+    # to reflect the just-approved rows. Without this, DASH_CACHE_TTL
+    # (15s) leaves the CPA staring at stale "N categories left" numbers
+    # after a successful mega-approve.
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+
     return {
         "ok": True, "dry_run": False,
         "batch_id": batch_id,
@@ -779,6 +790,13 @@ async def undo_mega_batch(cid: str, batch_id: str, user: dict = Depends(get_curr
     rules_deleted = await db.rules.delete_many({
         "company_id": cid, "mega_batch_id": batch_id,
     })
+    # Invalidate the firm-glance / dashboard cache so Step counts snap
+    # back to the pre-approve state after an Undo.
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
     return {
         "ok": True,
         "reverted": reverted,
@@ -1972,6 +1990,14 @@ async def apply_multi_bulk_approve(cid: str, inp: MultiBulkApproveIn, user: dict
                 })
                 rule_ids.append(rid)
     await log_ai(cid, "multi_bulk_approve", updated_total)
+    # Invalidate firm-glance / dashboard cache so the Step 2 badge and
+    # setup-checklist counts refresh immediately after a Let's Review
+    # bulk-categorize action lands.
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True, "updated": updated_total, "rule_ids": rule_ids}
 
 
