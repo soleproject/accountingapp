@@ -51,6 +51,21 @@ from deps import (
 router = APIRouter(prefix="/api")
 
 
+async def _invalidate_dash(cid: str) -> None:
+    """Invalidate the firm-glance / dashboard / business-overview caches
+    for this company so any subsequent read reflects the just-mutated
+    transaction state. Called at the tail of every write endpoint that
+    can affect Step 1/2/3 counts, dashboard tiles, or reports.
+
+    Failures are swallowed — cache invalidation should never turn a
+    successful mutation into a client-visible error.
+    """
+    try:
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 # ----------------------- Transactions -----------------------
 
 @router.get("/companies/{cid}/transactions/cleanup-suggestions")
@@ -707,16 +722,7 @@ async def bulk_approve_ai_ready(
         if rules_created:
             await log_ai(cid, "rule_created", len(rules_created))
 
-    # Invalidate the firm-glance / dashboard cache so the Step 1 badge,
-    # setup-checklist tile counts, and business-overview widgets refresh
-    # to reflect the just-approved rows. Without this, DASH_CACHE_TTL
-    # (15s) leaves the CPA staring at stale "N categories left" numbers
-    # after a successful mega-approve.
-    try:
-        from infra import get_cache
-        await get_cache().ainvalidate(cid)
-    except Exception:  # noqa: BLE001
-        pass
+    await _invalidate_dash(cid)
 
     return {
         "ok": True, "dry_run": False,
@@ -790,13 +796,7 @@ async def undo_mega_batch(cid: str, batch_id: str, user: dict = Depends(get_curr
     rules_deleted = await db.rules.delete_many({
         "company_id": cid, "mega_batch_id": batch_id,
     })
-    # Invalidate the firm-glance / dashboard cache so Step counts snap
-    # back to the pre-approve state after an Undo.
-    try:
-        from infra import get_cache
-        await get_cache().ainvalidate(cid)
-    except Exception:  # noqa: BLE001
-        pass
+    await _invalidate_dash(cid)
     return {
         "ok": True,
         "reverted": reverted,
@@ -1117,6 +1117,7 @@ async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depe
     if doc["needs_review"]:
         await log_ai(cid, "flag_review", 1)
     await db.transactions.insert_one(doc)
+    await _invalidate_dash(cid)
     return {"id": tid, "transaction": coerce(doc)}
 
 
@@ -1161,6 +1162,7 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
                 account_name=doc.get("category_account_name") or "",
                 confidence=1.0, source="user",
             )
+    await _invalidate_dash(cid)
     return {"transaction": coerce(doc)}
 
 
@@ -1203,6 +1205,7 @@ async def split_transaction(cid: str, tid: str, inp: SplitIn, user: dict = Depen
         {"id": tid, "company_id": cid},
         {"$set": {"splits": normalized, "human_reviewed": True, "needs_review": False, "updated_at": now_iso()}},
     )
+    await _invalidate_dash(cid)
     return {"ok": True, "splits": normalized}
 
 
@@ -1221,6 +1224,7 @@ async def link_transaction(
     if payment_id is not None:
         upd["linked_payment_id"] = payment_id
     await db.transactions.update_one({"id": tid, "company_id": cid}, {"$set": upd})
+    await _invalidate_dash(cid)
     return {"ok": True}
 
 
@@ -1256,6 +1260,7 @@ async def approve_transaction(cid: str, tid: str, user: dict = Depends(get_curre
                     "account_name": txn.get("category_account_name"),
                     "approvals": 1, "created_at": now_iso(),
                 })
+    await _invalidate_dash(cid)
     return {"ok": True}
 
 
@@ -1273,6 +1278,7 @@ async def unapprove_transaction(cid: str, tid: str, user: dict = Depends(get_cur
         {"id": tid, "company_id": cid},
         {"$set": {"human_reviewed": False, "updated_at": now_iso()}},
     )
+    await _invalidate_dash(cid)
     return {"ok": True}
 
 
@@ -1395,6 +1401,7 @@ async def mark_as_transfer(cid: str, tid: str, inp: MarkTransferIn = MarkTransfe
                 "current_category": c.get("category_account_name"),
             })
 
+    await _invalidate_dash(cid)
     return {
         "ok": True,
         "transfer_account": {
@@ -1641,6 +1648,8 @@ async def re_resolve_contacts(cid: str, user: dict = Depends(get_current_user)):
         updated += 1
     resolved_at = now_iso()
     await db.companies.update_one({"id": cid}, {"$set": {"contacts_re_resolved_at": resolved_at}})
+    if updated:
+        await _invalidate_dash(cid)
     return {"ok": True, "cache_deleted": cache_res.deleted_count,
             "updated": updated, "resolved_at": resolved_at}
 
@@ -1686,6 +1695,7 @@ async def unbook_auto_detected_transfers(cid: str, user: dict = Depends(get_curr
             "transfer_pair_id": "",
         }},
     )
+    await _invalidate_dash(cid)
     return {"ok": True, "unbooked": res.modified_count}
 
 
@@ -1697,7 +1707,10 @@ async def detect_transfers(cid: str, inp: DetectTransfersIn = DetectTransfersIn(
     legs to the Inter-Account Transfer equity account (idempotent).
     """
     await require_company(user, cid)
-    return await detect_transfer_pairs(cid, dry_run=inp.dry_run, date_since=inp.date_since)
+    result = await detect_transfer_pairs(cid, dry_run=inp.dry_run, date_since=inp.date_since)
+    if not inp.dry_run and (result.get("updated") or 0) > 0:
+        await _invalidate_dash(cid)
+    return result
 
 
 @router.get("/companies/{cid}/transactions/transfer-pairs")
@@ -1791,6 +1804,7 @@ async def book_transfer_pairs(cid: str, inp: BookTransferPairsIn, user: dict = D
             updated += res.modified_count
     if updated:
         await log_ai(cid, "internal_transfer_review", updated)
+        await _invalidate_dash(cid)
     return {"ok": True, "updated": updated, "skipped": skipped}
 
 
@@ -1885,6 +1899,7 @@ async def approve_with_suggestion(cid: str, tid: str, user: dict = Depends(get_c
             "match_value": contact_id,
         }))
 
+    await _invalidate_dash(cid)
     return {"ok": True, "approved": approved_info, "similar": similar, "rule_exists": rule_exists}
 
 
@@ -1990,14 +2005,7 @@ async def apply_multi_bulk_approve(cid: str, inp: MultiBulkApproveIn, user: dict
                 })
                 rule_ids.append(rid)
     await log_ai(cid, "multi_bulk_approve", updated_total)
-    # Invalidate firm-glance / dashboard cache so the Step 2 badge and
-    # setup-checklist counts refresh immediately after a Let's Review
-    # bulk-categorize action lands.
-    try:
-        from infra import get_cache
-        await get_cache().ainvalidate(cid)
-    except Exception:  # noqa: BLE001
-        pass
+    await _invalidate_dash(cid)
     return {"ok": True, "updated": updated_total, "rule_ids": rule_ids}
 
 
@@ -2176,6 +2184,7 @@ async def apply_bulk_approve_rule(cid: str, inp: BulkApproveRuleIn, user: dict =
             await db.rules.insert_one(rule)
             rule_id = rule["id"]
 
+    await _invalidate_dash(cid)
     return {"ok": True, "updated": updated, "rule_id": rule_id}
 
 
@@ -2186,6 +2195,7 @@ async def bulk_approve(cid: str, ids: List[str], user: dict = Depends(get_curren
         {"id": {"$in": ids}, "company_id": cid},
         {"$set": {"human_reviewed": True, "needs_review": False, "posted": True, "updated_at": now_iso()}},
     )
+    await _invalidate_dash(cid)
     return {"ok": True, "count": len(ids)}
 
 
@@ -2342,11 +2352,7 @@ async def bulk_reclassify(cid: str, payload: dict, user: dict = Depends(get_curr
                     "approvals": approvals,
                 }
 
-    try:
-        from infra import get_cache
-        await get_cache().ainvalidate(cid)
-    except Exception:  # noqa: BLE001
-        pass
+    await _invalidate_dash(cid)
 
     return {
         "ok": True,
@@ -2363,6 +2369,7 @@ async def delete_transaction(cid: str, tid: str, user: dict = Depends(get_curren
     if existing:
         await assert_open(cid, existing.get("date"))
     await db.transactions.delete_one({"id": tid, "company_id": cid})
+    await _invalidate_dash(cid)
     return {"ok": True}
 
 
