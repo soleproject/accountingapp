@@ -102,6 +102,23 @@ function InspectCard({ pair, onApprove, onReject, busy }) {
   );
 }
 
+function TransferReviewDoneRedirect() {
+  // Every pending transfer pair has been reviewed — auto-continue to the
+  // second phase of Step 3 (No-Contact Review). Matches the LetsReview /
+  // NoContactReview redirect pattern so the CPA never hits a dead-end
+  // empty state between sub-steps.
+  const navigate = useNavigate();
+  useEffect(() => {
+    navigate("/accounting/no-contact-review", { replace: true });
+  }, [navigate]);
+  return (
+    <div className="p-6 text-sm text-slate-500" data-testid="transfer-review-continuing">
+      Nice — all transfer pairs reviewed. Continuing to No-Contact Review…
+    </div>
+  );
+}
+
+
 export default function TransferReview() {
   const { currentId } = useCompany();
   const navigate = useNavigate();
@@ -195,66 +212,7 @@ export default function TransferReview() {
     );
   }
   if (visible.length === 0) {
-    return (
-      <div className="p-6 max-w-3xl mx-auto">
-        <div className="rounded-xl border bg-white p-8 text-center" data-testid="transfer-review-empty">
-          <Sparkles className="mx-auto text-emerald-500 mb-2" size={28} />
-          <div className="font-semibold text-slate-900">No pending transfer pairs</div>
-          <div className="text-sm text-slate-500 mt-1">
-            Every intercompany move has been reviewed. Ready for the next step.
-          </div>
-          <div className="mt-4 flex items-center gap-2 justify-center">
-            <Link
-              to="/accounting/no-contact-review"
-              className="inline-block text-xs rounded-md border border-cyan-300 bg-cyan-50 text-cyan-800 hover:bg-cyan-100 px-3 py-1.5 font-medium"
-              data-testid="transfer-review-next-step"
-            >
-              Continue to No-Contact Review →
-            </Link>
-            <Link
-              to="/dashboard"
-              className="inline-block text-xs text-slate-500 hover:text-slate-700 px-2 py-1.5"
-            >
-              Back to Dashboard
-            </Link>
-          </div>
-          <div className="mt-6 pt-4 border-t border-slate-100">
-            <div className="text-[11px] text-slate-400 mb-2">
-              Previously auto-booked by the retired one-click detector?
-              Un-book them here to re-review through this page.
-            </div>
-            <button
-              onClick={async () => {
-                if (busy) return;
-                setBusy(true);
-                try {
-                  const r = await api.post(
-                    `/companies/${currentId}/transactions/transfer-pairs/unbook`
-                  );
-                  const n = r.data?.unbooked || 0;
-                  if (n === 0) {
-                    toast.info("Nothing to un-book — all previously detected pairs are still open.");
-                  } else {
-                    toast.success(`Un-booked ${n} transfer leg${n === 1 ? "" : "s"} — reloading queue…`);
-                    await load();
-                  }
-                } catch (e) {
-                  toast.error("Could not un-book — try again?");
-                } finally {
-                  setBusy(false);
-                }
-              }}
-              disabled={busy}
-              data-testid="transfer-review-unbook"
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-xs text-slate-700 disabled:opacity-50"
-            >
-              <ArrowLeftRight size={12} />
-              {busy ? "Un-booking…" : "Un-book previous auto-detections"}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
+    return <TransferReviewDoneRedirect />;
   }
 
   return (
