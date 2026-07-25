@@ -1,0 +1,196 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Step 3a Transfer Review — Mockup</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; padding: 32px; }
+    /* Rainbow shimmer border (matches ai-shimmer-bubble in app) */
+    @keyframes rainbow-spin {
+      0%   { --a: 0deg; }
+      100% { --a: 360deg; }
+    }
+    .rainbow-outline {
+      position: relative;
+      background: #fff;
+      border-radius: 12px;
+      padding: 2px;
+      background-image: conic-gradient(
+        from var(--a, 0deg),
+        #f97316, #ec4899, #8b5cf6, #06b6d4, #10b981, #f97316
+      );
+      animation: rainbow-spin 6s linear infinite;
+    }
+    .rainbow-outline > .inner {
+      background: #fff;
+      border-radius: 10px;
+      padding: 16px;
+    }
+    @property --a {
+      syntax: '<angle>';
+      inherits: false;
+      initial-value: 0deg;
+    }
+    .tile { transition: transform .15s ease, box-shadow .15s ease; }
+    .tile:hover { transform: translateY(-1px); box-shadow: 0 8px 20px -8px rgba(15, 23, 42, .18); }
+    .num { font-variant-numeric: tabular-nums; font-family: 'DM Sans', 'Inter', sans-serif; }
+  </style>
+</head>
+<body>
+
+  <div class="max-w-6xl mx-auto space-y-6">
+    <div>
+      <h1 class="text-3xl font-bold text-slate-900">Setup Checklist — Mockup</h1>
+      <p class="text-sm text-slate-500 mt-1">
+        Showing the proposed <b>Step 3a: Transfer Review</b> tile inserted
+        between Step 3 (No-Contact Review) and the Dashboard "Everything is
+        clean" empty state. Not shipped — screenshot preview only.
+      </p>
+    </div>
+
+    <!-- Current checklist tiles + proposed new one -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+      <!-- STEP 1 — Done (muted green) -->
+      <div class="tile bg-white rounded-xl border-2 border-emerald-200 p-4 shadow-sm">
+        <div class="flex items-center justify-between">
+          <div class="min-w-0">
+            <div class="text-[10px] uppercase tracking-wider text-emerald-600 font-semibold">✓ Complete</div>
+            <div class="mt-1 font-semibold text-slate-900 text-[15px]">Step 1: Review AI categorized</div>
+            <div class="mt-1 text-xs text-slate-500">
+              One-click approve the AI's high-confidence categorizations.
+            </div>
+          </div>
+          <div class="shrink-0 flex flex-col items-end pl-4 border-l border-slate-200">
+            <div class="num text-3xl font-bold text-emerald-600">0</div>
+            <div class="text-[9px] uppercase tracking-wider text-slate-500 font-semibold whitespace-nowrap mt-1.5">categories</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 2 — Active rainbow -->
+      <div class="rainbow-outline tile">
+        <div class="inner">
+          <div class="flex items-center justify-between">
+            <div class="min-w-0">
+              <div class="text-[10px] uppercase tracking-wider text-indigo-600 font-semibold">Active step</div>
+              <div class="mt-1 font-semibold text-slate-900 text-[15px]">Step 2: Let's review</div>
+              <div class="mt-1 text-xs text-slate-500">
+                Batch-categorize vendor groups where 1+ rows are still uncategorized.
+              </div>
+            </div>
+            <div class="shrink-0 flex flex-col items-end pl-4 border-l border-slate-200">
+              <div class="num text-3xl font-bold text-slate-900">9</div>
+              <div class="text-[9px] uppercase tracking-wider text-slate-500 font-semibold whitespace-nowrap mt-1.5">vendor groups</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 3 — Pending -->
+      <div class="tile bg-white rounded-xl border border-slate-200 p-4 shadow-sm opacity-90">
+        <div class="flex items-center justify-between">
+          <div class="min-w-0">
+            <div class="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Up next</div>
+            <div class="mt-1 font-semibold text-slate-900 text-[15px]">Step 3: Individual review</div>
+            <div class="mt-1 text-xs text-slate-500">
+              No-contact rows grouped by similar description — walk one group at a time.
+            </div>
+          </div>
+          <div class="shrink-0 flex flex-col items-end pl-4 border-l border-slate-200">
+            <div class="num text-3xl font-bold text-slate-900">66</div>
+            <div class="text-[9px] uppercase tracking-wider text-slate-500 font-semibold whitespace-nowrap mt-1.5">transactions</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- NEW: STEP 3a — Transfer Review (proposed) -->
+      <div class="tile bg-gradient-to-br from-cyan-50 via-white to-sky-50 rounded-xl border-2 border-cyan-300 p-4 shadow-sm relative">
+        <span class="absolute -top-2 left-3 text-[9px] bg-cyan-500 text-white uppercase tracking-wider font-bold px-1.5 py-0.5 rounded-sm">
+          Proposed · Not shipped
+        </span>
+        <div class="flex items-center justify-between">
+          <div class="min-w-0">
+            <div class="text-[10px] uppercase tracking-wider text-cyan-700 font-semibold">Up next · Auto-detected</div>
+            <div class="mt-1 font-semibold text-slate-900 text-[15px]">Step 3a: Transfer Review</div>
+            <div class="mt-1 text-xs text-slate-500">
+              Book both legs of intercompany transfers to <b>Inter-Account Transfer</b> so neither hits P&amp;L.
+            </div>
+          </div>
+          <div class="shrink-0 flex flex-col items-end pl-4 border-l border-cyan-200">
+            <div class="num text-3xl font-bold text-slate-900">12</div>
+            <div class="text-[9px] uppercase tracking-wider text-slate-500 font-semibold whitespace-nowrap mt-1.5">transfer pairs</div>
+          </div>
+        </div>
+        <!-- Sub-facets: mini stats -->
+        <div class="mt-3 pt-3 border-t border-cyan-200/70 flex items-center gap-4 text-[11px]">
+          <div class="flex items-center gap-1">
+            <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+            <span class="text-slate-500">Detected today</span>
+            <span class="font-semibold text-slate-900 num">7</span>
+          </div>
+          <div class="flex items-center gap-1">
+            <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+            <span class="text-slate-500">Needs your OK</span>
+            <span class="font-semibold text-slate-900 num">5</span>
+          </div>
+          <div class="ml-auto text-cyan-700 font-semibold hover:text-cyan-900 cursor-pointer">
+            Open Transfer Review →
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 4 — Close (locked) -->
+      <div class="tile bg-slate-50 rounded-xl border border-slate-200 p-4 shadow-sm">
+        <div class="flex items-center justify-between">
+          <div class="min-w-0">
+            <div class="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Locked</div>
+            <div class="mt-1 font-semibold text-slate-500 text-[15px]">Step 4: Close the month</div>
+            <div class="mt-1 text-xs text-slate-400">
+              Finish steps 1–3a to unlock month-close.
+            </div>
+          </div>
+          <div class="shrink-0 flex flex-col items-end pl-4 border-l border-slate-200">
+            <div class="num text-3xl font-bold text-slate-400">—</div>
+            <div class="text-[9px] uppercase tracking-wider text-slate-400 font-semibold whitespace-nowrap mt-1.5">locked</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Second variant: what the TRANSACTIONS PAGE "you are here" blue card would look like -->
+    <div class="mt-10">
+      <h2 class="text-base font-semibold text-slate-900 mb-3">Variant B — "You are here" card on the Transfer Review page</h2>
+      <div class="w-[400px] rounded-xl border-2 border-blue-500 bg-white px-4 py-3 shadow-sm flex items-center gap-4">
+        <div class="flex-1 min-w-0">
+          <div class="font-semibold text-slate-900 text-[15px] leading-tight truncate">
+            Step 3a: Transfer Review
+          </div>
+          <div class="mt-1 text-[12px] text-slate-500 leading-snug">
+            Book both legs of intercompany transfers to Inter-Account Transfer equity.
+          </div>
+        </div>
+        <div class="shrink-0 flex flex-col items-end justify-center pl-3 border-l border-slate-200">
+          <div class="num text-3xl font-bold text-slate-900 leading-none">12</div>
+          <div class="mt-1.5 text-[10px] uppercase tracking-wider text-slate-500 font-semibold whitespace-nowrap">transfer pairs</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Notes -->
+    <div class="mt-10 rounded-xl bg-white border border-slate-200 p-5 text-sm text-slate-600">
+      <div class="font-semibold text-slate-900 mb-2">Implementation notes (for reference only)</div>
+      <ul class="list-disc pl-5 space-y-1">
+        <li>New tile inserted between Step 3 and Step 4 in the setup checklist.</li>
+        <li>Count = number of unreviewed <code>transfer_pair_id</code> groupings — one per pair (not per leg) so 12 pairs = 24 rows.</li>
+        <li>Two subfacets: <b>Detected today</b> (auto-scanned since last Plaid sync) and <b>Needs your OK</b> (candidates that failed the amount-delta / date-delta confidence threshold).</li>
+        <li>Uses cyan accent to differentiate from the fuchsia/indigo of "categorization" steps — transfers are structurally different work.</li>
+        <li>Book-all CTA lives inside the linked Transfer Review page, not on the tile, to keep the tile purely informational.</li>
+      </ul>
+    </div>
+  </div>
+
+</body>
+</html>
