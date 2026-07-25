@@ -510,11 +510,11 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   // server-side per (cid, month).
   const [checklistTodos, setChecklistTodos] = useState(null);
   useEffect(() => {
-    if (!currentId || inline) return;
+    if (!currentId) return;
     api.get(`/companies/${currentId}/dashboard/firm-glance`)
       .then((r) => setChecklistTodos(r.data?.todos || null))
       .catch(() => setChecklistTodos(null));
-  }, [currentId, inline, data]);
+  }, [currentId, data]);
   // Pick the earliest step still open (count > 0). That's the step the CPA
   // is currently on — matches the dashboard checklist numbering.
   const activeStep = (() => {
@@ -1311,7 +1311,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
           ) : null}
         </div>
         <div className="flex items-center gap-2">
-          {activeStep && !inline && (
+          {activeStep && (
             <div
               data-testid="cleanup-active-step-badge"
               className="ai-shimmer-bubble hidden md:flex items-center gap-4 w-[400px] max-w-[42vw] rounded-xl px-4 py-3 shadow-sm"
