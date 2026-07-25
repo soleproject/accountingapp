@@ -11,7 +11,7 @@ import {
   List as ListIcon, LayoutGrid, ArrowLeftRight, HelpCircle,
 } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
-import CleanupCopilot from "@/components/CleanupCopilot";
+import CleanupCopilot, { NextStepCard } from "@/components/CleanupCopilot";
 import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
 import AskClientButton from "@/components/AskClientButton";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
@@ -183,6 +183,7 @@ export default function Transactions() {
   // Read the "Let's Review" URL params up-front so `load()` (defined
   // below) can reference them without hitting a TDZ error.
   const isLetsReview = params.get("letsReview") === "1";
+  const isReviewDone = params.get("done") === "1";
   const lrContactId = params.get("contact_id") || "";
   const lrContactName = params.get("contact_name") || "";
   const lrIdx = parseInt(params.get("idx") || "1", 10);
@@ -1146,6 +1147,27 @@ export default function Transactions() {
         />
       )}
 
+      {isReviewMode && isReviewDone ? (
+        // Step 2 / Step 3 fully cleared — replace the table area with the
+        // NextStepCard so the copilot header + blue "Step N" card at the
+        // top stay visible, and the CPA gets a clear handoff to the next
+        // step (or Dashboard when the whole checklist is done). Matches
+        // the Step 1 AI Cleanup Review empty-state UX.
+        <div className="rounded-xl border bg-white p-6" data-testid="review-mode-done-card">
+          <div className="flex items-center gap-2 mb-3">
+            <Sparkles className="text-emerald-500" size={18} />
+            <div className="font-heading font-semibold text-slate-900">
+              {isLetsReview ? "Nice — Step 2 is clean" : "Nice — Step 3 is clean"}
+            </div>
+          </div>
+          <div className="text-sm text-slate-500 mb-4">
+            {isLetsReview
+              ? "No uncategorized vendor groups left for this company."
+              : "No uncategorized no-contact transactions left for this company."}
+          </div>
+          <NextStepCard currentId={currentId} />
+        </div>
+      ) : (
       <div className="rounded-xl border bg-white overflow-hidden">
         {view === "rollup" ? (
           <ContactRollup
@@ -1317,6 +1339,7 @@ export default function Transactions() {
         </>
         )}
       </div>
+      )}
 
       {creating && <ManualTxnModal accts={accts} currentId={currentId} onClose={() => { setCreating(false); load(); }} />}
       {splitting && <SplitModal txn={splitting} accts={accts} currentId={currentId} onClose={() => { setSplitting(null); load(); }} />}

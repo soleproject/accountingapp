@@ -71,25 +71,19 @@ export default function NoContactReview() {
     );
   }
   if (groups.length === 0) {
-    // Same "next step or dashboard" affordance as LetsReview / AICleanupReview
-    // — hand the CPA a real handoff instead of a dead-end panel.
-    return (
-      <div className="p-6 max-w-3xl mx-auto">
-        <div className="rounded-xl border bg-white p-6">
-          <div className="flex items-center gap-2 mb-3">
-            <Sparkles className="text-emerald-500" size={18} />
-            <div className="font-heading font-semibold text-slate-900">
-              Nice — Step 3 is clean
-            </div>
-          </div>
-          <div className="text-sm text-slate-500 mb-4">
-            No uncategorized no-contact transactions left for this company.
-          </div>
-          <NextStepCard currentId={currentId} />
-        </div>
-      </div>
-    );
+    // Step 3 is clean — bounce the CPA back to the Transactions page in
+    // No-Contact Review mode so the copilot header + blue Step 3 card
+    // stay visible while the NextStepCard handoff replaces the table.
+    return <NoContactReviewDoneRedirect />;
   }
+  return null;
+}
+
+function NoContactReviewDoneRedirect() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    navigate("/accounting/transactions?noContactReview=1&done=1", { replace: true });
+  }, [navigate]);
   return null;
 }
 
