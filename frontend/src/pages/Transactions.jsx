@@ -191,6 +191,14 @@ export default function Transactions() {
   const lrCount = parseInt(params.get("count") || "0", 10);
   const lrTotalAmount = parseFloat(params.get("total_amount") || "0");
   const letsReviewNav = useLetsReviewNav();
+  // Declare No-Contact Review mode flags up here (they were previously
+  // defined further down) so the bulk-categorize useEffect below can
+  // reference them without hitting a Temporal Dead Zone error.
+  const isNoContactReview = params.get("noContactReview") === "1";
+  const ncrGroupKey = params.get("group_key") || "";
+  const ncrLabel = params.get("label") || "";
+  const noContactReviewNav = useNoContactReviewNav();
+  const isReviewMode = isLetsReview || isNoContactReview;
   // Inline bulk-categorize dropdown in the Let's-Review info card — lets
   // the CPA one-click categorize every currently-visible row for the
   // contact into a chosen GAAP account, bypassing the AI chat entirely.
@@ -205,12 +213,12 @@ export default function Transactions() {
   // starts, so we can restore visuals if the user changes their mind
   // (picks a different account or clears the dropdown).
   const bulkPreviewOriginalRef = useRef(null);
-  // Reset the preview whenever the current Let's Review contact changes
-  // — new stepper page, fresh choice.
+  // Reset the preview whenever the current Let's Review contact / No-
+  // Contact Review group changes — new stepper page, fresh choice.
   useEffect(() => {
     setBulkPreviewAcctId("");
     bulkPreviewOriginalRef.current = null;
-  }, [lrContactId, isLetsReview]);
+  }, [lrContactId, isLetsReview, ncrGroupKey, isNoContactReview]);
   const previewBulkCategory = (accountId) => {
     // Snapshot originals the first time the CPA touches the dropdown
     // for this contact so we can revert cleanly on re-pick / clear.
@@ -264,34 +272,40 @@ export default function Transactions() {
       );
       const updated = res.data?.updated || 0;
       toast.success(
-        `Categorized ${updated} ${lrContactName || "contact"} row${updated === 1 ? "" : "s"} to ${acct?.name || "the selected account"}.`
+        `Categorized ${updated} ${lrContactName || "row"}${updated === 1 || lrContactName ? "" : "s"} to ${acct?.name || "the selected account"}.`
       );
       // Clear the preview snapshot — the stepper will auto-advance and
       // the freshly-loaded rows should reflect the persisted state.
       bulkPreviewOriginalRef.current = null;
       setBulkPreviewAcctId("");
-      // Fire the same event AiPanel emits after bulk-approve so the
-      // Transactions page's cleanup-completed listener auto-advances the
-      // Let's Review stepper to the next uncleared contact.
-      emitAction("cleanup-completed", {
-        contact_id: lrContactId,
-        kind: "contact_in_uncat",
-        count: updated,
-      });
+      // Emit the same cleanup-completed event AiPanel emits after
+      // bulk-approve so the Transactions page's stepper listener knows
+      // to auto-advance. For Let's Review it fires `contact_in_uncat`
+      // (routes back to /accounting/lets-review); for No-Contact Review
+      // it fires `no_contact_group` with the group_key so the listener
+      // routes to /accounting/no-contact-review instead.
+      if (isNoContactReview) {
+        emitAction("cleanup-completed", {
+          group_key: ncrGroupKey,
+          kind: "no_contact_group",
+          count: updated,
+        });
+      } else {
+        emitAction("cleanup-completed", {
+          contact_id: lrContactId,
+          kind: "contact_in_uncat",
+          count: updated,
+        });
+      }
     } catch (e) {
       toast.error("Bulk-categorize failed — try again?");
     } finally {
       setBulkCatBusy(false);
     }
   };
-  // No-Contact Review (Step 3) — same params as Let's Review but keyed on a
-  // description signature instead of a contact_id. `ncr*` state feeds the
-  // stepper info box and drives the `desc_group` server filter.
-  const isNoContactReview = params.get("noContactReview") === "1";
-  const ncrGroupKey = params.get("group_key") || "";
-  const ncrLabel = params.get("label") || "";
-  const noContactReviewNav = useNoContactReviewNav();
-  const isReviewMode = isLetsReview || isNoContactReview;
+  // No-Contact Review (Step 3) mode flags moved to top of component
+  // (see the group above `bulkPreviewAcctId`) so the bulk-categorize
+  // useEffect can safely reference them.
   const [txns, setTxns] = useState([]);
   const [accts, setAccts] = useState([]);
   const [invoices, setInvoices] = useState([]);
@@ -955,12 +969,49 @@ export default function Transactions() {
             >
               {ncrLabel}
             </div>
-            <div className="mt-2 flex items-center gap-1 justify-end">
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <label className="text-[9px] uppercase tracking-wider text-slate-500 font-semibold">
+                Bulk-categorize all {(txns || []).length} row{(txns || []).length === 1 ? "" : "s"}
+              </label>
+              <button
+                data-testid="no-contact-review-bulk-approve"
+                onClick={applyBulkCategoryPreview}
+                disabled={!bulkPreviewAcctId || bulkCatBusy || (txns || []).length === 0}
+                title={bulkPreviewAcctId ? "Save this category to every visible row in this group." : "Pick a category below to enable Approve."}
+                className="text-[11px] font-semibold rounded-md border border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600 hover:border-emerald-600 px-2.5 py-1 disabled:opacity-40 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:border-slate-300"
+              >
+                {bulkCatBusy ? "Saving…" : "Approve"}
+              </button>
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <select
+                data-testid="no-contact-review-bulk-category"
+                disabled={bulkCatBusy || (txns || []).length === 0}
+                value={bulkPreviewAcctId}
+                onChange={(e) => previewBulkCategory(e.target.value)}
+                title="Preview a category for every visible row. Click Approve to save."
+                className="flex-1 min-w-0 px-2 py-1 rounded-md border border-cyan-300 bg-white text-[11px] font-medium text-slate-800 hover:border-cyan-400 disabled:opacity-60 disabled:cursor-wait"
+              >
+                <option value="">
+                  {bulkCatBusy ? "Applying…" : "Choose category…"}
+                </option>
+                {(accts || [])
+                  .filter((a) =>
+                    ["expense", "income", "cost_of_goods_sold",
+                     "other_income", "other_expense"].includes(a.type)
+                    && !["9999", "6999", "4999"].includes(a.code)
+                  )
+                  .map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.code} · {a.name}
+                    </option>
+                  ))}
+              </select>
               <button
                 onClick={() => noContactReviewNav.prev && noContactReviewNav.prev()}
                 disabled={!noContactReviewNav.prev}
                 data-testid="no-contact-review-prev"
-                className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
               >
                 ← Prev
               </button>
@@ -968,7 +1019,7 @@ export default function Transactions() {
                 onClick={() => noContactReviewNav.next && noContactReviewNav.next()}
                 disabled={!noContactReviewNav.next}
                 data-testid="no-contact-review-next"
-                className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
               >
                 Next →
               </button>
