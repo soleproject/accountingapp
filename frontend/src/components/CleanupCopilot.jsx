@@ -1312,32 +1312,29 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         </div>
         <div className="flex items-center gap-2">
           {activeStep && !inline && (
-            <button
-              type="button"
+            <div
               data-testid="cleanup-active-step-badge"
-              onClick={() => activeStep.cta_link && navigate(activeStep.cta_link)}
-              title={`Go to Step ${activeStep.n} — ${activeStep.title}`}
-              className="group hidden md:flex items-center gap-3 w-[340px] max-w-[38vw] text-left rounded-xl border border-fuchsia-200 bg-gradient-to-br from-fuchsia-50 via-white to-indigo-50 px-3.5 py-2 shadow-sm hover:border-fuchsia-300 hover:shadow transition-all"
+              className="ai-shimmer-bubble hidden md:flex items-center gap-4 w-[400px] max-w-[42vw] rounded-xl px-4 py-3 shadow-sm"
             >
               <div className="flex-1 min-w-0">
-                <div className="font-heading font-semibold text-slate-900 text-sm leading-tight truncate">
+                <div className="font-heading font-semibold text-slate-900 text-[15px] leading-tight truncate">
                   Step {activeStep.n}: {activeStep.title}
                 </div>
                 {activeStep.subtitle && (
-                  <div className="mt-0.5 text-[11px] text-slate-500 leading-snug line-clamp-2">
+                  <div className="mt-1 text-[12px] text-slate-500 leading-snug line-clamp-2">
                     {activeStep.subtitle}
                   </div>
                 )}
               </div>
-              <div className="shrink-0 flex flex-col items-end justify-center pl-2 border-l border-fuchsia-200/70">
-                <div className="font-heading text-2xl font-bold text-slate-900 leading-none tabular-nums">
+              <div className="shrink-0 flex flex-col items-end justify-center pl-3 border-l border-slate-200">
+                <div className="font-heading text-3xl font-bold text-slate-900 leading-none tabular-nums">
                   {activeStep.count.toLocaleString()}
                 </div>
-                <div className="mt-1 text-[9px] uppercase tracking-wider text-slate-500 font-semibold whitespace-nowrap">
+                <div className="mt-1.5 text-[10px] uppercase tracking-wider text-slate-500 font-semibold whitespace-nowrap">
                   {activeStep.unit}
                 </div>
               </div>
-            </button>
+            </div>
           )}
           {(() => {
             // The three action buttons (Let's review / Approve AI
