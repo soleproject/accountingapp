@@ -1322,29 +1322,64 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         </div>
         <div className="flex items-center gap-2">
           {activeStep && (
-            <div
-              data-testid="cleanup-active-step-badge"
-              className="ai-shimmer-bubble hidden md:flex items-center gap-4 w-[400px] max-w-[42vw] rounded-xl px-4 py-3 shadow-sm"
-            >
-              <div className="flex-1 min-w-0">
-                <div className="font-heading font-semibold text-slate-900 text-[15px] leading-tight truncate">
-                  Step {activeStep.n}: {activeStep.title}
-                </div>
-                {activeStep.subtitle && (
-                  <div className="mt-1 text-[12px] text-slate-500 leading-snug line-clamp-2">
-                    {activeStep.subtitle}
+            forceStep ? (
+              // On a dedicated step page (e.g. AI Cleanup Review = Step 1)
+              // the card is a static "you are here" marker — blue outline,
+              // no shimmer, no click.
+              <div
+                data-testid="cleanup-active-step-badge"
+                className="hidden md:flex items-center gap-4 w-[400px] max-w-[42vw] rounded-xl border-2 border-blue-500 bg-white px-4 py-3 shadow-sm"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="font-heading font-semibold text-slate-900 text-[15px] leading-tight truncate">
+                    Step {activeStep.n}: {activeStep.title}
                   </div>
-                )}
-              </div>
-              <div className="shrink-0 flex flex-col items-end justify-center pl-3 border-l border-slate-200">
-                <div className="font-heading text-3xl font-bold text-slate-900 leading-none tabular-nums">
-                  {activeStep.count.toLocaleString()}
+                  {activeStep.subtitle && (
+                    <div className="mt-1 text-[12px] text-slate-500 leading-snug line-clamp-2">
+                      {activeStep.subtitle}
+                    </div>
+                  )}
                 </div>
-                <div className="mt-1.5 text-[10px] uppercase tracking-wider text-slate-500 font-semibold whitespace-nowrap">
-                  {activeStep.unit}
+                <div className="shrink-0 flex flex-col items-end justify-center pl-3 border-l border-slate-200">
+                  <div className="font-heading text-3xl font-bold text-slate-900 leading-none tabular-nums">
+                    {activeStep.count.toLocaleString()}
+                  </div>
+                  <div className="mt-1.5 text-[10px] uppercase tracking-wider text-slate-500 font-semibold whitespace-nowrap">
+                    {activeStep.unit}
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              // On the main Transactions page, the card is a clickable link
+              // to the next-open step's page with the rainbow shimmer to
+              // signal "AI action available — pick this up."
+              <button
+                type="button"
+                data-testid="cleanup-active-step-badge"
+                onClick={() => activeStep.cta_link && navigate(activeStep.cta_link)}
+                title={`Go to Step ${activeStep.n} — ${activeStep.title}`}
+                className="ai-shimmer-bubble hidden md:flex items-center gap-4 w-[400px] max-w-[42vw] rounded-xl px-4 py-3 shadow-sm text-left cursor-pointer transition-shadow hover:shadow-md"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="font-heading font-semibold text-slate-900 text-[15px] leading-tight truncate">
+                    Step {activeStep.n}: {activeStep.title}
+                  </div>
+                  {activeStep.subtitle && (
+                    <div className="mt-1 text-[12px] text-slate-500 leading-snug line-clamp-2">
+                      {activeStep.subtitle}
+                    </div>
+                  )}
+                </div>
+                <div className="shrink-0 flex flex-col items-end justify-center pl-3 border-l border-slate-200">
+                  <div className="font-heading text-3xl font-bold text-slate-900 leading-none tabular-nums">
+                    {activeStep.count.toLocaleString()}
+                  </div>
+                  <div className="mt-1.5 text-[10px] uppercase tracking-wider text-slate-500 font-semibold whitespace-nowrap">
+                    {activeStep.unit}
+                  </div>
+                </div>
+              </button>
+            )
           )}
           {(() => {
             // The three action buttons (Let's review / Approve AI
