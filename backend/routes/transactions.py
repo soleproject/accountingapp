@@ -458,13 +458,34 @@ async def bulk_approve_ai_ready(
         "human_reviewed": {"$ne": True},
         "category_account_id": {"$nin": [None, ""]},
         "category_account_code": {"$nin": ["9999", "6999", "4999"]},
-        "contact_id": {"$exists": True, "$nin": [None, ""]},
     }):
-        key = f"{t['contact_id']}::{t.get('category_account_id')}"
+        # Bucketing key: prefer contact_id when present; otherwise fall back
+        # to the normalized merchant string so no-contact rows still get
+        # grouped and mass-approvable. Without this, "Amazon" rows that
+        # didn't get contact-tagged (e.g. Plaid returned no clean
+        # merchant_name for the payment channel) would silently drop out
+        # of the review — 316 LLC showed 1,707 AI-categorized but only
+        # 1,689 approvable (18 no-contact rows hidden).
+        contact_key = t.get("contact_id")
+        if not contact_key:
+            merchant_raw = (t.get("merchant") or t.get("description") or "").strip()
+            if not merchant_raw:
+                # Truly nothing to identify — skip. Detect Transfers or the
+                # No-Contact Review workflow will catch these.
+                continue
+            contact_key = f"nc::{merchant_raw.lower()[:60]}"
+        key = f"{contact_key}::{t.get('category_account_id')}"
         b = buckets[key]
         b["count"] += 1
         b["amount"] += abs(float(t.get("amount") or 0.0))
-        b["contact_name"] = t.get("contact_name") or ""
+        # Use the raw merchant string as the display name for no-contact
+        # buckets so the CPA sees "Amazon" instead of empty / "None".
+        b["contact_name"] = (
+            t.get("contact_name")
+            or t.get("merchant")
+            or t.get("description")
+            or ""
+        )
         b["txn_ids"].append(t["id"])
         # Track how many rows in this bucket are `needs_review=True` so the
         # UI can render a "N flagged" pill — makes it clear that flagged
@@ -478,8 +499,8 @@ async def bulk_approve_ai_ready(
                 "name": t.get("category_account_name"),
             }
         # Cache contact_id on the bucket so we can still expand contact_ids-based
-        # filters (backwards-compat).
-        b["contact_id"] = t["contact_id"]
+        # filters (backwards-compat). For no-contact buckets this stays None.
+        b["contact_id"] = t.get("contact_id")
 
     # Sort by count desc so the biggest wins float to the top.
     eligible = sorted(buckets.items(), key=lambda kv: -kv[1]["count"])
@@ -623,6 +644,14 @@ async def bulk_approve_ai_ready(
             target_acct_code = override.get("code") if override else b["account"].get("code")
             target_acct_name = override.get("name") if override else b["account"].get("name")
 
+            # No-contact buckets — approve the rows but DON'T create a rule.
+            # Without a contact tag, the only rule we could create is a raw
+            # merchant_contains against the description, which risks capturing
+            # unrelated future rows that happen to share a substring. Safer to
+            # let AI re-decide each future occurrence than to lock in a
+            # loose match.
+            if not contact_id:
+                continue
             # Ambiguous vendor — skip.
             if buckets_per_contact.get(contact_id, 0) > 1:
                 continue
