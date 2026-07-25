@@ -776,6 +776,7 @@ export default function Transactions() {
         currentId={currentId}
         autoTrigger={params.get("auto") === "1"}
         hideChips={true}
+        forceStep={isLetsReview ? 2 : (isNoContactReview ? 3 : null)}
         onApplyAction={(a) => {
           // Filter the list first so the user sees exactly what the AI is about
           // to touch, then kick off a conversational inquiry in the AI panel.
