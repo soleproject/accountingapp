@@ -193,11 +193,52 @@ export default function Transactions() {
   // Inline bulk-categorize dropdown in the Let's-Review info card — lets
   // the CPA one-click categorize every currently-visible row for the
   // contact into a chosen GAAP account, bypassing the AI chat entirely.
+  // The dropdown now runs in PREVIEW mode — picking a category only
+  // updates the on-screen category column for every visible row (via
+  // local `txns` state) so the CPA can eyeball the change before
+  // committing. Clicking the Approve button next to the header fires
+  // the actual bulk-save API call.
   const [bulkCatBusy, setBulkCatBusy] = useState(false);
-  const bulkCategorizeCurrentContact = async (accountId) => {
+  const [bulkPreviewAcctId, setBulkPreviewAcctId] = useState("");
+  // Snapshot the original category_account_id per row when a preview
+  // starts, so we can restore visuals if the user changes their mind
+  // (picks a different account or clears the dropdown).
+  const bulkPreviewOriginalRef = useRef(null);
+  // Reset the preview whenever the current Let's Review contact changes
+  // — new stepper page, fresh choice.
+  useEffect(() => {
+    setBulkPreviewAcctId("");
+    bulkPreviewOriginalRef.current = null;
+  }, [lrContactId, isLetsReview]);
+  const previewBulkCategory = (accountId) => {
+    // Snapshot originals the first time the CPA touches the dropdown
+    // for this contact so we can revert cleanly on re-pick / clear.
+    if (bulkPreviewOriginalRef.current === null) {
+      bulkPreviewOriginalRef.current = Object.fromEntries(
+        (txns || []).map((t) => [t.id, t.category_account_id || ""])
+      );
+    }
+    setBulkPreviewAcctId(accountId || "");
+    setTxns((prev) =>
+      (prev || []).map((t) => {
+        if (!accountId) {
+          // Revert to original when cleared.
+          const orig = bulkPreviewOriginalRef.current?.[t.id] ?? "";
+          return { ...t, category_account_id: orig || null };
+        }
+        return { ...t, category_account_id: accountId };
+      })
+    );
+  };
+  const applyBulkCategoryPreview = async () => {
+    const accountId = bulkPreviewAcctId;
     if (!accountId || bulkCatBusy || !currentId) return;
     const acct = accts.find((a) => a.id === accountId);
-    const ids = (txns || []).map((t) => t.id);
+    // Use the snapshotted row IDs so a mid-flight refresh doesn't shrink
+    // the batch. Fall back to the currently-visible rows.
+    const ids = bulkPreviewOriginalRef.current
+      ? Object.keys(bulkPreviewOriginalRef.current)
+      : (txns || []).map((t) => t.id);
     if (ids.length === 0) {
       toast.info("No visible rows to categorize.");
       return;
@@ -224,6 +265,10 @@ export default function Transactions() {
       toast.success(
         `Categorized ${updated} ${lrContactName || "contact"} row${updated === 1 ? "" : "s"} to ${acct?.name || "the selected account"}.`
       );
+      // Clear the preview snapshot — the stepper will auto-advance and
+      // the freshly-loaded rows should reflect the persisted state.
+      bulkPreviewOriginalRef.current = null;
+      setBulkPreviewAcctId("");
       // Fire the same event AiPanel emits after bulk-approve so the
       // Transactions page's cleanup-completed listener auto-advances the
       // Let's Review stepper to the next uncleared contact.
@@ -817,19 +862,30 @@ export default function Transactions() {
             >
               {lrContactName}
             </div>
-            <div className="mt-2">
-              <label className="text-[9px] uppercase tracking-wider text-slate-500 font-semibold block mb-1">
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <label className="text-[9px] uppercase tracking-wider text-slate-500 font-semibold">
                 Bulk-categorize all {(txns || []).length} row{(txns || []).length === 1 ? "" : "s"}
               </label>
+              <button
+                data-testid="lets-review-bulk-approve"
+                onClick={applyBulkCategoryPreview}
+                disabled={!bulkPreviewAcctId || bulkCatBusy || (txns || []).length === 0}
+                title={bulkPreviewAcctId ? "Save this category to every visible row for this contact." : "Pick a category below to enable Approve."}
+                className="text-[11px] font-semibold rounded-md border border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600 hover:border-emerald-600 px-2.5 py-1 disabled:opacity-40 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:border-slate-300"
+              >
+                {bulkCatBusy ? "Saving…" : "Approve"}
+              </button>
+            </div>
+            <div className="mt-2 flex items-center gap-2">
               <select
                 data-testid="lets-review-bulk-category"
                 disabled={bulkCatBusy || (txns || []).length === 0}
-                value=""
-                onChange={(e) => bulkCategorizeCurrentContact(e.target.value)}
-                title="Categorize every currently-visible row for this contact into the chosen account. Bypasses the AI chat."
-                className="w-full px-2 py-1.5 rounded-md border border-cyan-300 bg-white text-xs font-medium text-slate-800 hover:border-cyan-400 disabled:opacity-60 disabled:cursor-wait"
+                value={bulkPreviewAcctId}
+                onChange={(e) => previewBulkCategory(e.target.value)}
+                title="Preview a category for every visible row. Click Approve to save."
+                className="flex-1 min-w-0 px-2 py-1 rounded-md border border-cyan-300 bg-white text-[11px] font-medium text-slate-800 hover:border-cyan-400 disabled:opacity-60 disabled:cursor-wait"
               >
-                <option value="" disabled>
+                <option value="">
                   {bulkCatBusy ? "Applying…" : "Choose category…"}
                 </option>
                 {(accts || [])
@@ -848,13 +904,11 @@ export default function Transactions() {
                     </option>
                   ))}
               </select>
-            </div>
-            <div className="mt-2 flex items-center gap-1 justify-end">
               <button
                 onClick={() => letsReviewNav.prev && letsReviewNav.prev()}
                 disabled={!letsReviewNav.prev}
                 data-testid="lets-review-prev"
-                className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
               >
                 ← Prev
               </button>
@@ -862,7 +916,7 @@ export default function Transactions() {
                 onClick={() => letsReviewNav.next && letsReviewNav.next()}
                 disabled={!letsReviewNav.next}
                 data-testid="lets-review-next"
-                className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
               >
                 Next →
               </button>

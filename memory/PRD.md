@@ -39,6 +39,24 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Let's Review Bulk-Categorize Dropdown: Preview + Approve
+- **Reworked the inline dropdown** on the Let's Review info card
+  (`Transactions.jsx`) from instant-save to **preview + explicit approve**:
+  - Picking a category now updates every visible row's Category column
+    in local state only (no API call). Snapshots the originals so
+    changing the pick or clearing "Choose category…" cleanly reverts.
+  - Added an **Approve** button (green) on the same line as
+    "BULK-CATEGORIZE ALL X ROWS" — disabled until a category is
+    previewed, fires the existing bulk `apply-multi-bulk-approve-rule`
+    endpoint on click and auto-advances the stepper via the
+    `cleanup-completed` event.
+  - Moved the `<Select>` onto the same row as ← Prev / Next → to shrink
+    the info card vertical footprint.
+  - `data-testid="lets-review-bulk-approve"` added for e2e coverage.
+- No backend change — reuses the same `apply-multi-bulk-approve-rule`
+  invocation the prior instant-save handler used.
+
+
 ### Feb 2026 — Step 3a Transfer Review (retire auto-book)
 - **Retired the one-click "Detect transfers" button** on `Transactions.jsx`.
   Auto-book was error-prone (no reject path once posted) — replaced with a
