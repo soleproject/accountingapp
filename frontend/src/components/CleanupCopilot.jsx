@@ -89,6 +89,107 @@ function pitchFor(action, progress) {
   return action.why || action.label;
 }
 
+// Renders below the "Nothing to approve" empty state on the AI Cleanup
+// Review page. Reads the dashboard checklist so we know EXACTLY what
+// step comes next — Let's Review (if uncategorized-with-contact rows
+// exist), Transfer Review (if intercompany pairs exist), No-Contact
+// Review (if unbucketed rows remain), or Dashboard (if the whole close
+// is done). The dashboard chat sometimes shows its own "next step"
+// bubble, but this in-page card is the primary hand-off so the CPA
+// never feels stranded after a successful mass-approve.
+function NextStepCard({ currentId, inline, onClose }) {
+  const navigate = useNavigate();
+  const [next, setNext] = useState(null);
+  useEffect(() => {
+    if (!currentId) return;
+    api.get(`/companies/${currentId}/dashboard/firm-glance`).then(r => {
+      const t = r.data?.todos || {};
+      if ((t.step2?.count || 0) > 0) {
+        setNext({
+          step: 2,
+          title: t.step2.title || "Let's Review",
+          subtitle: t.step2.subtitle || "",
+          count: t.step2.count,
+          unit: t.step2.unit || "vendor groups",
+          cta_link: t.step2.cta_link || "/accounting/lets-review",
+        });
+      } else if ((t.step3?.count || 0) > 0) {
+        setNext({
+          step: 3,
+          title: t.step3.title || "Individual Review",
+          subtitle: t.step3.subtitle || "",
+          count: t.step3.count,
+          unit: t.step3.unit || "transactions",
+          cta_link: t.step3.cta_link || "/accounting/no-contact-review",
+        });
+      } else {
+        setNext({ step: null });
+      }
+    }).catch(() => setNext({ step: null }));
+  }, [currentId]);
+
+  if (!next) {
+    return (
+      <div className="rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-sm text-slate-500" data-testid="cleanup-next-step-loading">
+        Checking what's next…
+      </div>
+    );
+  }
+  if (!next.step) {
+    return (
+      <div className="rounded-xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-white px-5 py-4" data-testid="cleanup-next-step-done">
+        <div className="flex items-center gap-2 mb-1">
+          <Sparkles className="text-emerald-600" size={16} />
+          <div className="font-heading font-semibold text-slate-900">You've finished the cleanup checklist</div>
+        </div>
+        <div className="text-sm text-slate-600 mb-3">
+          Nothing else needs a decision right now. Head back to the dashboard to see the updated view.
+        </div>
+        <button
+          onClick={() => { onClose?.(); navigate("/dashboard"); }}
+          data-testid="cleanup-next-step-dashboard"
+          className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium"
+        >
+          Back to Dashboard →
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-xl border-2 border-cyan-300 bg-gradient-to-br from-cyan-50 via-white to-indigo-50 px-5 py-4 shadow-sm" data-testid={`cleanup-next-step-${next.step}`}>
+      <div className="flex items-center gap-2 mb-1">
+        <Sparkles className="text-cyan-600" size={16} />
+        <div className="font-heading font-semibold text-slate-900">
+          Step {next.step} is next: {next.title}
+        </div>
+      </div>
+      <div className="text-sm text-slate-600 mb-1">
+        <span className="font-semibold text-slate-900">{next.count.toLocaleString()}</span>{" "}
+        <span className="text-slate-500">{next.unit}</span> waiting for review.
+      </div>
+      {next.subtitle && (
+        <div className="text-xs text-slate-500 mb-3">{next.subtitle}</div>
+      )}
+      <div className="flex items-center gap-2 mt-3">
+        <button
+          onClick={() => { onClose?.(); navigate(next.cta_link); }}
+          data-testid={`cleanup-next-step-${next.step}-start`}
+          className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-semibold shadow-sm"
+        >
+          Start Step {next.step} →
+        </button>
+        <button
+          onClick={() => { onClose?.(); navigate("/dashboard"); }}
+          data-testid={`cleanup-next-step-${next.step}-dashboard`}
+          className="inline-flex items-center gap-1 px-3 py-2 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-sm text-slate-700"
+        >
+          Dashboard
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null, inlineTitle = null, inlineSubtitle = null, initialViewMode = null, autoStartTour = false, hideChips = false }) {
   const navigate = useNavigate();
   const { focus } = useAiFocus();
@@ -763,9 +864,10 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
               <>
                 <div className="text-base font-semibold text-slate-900 mb-1">Nothing to approve</div>
                 <div className="text-sm text-slate-600 mb-4">No AI-categorized-unreviewed rows found for vendors with a unanimous AI opinion. You're clean.</div>
+                <NextStepCard currentId={currentId} inline={inline} onClose={() => setMegaPreview(null)} />
                 {!inline && (
                   <button onClick={() => setMegaPreview(null)}
-                          className="w-full py-2 rounded-md bg-slate-900 text-white text-sm font-medium">Close</button>
+                          className="mt-3 w-full py-2 rounded-md bg-slate-900 text-white text-sm font-medium">Close</button>
                 )}
               </>
             ) : (
