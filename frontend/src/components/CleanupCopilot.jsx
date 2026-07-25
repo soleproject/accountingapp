@@ -504,6 +504,30 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId]);
 
+  // Fetch the dashboard checklist so the copilot header can show a compact
+  // "STEP N · count" badge alongside the CTAs. Piggybacks on the same
+  // firm-glance endpoint the dashboard tiles use — cheap and cached
+  // server-side per (cid, month).
+  const [checklistTodos, setChecklistTodos] = useState(null);
+  useEffect(() => {
+    if (!currentId || inline) return;
+    api.get(`/companies/${currentId}/dashboard/firm-glance`)
+      .then((r) => setChecklistTodos(r.data?.todos || null))
+      .catch(() => setChecklistTodos(null));
+  }, [currentId, inline, data]);
+  // Pick the earliest step still open (count > 0). That's the step the CPA
+  // is currently on — matches the dashboard checklist numbering.
+  const activeStep = (() => {
+    if (!checklistTodos) return null;
+    for (const n of [1, 2, 3]) {
+      const s = checklistTodos[`step${n}`];
+      if (s && (s.count || 0) > 0) {
+        return { n, title: s.title, count: s.count, unit: s.unit };
+      }
+    }
+    return null;
+  })();
+
   // Auto-advance: when the AiPanel confirms a cleanup batch is done, dismiss
   // that contact from our queue, reload the actions list, and — if there's
   // another Fix Now candidate — automatically kick it off so the user rolls
@@ -1280,6 +1304,21 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
           ) : null}
         </div>
         <div className="flex items-center gap-2">
+          {activeStep && !inline && (
+            <div
+              data-testid="cleanup-active-step-badge"
+              className="hidden md:flex flex-col items-start justify-center rounded-md border border-indigo-200 bg-indigo-50/70 px-2.5 py-1 leading-tight"
+              title={`You're on Step ${activeStep.n} of the cleanup checklist — ${activeStep.title}`}
+            >
+              <span className="text-[9px] uppercase tracking-wider text-indigo-700 font-semibold">
+                Step {activeStep.n} of 3
+              </span>
+              <span className="text-[11px] font-semibold text-slate-900 tabular-nums">
+                {activeStep.count.toLocaleString()}{" "}
+                <span className="font-normal text-slate-500">{activeStep.unit}</span>
+              </span>
+            </div>
+          )}
           {(() => {
             const aiReadyCount = data?.progress?.mega_ready_rows || 0;
             const hasApprove = aiReadyCount > 0;
