@@ -147,28 +147,40 @@ def client_welcome_first_time(*, client_name: str, pro_name: str,
                               brand_name: Optional[str] = None) -> tuple[str, str]:
     """First-time client welcome. If ``payment_url`` is supplied (i.e.
     the Pro selected "Client — Email bill" as the payer), the email
-    surfaces a "Pay & activate" CTA above the password step and makes
-    the copy explicit that access is unlocked after payment.
+    surfaces a "Pay & activate" CTA — but for a first-time client that
+    button routes to the ``set_password_url`` because a password is
+    prerequisite for anything to work. After the user picks a password
+    the app auto-logs them in and the ``BillingLockedModal`` immediately
+    prompts for the Stripe checkout. Copy is written to make that
+    two-step flow obvious.
+
+    ``payment_url`` is still accepted (and stored in the token's client
+    context via the ``next`` query param if the caller wants), even
+    though the primary button leads to set-password — so returning-
+    client callers don't have to branch.
     """
     firm = firm_name or pro_name
     brand = (brand_name or "").strip() or "SmartBooks"
     brand_e = escape(brand)
-    pay_block = ""
+    # For first-time clients we always route through set-password. The
+    # welcome email carries a single primary CTA reflecting the payer
+    # intent so the client knows the outcome ("activate subscription"),
+    # even though the URL is the password-set link.
     if payment_url:
-        pay_block = f"""
-      <div style="{_P}"><b>Before you get in, activate your subscription.</b>
-        {escape(pro_name)} set your billing so you pay directly — one
-        secure Stripe checkout, no card details shared with your bookkeeper.</div>
-      <div style="padding:14px 0 6px;">
-        <a href="{escape(payment_url)}" style="{_BTN}">Pay &amp; activate books →</a>
-      </div>
-      <div style="{_MUTE}">
-        After payment, your books unlock instantly and you'll be redirected
-        to set your password.
-      </div>
-      <div style="border-top:1px solid #e2e8f0;margin:22px 0 4px;"></div>
-      <div style="{_P}"><b>Already paid?</b> Set your password to log in:</div>
-        """
+        primary_url = set_password_url  # password comes first
+        primary_label = "Set password &amp; activate →"
+        activation_hint = (
+            f"<b>Two quick steps:</b> pick a password, then a single Stripe "
+            f"checkout to activate <b>{escape(company_name)}</b>. No card "
+            f"details are shared with your bookkeeper."
+        )
+    else:
+        primary_url = set_password_url
+        primary_label = "Set your password →"
+        activation_hint = (
+            "Pick a password. It takes about 20 seconds and this link is "
+            "unique to you."
+        )
     inner = f"""
       <div style="{_H1}">Welcome to {brand_e} 👋</div>
       <div style="{_P}">
@@ -177,14 +189,12 @@ def client_welcome_first_time(*, client_name: str, pro_name: str,
         <b>{escape(company_name)}</b>'s books here on {brand_e} — a modern,
         AI-assisted accounting platform.
       </div>
-      {pay_block}
+      <div style="{_P}">{activation_hint}</div>
       <div style="padding:14px 0 6px;">
-        <a href="{escape(set_password_url)}" style="{_BTN}">Set your password →</a>
+        <a href="{escape(primary_url)}" style="{_BTN}">{primary_label}</a>
       </div>
       <div style="{_MUTE}">
-        Once you're in you'll see a short onboarding tour, your bank
-        connections, and the questions {escape(pro_name)} needs your help
-        with.<br><br>
+        {"After you set your password, we'll unlock the Stripe checkout automatically — no extra login needed." if payment_url else f"Once you're in you'll see a short onboarding tour, your bank connections, and the questions {escape(pro_name)} needs your help with."}<br><br>
         This link expires in 7 days. If it does, ask {escape(pro_name)} to
         re-send it.
       </div>
