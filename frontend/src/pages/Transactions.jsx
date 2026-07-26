@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import {
   Check, Wand2, Split, Link as LinkIcon, RotateCw, Plus, X, Trash2, AlertTriangle, ShieldCheck,
   ChevronLeft, ChevronRight, Search, Calendar, XCircle, Tag, Sparkles, MoreHorizontal,
-  List as ListIcon, LayoutGrid, ArrowLeftRight, HelpCircle,
+  List as ListIcon, LayoutGrid, ArrowLeftRight, HelpCircle, Pencil,
 } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import CleanupCopilot, { NextStepCard } from "@/components/CleanupCopilot";
@@ -27,7 +27,7 @@ const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
 // AI re-categorize, Split, and Link-to-invoice/bill. Opens on click, closes
 // on outside click or Escape. Positioned above the button so the menu never
 // clips off the bottom of the viewport on the last few rows.
-function RowMoreMenu({ t, onRecategorize, onSplit, onLink, onDelete, onAskClient }) {
+function RowMoreMenu({ t, onEdit, onRecategorize, onSplit, onLink, onDelete, onAskClient }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef(null);
   const menuRef = useRef(null);
@@ -67,6 +67,10 @@ function RowMoreMenu({ t, onRecategorize, onSplit, onLink, onDelete, onAskClient
           data-testid={`txn-more-menu-${t.id}`}
           className="absolute right-0 z-30 mt-1 w-52 rounded-md border border-slate-200 bg-white shadow-lg py-1"
         >
+          <button data-testid={`txn-edit-${t.id}`} onClick={handle(onEdit)} className={item}>
+            <span>Edit transaction</span>
+            <Pencil size={13} className="text-slate-700" />
+          </button>
           <button data-testid={TID.txnRecategorize} onClick={handle(onRecategorize)} className={item}>
             <span>AI re-categorize</span>
             <RotateCw size={13} className="text-indigo-600" />
@@ -1505,6 +1509,7 @@ export default function Transactions() {
                       </button>
                       <RowMoreMenu
                         t={t}
+                        onEdit={() => setEditing(t)}
                         onRecategorize={() => recategorize(t.id)}
                         onSplit={() => setSplitting(t)}
                         onLink={() => setLinking(t)}
@@ -1538,6 +1543,7 @@ export default function Transactions() {
       )}
 
       {creating && <ManualTxnModal accts={accts} currentId={currentId} contactOptions={filterContactOptions} onClose={() => { setCreating(false); load(); }} />}
+      {editing && <ManualTxnModal accts={accts} currentId={currentId} contactOptions={filterContactOptions} initialTxn={editing} onClose={() => { setEditing(null); load(); }} />}
       {splitting && <SplitModal txn={splitting} accts={accts} currentId={currentId} onClose={() => { setSplitting(null); load(); }} />}
       {linking && <LinkModal txn={linking} invoices={invoices} bills={bills} currentId={currentId} onClose={() => { setLinking(null); load(); }} />}
       {xferPreview && (
@@ -1799,21 +1805,24 @@ function ContactRollup({ data, busy, currentId }) {
   );
 }
 
-function ManualTxnModal({ accts, currentId, contactOptions = [], onClose }) {
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [description, setDescription] = useState("");
-  const [merchant, setMerchant] = useState("");
-  const [amount, setAmount] = useState("");
-  const [categoryId, setCategoryId] = useState("");
+function ManualTxnModal({ accts, currentId, contactOptions = [], initialTxn = null, onClose }) {
+  const isEdit = Boolean(initialTxn);
+  const [date, setDate] = useState(initialTxn?.date || new Date().toISOString().slice(0, 10));
+  const [description, setDescription] = useState(initialTxn?.description || "");
+  const [merchant, setMerchant] = useState(initialTxn?.merchant || "");
+  const [amount, setAmount] = useState(
+    initialTxn?.amount != null ? String(initialTxn.amount) : ""
+  );
+  const [categoryId, setCategoryId] = useState(initialTxn?.category_account_id || "");
   // Source Bank / Credit-card account the transaction hit. Optional —
   // when left blank the backend defaults to Business Checking (code
   // 1010) to preserve the double-entry invariant.
-  const [bankAccountId, setBankAccountId] = useState("");
+  const [bankAccountId, setBankAccountId] = useState(initialTxn?.bank_account_id || "");
   const bankOptions = (accts || []).filter((a) => ["bank", "credit_card"].includes(a.type));
   const [busy, setBusy] = useState(false);
   // Contact link — CPA can pick an existing contact from the search
   // combo or type a brand-new name to auto-create one on save.
-  const [contactId, setContactId] = useState("");
+  const [contactId, setContactId] = useState(initialTxn?.contact_id || "");
   const [contactQuery, setContactQuery] = useState("");
   const [contactMenuOpen, setContactMenuOpen] = useState(false);
   const filteredContacts = (() => {
@@ -1829,11 +1838,20 @@ function ManualTxnModal({ accts, currentId, contactOptions = [], onClose }) {
   // single category. Mirrors the SplitModal UX but lives inline in the
   // create flow so a CPA can post a proper multi-line JE without a
   // second click. Empty array = simple single-category mode.
-  const [splitsOn, setSplitsOn] = useState(false);
-  const [splitRows, setSplitRows] = useState([
-    { amount: "", category_account_id: "", description: "" },
-    { amount: "", category_account_id: "", description: "" },
-  ]);
+  const initialSplits = Array.isArray(initialTxn?.splits) ? initialTxn.splits : [];
+  const [splitsOn, setSplitsOn] = useState(initialSplits.length > 0);
+  const [splitRows, setSplitRows] = useState(
+    initialSplits.length > 0
+      ? initialSplits.map((s) => ({
+          amount: s.amount != null ? String(s.amount) : "",
+          category_account_id: s.category_account_id || "",
+          description: s.description || "",
+        }))
+      : [
+          { amount: "", category_account_id: "", description: "" },
+          { amount: "", category_account_id: "", description: "" },
+        ]
+  );
   const amtNum = parseFloat(amount || 0) || 0;
   const splitTotal = splitRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
   const splitsBalance = Math.abs(splitTotal - amtNum) < 0.01;
@@ -1867,20 +1885,28 @@ function ManualTxnModal({ accts, currentId, contactOptions = [], onClose }) {
           return;
         }
       }
-      await api.post(`/companies/${currentId}/transactions`, {
+      const payload = {
         date, description, merchant, amount: amtNum,
         bank_account_id: bankAccountId || null,
         category_account_id: splitsOn ? null : (categoryId || null),
-        auto_categorize: !splitsOn && !categoryId,
         splits: splitsOn ? splitRows.map((r) => ({
           amount: parseFloat(r.amount) || 0,
           category_account_id: r.category_account_id,
           description: r.description,
-        })) : null,
+        })) : (isEdit ? [] : null),
         contact_id: finalContactId || null,
         contact_name: finalContactName || null,
-      });
-      toast.success(splitsOn ? "Split transaction created" : "Transaction created");
+      };
+      if (isEdit) {
+        await api.patch(`/companies/${currentId}/transactions/${initialTxn.id}`, payload);
+        toast.success(splitsOn ? "Split transaction updated" : "Transaction updated");
+      } else {
+        await api.post(`/companies/${currentId}/transactions`, {
+          ...payload,
+          auto_categorize: !splitsOn && !categoryId,
+        });
+        toast.success(splitsOn ? "Split transaction created" : "Transaction created");
+      }
       onClose();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to save");
@@ -1889,7 +1915,7 @@ function ManualTxnModal({ accts, currentId, contactOptions = [], onClose }) {
     }
   };
   return (
-    <Modal title="Add manual transaction" onClose={onClose} wide={splitsOn}>
+    <Modal title={isEdit ? "Edit transaction" : "Add manual transaction"} onClose={onClose} wide={splitsOn}>
       <div className="space-y-3 text-sm">
         <div><label className="text-xs text-slate-600">Date</label>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border rounded px-2 py-1.5" /></div>
@@ -1921,7 +1947,7 @@ function ManualTxnModal({ accts, currentId, contactOptions = [], onClose }) {
             type="text"
             placeholder="Search or type a new name…"
             value={contactId
-              ? (contactOptions.find((c) => c.id === contactId) || {}).name || ""
+              ? ((contactOptions.find((c) => c.id === contactId) || {}).name || initialTxn?.contact_name || "")
               : contactQuery}
             onFocus={() => setContactMenuOpen(true)}
             onChange={(e) => {

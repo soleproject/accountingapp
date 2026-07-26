@@ -34,8 +34,12 @@ class CompanyCreate(BaseModel):
 class TransactionUpdate(BaseModel):
     category_account_id: Optional[str] = None
     description: Optional[str] = None
+    merchant: Optional[str] = None
     amount: Optional[float] = None
     date: Optional[str] = None
+    bank_account_id: Optional[str] = None
+    contact_id: Optional[str] = None
+    contact_name: Optional[str] = None
     needs_review: Optional[bool] = None
     human_reviewed: Optional[bool] = None
     posted: Optional[bool] = None

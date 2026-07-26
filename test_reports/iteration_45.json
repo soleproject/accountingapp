@@ -1,0 +1,36 @@
+{
+  "summary": "Verified P0 'Edit transaction' feature end-to-end. Backend: 6/6 pytest cases pass covering PATCH updates for merchant/description/amount/date/bank/category, split-sum validation (success + 400 mismatch + empty clears), and firm-glance cache invalidation. Frontend: Row 3-dot menu shows 'Edit transaction' as first item with pencil icon (data-testid txn-edit-{id}); clicking opens modal titled 'Edit transaction' pre-populated with Date, Account, Contact, Merchant, Description, Amount and (when applicable) Splits toggle on with per-row splits filled. Editing merchant + description and clicking Save fires PATCH /api/companies/{cid}/transactions/{tid}, closes modal, shows 'Transaction updated' toast and updates row inline. Manual Transaction (create) flow still opens the 'Add manual transaction' modal — unchanged.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Edit transaction modal", "issues": [
+        "Missing data-testid on Date, Merchant, Description, Amount inputs and the single-category picker. Spec called for data-testids `manual-txn-merchant`, `manual-txn-description`, `manual-txn-amount`, `manual-txn-date`, `manual-txn-category-picker`. Only `manual-txn-bank-account`, `manual-txn-contact-input`, `manual-txn-splits-toggle`, `manual-txn-splits-panel`, `manual-txn-split-cat-{i}`, `manual-txn-split-add`, `save-btn`, `cancel-btn` are present. Feature works, but downstream automation must fall back to label-based selectors."
+      ]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter45_txn_edit.py",
+    "/app/test_reports/pytest/iter45_txn_edit.xml"
+  ],
+  "action_items": [
+    "Add data-testid attributes to remaining ManualTxnModal inputs: manual-txn-date, manual-txn-merchant, manual-txn-description, manual-txn-amount, manual-txn-category-picker to match the E2E test-id contract."
+  ],
+  "critical_code_review_comments": [
+    "PATCH endpoint correctly denormalizes bank_account_name / contact_name / category_account_code|name and auto-routes generic parent-liability buckets to per-payee sub-accounts.",
+    "Splits validation uses target amount = new amount if provided else existing.amount, which is the correct semantics; sum tolerance of 0.01 matches POST/create path — good consistency.",
+    "Splits path clears header category_account_id/code/name — prevents double-counting in ledger renders.",
+    "Merchant->category user override persisted to merchant_cache with confidence=1.0 source='user' — good pattern; consider also invalidating this cache entry if splits path is taken (currently only runs when category_account_id set)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter45_txn_edit.py"
+  ],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "100% of critical flows"},
+  "test_credentials": "pro@axiom.ai / pro123 (Pro CPA); company_id = 1829a9eb-7df2-4a31-afcf-7e50a514da7e (Bright Beans Coffee Co.)",
+  "seed_data_creation": "test_iter45 creates temporary TEST_ prefixed transactions via POST /api/companies/{cid}/transactions to test PATCH; these persist in the demo company DB. No cleanup fixture — main agent may want to prune 'TEST_' merchants periodically.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend PATCH endpoint is at /api/companies/{cid}/transactions/{tid}; there is NO GET single-transaction endpoint (405). Use list endpoint with q= filter, or read the PATCH response body. Manual create endpoint is POST /api/companies/{cid}/transactions (NOT /manual). Transactions page route is /accounting/transactions (accessed via company context by clicking 'Open books' then sidebar Transactions). Row 3-dot menu uses a popover, not role='menu', so query the edit button directly via [data-testid='txn-edit-{id}'].",
+  "rca of the issue": "N/A — feature functions as designed. Only remediation is adding a few missing data-testid attributes to Edit modal inputs for testability."
+}

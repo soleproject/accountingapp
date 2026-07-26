@@ -1178,6 +1178,18 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
         if inp.date:
             await assert_open(cid, inp.date)
     upd = {k: v for k, v in inp.model_dump(exclude_unset=True).items() if v is not None}
+    # Resolve bank account -> denormalize name so the row/table doesn't have
+    # to re-join accounts on every render.
+    if "bank_account_id" in upd:
+        bank = await db.accounts.find_one({"id": upd["bank_account_id"], "company_id": cid})
+        if bank:
+            upd["bank_account_name"] = bank["name"]
+    # Resolve contact -> denormalize name. If caller passed contact_name
+    # directly (e.g. brand-new contact just created), honor that.
+    if "contact_id" in upd and upd["contact_id"]:
+        contact = await db.contacts.find_one({"id": upd["contact_id"], "company_id": cid})
+        if contact:
+            upd["contact_name"] = contact.get("name") or upd.get("contact_name")
     if "category_account_id" in upd:
         acct = await db.accounts.find_one({"id": upd["category_account_id"], "company_id": cid})
         if acct:
@@ -1186,9 +1198,9 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
             # instrument-level.
             from liability_subaccounts import is_parent_liability_bucket, resolve_or_create_liability_subaccount
             if is_parent_liability_bucket(acct):
-                payee = existing.get("contact_name") if existing else None
-                if not payee and existing:
-                    payee = existing.get("merchant")
+                payee = upd.get("contact_name") or (existing.get("contact_name") if existing else None)
+                if not payee:
+                    payee = upd.get("merchant") or (existing.get("merchant") if existing else None)
                 child = await resolve_or_create_liability_subaccount(cid, acct, payee)
                 if child:
                     acct = child
@@ -1197,6 +1209,40 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
             upd["category_account_name"] = acct["name"]
         upd["human_reviewed"] = True
         upd["needs_review"] = False
+    # Splits payload — user edited the transaction and either changed the
+    # split lines or converted a single-category txn into a multi-category
+    # one. Validate the sum matches the header amount (using the new amount
+    # if the user changed it in the same edit, else the existing amount)
+    # within a cent, then persist. A split txn is inherently human-reviewed
+    # so we clear needs_review and mark it posted.
+    if "splits" in upd:
+        raw = upd["splits"] or []
+        target_amt = float(upd.get("amount", existing.get("amount") if existing else 0) or 0)
+        if raw:
+            clean = []
+            total = 0.0
+            for s in raw:
+                amt = float(s.get("amount") or 0)
+                total += amt
+                clean.append({
+                    "amount": round(amt, 2),
+                    "category_account_id": s.get("category_account_id") or None,
+                    "description": s.get("description") or "",
+                })
+            if abs(total - target_amt) > 0.01:
+                raise HTTPException(400, f"Split total {total:.2f} must equal amount {target_amt:.2f}")
+            upd["splits"] = clean
+            upd["human_reviewed"] = True
+            upd["needs_review"] = False
+            upd["posted"] = True
+            # Splits override single-category — clear the header category so
+            # the ledger renders from the split lines only.
+            upd["category_account_id"] = None
+            upd["category_account_code"] = None
+            upd["category_account_name"] = None
+        else:
+            # Empty list = user cleared splits back to single-category mode.
+            upd["splits"] = []
     upd["updated_at"] = now_iso()
     await db.transactions.update_one({"id": tid, "company_id": cid}, {"$set": upd})
     doc = await db.transactions.find_one({"id": tid, "company_id": cid})
