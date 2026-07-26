@@ -1814,11 +1814,17 @@ function ManualTxnModal({ accts, currentId, contactOptions = [], initialTxn = nu
     initialTxn?.amount != null ? String(initialTxn.amount) : ""
   );
   const [categoryId, setCategoryId] = useState(initialTxn?.category_account_id || "");
-  // Source Bank / Credit-card account the transaction hit. Optional —
-  // when left blank the backend defaults to Business Checking (code
-  // 1010) to preserve the double-entry invariant.
+  // Source Account the transaction hit. Pulled from all Asset + Liability
+  // rows on the Chart of Accounts (banks & savings live on the asset side,
+  // credit cards & lines of credit on the liability side — we don't hard-
+  // code type=bank/credit_card because the seed uses type=asset/liability
+  // with subtype indicating current_asset / current_liability / etc).
   const [bankAccountId, setBankAccountId] = useState(initialTxn?.bank_account_id || "");
-  const bankOptions = (accts || []).filter((a) => ["bank", "credit_card"].includes(a.type));
+  const bankOptions = (accts || [])
+    .filter((a) => ["asset", "liability"].includes(a.type))
+    .sort((a, b) => (a.code || "").localeCompare(b.code || ""));
+  const bankAssets = bankOptions.filter((a) => a.type === "asset");
+  const bankLiabilities = bankOptions.filter((a) => a.type === "liability");
   const [busy, setBusy] = useState(false);
   // Contact link — CPA can pick an existing contact from the search
   // combo or type a brand-new name to auto-create one on save.
@@ -1928,11 +1934,20 @@ function ManualTxnModal({ accts, currentId, contactOptions = [], initialTxn = nu
             className="w-full border rounded px-2 py-1.5 text-sm bg-white"
           >
             <option value="">— Default (Business Checking) —</option>
-            {bankOptions.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.code} · {a.name}
-              </option>
-            ))}
+            {bankAssets.length > 0 && (
+              <optgroup label="Assets (bank, cash, receivable…)">
+                {bankAssets.map((a) => (
+                  <option key={a.id} value={a.id}>{a.code} · {a.name}</option>
+                ))}
+              </optgroup>
+            )}
+            {bankLiabilities.length > 0 && (
+              <optgroup label="Liabilities (credit cards, loans, payable…)">
+                {bankLiabilities.map((a) => (
+                  <option key={a.id} value={a.id}>{a.code} · {a.name}</option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </div>
         <div className="relative" onBlur={(e) => {

@@ -46,13 +46,19 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
   - New page-level `editing` state; clicking Edit sets it to the row's txn.
     Modal render: `{editing && <ManualTxnModal ... initialTxn={editing} .../>}`.
   - `ManualTxnModal` now accepts an `initialTxn` prop. When present it:
-    - Pre-populates Date, Bank Account, Contact (with `contact_name` fallback
+    - Pre-populates Date, Bank Account (pulls the actual asset/liability CoA
+      account off `bank_account_id`), Contact (with `contact_name` fallback
       when the linked contact isn't in the 500-contact filter list),
       Merchant, Description, Amount, Category, and Splits (toggle auto-flips
       on and rows fill from existing splits).
     - Renders title "Edit transaction" instead of "Add manual transaction".
     - Save fires `PATCH /api/companies/{cid}/transactions/{tid}` instead of
       POST; toast reads "Transaction updated" / "Split transaction updated".
+  - Account dropdown broadened: previously filtered to `type in [bank,
+    credit_card]` which almost never matched the seeded CoA (uses
+    `type=asset|liability` with subtypes). Now renders ALL asset +
+    liability accounts, grouped via `<optgroup>` into "Assets (bank,
+    cash, receivable…)" and "Liabilities (credit cards, loans, payable…)".
   - Added remaining data-testids for E2E: `manual-txn-date`,
     `manual-txn-merchant`, `manual-txn-description`, `manual-txn-amount`.
 - **Backend** in `/app/backend/models.py`:
