@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import CleanupCopilot, { NextStepCard } from "@/components/CleanupCopilot";
+import AccountPicker from "@/components/AccountPicker";
 import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
 import AskClientButton from "@/components/AskClientButton";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
@@ -945,33 +946,25 @@ export default function Transactions() {
               </button>
             </div>
             <div className="mt-2 flex items-center gap-2">
-              <select
-                data-testid="lets-review-bulk-category"
-                disabled={bulkCatBusy || (txns || []).length === 0}
-                value={bulkPreviewAcctId}
-                onChange={(e) => previewBulkCategory(e.target.value)}
-                title="Preview a category for every visible row. Click Approve to save."
-                className="flex-1 min-w-0 px-2 py-1 rounded-md border border-cyan-300 bg-white text-[11px] font-medium text-slate-800 hover:border-cyan-400 disabled:opacity-60 disabled:cursor-wait"
-              >
-                <option value="">
-                  {bulkCatBusy ? "Applying…" : "Choose category…"}
-                </option>
-                {(accts || [])
-                  .filter((a) =>
-                    // Show accounts that are semantically postable — expense
-                    // + income + COGS + other-income/expense. Bank/AR/AP/
-                    // Equity/Uncat-sink exclude themselves: the CPA can't
-                    // mass-code Zelle rows to 'Chase Checking'.
+              <div className="flex-1 min-w-0" data-testid="lets-review-bulk-category">
+                <AccountPicker
+                  value={bulkPreviewAcctId}
+                  accounts={(accts || []).filter((a) =>
+                    // Postable-only filter — expense + income + COGS +
+                    // other-income/expense. Excludes bank / AR / AP /
+                    // Equity / Uncat sinks so the CPA can't mass-code
+                    // vendor rows to a bank account by mistake. Plus
+                    // asset / liability so users can post refunds or
+                    // clearing to those manually if needed.
                     ["expense", "income", "cost_of_goods_sold",
-                     "other_income", "other_expense"].includes(a.type)
+                     "other_income", "other_expense", "asset", "liability"].includes(a.type)
                     && !["9999", "6999", "4999"].includes(a.code)
-                  )
-                  .map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.code} · {a.name}
-                    </option>
-                  ))}
-              </select>
+                  )}
+                  onChange={(id) => previewBulkCategory(id)}
+                  companyId={currentId}
+                  testId="lets-review-bulk-category-picker"
+                />
+              </div>
               <button
                 onClick={() => letsReviewNav.prev && letsReviewNav.prev()}
                 disabled={!letsReviewNav.prev}
@@ -1036,29 +1029,19 @@ export default function Transactions() {
               </button>
             </div>
             <div className="mt-2 flex items-center gap-2">
-              <select
-                data-testid="no-contact-review-bulk-category"
-                disabled={bulkCatBusy || (txns || []).length === 0}
-                value={bulkPreviewAcctId}
-                onChange={(e) => previewBulkCategory(e.target.value)}
-                title="Preview a category for every visible row. Click Approve to save."
-                className="flex-1 min-w-0 px-2 py-1 rounded-md border border-cyan-300 bg-white text-[11px] font-medium text-slate-800 hover:border-cyan-400 disabled:opacity-60 disabled:cursor-wait"
-              >
-                <option value="">
-                  {bulkCatBusy ? "Applying…" : "Choose category…"}
-                </option>
-                {(accts || [])
-                  .filter((a) =>
+              <div className="flex-1 min-w-0" data-testid="no-contact-review-bulk-category">
+                <AccountPicker
+                  value={bulkPreviewAcctId}
+                  accounts={(accts || []).filter((a) =>
                     ["expense", "income", "cost_of_goods_sold",
-                     "other_income", "other_expense"].includes(a.type)
+                     "other_income", "other_expense", "asset", "liability"].includes(a.type)
                     && !["9999", "6999", "4999"].includes(a.code)
-                  )
-                  .map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.code} · {a.name}
-                    </option>
-                  ))}
-              </select>
+                  )}
+                  onChange={(id) => previewBulkCategory(id)}
+                  companyId={currentId}
+                  testId="no-contact-review-bulk-category-picker"
+                />
+              </div>
               <button
                 onClick={() => noContactReviewNav.prev && noContactReviewNav.prev()}
                 disabled={!noContactReviewNav.prev}
@@ -1438,15 +1421,16 @@ export default function Transactions() {
                     )}
                   </td>
                   <td className="px-3 py-2">
-                    <div className="inline-flex items-center gap-1">
-                      <select data-testid={TID.txnEditCategory} value={t.category_account_id || ""}
-                              onChange={(e) => updateCategory(t.id, e.target.value)}
-                              className="text-xs border rounded px-1.5 py-1 bg-white max-w-[180px]">
-                        <option value="">— Uncategorized —</option>
-                        {accts.map(a => (
-                          <option key={a.id} value={a.id}>{a.code} {a.name}</option>
-                        ))}
-                      </select>
+                    <div className="inline-flex items-center gap-1 max-w-[220px]">
+                      <div className="min-w-0 flex-1" data-testid={TID.txnEditCategory}>
+                        <AccountPicker
+                          value={t.category_account_id || ""}
+                          accounts={accts}
+                          onChange={(id) => updateCategory(t.id, id)}
+                          companyId={currentId}
+                          testId={`txn-cat-picker-${t.id}`}
+                        />
+                      </div>
                       <AccountInfoTooltip
                         account={accts.find(a => a.id === t.category_account_id)}
                       />
