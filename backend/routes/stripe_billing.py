@@ -877,6 +877,41 @@ async def billing_env_check(user: dict = Depends(require_role("superadmin"))):
     return {"env": result, "resolved_prices": resolved}
 
 
+@router.get("/admin/billing/webhook-status")
+async def billing_webhook_status(user: dict = Depends(require_role("superadmin"))):
+    """Diagnostic — reports whether Stripe webhooks are landing on this
+    deployment. Shows the last 20 events received, aggregate counts, and
+    the current state of `platform_payments` and subscribed companies.
+
+    If ``total_events == 0`` and you've just completed a paid checkout,
+    the webhook URL / signing secret is wrong on the Stripe Dashboard side.
+    """
+    from db import db  # local import to avoid cycles
+    events = await db.stripe_webhook_events.find({}).sort("received_at", -1).to_list(20)
+    total_events = await db.stripe_webhook_events.count_documents({})
+    total_payments = await db.platform_payments.count_documents({})
+    latest_payment = await db.platform_payments.find({}).sort("paid_at", -1).limit(1).to_list(1)
+    subscribed_companies = await db.companies.count_documents({
+        "stripe_subscription_id": {"$exists": True, "$ne": None}
+    })
+    active_billing = await db.companies.count_documents({"billing_state": "active"})
+    return {
+        "webhook_secret_set": bool(_WEBHOOK_SECRET),
+        "webhook_url_expected": f"{_platform_base_url().rstrip('/')}".replace(
+            "app.", "api."
+        ) + "/api/stripe/webhook",
+        "total_events_received": total_events,
+        "total_payments_recorded": total_payments,
+        "latest_payment_at": (latest_payment[0].get("paid_at") if latest_payment else None),
+        "companies_with_subscription": subscribed_companies,
+        "companies_billing_active": active_billing,
+        "recent_events": [
+            {"id": e.get("id"), "type": e.get("type"), "at": e.get("received_at")}
+            for e in events
+        ],
+    }
+
+
 @router.get("/companies/{cid}/billing/state")
 async def get_company_billing_state(
     cid: str,
