@@ -67,10 +67,17 @@ export default function BillingLockedModal() {
 
   if (!state?.locked) return null;
 
+  // Distinguish the two blocking cases so copy matches intent:
+  //   * `pending` (first-time activation for client-email payer) is a
+  //     welcome/onboarding moment — friendly copy, "Activate" CTA.
+  //   * `past_due` / `canceled` / `unpaid` is a service interruption
+  //     — urgent, red-tinged copy.
+  const isFirstTimeActivation = state.billing_state === "pending";
   const stateLabel =
     state.billing_state === "past_due"  ? "Past due"
     : state.billing_state === "canceled" ? "Canceled"
     : state.billing_state === "unpaid"   ? "Unpaid"
+    : state.billing_state === "pending"  ? "Not yet activated"
     : state.billing_state;
 
   return (
@@ -79,15 +86,33 @@ export default function BillingLockedModal() {
       data-testid="billing-locked-modal"
     >
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 text-center">
-        <div className="w-14 h-14 mx-auto rounded-full bg-rose-100 flex items-center justify-center">
-          <Lock size={22} className="text-rose-600" />
+        <div
+          className={`w-14 h-14 mx-auto rounded-full flex items-center justify-center ${
+            isFirstTimeActivation ? "bg-cyan-100" : "bg-rose-100"
+          }`}
+        >
+          {isFirstTimeActivation
+            ? <CreditCard size={22} className="text-cyan-700" />
+            : <Lock size={22} className="text-rose-600" />}
         </div>
         <h2 className="mt-4 font-heading text-2xl font-bold text-slate-900">
-          Payment needed to keep the books open
+          {isFirstTimeActivation
+            ? "Activate your subscription"
+            : "Payment needed to keep the books open"}
         </h2>
         <p className="mt-2 text-sm text-slate-600">
-          This company's subscription is <b className="text-rose-700">{stateLabel}</b>.
-          Nobody — pro or client — can open the ledger until it's paid.
+          {isFirstTimeActivation ? (
+            <>
+              Almost there. Your books are ready — one Stripe checkout and
+              you'll have full access.
+            </>
+          ) : (
+            <>
+              This company's subscription is{" "}
+              <b className="text-rose-700">{stateLabel}</b>. Nobody — pro
+              or client — can open the ledger until it's paid.
+            </>
+          )}
         </p>
 
         <div className="mt-4 rounded-md bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-600 text-left">
@@ -114,13 +139,17 @@ export default function BillingLockedModal() {
           onClick={payNow}
           disabled={busy || !state.stripe_configured}
           data-testid="billing-locked-pay-btn"
-          className="mt-5 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 disabled:opacity-60 w-full"
+          className={`mt-5 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-white text-sm font-semibold disabled:opacity-60 w-full ${
+            isFirstTimeActivation ? "bg-cyan-700 hover:bg-cyan-800" : "bg-slate-900 hover:bg-slate-800"
+          }`}
         >
           {busy ? <Loader2 size={14} className="animate-spin" /> : <CreditCard size={14} />}
-          {busy ? "Opening Stripe…" : "Pay now →"}
+          {busy
+            ? "Opening Stripe…"
+            : isFirstTimeActivation ? "Activate & pay →" : "Pay now →"}
         </button>
         <div className="mt-3 text-[11px] text-slate-400">
-          Your access will re-open automatically the moment Stripe confirms the payment.
+          Your access will {isFirstTimeActivation ? "open" : "re-open"} automatically the moment Stripe confirms the payment.
         </div>
       </div>
     </div>

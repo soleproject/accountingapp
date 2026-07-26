@@ -39,6 +39,43 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 (later) — "Client — Email bill" flow now actually blocks + prompts pay
+Closes a big security/revenue hole: the previous email-bill flow let
+Michael create an account and access his books without paying —
+`billing_state=pending` wasn't in the lock set.
+
+- **Backend lock rule** in `get_company_billing_state` — `locked` is
+  now true when `billing_state == "pending"` **and**
+  `billing_payer == "client_email"`. `client_card` payers still get
+  through their brief `pending` window (webhook flips them to `active`
+  in seconds), and `enterprise` / `free_spot` are never locked.
+- **Welcome-email CTA** — both `client_welcome_first_time` and
+  `client_welcome_returning` in `/app/backend/email_templates.py`
+  accept an optional `payment_url`. When provided (i.e. the payer is
+  `client_email`), the email surfaces a prominent
+  **"Pay &amp; activate books"** button above the password / open-books
+  action, with copy explaining that access unlocks after payment.
+- **`pro.py add_client`** now passes
+  `payment_url=f"{base}/billing?company={company_id}"` when
+  `billing_payer=="client_email"`. Deep-links straight to the client's
+  Billing page, where the `BillingLockedModal` will open Stripe
+  Checkout.
+- **New `BillingLockedModal` first-time-activation variant** —
+  friendly cyan / CreditCard icon + "Activate your subscription"
+  headline + "Almost there. Your books are ready — one Stripe checkout
+  and you'll have full access." + cyan "Activate & pay →" button.
+  Preserves the urgent red "Payment needed to keep the books open"
+  variant for `past_due` / `canceled` / `unpaid`.
+- **New reusable button style** `_BTN_SECONDARY` in
+  `email_templates.py` (outlined cyan) — used when the email has both
+  a "Pay & activate" primary CTA and an "Open my books" secondary.
+- **Tested end-to-end** — unit-tested all 3 lock scenarios
+  (`client_email/pending` → locked, `client_card/pending` → not
+  locked, `client_card/past_due` → locked); logged in as
+  `client@axiom.ai` on a `client_email/pending` company and
+  confirmed the modal covers the whole page and can't be bypassed.
+
+
 ### Feb 2026 (later) — Payment-Failure Alert Loop (client email + Pro badge)
 Closes the billing lifecycle so a declined card no longer sits invisible
 until the Pro next logs in.

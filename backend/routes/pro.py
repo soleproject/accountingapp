@@ -245,6 +245,15 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
         firm_name = (user.get("branding") or {}).get("firm_name") or None
         base = public_base_url()
 
+        # When billing_payer=client_email we surface a "Pay & activate"
+        # CTA in the welcome email that deep-links to the client's
+        # /billing page — after they set their password (or if they
+        # already have a login and click through), the BillingLockedModal
+        # will open Stripe checkout for this specific company.
+        payment_url: Optional[str] = None
+        if billing_payer == "client_email":
+            payment_url = f"{base}/billing?company={company_id}"
+
         if reused and other_company_count > 0:
             subject, html = _tmpl.client_welcome_returning(
                 client_name=inp.client_name or "there",
@@ -253,6 +262,7 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
                 company_name=inp.company_name,
                 other_company_count=other_company_count,
                 dashboard_url=f"{base}/dashboard",
+                payment_url=payment_url,
             )
             email_kind = "client_welcome_returning"
             result = await dispatch(
@@ -271,6 +281,7 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
                 brand_name=firm_name,
                 company_name=inp.company_name,
                 set_password_url=f"{base}/set-password/{token}",
+                payment_url=payment_url,
             )
             email_kind = "client_welcome"
             result = await dispatch(

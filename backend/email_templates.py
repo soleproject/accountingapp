@@ -36,6 +36,11 @@ _BTN = (
     "border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;"
     "margin:8px 0 4px;"
 )
+_BTN_SECONDARY = (
+    "display:inline-block;padding:10px 18px;background:#ffffff;color:#0e7490;"
+    "border:1px solid #0e7490;border-radius:8px;text-decoration:none;font-weight:600;"
+    "font-size:14px;margin:8px 0 4px;"
+)
 _TABLE_KEY = "font-size:13px;color:#64748b;padding:4px 12px 4px 0;white-space:nowrap;"
 _TABLE_VAL = "font-size:13px;color:#0f172a;padding:4px 0;font-weight:500;"
 
@@ -138,10 +143,32 @@ def team_invite(*, invitee_name: str, inviter_name: str,
 def client_welcome_first_time(*, client_name: str, pro_name: str,
                               firm_name: Optional[str], company_name: str,
                               set_password_url: str,
+                              payment_url: Optional[str] = None,
                               brand_name: Optional[str] = None) -> tuple[str, str]:
+    """First-time client welcome. If ``payment_url`` is supplied (i.e.
+    the Pro selected "Client — Email bill" as the payer), the email
+    surfaces a "Pay & activate" CTA above the password step and makes
+    the copy explicit that access is unlocked after payment.
+    """
     firm = firm_name or pro_name
     brand = (brand_name or "").strip() or "SmartBooks"
     brand_e = escape(brand)
+    pay_block = ""
+    if payment_url:
+        pay_block = f"""
+      <div style="{_P}"><b>Before you get in, activate your subscription.</b>
+        {escape(pro_name)} set your billing so you pay directly — one
+        secure Stripe checkout, no card details shared with your bookkeeper.</div>
+      <div style="padding:14px 0 6px;">
+        <a href="{escape(payment_url)}" style="{_BTN}">Pay &amp; activate books →</a>
+      </div>
+      <div style="{_MUTE}">
+        After payment, your books unlock instantly and you'll be redirected
+        to set your password.
+      </div>
+      <div style="border-top:1px solid #e2e8f0;margin:22px 0 4px;"></div>
+      <div style="{_P}"><b>Already paid?</b> Set your password to log in:</div>
+        """
     inner = f"""
       <div style="{_H1}">Welcome to {brand_e} 👋</div>
       <div style="{_P}">
@@ -150,12 +177,9 @@ def client_welcome_first_time(*, client_name: str, pro_name: str,
         <b>{escape(company_name)}</b>'s books here on {brand_e} — a modern,
         AI-assisted accounting platform.
       </div>
-      <div style="{_P}">
-        To get in, pick a password. It takes about 20 seconds and this link
-        is unique to you.
-      </div>
+      {pay_block}
       <div style="padding:14px 0 6px;">
-        <a href="{set_password_url}" style="{_BTN}">Set your password →</a>
+        <a href="{escape(set_password_url)}" style="{_BTN}">Set your password →</a>
       </div>
       <div style="{_MUTE}">
         Once you're in you'll see a short onboarding tour, your bank
@@ -178,7 +202,12 @@ def client_welcome_returning(*, client_name: str, pro_name: str,
                              firm_name: Optional[str], company_name: str,
                              other_company_count: int,
                              dashboard_url: str,
+                             payment_url: Optional[str] = None,
                              brand_name: Optional[str] = None) -> tuple[str, str]:
+    """Returning-client welcome. When ``payment_url`` is provided the
+    email leads with a "Pay & activate" CTA — the client's existing
+    password still works, but they can't open the new company until
+    the invoice is settled."""
     firm = firm_name or pro_name
     brand = (brand_name or "").strip() or "SmartBooks"
     brand_e = escape(brand)
@@ -186,6 +215,20 @@ def client_welcome_returning(*, client_name: str, pro_name: str,
         f"You now have <b>{other_company_count + 1}</b> companies on your {brand_e} login — "
         "switch between them from the dropdown at the top-left."
     )
+    if payment_url:
+        pay_block = f"""
+      <div style="{_P}"><b>Activate <em>{escape(company_name)}</em>'s books.</b>
+        {escape(pro_name)} set this company to pay directly. Once the
+        subscription is active, the books will unlock automatically.</div>
+      <div style="padding:14px 0 6px;">
+        <a href="{escape(payment_url)}" style="{_BTN}">Pay &amp; activate {escape(company_name)} →</a>
+      </div>
+      <div style="border-top:1px solid #e2e8f0;margin:22px 0 4px;"></div>
+        """
+        primary_btn_html = f'<a href="{escape(dashboard_url)}" style="{_BTN_SECONDARY}">Open my books</a>'
+    else:
+        pay_block = ""
+        primary_btn_html = f'<a href="{escape(dashboard_url)}" style="{_BTN}">Open {escape(company_name)} →</a>'
     inner = f"""
       <div style="{_H1}">A new company was added to your {brand_e} login</div>
       <div style="{_P}">
@@ -194,8 +237,9 @@ def client_welcome_returning(*, client_name: str, pro_name: str,
         <b>{escape(company_name)}</b> to your existing {brand_e} account.
       </div>
       <div style="{_P}">{others}</div>
+      {pay_block}
       <div style="padding:14px 0 6px;">
-        <a href="{dashboard_url}" style="{_BTN}">Open {escape(company_name)} →</a>
+        {primary_btn_html}
       </div>
       <div style="{_MUTE}">
         Your existing password still works — no need to reset anything.

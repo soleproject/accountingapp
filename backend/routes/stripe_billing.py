@@ -1056,22 +1056,26 @@ async def get_company_billing_state(
     if not c:
         raise HTTPException(404, "Company not found")
     state = c.get("billing_state") or "pending"
+    payer = c.get("billing_payer")
+    # Lock rule:
+    #   * past_due / canceled / unpaid → always locked (self-explanatory).
+    #   * pending → locked ONLY when the payer is the client themselves
+    #     via the email-invoice path. `client_card` collects payment at
+    #     signup (pending is momentary until the webhook flips to
+    #     active); `enterprise` and `free_spot` never need lockout.
+    locked = (
+        state in ("past_due", "canceled", "unpaid")
+        or (state == "pending" and payer == "client_email")
+    )
     return {
         "billing_state": state,
-        "billing_payer": c.get("billing_payer"),
+        "billing_payer": payer,
         "billing_product": c.get("billing_product"),
         "billing_discount": bool(c.get("billing_discount")),
-        # `locked` = the frontend should show the blocking modal.
-        # Pending is NOT locked so a fresh signup can navigate normally
-        # while the first invoice is finalizing (Stripe often takes a
-        # few seconds); if the Stripe webhook comes back with a
-        # payment_failed we flip to past_due and the modal appears.
-        "locked": state in ("past_due", "canceled", "unpaid"),
+        "locked": locked,
         "stripe_subscription_id": c.get("stripe_subscription_id"),
         "stripe_customer_id": c.get("stripe_customer_id"),
         "last_session_id": c.get("billing_last_session_id"),
-        # For the modal's "Pay now" button — the frontend hits the
-        # checkout-session endpoint above to mint a fresh URL.
         "stripe_configured": bool(_STRIPE_KEY),
     }
 
