@@ -69,6 +69,44 @@ AFFILIATE_SHARE_BPS = int(os.environ.get("AFFILIATE_SHARE_BPS", "2000"))
 
 
 # --------------------------------------------------------------------------
+# Company-scoped price catalog — Phase C.
+#
+# Each (product, tier) maps to a Stripe Price ID configured via env var so
+# we never hard-code IDs into code. Naming convention:
+#     STRIPE_PRICE_<PRODUCT>_<TIER>   (tier = REGULAR | DISCOUNT)
+#
+# Simple Start is already provisioned in the user's Stripe account:
+#   $38/mo regular  → STRIPE_PRICE_SIMPLE_START_REGULAR (falls back to
+#                     STRIPE_PRICE_SIMPLE_START_MONTHLY_38 for backwards-
+#                     compat with the existing env)
+#   $30/mo discount → STRIPE_PRICE_SIMPLE_START_DISCOUNT
+# The other 7 (Essentials/Plus/Advanced × regular/discount) are placeholder
+# env vars — populate them when you create those prices in Stripe.
+def _price_id(product: str, discount: bool) -> Optional[str]:
+    tier = "DISCOUNT" if discount else "REGULAR"
+    key = f"STRIPE_PRICE_{product.upper()}_{tier}"
+    pid = os.environ.get(key)
+    if pid:
+        return pid
+    # Back-compat for the existing prod env keys.
+    if product == "simple_start" and not discount:
+        return os.environ.get("STRIPE_PRICE_SIMPLE_START_MONTHLY_38")
+    if product == "simple_start" and discount:
+        return os.environ.get("STRIPE_PRICE_SIMPLE_START_MONTHLY_19")
+    return None
+
+
+def _platform_base_url() -> str:
+    """Return the platform URL to use as origin for success/cancel URLs.
+    Order of preference: env override → PUBLIC_BASE_URL → localhost dev."""
+    return (
+        os.environ.get("STRIPE_RETURN_BASE_URL")
+        or os.environ.get("PUBLIC_BASE_URL")
+        or "http://localhost:3000"
+    ).rstrip("/")
+
+
+# --------------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------------
 
@@ -272,6 +310,8 @@ async def stripe_webhook(request: Request):
             await _handle_checkout_completed(obj)
         elif event_type == "invoice.paid":
             await _handle_invoice_paid(obj)
+        elif event_type == "invoice.payment_failed":
+            await _handle_invoice_payment_failed(obj)
         elif event_type in ("customer.subscription.deleted",
                              "customer.subscription.updated"):
             await _handle_subscription_change(obj)
@@ -324,6 +364,22 @@ async def _handle_checkout_completed(session: dict) -> None:
     if is_new:
         await _send_welcome_magic_link(user, source="stripe_signup")
 
+    # Phase C — if the checkout was for a specific COMPANY (Add-Client
+    # "Pay with client card" flow attached metadata.company_id) then
+    # flip that company's billing_state to active and link the
+    # subscription so downstream webhooks can find the right row.
+    company_id = (session.get("metadata") or {}).get("company_id")
+    if company_id and stripe_subscription_id:
+        await db.companies.update_one(
+            {"id": company_id},
+            {"$set": {
+                "billing_state": "active",
+                "stripe_subscription_id": stripe_subscription_id,
+                "stripe_customer_id": stripe_customer_id,
+                "updated_at": now_iso(),
+            }},
+        )
+
 
 async def _handle_invoice_paid(invoice: dict) -> None:
     stripe_customer_id = invoice.get("customer")
@@ -354,6 +410,28 @@ async def _handle_invoice_paid(invoice: dict) -> None:
             payment_id=pid, invoice=invoice, payer_user=user,
         )
 
+    # Phase C — if this invoice is for a company subscription, flip the
+    # billing_state to active. Uses the subscription id (stable) as the
+    # join key.
+    sub_id = invoice.get("subscription")
+    if sub_id:
+        await db.companies.update_one(
+            {"stripe_subscription_id": sub_id},
+            {"$set": {"billing_state": "active", "updated_at": now_iso()}},
+        )
+
+
+async def _handle_invoice_payment_failed(invoice: dict) -> None:
+    """Company-scoped: flip billing_state to past_due so the blocking
+    modal appears on next page load."""
+    sub_id = invoice.get("subscription")
+    if not sub_id:
+        return
+    await db.companies.update_one(
+        {"stripe_subscription_id": sub_id},
+        {"$set": {"billing_state": "past_due", "updated_at": now_iso()}},
+    )
+
 
 async def _handle_subscription_change(sub: dict) -> None:
     stripe_customer_id = sub.get("customer")
@@ -372,6 +450,31 @@ async def _handle_subscription_change(sub: dict) -> None:
             "updated_at": now_iso(),
         }},
     )
+    # Also flip any Company whose subscription this is — Phase C makes
+    # `companies.billing_state` the source-of-truth the blocking modal
+    # reads from.
+    sub_id = sub.get("id")
+    if sub_id:
+        state = _sub_status_to_billing_state(status)
+        await db.companies.update_one(
+            {"stripe_subscription_id": sub_id},
+            {"$set": {"billing_state": state, "updated_at": now_iso()}},
+        )
+
+
+def _sub_status_to_billing_state(sub_status: Optional[str]) -> str:
+    """Map Stripe subscription.status → our internal company billing_state.
+
+    Stripe values: incomplete | incomplete_expired | trialing | active |
+    past_due | canceled | unpaid | paused.
+    """
+    if sub_status in ("active", "trialing"):
+        return "active"
+    if sub_status in ("past_due", "unpaid"):
+        return "past_due"
+    if sub_status in ("canceled", "incomplete_expired"):
+        return "canceled"
+    return "pending"
 
 
 # --------------------------------------------------------------------------
@@ -558,3 +661,157 @@ async def mark_paid_out(inp: MarkPaidIn, user: dict = Depends(get_current_user))
         }},
     )
     return {"updated": res.modified_count}
+
+
+# --------------------------------------------------------------------------
+# Phase C — Company-scoped subscription billing.
+#
+# The Add-Client "Pay with client card" flow (and the future
+# "Enterprise pays with card" flow) both POST here to get a Stripe
+# Checkout URL. `metadata.company_id` on the session is how the
+# webhook attributes the subscription back to the right company row.
+# --------------------------------------------------------------------------
+
+
+class CheckoutSessionIn(BaseModel):
+    """Optional overrides — when omitted we read product / discount
+    from the company doc (set by the Add-Client modal)."""
+    product: Optional[str] = None
+    discount: Optional[bool] = None
+    origin_url: Optional[str] = None
+
+
+@router.post("/companies/{cid}/billing/checkout-session")
+async def create_company_checkout_session(
+    cid: str,
+    inp: CheckoutSessionIn,
+    user: dict = Depends(get_current_user),
+):
+    """Create a Stripe Checkout Session for a company subscription.
+
+    Behaviour:
+    * The active user must have some access to the company (owner, pro,
+      editor, reviewer, viewer). Otherwise 404 (we don't leak whether
+      the company exists).
+    * Reads product / discount from body if provided, else falls back
+      to the company doc's stored values.
+    * Session ``metadata.company_id`` = ``cid`` — the webhook uses this
+      to link the resulting subscription back to the company row.
+    * Returns ``{checkout_url, session_id, mode: "test"|"live"}``.
+    """
+    # Access check — reuse the memberships table.
+    if user.get("role") != "superadmin":
+        m = await db.memberships.find_one({"user_id": user["id"], "company_id": cid})
+        if not m:
+            raise HTTPException(404, "Company not found")
+
+    company = await db.companies.find_one({"id": cid})
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    product = (inp.product or company.get("billing_product") or "simple_start").lower()
+    discount = bool(inp.discount if inp.discount is not None else company.get("billing_discount") or False)
+
+    price_id = _price_id(product, discount)
+    if not price_id:
+        raise HTTPException(
+            400,
+            f"No Stripe Price configured for product={product} discount={discount}. "
+            f"Set STRIPE_PRICE_{product.upper()}_{'DISCOUNT' if discount else 'REGULAR'} in the env.",
+        )
+
+    if not _STRIPE_KEY:
+        raise HTTPException(
+            503,
+            "Stripe is not configured on this environment. Set STRIPE_SECRET_KEY "
+            "(and STRIPE_WEBHOOK_SECRET) then redeploy.",
+        )
+
+    base = (inp.origin_url or _platform_base_url()).rstrip("/")
+    success_url = f"{base}/billing/success?session_id={{CHECKOUT_SESSION_ID}}&company_id={cid}"
+    cancel_url = f"{base}/billing/cancel?company_id={cid}"
+
+    try:
+        # Reuse an existing Stripe customer for the owner if we've seen one;
+        # otherwise let Checkout create it and we'll attach on webhook.
+        owner_uid = company.get("owner_user_id")
+        owner = await db.users.find_one({"id": owner_uid}) if owner_uid else None
+        customer_kwargs = {}
+        if owner and owner.get("stripe_customer_id"):
+            customer_kwargs["customer"] = owner["stripe_customer_id"]
+        elif owner and owner.get("email"):
+            customer_kwargs["customer_email"] = owner["email"]
+
+        session = stripe.checkout.Session.create(
+            mode="subscription",
+            line_items=[{"price": price_id, "quantity": 1}],
+            success_url=success_url,
+            cancel_url=cancel_url,
+            allow_promotion_codes=True,
+            metadata={
+                "company_id": cid,
+                "company_name": company.get("name") or "",
+                "billing_product": product,
+                "billing_discount": "true" if discount else "false",
+                "initiated_by_user_id": user["id"],
+            },
+            subscription_data={"metadata": {"company_id": cid}},
+            **customer_kwargs,
+        )
+    except stripe.error.StripeError as e:
+        logger.exception("Stripe checkout session failed for company %s", cid)
+        raise HTTPException(502, f"Stripe error: {e.user_message or str(e)}")
+
+    # Persist the session id on the company for reconciliation / debug.
+    await db.companies.update_one(
+        {"id": cid},
+        {"$set": {
+            "billing_last_session_id": session.id,
+            "billing_state": company.get("billing_state") or "pending",
+            "updated_at": now_iso(),
+        }},
+    )
+    return {
+        "checkout_url": session.url,
+        "session_id": session.id,
+        "mode": "live" if _STRIPE_KEY.startswith("sk_live_") else "test",
+    }
+
+
+@router.get("/companies/{cid}/billing/state")
+async def get_company_billing_state(
+    cid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Return the current company's billing state + product/payer so the
+    frontend can decide whether to render the blocking modal.
+
+    Access: any member of the company. Superadmin sees everything.
+    """
+    if user.get("role") != "superadmin":
+        m = await db.memberships.find_one({"user_id": user["id"], "company_id": cid})
+        if not m:
+            raise HTTPException(404, "Company not found")
+    c = await db.companies.find_one({"id": cid})
+    if not c:
+        raise HTTPException(404, "Company not found")
+    state = c.get("billing_state") or "pending"
+    return {
+        "billing_state": state,
+        "billing_payer": c.get("billing_payer"),
+        "billing_product": c.get("billing_product"),
+        "billing_discount": bool(c.get("billing_discount")),
+        # `locked` = the frontend should show the blocking modal.
+        # Pending is NOT locked so a fresh signup can navigate normally
+        # while the first invoice is finalizing (Stripe often takes a
+        # few seconds); if the Stripe webhook comes back with a
+        # payment_failed we flip to past_due and the modal appears.
+        "locked": state in ("past_due", "canceled", "unpaid"),
+        "stripe_subscription_id": c.get("stripe_subscription_id"),
+        "stripe_customer_id": c.get("stripe_customer_id"),
+        "last_session_id": c.get("billing_last_session_id"),
+        # For the modal's "Pay now" button — the frontend hits the
+        # checkout-session endpoint above to mint a fresh URL.
+        "stripe_configured": bool(_STRIPE_KEY),
+    }
+

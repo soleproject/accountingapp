@@ -670,6 +670,30 @@ function NewClientModal({ onClose, onCreated }) {
           { duration: emailOk ? 7000 : 12000 },
         );
       }
+      // Phase C — if the accountant chose to enter the client's card
+      // right now, redirect to Stripe Checkout with the freshly-created
+      // company as the target. On successful payment Stripe redirects
+      // to /billing/success which flips billing_state to `active` and
+      // dismisses the blocking modal. Skipped for email/enterprise/
+      // free_spot payers.
+      if (form.billing_payer === "client_card" && r.data.company_id) {
+        try {
+          const co = await api.post(
+            `/companies/${r.data.company_id}/billing/checkout-session`,
+            { origin_url: window.location.origin },
+          );
+          if (co.data?.checkout_url) {
+            window.location.href = co.data.checkout_url;
+            return;
+          }
+        } catch (e) {
+          toast.error(
+            e.response?.data?.detail
+              || "Could not open Stripe checkout — the client can still pay from the blocked-billing modal later.",
+            { duration: 10_000 },
+          );
+        }
+      }
       onCreated();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to create client");

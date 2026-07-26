@@ -39,6 +39,108 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Enterprise Phase C: Company-Scoped Stripe Billing
+Built on top of the existing `stripe_billing.py` router (which already
+had a user-level subscription flow + affiliate/referral tracking).
+
+- **New env-var convention** in `stripe_billing.py :: _price_id`:
+  `STRIPE_PRICE_<PRODUCT>_<REGULAR|DISCOUNT>` — 8 slots total. Falls
+  back to the existing `STRIPE_PRICE_SIMPLE_START_MONTHLY_38` /
+  `_MONTHLY_19` env vars so the code works with the prod Stripe
+  account's already-provisioned Simple Start prices out-of-the-box.
+- **New endpoints** in `stripe_billing.py`:
+  - `POST /api/companies/{cid}/billing/checkout-session` — creates a
+    Stripe Checkout Session for a subscription with
+    `metadata={company_id, billing_product, billing_discount,
+    initiated_by_user_id}` and `subscription_data.metadata.company_id`.
+    Returns `{checkout_url, session_id, mode: "live"|"test"}`.
+    Guarded: any user with membership on the company can call it.
+    Fails gracefully with `HTTPException(503, "Stripe is not
+    configured on this environment...")` when `STRIPE_SECRET_KEY` is
+    missing (preview), and `HTTPException(400)` with a specific hint
+    when the requested price ID isn't in the env.
+  - `GET /api/companies/{cid}/billing/state` — returns the current
+    company's `billing_state`, `billing_payer`, `billing_product`,
+    `billing_discount`, `locked` bool, plus `stripe_configured` so
+    the frontend can gray-out the Pay button in preview.
+- **Webhook handlers extended** to keep `companies.billing_state`
+  in lockstep with Stripe:
+  - `checkout.session.completed` (with `metadata.company_id`) → sets
+    `billing_state="active"` + links `stripe_subscription_id` +
+    `stripe_customer_id` on the company.
+  - `invoice.paid` → sets `billing_state="active"` for the company
+    joined by `stripe_subscription_id`.
+  - `invoice.payment_failed` (new handler) → sets `past_due`.
+  - `customer.subscription.updated/.deleted` → maps Stripe status to
+    our internal state via `_sub_status_to_billing_state`
+    (active/trialing → active, past_due/unpaid → past_due,
+    canceled/incomplete_expired → canceled).
+- **Frontend blocking modal** — new component
+  `/app/frontend/src/components/BillingLockedModal.jsx` wired into
+  `Layout.jsx`. Fetches `/companies/{cid}/billing/state` on every
+  company switch + polls every 20s while `locked=true`. Renders a
+  full-screen `z-[999]` modal with backdrop-blur, "Pay now" button,
+  and payer/product summary. Auto-dismisses within seconds of
+  Stripe webhook flipping state back to `active`.
+- **New pages** `/app/frontend/src/pages/BillingReturn.jsx`:
+  - `/billing/success?session_id=...&company_id=...` — polls the
+    company state every 2s until it flips to `active` (webhook may
+    take a moment), then routes to `/dashboard` for that company.
+    Gives up after 30s with a "continue anyway" affordance.
+  - `/billing/cancel?company_id=...` — shows "no charge posted" + a
+    "Try again" button that re-opens a fresh checkout session.
+- **New Client flow** (`ProClients.jsx :: NewClientModal :: save`):
+  when `billing_payer === "client_card"`, the modal now POSTs to the
+  checkout-session endpoint immediately after the client is created
+  and `window.location.href`s to the Checkout URL. Other payer
+  choices (email / enterprise / free_spot) skip this hop and just
+  return to the Clients grid.
+- **Verified live** (screenshots):
+  1. Set `Card Test LLC` (billing_payer=client_card, product=essentials,
+     discount=true) to `billing_state=past_due` → navigating to
+     `/dashboard` for that company renders the blocking modal on top
+     of the ledger, showing:
+       * "This company's subscription is **Past due**. Nobody — pro
+         or client — can open the ledger until it's paid."
+       * Product `essentials · disc`, Payer `client_card`.
+       * Amber notice: "Stripe not configured on this environment.
+         Once STRIPE_SECRET_KEY is set + the app redeployed, the
+         Pay button will open a real Checkout page."
+       * Pay button correctly **disabled** (stripe_configured=false).
+  2. `GET /billing/state` returns proper JSON incl. `locked` flag
+     computed from `billing_state`.
+  3. `POST /billing/checkout-session` fails cleanly in preview with
+     the correct guidance ("Set STRIPE_PRICE_ESSENTIALS_DISCOUNT in
+     the env" for a missing price-ID; "Stripe is not configured"
+     when only the secret key is missing).
+
+### Enterprise Phase C — Deploy checklist (prod)
+1. Confirm `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
+   `STRIPE_PRICE_SIMPLE_START_MONTHLY_38`, and
+   `STRIPE_PRICE_SIMPLE_START_MONTHLY_19` are set on Railway (they
+   are — code already relies on these).
+2. Optionally add the 7 additional price env vars once you provision
+   Essentials/Plus/Advanced in Stripe:
+   `STRIPE_PRICE_ESSENTIALS_REGULAR/_DISCOUNT`,
+   `STRIPE_PRICE_PLUS_REGULAR/_DISCOUNT`,
+   `STRIPE_PRICE_ADVANCED_REGULAR/_DISCOUNT`. Until then the modal
+   will still work for Simple Start; other products will 400 with a
+   clear "Set STRIPE_PRICE_..." message.
+3. Add the webhook endpoint `POST /api/stripe/webhook` in the Stripe
+   Dashboard (already there for the user-level flow — reuses it) and
+   ensure it subscribes to `checkout.session.completed`,
+   `invoice.paid`, `invoice.payment_failed`,
+   `customer.subscription.updated`, `customer.subscription.deleted`.
+4. Push code to GitHub → Railway redeploys → end-to-end works.
+
+### Phase D — Consolidated monthly invoicing (still pending)
+5th-of-month scheduler that rolls all `billing_payer="enterprise"`
+companies into a single Stripe invoice on the enterprise's Stripe
+customer, then flips those companies' `billing_state` based on the
+resulting invoice.
+
+
+
 ### Feb 2026 — Enterprise Phase B: Add-Client Billing Fields
 - **Backend**
   - `/app/backend/models.py :: NewClientIn` extended with

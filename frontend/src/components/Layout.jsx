@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Outlet, Link } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import AiPanel from "./AiPanel";
+import BillingLockedModal from "./BillingLockedModal";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
@@ -353,6 +354,7 @@ export default function Layout() {
         </div>
 
         <AiPanel collapsed={aiCollapsed} onToggle={() => setAiCollapsed(!aiCollapsed)} />
+        <BillingLockedModal />
         <Toaster position="bottom-right" />
       </div>
     </AiFocusProvider>
