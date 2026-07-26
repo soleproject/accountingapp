@@ -97,7 +97,7 @@ export default function AccountPicker({ value, accounts, onChange, companyId, is
       </button>
 
       {open && (
-        <div className="absolute z-30 left-0 top-[calc(100%+4px)] w-[360px] max-h-[380px] bg-white border border-slate-200 rounded-lg shadow-xl flex flex-col" data-testid={`${testId}-popover`}>
+        <div className="absolute z-[60] left-0 top-[calc(100%+4px)] w-[360px] max-h-[380px] bg-white border border-slate-200 rounded-lg shadow-xl flex flex-col" data-testid={`${testId}-popover`}>
           {!addMode ? (
             <>
               <div className="p-2 border-b border-slate-100 flex items-center gap-2">
