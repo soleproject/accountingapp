@@ -1537,7 +1537,7 @@ export default function Transactions() {
       </div>
       )}
 
-      {creating && <ManualTxnModal accts={accts} currentId={currentId} onClose={() => { setCreating(false); load(); }} />}
+      {creating && <ManualTxnModal accts={accts} currentId={currentId} contactOptions={filterContactOptions} onClose={() => { setCreating(false); load(); }} />}
       {splitting && <SplitModal txn={splitting} accts={accts} currentId={currentId} onClose={() => { setSplitting(null); load(); }} />}
       {linking && <LinkModal txn={linking} invoices={invoices} bills={bills} currentId={currentId} onClose={() => { setLinking(null); load(); }} />}
       {xferPreview && (
@@ -1799,13 +1799,26 @@ function ContactRollup({ data, busy, currentId }) {
   );
 }
 
-function ManualTxnModal({ accts, currentId, onClose }) {
+function ManualTxnModal({ accts, currentId, contactOptions = [], onClose }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [description, setDescription] = useState("");
   const [merchant, setMerchant] = useState("");
   const [amount, setAmount] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [busy, setBusy] = useState(false);
+  // Contact link — CPA can pick an existing contact from the search
+  // combo or type a brand-new name to auto-create one on save.
+  const [contactId, setContactId] = useState("");
+  const [contactQuery, setContactQuery] = useState("");
+  const [contactMenuOpen, setContactMenuOpen] = useState(false);
+  const filteredContacts = (() => {
+    const q = contactQuery.trim().toLowerCase();
+    if (!q) return contactOptions.slice(0, 50);
+    return contactOptions.filter((c) => (c.name || "").toLowerCase().includes(q)).slice(0, 50);
+  })();
+  const canCreateNewContact = contactQuery.trim().length > 1 && !contactOptions.some(
+    (c) => (c.name || "").trim().toLowerCase() === contactQuery.trim().toLowerCase()
+  );
   // Splits are optional — CPA toggles "Split into multiple categories"
   // to break the header amount across N lines instead of picking a
   // single category. Mirrors the SplitModal UX but lives inline in the
@@ -1827,6 +1840,28 @@ function ManualTxnModal({ accts, currentId, onClose }) {
     }
     setBusy(true);
     try {
+      // Resolve the contact link. If the CPA typed a new name that
+      // doesn't match anything in contactOptions, create the contact
+      // first and use the returned id. Otherwise honor whatever
+      // contactId is selected (may be empty for "no contact").
+      let finalContactId = contactId;
+      let finalContactName = "";
+      if (finalContactId) {
+        finalContactName = (contactOptions.find((c) => c.id === finalContactId) || {}).name || "";
+      } else if (contactQuery.trim() && canCreateNewContact) {
+        try {
+          const cr = await api.post(`/companies/${currentId}/contacts`, {
+            name: contactQuery.trim(),
+            kind: (parseFloat(amount || 0) || 0) >= 0 ? "customer" : "vendor",
+          });
+          finalContactId = cr.data?.id || "";
+          finalContactName = contactQuery.trim();
+        } catch (e) {
+          toast.error("Couldn't create the new contact — try again?");
+          setBusy(false);
+          return;
+        }
+      }
       await api.post(`/companies/${currentId}/transactions`, {
         date, description, merchant, amount: amtNum,
         category_account_id: splitsOn ? null : (categoryId || null),
@@ -1836,6 +1871,8 @@ function ManualTxnModal({ accts, currentId, onClose }) {
           category_account_id: r.category_account_id,
           description: r.description,
         })) : null,
+        contact_id: finalContactId || null,
+        contact_name: finalContactName || null,
       });
       toast.success(splitsOn ? "Split transaction created" : "Transaction created");
       onClose();
@@ -1850,6 +1887,58 @@ function ManualTxnModal({ accts, currentId, onClose }) {
       <div className="space-y-3 text-sm">
         <div><label className="text-xs text-slate-600">Date</label>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border rounded px-2 py-1.5" /></div>
+        <div className="relative" onBlur={(e) => {
+          // Close the contact menu on blur unless focus went to a child.
+          if (!e.currentTarget.contains(e.relatedTarget)) {
+            setTimeout(() => setContactMenuOpen(false), 150);
+          }
+        }}>
+          <label className="text-xs text-slate-600">Contact</label>
+          <input
+            data-testid="manual-txn-contact-input"
+            type="text"
+            placeholder="Search or type a new name…"
+            value={contactId
+              ? (contactOptions.find((c) => c.id === contactId) || {}).name || ""
+              : contactQuery}
+            onFocus={() => setContactMenuOpen(true)}
+            onChange={(e) => {
+              setContactId("");
+              setContactQuery(e.target.value);
+              setContactMenuOpen(true);
+            }}
+            className="w-full border rounded px-2 py-1.5 text-sm"
+          />
+          {contactMenuOpen && (filteredContacts.length > 0 || canCreateNewContact) && (
+            <div className="absolute z-30 left-0 right-0 top-[calc(100%+2px)] max-h-[240px] overflow-y-auto rounded-md border border-slate-200 bg-white shadow-xl">
+              {filteredContacts.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  data-testid={`manual-txn-contact-opt-${c.id}`}
+                  onClick={() => {
+                    setContactId(c.id);
+                    setContactQuery("");
+                    setContactMenuOpen(false);
+                  }}
+                  className="w-full text-left px-2 py-1.5 text-xs hover:bg-slate-50 border-b border-slate-100 last:border-b-0"
+                >
+                  {c.name}
+                </button>
+              ))}
+              {canCreateNewContact && (
+                <button
+                  type="button"
+                  data-testid="manual-txn-contact-add-new"
+                  onClick={() => setContactMenuOpen(false)}
+                  className="w-full text-left px-2 py-1.5 text-xs text-cyan-700 font-semibold hover:bg-cyan-50 border-t border-slate-100"
+                >
+                  + Use new contact "{contactQuery.trim()}"
+                </button>
+              )}
+            </div>
+          )}
+        </div>
         <div><label className="text-xs text-slate-600">Merchant</label>
           <input value={merchant} onChange={(e) => setMerchant(e.target.value)} className="w-full border rounded px-2 py-1.5" /></div>
         <div><label className="text-xs text-slate-600">Description</label>

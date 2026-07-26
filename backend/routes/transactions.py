@@ -1126,6 +1126,8 @@ async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depe
         "category_account_id": category_id,
         "category_account_code": acct["code"] if acct else None,
         "category_account_name": acct["name"] if acct else None,
+        "contact_id": inp.contact_id,
+        "contact_name": inp.contact_name or (inp.merchant if inp.contact_id else None),
         "ai_confidence": round(conf, 2),
         "ai_reasoning": reasoning,
         "needs_review": conf < 0.80,

@@ -57,6 +57,11 @@ class TransactionCreate(BaseModel):
     # be stored with `splits` populated and marked human_reviewed=True so
     # it bypasses AI categorization entirely.
     splits: Optional[list] = None
+    # Optional contact link — attached to the txn as `contact_id` +
+    # denormalized `contact_name` so vendor rollups pick it up
+    # immediately without a re-resolve pass.
+    contact_id: Optional[str] = None
+    contact_name: Optional[str] = None
 
 
 class SplitIn(BaseModel):
