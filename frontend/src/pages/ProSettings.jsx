@@ -213,24 +213,6 @@ export default function ProSettings() {
         </p>
       </section>
 
-      {/* ---------- Logos (4 variants) ---------- */}
-      <section className="rounded-xl border bg-white p-6" data-testid="branding-logos-card">
-        <div className="flex items-center gap-2 mb-2">
-          <ImageIcon size={16} className="text-slate-500" />
-          <h2 className="font-heading font-semibold">Logos</h2>
-        </div>
-        <p className="text-sm text-slate-500 mb-4">
-          The <b>light logo</b> is the default; the others are used when the sidebar is dark or collapsed.
-          Only the light logo is required.
-        </p>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <LogoSlot variant="logo_light"  label="Logo · light"  bg="bg-slate-50"  url={logos.logo_light}  refresh={refresh} />
-          <LogoSlot variant="logo_dark"   label="Logo · dark"   bg="bg-slate-900" url={logos.logo_dark}   refresh={refresh} />
-          <LogoSlot variant="icon_light"  label="Icon · light"  bg="bg-slate-50"  url={logos.icon_light}  refresh={refresh} square />
-          <LogoSlot variant="icon_dark"   label="Icon · dark"   bg="bg-slate-900" url={logos.icon_dark}   refresh={refresh} square />
-        </div>
-      </section>
-
       {/* ---------- Sign-in address ---------- */}
       <section className="rounded-xl border bg-white p-6" data-testid="branding-signin-card">
         <div className="flex items-center gap-2 mb-2">
@@ -305,6 +287,24 @@ export default function ProSettings() {
         <p className="text-[11px] text-slate-400 mt-2">
           3–40 chars, lowercase letters, digits, and hyphens. Must be unique across all firms.
         </p>
+      </section>
+
+      {/* ---------- Logos (4 variants) ---------- */}
+      <section className="rounded-xl border bg-white p-6" data-testid="branding-logos-card">
+        <div className="flex items-center gap-2 mb-2">
+          <ImageIcon size={16} className="text-slate-500" />
+          <h2 className="font-heading font-semibold">Logos</h2>
+        </div>
+        <p className="text-sm text-slate-500 mb-4">
+          The <b>light logo</b> is the default; the others are used when the sidebar is dark or collapsed.
+          Only the light logo is required.
+        </p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <LogoSlot variant="logo_light"  label="Logo · light"  bg="bg-slate-50"  url={logos.logo_light}  refresh={refresh} />
+          <LogoSlot variant="logo_dark"   label="Logo · dark"   bg="bg-slate-900" url={logos.logo_dark}   refresh={refresh} />
+          <LogoSlot variant="icon_light"  label="Icon · light"  bg="bg-slate-50"  url={logos.icon_light}  refresh={refresh} square />
+          <LogoSlot variant="icon_dark"   label="Icon · dark"   bg="bg-slate-900" url={logos.icon_dark}   refresh={refresh} square />
+        </div>
       </section>
 
       {/* ---------- Theme (presets + custom pickers + live preview) ---------- */}
