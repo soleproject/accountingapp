@@ -752,10 +752,19 @@ async def create_company_checkout_session(
 
     price_id = _price_id(product, discount)
     if not price_id:
+        expected_var = f"STRIPE_PRICE_{product.upper()}_{'DISCOUNT' if discount else 'REGULAR'}"
+        legacy_hint = ""
+        if product == "simple_start":
+            legacy_hint = (
+                " (or the legacy name "
+                f"STRIPE_PRICE_SIMPLE_START_{'MONTHLY_19' if discount else 'MONTHLY_38'})"
+            )
         raise HTTPException(
             400,
             f"No Stripe Price configured for product={product} discount={discount}. "
-            f"Set STRIPE_PRICE_{product.upper()}_{'DISCOUNT' if discount else 'REGULAR'} in the env.",
+            f"Add {expected_var}{legacy_hint} to your Railway env vars (Settings → "
+            f"Variables) with the Stripe Price ID (starts with `price_...`) from your "
+            f"Stripe Dashboard, then redeploy.",
         )
 
     if not _STRIPE_KEY:

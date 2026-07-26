@@ -676,6 +676,12 @@ function NewClientModal({ onClose, onCreated }) {
       // to /billing/success which flips billing_state to `active` and
       // dismisses the blocking modal. Skipped for email/enterprise/
       // free_spot payers.
+      //
+      // CRITICAL UX: the client + company ARE ALREADY CREATED at this
+      // point. If Stripe checkout fails (missing env, invalid key, etc.)
+      // we must not leave the pro thinking the whole flow crashed —
+      // the error toast has to make it obvious the client was saved and
+      // only the payment redirect was lost.
       if (form.billing_payer === "client_card" && r.data.company_id) {
         try {
           const co = await api.post(
@@ -687,10 +693,18 @@ function NewClientModal({ onClose, onCreated }) {
             return;
           }
         } catch (e) {
+          const detail = e.response?.data?.detail || "";
           toast.error(
-            e.response?.data?.detail
-              || "Could not open Stripe checkout — the client can still pay from the blocked-billing modal later.",
-            { duration: 10_000 },
+            <div>
+              <b>{form.company_name} was created ✓</b> — but Stripe checkout couldn't open.
+              <div className="mt-1 text-[11px] opacity-90">{detail}</div>
+              <div className="mt-2 text-[11px]">
+                The company will show a <b>billing-locked modal</b> on next open with a
+                Pay-now button — nothing is lost. Ask a superadmin to fix the missing
+                Stripe env var and the "Pay now" button will work.
+              </div>
+            </div>,
+            { duration: 20_000 },
           );
         }
       }
