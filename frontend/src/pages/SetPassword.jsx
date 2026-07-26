@@ -12,7 +12,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { toast } from "sonner";
-import { KeyRound, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
+import { KeyRound, Loader2, CheckCircle2, AlertTriangle, Sparkles } from "lucide-react";
 
 const BASE = process.env.REACT_APP_BACKEND_URL;
 
@@ -26,6 +26,21 @@ export default function SetPassword() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
+  // Firm branding — mirrors the same lookup Login.jsx does. When
+  // `?firm=<slug>` is present on the URL (the Pro's welcome email
+  // adds it for private-label firms), we swap the SmartBooks logo
+  // above the form for the firm's logo + name so a brand-new client
+  // never sees the SmartBooks platform brand.
+  const [firm, setFirm] = useState(null);
+  const firmSlug = new URLSearchParams(window.location.search).get("firm");
+
+  useEffect(() => {
+    if (!firmSlug) return;
+    axios
+      .get(`${BASE}/api/branding/by-subdomain/${encodeURIComponent(firmSlug.toLowerCase().trim())}`)
+      .then((r) => setFirm(r.data))
+      .catch(() => {});
+  }, [firmSlug]);
 
   useEffect(() => {
     axios
@@ -55,7 +70,14 @@ export default function SetPassword() {
       const r = await axios.post(`${BASE}/api/auth/password-set/${token}`, { password });
       localStorage.setItem("token", r.data.token);
       localStorage.setItem("user", JSON.stringify(r.data.user));
-      toast.success("You're in! Welcome to SmartBooks.");
+      const brand = firm?.firm_name || "SmartBooks";
+      // Persist firm slug so the login page keeps the firm brand if the
+      // client logs out and back in (Login.jsx reads this as a fallback
+      // when there's no ?firm= param and the hostname is the platform).
+      if (firmSlug) {
+        try { localStorage.setItem("axiom_firm_slug", firmSlug); } catch { /* quota / privacy mode */ }
+      }
+      toast.success(`You're in! Welcome to ${brand}.`);
       // Full reload so AuthProvider picks up the new token cleanly.
       window.location.replace("/");
     } catch (e) {
@@ -68,6 +90,35 @@ export default function SetPassword() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-200 p-8">
+        {/* Firm branding header — shown when ?firm=<slug> is present on
+            the URL and the /branding/by-subdomain lookup succeeded.
+            Falls back to a light SmartBooks header for platform links. */}
+        {firm ? (
+          <div className="flex items-center gap-3 mb-5 pb-5 border-b border-slate-100" data-testid="setpw-firm-branding">
+            {(firm.logos?.logo_light || firm.logos?.icon_light) ? (
+              <img
+                src={firm.logos.logo_light || firm.logos.icon_light}
+                alt={firm.firm_name}
+                className="h-9 max-w-[160px] object-contain"
+              />
+            ) : (
+              <div className="w-9 h-9 rounded-lg bg-cyan-600 flex items-center justify-center">
+                <Sparkles size={16} className="text-white" />
+              </div>
+            )}
+            <div>
+              <div className="font-heading font-bold text-slate-900 text-sm">{firm.firm_name}</div>
+              <div className="text-[10px] text-slate-500 uppercase tracking-widest">Client onboarding</div>
+            </div>
+          </div>
+        ) : !firmSlug ? (
+          <div className="flex items-center gap-2 mb-5 pb-5 border-b border-slate-100">
+            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
+              <Sparkles size={16} className="text-white" />
+            </div>
+            <div className="font-heading font-bold text-slate-900 text-sm">SmartBooks</div>
+          </div>
+        ) : null}
         {status === "checking" && (
           <div className="text-center py-8" data-testid="setpw-checking">
             <Loader2 size={28} className="animate-spin text-cyan-600 mx-auto" />

@@ -33,8 +33,14 @@ export default function Login() {
     //    where the host doesn't match the real private-label root.
     const q = new URLSearchParams(window.location.search).get("firm");
     if (q) {
+      // Cache the successful lookup so future logouts on this device
+      // keep the firm brand (see #3 below).
       api.get(`/branding/by-subdomain/${encodeURIComponent(q.toLowerCase().trim())}`)
-        .then(r => { setFirm(r.data); setMode("firm"); })
+        .then(r => {
+          setFirm(r.data);
+          setMode("firm");
+          try { localStorage.setItem("axiom_firm_slug", q); } catch { /* ignore */ }
+        })
         .catch(() => setMode("platform"));  // unknown ?firm → platform brand
       return;
     }
@@ -45,6 +51,20 @@ export default function Login() {
     api.get(`/branding/by-host?host=${encodeURIComponent(window.location.hostname)}`)
       .then(r => {
         const m = r.data?.mode || "platform";
+        // 3. If the backend says "platform" but this device previously
+        //    signed in under a firm (SetPassword or explicit `?firm=`
+        //    query), keep that firm brand sticky — a private-label
+        //    client shouldn't see SmartBooks on their sign-in page just
+        //    because they visited the bare app URL.
+        if (m === "platform") {
+          const cached = (() => { try { return localStorage.getItem("axiom_firm_slug"); } catch { return null; } })();
+          if (cached) {
+            api.get(`/branding/by-subdomain/${encodeURIComponent(cached)}`)
+              .then(fr => { setFirm(fr.data); setMode("firm"); })
+              .catch(() => setMode("platform"));
+            return;
+          }
+        }
         setMode(m);
         if (m === "firm") setFirm(r.data);
       })

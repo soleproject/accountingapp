@@ -252,7 +252,21 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
 
         pro_name = user.get("full_name") or user.get("name") or user.get("email") or "Your accountant"
         firm_name = (user.get("branding") or {}).get("firm_name") or None
+        firm_slug = (user.get("branding") or {}).get("signin_subdomain") or None
         base = public_base_url()
+
+        # Pros with a `signin_subdomain` set (i.e. private-label firms)
+        # get every outbound URL suffixed with `?firm={slug}` so the
+        # login / set-password / billing pages resolve the firm brand
+        # instead of falling back to SmartBooks. The frontend
+        # `/branding/by-subdomain/{sub}` endpoint drives the whole
+        # sign-in-gate lookup off that param. If the Pro is not private-
+        # labelled we leave the URLs plain so they resolve to platform.
+        def _brand(url: str) -> str:
+            if not firm_slug:
+                return url
+            sep = "&" if "?" in url else "?"
+            return f"{url}{sep}firm={firm_slug}"
 
         # When billing_payer=client_email we surface a "Pay & activate"
         # CTA in the welcome email that deep-links to the client's
@@ -261,7 +275,7 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
         # will open Stripe checkout for this specific company.
         payment_url: Optional[str] = None
         if billing_payer == "client_email":
-            payment_url = f"{base}/billing?company={company_id}"
+            payment_url = _brand(f"{base}/billing?company={company_id}")
 
         if reused and other_company_count > 0:
             subject, html = _tmpl.client_welcome_returning(
@@ -270,7 +284,7 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
                 brand_name=firm_name,
                 company_name=inp.company_name,
                 other_company_count=other_company_count,
-                dashboard_url=f"{base}/dashboard",
+                dashboard_url=_brand(f"{base}/dashboard"),
                 payment_url=payment_url,
             )
             email_kind = "client_welcome_returning"
@@ -289,7 +303,7 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
                 pro_name=pro_name, firm_name=firm_name,
                 brand_name=firm_name,
                 company_name=inp.company_name,
-                set_password_url=f"{base}/set-password/{token}",
+                set_password_url=_brand(f"{base}/set-password/{token}"),
                 payment_url=payment_url,
             )
             email_kind = "client_welcome"
@@ -366,12 +380,22 @@ async def resend_welcome_email(cid: str, user: dict = Depends(require_role("pro"
     base = public_base_url()
     pro_name = user.get("full_name") or user.get("name") or user.get("email") or "Your accountant"
     firm_name = (user.get("branding") or {}).get("firm_name") or None
+    firm_slug = (user.get("branding") or {}).get("signin_subdomain") or None
+
+    # Mirror /pro/clients (add_client) branding — carry ?firm=<slug>
+    # so the client's set-password + billing pages render the Pro's
+    # private label instead of the SmartBooks platform brand.
+    def _brand(url: str) -> str:
+        if not firm_slug:
+            return url
+        sep = "&" if "?" in url else "?"
+        return f"{url}{sep}firm={firm_slug}"
 
     needs_activation = (
         company.get("billing_payer") == "client_email"
         and (company.get("billing_state") or "pending") == "pending"
     )
-    payment_url = f"{base}/billing?company={cid}" if needs_activation else None
+    payment_url = _brand(f"{base}/billing?company={cid}") if needs_activation else None
 
     if owner.get("must_set_password"):
         token = await mint_password_set_token(owner["id"], purpose="client_welcome_resend")
@@ -380,7 +404,7 @@ async def resend_welcome_email(cid: str, user: dict = Depends(require_role("pro"
             pro_name=pro_name, firm_name=firm_name,
             brand_name=firm_name,
             company_name=company.get("name") or "",
-            set_password_url=f"{base}/set-password/{token}",
+            set_password_url=_brand(f"{base}/set-password/{token}"),
             payment_url=payment_url,
         )
         related = {"resend": True, "password_set_token": token, "needs_activation": needs_activation}
@@ -397,7 +421,7 @@ async def resend_welcome_email(cid: str, user: dict = Depends(require_role("pro"
             brand_name=firm_name,
             company_name=company.get("name") or "",
             other_company_count=max(0, other_count),
-            dashboard_url=f"{base}/dashboard",
+            dashboard_url=_brand(f"{base}/dashboard"),
             payment_url=payment_url,
         )
         related = {"resend": True, "needs_activation": needs_activation}
