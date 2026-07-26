@@ -303,6 +303,11 @@ _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
 class BrandingPatch(BaseModel):
+    # Public/private-label name the firm renders as everywhere the app or an
+    # outbound email is branded (browser tab, email sender name, client
+    # sign-in header). Blank string clears it, in which case the effective
+    # name falls back to the pro user's own name.
+    firm_name: Optional[str] = None
     signin_subdomain: Optional[str] = None
     theme_preset: Optional[str] = None
     # Sparse object — every key must be in `_THEME_TOKENS`. Pass `null` to
@@ -321,11 +326,19 @@ def _logos_from(b: dict) -> dict:
 
 def _branding_out(user_doc: dict) -> dict:
     b = (user_doc or {}).get("branding") or {}
+    fallback = (user_doc or {}).get("name") or None
+    stored = b.get("firm_name") or None
     return {
         # The firm's display name — falls back to the user's own name so
         # newly-signed-up pros get something sensible in the tab title / UI
         # before they've set Enterprise Settings explicitly.
-        "firm_name": b.get("firm_name") or (user_doc or {}).get("name") or None,
+        "firm_name": stored or fallback,
+        # `firm_name_raw` is what the pro has actually stored on their
+        # branding sub-doc. The Enterprise Settings form uses this so the
+        # empty input surfaces (rather than the user's own name) — the
+        # placeholder shows the fallback value.
+        "firm_name_raw": stored,
+        "firm_name_fallback": fallback,
         "logos": _logos_from(b),
         # Preserved for backwards-compat with older frontend builds; new
         # clients should read `logos.logo_light` instead.
@@ -376,6 +389,14 @@ async def patch_pro_branding(
 ):
     updates: dict = {}
     unsets: dict = {}
+    if inp.firm_name is not None:
+        name = inp.firm_name.strip()
+        if not name:
+            unsets["branding.firm_name"] = ""
+        else:
+            if len(name) > 60:
+                raise HTTPException(400, "Private label name must be 60 characters or less.")
+            updates["branding.firm_name"] = name
     if inp.theme_preset is not None:
         if inp.theme_preset not in _ALLOWED_PRESETS:
             raise HTTPException(400, f"Unknown theme preset — must be one of {sorted(_ALLOWED_PRESETS)}")

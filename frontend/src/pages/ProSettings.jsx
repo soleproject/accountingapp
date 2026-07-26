@@ -3,7 +3,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { useBranding, THEME_PRESETS, THEME_TOKEN_META, resolvePalette } from "@/lib/branding";
-import { Loader2, Upload, Trash2, Check, Save, Palette, ImageIcon, Link as LinkIcon, RotateCcw } from "lucide-react";
+import { Loader2, Upload, Trash2, Check, Save, Palette, ImageIcon, Link as LinkIcon, RotateCcw, Type } from "lucide-react";
 
 // Pro-firm branding — slice B: 4 logo variants, per-token custom colors
 // with a live preview card, and a public sign-in subdomain.
@@ -12,6 +12,12 @@ export default function ProSettings() {
   const { user } = useAuth();
   const { branding, refresh } = useBranding();
   const [subdomain, setSubdomain] = useState("");
+  // Private-label display name — used for the browser tab title, outbound
+  // email sender name, and every other place the firm wants their own
+  // brand instead of "SmartBooks". Blank string clears it (falls back to
+  // the pro's own user name via `firm_name_fallback`).
+  const [firmName, setFirmName] = useState("");
+  const [savingFirmName, setSavingFirmName] = useState(false);
   const [preset, setPreset] = useState("default");
   // Local, unsaved custom palette overrides. Auto-saved with a short debounce
   // whenever the user edits a color, so there's no separate "Save" step to
@@ -39,6 +45,7 @@ export default function ProSettings() {
   useEffect(() => {
     if (!branding) return;
     setSubdomain(branding.signin_subdomain || "");
+    setFirmName(branding.firm_name_raw || "");
     setPreset(branding.theme_preset || "default");
     setCustom(branding.theme_custom || {});
   }, [branding]);
@@ -100,6 +107,21 @@ export default function ProSettings() {
     } finally { setSavingSub(false); }
   };
 
+  const saveFirmName = async () => {
+    setSavingFirmName(true);
+    try {
+      await api.patch("/pro/branding", { firm_name: firmName });
+      await refresh();
+      toast.success(
+        firmName.trim()
+          ? `Private label name saved — everything now brands as "${firmName.trim()}".`
+          : "Private label name cleared — reverting to your account name."
+      );
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Save failed");
+    } finally { setSavingFirmName(false); }
+  };
+
   const pickPreset = async (p) => {
     setPreset(p);
     setCustom({});
@@ -146,6 +168,50 @@ export default function ProSettings() {
           Customize how your firm shows up to your team and your clients.
         </p>
       </div>
+
+      {/* ---------- Private Label Name ---------- */}
+      <section className="rounded-xl border bg-white p-6" data-testid="branding-firm-name-card">
+        <div className="flex items-center gap-2 mb-2">
+          <Type size={16} className="text-slate-500" />
+          <h2 className="font-heading font-semibold">Private label name</h2>
+        </div>
+        <p className="text-sm text-slate-500 mb-4">
+          The name every part of the app uses when it shows your firm — browser tab title,
+          outbound email sender ("From" name), client sign-in header, and PDF footers.
+          Leave blank to fall back to your account name.
+        </p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            value={firmName}
+            onChange={(e) => setFirmName(e.target.value)}
+            placeholder={branding?.firm_name_fallback || "e.g. Synergy AI CPAs"}
+            className="border rounded-md px-3 py-1.5 text-sm w-80"
+            data-testid="branding-firm-name-input"
+            maxLength={60}
+          />
+          <button
+            onClick={saveFirmName}
+            disabled={savingFirmName || firmName === (branding?.firm_name_raw || "")}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-800 disabled:opacity-50"
+            data-testid="branding-firm-name-save"
+          >
+            {savingFirmName ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+            Save
+          </button>
+        </div>
+        <p className="text-[11px] text-slate-500 mt-2">
+          Currently branding as:{" "}
+          <span className="font-mono-num text-slate-700" data-testid="branding-firm-name-current">
+            {branding?.firm_name || "—"}
+          </span>
+          {!branding?.firm_name_raw && branding?.firm_name_fallback && (
+            <span className="text-slate-400"> (falling back to your account name)</span>
+          )}
+        </p>
+        <p className="text-[11px] text-slate-400 mt-1">
+          Up to 60 characters. Changes apply on next page load — no rebuild required.
+        </p>
+      </section>
 
       {/* ---------- Logos (4 variants) ---------- */}
       <section className="rounded-xl border bg-white p-6" data-testid="branding-logos-card">

@@ -39,6 +39,34 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Private Label Name in Enterprise Settings
+- **Backend** in `/app/backend/routes/pro.py`:
+  - `BrandingPatch` extended with `firm_name: Optional[str]`. Empty string
+    clears the stored value (unsets the doc field) — the effective
+    `firm_name` then falls back to the pro user's own `name`. Cap 60 chars.
+  - `_branding_out` now returns three fields for the settings form and
+    downstream consumers: `firm_name` (effective, backwards-compatible),
+    `firm_name_raw` (what's actually stored on `branding.firm_name`), and
+    `firm_name_fallback` (the pro user's own `name`). The settings form
+    binds to `firm_name_raw` so an empty input surfaces (rather than the
+    fallback), and uses `firm_name_fallback` as the input placeholder.
+- **Frontend** in `/app/frontend/src/pages/ProSettings.jsx`:
+  - New "Private label name" card at the top of Enterprise Settings
+    (before Logos). Input + Save button; Save PATCHes `/pro/branding`.
+    Shows "Currently branding as: …" indicator + "(falling back to your
+    account name)" hint when nothing is stored yet.
+  - Save button is auto-disabled when the input matches the saved value
+    so a stale click can't re-persist the same string.
+- **Downstream propagation — zero further change needed**:
+  - `useHostTitle.js` already watches `branding.firm_name` and updates
+    `document.title` on refresh, so the browser tab title flips instantly.
+  - `email_dispatcher.py` already reads `branding.firm_name` for the
+    outbound email sender name (line 147), so client-facing emails ("Ask
+    client" magic links, welcome invites, daily digests) now brand
+    correctly.
+
+
+
 ### Feb 2026 — Edit Transaction from Row 3-Dot Menu (P0)
 - **Frontend** in `/app/frontend/src/pages/Transactions.jsx`:
   - `RowMoreMenu` gained an `onEdit` prop and renders an "Edit transaction"
