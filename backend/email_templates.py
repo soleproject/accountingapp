@@ -19,10 +19,10 @@ _WRAP_OPEN = """
            style="background:#ffffff;border-radius:12px;padding:36px;border:1px solid #e2e8f0;">
 """
 
-_WRAP_CLOSE = """
+_WRAP_CLOSE_TMPL = """
     </table>
     <div style="max-width:560px;margin:16px auto 0;color:#94a3b8;font-size:11px;line-height:1.5;text-align:center;">
-      Sent by SmartBooks · <span style="font-family:monospace;">smartbookssoftware.ai</span>
+      Sent by {brand} · <span style="font-family:monospace;">{domain}</span>
     </div>
   </td></tr>
 </table>
@@ -40,8 +40,19 @@ _TABLE_KEY = "font-size:13px;color:#64748b;padding:4px 12px 4px 0;white-space:no
 _TABLE_VAL = "font-size:13px;color:#0f172a;padding:4px 0;font-weight:500;"
 
 
-def _wrap(inner: str) -> str:
-    return f"{_WRAP_OPEN}<tr><td>{inner}</td></tr>{_WRAP_CLOSE}"
+def _wrap(inner: str, *, brand_name: Optional[str] = None) -> str:
+    """Wrap an email body with the standard slate/cyan chrome.
+
+    When a Pro has set a Private Label Name on their branding, callers pass
+    it as ``brand_name`` and the footer swaps "Sent by SmartBooks" for
+    "Sent by {firm}". The domain still shows the platform host so
+    deliverability isn't affected — pros can override their sending domain
+    at the ESP level later if they want full DNS-level white-label.
+    """
+    brand = escape(brand_name.strip()) if brand_name and brand_name.strip() else "SmartBooks"
+    domain = "smartbookssoftware.ai"
+    close = _WRAP_CLOSE_TMPL.format(brand=brand, domain=domain)
+    return f"{_WRAP_OPEN}<tr><td>{inner}</td></tr>{close}"
 
 
 # --------------------------------------------------------------------------
@@ -126,14 +137,17 @@ def team_invite(*, invitee_name: str, inviter_name: str,
 # --------------------------------------------------------------------------
 def client_welcome_first_time(*, client_name: str, pro_name: str,
                               firm_name: Optional[str], company_name: str,
-                              set_password_url: str) -> tuple[str, str]:
+                              set_password_url: str,
+                              brand_name: Optional[str] = None) -> tuple[str, str]:
     firm = firm_name or pro_name
+    brand = (brand_name or "").strip() or "SmartBooks"
+    brand_e = escape(brand)
     inner = f"""
-      <div style="{_H1}">Welcome to SmartBooks 👋</div>
+      <div style="{_H1}">Welcome to {brand_e} 👋</div>
       <div style="{_P}">
         Hi {escape(client_name)},<br><br>
         <b>{escape(pro_name)}</b> at {escape(firm)} just set up
-        <b>{escape(company_name)}</b>'s books here on SmartBooks — a modern,
+        <b>{escape(company_name)}</b>'s books here on {brand_e} — a modern,
         AI-assisted accounting platform.
       </div>
       <div style="{_P}">
@@ -151,7 +165,7 @@ def client_welcome_first_time(*, client_name: str, pro_name: str,
         re-send it.
       </div>
     """
-    return f"Welcome to SmartBooks — set your password", _wrap(inner)
+    return f"Welcome to {brand} — set your password", _wrap(inner, brand_name=brand_name)
 
 
 # --------------------------------------------------------------------------
@@ -163,18 +177,21 @@ def client_welcome_first_time(*, client_name: str, pro_name: str,
 def client_welcome_returning(*, client_name: str, pro_name: str,
                              firm_name: Optional[str], company_name: str,
                              other_company_count: int,
-                             dashboard_url: str) -> tuple[str, str]:
+                             dashboard_url: str,
+                             brand_name: Optional[str] = None) -> tuple[str, str]:
     firm = firm_name or pro_name
+    brand = (brand_name or "").strip() or "SmartBooks"
+    brand_e = escape(brand)
     others = (
-        f"You now have <b>{other_company_count + 1}</b> companies on your Axiom login — "
+        f"You now have <b>{other_company_count + 1}</b> companies on your {brand_e} login — "
         "switch between them from the dropdown at the top-left."
     )
     inner = f"""
-      <div style="{_H1}">A new company was added to your Axiom login</div>
+      <div style="{_H1}">A new company was added to your {brand_e} login</div>
       <div style="{_P}">
         Hi {escape(client_name)},<br><br>
         <b>{escape(pro_name)}</b> at {escape(firm)} just added
-        <b>{escape(company_name)}</b> to your existing SmartBooks account.
+        <b>{escape(company_name)}</b> to your existing {brand_e} account.
       </div>
       <div style="{_P}">{others}</div>
       <div style="padding:14px 0 6px;">
@@ -184,7 +201,7 @@ def client_welcome_returning(*, client_name: str, pro_name: str,
         Your existing password still works — no need to reset anything.
       </div>
     """
-    return f"{company_name} is now on your Axiom login", _wrap(inner)
+    return f"{company_name} is now on your {brand} login", _wrap(inner, brand_name=brand_name)
 
 
 # --------------------------------------------------------------------------

@@ -39,6 +39,43 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Private-Label Emails + Missing "Company Added" Email Bug Fix
+- **Root cause of the missing email**: `POST /companies` (used by the "My
+  Businesses" page's Add flow) never dispatched a welcome email. Only
+  `POST /pro/clients` did. When Priya added "Test Branding LLC" from
+  My Businesses, no email was fired.
+- **Bug fix** in `/app/backend/routes/companies.py :: create_company`:
+  Now counts prior owner-memberships. If the caller already owns ≥ 1
+  company AND has an email on file, dispatches
+  `client_welcome_returning` to their own inbox (mirroring the Pro-adds-
+  a-client flow). Signup case (first company) still skips the email.
+  Send errors never block company creation — swallowed to comms log.
+- **Templates parameterized for Private Label Name** in
+  `/app/backend/email_templates.py`:
+  - `_wrap()` now takes `brand_name` and interpolates it into the
+    footer ("Sent by {firm}"). Falls back to "SmartBooks" when unset.
+  - `client_welcome_first_time` and `client_welcome_returning` now
+    accept `brand_name` (used in H1 headline, subject line, body copy
+    "on your {brand} login" / "existing {brand} account", and footer).
+  - Every hardcoded "SmartBooks" / "Axiom" in these two templates
+    swapped for the brand variable. Templates that don't yet accept
+    `brand_name` (password_reset, team_invite, ai_ask_client, etc.)
+    still show "SmartBooks" in their footer — future pass will
+    parameterize them the same way.
+- **Callers updated**:
+  - `pro_create_client` and `resend_welcome_email` in
+    `/app/backend/routes/pro.py` now pass `brand_name=firm_name`.
+  - `create_company` in `/app/backend/routes/companies.py` uses the
+    same pattern for the self-add case.
+- **Verified live**: With `branding.firm_name="PriyaBooks"` set, creating
+  a company via `POST /companies` fires a `client_welcome_returning`
+  email whose subject reads *"Test Branding LLC is now on your PriyaBooks
+  login"*, body says *"A new company was added to your PriyaBooks login"*,
+  and footer reads *"Sent by PriyaBooks"* — zero remaining SmartBooks /
+  Axiom strings. Falls back to "SmartBooks" when no brand is set.
+
+
+
 ### Feb 2026 — Private Label Name in Enterprise Settings
 - **Backend** in `/app/backend/routes/pro.py`:
   - `BrandingPatch` extended with `firm_name: Optional[str]`. Empty string

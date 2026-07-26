@@ -181,6 +181,7 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
             subject, html = _tmpl.client_welcome_returning(
                 client_name=inp.client_name or "there",
                 pro_name=pro_name, firm_name=firm_name,
+                brand_name=firm_name,
                 company_name=inp.company_name,
                 other_company_count=other_company_count,
                 dashboard_url=f"{base}/dashboard",
@@ -196,6 +197,7 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
             subject, html = _tmpl.client_welcome_first_time(
                 client_name=inp.client_name or "there",
                 pro_name=pro_name, firm_name=firm_name,
+                brand_name=firm_name,
                 company_name=inp.company_name,
                 set_password_url=f"{base}/set-password/{token}",
             )
@@ -266,6 +268,7 @@ async def resend_welcome_email(cid: str, user: dict = Depends(require_role("pro"
     subject, html = _tmpl.client_welcome_first_time(
         client_name=owner.get("name") or "there",
         pro_name=pro_name, firm_name=firm_name,
+        brand_name=firm_name,
         company_name=company.get("name") or "",
         set_password_url=f"{public_base_url()}/set-password/{token}",
     )

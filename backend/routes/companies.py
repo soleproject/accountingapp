@@ -77,6 +77,13 @@ async def list_companies(user: dict = Depends(get_current_user)):
 async def create_company(inp: CompanyCreate, user: dict = Depends(get_current_user)):
     cid = str(uuid.uuid4())
     now = now_iso()
+    # Count how many companies the caller already owns so we can decide
+    # whether to send the "another company added to your login" email. On
+    # signup (first company) we skip the email — the user just created
+    # their account and doesn't need a "welcome" bounce.
+    prior_owner_count = await db.memberships.count_documents({
+        "user_id": user["id"], "role": "owner",
+    })
     await db.companies.insert_one({
         "id": cid, "name": inp.name, "business_type": inp.business_type,
         "business_description": inp.business_description,
@@ -100,6 +107,40 @@ async def create_company(inp: CompanyCreate, user: dict = Depends(get_current_us
         "id": str(uuid.uuid4()), "company_id": cid, "step": 0, "total_steps": 6,
         "complete": False, "answers": {}, "created_at": now, "updated_at": now,
     })
+
+    # Owner-adds-another-company welcome email — matches the notification
+    # a client gets when a Pro adds a new company to their login. Skipped
+    # for the very first company (signup case) and for users without an
+    # email on file. Never blocks — swallow send failures so a broken
+    # Resend key can't stop company creation.
+    if prior_owner_count > 0 and user.get("email"):
+        try:
+            from email_dispatcher import dispatch, public_base_url
+            import email_templates as _tmpl
+            branding = user.get("branding") or {}
+            firm_name = branding.get("firm_name") or None
+            pro_name = user.get("full_name") or user.get("name") or user.get("email") or "You"
+            subject, html = _tmpl.client_welcome_returning(
+                client_name=user.get("name") or "there",
+                pro_name=pro_name,
+                firm_name=firm_name,
+                brand_name=firm_name,
+                company_name=inp.name,
+                other_company_count=prior_owner_count,
+                dashboard_url=f"{public_base_url()}/dashboard",
+            )
+            await dispatch(
+                kind="client_welcome_returning", to=user["email"],
+                subject=subject, html=html,
+                initiating_user_id=user["id"], company_id=cid,
+                related={"self_add": True, "prior_owner_count": prior_owner_count},
+            )
+        except Exception:
+            import logging as _lg
+            _lg.getLogger(__name__).exception(
+                "Self-add welcome email failed (company creation still succeeded)"
+            )
+
     return {"company_id": cid}
 
 
