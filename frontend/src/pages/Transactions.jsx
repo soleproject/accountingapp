@@ -1825,11 +1825,34 @@ function ManualTxnModal({ accts, currentId, onClose }) {
           <input value={description} onChange={(e) => setDescription(e.target.value)} className="w-full border rounded px-2 py-1.5" /></div>
         <div><label className="text-xs text-slate-600">Amount (negative = expense)</label>
           <input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full border rounded px-2 py-1.5 font-mono-num" /></div>
-        <div><label className="text-xs text-slate-600">Category (leave blank for AI)</label>
-          <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className="w-full border rounded px-2 py-1.5">
-            <option value="">Let AI decide</option>
-            {accts.map(a => <option key={a.id} value={a.id}>{a.code} {a.name}</option>)}
-          </select></div>
+        <div>
+          <label className="text-xs text-slate-600">Category (leave blank for AI)</label>
+          {/* Checkbox is authoritative for "Let AI decide" mode. When it
+              is checked, categoryId stays empty and the backend gets
+              `auto_categorize: true`. Picking anything from the
+              AccountPicker below flips the checkbox off automatically. */}
+          <div className="flex items-center gap-2 mt-1 mb-2">
+            <input
+              type="checkbox"
+              id="manual-txn-let-ai"
+              checked={!categoryId}
+              onChange={(e) => { if (e.target.checked) setCategoryId(""); }}
+              className="rounded"
+            />
+            <label htmlFor="manual-txn-let-ai" className="text-xs text-slate-600 cursor-pointer">
+              Let AI decide
+            </label>
+          </div>
+          <div className={!categoryId ? "opacity-40" : ""}>
+            <AccountPicker
+              value={categoryId}
+              accounts={accts}
+              onChange={(id) => setCategoryId(id)}
+              companyId={currentId}
+              testId="manual-txn-category-picker"
+            />
+          </div>
+        </div>
         <button data-testid={TID.saveBtn} onClick={save} disabled={busy}
                 className="w-full py-2 rounded-md bg-slate-900 text-white text-sm">Save</button>
       </div>
