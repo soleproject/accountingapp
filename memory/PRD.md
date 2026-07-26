@@ -39,6 +39,37 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Superadmin "Enterprise Pros" View on /pro/clients
+- **Frontend** in `/app/frontend/src/pages/ProClients.jsx`:
+  - New superadmin-only view toggle in the header (two-button pill,
+    `data-testid="pro-clients-view-toggle"`): **Clients** (default) /
+    **Enterprise Pros**. Hidden entirely for role=`pro` so plain pros
+    never see an affordance they can't use. Uses `useAuth()` to gate.
+  - Enterprise view fetches `/admin/overview` once on demand and
+    aggregates memberships/companies to compute per-Pro rollups
+    (client_count, company_count) in a single pass.
+  - New `EnterpriseProsGrid` component with a deliberately distinct
+    look: indigo→violet→fuchsia gradient border, `Shield` icon,
+    "PRO" badge, indigo/violet stat tiles, "White-labeled" green pill
+    when the Pro has set a `firm_name`. Metadata rows show theme
+    preset, sign-in subdomain (linked to `/login?firm=<slug>`), and
+    joined date. Sorted by companies-managed desc.
+  - `data-testids`: `pro-clients-view-clients`,
+    `pro-clients-view-enterprise`, `enterprise-pros-grid`,
+    `enterprise-pro-card-{id}`.
+- **Backend**: no new endpoints — reuses existing
+  `GET /api/admin/overview` (superadmin-guarded) which already returns
+  users + companies + memberships in one payload.
+- Verified via screenshots:
+  * As `admin@axiom.ai` (superadmin): toggle visible, clicking
+    "Enterprise Pros" renders the gradient Pro card for `PriyaBooks`
+    (Priya Patel) with `5 Clients · 8 Companies · midnight theme ·
+    white-labeled · sign-in acme`.
+  * As `pro@axiom.ai` (regular Pro): toggle absent, only her portfolio
+    of clients is shown.
+
+
+
 ### Feb 2026 — Private-Label Emails + Missing "Company Added" Email Bug Fix
 - **Root cause of the missing email**: `POST /companies` (used by the "My
   Businesses" page's Add flow) never dispatched a welcome email. Only
