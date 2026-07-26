@@ -22,6 +22,7 @@ import Onboarding from "@/pages/Onboarding";
 import SuperadminDash from "@/pages/SuperadminDash";
 import SuperadminUsage from "@/pages/SuperadminUsage";
 import ProClients from "@/pages/ProClients";
+import AdminEnterpriseDetail from "@/pages/AdminEnterpriseDetail";
 import Invoices from "@/pages/Invoices";
 import Bills from "@/pages/Bills";
 import Payments from "@/pages/Payments";
@@ -78,6 +79,7 @@ function App() {
               <Route path="/onboarding" element={<Onboarding />} />
               <Route path="/admin" element={<SuperadminDash />} />
               <Route path="/admin/usage" element={<SuperadminUsage />} />
+              <Route path="/admin/enterprises/:eid" element={<AdminEnterpriseDetail />} />
               <Route path="/pro/clients" element={<ProClients />} />
               <Route path="/invoices" element={<Invoices />} />
               <Route path="/bills" element={<Bills />} />

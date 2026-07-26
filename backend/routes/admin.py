@@ -286,3 +286,156 @@ async def admin_usage(
 
 
 
+
+
+# ----------------------- Enterprises -----------------------
+# The Enterprise object represents the accounting-firm / billing-parent of
+# one-or-more Pro users. The platform-default `SmartBooks` enterprise
+# catches every Pro that hasn't been assigned to a private-label parent.
+
+import enterprises as _ent
+
+
+class EnterprisePatch(BaseModel):
+    """Superadmin-editable fields. Everything is optional (sparse patch)."""
+    name: Optional[str] = None
+    free_user_allotment: Optional[int] = Field(default=None, ge=0, le=10_000)
+    default_product: Optional[str] = None
+    default_discount: Optional[bool] = None
+
+
+@router.get("/admin/enterprises")
+async def list_enterprises(user: dict = Depends(require_role("superadmin"))):
+    """Every enterprise on the platform + roll-up KPIs. Sorted with the
+    default SmartBooks record first, then by number of companies desc."""
+    rows = await db.enterprises.find({}, {"_id": 0}).to_list(500)
+    enriched = []
+    for r in rows:
+        stats = await _ent.rollup_stats(r["id"])
+        enriched.append(_ent.serialize(r, stats=stats))
+    enriched.sort(key=lambda e: (not e["is_default"], -e["companies_count"], e["name"].lower()))
+    return {"enterprises": enriched}
+
+
+@router.get("/admin/enterprises/{eid}")
+async def get_enterprise(eid: str, user: dict = Depends(require_role("superadmin"))):
+    """Detail: enterprise + KPI roll-ups + companies list report."""
+    ent = await db.enterprises.find_one({"id": eid}, {"_id": 0})
+    if not ent:
+        raise HTTPException(404, "Enterprise not found")
+    stats = await _ent.rollup_stats(eid)
+
+    # Pros belonging to this enterprise (name + email so the detail page
+    # can attribute each company to a specific accountant).
+    pros = await db.users.find(
+        {"id": {"$in": stats["pro_ids"]}},
+        {"_id": 0, "id": 1, "name": 1, "email": 1, "branding": 1, "created_at": 1},
+    ).to_list(500) if stats["pro_ids"] else []
+    pros_by_id = {p["id"]: p for p in pros}
+
+    # Companies list — build the "list report" the UI renders. Each row is
+    # its own owner + managing-pro pair.
+    if stats["company_ids"]:
+        companies = await db.companies.find(
+            {"id": {"$in": stats["company_ids"]}},
+            {"_id": 0},
+        ).to_list(2000)
+    else:
+        companies = []
+
+    # Fetch owner (client) users in one shot for denormalized display.
+    owners = await db.users.find(
+        {"id": {"$in": stats["owner_ids"]}},
+        {"_id": 0, "id": 1, "name": 1, "email": 1},
+    ).to_list(2000) if stats["owner_ids"] else []
+    owners_by_id = {o["id"]: o for o in owners}
+
+    # Managing-pro per company: pull the "pro" membership row.
+    pro_memberships = await db.memberships.find(
+        {"company_id": {"$in": stats["company_ids"]}, "role": "pro"},
+        {"_id": 0, "user_id": 1, "company_id": 1},
+    ).to_list(4000) if stats["company_ids"] else []
+    pro_by_company = {m["company_id"]: m["user_id"] for m in pro_memberships}
+
+    company_rows = []
+    for c in companies:
+        owner_uid = c.get("owner_user_id")
+        owner = owners_by_id.get(owner_uid, {})
+        pro_uid = pro_by_company.get(c["id"])
+        pro = pros_by_id.get(pro_uid, {})
+        company_rows.append({
+            "id": c["id"],
+            "name": c.get("name") or "",
+            "business_type": c.get("business_type") or "",
+            "reporting_basis": c.get("reporting_basis") or "accrual",
+            "onboarding_complete": bool(c.get("onboarding_complete")),
+            "created_at": c.get("created_at"),
+            "owner_id": owner_uid,
+            "owner_name": owner.get("name") or "",
+            "owner_email": owner.get("email") or "",
+            "pro_id": pro_uid,
+            "pro_name": pro.get("name") or "",
+            "pro_email": pro.get("email") or "",
+            # Phase B/C billing fields — may be None until Add-Client modal
+            # captures them. Frontend renders "—" for blanks.
+            "billing_payer": c.get("billing_payer"),
+            "billing_product": c.get("billing_product"),
+            "billing_discount": c.get("billing_discount"),
+            "billing_state": c.get("billing_state") or "pending",
+        })
+    # Newest companies first — most useful for a Superadmin sanity check.
+    company_rows.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+
+    return {
+        "enterprise": _ent.serialize(ent, stats=stats),
+        "pros": [
+            {
+                "id": p["id"],
+                "name": p.get("name") or "",
+                "email": p.get("email") or "",
+                "firm_name": (p.get("branding") or {}).get("firm_name") or None,
+                "joined_at": p.get("created_at"),
+            } for p in pros
+        ],
+        "companies": company_rows,
+    }
+
+
+@router.patch("/admin/enterprises/{eid}")
+async def patch_enterprise(eid: str, inp: EnterprisePatch,
+                           user: dict = Depends(require_role("superadmin"))):
+    ent = await db.enterprises.find_one({"id": eid})
+    if not ent:
+        raise HTTPException(404, "Enterprise not found")
+
+    updates: dict = {}
+    if inp.name is not None:
+        name = inp.name.strip()
+        if not name:
+            raise HTTPException(400, "Enterprise name cannot be empty.")
+        if len(name) > 80:
+            raise HTTPException(400, "Enterprise name must be 80 characters or less.")
+        updates["name"] = name
+    if inp.free_user_allotment is not None:
+        updates["free_user_allotment"] = int(inp.free_user_allotment)
+    if inp.default_product is not None:
+        if inp.default_product not in _ent.BILLING_PRODUCTS:
+            raise HTTPException(
+                400,
+                f"default_product must be one of {list(_ent.BILLING_PRODUCTS)}",
+            )
+        updates["default_product"] = inp.default_product
+    if inp.default_discount is not None:
+        updates["default_discount"] = bool(inp.default_discount)
+
+    if not updates:
+        # No-op — return the current snapshot so the frontend can still
+        # display a fresh timestamp.
+        stats = await _ent.rollup_stats(eid)
+        return {"enterprise": _ent.serialize(ent, stats=stats)}
+
+    updates["updated_at"] = now_iso()
+    await db.enterprises.update_one({"id": eid}, {"$set": updates})
+    ent = await db.enterprises.find_one({"id": eid}, {"_id": 0})
+    stats = await _ent.rollup_stats(eid)
+    return {"enterprise": _ent.serialize(ent, stats=stats)}

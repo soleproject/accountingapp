@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
@@ -6,7 +7,7 @@ import { TID } from "@/constants/testIds";
 import {
   AlertTriangle, CheckCircle2, ArrowRight, Plus, X, Loader2, UserPlus,
   BellRing, Wand2, FileWarning, ReceiptText, ScrollText, Sparkles, MailPlus,
-  Building2, Shield, Users2, Palette, Link as LinkIcon,
+  Building2, Shield, Users2, Palette, Link as LinkIcon, Gift, Ticket,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -21,12 +22,12 @@ export default function ProClients() {
   const isSuperadmin = user?.role === "superadmin";
 
   // Superadmin-only view toggle. `clients` = default portfolio view.
-  // `enterprise` = list of all Pro users on the platform (cards styled
-  // distinctly). We keep the toggle hidden for plain Pros so their UX
-  // doesn't grow a Superadmin-only affordance they can't use.
+  // `enterprise` = list of every accounting-firm ENTERPRISE on the
+  // platform (each card is clickable and drills into the enterprise
+  // detail page with a companies list-report + KPIs).
   const [mode, setMode] = useState("clients");
-  const [pros, setPros] = useState([]);
-  const [prosLoading, setProsLoading] = useState(false);
+  const [enterprises, setEnterprises] = useState([]);
+  const [entLoading, setEntLoading] = useState(false);
 
   const resendWelcome = async (cid, name) => {
     if (resending[cid]) return;
@@ -56,57 +57,16 @@ export default function ProClients() {
   };
   useEffect(() => { load(); }, []);
 
-  // Enterprise view — one-shot fetch (superadmin only). Data is small
-  // enough (<= a few thousand users on the platform) that we don't
-  // need pagination yet; when it grows we'll add a `?limit=` param.
+  // Enterprise view — one-shot fetch (superadmin only). The backend
+  // returns one row per Enterprise with pre-computed roll-up KPIs
+  // (pros_count, clients_count, companies_count, free_used, free_remaining).
   useEffect(() => {
-    if (!isSuperadmin || mode !== "enterprise" || pros.length) return;
-    setProsLoading(true);
-    api.get("/admin/overview")
-      .then((r) => {
-        const users = r.data?.users || [];
-        const companies = r.data?.companies || [];
-        const memberships = r.data?.memberships || [];
-        // Group memberships by user_id so we can compute per-pro stats
-        // in one linear pass — companies-managed, clients-owned, etc.
-        const proUsers = users.filter((u) => u.role === "pro");
-        const clientCountByPro = {};
-        const companyIdsByPro = {};
-        for (const m of memberships) {
-          if (m.role !== "pro") continue;
-          (companyIdsByPro[m.user_id] ||= new Set()).add(m.company_id);
-        }
-        const companiesById = Object.fromEntries(companies.map((c) => [c.id, c]));
-        const ownersByCompany = {};
-        for (const m of memberships) {
-          if (m.role === "owner") ownersByCompany[m.company_id] = m.user_id;
-        }
-        for (const [proId, cids] of Object.entries(companyIdsByPro)) {
-          const clientOwners = new Set();
-          for (const cid of cids) {
-            const ownerUid = ownersByCompany[cid];
-            if (ownerUid) clientOwners.add(ownerUid);
-          }
-          clientCountByPro[proId] = clientOwners.size;
-        }
-        const enriched = proUsers.map((p) => {
-          const branding = p.branding || {};
-          const cids = companyIdsByPro[p.id] ? Array.from(companyIdsByPro[p.id]) : [];
-          return {
-            ...p,
-            firm_name: branding.firm_name || null,
-            signin_subdomain: branding.signin_subdomain || null,
-            theme_preset: branding.theme_preset || "default",
-            company_count: cids.length,
-            client_count: clientCountByPro[p.id] || 0,
-          };
-        });
-        // Sort: most companies managed first, then joined earliest first.
-        enriched.sort((a, b) => (b.company_count - a.company_count) || (a.created_at || "").localeCompare(b.created_at || ""));
-        setPros(enriched);
-      })
-      .catch((e) => toast.error(e.response?.data?.detail || "Failed to load enterprise pros"))
-      .finally(() => setProsLoading(false));
+    if (!isSuperadmin || mode !== "enterprise" || enterprises.length) return;
+    setEntLoading(true);
+    api.get("/admin/enterprises")
+      .then((r) => setEnterprises(r.data?.enterprises || []))
+      .catch((e) => toast.error(e.response?.data?.detail || "Failed to load enterprises"))
+      .finally(() => setEntLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, isSuperadmin]);
 
@@ -135,11 +95,11 @@ export default function ProClients() {
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="font-heading text-3xl font-bold tracking-tight">
-            {mode === "enterprise" ? "Enterprise Pros" : "My Clients"}
+            {mode === "enterprise" ? "Enterprises" : "My Clients"}
           </h1>
           <p className="text-slate-500 text-sm mt-1">
             {mode === "enterprise"
-              ? "Every accounting firm on the platform · branding · client roster."
+              ? "Every accounting-firm parent on the platform. Click one to drill into its KPIs and companies."
               : "Firm portfolio · onboarding status · transactions needing your call."}
           </p>
         </div>
@@ -162,7 +122,7 @@ export default function ProClients() {
                   mode === "enterprise" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-50"
                 }`}
               >
-                <Shield size={11} /> Enterprise Pros
+                <Shield size={11} /> Enterprises
               </button>
             </div>
           )}
@@ -179,7 +139,7 @@ export default function ProClients() {
       </div>
 
       {mode === "enterprise" ? (
-        <EnterpriseProsGrid pros={pros} loading={prosLoading} />
+        <EnterprisesGrid enterprises={enterprises} loading={entLoading} />
       ) : (
       <>
       <FirmAttentionTile
@@ -277,35 +237,36 @@ export default function ProClients() {
 }
 
 // --------------------------------------------------------------------------
-// EnterpriseProsGrid — SUPERADMIN-ONLY view of every Pro user on the
-// platform. Cards deliberately look different from the client cards:
-// indigo/violet gradient border + Shield icon, so a Superadmin can tell
-// at a glance which portfolio they're looking at. Data is enriched from
-// /admin/overview so we can show the Pro's Private Label Name + subdomain
-// and roll-up of managed companies/clients.
+// EnterprisesGrid — SUPERADMIN-ONLY view of every Enterprise on the
+// platform. Cards are deliberately styled distinctly from client cards
+// (indigo→violet→fuchsia gradient border + Shield icon) so a superadmin
+// can tell at a glance which portfolio they're looking at. Clicking a
+// card opens /admin/enterprises/{eid} — the detail page with KPI row
+// and companies list report.
 // --------------------------------------------------------------------------
-function EnterpriseProsGrid({ pros, loading }) {
+function EnterprisesGrid({ enterprises, loading }) {
   if (loading) {
     return (
       <div className="rounded-xl border border-dashed p-10 text-center text-slate-500 flex items-center justify-center gap-2">
-        <Loader2 size={16} className="animate-spin" /> Loading enterprise pros…
+        <Loader2 size={16} className="animate-spin" /> Loading enterprises…
       </div>
     );
   }
-  if (!pros.length) {
+  if (!enterprises.length) {
     return (
       <div className="rounded-xl border border-dashed p-10 text-center text-slate-500">
-        No Pro accounts yet on the platform.
+        No enterprises on the platform yet.
       </div>
     );
   }
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="enterprise-pros-grid">
-      {pros.map((p) => (
-        <div
-          key={p.id}
-          data-testid={`enterprise-pro-card-${p.id}`}
-          className="relative rounded-xl p-[1.5px] bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 shadow-sm"
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="enterprises-grid">
+      {enterprises.map((e) => (
+        <Link
+          key={e.id}
+          to={`/admin/enterprises/${e.id}`}
+          data-testid={`enterprise-card-${e.id}`}
+          className="group relative rounded-xl p-[1.5px] bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 shadow-sm hover:shadow-md transition-shadow"
         >
           <div className="rounded-[10px] bg-white p-4 h-full flex flex-col">
             <div className="flex items-start justify-between gap-2">
@@ -315,67 +276,65 @@ function EnterpriseProsGrid({ pros, loading }) {
                     <Shield size={13} />
                   </span>
                   <div className="font-heading font-semibold text-lg truncate">
-                    {p.firm_name || p.name || p.email}
+                    {e.name}
                   </div>
                 </div>
                 <div className="text-xs text-slate-500 mt-0.5 truncate">
-                  {p.name && p.firm_name && p.name !== p.firm_name ? `${p.name} · ` : ""}
-                  {p.email}
+                  slug: <span className="font-mono-num">{e.slug}</span>
                 </div>
               </div>
-              <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium flex-shrink-0">
-                Pro
-              </span>
+              <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                {e.is_default && (
+                  <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 font-medium">
+                    Default
+                  </span>
+                )}
+                <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium">
+                  Enterprise
+                </span>
+              </div>
             </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-2">
+            <div className="mt-3 grid grid-cols-3 gap-2">
               <div className="rounded-md bg-indigo-50/60 p-2">
                 <div className="text-[10px] uppercase text-indigo-700 flex items-center gap-1">
-                  <Users2 size={10} /> Clients
+                  <Users2 size={10} /> Pros
                 </div>
-                <div className="font-mono-num font-semibold text-indigo-800">{p.client_count}</div>
+                <div className="font-mono-num font-semibold text-indigo-800">{e.pros_count}</div>
+              </div>
+              <div className="rounded-md bg-cyan-50/60 p-2">
+                <div className="text-[10px] uppercase text-cyan-700 flex items-center gap-1">
+                  <Ticket size={10} /> Clients
+                </div>
+                <div className="font-mono-num font-semibold text-cyan-800">{e.clients_count}</div>
               </div>
               <div className="rounded-md bg-violet-50/60 p-2">
                 <div className="text-[10px] uppercase text-violet-700 flex items-center gap-1">
-                  <Building2 size={10} /> Companies
+                  <Building2 size={10} /> Cos
                 </div>
-                <div className="font-mono-num font-semibold text-violet-800">{p.company_count}</div>
+                <div className="font-mono-num font-semibold text-violet-800">{e.companies_count}</div>
               </div>
             </div>
 
-            <div className="mt-3 space-y-1 flex-1 text-[11px] text-slate-600">
+            <div className="mt-3 flex-1 text-[11px] text-slate-600 space-y-1">
               <div className="flex items-center gap-1.5">
-                <Palette size={11} className="text-slate-400" />
-                <span className="text-slate-500">Theme:</span>
-                <span className="font-mono-num text-slate-700 truncate">{p.theme_preset}</span>
-                {p.firm_name && (
-                  <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
-                    White-labeled
-                  </span>
-                )}
+                <Gift size={11} className="text-emerald-500" />
+                <span className="text-slate-500">Free spots:</span>
+                <span className="font-mono-num text-slate-700">
+                  {e.free_used} / {e.free_user_allotment}
+                </span>
+                <span className="text-slate-400 ml-auto">({e.free_remaining} left)</span>
               </div>
-              <div className="flex items-center gap-1.5">
-                <LinkIcon size={11} className="text-slate-400" />
-                <span className="text-slate-500">Sign-in:</span>
-                {p.signin_subdomain ? (
-                  <a
-                    href={`/login?firm=${p.signin_subdomain}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-cyan-700 hover:underline font-mono-num truncate"
-                  >
-                    {p.signin_subdomain}
-                  </a>
-                ) : (
-                  <span className="text-slate-400">— not set —</span>
-                )}
-              </div>
-              <div className="text-[10px] text-slate-400 pt-1">
-                Joined {p.created_at ? new Date(p.created_at).toLocaleDateString() : "—"}
+              <div className="text-[10px] text-slate-400">
+                Default product: {e.default_product}{e.default_discount ? " · discount" : ""}
               </div>
             </div>
+
+            <div className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-indigo-700 group-hover:text-indigo-900 self-start">
+              Open enterprise <ArrowRight size={12} className="transition-transform group-hover:translate-x-0.5" />
+            </div>
           </div>
-        </div>
+        </Link>
       ))}
     </div>
   );

@@ -39,6 +39,90 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Enterprise (Phase A): First-class Firm-Parent Object
+Groundwork for the "Enterprise runs a set of Pros" model that Phase B/C
+(Add-Client modal expansion + Stripe billing) will build on top of.
+
+- **New collection** `enterprises` + module `/app/backend/enterprises.py`:
+  - Fields: `id`, `name`, `slug` (unique), `is_default`, `owner_user_id`,
+    `free_user_allotment`, `default_product` (simple_start|essentials|
+    plus|advanced), `default_discount`, timestamps.
+  - `ensure_default_enterprise()` idempotently seeds the platform-level
+    **SmartBooks** enterprise on every boot and back-fills
+    `users.enterprise_id` for every Pro that predated the model.
+  - `rollup_stats(eid)` computes pros/clients/companies counts and how
+    many free spots have been consumed (`billing_payer == "free_spot"`).
+- **Startup hook** in `/app/backend/server.py`: registers indexes +
+  runs `ensure_default_enterprise`.
+- **Superadmin routes** in `/app/backend/routes/admin.py`:
+  - `GET /api/admin/enterprises` — list every enterprise with KPI
+    roll-ups. Sorted: default first, then most companies desc.
+  - `GET /api/admin/enterprises/{eid}` — detail incl. Pros list +
+    denormalized Companies list report (each row has owner/pro name,
+    product, payer, billing_state, onboarding, created_at).
+  - `PATCH /api/admin/enterprises/{eid}` — name (≤80 chars),
+    `free_user_allotment` (0–10 000), `default_product`,
+    `default_discount`.
+- **Frontend rework of the Superadmin "Enterprises" view** in
+  `/app/frontend/src/pages/ProClients.jsx`:
+  - Toggle relabeled from "Enterprise Pros" → **Enterprises**. Cards
+    are now Enterprise-level (not per-Pro): show pros/clients/cos KPIs,
+    free-spot summary, and "Open enterprise" affordance. Cards wrap
+    `<Link to="/admin/enterprises/{id}">` — one click drills in.
+- **New page** `/app/frontend/src/pages/AdminEnterpriseDetail.jsx` at
+  `/admin/enterprises/:eid` (route registered in `App.js`):
+  - Header with enterprise name + `DEFAULT` badge + Edit button.
+  - **KPI row** (4 tiles): Pros, Clients, Companies, Free spots
+    (used / max with remaining). Free-allotment number is inline-
+    editable when the header Edit button is toggled.
+  - Pros list section (name, email, firm_name pill, joined date).
+  - Companies list report (Company / Owner / Managing Pro / Product /
+    Payer / Billing state / Onboarding / Created), newest-first,
+    horizontally scrollable, with `data-testid="ent-companies-table"`.
+- **Verified live** via screenshot: superadmin lands on
+  `/admin/enterprises/2f4b4d17-…` and sees SmartBooks with
+  `Pros=1 · Clients=5 · Companies=8 · Free 0/10 · 10 left`. PATCH
+  raised allotment from 0 → 10 successfully.
+
+### Feb 2026 — Enterprise Phase B/C ROADMAP (still pending)
+- **Phase B (in-progress next)** — extend Add-Client modal in
+  `/app/frontend/src/pages/ProClients.jsx :: NewClientModal` with:
+  1. "Who is paying" dropdown (Client — email bill / Client — pay
+     with client card / Enterprise pays / Free spot).
+  2. Product dropdown (Simple Start / Essentials / Plus / Advanced).
+  3. Discount toggle (showing tier-vs-regular price side-by-side).
+  4. Copy above Save button: *"Enterprise will be billed on the
+     5th of next month"* when Enterprise pays.
+  5. "Free spot (X left)" option only appears when the enterprise's
+     `free_remaining > 0`.
+  6. New fields persisted on `companies` doc:
+     `billing_payer`, `billing_product`, `billing_discount`,
+     `billing_state` (default `"pending"`).
+- **Phase C** — Stripe integration
+  1. Start with the $38 Simple Start regular price already in
+     Stripe. Add 7 more price IDs to env vars once flow is proven.
+  2. `POST /api/companies/{cid}/billing/checkout-session` returns
+     Stripe Checkout URL (mode=subscription).
+  3. Webhook `POST /api/stripe/webhook` updates
+     `companies.billing_state` on `invoice.paid` (active) /
+     `invoice.payment_failed` (past_due) /
+     `customer.subscription.deleted` (canceled).
+  4. Frontend: on "Pay with client card" or "Enterprise pays with
+     card" flow, redirect to the Checkout URL after company create.
+     Enterprise-pays-monthly path just records intent and shows the
+     5th-of-month copy.
+  5. **Blocking-modal middleware**: any page under `/dashboard`,
+     `/accounting/*`, `/reports/*`, etc. checks the active company's
+     `billing_state`; if `past_due`/`unpaid`/`canceled`, renders a
+     full-screen modal that only allows navigation to the checkout
+     link. Once Stripe webhook flips state → `active`, the modal
+     auto-dismisses on next fetch.
+- **Phase D** — Multi-product cloning + Enterprise consolidated
+  monthly invoicing (5th-of-month scheduler for "Enterprise pays"
+  payers).
+
+
+
 ### Feb 2026 — Superadmin "Enterprise Pros" View on /pro/clients
 - **Frontend** in `/app/frontend/src/pages/ProClients.jsx`:
   - New superadmin-only view toggle in the header (two-button pill,

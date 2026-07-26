@@ -134,6 +134,11 @@ async def startup():
     await statements.ensure_indexes()
     import ai_usage
     await ai_usage.ensure_indexes()
+    # Enterprise (billing/branding parent of Pros) — ensure the default
+    # SmartBooks record exists and every Pro has an enterprise_id.
+    import enterprises as _ent
+    await _ent.ensure_indexes()
+    await _ent.ensure_default_enterprise()
     sync_tasks.register_all()
     # AI Ask Client — hourly autonomous email loop (opt-out per pro).
     import ai_ask_client_scheduler
