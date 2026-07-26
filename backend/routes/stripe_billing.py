@@ -875,6 +875,9 @@ async def billing_env_check(user: dict = Depends(require_role("superadmin"))):
             pid = _price_id(prod, tier == "discount")
             resolved[f"{prod}_{tier}"] = pid or "— unset —"
     return {"env": result, "resolved_prices": resolved}
+
+
+@router.get("/companies/{cid}/billing/state")
 async def get_company_billing_state(
     cid: str,
     user: dict = Depends(get_current_user),
