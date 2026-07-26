@@ -1805,6 +1805,11 @@ function ManualTxnModal({ accts, currentId, contactOptions = [], onClose }) {
   const [merchant, setMerchant] = useState("");
   const [amount, setAmount] = useState("");
   const [categoryId, setCategoryId] = useState("");
+  // Source Bank / Credit-card account the transaction hit. Optional —
+  // when left blank the backend defaults to Business Checking (code
+  // 1010) to preserve the double-entry invariant.
+  const [bankAccountId, setBankAccountId] = useState("");
+  const bankOptions = (accts || []).filter((a) => ["bank", "credit_card"].includes(a.type));
   const [busy, setBusy] = useState(false);
   // Contact link — CPA can pick an existing contact from the search
   // combo or type a brand-new name to auto-create one on save.
@@ -1864,6 +1869,7 @@ function ManualTxnModal({ accts, currentId, contactOptions = [], onClose }) {
       }
       await api.post(`/companies/${currentId}/transactions`, {
         date, description, merchant, amount: amtNum,
+        bank_account_id: bankAccountId || null,
         category_account_id: splitsOn ? null : (categoryId || null),
         auto_categorize: !splitsOn && !categoryId,
         splits: splitsOn ? splitRows.map((r) => ({
@@ -1887,6 +1893,22 @@ function ManualTxnModal({ accts, currentId, contactOptions = [], onClose }) {
       <div className="space-y-3 text-sm">
         <div><label className="text-xs text-slate-600">Date</label>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border rounded px-2 py-1.5" /></div>
+        <div>
+          <label className="text-xs text-slate-600">Account</label>
+          <select
+            data-testid="manual-txn-bank-account"
+            value={bankAccountId}
+            onChange={(e) => setBankAccountId(e.target.value)}
+            className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+          >
+            <option value="">— Default (Business Checking) —</option>
+            {bankOptions.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.code} · {a.name}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="relative" onBlur={(e) => {
           // Close the contact menu on blur unless focus went to a child.
           if (!e.currentTarget.contains(e.relatedTarget)) {
