@@ -358,7 +358,13 @@ export default function Layout() {
                 </button>
               )}
               {showBell && <ProAlertsBell />}
-              <ProfileMenu />
+              {/* Profile menu also elevated so the client can Sign out
+                  / Change password even while the BillingLockedModal is
+                  up. Assistant toggle and alerts bell stay at default
+                  stack so they dim under the backdrop. */}
+              <div className="relative z-[1000]">
+                <ProfileMenu />
+              </div>
             </div>
           </header>
 
