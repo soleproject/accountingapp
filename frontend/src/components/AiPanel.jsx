@@ -482,9 +482,27 @@ export default function AiPanel({ collapsed, onToggle }) {
   // action payload. We seed a conversational message so the AI asks about
   // the contact, and stash the action on `pendingIntentRef` so the user's
   // next reply is interpreted as the category description.
+  //
+  // De-dupe guard — the LetsReview / NoContactReview redirects can fire
+  // the same inquiry twice in quick succession when React re-runs the
+  // redirect useEffect (e.g. after a stepper advance or a `groups`
+  // reference change). Track the last (kind + entity_id) we surfaced and
+  // ignore any exact repeat within 2s.
+  const lastInquiryRef = useRef({ key: "", at: 0 });
   useActionListener("cleanup-inquiry", async (payload) => {
     const a = payload?.action;
     if (!a) return;
+    const entityKey = a.contact_id || a.group_key || a.label || "";
+    const dedupeKey = `${a.kind}::${entityKey}::${a.count || 0}`;
+    const now = Date.now();
+    if (
+      lastInquiryRef.current.key === dedupeKey &&
+      now - lastInquiryRef.current.at < 2000
+    ) {
+      // Silent drop — same inquiry fired within the 2s dedupe window.
+      return;
+    }
+    lastInquiryRef.current = { key: dedupeKey, at: now };
     let msg = "";
     if (a.kind === "contact_in_uncat") {
       msg = `I see **${a.count} ${a.contact_name}** transactions sitting in Uncategorized. Tell me about them.`;
