@@ -47,7 +47,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from db import db, now_iso, coerce
-from auth import get_current_user, create_token, hash_password
+from auth import get_current_user, create_token, hash_password, require_role
 import secrets as _secrets
 
 logger = logging.getLogger(__name__)
@@ -825,7 +825,56 @@ async def create_company_checkout_session(
     }
 
 
-@router.get("/companies/{cid}/billing/state")
+@router.get("/admin/billing/env-check")
+async def billing_env_check(user: dict = Depends(require_role("superadmin"))):
+    """Diagnostic — returns which Stripe env vars the currently-running
+    Python process CAN see, with values masked (length + last 4 chars).
+    Use this to quickly confirm a Railway env var actually made it to
+    the container. Superadmin-only because it exposes value shapes.
+    """
+    watched = [
+        "STRIPE_SECRET_KEY",
+        "STRIPE_WEBHOOK_SECRET",
+        "STRIPE_PUBLISHABLE_KEY",
+        "STRIPE_RETURN_BASE_URL",
+        "PUBLIC_BASE_URL",
+        # Phase C — 8 canonical product/tier price IDs
+        "STRIPE_PRICE_SIMPLE_START_REGULAR",
+        "STRIPE_PRICE_SIMPLE_START_DISCOUNT",
+        "STRIPE_PRICE_ESSENTIALS_REGULAR",
+        "STRIPE_PRICE_ESSENTIALS_DISCOUNT",
+        "STRIPE_PRICE_PLUS_REGULAR",
+        "STRIPE_PRICE_PLUS_DISCOUNT",
+        "STRIPE_PRICE_ADVANCED_REGULAR",
+        "STRIPE_PRICE_ADVANCED_DISCOUNT",
+        # Legacy fallbacks
+        "STRIPE_PRICE_SIMPLE_START_MONTHLY_38",
+        "STRIPE_PRICE_SIMPLE_START_MONTHLY_19",
+    ]
+
+    def _mask(v: str) -> dict:
+        if v is None:
+            return {"set": False}
+        if v == "":
+            return {"set": True, "empty": True, "length": 0}
+        return {
+            "set": True,
+            "empty": False,
+            "length": len(v),
+            "prefix": v[:5],
+            "suffix": v[-4:] if len(v) > 4 else "***",
+        }
+
+    result = {k: _mask(os.environ.get(k)) for k in watched}
+
+    # Also compute the effective resolved price id per (product, tier)
+    # so the user sees exactly what `_price_id` will return for each.
+    resolved = {}
+    for prod in ("simple_start", "essentials", "plus", "advanced"):
+        for tier in ("regular", "discount"):
+            pid = _price_id(prod, tier == "discount")
+            resolved[f"{prod}_{tier}"] = pid or "— unset —"
+    return {"env": result, "resolved_prices": resolved}
 async def get_company_billing_state(
     cid: str,
     user: dict = Depends(get_current_user),
