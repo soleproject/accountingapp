@@ -517,6 +517,70 @@ def stripe_welcome(*, name: str, magic_url: str) -> tuple[str, str]:
     return "Welcome to SmartBooks — set your password", _wrap(inner)
 
 
+# --------------------------------------------------------------------------
+# Payment failed — sent when Stripe fires ``invoice.payment_failed``.
+# Two variants: one to the paying client (call-to-action to update their
+# card), and one to the accounting Pro (heads-up so they can nudge the
+# client personally). Both templates re-use the firm's private-label
+# name in the footer so the emails feel branded end-to-end.
+# --------------------------------------------------------------------------
+def payment_failed_client(
+    *, client_name: str, company_name: str, amount_usd: float,
+    update_url: str, brand_name: Optional[str] = None,
+) -> tuple[str, str]:
+    inner = f"""
+      <div style="{_H1}">Your card was declined</div>
+      <div style="{_P}">
+        Hi {escape(client_name)},<br><br>
+        We tried to process your subscription payment for
+        <b>{escape(company_name)}</b> — <b>${amount_usd:,.2f}</b> — and
+        your card issuer declined it.
+      </div>
+      <div style="{_P}">
+        Your books stay locked until the balance is settled. Update your
+        card and we'll retry automatically:
+      </div>
+      <div style="padding:14px 0 6px;">
+        <a href="{escape(update_url)}" style="{_BTN}">Update payment method →</a>
+      </div>
+      <div style="{_MUTE}">
+        If you think this is a mistake, reply to this email and we'll
+        get your accounting team on it right away.
+      </div>
+    """
+    return (
+        f"Action required — payment declined for {company_name}",
+        _wrap(inner, brand_name=brand_name),
+    )
+
+
+def payment_failed_pro(
+    *, pro_name: str, client_name: str, company_name: str, amount_usd: float,
+    app_url: str, brand_name: Optional[str] = None,
+) -> tuple[str, str]:
+    inner = f"""
+      <div style="{_H1}">Heads up — {escape(client_name)}'s payment failed</div>
+      <div style="{_P}">
+        Hi {escape(pro_name)},<br><br>
+        Stripe just tried to charge <b>${amount_usd:,.2f}</b> for
+        <b>{escape(company_name)}</b> and the card was declined. We've
+        emailed the client with a link to update their card, but a
+        personal nudge from you usually gets it resolved faster.
+      </div>
+      <div style="padding:14px 0 6px;">
+        <a href="{escape(app_url)}" style="{_BTN}">Open client →</a>
+      </div>
+      <div style="{_MUTE}">
+        The client's books are locked until the balance clears. You'll
+        get another email once Stripe successfully retries.
+      </div>
+    """
+    return (
+        f"Payment declined — {client_name} ({company_name})",
+        _wrap(inner, brand_name=brand_name),
+    )
+
+
 
 # --------------------------------------------------------------------------
 # Tiny local escape (avoid pulling markupsafe just for these).

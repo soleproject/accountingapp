@@ -46,6 +46,44 @@ def _configure() -> str:
     return from_addr
 
 
+import re
+
+_FROM_RE = re.compile(
+    r"^(?:.*<)?[^<>@\s]+@[^<>@\s]+\.[^<>@\s]+>?$"
+)
+
+
+def _validate_from(from_addr: str) -> None:
+    """Fail fast if the composed From header doesn't look like a valid
+    RFC 5322 mailbox (bare ``a@b.c`` or ``Name <a@b.c>``). Resend would
+    reject it with a cryptic error otherwise — this raises early with a
+    clear message that surfaces to the caller (and into the Communications
+    log)."""
+    s = from_addr.strip()
+    if not _FROM_RE.match(s):
+        raise EmailError(
+            f"From address {s!r} is not a valid mailbox. Expected "
+            f"'user@example.com' or 'Name <user@example.com>'. Check "
+            f"the RESEND_FROM / RESEND_FROM_FIRM env vars on the server."
+        )
+
+
+def _quote_display_name(name: str) -> str:
+    """Return a display name safe to drop into ``Name <email@x.com>``.
+
+    RFC 5322 says a display-name that contains any of these "specials"
+    ``( ) < > @ , ; : \\ " . [ ]`` must be a quoted-string. We use a
+    conservative rule: if the name is not pure ASCII alnum + space +
+    hyphen + underscore, wrap it in double quotes and escape embedded
+    quotes / backslashes. Otherwise leave it bare.
+    """
+    safe = all(c.isalnum() or c in " -_&" for c in name)
+    if safe:
+        return name
+    escaped = name.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def _firm_sender(firm_name: str | None) -> str | None:
     """Build the firm-branded From address from the RESEND_FROM_FIRM template.
 
@@ -53,11 +91,21 @@ def _firm_sender(firm_name: str | None) -> str | None:
     — the `{firm}` marker is replaced with the firm's display name. If the
     template is not configured, or no firm_name is provided, we return None
     so the caller falls back to the platform default.
+
+    Firm names may contain commas, dots, apostrophes, non-ASCII, etc.
+    We strip whitespace / control characters and quote the display name
+    when RFC 5322 would otherwise reject it (so ``Acme, Inc.`` becomes
+    ``"Acme, Inc." <no-reply@accountingapp.ai>`` — a valid From).
     """
     template = os.environ.get("RESEND_FROM_FIRM")
     if not template or not firm_name:
         return None
-    return template.replace("{firm}", firm_name.strip())
+    # Strip whitespace + control chars (newlines/tabs would corrupt the
+    # SMTP header and cause Resend to reject with "Invalid `from` field").
+    cleaned = "".join(c for c in firm_name if c.isprintable()).strip()
+    if not cleaned:
+        return None
+    return template.replace("{firm}", _quote_display_name(cleaned))
 
 
 async def send_email(
@@ -79,6 +127,7 @@ async def send_email(
     """
     platform_from = _configure()
     from_addr = _firm_sender(firm_name) or platform_from
+    _validate_from(from_addr)
     recipients = [to] if isinstance(to, str) else list(to)
     params: dict = {
         "from": from_addr,
@@ -93,8 +142,8 @@ async def send_email(
     try:
         resp = await asyncio.to_thread(resend.Emails.send, params)
     except Exception as e:  # noqa: BLE001 — Resend surfaces auth/domain/rate errors here
-        logger.exception("Resend send failed")
-        raise EmailError(f"Resend refused the send: {e}") from e
+        logger.exception("Resend send failed (from=%r subject=%r)", from_addr, subject)
+        raise EmailError(f"Resend refused the send: {e} (from={from_addr!r})") from e
     if not resp or not resp.get("id"):
         raise EmailError(f"Resend returned unexpected shape: {resp!r}")
     logger.info("Resend accepted email id=%s to=%s from=%s subject=%r", resp["id"], recipients, from_addr, subject)

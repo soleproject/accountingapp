@@ -53,6 +53,8 @@ DEFAULT_PREFS = {
     "plaid_reauth":             True,
     "onboarding_followup":      True,
     "month_close_signoff":      True,
+    "payment_failed_client":    True,   # Client card declined — CTA to update card
+    "payment_failed_pro":       True,   # Pro-side heads-up when a client card fails
 }
 
 

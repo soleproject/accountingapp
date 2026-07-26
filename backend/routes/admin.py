@@ -116,6 +116,40 @@ async def admin_test_email(
     return {"sent": True, "id": resp.get("id"), "to": str(inp.to)}
 
 
+@router.get("/admin/email/env-check")
+async def admin_email_env_check(
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Diagnostic — inspect the Resend env config on the currently-running
+    backend. Reports whether RESEND_API_KEY / RESEND_FROM / RESEND_FROM_FIRM
+    are set and what the resolved firm-sender From address would look like
+    for a sample firm name. Superadmin-only because it echoes value shapes.
+    """
+    import os as _os
+    from email_service import _firm_sender
+
+    def _mask(v):
+        if v is None:
+            return {"set": False}
+        if v == "":
+            return {"set": True, "empty": True, "length": 0}
+        return {
+            "set": True, "empty": False, "length": len(v),
+            "prefix": v[:8], "suffix": v[-8:] if len(v) > 8 else "***",
+        }
+
+    watched = ["RESEND_API_KEY", "RESEND_FROM", "RESEND_FROM_FIRM"]
+    result = {k: _mask(_os.environ.get(k)) for k in watched}
+    samples = {}
+    for name in ["Synergy AI", "Acme, Inc.", "O'Brien & Sons"]:
+        samples[name] = _firm_sender(name) or "(would fall back to RESEND_FROM)"
+    return {
+        "env": result,
+        "resolved_from_samples": samples,
+        "platform_from_preview": _os.environ.get("RESEND_FROM"),
+    }
+
+
 # ----------------------- Superadmin — AI Usage & Costs -----------------------
 
 @router.get("/admin/usage")

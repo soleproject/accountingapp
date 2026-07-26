@@ -450,13 +450,27 @@ async def _handle_invoice_payment_failed(invoice: dict) -> None:
     """Company-scoped: flip billing_state to past_due so the blocking
     modal appears on next page load. Also handles the consolidated-
     enterprise invoice case — every enterprise-paid company under the
-    enterprise gets flipped to past_due together."""
+    enterprise gets flipped to past_due together.
+
+    On top of the state flip we now notify humans:
+    * The paying client gets an email with a "Update payment method" CTA
+      that deep-links to their /billing page.
+    * The company's Pro(s) get an email + an unread alert on their
+      /pro Alerts inbox so they can nudge the client personally.
+    """
+    from pro_alerts import emit_alert
+    from email_dispatcher import dispatch
+
     sub_id = invoice.get("subscription")
+    company = None
     if sub_id:
+        company = await db.companies.find_one({"stripe_subscription_id": sub_id})
         await db.companies.update_one(
             {"stripe_subscription_id": sub_id},
             {"$set": {"billing_state": "past_due", "updated_at": now_iso()}},
         )
+
+    # ---- Consolidated enterprise-invoice branch ------------------------
     ent_inv_id = ((invoice.get("metadata") or {}).get("enterprise_invoice_id"))
     if ent_inv_id:
         await db.enterprise_invoices.update_one(
@@ -469,6 +483,118 @@ async def _handle_invoice_payment_failed(invoice: dict) -> None:
                 {"enterprise_id": ent_id, "billing_payer": "enterprise"},
                 {"$set": {"billing_state": "past_due", "updated_at": now_iso()}},
             )
+        # For enterprise invoices we don't email the individual clients
+        # (they aren't the payer). Do notify the enterprise owner Pro.
+        if ent_id:
+            ent = await db.enterprises.find_one({"id": ent_id})
+            owner_uid = (ent or {}).get("owner_user_id")
+            if owner_uid:
+                amount = (invoice.get("amount_due") or 0) / 100.0
+                await emit_alert(
+                    pro_user_id=owner_uid,
+                    kind="enterprise_payment_failed",
+                    company_id=None,
+                    message=(
+                        f"Enterprise invoice of ${amount:,.2f} failed to charge "
+                        f"— update the payment method on file."
+                    ),
+                    meta={
+                        "enterprise_id": ent_id,
+                        "stripe_invoice_id": invoice.get("id"),
+                        "amount_usd": amount,
+                    },
+                )
+        return
+
+    # ---- Individual company (client-card) branch -----------------------
+    if not company:
+        return
+    amount = (invoice.get("amount_due") or 0) / 100.0
+    cid = company.get("id")
+
+    # Notify client owner via email
+    owner_uid = company.get("owner_user_id")
+    owner = await db.users.find_one({"id": owner_uid}) if owner_uid else None
+    base = _platform_base_url().rstrip("/")
+    update_url = f"{base}/billing?company={cid}"
+
+    if owner and owner.get("email"):
+        try:
+            from email_templates import payment_failed_client
+            subj, html = payment_failed_client(
+                client_name=owner.get("name") or owner["email"].split("@")[0],
+                company_name=company.get("name") or "your business",
+                amount_usd=amount,
+                update_url=update_url,
+                brand_name=(owner.get("branding") or {}).get("firm_name"),
+            )
+            await dispatch(
+                kind="payment_failed_client",
+                to=owner["email"],
+                subject=subj,
+                html=html,
+                company_id=cid,
+                initiating_user_id=None,
+                related={"stripe_invoice_id": invoice.get("id")},
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("payment_failed client email failed for %s", cid)
+
+    # Notify every Pro attached to the company (memberships.role='pro' or
+    # 'reviewer'). Also emit an in-app alert so the Pro sees a red dot
+    # on the sidebar without opening their inbox.
+    pro_memberships = db.memberships.find({
+        "company_id": cid,
+        "role": {"$in": ["pro", "reviewer", "owner"]},
+    })
+    seen_pros: set[str] = set()
+    async for m in pro_memberships:
+        pro_uid = m.get("user_id")
+        if not pro_uid or pro_uid in seen_pros:
+            continue
+        seen_pros.add(pro_uid)
+        pro = await db.users.find_one({"id": pro_uid})
+        if not pro or pro.get("role") not in ("pro", "superadmin"):
+            continue
+        try:
+            await emit_alert(
+                pro_user_id=pro_uid,
+                kind="payment_failed",
+                company_id=cid,
+                message=(
+                    f"{company.get('name') or 'A client'} — "
+                    f"${amount:,.2f} card declined. Client emailed to update."
+                ),
+                meta={
+                    "stripe_invoice_id": invoice.get("id"),
+                    "amount_usd": amount,
+                    "client_email": (owner or {}).get("email"),
+                },
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("emit_alert failed for pro=%s cid=%s", pro_uid, cid)
+        if pro.get("email"):
+            try:
+                from email_templates import payment_failed_pro
+                subj, html = payment_failed_pro(
+                    pro_name=pro.get("name") or pro["email"].split("@")[0],
+                    client_name=(owner or {}).get("name") or (owner or {}).get("email", "your client"),
+                    company_name=company.get("name") or "a company",
+                    amount_usd=amount,
+                    app_url=f"{base}/pro/clients",
+                    brand_name=(pro.get("branding") or {}).get("firm_name"),
+                )
+                await dispatch(
+                    kind="payment_failed_pro",
+                    to=pro["email"],
+                    subject=subj,
+                    html=html,
+                    company_id=cid,
+                    initiating_user_id=None,
+                    related={"stripe_invoice_id": invoice.get("id")},
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("payment_failed pro email failed for %s", pro_uid)
 
 
 async def _handle_subscription_change(sub: dict) -> None:

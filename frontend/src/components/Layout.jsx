@@ -3,6 +3,7 @@ import { Outlet, Link } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import AiPanel from "./AiPanel";
 import BillingLockedModal from "./BillingLockedModal";
+import ProAlertsBell from "./ProAlertsBell";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
@@ -323,8 +324,11 @@ function ChangePasswordModal({ onClose }) {
 export default function Layout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [aiCollapsed, setAiCollapsed] = useState(false);
+  const { user } = useAuth();
   // Row-level "Ask AI" buttons emit `ai-open` — expand the panel when it fires.
   useActionListener("ai-open", () => setAiCollapsed(false));
+
+  const showBell = user && ["pro", "superadmin"].includes(user.role);
 
   return (
     <AiFocusProvider>
@@ -344,6 +348,7 @@ export default function Layout() {
                   <MessageSquare size={13} /> Assistant
                 </button>
               )}
+              {showBell && <ProAlertsBell />}
               <ProfileMenu />
             </div>
           </header>

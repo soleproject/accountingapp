@@ -39,6 +39,68 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 (later) — Payment-Failure Alert Loop (client email + Pro badge)
+Closes the billing lifecycle so a declined card no longer sits invisible
+until the Pro next logs in.
+
+- **New backend module** `/app/backend/pro_alerts.py` — small MongoDB-
+  backed inbox (`emit_alert`, `list_alerts`, `unread_count`, `mark_read`,
+  `mark_all_read`). Stored in the `pro_alerts` collection, keyed by
+  `pro_user_id`, extensible via the `kind` field.
+- **Two new email templates** in `/app/backend/email_templates.py`:
+  - `payment_failed_client` — CTA "Update payment method" that deep-
+    links to the client's `/billing` page with `?company=<cid>`.
+  - `payment_failed_pro` — heads-up to every Pro managing the company,
+    with a "Open client" CTA to `/pro/clients`. Both templates respect
+    the Pro's Private Label Name in the footer.
+- **Extended webhook** `_handle_invoice_payment_failed` in
+  `stripe_billing.py`:
+  * Individual-client branch: emails the client + emails every Pro on
+    the company + emits a `pro_alerts` row with `kind="payment_failed"`.
+  * Enterprise-invoice branch: emits `kind="enterprise_payment_failed"`
+    to the enterprise owner (no per-client emails; the enterprise is
+    the payer).
+- **New Pro endpoints** in `/app/backend/routes/pro.py`:
+  - `GET /api/pro/alerts` → `{items, unread}` (last 50 newest-first).
+  - `POST /api/pro/alerts/{id}/read` → mark one read.
+  - `POST /api/pro/alerts/read-all` → clear the inbox.
+- **New Frontend component** `/app/frontend/src/components/ProAlertsBell.jsx`
+  — bell icon in the top header (Pro/Superadmin only) with red unread
+  badge. Popover lists the last 50 alerts with individual + bulk mark-
+  read actions. Polls every 60s so new alerts surface without a page
+  reload.
+- **Layout hook-in** — `Layout.jsx` renders `<ProAlertsBell />` between
+  the AI Assistant toggle and the profile menu when the user's role is
+  `pro` or `superadmin`.
+- **Tested**: end-to-end simulation via
+  `python3 -c "await _handle_invoice_payment_failed({...})"` — an alert
+  correctly appears on the bell, badge shows 1, popover renders the
+  company name + amount, Mark-all-read clears the badge.
+
+### Feb 2026 (later) — Email `from` field sanitizer + Resend env diagnostic
+Fixes the "Resend refused the send: Invalid `from` field" error the
+user hit when a Pro with a Private Label Name tried to add a client
+whose email address matched an existing login.
+
+- **`email_service._quote_display_name`** wraps a firm's display name
+  in RFC 5322 quotes whenever it contains commas, dots, apostrophes,
+  angle brackets etc. Also strips whitespace + control characters so a
+  stray newline in `RESEND_FROM_FIRM` can no longer corrupt the SMTP
+  header. `Acme, Inc.` → `"Acme, Inc." <no-reply@accountingapp.ai>`.
+- **`email_service._validate_from`** — regex-checks the final From
+  header before hitting Resend and raises a clear
+  `From address 'x' is not a valid mailbox` error naming which env var
+  to fix, so future failures never surface as opaque provider errors.
+- **`send_email` error message now includes the offending From value**
+  so it lands in Communications and the operator can diagnose without
+  server-log access.
+- **New Superadmin diagnostic** `GET /api/admin/email/env-check` —
+  mirrors `/api/admin/billing/env-check`: reports whether
+  `RESEND_API_KEY / RESEND_FROM / RESEND_FROM_FIRM` are set on the
+  running deployment, plus resolved-From samples for a few
+  representative firm names.
+
+
 ### Feb 2026 (later) — Production Stripe Webhook Diagnostic + Route Fixes
 Unblocked the "checkout succeeds but Superadmin billing dashboard stays $0"
 issue in the Railway production environment.

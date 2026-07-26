@@ -682,3 +682,46 @@ async def branding_config():
     }
 
 
+
+
+# --------------------------------------------------------------------------
+# Pro Alerts — in-app notification inbox powered by pro_alerts.py.
+# Currently populated by the Stripe payment_failed webhook; designed to
+# be extended (churn signals, onboarding stalls, unusual AI cost spikes).
+# --------------------------------------------------------------------------
+from pro_alerts import (  # noqa: E402
+    list_alerts,
+    unread_count,
+    mark_read,
+    mark_all_read,
+)
+
+
+@router.get("/pro/alerts")
+async def pro_list_alerts(
+    user: dict = Depends(require_role("pro", "superadmin")),
+):
+    """Return the current pro's last 50 alerts, newest first, plus the
+    unread count so the sidebar badge can render in one round-trip."""
+    items = await list_alerts(user["id"], limit=50)
+    unread = await unread_count(user["id"])
+    return {"items": items, "unread": unread}
+
+
+@router.post("/pro/alerts/{alert_id}/read")
+async def pro_mark_alert_read(
+    alert_id: str,
+    user: dict = Depends(require_role("pro", "superadmin")),
+):
+    ok = await mark_read(alert_id, user["id"])
+    if not ok:
+        raise HTTPException(404, "Alert not found")
+    return {"ok": True}
+
+
+@router.post("/pro/alerts/read-all")
+async def pro_mark_all_alerts_read(
+    user: dict = Depends(require_role("pro", "superadmin")),
+):
+    n = await mark_all_read(user["id"])
+    return {"ok": True, "marked": n}
