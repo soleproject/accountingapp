@@ -253,7 +253,14 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
         pro_name = user.get("full_name") or user.get("name") or user.get("email") or "Your accountant"
         firm_name = (user.get("branding") or {}).get("firm_name") or None
         firm_slug = (user.get("branding") or {}).get("signin_subdomain") or None
-        base = public_base_url()
+        # Base URL flips to the firm's private-label subdomain
+        # (e.g. `https://priyabooks.accountingapp.ai`) when the Pro has
+        # a signin_subdomain AND the PRIVATE_LABEL_HOST_TEMPLATE env is
+        # configured. Otherwise falls back to the platform URL. The
+        # `?firm={slug}` param is still appended so preview environments
+        # (or Pros whose subdomain isn't provisioned yet) still resolve
+        # the firm brand via the hostname-independent query lookup.
+        base = public_base_url(firm_slug)
 
         # Pros with a `signin_subdomain` set (i.e. private-label firms)
         # get every outbound URL suffixed with `?firm={slug}` so the
@@ -377,10 +384,10 @@ async def resend_welcome_email(cid: str, user: dict = Depends(require_role("pro"
     import email_templates as _tmpl
     from routes.auth import mint_password_set_token
 
-    base = public_base_url()
     pro_name = user.get("full_name") or user.get("name") or user.get("email") or "Your accountant"
     firm_name = (user.get("branding") or {}).get("firm_name") or None
     firm_slug = (user.get("branding") or {}).get("signin_subdomain") or None
+    base = public_base_url(firm_slug)
 
     # Mirror /pro/clients (add_client) branding — carry ?firm=<slug>
     # so the client's set-password + billing pages render the Pro's
