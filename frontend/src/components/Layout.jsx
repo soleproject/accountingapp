@@ -336,8 +336,17 @@ export default function Layout() {
         <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
 
         <div className="flex-1 flex flex-col min-w-0">
-          <header className="relative z-[1000] h-16 shrink-0 border-b bg-white flex items-center px-6 gap-4">
-            <CompanySwitcher />
+          <header className="h-16 shrink-0 border-b bg-white flex items-center px-6 gap-4">
+            {/* CompanySwitcher gets z-[1000] so it stays clickable when
+                the BillingLockedModal (z-[999]) is up — clients who own
+                multiple companies can escape a locked one via the
+                dropdown. The rest of the header (profile menu, AI
+                toggle, alerts bell) stays at the header's normal stack
+                level so it visually dims under the modal backdrop and
+                doesn't distract from the "Activate & pay" CTA. */}
+            <div className="relative z-[1000]">
+              <CompanySwitcher />
+            </div>
             <div className="ml-auto flex items-center gap-3">
               {aiCollapsed && (
                 <button
