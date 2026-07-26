@@ -7,7 +7,7 @@ import { TID } from "@/constants/testIds";
 import {
   AlertTriangle, CheckCircle2, ArrowRight, Plus, X, Loader2, UserPlus,
   BellRing, Wand2, FileWarning, ReceiptText, ScrollText, Sparkles, MailPlus,
-  Building2, Shield, Users2, Palette, Link as LinkIcon, Gift, Ticket,
+  Building2, Shield, Users2, Palette, Link as LinkIcon, Gift, Ticket, CreditCard,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -34,10 +34,15 @@ export default function ProClients() {
     setResending(prev => ({ ...prev, [cid]: true }));
     try {
       const r = await api.post(`/pro/clients/${cid}/resend-welcome`);
-      toast.success(`Sent — ${name}'s owner will get a fresh "Set your password" email at ${r.data.sent_to}.`, { duration: 6000 });
+      const suffix = r.data.included_payment_link
+        ? " The email includes a fresh Pay & activate link."
+        : "";
+      toast.success(
+        `Sent — ${name}'s owner will get a fresh welcome email at ${r.data.sent_to}.${suffix}`,
+        { duration: 6000 }
+      );
     } catch (e) {
       const detail = e.response?.data?.detail || "Couldn't re-send the invite.";
-      // 409 = already active — surface a friendly info toast instead of error.
       if (e.response?.status === 409) toast.info(detail);
       else toast.error(detail);
     } finally {
@@ -178,6 +183,15 @@ export default function ProClients() {
                       <BellRing size={10} /> {act}
                     </span>
                   )}
+                  {c.needs_activation && (
+                    <span
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-100 text-cyan-800 flex items-center gap-1"
+                      title="Client hasn't paid yet — resend the Pay & activate link"
+                      data-testid={`needs-activation-badge-${c.id}`}
+                    >
+                      <CreditCard size={10} /> Awaiting payment
+                    </span>
+                  )}
                   {c.onboarding_complete
                     ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 flex items-center gap-1"><CheckCircle2 size={10} /> Ready</span>
                     : <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">Onboarding</span>}
@@ -211,8 +225,14 @@ export default function ProClients() {
                   onClick={() => resendWelcome(c.id, c.name)}
                   disabled={resending[c.id]}
                   data-testid={`resend-welcome-${c.id}`}
-                  title="Re-send the client's Set-your-password invite email"
-                  className="inline-flex items-center justify-center w-8 h-[30px] rounded-md border border-slate-200 text-slate-500 hover:text-cyan-700 hover:border-cyan-300 hover:bg-cyan-50 disabled:opacity-50"
+                  title={c.needs_activation
+                    ? "Re-send the client's Pay & activate email"
+                    : "Re-send the client's welcome email"}
+                  className={`inline-flex items-center justify-center w-8 h-[30px] rounded-md border disabled:opacity-50 ${
+                    c.needs_activation
+                      ? "border-cyan-300 text-cyan-700 bg-cyan-50 hover:bg-cyan-100"
+                      : "border-slate-200 text-slate-500 hover:text-cyan-700 hover:border-cyan-300 hover:bg-cyan-50"
+                  }`}
                 >
                   {resending[c.id] ? <Loader2 size={12} className="animate-spin" /> : <MailPlus size={12} />}
                 </button>

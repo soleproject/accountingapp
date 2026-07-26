@@ -1052,21 +1052,29 @@ async def get_company_billing_state(
         m = await db.memberships.find_one({"user_id": user["id"], "company_id": cid})
         if not m:
             raise HTTPException(404, "Company not found")
+    else:
+        m = None
     c = await db.companies.find_one({"id": cid})
     if not c:
         raise HTTPException(404, "Company not found")
     state = c.get("billing_state") or "pending"
     payer = c.get("billing_payer")
     # Lock rule:
-    #   * past_due / canceled / unpaid → always locked (self-explanatory).
-    #   * pending → locked ONLY when the payer is the client themselves
-    #     via the email-invoice path. `client_card` collects payment at
-    #     signup (pending is momentary until the webhook flips to
-    #     active); `enterprise` and `free_spot` never need lockout.
-    locked = (
-        state in ("past_due", "canceled", "unpaid")
-        or (state == "pending" and payer == "client_email")
+    #   * past_due / canceled / unpaid → always lock (service interruption
+    #     affects everyone equally, including the Pro).
+    #   * pending + client_email → lock the CLIENT side only. The Pro
+    #     needs to keep working the file (and resending the activation
+    #     link if the client lost it) so we let Pros and superadmin
+    #     through. `client_card` / `enterprise` / `free_spot` never
+    #     need lockout during a pending window.
+    is_service_lock = state in ("past_due", "canceled", "unpaid")
+    is_pending_activation = state == "pending" and payer == "client_email"
+    role_on_company = (m or {}).get("role") if m else None
+    is_pro_side = (
+        user.get("role") == "superadmin"
+        or role_on_company in ("pro", "reviewer")
     )
+    locked = is_service_lock or (is_pending_activation and not is_pro_side)
     return {
         "billing_state": state,
         "billing_payer": payer,

@@ -39,6 +39,31 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 (later) — Resend Activation Link + Pro-scoped lock
+- **`/pro/clients` response** now includes `billing_payer`,
+  `billing_state`, and a derived `needs_activation` boolean
+  (`client_email + pending`) so the client-card can surface a
+  status hint without a second round-trip.
+- **New cyan "Awaiting payment" badge** on client cards where
+  `needs_activation=true`, plus the existing resend-email button gets
+  a cyan tint on those same cards to draw the eye there first.
+- **`POST /api/pro/clients/{cid}/resend-welcome` extended** — no
+  longer 409s when the client has already set their password. Now:
+  * First-time (`must_set_password=true`) → `client_welcome_first_time`
+    with a fresh magic-link token + `payment_url` if the company is
+    still awaiting activation.
+  * Returning client → `client_welcome_returning` with the same
+    `payment_url` if activation is pending.
+  Response payload gains `included_payment_link: bool` so the toast
+  can honestly report "email includes a fresh Pay & activate link."
+- **Lock rule refined** in `get_company_billing_state`: the
+  `pending + client_email` lock now applies only to the CLIENT side
+  (owner / editor / viewer). Pros and superadmin can keep working the
+  file (and hit the resend button) — matches real-world workflow.
+  Full-outage locks (`past_due` / `canceled` / `unpaid`) still lock
+  everyone. All 5 role/state combos unit-tested.
+
+
 ### Feb 2026 (later) — "Client — Email bill" flow now actually blocks + prompts pay
 Closes a big security/revenue hole: the previous email-bill flow let
 Michael create an account and access his books without paying —

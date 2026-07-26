@@ -69,6 +69,15 @@ async def pro_clients(user: dict = Depends(require_role("pro", "superadmin"))):
             "id": c["id"], "name": c["name"], "business_type": c.get("business_type", ""),
             "onboarding_complete": c.get("onboarding_complete", False),
             "transactions": txn_count, "needs_review": needs_review,
+            # Billing snapshot so the client-card can surface a
+            # "needs activation" indicator + tailor the resend-email
+            # tooltip. Only three fields we need on the tile.
+            "billing_payer": c.get("billing_payer"),
+            "billing_state": c.get("billing_state"),
+            "needs_activation": (
+                c.get("billing_payer") == "client_email"
+                and (c.get("billing_state") or "pending") == "pending"
+            ),
         })
     return {"clients": result}
 
@@ -313,15 +322,23 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
 
 @router.post("/pro/clients/{cid}/resend-welcome")
 async def resend_welcome_email(cid: str, user: dict = Depends(require_role("pro", "superadmin"))):
-    """Re-mint a fresh magic-link token for the client-owner of ``cid`` and
-    email them the "Set your password" welcome again. Used when a client
-    says "I never got the invite." Restrictions:
-      * Pro must be a member of the company.
-      * If the client has already set their password (i.e. successfully
-        used a prior magic-link), we skip the mint + refuse with 409 so
-        the Pro doesn't accidentally wipe a working account. If the Pro
-        really needs to reset, they can direct the client to whatever
-        password-recovery flow we ship in the future.
+    """Re-send the welcome / activation email for ``cid``'s owner.
+
+    Two paths, chosen automatically:
+
+    * **First-time client** (`must_set_password=True`) — mint a fresh
+      magic-link token and use the ``client_welcome_first_time``
+      template. Existing behavior.
+    * **Returning client** — the client already has a password, so we
+      don't mint a token; we send ``client_welcome_returning`` instead.
+      This unblocks the previous 409 that the endpoint used to raise,
+      which was the wrong call whenever a client-email/pending company
+      lost its activation link — the Pro had no way to resend without
+      deleting and re-adding the company.
+
+    Regardless of path, if this company's payer is ``client_email`` and
+    the subscription is still ``pending``, the email surfaces the
+    "Pay & activate books" CTA that deep-links to Stripe checkout.
     """
     # Membership check — Pro must be on this company.
     m = await db.memberships.find_one({
@@ -339,12 +356,6 @@ async def resend_welcome_email(cid: str, user: dict = Depends(require_role("pro"
     owner = await db.users.find_one({"id": owner_m["user_id"]})
     if not owner:
         raise HTTPException(404, "Client user missing.")
-    if not owner.get("must_set_password"):
-        raise HTTPException(
-            409,
-            "This client has already set their own password. They can sign in directly, "
-            "or use the standard password-recovery flow if they forgot it.",
-        )
     if not owner.get("email"):
         raise HTTPException(400, "Client has no email on file.")
 
@@ -352,25 +363,60 @@ async def resend_welcome_email(cid: str, user: dict = Depends(require_role("pro"
     import email_templates as _tmpl
     from routes.auth import mint_password_set_token
 
-    token = await mint_password_set_token(owner["id"], purpose="client_welcome_resend")
+    base = public_base_url()
     pro_name = user.get("full_name") or user.get("name") or user.get("email") or "Your accountant"
     firm_name = (user.get("branding") or {}).get("firm_name") or None
-    subject, html = _tmpl.client_welcome_first_time(
-        client_name=owner.get("name") or "there",
-        pro_name=pro_name, firm_name=firm_name,
-        brand_name=firm_name,
-        company_name=company.get("name") or "",
-        set_password_url=f"{public_base_url()}/set-password/{token}",
+
+    needs_activation = (
+        company.get("billing_payer") == "client_email"
+        and (company.get("billing_state") or "pending") == "pending"
     )
+    payment_url = f"{base}/billing?company={cid}" if needs_activation else None
+
+    if owner.get("must_set_password"):
+        token = await mint_password_set_token(owner["id"], purpose="client_welcome_resend")
+        subject, html = _tmpl.client_welcome_first_time(
+            client_name=owner.get("name") or "there",
+            pro_name=pro_name, firm_name=firm_name,
+            brand_name=firm_name,
+            company_name=company.get("name") or "",
+            set_password_url=f"{base}/set-password/{token}",
+            payment_url=payment_url,
+        )
+        related = {"resend": True, "password_set_token": token, "needs_activation": needs_activation}
+        kind = "client_welcome"
+    else:
+        # Returning client — count how many other companies they own so
+        # the "you now have N companies" copy stays accurate.
+        other_count = await db.memberships.count_documents({
+            "user_id": owner["id"], "role": "owner",
+        }) - 1
+        subject, html = _tmpl.client_welcome_returning(
+            client_name=owner.get("name") or "there",
+            pro_name=pro_name, firm_name=firm_name,
+            brand_name=firm_name,
+            company_name=company.get("name") or "",
+            other_company_count=max(0, other_count),
+            dashboard_url=f"{base}/dashboard",
+            payment_url=payment_url,
+        )
+        related = {"resend": True, "needs_activation": needs_activation}
+        kind = "client_welcome_returning"
+
     result = await dispatch(
-        kind="client_welcome", to=owner["email"],
+        kind=kind, to=owner["email"],
         subject=f"[Re-sent] {subject}", html=html,
         initiating_user_id=user["id"], company_id=cid,
-        related={"resend": True, "password_set_token": token},
+        related=related,
     )
     if result["status"] == "failed":
         raise HTTPException(502, result.get("error") or "Email send failed")
-    return {"status": result["status"], "sent_to": owner["email"], "communication_id": result["id"]}
+    return {
+        "status": result["status"],
+        "sent_to": owner["email"],
+        "communication_id": result["id"],
+        "included_payment_link": needs_activation,
+    }
 
 
 
