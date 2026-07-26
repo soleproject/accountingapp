@@ -976,9 +976,15 @@ async def list_transactions(
     if category_account_id:
         query["category_account_id"] = category_account_id
     if bank_account_id:
-        # Bank / credit-card account filter. Matches transactions that
-        # hit this specific bank feed row (Plaid item or manual account).
-        query["bank_account_id"] = bank_account_id
+        # Bank / credit-card account filter. Match rows on either the
+        # legacy `bank_account_id` field (manual-import demo data) OR the
+        # Plaid `plaid_account_id` field (real bank-fed rows). Plaid
+        # doesn't set `bank_account_id` — it stores its own account_id
+        # under `plaid_account_id` — so we OR both to cover every case.
+        query.setdefault("$and", []).append({"$or": [
+            {"bank_account_id": bank_account_id},
+            {"plaid_account_id": bank_account_id},
+        ]})
     if amount_min is not None or amount_max is not None:
         # Amount range filter — matches on the ABSOLUTE amount so the CPA
         # doesn't have to remember the sign convention (debits are stored

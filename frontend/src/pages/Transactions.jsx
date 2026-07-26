@@ -419,14 +419,19 @@ export default function Transactions() {
       api.get(`/companies/${currentId}/plaid/accounts`).catch(() => ({ data: {} })),
       api.get(`/companies/${currentId}/contacts?limit=500`).catch(() => ({ data: {} })),
     ]).then(([banksRes, contactsRes]) => {
-      // Plaid-linked accounts: each `connected` row has a `bank_account_id`
-      // that matches the txn `bank_account_id`. Fall back to
-      // deriving from currently-loaded txns if the endpoint returns nothing
-      // (manual-only companies).
-      const connected = (banksRes.data?.connected || []).map((b) => ({
-        id: b.bank_account_id || b.account_id,
-        name: b.name || b.official_name || "Account",
-      })).filter((b) => b.id);
+      // Plaid-linked accounts: use `account_id` (Plaid's id, which
+      // matches how the backend filters on `plaid_account_id`) and
+      // append the mask so multiple accounts under the same bank (e.g.
+      // both named "Adv Plus Banking") don't collide in the dropdown.
+      const connected = (banksRes.data?.connected || []).map((b) => {
+        const nm = b.name || b.official_name || "Account";
+        const mask = b.mask ? ` · **${b.mask}` : "";
+        const sub = b.subtype ? ` (${b.subtype})` : "";
+        return {
+          id: b.account_id,
+          name: `${nm}${mask}${sub}`,
+        };
+      }).filter((b) => b.id);
       setFilterBankOptions(connected);
       setFilterContactOptions((contactsRes.data?.contacts || []).map((c) => ({
         id: c.id, name: c.name || c.display_name || "—",
