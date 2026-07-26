@@ -151,6 +151,12 @@ export default function BillingLockedModal() {
         <div className="mt-3 text-[11px] text-slate-400">
           Your access will {isFirstTimeActivation ? "open" : "re-open"} automatically the moment Stripe confirms the payment.
         </div>
+        <div className="mt-3 text-[11px] text-slate-500 border-t pt-3">
+          Have other companies?{" "}
+          <span className="text-slate-700 font-medium">
+            Use the company switcher at the top-left to jump to one that's active.
+          </span>
+        </div>
       </div>
     </div>
   );

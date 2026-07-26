@@ -336,7 +336,7 @@ export default function Layout() {
         <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
 
         <div className="flex-1 flex flex-col min-w-0">
-          <header className="h-16 shrink-0 border-b bg-white flex items-center px-6 gap-4">
+          <header className="relative z-[1000] h-16 shrink-0 border-b bg-white flex items-center px-6 gap-4">
             <CompanySwitcher />
             <div className="ml-auto flex items-center gap-3">
               {aiCollapsed && (
