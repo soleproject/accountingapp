@@ -16,7 +16,7 @@ import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
 import {
   ArrowLeft, Loader2, Save, Shield, Users2, Building2, Ticket, Gift, Pencil,
-  Sparkles, CheckCircle2, Clock, X, Receipt, Play,
+  Sparkles, CheckCircle2, Clock, X, Receipt, Play, ChevronRight, ChevronDown,
 } from "lucide-react";
 
 const PRODUCT_LABELS = {
@@ -339,6 +339,8 @@ function EnterpriseBillingSection({ eid }) {
   const [loading, setLoading] = useState(true);
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [openLines, setOpenLines] = useState({});
+  const toggleLines = (id) => setOpenLines((s) => ({ ...s, [id]: !s[id] }));
 
   const load = async () => {
     setLoading(true);
@@ -456,7 +458,8 @@ function EnterpriseBillingSection({ eid }) {
           <table className="w-full text-sm">
             <thead className="bg-slate-50/40 text-xs text-slate-500">
               <tr>
-                <th className="text-left px-5 py-2 font-medium">Month</th>
+                <th className="w-6 px-2 py-2"></th>
+                <th className="text-left px-3 py-2 font-medium">Month</th>
                 <th className="text-left px-3 py-2 font-medium">Status</th>
                 <th className="text-left px-3 py-2 font-medium">Lines</th>
                 <th className="text-left px-3 py-2 font-medium">Amount</th>
@@ -465,40 +468,104 @@ function EnterpriseBillingSection({ eid }) {
               </tr>
             </thead>
             <tbody>
-              {invoices.map((inv) => (
-                <tr key={inv.id} className="border-t hover:bg-slate-50/40">
-                  <td className="px-5 py-2.5 font-mono-num">{inv.month_key}</td>
-                  <td className="px-3 py-2.5">
-                    <span className={`text-[11px] px-2 py-0.5 rounded border ${
-                      inv.status === "paid"      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                      : inv.status === "finalized" ? "bg-amber-50 text-amber-700 border-amber-200"
-                      : inv.status === "past_due"  ? "bg-rose-50 text-rose-700 border-rose-200"
-                      : inv.status === "empty"     ? "bg-slate-50 text-slate-500 border-slate-200"
-                      : inv.status === "failed"    ? "bg-rose-50 text-rose-700 border-rose-200"
-                      :                              "bg-slate-50 text-slate-500 border-slate-200"
-                    }`}>
-                      {inv.status}
-                    </span>
-                    {inv.error && <div className="text-[10px] text-rose-600 mt-0.5">{inv.error}</div>}
-                  </td>
-                  <td className="px-3 py-2.5 font-mono-num">{inv.line_count ?? (inv.lines?.length || 0)}</td>
-                  <td className="px-3 py-2.5 font-mono-num">
-                    {inv.amount_due_cents != null
-                      ? `$${(inv.amount_due_cents / 100).toFixed(2)}`
-                      : "—"}
-                  </td>
-                  <td className="px-3 py-2.5 text-[11px]">
-                    {inv.hosted_invoice_url ? (
-                      <a href={inv.hosted_invoice_url} target="_blank" rel="noreferrer" className="text-cyan-700 hover:underline">Open →</a>
-                    ) : inv.stripe_invoice_id ? (
-                      <span className="font-mono-num text-slate-500">{inv.stripe_invoice_id}</span>
-                    ) : <span className="text-slate-400">—</span>}
-                  </td>
-                  <td className="px-3 py-2.5 text-[11px] text-slate-500">
-                    {inv.created_at ? new Date(inv.created_at).toLocaleString() : "—"}
-                  </td>
-                </tr>
-              ))}
+              {invoices.map((inv) => {
+                const open = !!openLines[inv.id];
+                const hasLines = Array.isArray(inv.lines) && inv.lines.length > 0;
+                return (
+                  <>
+                  <tr
+                    key={inv.id}
+                    onClick={() => hasLines && toggleLines(inv.id)}
+                    className={`border-t hover:bg-slate-50/40 ${hasLines ? "cursor-pointer" : ""}`}
+                    data-testid={`ent-invoice-row-${inv.id}`}
+                    title={hasLines ? "Click to reveal per-company detail" : ""}
+                  >
+                    <td className="px-2 py-2.5 text-slate-400">
+                      {hasLines && (open ? <ChevronDown size={13} /> : <ChevronRight size={13} />)}
+                    </td>
+                    <td className="px-3 py-2.5 font-mono-num">{inv.month_key}</td>
+                    <td className="px-3 py-2.5">
+                      <span className={`text-[11px] px-2 py-0.5 rounded border ${
+                        inv.status === "paid"        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        : inv.status === "finalized" ? "bg-amber-50 text-amber-700 border-amber-200"
+                        : inv.status === "past_due"  ? "bg-rose-50 text-rose-700 border-rose-200"
+                        : inv.status === "empty"     ? "bg-slate-50 text-slate-500 border-slate-200"
+                        : inv.status === "failed"    ? "bg-rose-50 text-rose-700 border-rose-200"
+                        :                              "bg-slate-50 text-slate-500 border-slate-200"
+                      }`}>
+                        {inv.status}
+                      </span>
+                      {inv.error && <div className="text-[10px] text-rose-600 mt-0.5">{inv.error}</div>}
+                    </td>
+                    <td className="px-3 py-2.5 font-mono-num">{inv.line_count ?? (inv.lines?.length || 0)}</td>
+                    <td className="px-3 py-2.5 font-mono-num">
+                      {inv.amount_due_cents != null
+                        ? `$${(inv.amount_due_cents / 100).toFixed(2)}`
+                        : "—"}
+                    </td>
+                    <td className="px-3 py-2.5 text-[11px]" onClick={(e) => e.stopPropagation()}>
+                      {inv.hosted_invoice_url ? (
+                        <a href={inv.hosted_invoice_url} target="_blank" rel="noreferrer" className="text-cyan-700 hover:underline">Open →</a>
+                      ) : inv.stripe_invoice_id ? (
+                        <span className="font-mono-num text-slate-500">{inv.stripe_invoice_id}</span>
+                      ) : <span className="text-slate-400">—</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-[11px] text-slate-500">
+                      {inv.created_at ? new Date(inv.created_at).toLocaleString() : "—"}
+                    </td>
+                  </tr>
+                  {open && hasLines && (
+                    <tr key={inv.id + "_lines"} className="bg-slate-50/60 border-t border-slate-200">
+                      <td></td>
+                      <td colSpan={6} className="px-3 py-2.5">
+                        <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">
+                          Why is this being billed? — per-company breakdown
+                        </div>
+                        <table className="w-full text-[11px]">
+                          <thead className="text-[9px] uppercase text-slate-400">
+                            <tr>
+                              <th className="text-left pb-1 pr-3 font-medium">Company</th>
+                              <th className="text-left pb-1 pr-3 font-medium">Product</th>
+                              <th className="text-left pb-1 pr-3 font-medium">Price ID / reason</th>
+                              <th className="text-left pb-1 pr-3 font-medium">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {inv.lines.map((ln, i) => (
+                              <tr key={ln.company_id || i} className="border-t border-slate-100">
+                                <td className="py-1 pr-3 font-medium text-slate-700">
+                                  {ln.company_name || "—"}
+                                  <div className="text-[9px] text-slate-400 font-mono-num">{(ln.company_id || "").slice(0, 8)}</div>
+                                </td>
+                                <td className="py-1 pr-3">
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-50 text-cyan-700 border border-cyan-200">
+                                    {ln.product}{ln.discount ? " · disc" : ""}
+                                  </span>
+                                </td>
+                                <td className="py-1 pr-3">
+                                  {ln.skipped ? (
+                                    <span className="text-amber-700">{ln.skip_reason}</span>
+                                  ) : (
+                                    <span className="font-mono-num text-slate-600">{ln.price_id}</span>
+                                  )}
+                                </td>
+                                <td className="py-1 pr-3">
+                                  {ln.skipped ? (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">skipped</span>
+                                  ) : (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">billed</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </td>
+                    </tr>
+                  )}
+                  </>
+                );
+              })}
             </tbody>
           </table>
         </div>

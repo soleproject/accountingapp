@@ -50,9 +50,95 @@ PRICE_CATALOG = {
 }
 
 
+import re as _re
+
+
+def _slugify(text: str) -> str:
+    s = _re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
+    return s or "enterprise"
+
+
+async def _resolve_unique_slug(base: str) -> str:
+    """Return a slug that isn't already in use by another enterprise. If
+    the caller's ideal `base` is taken (e.g. two firms both want
+    "capstone"), we append `-2`, `-3`, ... until free."""
+    slug = base
+    for i in range(1, 50):
+        if not await db.enterprises.find_one({"slug": slug}):
+            return slug
+        slug = f"{base}-{i + 1}"
+    # Fallback — extremely unlikely; append the current epoch.
+    from time import time
+    return f"{base}-{int(time())}"
+
+
+async def ensure_personal_enterprise_for_pro(user_id: str) -> Optional[dict]:
+    """If the given Pro has a `branding.firm_name` set AND is still on
+    the default SmartBooks enterprise (or has no enterprise_id at all),
+    spawn a new Enterprise record OWNED BY THE PRO and move them onto it.
+
+    Idempotent: if the pro already owns their own enterprise we return it
+    unchanged. Returns the enterprise doc (or None if the pro has no
+    firm_name to key off of).
+    """
+    user = await db.users.find_one({"id": user_id, "role": "pro"})
+    if not user:
+        return None
+    firm_name = ((user.get("branding") or {}).get("firm_name") or "").strip()
+    if not firm_name:
+        return None
+
+    # Already owns an enterprise? Re-use it and just keep the name synced.
+    owned = await db.enterprises.find_one({"owner_user_id": user_id})
+    if owned:
+        if owned.get("name") != firm_name:
+            await db.enterprises.update_one(
+                {"id": owned["id"]},
+                {"$set": {"name": firm_name, "updated_at": now_iso()}},
+            )
+            owned["name"] = firm_name
+        # Make sure the user's `enterprise_id` points at their own record
+        # (defensive — in case they were previously on the default).
+        if user.get("enterprise_id") != owned["id"]:
+            await db.users.update_one(
+                {"id": user_id},
+                {"$set": {"enterprise_id": owned["id"]}},
+            )
+        return owned
+
+    # Otherwise mint a fresh enterprise. Slug preference: signin_subdomain
+    # (nice URL match) → slugify(firm_name).
+    b = user.get("branding") or {}
+    base_slug = _slugify(b.get("signin_subdomain") or firm_name)
+    slug = await _resolve_unique_slug(base_slug)
+    now = now_iso()
+    ent = {
+        "id": str(uuid.uuid4()),
+        "name": firm_name,
+        "slug": slug,
+        "is_default": False,
+        "owner_user_id": user_id,
+        # Inherit the default enterprise's allotment on birth so a new
+        # private label doesn't unexpectedly start at 0 free spots.
+        "free_user_allotment": 0,
+        "default_product": "simple_start",
+        "default_discount": False,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.enterprises.insert_one(ent)
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {"enterprise_id": ent["id"]}},
+    )
+    return ent
+
+
 async def ensure_default_enterprise() -> dict:
     """Guarantee the platform-default SmartBooks enterprise exists and every
     existing Pro is attached to it. Idempotent — safe to call on every boot.
+    Also spawns personal enterprises for any Pro that has a branding
+    firm_name set (deferred private-label migration).
     """
     now = now_iso()
     existing = await db.enterprises.find_one({"slug": DEFAULT_SLUG})
@@ -71,10 +157,7 @@ async def ensure_default_enterprise() -> dict:
         }
         await db.enterprises.insert_one(existing)
 
-    # Back-fill every Pro without an enterprise_id → attach to default. This
-    # is a one-shot migration effect: pros created before enterprises existed
-    # get slotted into SmartBooks. Once we build the "Move Pro" UI (Phase B+)
-    # a superadmin can reassign them.
+    # Back-fill every Pro without an enterprise_id → attach to default.
     await db.users.update_many(
         {"role": "pro", "enterprise_id": {"$in": [None, ""]}},
         {"$set": {"enterprise_id": existing["id"]}},
@@ -83,6 +166,22 @@ async def ensure_default_enterprise() -> dict:
         {"role": "pro", "enterprise_id": {"$exists": False}},
         {"$set": {"enterprise_id": existing["id"]}},
     )
+
+    # Then, for every Pro who has set a Private Label Name, promote them
+    # onto their own Enterprise record.
+    branded_pros = await db.users.find(
+        {"role": "pro", "branding.firm_name": {"$nin": [None, ""]}},
+        {"_id": 0, "id": 1},
+    ).to_list(1000)
+    for p in branded_pros:
+        try:
+            await ensure_personal_enterprise_for_pro(p["id"])
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "Failed to spawn personal enterprise for pro %s", p["id"],
+            )
+
     return existing
 
 

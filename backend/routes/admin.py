@@ -442,6 +442,73 @@ async def patch_enterprise(eid: str, inp: EnterprisePatch,
 
 
 
+@router.get("/admin/enterprises-report")
+async def enterprises_report(user: dict = Depends(require_role("superadmin"))):
+    """One-shot payload for the Superadmin dashboard's collapsible
+    Enterprises → Clients report. Each row is an Enterprise with a
+    nested `clients` list (owner users) — each client carries their
+    per-company details so the row can expand two-levels deep on the
+    frontend without another fetch.
+    """
+    ents = await db.enterprises.find({}, {"_id": 0}).to_list(500)
+    out = []
+    for ent in ents:
+        stats = await _ent.rollup_stats(ent["id"])
+        pro_ids = stats["pro_ids"]
+        company_ids = stats["company_ids"]
+        owner_ids = stats["owner_ids"]
+
+        # Owner-to-company map for this enterprise's scope.
+        owner_companies: dict[str, list[dict]] = {}
+        if company_ids:
+            companies = await db.companies.find(
+                {"id": {"$in": company_ids}}, {"_id": 0},
+            ).to_list(2000)
+            for c in companies:
+                owner_uid = c.get("owner_user_id")
+                if not owner_uid:
+                    continue
+                owner_companies.setdefault(owner_uid, []).append({
+                    "id": c["id"],
+                    "name": c.get("name") or "",
+                    "business_type": c.get("business_type") or "",
+                    "onboarding_complete": bool(c.get("onboarding_complete")),
+                    "billing_payer": c.get("billing_payer"),
+                    "billing_product": c.get("billing_product"),
+                    "billing_discount": bool(c.get("billing_discount")),
+                    "billing_state": c.get("billing_state") or "pending",
+                    "created_at": c.get("created_at"),
+                })
+
+        # Fetch owner user docs so we can render name + email.
+        owners = await db.users.find(
+            {"id": {"$in": owner_ids}},
+            {"_id": 0, "id": 1, "name": 1, "email": 1, "created_at": 1},
+        ).to_list(2000) if owner_ids else []
+        clients_rows = []
+        for o in owners:
+            cos = owner_companies.get(o["id"], [])
+            cos.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+            clients_rows.append({
+                "id": o["id"],
+                "name": o.get("name") or "",
+                "email": o.get("email") or "",
+                "joined_at": o.get("created_at"),
+                "company_count": len(cos),
+                "companies": cos,
+            })
+        clients_rows.sort(key=lambda r: (-r["company_count"], (r["name"] or r["email"]).lower()))
+
+        out.append({
+            "enterprise": _ent.serialize(ent, stats=stats),
+            "clients": clients_rows,
+        })
+    # Default first, then most companies desc.
+    out.sort(key=lambda x: (not x["enterprise"]["is_default"], -x["enterprise"]["companies_count"], x["enterprise"]["name"].lower()))
+    return {"rows": out}
+
+
+
 # ----------------------- Enterprise consolidated billing (Phase D) -----
 
 @router.get("/admin/enterprises/{eid}/invoices")

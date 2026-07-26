@@ -522,6 +522,17 @@ async def patch_pro_branding(
     if unsets: mongo_ops["$unset"] = unsets
     if mongo_ops:
         await db.users.update_one({"id": user["id"]}, mongo_ops)
+    # If the pro just set/changed their Private Label Name, promote them
+    # to their own Enterprise (or rename the existing one). Idempotent.
+    if inp.firm_name is not None:
+        try:
+            import enterprises as _entmod
+            await _entmod.ensure_personal_enterprise_for_pro(user["id"])
+        except Exception:
+            import logging as _lg
+            _lg.getLogger(__name__).exception(
+                "Failed to spawn personal enterprise on branding save (non-fatal)"
+            )
     doc = await db.users.find_one({"id": user["id"]})
     return _branding_out(doc or {})
 
