@@ -420,17 +420,55 @@ async def _handle_invoice_paid(invoice: dict) -> None:
             {"$set": {"billing_state": "active", "updated_at": now_iso()}},
         )
 
+    # Phase D — consolidated enterprise invoice paid. The scheduler
+    # stamped `metadata.enterprise_invoice_id` on the invoice when it
+    # created it, so we can join back precisely. Also flip every one of
+    # the invoice's line-item companies to `active` since the whole
+    # enterprise bill just settled.
+    ent_inv_id = ((invoice.get("metadata") or {}).get("enterprise_invoice_id"))
+    if ent_inv_id:
+        await db.enterprise_invoices.update_one(
+            {"id": ent_inv_id},
+            {"$set": {
+                "status": "paid",
+                "paid_at": now_iso(),
+                "amount_paid_cents": int(invoice.get("amount_paid") or 0),
+            }},
+        )
+        ent_id = (invoice.get("metadata") or {}).get("enterprise_id")
+        if ent_id:
+            # Every enterprise-paid company under this enterprise is
+            # covered by the month we just settled — mark them active
+            # so the blocking modal (if it was up) auto-dismisses.
+            await db.companies.update_many(
+                {"enterprise_id": ent_id, "billing_payer": "enterprise"},
+                {"$set": {"billing_state": "active", "updated_at": now_iso()}},
+            )
+
 
 async def _handle_invoice_payment_failed(invoice: dict) -> None:
     """Company-scoped: flip billing_state to past_due so the blocking
-    modal appears on next page load."""
+    modal appears on next page load. Also handles the consolidated-
+    enterprise invoice case — every enterprise-paid company under the
+    enterprise gets flipped to past_due together."""
     sub_id = invoice.get("subscription")
-    if not sub_id:
-        return
-    await db.companies.update_one(
-        {"stripe_subscription_id": sub_id},
-        {"$set": {"billing_state": "past_due", "updated_at": now_iso()}},
-    )
+    if sub_id:
+        await db.companies.update_one(
+            {"stripe_subscription_id": sub_id},
+            {"$set": {"billing_state": "past_due", "updated_at": now_iso()}},
+        )
+    ent_inv_id = ((invoice.get("metadata") or {}).get("enterprise_invoice_id"))
+    if ent_inv_id:
+        await db.enterprise_invoices.update_one(
+            {"id": ent_inv_id},
+            {"$set": {"status": "past_due", "updated_at": now_iso()}},
+        )
+        ent_id = (invoice.get("metadata") or {}).get("enterprise_id")
+        if ent_id:
+            await db.companies.update_many(
+                {"enterprise_id": ent_id, "billing_payer": "enterprise"},
+                {"$set": {"billing_state": "past_due", "updated_at": now_iso()}},
+            )
 
 
 async def _handle_subscription_change(sub: dict) -> None:

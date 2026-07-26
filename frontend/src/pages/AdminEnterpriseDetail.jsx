@@ -16,7 +16,7 @@ import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
 import {
   ArrowLeft, Loader2, Save, Shield, Users2, Building2, Ticket, Gift, Pencil,
-  Sparkles, CheckCircle2, Clock, X,
+  Sparkles, CheckCircle2, Clock, X, Receipt, Play,
 } from "lucide-react";
 
 const PRODUCT_LABELS = {
@@ -319,9 +319,194 @@ export default function AdminEnterpriseDetail() {
           </div>
         )}
       </section>
+
+      {/* ---------- Consolidated billing (Phase D) ---------- */}
+      <EnterpriseBillingSection eid={eid} />
     </div>
   );
 }
+
+
+// --------------------------------------------------------------------------
+// EnterpriseBillingSection — monthly consolidated invoicing panel.
+//   • Lists past `enterprise_invoices` (status, month, amount, PDF link)
+//   • "Preview next invoice" runs a dry-run for the prior month
+//   • "Bill now" actually creates the Stripe invoice (real in prod,
+//     no-ops with a clear "not configured" toast in preview).
+// --------------------------------------------------------------------------
+function EnterpriseBillingSection({ eid }) {
+  const [invoices, setInvoices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [preview, setPreview] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await api.get(`/admin/enterprises/${eid}/invoices`);
+      setInvoices(r.data?.invoices || []);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to load invoices");
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { if (eid) load(); /* eslint-disable-next-line */ }, [eid]);
+
+  const runPreview = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post(`/admin/enterprises/${eid}/bill-now`, { dry_run: true });
+      setPreview(r.data);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Preview failed");
+    } finally { setBusy(false); }
+  };
+
+  const runBillNow = async () => {
+    if (!window.confirm("Create a real Stripe invoice for the prior month? This will charge the enterprise's Stripe customer.")) return;
+    setBusy(true);
+    try {
+      const r = await api.post(`/admin/enterprises/${eid}/bill-now`, { dry_run: false });
+      const s = r.data?.status;
+      if (s === "finalized") toast.success(`Invoice finalized · $${((r.data.amount_due_cents || 0) / 100).toFixed(2)}`);
+      else if (s === "already_billed") toast.success("Already billed for this month.");
+      else if (s === "empty") toast("No enterprise-paid companies to bill this month.");
+      else if (s === "dry_run") toast(`Preview only — Stripe not configured. ${r.data.payable_count} payable / ${r.data.skipped_count} skipped.`);
+      else toast.error(`Status: ${s}${r.data?.error ? ` — ${r.data.error}` : ""}`);
+      await load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Bill-now failed");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <section className="rounded-xl border bg-white overflow-hidden" data-testid="ent-billing-section">
+      <div className="px-5 py-3 border-b bg-slate-50/60 flex items-center gap-2 flex-wrap">
+        <Receipt size={14} className="text-slate-500" />
+        <h2 className="font-heading font-semibold text-sm">Consolidated billing</h2>
+        <span className="text-[10px] text-slate-500">
+          5th-of-month scheduled · all <code className="bg-slate-100 px-1 rounded">Enterprise pays</code> companies rolled into one Stripe invoice
+        </span>
+        <div className="ml-auto flex gap-1.5">
+          <button
+            onClick={runPreview}
+            disabled={busy}
+            data-testid="ent-billing-preview-btn"
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {busy ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+            Preview
+          </button>
+          <button
+            onClick={runBillNow}
+            disabled={busy}
+            data-testid="ent-billing-billnow-btn"
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-900 text-white text-xs hover:bg-slate-800 disabled:opacity-50"
+          >
+            {busy ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+            Bill now
+          </button>
+        </div>
+      </div>
+
+      {/* Dry-run preview panel */}
+      {preview && (
+        <div className="border-b bg-cyan-50/40 px-5 py-3 text-xs">
+          <div className="flex items-center gap-2 mb-1">
+            <Sparkles size={12} className="text-cyan-700" />
+            <b className="text-cyan-800">Preview · {preview.month_key}</b>
+            <span className="text-slate-500 ml-auto">
+              {preview.payable_count} payable · {preview.skipped_count} skipped
+              {preview.stripe_configured ? "" : " · dry-run (Stripe not configured)"}
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-1">
+            {(preview.lines || []).map((ln) => (
+              <div
+                key={ln.company_id}
+                className={`px-2 py-1 rounded border text-[11px] ${
+                  ln.skipped
+                    ? "bg-white border-amber-200 text-amber-800"
+                    : "bg-white border-emerald-200 text-emerald-800"
+                }`}
+              >
+                <div className="font-medium truncate">
+                  {ln.skipped ? "⨯" : "✓"} {ln.company_name}
+                  <span className="text-slate-400 font-normal">
+                    {" "}· {ln.product}{ln.discount ? " · disc" : ""}
+                  </span>
+                </div>
+                {ln.skipped && <div className="text-[10px] mt-0.5 opacity-80">{ln.skip_reason}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="p-5 text-sm text-slate-500 flex items-center gap-2">
+          <Loader2 size={14} className="animate-spin" /> Loading invoices…
+        </div>
+      ) : !invoices.length ? (
+        <div className="p-5 text-sm text-slate-500">
+          No consolidated invoices yet. First one runs on the 5th of the month
+          for any <code className="bg-slate-100 px-1 rounded">Enterprise pays</code> companies.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50/40 text-xs text-slate-500">
+              <tr>
+                <th className="text-left px-5 py-2 font-medium">Month</th>
+                <th className="text-left px-3 py-2 font-medium">Status</th>
+                <th className="text-left px-3 py-2 font-medium">Lines</th>
+                <th className="text-left px-3 py-2 font-medium">Amount</th>
+                <th className="text-left px-3 py-2 font-medium">Stripe invoice</th>
+                <th className="text-left px-3 py-2 font-medium">Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoices.map((inv) => (
+                <tr key={inv.id} className="border-t hover:bg-slate-50/40">
+                  <td className="px-5 py-2.5 font-mono-num">{inv.month_key}</td>
+                  <td className="px-3 py-2.5">
+                    <span className={`text-[11px] px-2 py-0.5 rounded border ${
+                      inv.status === "paid"      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                      : inv.status === "finalized" ? "bg-amber-50 text-amber-700 border-amber-200"
+                      : inv.status === "past_due"  ? "bg-rose-50 text-rose-700 border-rose-200"
+                      : inv.status === "empty"     ? "bg-slate-50 text-slate-500 border-slate-200"
+                      : inv.status === "failed"    ? "bg-rose-50 text-rose-700 border-rose-200"
+                      :                              "bg-slate-50 text-slate-500 border-slate-200"
+                    }`}>
+                      {inv.status}
+                    </span>
+                    {inv.error && <div className="text-[10px] text-rose-600 mt-0.5">{inv.error}</div>}
+                  </td>
+                  <td className="px-3 py-2.5 font-mono-num">{inv.line_count ?? (inv.lines?.length || 0)}</td>
+                  <td className="px-3 py-2.5 font-mono-num">
+                    {inv.amount_due_cents != null
+                      ? `$${(inv.amount_due_cents / 100).toFixed(2)}`
+                      : "—"}
+                  </td>
+                  <td className="px-3 py-2.5 text-[11px]">
+                    {inv.hosted_invoice_url ? (
+                      <a href={inv.hosted_invoice_url} target="_blank" rel="noreferrer" className="text-cyan-700 hover:underline">Open →</a>
+                    ) : inv.stripe_invoice_id ? (
+                      <span className="font-mono-num text-slate-500">{inv.stripe_invoice_id}</span>
+                    ) : <span className="text-slate-400">—</span>}
+                  </td>
+                  <td className="px-3 py-2.5 text-[11px] text-slate-500">
+                    {inv.created_at ? new Date(inv.created_at).toLocaleString() : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 
 
 function KpiCard({ icon, label, value, tone = "slate" }) {

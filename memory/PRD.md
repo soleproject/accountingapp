@@ -39,6 +39,89 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Enterprise Phase D: Monthly Consolidated Invoicing
+Makes the "Enterprise will be billed on the 5th of next month" copy on
+the Add-Client modal actually true.
+
+- **New module** `/app/backend/enterprise_billing_scheduler.py`:
+  - `bill_enterprise(eid, month_key, dry_run)` — the core function.
+    Creates ONE Stripe invoice per enterprise per month, with one
+    `InvoiceItem` per `billing_payer="enterprise"` company mapped to
+    the correct Stripe Price ID via the same
+    `STRIPE_PRICE_<PRODUCT>_<REGULAR|DISCOUNT>` env convention.
+  - `run_monthly_cycle()` — iterates every enterprise; skips those
+    with zero enterprise-paid companies.
+  - `_resolve_enterprise_customer_id(ent)` — auto-creates a Stripe
+    Customer for the enterprise on first billing run (using the
+    enterprise's `owner_user_id`, or the first Pro attached to it as
+    fallback) and persists `stripe_customer_id` on the enterprise doc.
+  - `_loop()` — asyncio task that wakes every 6 hours; when today is
+    the 5th (America/New_York, configurable via `BILLING_TZ` and
+    `ENTERPRISE_BILL_DAY` env vars) it calls `run_monthly_cycle` for
+    the prior month. Idempotent via the DB unique index — multiple
+    ticks in the same day short-circuit.
+  - **Dry-run** — when `STRIPE_SECRET_KEY` is unset, returns the
+    "would-invoice" plan without hitting Stripe so the aggregation
+    logic can be verified in preview without live keys.
+  - **Graceful per-line failure** — a company whose price ID isn't
+    configured is `skipped` with `skip_reason="Set STRIPE_PRICE_..."`
+    but never blocks the rest of the enterprise's invoice.
+- **Idempotency** — new collection `enterprise_invoices` with a unique
+  index on `(enterprise_id, month_key)`. Guarantees no double-billing.
+- **Startup hook** in `/app/backend/server.py` — registers the index
+  and starts the scheduler alongside the AI ask-client scheduler.
+- **New superadmin routes** in `/app/backend/routes/admin.py`:
+  - `GET /api/admin/enterprises/{eid}/invoices` — list historical
+    monthly invoices for one enterprise (newest first).
+  - `POST /api/admin/enterprises/{eid}/bill-now` — manual kick with
+    `{month_key?, dry_run?}`. Superadmin can preview or catch up.
+- **Webhook handlers extended** in `stripe_billing.py`:
+  - `invoice.paid` with `metadata.enterprise_invoice_id` → flips
+    `enterprise_invoices.status="paid"` AND marks every enterprise-
+    paid company under that enterprise as `billing_state="active"`
+    in one bulk update.
+  - `invoice.payment_failed` with same metadata → symmetrical flip
+    to `past_due` (so the blocking modal surfaces immediately for
+    everyone).
+- **Frontend** — new `EnterpriseBillingSection` on
+  `/app/frontend/src/pages/AdminEnterpriseDetail.jsx`:
+  - Header explains the schedule + has `Preview` (dry-run) and
+    `Bill now` (real, confirm dialog) buttons.
+  - Live preview panel renders each line as a green (billable) or
+    amber (skipped, with specific "Set STRIPE_PRICE_..." reason) pill.
+  - Historical invoices table (Month / Status / Lines / Amount /
+    Stripe invoice link → hosted invoice page / Created).
+  - Status pills color-coded: paid=emerald, finalized=amber,
+    past_due/failed=rose, empty=slate.
+- **Verified live** (preview environment via curl + screenshot):
+  - Created three enterprise-paid companies (simple_start regular,
+    essentials disc, plus regular).
+  - `POST /admin/enterprises/{eid}/bill-now` dry-run returned:
+    * PhaseD-simple_start → matched to real Stripe price
+      `price_1TwKhcECKMX6pzcAi1l2WAWw` from prod env ✓
+    * PhaseD-essentials → skipped with reason *"Set
+      STRIPE_PRICE_ESSENTIALS_DISCOUNT in env"* ✓
+    * PhaseD-plus → skipped with *"Set STRIPE_PRICE_PLUS_REGULAR
+      in env"* ✓
+    * Summary: `payable=1, skipped=2, stripe_configured=false`.
+  - Screenshot: preview panel + billing history table both render
+    correctly on the Enterprise Detail page.
+
+### Phase D — Deploy checklist (prod)
+1. Confirm `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and
+   `STRIPE_PRICE_SIMPLE_START_MONTHLY_38/19` are already on Railway.
+2. When ready to bill Essentials/Plus/Advanced consolidated, add
+   `STRIPE_PRICE_ESSENTIALS_REGULAR/_DISCOUNT`,
+   `STRIPE_PRICE_PLUS_REGULAR/_DISCOUNT`,
+   `STRIPE_PRICE_ADVANCED_REGULAR/_DISCOUNT` env vars. No code change.
+3. Ensure the Stripe Dashboard webhook subscribes to
+   `invoice.payment_failed` (in addition to `invoice.paid` etc).
+4. The scheduler will fire automatically at ~01:00 America/New_York
+   on the 5th of each month for the previous month. Superadmin can
+   also trigger `Bill now` from the Enterprise Detail page any time.
+
+
+
 ### Feb 2026 — Enterprise Phase C: Company-Scoped Stripe Billing
 Built on top of the existing `stripe_billing.py` router (which already
 had a user-level subscription flow + affiliate/referral tracking).

@@ -139,6 +139,11 @@ async def startup():
     import enterprises as _ent
     await _ent.ensure_indexes()
     await _ent.ensure_default_enterprise()
+    # Enterprise consolidated billing (Phase D) — schedules the 5th-of-
+    # month invoice run and creates the idempotency index.
+    import enterprise_billing_scheduler as _ebs
+    await _ebs.ensure_indexes()
+    _ebs.start_scheduler()
     sync_tasks.register_all()
     # AI Ask Client — hourly autonomous email loop (opt-out per pro).
     import ai_ask_client_scheduler

@@ -439,3 +439,45 @@ async def patch_enterprise(eid: str, inp: EnterprisePatch,
     ent = await db.enterprises.find_one({"id": eid}, {"_id": 0})
     stats = await _ent.rollup_stats(eid)
     return {"enterprise": _ent.serialize(ent, stats=stats)}
+
+
+
+# ----------------------- Enterprise consolidated billing (Phase D) -----
+
+@router.get("/admin/enterprises/{eid}/invoices")
+async def list_enterprise_invoices(
+    eid: str,
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Historical monthly invoices for one enterprise, newest first."""
+    rows = await db.enterprise_invoices.find(
+        {"enterprise_id": eid}, {"_id": 0},
+    ).sort("month_key", -1).to_list(120)
+    return {"invoices": rows}
+
+
+class BillNowIn(BaseModel):
+    """Optional overrides for the manual bill-now endpoint."""
+    month_key: Optional[str] = None      # "YYYY-MM"; defaults to prior month
+    dry_run: bool = False
+
+
+@router.post("/admin/enterprises/{eid}/bill-now")
+async def bill_enterprise_now(
+    eid: str,
+    inp: BillNowIn,
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Manually kick off billing for one enterprise (superadmin only).
+
+    Useful for (a) smoke-testing the flow, (b) catching up an enterprise
+    that missed the scheduled run, or (c) previewing the plan via
+    `dry_run=true` before actually creating a Stripe invoice.
+    """
+    import enterprise_billing_scheduler as _ebs
+    month_key = inp.month_key or _ebs._prior_month_key(
+        datetime.now(_ebs.BILLING_TZ)
+    )
+    res = await _ebs.bill_enterprise(eid, month_key=month_key, dry_run=inp.dry_run)
+    res["month_key"] = month_key
+    return res
