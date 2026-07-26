@@ -446,16 +446,183 @@ function ClientActionSummary({ c }) {
   );
 }
 
+// --------------------------------------------------------------------------
+// BillingSection — payer / product / discount pickers on the New Client
+// modal. Fed by the /pro/billing/context payload which carries the caller
+// enterprise's remaining free spots + the price catalog.
+// --------------------------------------------------------------------------
+function BillingSection({ billing, form, update }) {
+  const catalog = billing?.price_catalog || {};
+  const ent = billing?.enterprise || null;
+  const freeRemaining = ent ? Math.max(0, ent.free_remaining ?? 0) : 0;
+
+  const product = form.billing_product || "simple_start";
+  const catItem = catalog[product] || { regular: 0, discount: 0, label: product };
+  const regularPrice = catItem.regular ?? 0;
+  const discountPrice = catItem.discount ?? 0;
+  const effectivePrice = form.billing_discount ? discountPrice : regularPrice;
+
+  const payerOptions = [
+    { value: "client_email", label: "Client — email bill",           hint: "We email the invoice; client pays directly" },
+    { value: "client_card",  label: "Client — pay with client card", hint: "You'll enter the client's card in the next step" },
+    { value: "enterprise",   label: "Enterprise pays",               hint: "Rolled into your firm's monthly invoice" },
+    { value: "free_spot",    label: `Free enterprise spot (${freeRemaining} left)`, hint: "Comp'd — no charge posts", disabled: freeRemaining <= 0 },
+  ];
+
+  return (
+    <div className="mt-3 pt-3 border-t space-y-3" data-testid="new-client-billing-section">
+      <div className="text-xs uppercase tracking-wider text-slate-500 border-b pb-1">
+        Billing
+      </div>
+
+      {ent && (
+        <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-2 text-[11px] text-slate-600 flex items-center gap-2">
+          <Shield size={11} className="text-indigo-500 flex-shrink-0" />
+          <span>
+            You're billing under <b>{ent.name}</b>
+            {ent.is_default ? "" : " (private label)"}
+            {" · "}
+            <span className="font-mono-num">{freeRemaining}</span> of {ent.free_user_allotment} free spots remaining
+          </span>
+        </div>
+      )}
+
+      {/* --- Who is paying --- */}
+      <div>
+        <label className="text-xs text-slate-600">Who is paying?</label>
+        <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-2" data-testid="new-client-payer-picker">
+          {payerOptions.map((opt) => {
+            const active = form.billing_payer === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => !opt.disabled && update("billing_payer", opt.value)}
+                disabled={opt.disabled}
+                data-testid={`new-client-payer-${opt.value}`}
+                className={`text-left rounded-md border px-3 py-2 text-xs transition ${
+                  active
+                    ? "border-indigo-500 bg-indigo-50 text-indigo-900 ring-2 ring-indigo-200"
+                    : opt.disabled
+                      ? "border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed"
+                      : "border-slate-200 hover:border-slate-400 hover:bg-slate-50 text-slate-700"
+                }`}
+              >
+                <div className="font-medium">{opt.label}</div>
+                <div className="text-[10px] opacity-70 mt-0.5">{opt.hint}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {form.billing_payer !== "free_spot" && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-slate-600">Product</label>
+            <select
+              value={product}
+              onChange={(e) => update("billing_product", e.target.value)}
+              data-testid="new-client-product-picker"
+              className="w-full mt-1 border rounded px-2 py-1.5"
+            >
+              {Object.entries(catalog).map(([key, val]) => (
+                <option key={key} value={key}>{val.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-slate-600">Pricing</label>
+            <label
+              className="mt-1 flex items-center gap-2 border rounded px-2 py-1.5 cursor-pointer hover:bg-slate-50"
+              data-testid="new-client-discount-toggle"
+            >
+              <input
+                type="checkbox"
+                checked={!!form.billing_discount}
+                onChange={(e) => update("billing_discount", e.target.checked)}
+              />
+              <span className="text-xs">
+                Apply discount ($<span className="font-mono-num">{discountPrice}</span>/mo
+                <span className="text-slate-400"> vs $</span>
+                <span className="font-mono-num line-through text-slate-400">{regularPrice}</span>)
+              </span>
+            </label>
+          </div>
+        </div>
+      )}
+
+      {/* Effective-price summary + payer-specific copy */}
+      <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-2 text-xs" data-testid="new-client-billing-summary">
+        {form.billing_payer === "free_spot" ? (
+          <>
+            <b className="text-violet-700">Free enterprise spot.</b>{" "}
+            No charge will post. This spot is permanent for the life of the company.
+          </>
+        ) : form.billing_payer === "enterprise" ? (
+          <>
+            <b className="text-indigo-700">Enterprise will be billed on the 5th of next month</b>
+            {" · "}${effectivePrice}/mo · {catItem.label}
+            {form.billing_discount ? " · discounted" : ""}
+          </>
+        ) : form.billing_payer === "client_card" ? (
+          <>
+            <b className="text-cyan-700">You'll enter the client's card on the next screen.</b>
+            {" · "}${effectivePrice}/mo · {catItem.label}
+            {form.billing_discount ? " · discounted" : ""}
+          </>
+        ) : (
+          <>
+            <b className="text-slate-700">We'll email the client the bill.</b>
+            {" · "}${effectivePrice}/mo · {catItem.label}
+            {form.billing_discount ? " · discounted" : ""}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+
 function NewClientModal({ onClose, onCreated }) {
   const [form, setForm] = useState({
     company_name: "", business_type: "", business_description: "",
     client_name: "", client_email: "", client_password: "",
     reporting_basis: "accrual",
+    // Phase B billing intent — populated once billing context lands.
+    billing_payer: "client_email",
+    billing_product: "simple_start",
+    billing_discount: false,
   });
   const [busy, setBusy] = useState(false);
   const [existingEmail, setExistingEmail] = useState(false);
   const [checkingEmail, setCheckingEmail] = useState(false);
+  const [billing, setBilling] = useState(null); // { enterprise, price_catalog, ... }
   const update = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  // One-shot fetch of the caller's enterprise + product catalog so the
+  // payer/product/discount pickers can render with real prices + remaining
+  // free-spot count on modal open.
+  useEffect(() => {
+    let cancelled = false;
+    api.get("/pro/billing/context")
+      .then((r) => {
+        if (cancelled) return;
+        setBilling(r.data);
+        const ent = r.data?.enterprise;
+        if (ent) {
+          // Pre-seed the pickers from the enterprise's defaults.
+          setForm((f) => ({
+            ...f,
+            billing_product: ent.default_product || "simple_start",
+            billing_discount: !!ent.default_discount,
+          }));
+        }
+      })
+      .catch(() => setBilling({ enterprise: null, price_catalog: {} }));
+    return () => { cancelled = true; };
+  }, []);
 
   // Debounced check: does this email already belong to a client?
   useEffect(() => {
@@ -511,7 +678,7 @@ function NewClientModal({ onClose, onCreated }) {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between px-5 py-3 border-b">
           <h3 className="font-heading font-semibold">Add a new client</h3>
           <button onClick={onClose} data-testid={TID.cancelBtn} className="p-1 rounded hover:bg-slate-100"><X size={16} /></button>
@@ -568,6 +735,14 @@ function NewClientModal({ onClose, onCreated }) {
               ? "This client already has a login. They'll see the new company in the top-left dropdown after their next sign-in."
               : (<>A GAAP-compliant Chart of Accounts is seeded automatically. We'll email <b>{form.client_email || "the client"}</b> a "Set your password" link — no need to share a temporary password.</>)}
           </div>
+
+          {/* -------------------- Billing (Phase B) --------------------
+              Payer + product + discount pickers. The "Free Enterprise
+              Spot" option only appears when the enterprise still has
+              capacity. When Enterprise pays, we surface the 5th-of-
+              next-month billing copy so the pro sets the client's
+              expectation up-front.                                         */}
+          <BillingSection billing={billing} form={form} update={update} />
         </div>
         <div className="px-5 py-3 border-t flex justify-end gap-2">
           <button onClick={onClose} className="px-3 py-1.5 rounded-md border text-sm">Cancel</button>

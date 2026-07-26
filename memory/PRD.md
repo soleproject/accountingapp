@@ -39,6 +39,66 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Enterprise Phase B: Add-Client Billing Fields
+- **Backend**
+  - `/app/backend/models.py :: NewClientIn` extended with
+    `billing_payer`, `billing_product`, `billing_discount` (all optional).
+  - `/app/backend/enterprises.py` — added constants:
+    `BILLING_PAYERS = (client_email, client_card, enterprise, free_spot)`
+    and `PRICE_CATALOG` with regular + discounted USD prices per product.
+  - `pro_create_client` in `/app/backend/routes/pro.py` now:
+    - Validates payer/product against the enterprise constants
+      (HTTP 400 on unknown values).
+    - Blocks `free_spot` when the enterprise has 0 remaining
+      capacity ("This enterprise has no free spots remaining.").
+    - Persists `billing_payer`, `billing_product`, `billing_discount`,
+      `enterprise_id`, and `billing_state` on the new company.
+      `billing_state="active"` for `free_spot` (no charge posts),
+      `"pending"` for all paid payers.
+  - New endpoint `GET /api/pro/billing/context` returns the caller's
+    parent enterprise (with `free_remaining`), the price catalog, and
+    the payer/product enums. Feeds the modal in one round-trip.
+- **Frontend** (`/app/frontend/src/pages/ProClients.jsx`):
+  - New `BillingSection` component embedded in `NewClientModal`:
+    - Enterprise banner ("You're billing under **SmartBooks** · N of M
+      free spots remaining"). Auto-shows private-label suffix when the
+      Pro belongs to a non-default enterprise.
+    - **Payer picker**: 2×2 grid of selectable cards with hints. The
+      "Free enterprise spot (N left)" card is disabled with grayed-
+      out styling when `free_remaining <= 0`.
+    - **Product picker** (Simple Start / Essentials / Plus / Advanced)
+      and **Discount toggle** showing side-by-side `$discount vs
+      $regular` strikethrough pricing.
+    - **Effective-price summary** with payer-specific copy:
+      * Enterprise pays → *"Enterprise will be billed on the 5th of
+        next month · $X/mo · Product [· discounted]"*
+      * Client card → *"You'll enter the client's card on the next
+        screen"* (Phase C wires the actual Stripe Checkout redirect).
+      * Client email → *"We'll email the client the bill"*.
+      * Free spot → *"No charge will post. This spot is permanent for
+        the life of the company."*
+  - Modal widened to `max-w-2xl` + `max-h-[92vh] overflow-y-auto` to
+    accommodate the new section.
+  - Defaults sourced from `enterprise.default_product` +
+    `enterprise.default_discount` so a Superadmin can set the firm-
+    wide defaults once and every new client inherits them.
+  - Product/Discount pickers auto-hide when `free_spot` is selected
+    (price would be $0 either way).
+- **Verified end-to-end**:
+  1. Screenshot: modal renders with SmartBooks banner, 4-card payer
+     picker, Product+Discount pickers, live summary line.
+  2. Create with `billing_payer=free_spot` → company written with
+     `billing_state=active`; enterprise `free_used` bumps 0→1.
+  3. Create with `billing_payer=client_card, product=essentials,
+     discount=true` → all three fields persisted.
+  4. Lower allotment to 1 (already used 1) → next `free_spot`
+     attempt returns HTTP 400 with a clear message; restored to 10.
+  5. Enterprise Detail companies-list table renders the new pills:
+     Product ("Essentials · disc"), Payer ("Free spot" / "Client
+     card"), Billing state ("active" for free / "pending" for card).
+
+
+
 ### Feb 2026 — Enterprise (Phase A): First-class Firm-Parent Object
 Groundwork for the "Enterprise runs a set of Pros" model that Phase B/C
 (Add-Client modal expansion + Stripe billing) will build on top of.

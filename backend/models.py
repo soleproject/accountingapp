@@ -172,3 +172,12 @@ class NewClientIn(BaseModel):
     business_type: str = ""
     business_description: str = ""
     reporting_basis: str = "accrual"
+    # Phase B billing intent — persists on the resulting company doc so
+    # Phase C's Stripe checkout knows which price to charge. All optional
+    # for backwards-compat with any pre-billing modal.
+    #   billing_payer:    client_email | client_card | enterprise | free_spot
+    #   billing_product:  simple_start | essentials | plus | advanced
+    #   billing_discount: applies the discounted price tier
+    billing_payer: Optional[str] = None
+    billing_product: Optional[str] = None
+    billing_discount: Optional[bool] = None

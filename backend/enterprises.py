@@ -32,6 +32,23 @@ DEFAULT_NAME = "SmartBooks"
 # wires the Stripe price IDs).
 BILLING_PRODUCTS = ("simple_start", "essentials", "plus", "advanced")
 
+# Valid `billing_payer` values recorded on a company. `client_email` /
+# `client_card` both mean "the client pays" — they differ only in how the
+# card is captured (email an invoice vs the accountant enters the card in
+# a form). `enterprise` = firm pays monthly consolidated on the 5th.
+# `free_spot` = comp'd, no charge, no Stripe subscription.
+BILLING_PAYERS = ("client_email", "client_card", "enterprise", "free_spot")
+
+# Product catalog — regular and discounted USD prices per month. Phase C
+# maps each (product, tier) to a Stripe Price ID via env vars, keyed as
+# STRIPE_PRICE_<PRODUCT>_<TIER>.
+PRICE_CATALOG = {
+    "simple_start": {"regular": 38,  "discount": 30,  "label": "Simple Start"},
+    "essentials":   {"regular": 75,  "discount": 60,  "label": "Essentials"},
+    "plus":         {"regular": 97,  "discount": 78,  "label": "Plus"},
+    "advanced":     {"regular": 149, "discount": 119, "label": "Advanced"},
+}
+
 
 async def ensure_default_enterprise() -> dict:
     """Guarantee the platform-default SmartBooks enterprise exists and every

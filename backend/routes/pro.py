@@ -85,6 +85,34 @@ async def pro_lookup_client(email: str, user: dict = Depends(require_role("pro",
     return {"exists": True, "name": u.get("name")}
 
 
+@router.get("/pro/billing/context")
+async def pro_billing_context(user: dict = Depends(require_role("pro", "superadmin"))):
+    """Everything the Add-Client modal needs to render its payer/product/
+    discount pickers in a single fetch:
+
+      * The caller Pro's parent enterprise (id, name, free spots left,
+        default_product, default_discount).
+      * The product catalog with regular + discounted USD prices, so the
+        UI can render the side-by-side price the pro/client will see.
+    """
+    import enterprises as _entmod
+
+    ent_id = user.get("enterprise_id")
+    ent_out = None
+    if ent_id:
+        ent = await db.enterprises.find_one({"id": ent_id}, {"_id": 0})
+        if ent:
+            stats = await _entmod.rollup_stats(ent_id)
+            ent_out = _entmod.serialize(ent, stats=stats)
+    return {
+        "enterprise": ent_out,
+        "price_catalog": _entmod.PRICE_CATALOG,
+        "payers": list(_entmod.BILLING_PAYERS),
+        "products": list(_entmod.BILLING_PRODUCTS),
+    }
+
+
+
 @router.post("/pro/clients")
 async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role("pro", "superadmin"))):
     """Create (or reuse) a client user + a new company + memberships, and seed
@@ -133,6 +161,32 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
             "created_at": now, "updated_at": now,
         })
 
+    # -----------------------------------------------------------
+    # Phase B — validate & persist billing intent on the company.
+    # If the pro picks `free_spot` we bounce back to the enterprise's
+    # remaining capacity BEFORE creating the company so we never end
+    # up with a company that consumed a spot the firm didn't have.
+    # -----------------------------------------------------------
+    import enterprises as _entmod
+    billing_payer = inp.billing_payer
+    billing_product = inp.billing_product
+    billing_discount = bool(inp.billing_discount) if inp.billing_discount is not None else False
+    ent_id = user.get("enterprise_id")
+    if billing_payer:
+        if billing_payer not in _entmod.BILLING_PAYERS:
+            raise HTTPException(400, f"billing_payer must be one of {list(_entmod.BILLING_PAYERS)}")
+    if billing_product:
+        if billing_product not in _entmod.BILLING_PRODUCTS:
+            raise HTTPException(400, f"billing_product must be one of {list(_entmod.BILLING_PRODUCTS)}")
+    if billing_payer == "free_spot":
+        if not ent_id:
+            raise HTTPException(400, "Pro user is not attached to an enterprise; free spots unavailable.")
+        stats = await _entmod.rollup_stats(ent_id)
+        ent = await db.enterprises.find_one({"id": ent_id})
+        remaining = max(0, int((ent or {}).get("free_user_allotment") or 0) - stats["free_used"])
+        if remaining <= 0:
+            raise HTTPException(400, "This enterprise has no free spots remaining.")
+
     company_id = str(uuid.uuid4())
     await db.companies.insert_one({
         "id": company_id, "name": inp.company_name,
@@ -140,6 +194,15 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
         "reporting_basis": inp.reporting_basis,
         "owner_user_id": client_id, "pro_user_id": user["id"],
         "onboarding_complete": False,
+        # Enterprise + billing intent. `billing_state` starts pending;
+        # Phase C's Stripe webhook flips it to active/past_due/canceled.
+        # For free_spot we can mark it active immediately since no charge
+        # ever posts.
+        "enterprise_id": ent_id,
+        "billing_payer": billing_payer,
+        "billing_product": billing_product,
+        "billing_discount": billing_discount,
+        "billing_state": "active" if billing_payer == "free_spot" else "pending",
         "created_at": now, "updated_at": now,
     })
 
