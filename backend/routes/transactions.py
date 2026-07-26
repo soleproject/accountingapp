@@ -1136,6 +1136,28 @@ async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depe
         "linked_payment_id": None, "tags": [],
         "created_at": now, "updated_at": now,
     }
+    # Split payload — the CPA broke the amount across multiple
+    # categories in the Add Manual Transaction modal. Validate the sum
+    # matches the header amount within a cent, then persist. A split txn
+    # is inherently human-reviewed (the CPA chose every line) so we
+    # clear needs_review and post it.
+    if inp.splits:
+        clean = []
+        total = 0.0
+        for s in inp.splits:
+            amt = float(s.get("amount") or 0)
+            total += amt
+            clean.append({
+                "amount": round(amt, 2),
+                "category_account_id": s.get("category_account_id") or None,
+                "description": s.get("description") or "",
+            })
+        if abs(total - float(inp.amount)) > 0.01:
+            raise HTTPException(400, f"Split total {total:.2f} must equal amount {inp.amount:.2f}")
+        doc["splits"] = clean
+        doc["human_reviewed"] = True
+        doc["needs_review"] = False
+        doc["posted"] = True
     if doc["posted"]:
         await log_ai(cid, "post_je", 1)
     if doc["needs_review"]:

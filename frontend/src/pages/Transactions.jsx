@@ -1806,16 +1806,47 @@ function ManualTxnModal({ accts, currentId, onClose }) {
   const [amount, setAmount] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [busy, setBusy] = useState(false);
+  // Splits are optional — CPA toggles "Split into multiple categories"
+  // to break the header amount across N lines instead of picking a
+  // single category. Mirrors the SplitModal UX but lives inline in the
+  // create flow so a CPA can post a proper multi-line JE without a
+  // second click. Empty array = simple single-category mode.
+  const [splitsOn, setSplitsOn] = useState(false);
+  const [splitRows, setSplitRows] = useState([
+    { amount: "", category_account_id: "", description: "" },
+    { amount: "", category_account_id: "", description: "" },
+  ]);
+  const amtNum = parseFloat(amount || 0) || 0;
+  const splitTotal = splitRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+  const splitsBalance = Math.abs(splitTotal - amtNum) < 0.01;
   const save = async () => {
+    if (splitsOn) {
+      if (!amtNum) { toast.error("Enter the total amount first"); return; }
+      if (!splitsBalance) { toast.error(`Split total ${splitTotal.toFixed(2)} must equal ${amtNum.toFixed(2)}`); return; }
+      if (splitRows.some((r) => !r.category_account_id)) { toast.error("Every split needs a category"); return; }
+    }
     setBusy(true);
-    await api.post(`/companies/${currentId}/transactions`, {
-      date, description, merchant, amount: parseFloat(amount),
-      category_account_id: categoryId || null, auto_categorize: !categoryId,
-    });
-    setBusy(false); toast.success("Transaction created (AI categorized)"); onClose();
+    try {
+      await api.post(`/companies/${currentId}/transactions`, {
+        date, description, merchant, amount: amtNum,
+        category_account_id: splitsOn ? null : (categoryId || null),
+        auto_categorize: !splitsOn && !categoryId,
+        splits: splitsOn ? splitRows.map((r) => ({
+          amount: parseFloat(r.amount) || 0,
+          category_account_id: r.category_account_id,
+          description: r.description,
+        })) : null,
+      });
+      toast.success(splitsOn ? "Split transaction created" : "Transaction created");
+      onClose();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to save");
+    } finally {
+      setBusy(false);
+    }
   };
   return (
-    <Modal title="Add manual transaction" onClose={onClose}>
+    <Modal title="Add manual transaction" onClose={onClose} wide={splitsOn}>
       <div className="space-y-3 text-sm">
         <div><label className="text-xs text-slate-600">Date</label>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border rounded px-2 py-1.5" /></div>
@@ -1825,36 +1856,104 @@ function ManualTxnModal({ accts, currentId, onClose }) {
           <input value={description} onChange={(e) => setDescription(e.target.value)} className="w-full border rounded px-2 py-1.5" /></div>
         <div><label className="text-xs text-slate-600">Amount (negative = expense)</label>
           <input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full border rounded px-2 py-1.5 font-mono-num" /></div>
-        <div>
-          <label className="text-xs text-slate-600">Category (leave blank for AI)</label>
-          {/* Checkbox is authoritative for "Let AI decide" mode. When it
-              is checked, categoryId stays empty and the backend gets
-              `auto_categorize: true`. Picking anything from the
-              AccountPicker below flips the checkbox off automatically. */}
-          <div className="flex items-center gap-2 mt-1 mb-2">
-            <input
-              type="checkbox"
-              id="manual-txn-let-ai"
-              checked={!categoryId}
-              onChange={(e) => { if (e.target.checked) setCategoryId(""); }}
-              className="rounded"
-            />
-            <label htmlFor="manual-txn-let-ai" className="text-xs text-slate-600 cursor-pointer">
-              Let AI decide
-            </label>
-          </div>
-          <div className={!categoryId ? "opacity-40" : ""}>
-            <AccountPicker
-              value={categoryId}
-              accounts={accts}
-              onChange={(id) => setCategoryId(id)}
-              companyId={currentId}
-              testId="manual-txn-category-picker"
-            />
-          </div>
+        <div className="flex items-center gap-2 pt-1">
+          <input
+            type="checkbox"
+            id="manual-txn-splits-on"
+            data-testid="manual-txn-splits-toggle"
+            checked={splitsOn}
+            onChange={(e) => setSplitsOn(e.target.checked)}
+            className="rounded"
+          />
+          <label htmlFor="manual-txn-splits-on" className="text-xs text-slate-700 font-medium cursor-pointer">
+            Split into multiple categories
+          </label>
         </div>
+        {splitsOn ? (
+          <div className="space-y-2 border-t pt-3" data-testid="manual-txn-splits-panel">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+              Splits — must sum to {fmtMoney(amtNum)}
+            </div>
+            {splitRows.map((r, i) => (
+              <div key={i} className="grid grid-cols-12 gap-2 items-center">
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="Amount"
+                  value={r.amount}
+                  onChange={(e) => setSplitRows(splitRows.map((x, j) => j === i ? { ...x, amount: e.target.value } : x))}
+                  className="col-span-3 border rounded px-2 py-1.5 font-mono-num text-xs"
+                />
+                <div className="col-span-6 min-w-0">
+                  <AccountPicker
+                    value={r.category_account_id}
+                    accounts={accts}
+                    onChange={(id) => setSplitRows(splitRows.map((x, j) => j === i ? { ...x, category_account_id: id } : x))}
+                    companyId={currentId}
+                    testId={`manual-txn-split-cat-${i}`}
+                  />
+                </div>
+                <input
+                  placeholder="Note"
+                  value={r.description}
+                  onChange={(e) => setSplitRows(splitRows.map((x, j) => j === i ? { ...x, description: e.target.value } : x))}
+                  className="col-span-2 border rounded px-2 py-1.5 text-xs"
+                />
+                <button
+                  onClick={() => splitRows.length > 1 && setSplitRows(splitRows.filter((_, j) => j !== i))}
+                  disabled={splitRows.length <= 1}
+                  className="col-span-1 text-red-500 hover:text-red-600 disabled:opacity-30 disabled:cursor-not-allowed"
+                  title="Remove split line"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+            <div className="flex items-center justify-between pt-1">
+              <button
+                onClick={() => setSplitRows([...splitRows, { amount: "", category_account_id: "", description: "" }])}
+                data-testid="manual-txn-split-add"
+                className="text-xs text-slate-600 border border-dashed border-slate-300 rounded px-2 py-1 hover:bg-slate-50"
+              >
+                + Add split line
+              </button>
+              <div className={`text-xs ${splitsBalance && amtNum ? "text-emerald-600" : "text-red-600"}`}>
+                Total: <span className="font-mono-num font-semibold">{fmtMoney(splitTotal)}</span>
+                {" · Target: "}
+                <span className="font-mono-num">{fmtMoney(amtNum)}</span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <label className="text-xs text-slate-600">Category (leave blank for AI)</label>
+            <div className="flex items-center gap-2 mt-1 mb-2">
+              <input
+                type="checkbox"
+                id="manual-txn-let-ai"
+                checked={!categoryId}
+                onChange={(e) => { if (e.target.checked) setCategoryId(""); }}
+                className="rounded"
+              />
+              <label htmlFor="manual-txn-let-ai" className="text-xs text-slate-600 cursor-pointer">
+                Let AI decide
+              </label>
+            </div>
+            <div className={!categoryId ? "opacity-40" : ""}>
+              <AccountPicker
+                value={categoryId}
+                accounts={accts}
+                onChange={(id) => setCategoryId(id)}
+                companyId={currentId}
+                testId="manual-txn-category-picker"
+              />
+            </div>
+          </div>
+        )}
         <button data-testid={TID.saveBtn} onClick={save} disabled={busy}
-                className="w-full py-2 rounded-md bg-slate-900 text-white text-sm">Save</button>
+                className="w-full py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50">
+          {busy ? "Saving…" : "Save"}
+        </button>
       </div>
     </Modal>
   );

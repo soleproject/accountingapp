@@ -53,6 +53,10 @@ class TransactionCreate(BaseModel):
     bank_account_id: Optional[str] = None
     category_account_id: Optional[str] = None
     auto_categorize: bool = True
+    # Optional split payload — if provided, the newly-created txn will
+    # be stored with `splits` populated and marked human_reviewed=True so
+    # it bypasses AI categorization entirely.
+    splits: Optional[list] = None
 
 
 class SplitIn(BaseModel):
