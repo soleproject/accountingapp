@@ -225,13 +225,28 @@ function BusinessFormModal({ initial, onClose, onSaved }) {
         });
         toast.success("Business updated");
       } else {
-        await api.post("/companies", {
+        const r = await api.post("/companies", {
           name: name.trim(),
           business_type: type,
           reporting_basis: basis,
           business_description: desc || null,
         });
-        toast.success("Business created");
+        const status = r.data?.email_status;
+        const err = r.data?.email_error;
+        if (status === "sent") {
+          toast.success("Business created — we emailed you the confirmation.");
+        } else if (status === "skipped_first_company" || !status) {
+          toast.success("Business created");
+        } else if (status === "skipped_pref_off") {
+          toast.success("Business created (welcome email skipped — pref off).");
+        } else if (status === "skipped_no_email") {
+          toast.success("Business created (no email on file).");
+        } else {
+          toast.error(
+            `Business created but the welcome email FAILED to send${err ? ` (${String(err).slice(0,140)})` : ""} — check Communications.`,
+            { duration: 12000 },
+          );
+        }
       }
       onSaved();
     } catch (e) {

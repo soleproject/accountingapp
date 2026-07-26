@@ -166,8 +166,13 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
     # Welcome email — first-time OR returning branch.
     # Never blocks the create flow: if Resend errors, we still return
     # 200 so the Pro's UI updates, and the error is surfaced in the
-    # `communications` log for follow-up.
+    # `communications` log for follow-up. We return the actual send
+    # status on the response so the frontend can show an honest toast
+    # ("emailed" vs "email failed — check Communications").
     # -----------------------------------------------------------
+    email_status = "skipped_no_email"
+    email_error: Optional[str] = None
+    email_kind: Optional[str] = None
     try:
         from email_dispatcher import dispatch, public_base_url
         import email_templates as _tmpl
@@ -186,12 +191,15 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
                 other_company_count=other_company_count,
                 dashboard_url=f"{base}/dashboard",
             )
-            await dispatch(
-                kind="client_welcome_returning", to=email,
+            email_kind = "client_welcome_returning"
+            result = await dispatch(
+                kind=email_kind, to=email,
                 subject=subject, html=html,
                 initiating_user_id=user["id"], company_id=company_id,
                 related={"reused": True, "other_company_count": other_company_count},
             )
+            email_status = result.get("status", "failed")
+            email_error = result.get("error")
         else:
             token = await mint_password_set_token(client_id, purpose="client_welcome")
             subject, html = _tmpl.client_welcome_first_time(
@@ -201,15 +209,20 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
                 company_name=inp.company_name,
                 set_password_url=f"{base}/set-password/{token}",
             )
-            await dispatch(
-                kind="client_welcome", to=email,
+            email_kind = "client_welcome"
+            result = await dispatch(
+                kind=email_kind, to=email,
                 subject=subject, html=html,
                 initiating_user_id=user["id"], company_id=company_id,
                 related={"reused": False, "password_set_token": token},
             )
-    except Exception:  # noqa: BLE001 — email failure never blocks client creation
+            email_status = result.get("status", "failed")
+            email_error = result.get("error")
+    except Exception as _exc:  # noqa: BLE001 — email failure never blocks client creation
         import logging as _lg
         _lg.getLogger(__name__).exception("Welcome email failed (client create still succeeded)")
+        email_status = "failed"
+        email_error = str(_exc)
 
     # How many companies does this owner now have access to?
     total = await db.memberships.count_documents({"user_id": client_id, "role": "owner"})
@@ -218,6 +231,9 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
         "client_id": client_id,
         "reused_existing_user": reused,
         "owner_company_count": total,
+        "email_status": email_status,
+        "email_error": email_error,
+        "email_kind": email_kind,
     }
 
 

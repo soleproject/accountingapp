@@ -316,13 +316,24 @@ function NewClientModal({ onClose, onCreated }) {
     setBusy(true);
     try {
       const r = await api.post("/pro/clients", form);
+      const status = r.data.email_status;
+      const err = r.data.email_error;
+      const emailOk = status === "sent";
+      const emailNote =
+        status === "sent" ? "we've emailed them the good news."
+        : status === "skipped_pref_off" ? "email skipped — your welcome-email preference is off. Toggle it back on under Settings → Notifications if you meant to send."
+        : status === "skipped_no_email" ? "no email on file, so nothing was sent."
+        : `email FAILED to send${err ? ` (${err.slice(0,140)})` : ""} — check Communications for details.`;
       if (r.data.reused_existing_user) {
-        toast.success(
-          `${form.company_name} added to ${form.client_email}'s existing login. They now own ${r.data.owner_company_count} companies — we've emailed them the good news.`,
-          { duration: 7000 },
+        (emailOk ? toast.success : toast.error)(
+          `${form.company_name} added to ${form.client_email}'s existing login. They now own ${r.data.owner_company_count} companies — ${emailNote}`,
+          { duration: emailOk ? 7000 : 12000 },
         );
       } else {
-        toast.success(`Client "${form.client_name}" created — they'll get a "Set your password" email at ${form.client_email}.`, { duration: 7000 });
+        (emailOk ? toast.success : toast.error)(
+          `Client "${form.client_name}" created — ${emailNote.replace(/^we've emailed them the good news\.$/, `they'll get a "Set your password" email at ${form.client_email}.`)}`,
+          { duration: emailOk ? 7000 : 12000 },
+        );
       }
       onCreated();
     } catch (e) {

@@ -111,8 +111,11 @@ async def create_company(inp: CompanyCreate, user: dict = Depends(get_current_us
     # Owner-adds-another-company welcome email — matches the notification
     # a client gets when a Pro adds a new company to their login. Skipped
     # for the very first company (signup case) and for users without an
-    # email on file. Never blocks — swallow send failures so a broken
-    # Resend key can't stop company creation.
+    # email on file. Never blocks — we return the actual send status so
+    # the frontend can show an honest toast instead of "email sent!" when
+    # Resend really failed.
+    email_status = "skipped_first_company" if prior_owner_count == 0 else "skipped_no_email"
+    email_error: str | None = None
     if prior_owner_count > 0 and user.get("email"):
         try:
             from email_dispatcher import dispatch, public_base_url
@@ -129,19 +132,27 @@ async def create_company(inp: CompanyCreate, user: dict = Depends(get_current_us
                 other_company_count=prior_owner_count,
                 dashboard_url=f"{public_base_url()}/dashboard",
             )
-            await dispatch(
+            result = await dispatch(
                 kind="client_welcome_returning", to=user["email"],
                 subject=subject, html=html,
                 initiating_user_id=user["id"], company_id=cid,
                 related={"self_add": True, "prior_owner_count": prior_owner_count},
             )
-        except Exception:
+            email_status = result.get("status", "failed")
+            email_error = result.get("error")
+        except Exception as _exc:
             import logging as _lg
             _lg.getLogger(__name__).exception(
                 "Self-add welcome email failed (company creation still succeeded)"
             )
+            email_status = "failed"
+            email_error = str(_exc)
 
-    return {"company_id": cid}
+    return {
+        "company_id": cid,
+        "email_status": email_status,
+        "email_error": email_error,
+    }
 
 
 @router.post("/companies/{cid}/contacts/backfill")
