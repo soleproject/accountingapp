@@ -39,6 +39,38 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 (later) — Production Stripe Webhook Diagnostic + Route Fixes
+Unblocked the "checkout succeeds but Superadmin billing dashboard stays $0"
+issue in the Railway production environment.
+
+- **Bug fix** in `/app/backend/routes/stripe_billing.py`:
+  - `get_company_billing_state` (the `/api/companies/{cid}/billing/state`
+    endpoint that `BillingLockedModal` polls) was missing its
+    `@router.get(...)` decorator, so the route wasn't registered → the
+    modal's fetch silently 404'd in every client's console. Restored.
+- **New Superadmin diagnostic** `GET /api/admin/billing/webhook-status`
+  — reports `webhook_secret_set`, `total_events_received`,
+  `total_payments_recorded`, `latest_payment_at`,
+  `companies_with_subscription`, `companies_billing_active`, plus the
+  last 20 `stripe_webhook_events`. Used to prove whether Stripe events
+  are physically landing on our FastAPI server.
+- **User-side config fixes required** (documented in session):
+  1. Railway env `STRIPE_PRICE_SIMPLE_START_REGULAR` was missing — the
+     $38 price ID was mis-placed in the DISCOUNT slot on Railway. User
+     re-set it so `_price_id("simple_start", discount=False)` resolves.
+  2. Stripe Dashboard webhook endpoint URL pointed at
+     `app.smartbookssoftware.ai` (frontend SPA) — Stripe was getting
+     200s with `index.html` and considering deliveries successful, but
+     the FastAPI handler never ran. Fixed by updating URL to
+     `api.smartbookssoftware.ai/api/stripe/webhook`.
+  3. Resent past `checkout.session.completed` + `invoice.paid` events
+     to backfill the completed test payment.
+- **Verified working** in production: $38 payment now shows in
+  Superadmin `/billing` (Gross $38, Net $38, Active Subs 1, Recent
+  Payments row visible).
+
+
+
 ### Feb 2026 — Enterprise Phase D: Monthly Consolidated Invoicing
 Makes the "Enterprise will be billed on the 5th of next month" copy on
 the Add-Client modal actually true.
