@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Search, Plus, ChevronDown, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 
@@ -48,10 +49,17 @@ export default function AccountPicker({ value, accounts, onChange, companyId, is
     return order.filter(k => groups[k]?.length).map(k => ({ type: k, items: groups[k] }));
   }, [accounts, q]);
 
-  // Close on outside click.
+  // Close on outside click. Popover is portaled to document.body so
+  // check both rootRef (trigger area) and popRef (popover) — a click
+  // inside either should keep the picker open.
+  const popRef = useRef(null);
   useEffect(() => {
     if (!open) return;
-    const onDoc = (e) => { if (!rootRef.current?.contains(e.target)) { setOpen(false); setAddMode(false); setQ(""); } };
+    const onDoc = (e) => {
+      if (rootRef.current?.contains(e.target)) return;
+      if (popRef.current?.contains(e.target)) return;
+      setOpen(false); setAddMode(false); setQ("");
+    };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
@@ -80,9 +88,37 @@ export default function AccountPicker({ value, accounts, onChange, companyId, is
     }
   };
 
+  // Compute the popover's viewport-anchored position each time it opens
+  // (or the window is resized/scrolled). Portal-rendered popovers sidestep
+  // any ancestor `overflow: hidden` / stacking-context clipping — critical
+  // inside modals like Add-manual-transaction where the picker would
+  // otherwise render behind the modal backdrop.
+  const [popRect, setPopRect] = useState({ top: 0, left: 0, width: 0 });
+  const triggerRef = useRef(null);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const compute = () => {
+      const r = triggerRef.current?.getBoundingClientRect();
+      if (!r) return;
+      setPopRect({
+        top: r.bottom + 4,
+        left: r.left,
+        width: Math.max(r.width, 320),
+      });
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    window.addEventListener("scroll", compute, true);
+    return () => {
+      window.removeEventListener("resize", compute);
+      window.removeEventListener("scroll", compute, true);
+    };
+  }, [open]);
+
   return (
     <div ref={rootRef} className="relative min-w-0 flex-1 max-w-[340px]" onClick={e => e.stopPropagation()}>
       <button
+        ref={triggerRef}
         type="button"
         data-testid={testId}
         onClick={() => setOpen(v => !v)}
@@ -96,8 +132,13 @@ export default function AccountPicker({ value, accounts, onChange, companyId, is
         <ChevronDown size={12} className="text-slate-400 shrink-0" />
       </button>
 
-      {open && (
-        <div className="absolute z-[60] left-0 top-[calc(100%+4px)] w-[360px] max-h-[380px] bg-white border border-slate-200 rounded-lg shadow-xl flex flex-col" data-testid={`${testId}-popover`}>
+      {open && createPortal(
+        <div
+          ref={popRef}
+          className="fixed z-[9999] max-h-[380px] bg-white border border-slate-200 rounded-lg shadow-xl flex flex-col"
+          style={{ top: popRect.top, left: popRect.left, width: popRect.width }}
+          data-testid={`${testId}-popover`}
+        >
           {!addMode ? (
             <>
               <div className="p-2 border-b border-slate-100 flex items-center gap-2">
@@ -198,7 +239,8 @@ export default function AccountPicker({ value, accounts, onChange, companyId, is
               </div>
             </div>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
