@@ -39,6 +39,41 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Edit Transaction from Row 3-Dot Menu (P0)
+- **Frontend** in `/app/frontend/src/pages/Transactions.jsx`:
+  - `RowMoreMenu` gained an `onEdit` prop and renders an "Edit transaction"
+    button (data-testid `txn-edit-{id}`, Pencil icon) at the TOP of the menu.
+  - New page-level `editing` state; clicking Edit sets it to the row's txn.
+    Modal render: `{editing && <ManualTxnModal ... initialTxn={editing} .../>}`.
+  - `ManualTxnModal` now accepts an `initialTxn` prop. When present it:
+    - Pre-populates Date, Bank Account, Contact (with `contact_name` fallback
+      when the linked contact isn't in the 500-contact filter list),
+      Merchant, Description, Amount, Category, and Splits (toggle auto-flips
+      on and rows fill from existing splits).
+    - Renders title "Edit transaction" instead of "Add manual transaction".
+    - Save fires `PATCH /api/companies/{cid}/transactions/{tid}` instead of
+      POST; toast reads "Transaction updated" / "Split transaction updated".
+  - Added remaining data-testids for E2E: `manual-txn-date`,
+    `manual-txn-merchant`, `manual-txn-description`, `manual-txn-amount`.
+- **Backend** in `/app/backend/models.py`:
+  - `TransactionUpdate` extended with `merchant`, `bank_account_id`,
+    `contact_id`, `contact_name` fields.
+- **Backend** in `/app/backend/routes/transactions.py` (`update_transaction`):
+  - Denormalizes `bank_account_name` when `bank_account_id` changes.
+  - Denormalizes `contact_name` from the Contact when `contact_id` changes
+    (honors caller-provided `contact_name` for brand-new contacts).
+  - Extended splits handling — validates the split sum equals the header
+    amount (new amount if provided, else existing) within $0.01; on success
+    marks `human_reviewed=true`, `needs_review=false`, `posted=true`, and
+    clears the header category so the ledger renders from split lines.
+  - Empty splits array clears splits back to single-category mode.
+  - Still calls `await _invalidate_dash(cid)` so dashboard step counters
+    stay in sync (cache invalidation contract preserved).
+- **Testing agent**: 100% pass — backend 6/6 pytest, frontend critical
+  flows all green. Test file: `/app/backend/tests/test_iter45_txn_edit.py`.
+
+
+
 ### Feb 2026 — Let's Review Bulk-Categorize Dropdown: Preview + Approve
 - **Reworked the inline dropdown** on the Let's Review info card
   (`Transactions.jsx`) from instant-save to **preview + explicit approve**:

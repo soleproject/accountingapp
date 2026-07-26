@@ -1918,7 +1918,7 @@ function ManualTxnModal({ accts, currentId, contactOptions = [], initialTxn = nu
     <Modal title={isEdit ? "Edit transaction" : "Add manual transaction"} onClose={onClose} wide={splitsOn}>
       <div className="space-y-3 text-sm">
         <div><label className="text-xs text-slate-600">Date</label>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border rounded px-2 py-1.5" /></div>
+          <input data-testid="manual-txn-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border rounded px-2 py-1.5" /></div>
         <div>
           <label className="text-xs text-slate-600">Account</label>
           <select
@@ -1988,11 +1988,11 @@ function ManualTxnModal({ accts, currentId, contactOptions = [], initialTxn = nu
           )}
         </div>
         <div><label className="text-xs text-slate-600">Merchant</label>
-          <input value={merchant} onChange={(e) => setMerchant(e.target.value)} className="w-full border rounded px-2 py-1.5" /></div>
+          <input data-testid="manual-txn-merchant" value={merchant} onChange={(e) => setMerchant(e.target.value)} className="w-full border rounded px-2 py-1.5" /></div>
         <div><label className="text-xs text-slate-600">Description</label>
-          <input value={description} onChange={(e) => setDescription(e.target.value)} className="w-full border rounded px-2 py-1.5" /></div>
+          <input data-testid="manual-txn-description" value={description} onChange={(e) => setDescription(e.target.value)} className="w-full border rounded px-2 py-1.5" /></div>
         <div><label className="text-xs text-slate-600">Amount (negative = expense)</label>
-          <input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full border rounded px-2 py-1.5 font-mono-num" /></div>
+          <input data-testid="manual-txn-amount" type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full border rounded px-2 py-1.5 font-mono-num" /></div>
         <div className="flex items-center gap-2 pt-1">
           <input
             type="checkbox"
