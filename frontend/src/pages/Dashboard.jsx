@@ -61,6 +61,7 @@ import FirmAtAGlance from "@/components/FirmAtAGlance";
 import BusinessOverview from "@/components/BusinessOverview";
 import DashboardTodos from "@/components/DashboardTodos";
 import WelcomeModal, { hasSeenWelcome, markWelcomeSeen, ReplayWelcomeButton } from "@/components/WelcomeModal";
+import PostOnboardingTour, { hasSeenPostOnboarding, markPostOnboardingSeen } from "@/components/PostOnboardingTour";
 import { LayoutGrid, Sparkle, Grid3x3 } from "lucide-react";
 
 const kindLabel = {
@@ -112,6 +113,14 @@ export default function Dashboard() {
   // First-time welcome tour + replay button. Only fires for clients
   // (Pros / superadmin get a different orientation). Persisted per-user.
   const [welcomeOpen, setWelcomeOpen] = useState(false);
+  // When true, closing the welcome modal chains straight into the
+  // post-onboarding dashboard tour. Used by the Replay button so one
+  // click walks the client back through Welcome → Post-Onboarding.
+  const [chainPostTour, setChainPostTour] = useState(false);
+  // Post-onboarding dashboard tour — fires only for clients on the very
+  // first dashboard visit after `onboarding_complete` flips to true.
+  // Persisted per (user, company) so it never fires twice per company.
+  const [postTourOpen, setPostTourOpen] = useState(false);
   useEffect(() => {
     if (!user?.id) return;
     // Restrict to client role — Pros already know the app.
@@ -123,11 +132,41 @@ export default function Dashboard() {
       return () => clearTimeout(t);
     }
   }, [user?.id, user?.role]);
+  // Post-onboarding tour trigger — client only, onboarding_complete=true,
+  // not-yet-seen for this (user, company) pair. Guarded so it doesn't
+  // fight the WelcomeModal: only fires once welcome has been marked seen.
+  useEffect(() => {
+    if (!user?.id) return;
+    if (user.role !== "client") return;
+    if (!current?.id || !current?.onboarding_complete) return;
+    if (welcomeOpen) return;
+    // Wait for the welcome tour to be fully complete before firing the
+    // post-onboarding tour. Otherwise the two modals race each other on
+    // first login and both render simultaneously.
+    if (!hasSeenWelcome(user.id)) return;
+    if (hasSeenPostOnboarding(user.id, current.id)) return;
+    const t = setTimeout(() => setPostTourOpen(true), 400);
+    return () => clearTimeout(t);
+  }, [user?.id, user?.role, current?.id, current?.onboarding_complete, welcomeOpen]);
   const closeWelcome = () => {
     setWelcomeOpen(false);
     if (user?.id) markWelcomeSeen(user.id);
+    // If Replay was clicked, chain straight into the post-onboarding tour
+    // regardless of whether it's been seen before (option 3 — replay
+    // covers everything).
+    if (chainPostTour) {
+      setChainPostTour(false);
+      setTimeout(() => setPostTourOpen(true), 200);
+    }
   };
-  const replayWelcome = () => setWelcomeOpen(true);
+  const closePostTour = () => {
+    setPostTourOpen(false);
+    if (user?.id && current?.id) markPostOnboardingSeen(user.id, current.id);
+  };
+  const replayWelcome = () => {
+    setChainPostTour(true);
+    setWelcomeOpen(true);
+  };
   // Income-snapshot timeframe — user asked for a way to step back through
   // prior months / years. `mode` is one of "ytd" | "month" | "year";
   // `anchor` is a YYYY-MM string that arrow-navigates within the chosen mode.
@@ -233,6 +272,14 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6" data-testid={TID.aiPulseSection}>
+      <PostOnboardingTour
+        open={postTourOpen}
+        companyName={current?.name}
+        companyId={currentId}
+        todos={todos}
+        onSwitchView={changeView}
+        onDone={closePostTour}
+      />
       <FirstConnectWelcome
         status={syncStatus}
         companyId={currentId}

@@ -39,6 +39,68 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 (later) — Post-Onboarding Tour (client's first dashboard visit)
+Continuation piece to `WelcomeModal` — fires once a new client hits
+`/dashboard` after their company's onboarding flips to complete. Guides
+them through the 3 dashboard views, then hands them a "load your data"
+CTA so an empty dashboard doesn't feel like a dead-end.
+
+- **New component** `/app/frontend/src/components/PostOnboardingTour.jsx`
+  with 5 phases:
+  1. **Phase 0 — Congrats modal**: "Congratulations, {name}! 🎉" full-
+     page overlay with typewriter body + native TTS narration and
+     firm-branded eyebrow ("{brand} · Onboarding complete"). Auto-
+     advances after 6.5s.
+  2. **Phase 1-3 — Auto-cycle dashboard views**: floating top-right
+     caption pill ("TOUR · N OF 3") while the underlying view switches
+     Classic → Firm at a Glance → Business Overview via a new
+     `onSwitchView` callback (drives the parent's `changeView` /
+     localStorage-persisted `dashboard_view` state). 5.5s per phase.
+  3. **Phase 4 — Final CTA modal**: if the client's `firm-glance` todos
+     payload has visible items → single green "Review my to-dos" CTA
+     (routes back to normal DashboardTodos card). Otherwise → cyan
+     **Connect bank accounts** (→ `/connections`) + outlined **Upload
+     bank statements** (→ `/connections?tab=statements`) with an "I'll
+     do this later" out. User-driven; no auto-advance.
+- **Persistence** — `localStorage["smartbooks_post_onboarding:{uid}:{cid}"]`
+  set to "1" the first time the tour ends (skip, close, or completion).
+  Ensures option (b): fires only on the very first dashboard visit per
+  (user, company) pair.
+- **Skippable at every phase** (option a) — X button top-right of both
+  the congrats modal and the caption pill immediately cancels TTS +
+  snaps back to Classic view + marks seen.
+- **Mute toggle** — synced with `axiom_tts` localStorage key + dispatches
+  `axiom-tts-changed` custom event so `AiPanel` stays in lockstep.
+- **Race-condition fix** — the effect now waits for
+  `hasSeenWelcome(user.id)` before scheduling the post-tour, so the
+  WelcomeModal (first login) and PostOnboardingTour don't both fire in
+  the same 500ms window on a fresh account.
+- **Dashboard integration** in `/app/frontend/src/pages/Dashboard.jsx`:
+  - New `postTourOpen` state + `closePostTour` handler that fires
+    `markPostOnboardingSeen(uid, cid)`.
+  - New effect: client role only, `current.onboarding_complete=true`,
+    `!welcomeOpen`, `hasSeenWelcome`, `!hasSeenPostOnboarding` → opens
+    tour with 400ms delay.
+  - `<PostOnboardingTour>` mounted at the top of the return so it
+    survives view-toggle re-renders.
+- **Replay covers both** (option 3) — `replayWelcome` now sets a
+  `chainPostTour` flag before opening `WelcomeModal`. When the user
+  closes welcome, `closeWelcome` re-opens the post-onboarding tour with
+  a 200ms delay. One button, both tours.
+- **Verified end-to-end** via screenshot subagent as
+  `client2@axiom.ai` (owner of the onboarded "Bright Beans Coffee Co."):
+  * Phase 0 congrats renders with correct company + firm brand ("MFG
+    GMAIL · ONBOARDING COMPLETE").
+  * Phases 1-3 auto-cycle through Classic → Firm → Business (visible
+    view switch under the caption pill).
+  * Phase 4 CTA fires with **Load your data** copy + Connect / Upload
+    buttons when the company has no active todos.
+  * X skip at any phase → cancels TTS, snaps back to Classic, marks
+    persisted-seen. Reload confirms tour does not re-fire.
+  * Replay button visible on Dashboard header, opens Welcome →
+    chains to Post-Onboarding on close.
+
+
 ### Feb 2026 (later) — Resend Activation Link + Pro-scoped lock
 - **`/pro/clients` response** now includes `billing_payer`,
   `billing_state`, and a derived `needs_activation` boolean
