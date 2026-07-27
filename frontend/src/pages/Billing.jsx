@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import {
   CreditCard, DollarSign, TrendingUp, Users, ExternalLink, Loader2,
@@ -38,14 +39,22 @@ export default function Billing() {
 }
 
 /* ---------------------------------------------------------------- */
-/*  My Billing — everyone                                             */
+/*  My Billing — everyone. Scoped to the currently-selected company    */
+/*  so a client with multiple companies sees only that company's       */
+/*  subscription state and payment history (no more aggregated totals).*/
 /* ---------------------------------------------------------------- */
 function MyBillingSection() {
+  const { currentId, current } = useCompany();
   const [data, setData] = useState(null);
 
   useEffect(() => {
-    api.get("/billing/me").then(r => setData(r.data)).catch(() => setData({}));
-  }, []);
+    // Rekey the query on company switch so switching between companies
+    // reloads the section against the new context. Superadmin / users
+    // without a company context fall back to the unscoped view.
+    setData(null);
+    const url = currentId ? `/billing/me?company_id=${currentId}` : "/billing/me";
+    api.get(url).then(r => setData(r.data)).catch(() => setData({}));
+  }, [currentId]);
 
   if (!data) return (
     <div className="p-6 text-slate-400 text-sm">
@@ -59,12 +68,19 @@ function MyBillingSection() {
     status === "active" ? <StatusBadge color="emerald" icon={CheckCircle2} label="Active" /> :
     status === "canceled" ? <StatusBadge color="rose" icon={XCircle} label="Canceled" /> :
     status === "past_due" ? <StatusBadge color="amber" icon={Clock} label="Past due" /> :
+    status === "pending" ? <StatusBadge color="cyan" icon={Clock} label="Awaiting activation" /> :
     <StatusBadge color="slate" icon={Clock} label="No subscription" />;
 
   return (
     <section className="mb-8" data-testid="billing-me-section">
       <div className="flex items-baseline justify-between mb-3">
-        <h2 className="text-sm font-heading font-semibold text-slate-700 uppercase tracking-wide">My subscription</h2>
+        <h2 className="text-sm font-heading font-semibold text-slate-700 uppercase tracking-wide">
+          {data.scoped ? (
+            <>Subscription for <span className="text-slate-900">{data.company_name || current?.name || "this company"}</span></>
+          ) : (
+            "My subscription"
+          )}
+        </h2>
       </div>
 
       <div className="grid md:grid-cols-3 gap-3 mb-4">
@@ -344,6 +360,7 @@ function StatusBadge({ color, icon: Icon, label }) {
     emerald: "bg-emerald-50 text-emerald-700 border-emerald-100",
     rose: "bg-rose-50 text-rose-700 border-rose-100",
     amber: "bg-amber-50 text-amber-700 border-amber-100",
+    cyan: "bg-cyan-50 text-cyan-700 border-cyan-100",
     slate: "bg-slate-50 text-slate-500 border-slate-100",
   }[color];
   return (

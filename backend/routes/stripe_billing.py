@@ -194,7 +194,17 @@ async def _record_payment(
     stripe_customer_id: Optional[str],
 ) -> Optional[str]:
     """Insert a single row into ``platform_payments``. Idempotent on the
-    Stripe invoice id — a retried webhook won't double-insert."""
+    Stripe invoice id — a retried webhook won't double-insert.
+
+    Also stamps ``company_id`` on the row so the client "My Billing"
+    page can scope payments to the currently-selected company (a user
+    with multiple companies should NOT see aggregated totals under
+    each company's Billing tab). Resolution order for company_id:
+      1. ``invoice.metadata.company_id`` — set on client-card checkout.
+      2. Fall back to looking up the company via
+         ``stripe_subscription_id`` (webhook fired for a client-email
+         payer where the metadata was on the SESSION, not the invoice).
+    """
     inv_id = invoice.get("id")
     if not inv_id:
         return None
@@ -204,12 +214,21 @@ async def _record_payment(
     pid = str(uuid.uuid4())
     now = now_iso()
     amount_cents = int(invoice.get("amount_paid") or invoice.get("amount_due") or 0)
+    company_id = (invoice.get("metadata") or {}).get("company_id")
+    sub_id = invoice.get("subscription")
+    if not company_id and sub_id:
+        co = await db.companies.find_one(
+            {"stripe_subscription_id": sub_id}, {"id": 1}
+        )
+        if co:
+            company_id = co.get("id")
     doc = {
         "id": pid,
         "stripe_invoice_id": inv_id,
         "stripe_customer_id": stripe_customer_id,
-        "stripe_subscription_id": invoice.get("subscription"),
+        "stripe_subscription_id": sub_id,
         "user_id": user_id,
+        "company_id": company_id,
         "amount_cents": amount_cents,
         "currency": (invoice.get("currency") or "usd").lower(),
         "hosted_invoice_url": invoice.get("hosted_invoice_url"),
@@ -646,9 +665,60 @@ def _sub_status_to_billing_state(sub_status: Optional[str]) -> str:
 # --------------------------------------------------------------------------
 
 @router.get("/billing/me")
-async def my_billing(user: dict = Depends(get_current_user)):
-    """Return the signed-in user's subscription snapshot + invoice history."""
+async def my_billing(
+    company_id: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """Return the signed-in user's subscription snapshot + invoice history.
+
+    When ``company_id`` is provided the response is **scoped to that
+    company** — subscription state comes from the company row and
+    payments are filtered by ``company_id`` (or fall back to
+    subscription_id join for legacy rows written before company_id was
+    stamped on ``platform_payments``). Without ``company_id`` the
+    response aggregates across everything the user has ever paid for
+    (legacy behavior — used by `/billing` when no company is selected,
+    e.g. by superadmin or a user who has no companies).
+    """
     fresh = await db.users.find_one({"id": user["id"]}) or {}
+
+    if company_id:
+        # Ownership check: user must be a member of the company.
+        m = await db.memberships.find_one({
+            "user_id": user["id"], "company_id": company_id,
+        })
+        if not m and user.get("role") != "superadmin":
+            raise HTTPException(404, "Company not found")
+        c = await db.companies.find_one({"id": company_id}) or {}
+        # Prefer direct company_id filter; fall back to subscription_id
+        # for rows written before we stamped company_id on payments.
+        sub_id = c.get("stripe_subscription_id")
+        query = {"user_id": user["id"], "$or": [
+            {"company_id": company_id},
+            *([{"stripe_subscription_id": sub_id}] if sub_id else []),
+        ]}
+        payments = await (
+            db.platform_payments.find(query).sort("paid_at", -1).to_list(200)
+        )
+        total_cents = sum(int(p.get("amount_cents") or 0) for p in payments)
+        return {
+            "subscription": {
+                "status": c.get("billing_state"),
+                "stripe_customer_id": c.get("stripe_customer_id"),
+                "stripe_subscription_id": sub_id,
+                "canceled_at": None,
+                "billing_payer": c.get("billing_payer"),
+                "billing_product": c.get("billing_product"),
+            },
+            "payments": [coerce(p) for p in payments],
+            "total_paid_cents": total_cents,
+            "company_id": company_id,
+            "company_name": c.get("name"),
+            "scoped": True,
+        }
+
+    # Legacy / unscoped: aggregate across the whole user (used when the
+    # frontend doesn't have a company context yet — e.g. mid-boot).
     payments = await (
         db.platform_payments
           .find({"user_id": user["id"]})
@@ -665,6 +735,7 @@ async def my_billing(user: dict = Depends(get_current_user)):
         },
         "payments": [coerce(p) for p in payments],
         "total_paid_cents": total_cents,
+        "scoped": False,
     }
 
 
@@ -1001,6 +1072,47 @@ async def billing_env_check(user: dict = Depends(require_role("superadmin"))):
             pid = _price_id(prod, tier == "discount")
             resolved[f"{prod}_{tier}"] = pid or "— unset —"
     return {"env": result, "resolved_prices": resolved}
+
+
+@router.post("/admin/billing/backfill-payment-company")
+async def backfill_payment_company_ids(
+    user: dict = Depends(require_role("superadmin")),
+):
+    """One-time reconcile: stamp ``company_id`` on legacy
+    ``platform_payments`` rows written before we started saving it. We
+    look up each row's ``stripe_subscription_id`` against
+    ``companies.stripe_subscription_id`` and set the linked company id.
+
+    Safe to run repeatedly — only touches rows where ``company_id`` is
+    unset. Returns before/after counts.
+    """
+    total = await db.platform_payments.count_documents({})
+    missing_before = await db.platform_payments.count_documents({"company_id": {"$in": [None, ""]}})
+    also_missing_no_field = await db.platform_payments.count_documents({"company_id": {"$exists": False}})
+    missing_before += also_missing_no_field
+
+    updated = 0
+    unattributable = 0
+    async for p in db.platform_payments.find({
+        "$or": [{"company_id": {"$in": [None, ""]}}, {"company_id": {"$exists": False}}],
+    }):
+        sub_id = p.get("stripe_subscription_id")
+        if not sub_id:
+            unattributable += 1
+            continue
+        c = await db.companies.find_one({"stripe_subscription_id": sub_id}, {"id": 1})
+        if not c:
+            unattributable += 1
+            continue
+        await db.platform_payments.update_one({"id": p["id"]}, {"$set": {"company_id": c["id"]}})
+        updated += 1
+
+    return {
+        "total_platform_payments": total,
+        "missing_before": missing_before,
+        "updated": updated,
+        "unattributable": unattributable,
+    }
 
 
 @router.get("/admin/billing/webhook-status")
