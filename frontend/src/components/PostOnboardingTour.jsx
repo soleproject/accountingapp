@@ -28,14 +28,21 @@ function pickVoice() {
   return vs.find(v => v.name === pref) || vs.find(v => v.name.toLowerCase().includes(pref.toLowerCase())) || vs.find(v => (v.lang || "").toLowerCase().startsWith("en-gb")) || vs[0] || null;
 }
 
-function speak(text, muted) {
-  if (!("speechSynthesis" in window) || muted) return;
-  window.speechSynthesis.cancel();
+// Speak `text` and invoke `onDone` when the utterance finishes. When
+// muted or speechSynthesis isn't available, returns null and the
+// caller falls back to a timing-based advance. Callers should still
+// install a length-based safety-net timeout in case `onend` never
+// fires (some browsers drop it silently on tab-hide etc).
+function speak(text, muted, onDone) {
+  if (!("speechSynthesis" in window) || muted) return null;
+  try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
   const u = new SpeechSynthesisUtterance(text);
   const v = pickVoice();
   if (v) { u.voice = v; u.lang = v.lang || "en-GB"; }
   u.rate = 1.0; u.pitch = 1.0;
-  window.speechSynthesis.speak(u);
+  if (typeof onDone === "function") u.onend = onDone;
+  try { window.speechSynthesis.speak(u); } catch { /* ignore */ }
+  return u;
 }
 
 // Slide 0 = congrats modal; slides 1-3 are the tour narrations, rendered
@@ -80,12 +87,12 @@ export default function PostOnboardingTour({ open, companyName, companyId, todos
   const ctaMode = hasData ? "allset" : "connect";
 
   const scripts = [
-    `Congratulations ${firstName}! You've officially onboarded ${co}. Take a quick look around — I'll show you what's here.`,
+    `Congratulations ${firstName}! You've officially onboarded ${co}. Now look to the top-right — I'll walk you through the three dashboard views available to you.`,
     `This is your Classic dashboard — everything at a glance.`,
     `Here's Firm at a Glance — the view I recommend for month-end close.`,
     `And Business Overview — for pattern-spotting across your year.`,
     hasSpotlightStep
-      ? `And this is the next step in getting your books done — ${activeStep?.title || "let's tackle this one first"}.`
+      ? `And this is the next step in getting your books done — ${activeStep?.title || "let's tackle this one first"}. Click Review when you're ready and I'll show you what to do next.`
       : ctaMode === "allset"
       ? `You're all set. Your data is loaded — happy accounting.`
       : `You're all set up. Next step: load your bank data so I can start categorizing.`,
@@ -93,10 +100,10 @@ export default function PostOnboardingTour({ open, companyName, companyId, todos
   const script = scripts[phase] || "";
 
   // Whenever phase changes, restart typewriter + speech and switch the
-  // underlying dashboard view accordingly. Deps deliberately narrow —
-  // only `open` + `phase` — so parent re-renders (which produce new
-  // `onSwitchView` / `todos` references) do NOT restart the phase's
-  // TTS narration midstream. Latest values are read via refs.
+  // underlying dashboard view accordingly. The auto-advance is driven
+  // by the TTS `onend` event (with a length-based safety-net timeout
+  // in case the browser drops onend, or the client is muted), so a
+  // long narration never gets cut off mid-sentence anymore.
   useEffect(() => {
     if (!open) return;
     if (phase >= 5) return;
@@ -108,7 +115,6 @@ export default function PostOnboardingTour({ open, companyName, companyId, todos
       i++; setTyped(text.slice(0, i));
       if (i >= text.length) clearInterval(typerRef.current);
     }, TYPE_MS);
-    speak(text, mutedRef.current);
     // Switch the parent's viewMode for phases 1..3 (and snap back to
     // Classic for the CTA slide).
     const sw = switchRef.current;
@@ -116,10 +122,71 @@ export default function PostOnboardingTour({ open, companyName, companyId, todos
     if (phase === 2) sw && sw("firm");
     if (phase === 3) sw && sw("business");
     if (phase === 4) sw && sw("classic");
-    // Auto-advance phases 0..3. Phase 4 (final CTA) waits for user click.
-    if (phase >= 4) return () => { typerRef.current && clearInterval(typerRef.current); };
-    const t = setTimeout(() => setPhase(p => p + 1), phase === 0 ? 6500 : TOUR_HOLD_MS);
-    return () => { clearTimeout(t); typerRef.current && clearInterval(typerRef.current); };
+
+    // Glow-highlight the corresponding view-toggle button (Classic /
+    // Firm at a Glance / Business Overview) so the client SEES where
+    // the current view is being selected from.
+    const glowKey = phase === 1 ? "classic" : phase === 2 ? "firm" : phase === 3 ? "business" : null;
+    const glowEl = glowKey ? document.querySelector(`[data-testid="dashboard-view-${glowKey}"]`) : null;
+    let prevGlow = null;
+    if (glowEl) {
+      prevGlow = {
+        boxShadow: glowEl.style.boxShadow,
+        transition: glowEl.style.transition,
+        borderRadius: glowEl.style.borderRadius,
+      };
+      glowEl.style.transition = "box-shadow 0.4s ease-out";
+      glowEl.style.borderRadius = "9999px";
+      glowEl.style.boxShadow = "0 0 0 3px rgba(6,182,212,0.75), 0 8px 24px -4px rgba(6,182,212,0.55)";
+    }
+
+    // Auto-advance for phases 0..3. Phase 4 (final CTA / spotlight)
+    // waits for user click or its own auto-fade.
+    let advanced = false;
+    const advance = () => {
+      if (advanced) return;
+      advanced = true;
+      if (phase < 4) setPhase(p => p + 1);
+    };
+    let utt = null;
+    let fallbackId = null;
+    if (phase < 4) {
+      // TTS onend → advance shortly after narration finishes. When
+      // muted, fall back to a length-derived timeout that guarantees
+      // the typewriter had time to render + a beat to read.
+      const holdAfterTtsMs = 600;
+      const readMs = 1400; // muted breathing room after typewriter finishes
+      const typewriterMs = text.length * TYPE_MS;
+      const mutedFallbackMs = Math.max(typewriterMs + readMs, phase === 0 ? 7000 : 5500);
+      // Estimate an upper bound for TTS length too (browsers rarely
+      // take >120ms/char at rate=1.0). Used as the safety-net if onend
+      // silently drops.
+      const ttsSafetyMs = Math.max(text.length * 140, 8000);
+      if (mutedRef.current) {
+        fallbackId = setTimeout(advance, mutedFallbackMs);
+      } else {
+        utt = speak(text, false, () => setTimeout(advance, holdAfterTtsMs));
+        // Safety-net: browsers sometimes never fire onend (tab hide,
+        // Chrome idle, etc). Guarantee an advance within a generous
+        // window derived from the script length.
+        fallbackId = setTimeout(advance, ttsSafetyMs);
+      }
+    } else {
+      // Phase 4 — still narrate but don't schedule an advance.
+      speak(text, mutedRef.current);
+    }
+
+    return () => {
+      typerRef.current && clearInterval(typerRef.current);
+      if (fallbackId) clearTimeout(fallbackId);
+      if (utt) utt.onend = null;
+      // Restore the previous toggle-button style.
+      if (glowEl && prevGlow) {
+        glowEl.style.boxShadow = prevGlow.boxShadow;
+        glowEl.style.transition = prevGlow.transition;
+        glowEl.style.borderRadius = prevGlow.borderRadius;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, phase]);
 
@@ -336,11 +403,13 @@ function Spotlight({ stepIndex, typed, muted, onSkip, onToggleMute, onFinish }) 
     };
   }, [stepIndex]);
 
-  // Auto-fade after 6s so the tour clears itself once the client's had
-  // a chance to read the pill.
+  // Auto-fade after 9s so the tour clears itself once the client's had
+  // a chance to hear the narration + read the pill (Phase 4 copy is
+  // longer than the earlier phases because it also tells them what to
+  // click next).
   useEffect(() => {
-    const fadeAt = setTimeout(() => setFading(true), 6000);
-    const doneAt = setTimeout(() => onFinish && onFinish(), 6800);
+    const fadeAt = setTimeout(() => setFading(true), 9000);
+    const doneAt = setTimeout(() => onFinish && onFinish(), 9800);
     return () => { clearTimeout(fadeAt); clearTimeout(doneAt); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
