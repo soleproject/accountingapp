@@ -785,17 +785,17 @@ export default function Onboarding() {
           <button
             onClick={() => setMode("guided")}
             data-testid="onboarding-mode-guided"
-            title="Include the 30-second AI interview + AI-tailored Chart of Accounts for a fully personalized setup."
+            title="Full setup — AI interview + AI-tailored Chart of Accounts. More questions, deeper personalization."
             className={`px-3 py-1.5 flex items-center gap-1 ${
               mode === "guided" ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50"
             }`}
           >
-            <Sparkles size={11} /> AI-guided
+            <Sparkles size={11} /> Complex
           </button>
           <button
             onClick={() => setMode("simple")}
             data-testid="onboarding-mode-simple"
-            title="Skip the AI interview and AI-tailored Chart of Accounts. Just business profile + QBO + bank + statements."
+            title="Skip the AI interview + AI-tailored Chart of Accounts. Just business profile + QBO + bank + statements."
             className={`px-3 py-1.5 border-l border-slate-300 ${
               mode === "simple" ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50"
             }`}
