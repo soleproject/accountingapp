@@ -4,7 +4,6 @@ import { CompanyProvider } from "@/lib/company";
 import { BrandingProvider } from "@/lib/branding";
 import { useHostTitle } from "@/lib/useHostTitle";
 import Layout from "@/components/Layout";
-import ImpersonateBanner from "@/components/ImpersonateBanner";
 import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
 import Share from "@/pages/Share";
@@ -69,7 +68,6 @@ function App() {
         <CompanyProvider>
           <BrandingProvider>
             <HostTitle />
-            <ImpersonateBanner />
             <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
