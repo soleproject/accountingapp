@@ -1260,10 +1260,6 @@ export default function Onboarding() {
               I've categorized every transaction I could. Anything I wasn't sure about is flagged for review.
               You can scroll through transactions and tell me which ones look right — or hover a row and tell me anything about it.
             </p>
-            <button data-testid={TID.onboardingComplete} onClick={finish}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-emerald-600 text-white text-sm">
-              Enter my books <ChevronRight size={14} />
-            </button>
           </div>
         )}
 
@@ -1272,10 +1268,15 @@ export default function Onboarding() {
                   className="inline-flex items-center gap-1 text-sm text-slate-600 disabled:opacity-40">
             <ArrowLeft size={13} /> Back
           </button>
-          {step < STEPS.length - 1 && (
+          {step < STEPS.length - 1 ? (
             <button data-testid={TID.onboardingNext} onClick={next}
                     className="inline-flex items-center gap-1 px-4 py-1.5 rounded-md bg-slate-900 text-white text-sm">
               Next <ChevronRight size={14} />
+            </button>
+          ) : (
+            <button data-testid={TID.onboardingComplete} onClick={finish}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-emerald-600 text-white text-sm">
+              Enter my books <ChevronRight size={14} />
             </button>
           )}
         </div>
