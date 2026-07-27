@@ -14,6 +14,7 @@ import { X, Volume2, VolumeX, Sparkles } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useCompany } from "@/lib/company";
 import { emitAction } from "@/lib/createBus";
+import Step2MicDemo from "@/components/Step2MicDemo";
 
 const STEPS = [
   {
@@ -125,6 +126,11 @@ export default function Step2Tour({ open, onDone }) {
   const [step, setStep] = useState(0);
   const [running, setRunning] = useState(false);
   const [muted, setMuted] = useState(() => { try { return localStorage.getItem("axiom_tts") === "0"; } catch { return false; } });
+  // Modal-in-modal: when the outer tour hits the mic step it opens the
+  // Step2MicDemo scripted preview. We PAUSE the outer loop while the
+  // demo runs by awaiting a promise the demo resolves on `onDone`.
+  const [micDemoOpen, setMicDemoOpen] = useState(false);
+  const micDemoResolverRef = useRef(null);
   const abortRef = useRef(false);
   const cleanupRef = useRef(() => {});
 
@@ -154,6 +160,18 @@ export default function Step2Tour({ open, onDone }) {
         const minMs = Math.max(3400, STEPS[i].text.length * 55);
         await speakAsync(STEPS[i].text, minMs);
         if (abortRef.current) break;
+        // Right after narrating the "just talk to me" step, open the
+        // scripted mic demo modal with fake John-Smith rows so the
+        // client actually SEES the voice → categorize pipeline in
+        // action instead of just hearing about it.
+        if (i === 2) {
+          cleanupRef.current();
+          cleanupRef.current = () => {};
+          try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
+          setMicDemoOpen(true);
+          await new Promise((resolve) => { micDemoResolverRef.current = resolve; });
+          if (abortRef.current) break;
+        }
         await new Promise(r => setTimeout(r, 400));
       }
       cleanupRef.current();
@@ -177,37 +195,49 @@ export default function Step2Tour({ open, onDone }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  if (!open || !running) return null;
+  const closeMicDemo = () => {
+    setMicDemoOpen(false);
+    const r = micDemoResolverRef.current;
+    micDemoResolverRef.current = null;
+    if (r) r();
+  };
+
+  if (!open) return null;
 
   return (
-    <div
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[900] rounded-xl bg-slate-900 text-white shadow-2xl px-4 py-3 border border-slate-700 max-w-md"
-      data-testid="step2-tour-pill"
-    >
-      <div className="flex items-center justify-between gap-3 mb-1">
-        <div className="text-[10px] uppercase tracking-widest text-cyan-300 font-semibold inline-flex items-center gap-1">
-          <Sparkles size={11} /> Step 2 tour · {step + 1} of {STEPS.length}
+    <>
+      {running && (
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[900] rounded-xl bg-slate-900 text-white shadow-2xl px-4 py-3 border border-slate-700 max-w-md"
+          data-testid="step2-tour-pill"
+        >
+          <div className="flex items-center justify-between gap-3 mb-1">
+            <div className="text-[10px] uppercase tracking-widest text-cyan-300 font-semibold inline-flex items-center gap-1">
+              <Sparkles size={11} /> Step 2 tour · {step + 1} of {STEPS.length}
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={toggleMute}
+                className={`p-1 rounded ${muted ? "text-slate-400" : "text-cyan-300"}`}
+                title={muted ? "Turn narration on" : "Turn narration off"}
+                data-testid="step2-tour-mute"
+              >
+                {muted ? <VolumeX size={12} /> : <Volume2 size={12} />}
+              </button>
+              <button
+                onClick={() => { abortRef.current = true; setRunning(false); cleanupRef.current(); try { window.speechSynthesis?.cancel(); } catch {} if (user?.id && currentId) markStep2TourSeen(user.id, currentId); onDone && onDone(); const r = micDemoResolverRef.current; micDemoResolverRef.current = null; if (r) r(); setMicDemoOpen(false); }}
+                className="p-1 rounded text-slate-300 hover:text-white"
+                title="Skip tour"
+                data-testid="step2-tour-skip"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          </div>
+          <p className="text-sm leading-snug">{STEPS[step]?.text}</p>
         </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={toggleMute}
-            className={`p-1 rounded ${muted ? "text-slate-400" : "text-cyan-300"}`}
-            title={muted ? "Turn narration on" : "Turn narration off"}
-            data-testid="step2-tour-mute"
-          >
-            {muted ? <VolumeX size={12} /> : <Volume2 size={12} />}
-          </button>
-          <button
-            onClick={() => { abortRef.current = true; setRunning(false); cleanupRef.current(); try { window.speechSynthesis?.cancel(); } catch {} if (user?.id && currentId) markStep2TourSeen(user.id, currentId); onDone && onDone(); }}
-            className="p-1 rounded text-slate-300 hover:text-white"
-            title="Skip tour"
-            data-testid="step2-tour-skip"
-          >
-            <X size={12} />
-          </button>
-        </div>
-      </div>
-      <p className="text-sm leading-snug">{STEPS[step]?.text}</p>
-    </div>
+      )}
+      <Step2MicDemo open={micDemoOpen} onDone={closeMicDemo} />
+    </>
   );
 }
