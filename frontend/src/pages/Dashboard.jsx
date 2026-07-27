@@ -228,7 +228,7 @@ export default function Dashboard() {
   if (!current) return <div className="text-slate-500">Select a company to view your Dashboard.</div>;
 
   if (!current.onboarding_complete) {
-    return <OnboardingNudge company={current} welcomeOpen={welcomeOpen} onCloseWelcome={closeWelcome} onReplay={replayWelcome} showReplay={user?.role === "client"} />;
+    return <OnboardingNudge company={current} nudgeWelcomeOpen={welcomeOpen} onCloseWelcome={closeWelcome} onReplay={replayWelcome} showReplay={user?.role === "client"} />;
   }
 
   return (
@@ -290,6 +290,10 @@ export default function Dashboard() {
           setTfMode={setTfMode}
           setTfAnchor={setTfAnchor}
           todos={todos}
+          welcomeOpen={welcomeOpen}
+          onCloseWelcome={closeWelcome}
+          onReplayWelcome={replayWelcome}
+          showWelcomeReplay={user?.role === "client"}
         />
       )}
     </div>
@@ -305,6 +309,7 @@ function ClassicDashboard({
   current, attention, totals, income, metrics, activity,
   tfMode, tfAnchor, setTfMode, setTfAnchor,
   todos,
+  welcomeOpen, onCloseWelcome, onReplayWelcome, showWelcomeReplay,
 }) {
   // During Setup mode we move the "highlight" rainbow off the Needs-your-
   // attention section and onto the checklist itself (that's where the user
@@ -314,7 +319,7 @@ function ClassicDashboard({
     todos?.mode === "setup" && todos?.visible && !todos?.is_complete;
   return (
     <>
-      <WelcomeModal open={welcomeOpen} onClose={closeWelcome} />
+      <WelcomeModal open={welcomeOpen} onClose={onCloseWelcome} />
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="font-heading text-3xl font-bold tracking-tight">Dashboard</h1>
@@ -322,8 +327,8 @@ function ClassicDashboard({
             What the AI has done for {current.name} · {current.reporting_basis} basis
           </p>
         </div>
-        {user?.role === "client" && (
-          <ReplayWelcomeButton onClick={replayWelcome} />
+        {showWelcomeReplay && (
+          <ReplayWelcomeButton onClick={onReplayWelcome} />
         )}
       </div>
 
@@ -699,7 +704,7 @@ function TimeframePicker({ mode, anchor, onModeChange, onShift, onReset }) {
 // live-accountant greeting into the AI panel. If the user replies "yes" /
 // "ok" / "sure" / "let's go" in the chat, we navigate them straight into
 // /onboarding. Otherwise the existing manual button still works.
-function OnboardingNudge({ company, welcomeOpen, onCloseWelcome, onReplay, showReplay }) {
+function OnboardingNudge({ company, nudgeWelcomeOpen, onCloseWelcome, onReplay, showReplay }) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const greetedRef = useRef(new Set());
@@ -737,7 +742,7 @@ function OnboardingNudge({ company, welcomeOpen, onCloseWelcome, onReplay, showR
 
   return (
     <div className="max-w-2xl">
-      <WelcomeModal open={welcomeOpen} onClose={onCloseWelcome} />
+      <WelcomeModal open={nudgeWelcomeOpen} onClose={onCloseWelcome} />
       {showReplay && (
         <div className="flex justify-end mb-3">
           <ReplayWelcomeButton onClick={onReplay} />
