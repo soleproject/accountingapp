@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
@@ -105,10 +105,10 @@ export default function Dashboard() {
     try { return localStorage.getItem("dashboard_view") || "classic"; }
     catch { return "classic"; }
   });
-  const changeView = (m) => {
+  const changeView = useCallback((m) => {
     setViewMode(m);
     try { localStorage.setItem("dashboard_view", m); } catch { /* ignore */ }
-  };
+  }, []);
 
   // First-time welcome tour + replay button. Only fires for clients
   // (Pros / superadmin get a different orientation). Persisted per-user.
@@ -277,6 +277,7 @@ export default function Dashboard() {
         companyName={current?.name}
         companyId={currentId}
         todos={todos}
+        hasData={(syncStatus?.total_txns || 0) > 0 || (totals?.transactions || 0) > 0}
         onSwitchView={changeView}
         onDone={closePostTour}
       />
