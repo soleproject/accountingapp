@@ -37,6 +37,32 @@ const SLIDES = [
 ];
 
 const TYPE_SPEED_MS = 45; // ~22 chars/sec, matches natural speaking cadence
+// Extra pause after a slide finishes reading before we auto-advance —
+// gives the user a beat to absorb before the next line drops in.
+const AUTO_ADVANCE_PAUSE_MS = 1200;
+// The voice picker in AiPanel writes this key. Reusing it means the
+// welcome tour speaks in whatever voice the client has chosen for the
+// day-to-day assistant — no separate UI to configure twice.
+const VOICE_LS_KEY = "axiom_tts_voice";
+
+function pickVoice() {
+  if (!("speechSynthesis" in window)) return null;
+  const prefName = (() => {
+    try { return localStorage.getItem(VOICE_LS_KEY) || "Google UK English Female"; }
+    catch { return "Google UK English Female"; }
+  })();
+  const voices = window.speechSynthesis.getVoices() || [];
+  // Exact match wins, then case-insensitive contains, then any en-GB
+  // female-ish fallback so we're still on the same continent if the
+  // preferred voice isn't installed on this device.
+  const exact = voices.find((v) => v.name === prefName);
+  if (exact) return exact;
+  const nameCI = voices.find((v) => v.name.toLowerCase().includes(prefName.toLowerCase()));
+  if (nameCI) return nameCI;
+  const gb = voices.find((v) => (v.lang || "").toLowerCase().startsWith("en-gb"));
+  if (gb) return gb;
+  return voices[0] || null;
+}
 
 export function markWelcomeSeen(uid) {
   try { localStorage.setItem(`smartbooks_welcome_seen:${uid}`, "1"); } catch { /* quota */ }
@@ -60,6 +86,13 @@ export default function WelcomeModal({ open, onClose }) {
   const fullBody = slide ? slide.body : "";
   const title = slide ? slide.title(firstName, brandName) : "";
 
+  // Whenever the modal transitions from closed → open, snap back to
+  // slide 0 so "Replay welcome" always plays from the top instead of
+  // resuming wherever the previous session was dismissed.
+  useEffect(() => {
+    if (open) setSlideIdx(0);
+  }, [open]);
+
   // Reset state whenever the modal opens or the current slide changes.
   useEffect(() => {
     if (!open) return;
@@ -78,21 +111,61 @@ export default function WelcomeModal({ open, onClose }) {
     }, TYPE_SPEED_MS);
 
     // Speak title + body. Cancel any prior utterance so slide-jumps
-    // don't stack up.
+    // don't stack up. Voice choice mirrors the user's assistant-panel
+    // preference (`localStorage.axiom_tts_voice`) so the welcome sounds
+    // the same as the day-to-day AI replies.
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(`${title}. ${fullBody}`);
       u.rate = 1.0;
       u.pitch = 1.0;
       u.volume = 1.0;
+      const v = pickVoice();
+      if (v) { u.voice = v; u.lang = v.lang || "en-GB"; }
       speakRef.current = u;
-      window.speechSynthesis.speak(u);
+      // Some browsers (Chromium) fire `voiceschanged` async — if the
+      // voice list wasn't ready, retry once after ~120ms.
+      if (!v) {
+        setTimeout(() => {
+          const late = pickVoice();
+          if (late) { u.voice = late; u.lang = late.lang || "en-GB"; }
+          window.speechSynthesis.speak(u);
+        }, 120);
+      } else {
+        window.speechSynthesis.speak(u);
+      }
     }
     return () => {
       typerRef.current && clearInterval(typerRef.current);
       if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     };
   }, [open, slideIdx, fullBody, title]);
+
+  // Auto-advance to the next slide once BOTH the typewriter finished
+  // AND the TTS utterance ended (or the pause elapsed if speech isn't
+  // available). The last slide auto-closes the modal after the same
+  // pause so a user who just listened doesn't need to reach for the
+  // mouse to dismiss.
+  useEffect(() => {
+    if (!open || !done) return;
+    const isLast = slideIdx === SLIDES.length - 1;
+    const startAt = Date.now();
+    // Prefer real "speech ended" as the anchor; fall back to a fixed
+    // timer if the current utterance already finished (rare but
+    // possible when TTS is instant on very short lines).
+    const ttsIdle = () =>
+      !("speechSynthesis" in window)
+      || (!window.speechSynthesis.speaking && !window.speechSynthesis.pending);
+    let advTimer = null;
+    const tick = setInterval(() => {
+      if (ttsIdle() && Date.now() - startAt >= AUTO_ADVANCE_PAUSE_MS) {
+        clearInterval(tick);
+        if (isLast) onClose();
+        else setSlideIdx((i) => i + 1);
+      }
+    }, 200);
+    return () => { clearInterval(tick); advTimer && clearTimeout(advTimer); };
+  }, [open, done, slideIdx, onClose]);
 
   // Stop TTS + cleanup when the modal itself closes.
   useEffect(() => {
