@@ -594,10 +594,23 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     setHowToRunning(false);
     setHowToTargetKey(null);
   };
-  const speakAsync = (text) => new Promise(resolve => {
-    if (typeof window === "undefined" || !window.speechSynthesis) return resolve();
+  const speakAsync = (text, minMs = 3200) => new Promise(resolve => {
+    // Always hold the step for at least `minMs` regardless of TTS
+    // behavior so the highlight has time to be seen. When the user has
+    // muted narration (or the browser is silent for any reason) the
+    // utterance's `onend` fires instantly, which used to race through
+    // every step in < 1s and made it feel like nothing was highlighting.
+    const start = Date.now();
+    const finish = () => {
+      const elapsed = Date.now() - start;
+      const wait = Math.max(0, minMs - elapsed);
+      setTimeout(resolve, wait);
+    };
+    let userMuted = false;
+    try { userMuted = localStorage.getItem("axiom_tts") === "0"; } catch { /* ignore */ }
+    if (typeof window === "undefined" || !window.speechSynthesis || userMuted) return finish();
     const clean = stripMarkdownForSpeech(text);
-    if (!clean) return resolve();
+    if (!clean) return finish();
     const u = new SpeechSynthesisUtterance(clean);
     u.rate = 1.02; u.pitch = 1.0;
     // Prefer the "Google UK English Female (en-GB)" voice — warm, friendly
@@ -612,7 +625,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
       voices.find(v => v.lang?.startsWith("en") && /female/i.test(v.name)) ||
       null;
     if (pick) u.voice = pick;
-    u.onend = resolve; u.onerror = resolve;
+    u.onend = finish; u.onerror = finish;
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
   });
@@ -647,7 +660,11 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
       // Post the narration into the AI chat as an assistant bubble too so
       // there's a written trail after the tour ends.
       emitAction("ai-chat-say", { message: HOWTO_STEPS[i].text });
-      await speakAsync(HOWTO_STEPS[i].text);
+      // Give each step at least ~50ms/char (roughly TTS speaking rate)
+      // so muted users still see the highlight linger on the element
+      // being described.
+      const minMs = Math.max(3200, HOWTO_STEPS[i].text.length * 55);
+      await speakAsync(HOWTO_STEPS[i].text, minMs);
       if (howToAbortRef.current) break;
       // Brief beat between steps so the highlight doesn't snap instantly.
       await new Promise(r => setTimeout(r, 400));
