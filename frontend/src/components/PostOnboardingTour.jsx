@@ -65,20 +65,27 @@ export default function PostOnboardingTour({ open, companyName, companyId, todos
   const brand = branding?.firm_name || "SmartBooks";
   const co = companyName || "your company";
 
-  const hasTodos = !!(todos && todos.visible && Array.isArray(todos.items) && todos.items.length > 0);
+  // Setup-checklist "next step" detection — matches the same logic
+  // DashboardTodos uses for its rainbow highlight (first step with
+  // count > 0 during Setup mode). When present, Phase 4 spotlights
+  // that tile instead of showing a modal.
+  const setupSteps = [todos?.step1, todos?.step2, todos?.step3];
+  const activeStepIdx = (todos?.visible && todos?.mode === "setup")
+    ? setupSteps.findIndex(s => (s?.count ?? 0) > 0)
+    : -1;
+  const activeStep = activeStepIdx >= 0 ? setupSteps[activeStepIdx] : null;
+  const hasSpotlightStep = activeStepIdx >= 0;
 
-  // Final-slide copy depends on the company's actual state — nagging a
-  // client to "connect bank accounts" AFTER they already connected is
-  // the exact bug that made the tour feel dumb the first time around.
-  const ctaMode = hasTodos ? "todos" : hasData ? "allset" : "connect";
+  // Fallback mode when there's no active setup step to spotlight.
+  const ctaMode = hasData ? "allset" : "connect";
 
   const scripts = [
     `Congratulations ${firstName}! You've officially onboarded ${co}. Take a quick look around — I'll show you what's here.`,
     `This is your Classic dashboard — everything at a glance.`,
     `Here's Firm at a Glance — the view I recommend for month-end close.`,
     `And Business Overview — for pattern-spotting across your year.`,
-    ctaMode === "todos"
-      ? `You've got a few action items waiting — knock these out and your books will be picture-perfect.`
+    hasSpotlightStep
+      ? `And this is the next step in getting your books done — ${activeStep?.title || "let's tackle this one first"}.`
       : ctaMode === "allset"
       ? `You're all set. Your data is loaded — happy accounting.`
       : `You're all set up. Next step: load your bank data so I can start categorizing.`,
@@ -175,11 +182,25 @@ export default function PostOnboardingTour({ open, companyName, companyId, todos
     );
   }
 
-  // Phase 4 — final CTA. Three variants:
-  //   • hasTodos → single "Review my to-dos" nudge
-  //   • hasData  → pat-on-the-back "You're all set" close button (no
-  //                fake nag to load data that's already loaded)
-  //   • else     → Connect bank / Upload statements empty-state CTAs
+  // Phase 4 — either:
+  //   • A spotlight over the current setup-checklist step, blurring the
+  //     rest of the dashboard while the AI narrates "This is the next
+  //     step in getting your books done — {title}." Auto-dismisses
+  //     after ~6s so the blur fades away and the user can start clicking.
+  //   • Fallback modal for `all set` (data loaded, no todos) or empty
+  //     accounts (Connect / Upload CTAs).
+  if (phase === 4 && hasSpotlightStep) {
+    return (
+      <Spotlight
+        stepIndex={activeStepIdx + 1}
+        typed={typed}
+        muted={muted}
+        onSkip={finish}
+        onToggleMute={toggleMute}
+        onFinish={finish}
+      />
+    );
+  }
   if (phase === 4) {
     return (
       <div className="fixed inset-0 z-[900] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" data-testid="post-onboarding-cta">
@@ -194,31 +215,13 @@ export default function PostOnboardingTour({ open, companyName, companyId, todos
             <Sparkles size={11} /> {brand} · {ctaMode === "allset" ? "All set" : "Next step"}
           </div>
           <h2 className="font-heading text-2xl font-bold text-slate-900 mb-3 leading-tight">
-            {ctaMode === "todos" ? "You've got action items" : ctaMode === "allset" ? "You're all set" : "Load your data"}
+            {ctaMode === "allset" ? "You're all set" : "Load your data"}
           </h2>
           <p className="text-sm text-slate-600 leading-relaxed mb-5 min-h-[48px]">
             {typed}
             <span className="inline-block w-[1px] h-[14px] bg-slate-700 align-middle animate-pulse ml-[1px]" />
           </p>
-          {ctaMode === "todos" ? (
-            <div className="space-y-2">
-              <button
-                onClick={finish}
-                data-testid="post-onboarding-goto-todos"
-                className="w-full flex items-center justify-between gap-2 px-4 py-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium transition-colors"
-              >
-                <span className="inline-flex items-center gap-2"><ListChecks size={16} /> Review my to-dos</span>
-                <ArrowRight size={16} />
-              </button>
-              <button
-                onClick={finish}
-                data-testid="post-onboarding-skip-cta"
-                className="w-full text-xs text-slate-500 hover:text-slate-700 py-1"
-              >
-                Explore on my own
-              </button>
-            </div>
-          ) : ctaMode === "allset" ? (
+          {ctaMode === "allset" ? (
             <div className="space-y-2">
               <button
                 onClick={finish}
@@ -279,6 +282,124 @@ export default function PostOnboardingTour({ open, companyName, companyId, todos
         {typed}
         <span className="inline-block w-[1px] h-[12px] bg-white align-middle animate-pulse ml-[1px]" />
       </p>
+    </div>
+  );
+}
+
+// Spotlight overlay for the "next step" phase — dims + blurs everything
+// on the page except the currently-active setup-checklist tile
+// (identified by data-testid="dashboard-todo-step-{N}"). The step tile
+// is elevated via inline style + z-index so it "pops through" the
+// backdrop-filter'd overlay. After ~6 seconds the overlay fades away
+// and the parent tour completes.
+function Spotlight({ stepIndex, typed, muted, onSkip, onToggleMute, onFinish }) {
+  const [fading, setFading] = useState(false);
+  const [rect, setRect] = useState(null);
+
+  // Elevate the target step above the overlay while the spotlight is
+  // active. Snapshot its original inline styles so we can restore them
+  // on unmount (React's own re-render would clobber our changes
+  // otherwise — DashboardTodos owns this element).
+  useEffect(() => {
+    const el = document.querySelector(`[data-testid="dashboard-todo-step-${stepIndex}"]`);
+    if (!el) return;
+    const prevPos = el.style.position;
+    const prevZ = el.style.zIndex;
+    const prevBoxShadow = el.style.boxShadow;
+    const prevBorderRadius = el.style.borderRadius;
+    const prevTransition = el.style.transition;
+    el.style.position = "relative";
+    el.style.zIndex = "902";
+    el.style.borderRadius = "12px";
+    el.style.transition = "box-shadow 0.4s ease-out";
+    // Soft cyan halo so the pop-out reads as "look here" rather than
+    // "this element is broken".
+    el.style.boxShadow = "0 0 0 4px rgba(6,182,212,0.55), 0 20px 60px -10px rgba(6,182,212,0.4)";
+    const update = () => setRect(el.getBoundingClientRect());
+    update();
+    // Scroll the tile into view softly so a client on a small screen
+    // doesn't miss the spotlight.
+    try { el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch { /* ignore */ }
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      el.style.position = prevPos;
+      el.style.zIndex = prevZ;
+      el.style.boxShadow = prevBoxShadow;
+      el.style.borderRadius = prevBorderRadius;
+      el.style.transition = prevTransition;
+      ro.disconnect();
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [stepIndex]);
+
+  // Auto-fade after 6s so the tour clears itself once the client's had
+  // a chance to read the pill.
+  useEffect(() => {
+    const fadeAt = setTimeout(() => setFading(true), 6000);
+    const doneAt = setTimeout(() => onFinish && onFinish(), 6800);
+    return () => { clearTimeout(fadeAt); clearTimeout(doneAt); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Position the narration pill above (preferred) or below the target
+  // rect so it never covers the tile the AI is talking about.
+  const pillStyle = (() => {
+    if (!rect) return { top: 96, right: 32, position: "fixed" };
+    const gap = 16;
+    const pillWidth = 360;
+    const wantAbove = rect.top > 200;
+    const top = wantAbove ? rect.top - 130 : rect.bottom + gap;
+    let left = rect.left + rect.width / 2 - pillWidth / 2;
+    left = Math.max(16, Math.min(left, window.innerWidth - pillWidth - 16));
+    return { position: "fixed", top: Math.max(16, top), left, width: pillWidth };
+  })();
+
+  return (
+    <div
+      className={`fixed inset-0 z-[900] bg-slate-950/55 backdrop-blur-[3px] transition-opacity duration-700 ${fading ? "opacity-0 pointer-events-none" : "opacity-100"}`}
+      data-testid="post-onboarding-spotlight"
+      onClick={(e) => {
+        // Clicking on the dim area itself skips the spotlight — the
+        // step tile is elevated above and stays clickable.
+        if (e.target === e.currentTarget) onSkip && onSkip();
+      }}
+    >
+      <div
+        className="rounded-xl bg-slate-900 text-white shadow-2xl p-4 border border-slate-700"
+        style={pillStyle}
+        data-testid="post-onboarding-spotlight-pill"
+      >
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <div className="text-[10px] uppercase tracking-widest text-emerald-300 font-semibold">
+            Your next step
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={onToggleMute}
+              className={`p-1 rounded ${muted ? "text-slate-400" : "text-cyan-300"}`}
+              aria-label={muted ? "Unmute narration" : "Mute narration"}
+            >
+              {muted ? <VolumeX size={12} /> : <Volume2 size={12} />}
+            </button>
+            <button
+              onClick={onSkip}
+              className="p-1 rounded text-slate-300 hover:text-white"
+              aria-label="Skip tour"
+              data-testid="post-onboarding-spotlight-skip"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        </div>
+        <p className="text-sm leading-snug">
+          {typed}
+          <span className="inline-block w-[1px] h-[12px] bg-white align-middle animate-pulse ml-[1px]" />
+        </p>
+      </div>
     </div>
   );
 }
