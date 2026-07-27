@@ -14,7 +14,8 @@
 // wildly by OS + language). Skip button pins to top-right so a user
 // who's seen it before can bail out instantly.
 import { useEffect, useRef, useState } from "react";
-import { X, Play, ChevronRight, Sparkles } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { X, Play, ChevronRight, Sparkles, Volume2, MessageSquare } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
 
@@ -30,9 +31,13 @@ const SLIDES = [
       "I categorize every transaction, post the journal entries, chase down statements you haven't uploaded, and flag anything that doesn't look right — all before your first cup of coffee.",
   },
   {
-    title: () => "Ready when you are",
+    // Last slide is action-only — the user chooses how they want to
+    // continue instead of the tour auto-closing. Copy is intentionally
+    // short so it doesn't dwarf the two big CTAs.
+    title: () => "Ready? Let's onboard your company",
     body:
-      "Click Get started to jump into your dashboard. Ask me anything from the chat on the right — I'll walk you through the books, run reports, or answer accounting questions in plain English.",
+      "Next up: a quick company setup. I'll be right there every step of the way — you pick how loud I should be.",
+    isCta: true,
   },
 ];
 
@@ -74,6 +79,7 @@ export function hasSeenWelcome(uid) {
 export default function WelcomeModal({ open, onClose }) {
   const { user } = useAuth();
   const { branding } = useBranding();
+  const navigate = useNavigate();
   const [slideIdx, setSlideIdx] = useState(0);
   const [typed, setTyped] = useState("");
   const [done, setDone] = useState(false);
@@ -85,6 +91,7 @@ export default function WelcomeModal({ open, onClose }) {
   const slide = SLIDES[slideIdx];
   const fullBody = slide ? slide.body : "";
   const title = slide ? slide.title(firstName, brandName) : "";
+  const isCtaSlide = !!slide?.isCta;
 
   // Whenever the modal transitions from closed → open, snap back to
   // slide 0 so "Replay welcome" always plays from the top instead of
@@ -143,16 +150,14 @@ export default function WelcomeModal({ open, onClose }) {
 
   // Auto-advance to the next slide once BOTH the typewriter finished
   // AND the TTS utterance ended (or the pause elapsed if speech isn't
-  // available). The last slide auto-closes the modal after the same
-  // pause so a user who just listened doesn't need to reach for the
-  // mouse to dismiss.
+  // available). On the CTA slide we do NOT auto-close — the user must
+  // pick "Onboard with sound" or "Onboard with chat only" so they've
+  // made an intentional decision about the audio companion.
   useEffect(() => {
     if (!open || !done) return;
+    if (isCtaSlide) return;
     const isLast = slideIdx === SLIDES.length - 1;
     const startAt = Date.now();
-    // Prefer real "speech ended" as the anchor; fall back to a fixed
-    // timer if the current utterance already finished (rare but
-    // possible when TTS is instant on very short lines).
     const ttsIdle = () =>
       !("speechSynthesis" in window)
       || (!window.speechSynthesis.speaking && !window.speechSynthesis.pending);
@@ -165,7 +170,7 @@ export default function WelcomeModal({ open, onClose }) {
       }
     }, 200);
     return () => { clearInterval(tick); advTimer && clearTimeout(advTimer); };
-  }, [open, done, slideIdx, onClose]);
+  }, [open, done, slideIdx, onClose, isCtaSlide]);
 
   // Stop TTS + cleanup when the modal itself closes.
   useEffect(() => {
@@ -188,6 +193,17 @@ export default function WelcomeModal({ open, onClose }) {
     }
     if (isLast) onClose();
     else setSlideIdx((i) => i + 1);
+  };
+
+  // CTA buttons on the final slide. Persists the user's TTS choice via
+  // the same localStorage key AiPanel uses (`axiom_tts`), then closes
+  // the welcome + navigates straight to /onboarding so the transition
+  // is one click.
+  const startOnboarding = (withSound) => {
+    try { localStorage.setItem("axiom_tts", withSound ? "1" : "0"); } catch { /* quota */ }
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    onClose();
+    navigate("/onboarding");
   };
 
   return (
@@ -214,7 +230,7 @@ export default function WelcomeModal({ open, onClose }) {
           {typed}
           {!done && <span className="inline-block w-[1px] h-[14px] bg-slate-700 align-middle animate-pulse ml-[1px]" />}
         </p>
-        <div className="mt-6 flex items-center justify-between">
+        <div className="mt-6 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-1" data-testid="welcome-modal-dots">
             {SLIDES.map((_, i) => (
               <span
@@ -225,14 +241,35 @@ export default function WelcomeModal({ open, onClose }) {
               />
             ))}
           </div>
-          <button
-            onClick={handleNext}
-            data-testid="welcome-modal-next"
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-slate-900 text-white text-sm font-medium hover:bg-slate-800"
-          >
-            {!done ? "Skip line" : isLast ? "Get started" : "Next"}
-            <ChevronRight size={13} />
-          </button>
+          {isCtaSlide ? (
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => startOnboarding(true)}
+                data-testid="welcome-onboard-sound"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-slate-900 text-white text-sm font-medium hover:bg-slate-800"
+                title="Continue with the AI narration turned on"
+              >
+                <Volume2 size={13} /> Onboard with sound
+              </button>
+              <button
+                onClick={() => startOnboarding(false)}
+                data-testid="welcome-onboard-chat-only"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50"
+                title="Continue with chat only — I'll stop reading things out loud"
+              >
+                <MessageSquare size={13} /> Onboard with chat only
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={handleNext}
+              data-testid="welcome-modal-next"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-slate-900 text-white text-sm font-medium hover:bg-slate-800"
+            >
+              {!done ? "Skip line" : "Next"}
+              <ChevronRight size={13} />
+            </button>
+          )}
         </div>
       </div>
     </div>
