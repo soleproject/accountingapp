@@ -19,15 +19,15 @@ const STEPS = [
   },
   {
     text: "These are the leftover transactions that never got tagged with a contact — bank fees, subscription charges, one-off purchases. I've grouped them by similar description so you don't have to categorize them one at a time.",
-    targetTestId: "lets-review-info-box",
+    targetTestId: "no-contact-review-info-box",
   },
   {
     text: "The group header shows the description signature we found, the number of rows in the group, and the total dollar amount.",
-    targetTestId: "lets-review-info-box",
+    targetTestId: "no-contact-review-info-box",
   },
   {
     text: "Pick a category from the dropdown, hit Approve, and every row in the group gets stamped at once — same pattern as Step 2, just without a contact name.",
-    targetTestId: "lets-review-bulk-category",
+    targetTestId: "no-contact-review-bulk-category",
   },
   {
     text: "Let me show you what that looks like on a real-world example — a batch of Amazon charges.",
@@ -35,7 +35,7 @@ const STEPS = [
   },
   {
     text: "When you're done with this group, click Next to jump to the next one. Rip through them and you're officially done with the setup checklist.",
-    targetTestId: "lets-review-next",
+    targetTestId: "no-contact-review-next",
   },
 ];
 
@@ -73,14 +73,13 @@ export function markStep3BTourSeen(uid, cid) {
 
 function highlight(testId) {
   if (!testId) return () => {};
+  const style = document.createElement("style");
+  style.setAttribute("data-step3b-tour-highlight", "1");
+  style.textContent = `[data-testid="${testId}"] { box-shadow: ${HIGHLIGHT_STYLE} !important; transition: box-shadow 0.4s ease-out !important; border-radius: 10px !important; }`;
+  document.head.appendChild(style);
   const el = document.querySelector(`[data-testid="${testId}"]`);
-  if (!el) return () => {};
-  const prev = { boxShadow: el.style.boxShadow, transition: el.style.transition, borderRadius: el.style.borderRadius };
-  el.style.transition = "box-shadow 0.4s ease-out";
-  el.style.borderRadius = el.style.borderRadius || "10px";
-  el.style.boxShadow = HIGHLIGHT_STYLE;
-  try { el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch {}
-  return () => { el.style.boxShadow = prev.boxShadow; el.style.transition = prev.transition; el.style.borderRadius = prev.borderRadius; };
+  if (el) { try { el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch { /* ignore */ } }
+  return () => { try { style.remove(); } catch { /* ignore */ } };
 }
 
 export default function Step3BTour({ open, onDone }) {

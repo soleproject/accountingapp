@@ -95,29 +95,21 @@ export function markStep2TourSeen(uid, cid) {
   try { localStorage.setItem(`step2_tour_seen:${uid}:${cid}`, "1"); } catch { /* ignore */ }
 }
 
-// Applies a temporary cyan halo to the DOM element identified by
-// `data-testid`. Snapshots the previous inline styles so we can restore
-// them cleanly when the tour advances (React re-renders would otherwise
-// clobber our imperative changes).
+// Injects a global CSS rule targeting the element by `data-testid` and
+// returns a cleanup fn that removes the rule. Using a stylesheet rule
+// (rather than inline `element.style.boxShadow`) makes the highlight
+// survive React re-renders — Transactions.jsx re-fetches during the
+// tour and would otherwise unmount and re-mount the target row,
+// wiping our inline styles mid-narration.
 function highlight(testId) {
+  if (!testId) return () => {};
+  const style = document.createElement("style");
+  style.setAttribute("data-step2-tour-highlight", "1");
+  style.textContent = `[data-testid="${testId}"] { box-shadow: ${HIGHLIGHT_STYLE} !important; transition: box-shadow 0.4s ease-out !important; border-radius: 10px !important; }`;
+  document.head.appendChild(style);
   const el = document.querySelector(`[data-testid="${testId}"]`);
-  if (!el) return () => {};
-  const prev = {
-    boxShadow: el.style.boxShadow,
-    transition: el.style.transition,
-    borderRadius: el.style.borderRadius,
-    outline: el.style.outline,
-  };
-  el.style.transition = "box-shadow 0.4s ease-out";
-  el.style.borderRadius = el.style.borderRadius || "10px";
-  el.style.boxShadow = HIGHLIGHT_STYLE;
-  try { el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch { /* ignore */ }
-  return () => {
-    el.style.boxShadow = prev.boxShadow;
-    el.style.transition = prev.transition;
-    el.style.borderRadius = prev.borderRadius;
-    el.style.outline = prev.outline;
-  };
+  if (el) { try { el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch { /* ignore */ } }
+  return () => { try { style.remove(); } catch { /* ignore */ } };
 }
 
 export default function Step2Tour({ open, onDone }) {
