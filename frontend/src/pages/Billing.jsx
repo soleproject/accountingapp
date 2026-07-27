@@ -19,6 +19,22 @@ import {
  */
 const cents = (c) => fmtMoney((Number(c || 0) / 100));
 
+// Turn a raw product/discount tuple into a human label for the payment
+// history + subscription card. Matches the labels in
+// `/app/backend/enterprises.py` PRODUCTS. Falls back to "—" when the
+// legacy row has no product tier stamped.
+const PRODUCT_LABELS = {
+  simple_start: "Simple Start",
+  essentials:   "Essentials",
+  plus:         "Plus",
+  advanced:     "Advanced",
+};
+function productLabel(prod, discount) {
+  if (!prod) return "—";
+  const base = PRODUCT_LABELS[prod] || prod;
+  return discount ? `${base} · disc` : base;
+}
+
 export default function Billing() {
   const { user } = useAuth();
   return (
@@ -84,7 +100,11 @@ function MyBillingSection() {
       </div>
 
       <div className="grid md:grid-cols-3 gap-3 mb-4">
-        <Stat label="Status" value={badge} />
+        <Stat
+          label="Status"
+          value={badge}
+          sub={sub.billing_product ? productLabel(sub.billing_product, sub.billing_discount) : null}
+        />
         <Stat label="Lifetime paid" value={cents(data.total_paid_cents)} />
         <Stat label="Invoices" value={(data.payments || []).length} />
       </div>
@@ -107,6 +127,7 @@ function MyBillingSection() {
             <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
               <tr>
                 <th className="text-left px-4 py-2 font-medium">Paid at</th>
+                <th className="text-left px-4 py-2 font-medium">Service</th>
                 <th className="text-left px-4 py-2 font-medium">Amount</th>
                 <th className="text-left px-4 py-2 font-medium">Currency</th>
                 <th className="text-right px-4 py-2 font-medium">Invoice</th>
@@ -116,6 +137,9 @@ function MyBillingSection() {
               {data.payments.map(p => (
                 <tr key={p.id} data-testid={`billing-me-row-${p.id}`}>
                   <td className="px-4 py-2 text-slate-600">{fmtDate(p.paid_at)}</td>
+                  <td className="px-4 py-2 text-slate-700">
+                    {productLabel(p.billing_product, p.billing_discount)}
+                  </td>
                   <td className="px-4 py-2 font-medium text-slate-900 tabular-nums">{cents(p.amount_cents)}</td>
                   <td className="px-4 py-2 uppercase text-slate-500">{p.currency}</td>
                   <td className="px-4 py-2 text-right">
@@ -329,7 +353,7 @@ function SuperadminBillingSection() {
 /* ---------------------------------------------------------------- */
 /*  Shared primitives                                                */
 /* ---------------------------------------------------------------- */
-function Stat({ label, value, icon: Icon, accent = "slate" }) {
+function Stat({ label, value, icon: Icon, accent = "slate", sub = null }) {
   const tone = {
     slate: "text-slate-700 bg-slate-50 border-slate-100",
     emerald: "text-emerald-700 bg-emerald-50 border-emerald-100",
@@ -349,6 +373,9 @@ function Stat({ label, value, icon: Icon, accent = "slate" }) {
           <div className="text-xl font-heading font-bold text-slate-900 tabular-nums truncate">
             {value}
           </div>
+          {sub && (
+            <div className="text-[11px] text-slate-500 mt-0.5 truncate">{sub}</div>
+          )}
         </div>
       </div>
     </div>

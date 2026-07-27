@@ -216,12 +216,42 @@ async def _record_payment(
     amount_cents = int(invoice.get("amount_paid") or invoice.get("amount_due") or 0)
     company_id = (invoice.get("metadata") or {}).get("company_id")
     sub_id = invoice.get("subscription")
+    company = None
     if not company_id and sub_id:
-        co = await db.companies.find_one(
-            {"stripe_subscription_id": sub_id}, {"id": 1}
+        company = await db.companies.find_one(
+            {"stripe_subscription_id": sub_id}
         )
-        if co:
-            company_id = co.get("id")
+        if company:
+            company_id = company.get("id")
+    elif company_id:
+        company = await db.companies.find_one({"id": company_id})
+    # Snapshot the product tier + discount flag on the payment row so
+    # historical payments stay accurate even if the client later
+    # upgrades / downgrades the company's plan. Falls back to whatever
+    # the invoice line item says if the company row is unreachable.
+    billing_product = None
+    billing_discount = None
+    if company:
+        billing_product = company.get("billing_product")
+        billing_discount = bool(company.get("billing_discount"))
+    else:
+        # Try to infer from the invoice's price ID — matches the env
+        # vars we set for each tier. Silent-fail if none matches.
+        try:
+            lines = (invoice.get("lines") or {}).get("data") or []
+            price_id = lines[0].get("price", {}).get("id") if lines else None
+            if price_id:
+                for prod in ("simple_start", "essentials", "plus", "advanced"):
+                    for tier in ("regular", "discount"):
+                        env_val = os.environ.get(f"STRIPE_PRICE_{prod.upper()}_{tier.upper()}")
+                        if env_val and env_val == price_id:
+                            billing_product = prod
+                            billing_discount = (tier == "discount")
+                            break
+                    if billing_product:
+                        break
+        except Exception:  # noqa: BLE001
+            pass
     doc = {
         "id": pid,
         "stripe_invoice_id": inv_id,
@@ -229,6 +259,8 @@ async def _record_payment(
         "stripe_subscription_id": sub_id,
         "user_id": user_id,
         "company_id": company_id,
+        "billing_product": billing_product,
+        "billing_discount": billing_discount,
         "amount_cents": amount_cents,
         "currency": (invoice.get("currency") or "usd").lower(),
         "hosted_invoice_url": invoice.get("hosted_invoice_url"),
@@ -1162,7 +1194,19 @@ async def backfill_payment_company_ids(
                 chosen_cid = candidates[0]
 
         if chosen_cid:
-            await db.platform_payments.update_one({"id": p["id"]}, {"$set": {"company_id": chosen_cid}})
+            # Also snapshot billing_product / billing_discount from the
+            # company row while we're here — the backfill covers both
+            # gaps at once so /billing/me can show the service name.
+            company_row = await db.companies.find_one(
+                {"id": chosen_cid},
+                {"_id": 0, "billing_product": 1, "billing_discount": 1},
+            ) or {}
+            update_set = {"company_id": chosen_cid}
+            if company_row.get("billing_product") is not None:
+                update_set["billing_product"] = company_row.get("billing_product")
+            if company_row.get("billing_discount") is not None:
+                update_set["billing_discount"] = bool(company_row.get("billing_discount"))
+            await db.platform_payments.update_one({"id": p["id"]}, {"$set": update_set})
             updated += 1
         else:
             unattributable_details.append({
