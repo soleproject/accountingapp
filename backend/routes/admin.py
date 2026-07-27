@@ -582,3 +582,113 @@ async def bill_enterprise_now(
     res = await _ebs.bill_enterprise(eid, month_key=month_key, dry_run=inp.dry_run)
     res["month_key"] = month_key
     return res
+
+
+
+class BulkDeleteByOwnerIn(BaseModel):
+    """Bulk-delete request. Provide a non-empty list of owner emails +
+    the literal string ``I UNDERSTAND`` as the confirmation token so
+    accidents are impossible.
+
+    Set ``dry_run=True`` first to preview the blast radius (returns
+    counts + company names without deleting anything). Set
+    ``delete_users=True`` to also remove the owner user rows themselves
+    after their last-company deletion — handy for test-data cleanup.
+    """
+    owner_emails: list[str]
+    confirm: str
+    dry_run: bool = False
+    delete_users: bool = False
+
+
+@router.post("/admin/companies/bulk-delete-by-owner")
+async def admin_bulk_delete_by_owner(
+    inp: BulkDeleteByOwnerIn,
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Nuke every company owned by any of the given emails, along with
+    all per-company data (transactions, invoices, memberships, etc).
+    Superadmin-only, requires the literal confirmation string, and
+    supports dry-run so you can preview before firing.
+    """
+    if inp.confirm.strip() != "I UNDERSTAND":
+        raise HTTPException(400, "Pass confirm='I UNDERSTAND' to proceed.")
+    emails = [e.strip().lower() for e in inp.owner_emails if e and e.strip()]
+    if not emails:
+        raise HTTPException(400, "owner_emails must be a non-empty list.")
+
+    # Match users case-insensitively (users often type mixed-case emails
+    # into signup but the DB has lower-case; also match either shape to
+    # cover legacy accounts).
+    owner_users = await db.users.find({
+        "email": {"$in": emails + [e.upper() for e in emails]}
+    }, {"_id": 0}).to_list(1000)
+    owner_ids = [u["id"] for u in owner_users]
+    if not owner_ids:
+        return {"dry_run": inp.dry_run, "matched_users": [], "companies": [], "note": "No users matched."}
+
+    # Find every company where these users are the OWNER (not just a
+    # member; deleting a company where a Pro happens to be a member
+    # would be catastrophic).
+    owner_memberships = await db.memberships.find({
+        "user_id": {"$in": owner_ids}, "role": "owner",
+    }).to_list(2000)
+    company_ids = list({m["company_id"] for m in owner_memberships})
+    companies = await db.companies.find(
+        {"id": {"$in": company_ids}}, {"_id": 0, "id": 1, "name": 1, "billing_state": 1}
+    ).to_list(2000)
+
+    plan = {
+        "dry_run": inp.dry_run,
+        "matched_users": [{"id": u["id"], "email": u.get("email"), "name": u.get("name")} for u in owner_users],
+        "companies": [{"id": c["id"], "name": c.get("name"), "billing_state": c.get("billing_state")} for c in companies],
+        "delete_users": inp.delete_users,
+    }
+    if inp.dry_run:
+        plan["would_delete_records_from"] = [
+            "companies", "accounts", "transactions", "journal_entries",
+            "invoices", "bills", "customers", "vendors", "payments",
+            "onboarding_state", "plaid_items", "veryfi_uploads",
+            "ai_activity_log", "rules", "audit_logs", "period_locks",
+            "memberships", "pro_alerts (company-scoped)",
+        ]
+        if inp.delete_users:
+            plan["would_delete_records_from"].append(f"users ({len(owner_users)})")
+        return plan
+
+    # Real delete — mirror the per-company collections list from
+    # companies.py delete_company + add pro_alerts.
+    per_company_collections = [
+        "accounts", "transactions", "journal_entries", "invoices", "bills",
+        "customers", "vendors", "payments", "onboarding_state",
+        "plaid_items", "veryfi_uploads", "ai_activity_log", "rules",
+        "audit_logs", "period_locks", "memberships", "pro_alerts",
+    ]
+    per_collection_totals: dict[str, int] = {}
+    for cid in company_ids:
+        for coll in per_company_collections:
+            try:
+                r = await db[coll].delete_many({"company_id": cid})
+                if r.deleted_count:
+                    per_collection_totals[coll] = per_collection_totals.get(coll, 0) + r.deleted_count
+            except Exception:
+                pass
+    r = await db.companies.delete_many({"id": {"$in": company_ids}})
+    per_collection_totals["companies"] = r.deleted_count
+
+    if inp.delete_users:
+        # Only delete users who no longer own any other company (should
+        # be zero after the mass-delete above, but check defensively).
+        remaining = await db.memberships.count_documents({
+            "user_id": {"$in": owner_ids}, "role": "owner",
+        })
+        if remaining == 0:
+            ur = await db.users.delete_many({"id": {"$in": owner_ids}})
+            per_collection_totals["users"] = ur.deleted_count
+            # Also drop any dangling non-owner memberships on those user ids
+            mr = await db.memberships.delete_many({"user_id": {"$in": owner_ids}})
+            if mr.deleted_count:
+                per_collection_totals["memberships"] = per_collection_totals.get("memberships", 0) + mr.deleted_count
+
+    plan["records_removed"] = per_collection_totals
+    return plan
