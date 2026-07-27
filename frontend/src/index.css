@@ -195,6 +195,43 @@ body {
 .chat-bubble-user { background: #0F172A; color: #fff; }
 .chat-bubble-ai { background: #F1F5F9; color: #0F172A; }
 
+/* Markdown rendered inside AI chat bubbles — keeps line-height + spacing
+   comfortable without letting stock <p> / <ul> browser margins blow out
+   the bubble. Applied by AiPanel when the message role is `assistant`. */
+.chat-md > *:first-child { margin-top: 0; }
+.chat-md > *:last-child { margin-bottom: 0; }
+.chat-md p { margin: 0 0 0.6em; }
+.chat-md p:last-child { margin-bottom: 0; }
+.chat-md strong { font-weight: 700; color: #0F172A; }
+.chat-md em { font-style: italic; }
+.chat-md a { color: #0e7490; text-decoration: underline; text-underline-offset: 2px; }
+.chat-md ul, .chat-md ol { margin: 0.4em 0 0.6em; padding-left: 1.2em; }
+.chat-md ul { list-style: disc; }
+.chat-md ol { list-style: decimal; }
+.chat-md li { margin: 0.15em 0; }
+.chat-md code {
+  background: rgba(15, 23, 42, 0.08); padding: 0 4px; border-radius: 3px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+.chat-md pre {
+  background: rgba(15, 23, 42, 0.06); padding: 8px 10px; border-radius: 6px;
+  overflow-x: auto; margin: 0.5em 0; font-size: 0.85em;
+}
+.chat-md pre code { background: none; padding: 0; }
+.chat-md h1, .chat-md h2, .chat-md h3, .chat-md h4 {
+  font-weight: 700; margin: 0.6em 0 0.3em; line-height: 1.25;
+}
+.chat-md h1 { font-size: 1.1em; }
+.chat-md h2 { font-size: 1.05em; }
+.chat-md h3, .chat-md h4 { font-size: 1em; }
+.chat-md table { border-collapse: collapse; margin: 0.5em 0; font-size: 0.9em; }
+.chat-md th, .chat-md td { border: 1px solid rgba(15,23,42,0.15); padding: 3px 8px; text-align: left; }
+.chat-md blockquote {
+  border-left: 3px solid rgba(15,23,42,0.2); padding-left: 10px;
+  color: #475569; margin: 0.4em 0;
+}
+
 .nav-item-active { background: #F1F5F9; color: #0F172A; font-weight: 600; }
 .nav-item:hover { background: #F8FAFC; }
 

@@ -10,6 +10,8 @@ import { toast } from "sonner";
 import { resolveVoiceCommand } from "@/lib/voiceCommands";
 import { emitCreate, emitAction, useActionListener } from "@/lib/createBus";
 import { stripMarkdownForSpeech } from "@/lib/speechText";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 // Compact confirm card used by the create-account / recategorize / transfer
 // flows. Same visual language as BulkApproveCard but generic — takes a title,
@@ -2442,10 +2444,21 @@ export default function AiPanel({ collapsed, onToggle }) {
           }
           return messages.map((m, i) => (
           <div key={i} data-testid={TID.aiChatMessage}
-               className={`max-w-[92%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap leading-relaxed ${
-                 m.role === "user" ? "chat-bubble-user ml-auto" : "chat-bubble-ai"
+               className={`max-w-[92%] rounded-lg px-3 py-2 text-sm leading-relaxed ${
+                 m.role === "user"
+                   ? "chat-bubble-user ml-auto whitespace-pre-wrap"
+                   : "chat-bubble-ai chat-md"
                } ${i === latestUnansweredAssistant ? "ai-shimmer-bubble" : ""}`}>
-            {m.content || (streaming && i === messages.length - 1 ? "…" : "")}
+            {m.role === "assistant" && m.content ? (
+              // Render assistant messages as markdown so `**bold**`,
+              // `_italic_`, lists, tables, and inline code all format
+              // correctly. remark-gfm adds tables + strikethrough +
+              // task lists. User messages stay plain-text (preserves
+              // whatever the user typed, incl. accidental asterisks).
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+            ) : (
+              m.content || (streaming && i === messages.length - 1 ? "…" : "")
+            )}
             {m.splitHint && (
               <SplitHintForm
                 hint={m.splitHint}
