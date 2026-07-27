@@ -647,9 +647,21 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         });
       }
     }
-    // Anchor the highlight to the FIRST vendor row — simple + visually
-    // consistent walkthrough.
-    setHowToTargetKey(preview.vendors[0].key);
+    // Anchor the highlight to the FIRST vendor of the CURRENTLY-VISIBLE
+    // group in stepper view — otherwise a user viewing group 3 sees a
+    // tour that quietly highlights an off-screen row in group 1 and
+    // wonders why "nothing is happening". In category/list view we
+    // fall back to `preview.vendors[0]` (top of the list).
+    let anchorVendorKey = preview.vendors[0].key;
+    try {
+      if (megaViewMode === "stepper" && Array.isArray(megaGroups) && megaGroups.length > 0) {
+        const g = megaGroups[Math.min(focusedGroupIdx, megaGroups.length - 1)];
+        if (g && g.vendors && g.vendors.length > 0) {
+          anchorVendorKey = g.vendors[0].key;
+        }
+      }
+    } catch { /* fall through with preview.vendors[0] */ }
+    setHowToTargetKey(anchorVendorKey);
     setHowToRunning(true);
     howToAbortRef.current = false;
     // Make sure the AI panel is visible so the narration lands somewhere.
@@ -1050,15 +1062,18 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                     const isTourRow = howToTargetKey === c.key;
                     const isTourActive = isTourRow && howToStep !== null && howToStep < 7;
                     const hi = (step) => (isTourRow && howToStep === step ? "ai-shimmer-btn bg-white" : "");
+                    // Non-target rows get muted while the tour is running so
+                    // the target row visibly pops. Empty when not in tour.
+                    const tourDimClass = (howToRunning && !isTourRow) ? "opacity-40" : "";
                     return (
                       <div
                         key={c.key}
                         data-testid={`mega-vendor-${c.key}`}
-                        className={`w-full flex md:grid md:grid-cols-[auto_240px_minmax(200px,1fr)_auto_auto_auto] items-center gap-2.5 rounded border px-3 py-2 text-sm transition-colors ${
+                        className={`w-full flex md:grid md:grid-cols-[auto_240px_minmax(200px,1fr)_auto_auto_auto] items-center gap-2.5 rounded border px-3 py-2 text-sm transition-all ${tourDimClass} ${
                           isTourRow && howToStep === 0
-                            ? "ai-shimmer-btn"
+                            ? "ai-shimmer-btn shadow-[0_0_0_4px_rgba(6,182,212,0.15)]"
                             : isTourActive
-                              ? "bg-white border-slate-200"
+                              ? "bg-white border-cyan-300 shadow-[0_0_0_4px_rgba(6,182,212,0.15),0_8px_24px_-8px_rgba(6,182,212,0.35)]"
                               : focus?.bucket && focus.key === c.key
                                 ? "ai-shimmer-btn"
                                 : on
