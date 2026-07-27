@@ -21,6 +21,7 @@ import { emitAction, useActionListener } from "@/lib/createBus";
 import { useLetsReviewNav } from "@/pages/LetsReview";
 import { useNoContactReviewNav } from "@/pages/NoContactReview";
 import Step2Tour, { hasSeenStep2Tour } from "@/components/Step2Tour";
+import Step3BTour, { hasSeenStep3BTour } from "@/components/Step3BTour";
 import { useAuth } from "@/lib/auth";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
@@ -231,6 +232,20 @@ export default function Transactions() {
   // Support "Re-play tour" CTA click from the AI panel — restarts the
   // Step 2 tour regardless of the seen flag.
   useActionListener("chat-cta:restart-step2-tour", () => setStep2TourOpen(true));
+
+  // Step 3B first-time tour — same shape as Step 2 but fires when the
+  // page is in No-Contact Review mode (`noContactReview=1`). Piggybacks
+  // on the same `?tour=1` / `?replay=1` params.
+  const [step3bTourOpen, setStep3bTourOpen] = useState(false);
+  useEffect(() => {
+    if (!tourParam) return;
+    if (!isNoContactReview) return;
+    if (!user?.id || !currentCompanyId) return;
+    if (!replayParam && hasSeenStep3BTour(user.id, currentCompanyId)) return;
+    const t = setTimeout(() => setStep3bTourOpen(true), 900);
+    return () => clearTimeout(t);
+  }, [tourParam, replayParam, isNoContactReview, user?.id, currentCompanyId]);
+  const closeStep3BTour = () => setStep3bTourOpen(false);
   // Inline bulk-categorize dropdown in the Let's-Review info card — lets
   // the CPA one-click categorize every currently-visible row for the
   // contact into a chosen GAAP account, bypassing the AI chat entirely.
@@ -871,6 +886,7 @@ export default function Transactions() {
   return (
     <div className="space-y-4">
       <Step2Tour open={step2TourOpen} onDone={closeStep2Tour} />
+      <Step3BTour open={step3bTourOpen} onDone={closeStep3BTour} />
       <MonthCloseBreadcrumb />
       <CleanupCopilot
         currentId={currentId}

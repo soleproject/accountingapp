@@ -487,8 +487,8 @@ async def _monthly_todos(cid: str) -> dict:
             "unit": "pairs" if transfer_pairs_count > 0 else "transactions",
             "cta_label": "Review",
             "cta_link": (
-                "/accounting/transfer-review" if transfer_pairs_count > 0
-                else "/accounting/no-contact-review"
+                "/accounting/transfer-review?tour=1" if transfer_pairs_count > 0
+                else "/accounting/no-contact-review?tour=1"
             ),
             # Surface both sub-counts so the frontend can render a
             # progress-style breadcrumb inside the tile ("3a: 12 pairs

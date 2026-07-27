@@ -18,7 +18,6 @@ export default function NoContactReview() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const [groups, setGroups] = useState(null);
-
   useEffect(() => {
     if (!currentId) return;
     api
@@ -46,7 +45,11 @@ export default function NoContactReview() {
       total: String(groups.length),
       count: String(g.count ?? 0),
       total_amount: String(g.total_amount ?? 0),
-    }).toString();
+    });
+    // Preserve `tour=1` / `replay=1` through the redirect so the Step 3B
+    // walkthrough fires on the Transactions.jsx page.
+    if (params.get("tour") === "1") qs.set("tour", "1");
+    if (params.get("replay") === "1") qs.set("replay", "1");
     // Give the Transactions Copilot a beat to mount its listener before
     // we emit the inquiry that populates the chat panel.
     setTimeout(() => {
@@ -60,8 +63,8 @@ export default function NoContactReview() {
         },
       });
     }, 400);
-    navigate(`/accounting/transactions?${qs}`, { replace: true });
-  }, [groups, currentIdx, navigate]);
+    navigate(`/accounting/transactions?${qs.toString()}`, { replace: true });
+  }, [groups, currentIdx, navigate, params]);
 
   if (!groups) {
     return (

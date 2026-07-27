@@ -195,6 +195,22 @@ export default function CompanySettings() {
           >
             <Play size={13} /> Replay Step 2 tour
           </button>
+          <button
+            data-testid="settings-replay-step3a-tour-btn"
+            onClick={() => nav("/accounting/transfer-review?tour=1&replay=1")}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 hover:text-cyan-700 hover:border-cyan-300 hover:bg-cyan-50 text-sm"
+            title="Replay the Step 3A (Transfer Review) walkthrough"
+          >
+            <Play size={13} /> Replay Step 3A tour
+          </button>
+          <button
+            data-testid="settings-replay-step3b-tour-btn"
+            onClick={() => nav("/accounting/no-contact-review?tour=1&replay=1")}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 hover:text-cyan-700 hover:border-cyan-300 hover:bg-cyan-50 text-sm"
+            title="Replay the Step 3B (No-Contact Review) walkthrough"
+          >
+            <Play size={13} /> Replay Step 3B tour
+          </button>
         </div>
       </div>
 

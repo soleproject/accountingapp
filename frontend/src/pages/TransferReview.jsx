@@ -9,12 +9,14 @@
 // on /accounting/transfer-review. Confidence-sorted (same-day = 1.0, then
 // decays linearly to 0.5 at 3-day delta).
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { ArrowLeftRight, Check, X, Info, Sparkles } from "lucide-react";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
 import CleanupCopilot from "@/components/CleanupCopilot";
+import Step3ATour, { hasSeenStep3ATour } from "@/components/Step3ATour";
 
 function ConfBadge({ conf, delta }) {
   const tone =
@@ -122,11 +124,21 @@ function TransferReviewDoneRedirect() {
 
 export default function TransferReview() {
   const { currentId } = useCompany();
+  const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [pairs, setPairs] = useState(null);
   const [selected, setSelected] = useState(() => new Set());
   const [inspectPairId, setInspectPairId] = useState(null);
   const [busy, setBusy] = useState(false);
+  // Step 3A first-time walkthrough — fires when the URL carries
+  // `?tour=1` AND this client hasn't already seen it on this company.
+  // The `firm_glance.py` step 3 cta_link appends `&tour=1` when
+  // `transfer_pairs_count > 0` so this only fires for clients who land
+  // on Transfer Review from the dashboard checklist.
+  const [step3aTourOpen, setStep3aTourOpen] = useState(false);
+  const tourParam = searchParams.get("tour") === "1";
+  const replayParam = searchParams.get("replay") === "1";
   // Locally-rejected pair ids — user said "not a transfer" so we hide them
   // from this session without needing a server round-trip. They'll show up
   // again on next visit (a real reject/mark-not-a-transfer flow can come
@@ -147,6 +159,17 @@ export default function TransferReview() {
   useEffect(() => {
     load(); /* eslint-disable-next-line */
   }, [currentId]);
+
+  // Auto-fire the Step 3A tour once pairs are on-screen and the user is
+  // qualified (client role, not-yet-seen, `?tour=1` on the URL).
+  useEffect(() => {
+    if (!tourParam) return;
+    if (!user?.id || !currentId) return;
+    if (!Array.isArray(pairs) || pairs.length === 0) return;
+    if (!replayParam && hasSeenStep3ATour(user.id, currentId)) return;
+    const t = setTimeout(() => setStep3aTourOpen(true), 700);
+    return () => clearTimeout(t);
+  }, [tourParam, replayParam, user?.id, currentId, pairs]);
 
   const visible = useMemo(
     () => (pairs || []).filter((p) => !rejected.has(p.pair_id)),
@@ -287,6 +310,7 @@ export default function TransferReview() {
 
   return (
     <div className="p-6 space-y-4" data-testid="transfer-review-page">
+      <Step3ATour open={step3aTourOpen} onDone={() => setStep3aTourOpen(false)} />
       <CleanupCopilot
         currentId={currentId}
         inline
