@@ -3,7 +3,7 @@ import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { emitAction, useActionListener } from "@/lib/createBus";
 import {
   Sparkles, Zap, AlertTriangle, TrendingUp, Wand2, FileCheck2, Bot, ArrowRight,
@@ -167,6 +167,32 @@ export default function Dashboard() {
     setChainPostTour(true);
     setWelcomeOpen(true);
   };
+  // Independent replay entry for JUST the post-onboarding tour — used
+  // by the Settings-page replay buttons. Does NOT chain to welcome.
+  const replayPostTour = () => setPostTourOpen(true);
+  // Read `?replay=welcome` or `?replay=post-tour` from the URL and fire
+  // the matching tour. Used by the "Replay tour" buttons on the
+  // Settings page, which navigate here rather than dispatching a global
+  // event (URL is more shareable + survives a hard refresh).
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const flag = searchParams.get("replay");
+    if (!flag) return;
+    // Strip the param first so the tour doesn't re-open on every
+    // subsequent re-render / navigation.
+    const next = new URLSearchParams(searchParams);
+    next.delete("replay");
+    setSearchParams(next, { replace: true });
+    if (flag === "welcome") {
+      // Just replay welcome — don't chain into post-tour (Settings
+      // exposes them as two separate buttons intentionally).
+      setChainPostTour(false);
+      setWelcomeOpen(true);
+    } else if (flag === "post-tour") {
+      setPostTourOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
   // Income-snapshot timeframe — user asked for a way to step back through
   // prior months / years. `mode` is one of "ytd" | "month" | "year";
   // `anchor` is a YYYY-MM string that arrow-navigates within the chosen mode.

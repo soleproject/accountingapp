@@ -3,7 +3,7 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Settings2, Save, Trash2, AlertTriangle, Loader2 } from "lucide-react";
+import { Settings2, Save, Trash2, AlertTriangle, Loader2, Play, Sparkles } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
@@ -154,6 +154,38 @@ export default function CompanySettings() {
           >
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
             Save changes
+          </button>
+        </div>
+      </div>
+
+      {/* --- Tours & tips --- */}
+      <div className="rounded-xl border bg-white p-5 space-y-3" data-testid="settings-tours-card">
+        <div className="flex items-start gap-2">
+          <Sparkles size={18} className="text-cyan-600 mt-0.5" />
+          <div>
+            <h3 className="font-heading font-semibold text-lg">Tours &amp; tips</h3>
+            <p className="text-sm text-slate-500 mt-1">
+              Re-watch either onboarding tour any time — great for showing a
+              teammate around, or just re-orienting yourself after a break.
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2 pt-1">
+          <button
+            data-testid="settings-replay-welcome-btn"
+            onClick={() => nav("/dashboard?replay=welcome")}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 hover:text-cyan-700 hover:border-cyan-300 hover:bg-cyan-50 text-sm"
+            title="Replay the welcome tour"
+          >
+            <Play size={13} /> Replay welcome tour
+          </button>
+          <button
+            data-testid="settings-replay-post-tour-btn"
+            onClick={() => nav("/dashboard?replay=post-tour")}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 hover:text-cyan-700 hover:border-cyan-300 hover:bg-cyan-50 text-sm"
+            title="Replay the after-onboarding dashboard tour"
+          >
+            <Play size={13} /> Replay dashboard tour
           </button>
         </div>
       </div>
