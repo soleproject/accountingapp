@@ -60,6 +60,7 @@ import FirstConnectWelcome from "@/components/FirstConnectWelcome";
 import FirmAtAGlance from "@/components/FirmAtAGlance";
 import BusinessOverview from "@/components/BusinessOverview";
 import DashboardTodos from "@/components/DashboardTodos";
+import WelcomeModal, { hasSeenWelcome, markWelcomeSeen, ReplayWelcomeButton } from "@/components/WelcomeModal";
 import { LayoutGrid, Sparkle, Grid3x3 } from "lucide-react";
 
 const kindLabel = {
@@ -107,6 +108,26 @@ export default function Dashboard() {
     setViewMode(m);
     try { localStorage.setItem("dashboard_view", m); } catch { /* ignore */ }
   };
+
+  // First-time welcome tour + replay button. Only fires for clients
+  // (Pros / superadmin get a different orientation). Persisted per-user.
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
+  useEffect(() => {
+    if (!user?.id) return;
+    // Restrict to client role — Pros already know the app.
+    if (user.role !== "client") return;
+    if (!hasSeenWelcome(user.id)) {
+      // Delay a beat so the dashboard has painted first — reveals the
+      // real UI briefly before the overlay drops (matches RocketBooks).
+      const t = setTimeout(() => setWelcomeOpen(true), 500);
+      return () => clearTimeout(t);
+    }
+  }, [user?.id, user?.role]);
+  const closeWelcome = () => {
+    setWelcomeOpen(false);
+    if (user?.id) markWelcomeSeen(user.id);
+  };
+  const replayWelcome = () => setWelcomeOpen(true);
   // Income-snapshot timeframe — user asked for a way to step back through
   // prior months / years. `mode` is one of "ytd" | "month" | "year";
   // `anchor` is a YYYY-MM string that arrow-navigates within the chosen mode.
@@ -207,7 +228,7 @@ export default function Dashboard() {
   if (!current) return <div className="text-slate-500">Select a company to view your Dashboard.</div>;
 
   if (!current.onboarding_complete) {
-    return <OnboardingNudge company={current} />;
+    return <OnboardingNudge company={current} welcomeOpen={welcomeOpen} onCloseWelcome={closeWelcome} onReplay={replayWelcome} showReplay={user?.role === "client"} />;
   }
 
   return (
@@ -293,6 +314,7 @@ function ClassicDashboard({
     todos?.mode === "setup" && todos?.visible && !todos?.is_complete;
   return (
     <>
+      <WelcomeModal open={welcomeOpen} onClose={closeWelcome} />
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="font-heading text-3xl font-bold tracking-tight">Dashboard</h1>
@@ -300,6 +322,9 @@ function ClassicDashboard({
             What the AI has done for {current.name} · {current.reporting_basis} basis
           </p>
         </div>
+        {user?.role === "client" && (
+          <ReplayWelcomeButton onClick={replayWelcome} />
+        )}
       </div>
 
       <AttentionTile attention={attention} suppressShimmer={suppressAttentionShimmer} />
@@ -674,7 +699,7 @@ function TimeframePicker({ mode, anchor, onModeChange, onShift, onReset }) {
 // live-accountant greeting into the AI panel. If the user replies "yes" /
 // "ok" / "sure" / "let's go" in the chat, we navigate them straight into
 // /onboarding. Otherwise the existing manual button still works.
-function OnboardingNudge({ company }) {
+function OnboardingNudge({ company, welcomeOpen, onCloseWelcome, onReplay, showReplay }) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const greetedRef = useRef(new Set());
@@ -712,6 +737,12 @@ function OnboardingNudge({ company }) {
 
   return (
     <div className="max-w-2xl">
+      <WelcomeModal open={welcomeOpen} onClose={onCloseWelcome} />
+      {showReplay && (
+        <div className="flex justify-end mb-3">
+          <ReplayWelcomeButton onClick={onReplay} />
+        </div>
+      )}
       <div className="rounded-xl border bg-white p-8">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center">
