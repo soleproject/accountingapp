@@ -338,6 +338,65 @@ class EnterprisePatch(BaseModel):
     default_discount: Optional[bool] = None
 
 
+class EnterpriseCreate(BaseModel):
+    """Payload for POST /admin/enterprises — superadmin manually spawns
+    a new Enterprise record. Everything except `name` is optional; the
+    slug auto-generates from `name` if left blank, and we default the
+    product/discount/allotment to the same values used for
+    Pro-auto-spawn (`ensure_personal_enterprise_for_pro`). Ownership is
+    optional — most manually-created enterprises are unassigned until
+    a Pro is later linked from the enterprise detail page."""
+    name: str = Field(..., min_length=1, max_length=120)
+    slug: Optional[str] = Field(default=None, max_length=80)
+    owner_user_id: Optional[str] = None
+    free_user_allotment: int = Field(default=0, ge=0, le=10_000)
+    default_product: str = "simple_start"
+    default_discount: bool = False
+
+
+@router.post("/admin/enterprises")
+async def create_enterprise(
+    payload: EnterpriseCreate,
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Superadmin — mint a new Enterprise. Slug is auto-generated from
+    the name (kebab-case) with de-dupe suffixing when necessary. If
+    `owner_user_id` is provided we also attach that user to the
+    enterprise (updates `users.enterprise_id`) so the roll-up KPIs
+    reflect them immediately."""
+    now = datetime.now(timezone.utc).isoformat()
+    slug_base = _ent._slugify(payload.slug or payload.name)
+    slug = await _ent._resolve_unique_slug(slug_base)
+    # Verify the target owner (if any) is a real Pro on the platform —
+    # attaching a client to an enterprise as its owner would be nonsense.
+    if payload.owner_user_id:
+        owner = await db.users.find_one({"id": payload.owner_user_id})
+        if not owner:
+            raise HTTPException(400, "owner_user_id does not exist")
+        if owner.get("role") != "pro":
+            raise HTTPException(400, "owner_user_id must be a Pro user")
+    ent = {
+        "id": str(uuid.uuid4()),
+        "name": payload.name.strip(),
+        "slug": slug,
+        "is_default": False,
+        "owner_user_id": payload.owner_user_id,
+        "free_user_allotment": payload.free_user_allotment,
+        "default_product": payload.default_product,
+        "default_discount": payload.default_discount,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.enterprises.insert_one(ent)
+    if payload.owner_user_id:
+        await db.users.update_one(
+            {"id": payload.owner_user_id},
+            {"$set": {"enterprise_id": ent["id"]}},
+        )
+    stats = await _ent.rollup_stats(ent["id"])
+    return {"enterprise": _ent.serialize(ent, stats=stats)}
+
+
 @router.get("/admin/enterprises")
 async def list_enterprises(user: dict = Depends(require_role("superadmin"))):
     """Every enterprise on the platform + roll-up KPIs. Sorted with the

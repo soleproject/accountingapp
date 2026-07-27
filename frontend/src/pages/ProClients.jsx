@@ -16,6 +16,10 @@ export default function ProClients() {
   const [clients, setClients] = useState([]);
   const [firm, setFirm] = useState(null);
   const [creating, setCreating] = useState(false);
+  // Superadmin-only: open the "Add Enterprise" modal from the header on
+  // the Enterprises tab. On success we re-run the enterprises fetch so
+  // the new record shows up immediately in the grid without a reload.
+  const [creatingEnterprise, setCreatingEnterprise] = useState(false);
   const [showOnlyAction, setShowOnlyAction] = useState(false);
   const [resending, setResending] = useState({});
   const { switchCompany, refresh } = useCompany();
@@ -76,13 +80,21 @@ export default function ProClients() {
   // Enterprise view — one-shot fetch (superadmin only). The backend
   // returns one row per Enterprise with pre-computed roll-up KPIs
   // (pros_count, clients_count, companies_count, free_used, free_remaining).
+  const loadEnterprises = async () => {
+    if (!isSuperadmin) return;
+    setEntLoading(true);
+    try {
+      const r = await api.get("/admin/enterprises");
+      setEnterprises(r.data?.enterprises || []);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to load enterprises");
+    } finally {
+      setEntLoading(false);
+    }
+  };
   useEffect(() => {
     if (!isSuperadmin || mode !== "enterprise" || enterprises.length) return;
-    setEntLoading(true);
-    api.get("/admin/enterprises")
-      .then((r) => setEnterprises(r.data?.enterprises || []))
-      .catch((e) => toast.error(e.response?.data?.detail || "Failed to load enterprises"))
-      .finally(() => setEntLoading(false));
+    loadEnterprises();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, isSuperadmin]);
 
@@ -157,6 +169,15 @@ export default function ProClients() {
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-slate-900 text-white text-sm"
             >
               <UserPlus size={14} /> New Client
+            </button>
+          )}
+          {mode === "enterprise" && isSuperadmin && (
+            <button
+              data-testid="new-enterprise-btn"
+              onClick={() => setCreatingEnterprise(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm"
+            >
+              <Shield size={14} /> Add Enterprise
             </button>
           )}
         </div>
@@ -346,6 +367,19 @@ export default function ProClients() {
 
       {creating && <NewClientModal onClose={() => setCreating(false)} onCreated={async () => { await load(); await refresh(); setCreating(false); }} />}
       </>
+      )}
+      {/* Enterprise-create modal lives OUTSIDE the mode ternary so it
+          renders on either tab (the "Add Enterprise" button lives on
+          the Enterprises tab, but we hoist the modal here so it can
+          survive a tab switch mid-edit). */}
+      {creatingEnterprise && (
+        <NewEnterpriseModal
+          onClose={() => setCreatingEnterprise(false)}
+          onCreated={async () => {
+            await loadEnterprises();
+            setCreatingEnterprise(false);
+          }}
+        />
       )}
     </div>
   );
@@ -998,6 +1032,144 @@ function NewClientModal({ onClose, onCreated }) {
           <button data-testid={TID.saveBtn} onClick={save} disabled={busy}
                   className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-slate-900 text-white text-sm disabled:opacity-60">
             {busy && <Loader2 size={13} className="animate-spin" />} Create client
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// -----------------------------------------------------------------------------
+// NewEnterpriseModal — Superadmin-only. Lets the admin mint a fresh
+// Enterprise record from the Enterprises grid header. Slug auto-fills
+// from `name` (kebab-cased) but is editable in case the user wants to
+// pin a specific URL/subdomain. `owner_user_id` is intentionally omitted
+// from this quick-create UI — most manually-spawned enterprises start
+// unassigned and get a Pro attached later from the detail page.
+// -----------------------------------------------------------------------------
+function NewEnterpriseModal({ onClose, onCreated }) {
+  const [name, setName] = useState("");
+  const [slug, setSlug] = useState("");
+  const [freeSpots, setFreeSpots] = useState(0);
+  const [defaultProduct, setDefaultProduct] = useState("simple_start");
+  const [defaultDiscount, setDefaultDiscount] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const slugify = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const effectiveSlug = slug.trim() || slugify(name);
+
+  const save = async () => {
+    if (!name.trim()) { toast.error("Name is required"); return; }
+    setBusy(true);
+    try {
+      await api.post("/admin/enterprises", {
+        name: name.trim(),
+        slug: effectiveSlug || undefined,
+        free_user_allotment: Number(freeSpots) || 0,
+        default_product: defaultProduct,
+        default_discount: defaultDiscount,
+      });
+      toast.success(`Enterprise "${name.trim()}" created`);
+      onCreated && onCreated();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Could not create enterprise");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" data-testid="new-enterprise-modal">
+      <div className="w-full max-w-lg bg-white rounded-xl shadow-2xl overflow-hidden">
+        <div className="px-5 py-3 border-b flex items-center justify-between bg-gradient-to-r from-indigo-50 to-violet-50">
+          <div className="flex items-center gap-2">
+            <Shield size={16} className="text-indigo-600" />
+            <div className="font-heading font-semibold text-lg">Add Enterprise</div>
+          </div>
+          <button onClick={onClose} className="p-1 rounded hover:bg-white/60 text-slate-500" aria-label="Close">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Enterprise name</label>
+            <input
+              autoFocus
+              data-testid="new-enterprise-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Capstone Books"
+              className="w-full px-3 py-2 rounded-md border border-slate-300 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">
+              Slug <span className="font-normal text-slate-400">(URL / subdomain — auto-fills)</span>
+            </label>
+            <input
+              data-testid="new-enterprise-slug"
+              type="text"
+              value={slug}
+              onChange={(e) => setSlug(e.target.value)}
+              placeholder={slugify(name) || "capstone-books"}
+              className="w-full px-3 py-2 rounded-md border border-slate-300 text-sm font-mono focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+            />
+            {!slug.trim() && name.trim() && (
+              <div className="text-[11px] text-slate-500 mt-1">
+                Will use <span className="font-mono">{effectiveSlug}</span>
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Default product</label>
+              <select
+                data-testid="new-enterprise-product"
+                value={defaultProduct}
+                onChange={(e) => setDefaultProduct(e.target.value)}
+                className="w-full px-3 py-2 rounded-md border border-slate-300 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white"
+              >
+                <option value="simple_start">Simple Start</option>
+                <option value="essentials">Essentials</option>
+                <option value="plus">Plus</option>
+                <option value="advanced">Advanced</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Free spots</label>
+              <input
+                data-testid="new-enterprise-free-spots"
+                type="number"
+                min="0"
+                max="10000"
+                value={freeSpots}
+                onChange={(e) => setFreeSpots(e.target.value)}
+                className="w-full px-3 py-2 rounded-md border border-slate-300 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+              />
+            </div>
+          </div>
+          <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+            <input
+              data-testid="new-enterprise-discount"
+              type="checkbox"
+              checked={defaultDiscount}
+              onChange={(e) => setDefaultDiscount(e.target.checked)}
+              className="rounded border-slate-300"
+            />
+            Apply default discount to new companies under this enterprise
+          </label>
+        </div>
+        <div className="px-5 py-3 border-t flex justify-end gap-2 bg-slate-50">
+          <button onClick={onClose} className="px-3 py-1.5 rounded-md border text-sm">Cancel</button>
+          <button
+            data-testid="new-enterprise-save"
+            onClick={save}
+            disabled={busy || !name.trim()}
+            className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-60"
+          >
+            {busy && <Loader2 size={13} className="animate-spin" />} Create enterprise
           </button>
         </div>
       </div>
