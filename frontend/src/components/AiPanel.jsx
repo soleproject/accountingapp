@@ -4,6 +4,7 @@ import { Send, Sparkles, X, MessageSquare, Mic, MicOff, Volume2, VolumeX, Chevro
 import { api, BACKEND_URL } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
+import { useBranding } from "@/lib/branding";
 import { TID } from "@/constants/testIds";
 import { useAiFocus } from "@/lib/aiFocus";
 import { toast } from "sonner";
@@ -339,6 +340,14 @@ const getSR = () => window.SpeechRecognition || window.webkitSpeechRecognition;
 export default function AiPanel({ collapsed, onToggle }) {
   const { currentId, current, companies, switchCompany } = useCompany();
   const { user } = useAuth();
+  // Private-label the header (icon initial + firm name + "Assistant") so
+  // enterprise-branded clients see e.g. "CypherPro Assistant" instead of
+  // the generic "SmartBooks Assistant". Falls back to SmartBooks
+  // whenever the branding hasn't loaded yet or the firm name is blank.
+  const { branding } = useBranding();
+  const firmName = (branding?.firm_name || "").trim() || "SmartBooks";
+  const assistantTitle = `${firmName} Assistant`;
+  const firmInitial = firmName.charAt(0).toUpperCase();
   const navigate = useNavigate();
   // User-adjustable panel width. Persisted in localStorage. Constrained to a
   // sensible range so it can't be dragged narrower than the header controls
@@ -2362,11 +2371,21 @@ export default function AiPanel({ collapsed, onToggle }) {
         className="absolute left-0 top-0 h-full w-1.5 -translate-x-1/2 cursor-col-resize hover:bg-indigo-300/40 z-[65]"
       />
       <div className="h-16 shrink-0 border-b px-4 flex items-center gap-2">
-        <div className="w-7 h-7 rounded-md bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center">
-          <Sparkles size={14} className="text-white" />
+        <div className="w-7 h-7 rounded-md bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center overflow-hidden shrink-0">
+          {branding?.logos?.logo_light || branding?.logo_data_url ? (
+            <img
+              src={branding.logos?.logo_light || branding.logo_data_url}
+              alt=""
+              className="w-full h-full object-contain"
+            />
+          ) : firmName === "SmartBooks" ? (
+            <Sparkles size={14} className="text-white" />
+          ) : (
+            <span className="text-white text-xs font-heading font-bold">{firmInitial}</span>
+          )}
         </div>
         <div>
-          <div className="font-heading font-semibold text-sm">SmartBooks Assistant</div>
+          <div className="font-heading font-semibold text-sm" data-testid="ai-panel-title">{assistantTitle}</div>
           <div className="text-[11px] text-slate-500">GAAP-aware bookkeeper</div>
         </div>
         <button
