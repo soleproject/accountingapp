@@ -1074,45 +1074,113 @@ async def billing_env_check(user: dict = Depends(require_role("superadmin"))):
     return {"env": result, "resolved_prices": resolved}
 
 
+@router.get("/admin/billing/orphan-payments")
+async def list_orphan_payments(
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Diagnostic — dump every ``platform_payments`` row that lacks a
+    ``company_id`` so we can see what's on it and figure out how to
+    re-attribute it. Returns the sub_id, customer_id, amount, and the
+    invoice/payer identifiers so a superadmin can eyeball the state."""
+    q = {"$or": [{"company_id": {"$in": [None, ""]}}, {"company_id": {"$exists": False}}]}
+    rows = await db.platform_payments.find(q, {"_id": 0}).to_list(500)
+    # Enrich each row with the payer email + all candidate companies
+    # (owned by that user) so we can see attribution options at a glance.
+    out = []
+    for p in rows:
+        u = await db.users.find_one({"id": p.get("user_id")}, {"_id": 0, "email": 1, "id": 1, "name": 1}) if p.get("user_id") else None
+        owned = []
+        if u:
+            ms = await db.memberships.find({"user_id": u["id"], "role": "owner"}).to_list(50)
+            for m in ms:
+                c = await db.companies.find_one({"id": m["company_id"]}, {"_id": 0, "id": 1, "name": 1, "billing_state": 1, "stripe_subscription_id": 1})
+                if c:
+                    owned.append(c)
+        out.append({"payment": {k: p.get(k) for k in (
+            "id", "stripe_invoice_id", "stripe_subscription_id",
+            "stripe_customer_id", "user_id", "amount_cents", "paid_at",
+        )}, "payer": u, "owner_of_companies": owned})
+    return {"count": len(out), "rows": out}
+
+
 @router.post("/admin/billing/backfill-payment-company")
 async def backfill_payment_company_ids(
     user: dict = Depends(require_role("superadmin")),
 ):
     """One-time reconcile: stamp ``company_id`` on legacy
-    ``platform_payments`` rows written before we started saving it. We
-    look up each row's ``stripe_subscription_id`` against
-    ``companies.stripe_subscription_id`` and set the linked company id.
+    ``platform_payments`` rows written before we started saving it.
 
-    Safe to run repeatedly — only touches rows where ``company_id`` is
-    unset. Returns before/after counts.
+    Resolution order per orphan row:
+      1. Lookup by ``stripe_subscription_id`` (fast path — new payments).
+      2. Lookup by ``stripe_customer_id`` on companies (one client-card
+         signup → one customer). If exactly one company matches, use it.
+      3. Fallback: the payment's ``user_id`` owns exactly one company
+         with a `stripe_subscription_id` populated → attribute to that
+         one. This handles the "webhook stored the payment before the
+         company row got its subscription id, and the customer_id
+         field is empty" edge case that happens on Stripe test-mode
+         retries.
+
+    Safe to run repeatedly — only touches rows without ``company_id``.
     """
+    # Correct query — `$in: [null]` already matches missing fields in
+    # MongoDB, no need to double-count with a separate `$exists: false`.
+    orphan_q = {"company_id": {"$in": [None, ""]}}
     total = await db.platform_payments.count_documents({})
-    missing_before = await db.platform_payments.count_documents({"company_id": {"$in": [None, ""]}})
-    also_missing_no_field = await db.platform_payments.count_documents({"company_id": {"$exists": False}})
-    missing_before += also_missing_no_field
+    missing_before = await db.platform_payments.count_documents(orphan_q)
 
     updated = 0
-    unattributable = 0
-    async for p in db.platform_payments.find({
-        "$or": [{"company_id": {"$in": [None, ""]}}, {"company_id": {"$exists": False}}],
-    }):
+    unattributable_details = []
+    async for p in db.platform_payments.find(orphan_q):
+        chosen_cid: Optional[str] = None
+
+        # 1. sub_id → company
         sub_id = p.get("stripe_subscription_id")
-        if not sub_id:
-            unattributable += 1
-            continue
-        c = await db.companies.find_one({"stripe_subscription_id": sub_id}, {"id": 1})
-        if not c:
-            unattributable += 1
-            continue
-        await db.platform_payments.update_one({"id": p["id"]}, {"$set": {"company_id": c["id"]}})
-        updated += 1
+        if sub_id:
+            c = await db.companies.find_one({"stripe_subscription_id": sub_id}, {"id": 1})
+            if c:
+                chosen_cid = c["id"]
+
+        # 2. customer_id → company (unique)
+        if not chosen_cid and p.get("stripe_customer_id"):
+            cs = await db.companies.find({"stripe_customer_id": p["stripe_customer_id"]}, {"id": 1}).to_list(3)
+            if len(cs) == 1:
+                chosen_cid = cs[0]["id"]
+
+        # 3. user_id + exactly one owned company with a subscription id
+        if not chosen_cid and p.get("user_id"):
+            ms = await db.memberships.find({"user_id": p["user_id"], "role": "owner"}).to_list(50)
+            candidates = []
+            for m in ms:
+                c = await db.companies.find_one(
+                    {"id": m["company_id"], "stripe_subscription_id": {"$exists": True, "$ne": None}},
+                    {"id": 1},
+                )
+                if c:
+                    candidates.append(c["id"])
+            if len(candidates) == 1:
+                chosen_cid = candidates[0]
+
+        if chosen_cid:
+            await db.platform_payments.update_one({"id": p["id"]}, {"$set": {"company_id": chosen_cid}})
+            updated += 1
+        else:
+            unattributable_details.append({
+                "payment_id": p.get("id"),
+                "stripe_invoice_id": p.get("stripe_invoice_id"),
+                "stripe_subscription_id": p.get("stripe_subscription_id"),
+                "stripe_customer_id": p.get("stripe_customer_id"),
+                "user_id": p.get("user_id"),
+            })
 
     return {
         "total_platform_payments": total,
         "missing_before": missing_before,
         "updated": updated,
-        "unattributable": unattributable,
+        "unattributable": len(unattributable_details),
+        "unattributable_details": unattributable_details,
     }
+
 
 
 @router.get("/admin/billing/webhook-status")
