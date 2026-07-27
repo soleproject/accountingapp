@@ -55,7 +55,13 @@ export default function LetsReview() {
       count: String(g.count ?? 0),
       total_amount: String(g.total_amount ?? 0),
       filter: "uncategorized",
-    }).toString();
+    });
+    // Preserve `tour=1` (and optional `replay=1`) through the redirect
+    // so first-time clients see the guided walkthrough on the AI
+    // Transaction Questions page — and the Settings replay button can
+    // force it again.
+    if (params.get("tour") === "1") qs.set("tour", "1");
+    if (params.get("replay") === "1") qs.set("replay", "1");
     // Give the Transactions Copilot a beat to mount its listener before
     // we emit the inquiry that populates the chat panel.
     setTimeout(() => {
@@ -70,7 +76,7 @@ export default function LetsReview() {
         },
       });
     }, 400);
-    navigate(`/accounting/transactions?${qs}`, { replace: true });
+    navigate(`/accounting/transactions?${qs.toString()}`, { replace: true });
   }, [groups, currentIdx, navigate]);
 
   if (!groups) {

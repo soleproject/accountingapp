@@ -20,6 +20,8 @@ import { ContactBadge } from "@/components/ContactBadge";
 import { emitAction, useActionListener } from "@/lib/createBus";
 import { useLetsReviewNav } from "@/pages/LetsReview";
 import { useNoContactReviewNav } from "@/pages/NoContactReview";
+import Step2Tour, { hasSeenStep2Tour } from "@/components/Step2Tour";
+import { useAuth } from "@/lib/auth";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
 
@@ -204,6 +206,31 @@ export default function Transactions() {
   const ncrLabel = params.get("label") || "";
   const noContactReviewNav = useNoContactReviewNav();
   const isReviewMode = isLetsReview || isNoContactReview;
+
+  // Step 2 first-time tour. Fires when the URL carries `?tour=1` AND
+  // the client hasn't already seen it for this company. Auto-plays once
+  // the contact info box is on-screen. See `firm_glance.py` step2
+  // cta_link which appends `&tour=1` to trigger this.
+  const { user } = useAuth();
+  const { currentId: currentCompanyId } = useCompany();
+  const [step2TourOpen, setStep2TourOpen] = useState(false);
+  const tourParam = params.get("tour") === "1";
+  const replayParam = params.get("replay") === "1";
+  useEffect(() => {
+    if (!tourParam) return;
+    if (!isLetsReview || !lrContactId || !lrContactName) return;
+    if (!user?.id || !currentCompanyId) return;
+    // `replay=1` bypasses the seen check so the Settings "Replay Step 2
+    // tour" button always re-fires the walkthrough.
+    if (!replayParam && hasSeenStep2Tour(user.id, currentCompanyId)) return;
+    // Wait for the info box + AI panel to mount, then fire.
+    const t = setTimeout(() => setStep2TourOpen(true), 900);
+    return () => clearTimeout(t);
+  }, [tourParam, replayParam, isLetsReview, lrContactId, lrContactName, user?.id, currentCompanyId]);
+  const closeStep2Tour = () => setStep2TourOpen(false);
+  // Support "Re-play tour" CTA click from the AI panel — restarts the
+  // Step 2 tour regardless of the seen flag.
+  useActionListener("chat-cta:restart-step2-tour", () => setStep2TourOpen(true));
   // Inline bulk-categorize dropdown in the Let's-Review info card — lets
   // the CPA one-click categorize every currently-visible row for the
   // contact into a chosen GAAP account, bypassing the AI chat entirely.
@@ -843,6 +870,7 @@ export default function Transactions() {
 
   return (
     <div className="space-y-4">
+      <Step2Tour open={step2TourOpen} onDone={closeStep2Tour} />
       <MonthCloseBreadcrumb />
       <CleanupCopilot
         currentId={currentId}

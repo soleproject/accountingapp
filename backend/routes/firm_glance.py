@@ -460,7 +460,7 @@ async def _monthly_todos(cid: str) -> dict:
             # (Step 2's flow) is driven by the Copilot chips on the
             # Transactions page — that's where "Let's review" filters the
             # table to a vendor's uncategorized rows for one-click bulk fix.
-            "cta_link": "/accounting/lets-review",
+            "cta_link": "/accounting/lets-review?tour=1",
         },
         "step3": {
             "key": "intercompany_transfers" if transfer_pairs_count > 0 else "individual_review",

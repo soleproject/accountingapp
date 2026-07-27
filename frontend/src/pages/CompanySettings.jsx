@@ -187,6 +187,14 @@ export default function CompanySettings() {
           >
             <Play size={13} /> Replay dashboard tour
           </button>
+          <button
+            data-testid="settings-replay-step2-tour-btn"
+            onClick={() => nav("/accounting/lets-review?tour=1&replay=1")}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 hover:text-cyan-700 hover:border-cyan-300 hover:bg-cyan-50 text-sm"
+            title="Replay the Step 2 (Let's Review) walkthrough"
+          >
+            <Play size={13} /> Replay Step 2 tour
+          </button>
         </div>
       </div>
 
