@@ -360,19 +360,21 @@ export default function ReportView() {
     try {
       const scroller = document.querySelector("main");
       const y = scroller ? scroller.scrollTop : (window.scrollY || 0);
-      const isIS = kind === "income-statement";
+      const label = kind === "income-statement" ? "Income Statement"
+        : kind === "cash-flow" ? "Statement of Cash Flows"
+        : "Balance Sheet";
       sessionStorage.setItem("reportReturnUrl",
         `/reports/${kind}${window.location.search || ""}`);
-      sessionStorage.setItem("reportReturnLabel", isIS ? "Income Statement" : "Balance Sheet");
+      sessionStorage.setItem("reportReturnLabel", label);
       sessionStorage.setItem("reportScrollY", String(y));
     } catch { /* private mode / quota — fine to ignore */ }
     // Match the source report's period on the Account Detail drill-down
-    // so a P&L click doesn't return every historical row for that
-    // account — user reported seeing $796 of Entertainment when the P&L
-    // period only had $47. Income Statement passes `start` + `end`
-    // (the full period). Balance Sheet passes only `end` (as-of).
+    // so a P&L or Cash-Flow click doesn't return every historical row
+    // for that account. Income Statement & Cash Flow pass `start`+`end`
+    // (the full report window). Balance Sheet passes only `end`
+    // (as-of), since a BS is cumulative-to-date.
     const parts = [`account=${row.id}`];
-    if (kind === "income-statement") {
+    if (kind === "income-statement" || kind === "cash-flow") {
       if (start) parts.push(`start=${encodeURIComponent(start)}`);
       if (end)   parts.push(`end=${encodeURIComponent(end)}`);
     } else if (kind === "balance-sheet") {
@@ -383,7 +385,7 @@ export default function ReportView() {
 
   // Restore source-report scroll position on return from Account Detail.
   useEffect(() => {
-    if (!(kind === "balance-sheet" || kind === "income-statement") || !data) return;
+    if (!(kind === "balance-sheet" || kind === "income-statement" || kind === "cash-flow") || !data) return;
     const y = sessionStorage.getItem("reportScrollY")
       || sessionStorage.getItem("bsScrollY"); // legacy key
     if (y == null) return;
@@ -552,7 +554,7 @@ export default function ReportView() {
             <GeneralLedgerBody data={data} />
           )}
           {kind === "cash-flow" && data.net_change !== undefined && (
-            <CashFlowBody data={data} />
+            <CashFlowBody data={data} onDrilldown={goToAccountDetail} />
           )}
           {kind === "sales-tax" && Array.isArray(data.rows) && data.net_liability !== undefined && (
             <SalesTaxBody data={data} />
@@ -710,18 +712,35 @@ function GeneralLedgerBody({ data }) {
   );
 }
 
-function CashFlowBody({ data }) {
+function CashFlowBody({ data, onDrilldown }) {
+  const sections = [
+    ["Operating Activities", data.operating, data.operating_rows || []],
+    ["Investing Activities", data.investing, data.investing_rows || []],
+    ["Financing Activities", data.financing, data.financing_rows || []],
+  ];
   return (
-    <div className="text-sm space-y-2">
-      {[["Operating Activities", data.operating],
-        ["Investing Activities", data.investing],
-        ["Financing Activities", data.financing]].map(([k, v]) => (
-        <div key={k} className="grid grid-cols-12 gap-2 px-3 py-2 border-b">
-          <div className="col-span-9">{k}</div>
-          <div className="col-span-3 text-right font-mono-num">{fmtMoney(v)}</div>
+    <div className="text-sm">
+      {sections.map(([title, total, rows]) => (
+        <div key={title} className="mb-2">
+          <Section title={title} />
+          {rows.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-slate-400 italic">No activity in this period.</div>
+          ) : (
+            rows.map((r) => (
+              <Row
+                key={r.id || `${title}-uncat`}
+                id={r.id}
+                code={r.code}
+                name={r.name}
+                amount={r.amount}
+                onClick={r.id ? onDrilldown : undefined}
+              />
+            ))
+          )}
+          <Row code="" name={`Total ${title}`} amount={total} bold />
         </div>
       ))}
-      <div className="grid grid-cols-12 gap-2 px-3 py-2 border-t-2 border-slate-800 bg-slate-50 rounded mt-3">
+      <div className="mt-4 grid grid-cols-12 gap-2 px-3 py-2 border-t-2 border-slate-800 bg-slate-50 rounded">
         <div className="col-span-9 font-heading font-bold uppercase text-sm">Net Change in Cash</div>
         <div className="col-span-3 text-right font-mono-num font-bold">{fmtMoney(data.net_change)}</div>
       </div>

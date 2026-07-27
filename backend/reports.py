@@ -506,22 +506,48 @@ async def compute_cash_flow(company_id: str, start: str, end: str):
     operating = 0.0
     investing = 0.0
     financing = 0.0
+    # Per-account breakdown so the frontend can render drillable
+    # sub-rows under each bucket. Keyed by account id (nullable
+    # placeholder "__uncat__" for txns without a category).
+    buckets: dict = {"operating": {}, "investing": {}, "financing": {}}
+    UNCAT_KEY = "__uncat__"
+    def _bump(bucket_name, key, name, amt):
+        b = buckets[bucket_name]
+        row = b.get(key)
+        if row is None:
+            row = {"id": None if key == UNCAT_KEY else key, "code": "", "name": name, "amount": 0.0}
+            b[key] = row
+        row["amount"] += amt
     for t in txns:
         amt = float(t.get("amount", 0) or 0)
         aid = t.get("category_account_id")
         a = accts_by_id.get(aid) if aid else None
         if not a:
             operating += amt
+            _bump("operating", UNCAT_KEY, "Uncategorized", amt)
             continue
+        row_key = a["id"]
+        row_name = f"{a.get('code','')} · {a['name']}" if a.get("code") else a["name"]
         if a["type"] in ("revenue", "expense"):
             operating += amt
+            _bump("operating", row_key, row_name, amt)
         elif a.get("subtype") == "fixed_asset":
             investing += amt
+            _bump("investing", row_key, row_name, amt)
         elif a["type"] == "liability" and "loan" in (a.get("name") or "").lower():
             financing += amt
+            _bump("financing", row_key, row_name, amt)
         else:
             operating += amt
+            _bump("operating", row_key, row_name, amt)
     net = operating + investing + financing
+    def _sort_rows(bucket):
+        rows = list(bucket.values())
+        for r in rows:
+            r["amount"] = round(r["amount"], 2)
+            r["code"] = (accts_by_id.get(r["id"]) or {}).get("code", "") if r.get("id") else ""
+        rows.sort(key=lambda r: abs(r["amount"]), reverse=True)
+        return rows
     return {
         "company_name": company["name"] if company else "",
         "period_start": start, "period_end": end,
@@ -529,6 +555,9 @@ async def compute_cash_flow(company_id: str, start: str, end: str):
         "investing": round(investing, 2),
         "financing": round(financing, 2),
         "net_change": round(net, 2),
+        "operating_rows": _sort_rows(buckets["operating"]),
+        "investing_rows": _sort_rows(buckets["investing"]),
+        "financing_rows": _sort_rows(buckets["financing"]),
     }
 
 
