@@ -1227,7 +1227,7 @@ export default function Onboarding() {
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Upload statements Plaid couldn't reach</h2>
             <p className="text-sm text-slate-500">
-              Veryfi OCR pulls transactions off PDFs and images. AI categorizes the same way.
+              Our AI pulls transactions off PDFs and images and categorizes each per GAAP.
               Old paper statements, credit-union PDFs, receipts — drop them here.
             </p>
             {/* Reuse the same drop-zone / imports table experience from the

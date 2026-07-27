@@ -148,14 +148,21 @@ export default function StatementsTab({ companyId, bare = false }) {
     <div className="space-y-4" data-testid="statements-tab">
       <div className={bare ? "" : "rounded-xl border bg-white p-5"}>
         <div className="flex items-start justify-between gap-4 mb-3 flex-wrap">
-          <div>
-            <h3 className="font-heading font-semibold text-lg">Upload bank statements</h3>
-            <p className="text-sm text-slate-500 mt-1 max-w-2xl">
-              Drop PDFs (or images) of bank statements. Veryfi extracts every transaction,
-              our AI resolver auto-matches (or creates) the target bank account,
-              and every line is auto-posted to the ledger.
-            </p>
-          </div>
+          {/* Standalone (Connections → Statements) keeps the heading +
+              intro copy for context. When rendered `bare` inside the
+              onboarding stepper the parent already provides its own
+              heading and a friendlier intro, so we omit ours to avoid
+              a duplicated section. */}
+          {!bare ? (
+            <div>
+              <h3 className="font-heading font-semibold text-lg">Upload bank statements</h3>
+              <p className="text-sm text-slate-500 mt-1 max-w-2xl">
+                Drop PDFs (or images) of bank statements. Our AI extracts every transaction,
+                auto-matches (or creates) the target bank account,
+                and every line is auto-posted to the ledger.
+              </p>
+            </div>
+          ) : <div />}
           <label className="flex items-center gap-2 text-sm">
             <span className="text-slate-500">Bank account</span>
             <select
