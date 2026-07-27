@@ -1107,15 +1107,10 @@ export default function Onboarding() {
             <h2 className="font-heading text-xl font-semibold">Connect your bank via Plaid</h2>
             <p className="text-sm text-slate-500">
               Select which accounts belong to this company. We log the balance with every transaction so we can auto-reconcile later.
-              <span className="block mt-1 text-[11px] text-slate-400">Sandbox credentials: <span className="font-mono-num">user_good</span> / <span className="font-mono-num">pass_good</span></span>
             </p>
             {!plaidAccts.length ? (
               <div className="flex gap-2 flex-wrap">
                 <PlaidLinkButton companyId={currentId} onSuccess={onPlaidLinked} disabled={busy} />
-                <button onClick={mockPlaid} disabled={busy}
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-md border text-sm text-slate-600">
-                  Or use mock accounts
-                </button>
               </div>
             ) : (
               <div className="space-y-4">
@@ -1235,18 +1230,6 @@ export default function Onboarding() {
                 the app. `bare` skips the tab's own outer card since we're
                 already inside the onboarding step card. */}
             <StatementsTab companyId={currentId} bare />
-            {/* Sandbox users can still fire a fake Veryfi import to see the
-                downstream flow without hitting the real OCR pipeline. */}
-            <div className="pt-2">
-              <button
-                data-testid={TID.onboardingMockVeryfi}
-                onClick={mockVeryfi}
-                disabled={busy}
-                className="text-xs text-slate-500 hover:text-slate-800 underline"
-              >
-                Or simulate a Veryfi upload (sandbox)
-              </button>
-            </div>
             {imported.veryfi > 0 && (
               <div className="text-xs text-emerald-700">✓ Imported {imported.veryfi} lines. AI categorized each per GAAP.</div>
             )}
