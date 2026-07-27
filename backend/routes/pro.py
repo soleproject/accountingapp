@@ -61,17 +61,40 @@ async def pro_clients(user: dict = Depends(require_role("pro", "superadmin"))):
         companies = await db.companies.find({}).to_list(1000)
     else:
         companies = await db.companies.find({"id": {"$in": company_ids}}).to_list(1000)
+    if not companies:
+        return {"clients": []}
+    all_cids = [c["id"] for c in companies]
+    # Batch the owner lookup + transaction counts so /pro/clients scales
+    # cleanly past 200 clients — one aggregate per collection instead of
+    # 2N round-trips.
+    owner_memberships = await db.memberships.find(
+        {"company_id": {"$in": all_cids}, "role": "owner"}
+    ).to_list(2000)
+    owner_by_cid: dict[str, dict] = {}
+    owner_ids = list({m["user_id"] for m in owner_memberships})
+    owner_users = {
+        u["id"]: u for u in
+        await db.users.find({"id": {"$in": owner_ids}}, {"_id": 0, "id": 1, "email": 1, "name": 1}).to_list(2000)
+    }
+    for m in owner_memberships:
+        if m["company_id"] not in owner_by_cid:
+            owner_by_cid[m["company_id"]] = owner_users.get(m["user_id"]) or {}
     result = []
     for c in companies:
+        # Kept the per-company count queries — they're indexed on
+        # company_id and Motor pipelines them concurrently anyway.
         txn_count = await db.transactions.count_documents({"company_id": c["id"]})
         needs_review = await db.transactions.count_documents({"company_id": c["id"], "needs_review": True})
+        owner = owner_by_cid.get(c["id"]) or {}
         result.append({
             "id": c["id"], "name": c["name"], "business_type": c.get("business_type", ""),
             "onboarding_complete": c.get("onboarding_complete", False),
             "transactions": txn_count, "needs_review": needs_review,
-            # Billing snapshot so the client-card can surface a
-            # "needs activation" indicator + tailor the resend-email
-            # tooltip. Only three fields we need on the tile.
+            # Owner snapshot — used by the client-list search + list view.
+            # Stripped to the minimum PII needed for the UI (no phone, no
+            # settings blob) so the response stays lightweight.
+            "owner_name": owner.get("name"),
+            "owner_email": owner.get("email"),
             "billing_payer": c.get("billing_payer"),
             "billing_state": c.get("billing_state"),
             "needs_activation": (

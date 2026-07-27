@@ -8,6 +8,7 @@ import {
   AlertTriangle, CheckCircle2, ArrowRight, Plus, X, Loader2, UserPlus,
   BellRing, Wand2, FileWarning, ReceiptText, ScrollText, Sparkles, MailPlus,
   Building2, Shield, Users2, Palette, Link as LinkIcon, Gift, Ticket, CreditCard,
+  Search, LayoutGrid, List as ListIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -28,6 +29,16 @@ export default function ProClients() {
   const [mode, setMode] = useState("clients");
   const [enterprises, setEnterprises] = useState([]);
   const [entLoading, setEntLoading] = useState(false);
+
+  // Search + layout toggle for the client portfolio. `q` matches on
+  // company name, business type, owner name, and owner email — cheap
+  // client-side filter that scales fine for the hundreds-of-clients
+  // range a typical Pro portfolio hits. `layout` picks the card grid
+  // (default, richer visual scannability) vs a compact list view
+  // (fits ~3x more clients on screen for quick keyboard scanning).
+  const [q, setQ] = useState("");
+  const [layout, setLayout] = useState(() => localStorage.getItem("axiom_clients_layout") || "grid");
+  useEffect(() => { try { localStorage.setItem("axiom_clients_layout", layout); } catch { /* quota */ } }, [layout]);
 
   const resendWelcome = async (cid, name) => {
     if (resending[cid]) return;
@@ -91,9 +102,17 @@ export default function ProClients() {
     if (aFlag !== bFlag) return bFlag - aFlag;
     return (a.name || "").localeCompare(b.name || "");
   });
-  const visible = showOnlyAction
-    ? sorted.filter(c => (c.action_count || 0) > 0)
-    : sorted;
+  const visible = (() => {
+    const base = showOnlyAction ? sorted.filter(c => (c.action_count || 0) > 0) : sorted;
+    const needle = q.trim().toLowerCase();
+    if (!needle) return base;
+    return base.filter((c) => {
+      const hay = [
+        c.name, c.business_type, c.owner_name, c.owner_email,
+      ].filter(Boolean).map((s) => s.toLowerCase()).join(" ");
+      return hay.includes(needle);
+    });
+  })();
 
   return (
     <div className="space-y-4">
@@ -153,6 +172,70 @@ export default function ProClients() {
         onToggle={() => setShowOnlyAction(v => !v)}
       />
 
+      {/* Search + view-toggle row. Search filters on company name,
+          business type, owner name, and owner email — everything a
+          Pro would type when hunting for a specific client. Layout
+          toggle picks between the rich card grid (default) and a
+          compact list view better suited for keyboard-scanning
+          large portfolios. Preference is remembered per browser. */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-[240px] max-w-xl">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search clients — company name, owner name, owner email…"
+            data-testid="pro-clients-search"
+            className="w-full pl-9 pr-8 py-2 rounded-md border border-slate-200 bg-white text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+          />
+          {q && (
+            <button
+              onClick={() => setQ("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+              title="Clear search"
+              data-testid="pro-clients-search-clear"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+        <div className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white p-0.5" data-testid="pro-clients-layout-toggle">
+          <button
+            onClick={() => setLayout("grid")}
+            data-testid="pro-clients-layout-grid"
+            title="Card grid — richer visual per client"
+            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition ${
+              layout === "grid" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            <LayoutGrid size={12} /> Grid
+          </button>
+          <button
+            onClick={() => setLayout("list")}
+            data-testid="pro-clients-layout-list"
+            title="Compact list — more clients per screen"
+            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition ${
+              layout === "list" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            <ListIcon size={12} /> List
+          </button>
+        </div>
+        <div className="text-xs text-slate-500 ml-auto tabular-nums" data-testid="pro-clients-count">
+          {visible.length} of {clients.length}
+        </div>
+      </div>
+
+      {layout === "list" && (
+        <ClientsList
+          visible={visible}
+          onOpen={(cid) => { switchCompany(cid); window.location.href = "/dashboard"; }}
+          onResend={resendWelcome}
+          resending={resending}
+        />
+      )}
+
+      {layout === "grid" && (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {visible.map(c => {
           const act = c.action_count || 0;
@@ -240,14 +323,26 @@ export default function ProClients() {
             </div>
           );
         })}
-        {!visible.length && (
+        {!visible.length && layout === "grid" && (
           <div className="col-span-full text-sm text-slate-500 border border-dashed rounded-xl p-8 text-center">
-            {showOnlyAction
-              ? "All clients are clear. Nothing needs your attention today."
-              : "No clients yet. Click \"New Client\" to add your first one."}
+            {q.trim()
+              ? <>No clients match <b className="text-slate-700">"{q}"</b>. Try a different name, email, or business type.</>
+              : showOnlyAction
+                ? "All clients are clear. Nothing needs your attention today."
+                : "No clients yet. Click \"New Client\" to add your first one."}
           </div>
         )}
       </div>
+      )}
+      {!visible.length && layout === "list" && (
+        <div className="text-sm text-slate-500 border border-dashed rounded-xl p-8 text-center">
+          {q.trim()
+            ? <>No clients match <b className="text-slate-700">"{q}"</b>. Try a different name, email, or business type.</>
+            : showOnlyAction
+              ? "All clients are clear. Nothing needs your attention today."
+              : "No clients yet. Click \"New Client\" to add your first one."}
+        </div>
+      )}
 
       {creating && <NewClientModal onClose={() => setCreating(false)} onCreated={async () => { await load(); await refresh(); setCreating(false); }} />}
       </>
@@ -255,6 +350,102 @@ export default function ProClients() {
     </div>
   );
 }
+
+// --------------------------------------------------------------------------
+// ClientsList — compact list/table view of the client portfolio.
+// Same data model as the card grid; renders as one row per client with
+// scannable columns (Company, Owner, Business type, Txns, Review,
+// Status pills). "Open books" and "Resend welcome" actions live on the
+// right so keyboard-driven users can zip through clients quickly.
+// Preserves the "Awaiting payment" and Ready/Onboarding pills so the
+// two views surface the same signals.
+// --------------------------------------------------------------------------
+function ClientsList({ visible, onOpen, onResend, resending }) {
+  if (!visible.length) return null;
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden" data-testid="pro-clients-list">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+          <tr>
+            <th className="text-left px-4 py-2 font-medium">Company</th>
+            <th className="text-left px-4 py-2 font-medium">Owner</th>
+            <th className="text-left px-4 py-2 font-medium">Type</th>
+            <th className="text-right px-4 py-2 font-medium">Txns</th>
+            <th className="text-right px-4 py-2 font-medium">Review</th>
+            <th className="text-left px-4 py-2 font-medium">Status</th>
+            <th className="text-right px-4 py-2 font-medium">&nbsp;</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {visible.map((c) => {
+            const act = c.action_count || 0;
+            return (
+              <tr key={c.id} className="hover:bg-slate-50 transition" data-testid={`pro-clients-list-row-${c.id}`}>
+                <td className="px-4 py-2">
+                  <div className="font-medium text-slate-900 flex items-center gap-2">
+                    {c.name}
+                    {act > 0 && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 inline-flex items-center gap-1">
+                        <BellRing size={9} /> {act}
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td className="px-4 py-2 text-slate-600">
+                  <div className="text-slate-800">{c.owner_name || "—"}</div>
+                  <div className="text-[11px] text-slate-400">{c.owner_email || ""}</div>
+                </td>
+                <td className="px-4 py-2 text-slate-500 truncate max-w-[180px]">{c.business_type || "—"}</td>
+                <td className="px-4 py-2 text-right font-mono-num text-slate-700">{c.transactions ?? 0}</td>
+                <td className={`px-4 py-2 text-right font-mono-num ${(c.needs_review ?? 0) > 0 ? "text-orange-700" : "text-slate-400"}`}>
+                  {c.needs_review ?? 0}
+                </td>
+                <td className="px-4 py-2">
+                  <div className="flex flex-wrap gap-1">
+                    {c.needs_activation && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-100 text-cyan-800 inline-flex items-center gap-1">
+                        <CreditCard size={9} /> Awaiting payment
+                      </span>
+                    )}
+                    {c.onboarding_complete
+                      ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 inline-flex items-center gap-1"><CheckCircle2 size={9} /> Ready</span>
+                      : <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">Onboarding</span>}
+                  </div>
+                </td>
+                <td className="px-4 py-2 text-right whitespace-nowrap">
+                  <div className="inline-flex items-center gap-1">
+                    <button
+                      onClick={() => onOpen(c.id)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-900 text-white text-xs"
+                      data-testid={`open-books-list-${c.id}`}
+                    >
+                      Open <ArrowRight size={11} />
+                    </button>
+                    <button
+                      onClick={() => onResend(c.id, c.name)}
+                      disabled={resending[c.id]}
+                      title={c.needs_activation ? "Re-send Pay & activate email" : "Re-send welcome email"}
+                      data-testid={`resend-welcome-list-${c.id}`}
+                      className={`inline-flex items-center justify-center w-7 h-7 rounded border disabled:opacity-50 ${
+                        c.needs_activation
+                          ? "border-cyan-300 text-cyan-700 bg-cyan-50 hover:bg-cyan-100"
+                          : "border-slate-200 text-slate-500 hover:text-cyan-700 hover:border-cyan-300 hover:bg-cyan-50"
+                      }`}
+                    >
+                      {resending[c.id] ? <Loader2 size={11} className="animate-spin" /> : <MailPlus size={11} />}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+
 
 // --------------------------------------------------------------------------
 // EnterprisesGrid — SUPERADMIN-ONLY view of every Enterprise on the
