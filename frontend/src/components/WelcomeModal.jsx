@@ -15,7 +15,7 @@
 // who's seen it before can bail out instantly.
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { X, Play, ChevronRight, Sparkles, Volume2, MessageSquare } from "lucide-react";
+import { X, Play, ChevronRight, Sparkles, Volume2, VolumeX, MessageSquare } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
 
@@ -93,6 +93,16 @@ export default function WelcomeModal({ open, onClose }) {
   const title = slide ? slide.title(firstName, brandName) : "";
   const isCtaSlide = !!slide?.isCta;
 
+  // Local mute state — initialized from the same localStorage key the
+  // AiPanel voice toggle uses. When the user hits the speaker button
+  // during the tour we persist the change immediately so it carries
+  // into onboarding (their choice from the CTA-slide buttons will still
+  // override it, but this covers the case where they mute mid-tour and
+  // then dismiss via X).
+  const [muted, setMuted] = useState(() => {
+    try { return localStorage.getItem("axiom_tts") === "0"; } catch { return false; }
+  });
+
   // Whenever the modal transitions from closed → open, snap back to
   // slide 0 so "Replay welcome" always plays from the top instead of
   // resuming wherever the previous session was dismissed.
@@ -120,8 +130,8 @@ export default function WelcomeModal({ open, onClose }) {
     // Speak title + body. Cancel any prior utterance so slide-jumps
     // don't stack up. Voice choice mirrors the user's assistant-panel
     // preference (`localStorage.axiom_tts_voice`) so the welcome sounds
-    // the same as the day-to-day AI replies.
-    if ("speechSynthesis" in window) {
+    // the same as the day-to-day AI replies. Skip entirely when muted.
+    if ("speechSynthesis" in window && !muted) {
       window.speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(`${title}. ${fullBody}`);
       u.rate = 1.0;
@@ -146,7 +156,7 @@ export default function WelcomeModal({ open, onClose }) {
       typerRef.current && clearInterval(typerRef.current);
       if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     };
-  }, [open, slideIdx, fullBody, title]);
+  }, [open, slideIdx, fullBody, title, muted]);
 
   // Auto-advance to the next slide once BOTH the typewriter finished
   // AND the TTS utterance ended (or the pause elapsed if speech isn't
@@ -206,20 +216,51 @@ export default function WelcomeModal({ open, onClose }) {
     navigate("/onboarding");
   };
 
+  // Speaker toggle — cancels the current utterance immediately on mute
+  // and replays the current slide from the top on unmute so the audio
+  // and typewriter stay in sync. Persisted to the AiPanel preference
+  // key so a user who mutes mid-tour is silent-by-default in-app too
+  // (until they toggle it back or hit "Onboard with sound").
+  const toggleMuted = () => {
+    setMuted((prev) => {
+      const next = !prev;
+      try { localStorage.setItem("axiom_tts", next ? "0" : "1"); } catch { /* ignore */ }
+      if (next && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+      return next;
+    });
+  };
+
   return (
     <div
       className="fixed inset-0 z-[900] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
       data-testid="welcome-modal"
     >
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 relative">
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-3 p-1 rounded-full hover:bg-slate-100 text-slate-500"
-          data-testid="welcome-modal-close"
-          aria-label="Close welcome"
-        >
-          <X size={16} />
-        </button>
+        <div className="absolute top-3 right-3 flex items-center gap-1">
+          <button
+            onClick={toggleMuted}
+            data-testid="welcome-modal-mute"
+            aria-label={muted ? "Turn narration on" : "Turn narration off"}
+            title={muted ? "Turn narration on" : "Turn narration off"}
+            className={`p-1.5 rounded-full transition ${
+              muted
+                ? "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                : "text-cyan-700 hover:bg-cyan-50"
+            }`}
+          >
+            {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
+          </button>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-full hover:bg-slate-100 text-slate-500"
+            data-testid="welcome-modal-close"
+            aria-label="Close welcome"
+          >
+            <X size={16} />
+          </button>
+        </div>
         <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-cyan-700 mb-3">
           <Sparkles size={11} /> Assistant
         </div>
