@@ -1051,6 +1051,8 @@ function NewClientModal({ onClose, onCreated }) {
 function NewEnterpriseModal({ onClose, onCreated }) {
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
+  const [ownerName, setOwnerName] = useState("");
+  const [ownerEmail, setOwnerEmail] = useState("");
   const [freeSpots, setFreeSpots] = useState(0);
   const [defaultProduct, setDefaultProduct] = useState("simple_start");
   const [defaultDiscount, setDefaultDiscount] = useState(false);
@@ -1058,19 +1060,36 @@ function NewEnterpriseModal({ onClose, onCreated }) {
 
   const slugify = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   const effectiveSlug = slug.trim() || slugify(name);
+  // Basic client-side email sanity — server does the authoritative check.
+  const ownerEmailValid = !ownerEmail.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail.trim());
 
   const save = async () => {
     if (!name.trim()) { toast.error("Name is required"); return; }
+    if (ownerEmail.trim() && !ownerEmailValid) { toast.error("Owner email looks invalid"); return; }
+    if (ownerEmail.trim() && !ownerName.trim()) { toast.error("Owner name is required when you supply an email"); return; }
     setBusy(true);
     try {
-      await api.post("/admin/enterprises", {
+      const payload = {
         name: name.trim(),
         slug: effectiveSlug || undefined,
         free_user_allotment: Number(freeSpots) || 0,
         default_product: defaultProduct,
         default_discount: defaultDiscount,
-      });
-      toast.success(`Enterprise "${name.trim()}" created`);
+      };
+      if (ownerEmail.trim()) {
+        payload.owner_email = ownerEmail.trim();
+        payload.owner_name = ownerName.trim();
+      }
+      const r = await api.post("/admin/enterprises", payload);
+      const emailStatus = r.data?.email_status;
+      const ownerProvisioned = r.data?.owner_provisioned;
+      if (ownerProvisioned && emailStatus === "sent") {
+        toast.success(`Enterprise created — magic-link login sent to ${ownerEmail.trim()}`);
+      } else if (ownerProvisioned) {
+        toast.success(`Enterprise created — owner account provisioned (email dispatch: ${emailStatus || "unknown"})`);
+      } else {
+        toast.success(`Enterprise "${name.trim()}" created`);
+      }
       onCreated && onCreated();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Could not create enterprise");
@@ -1121,6 +1140,42 @@ function NewEnterpriseModal({ onClose, onCreated }) {
                 Will use <span className="font-mono">{effectiveSlug}</span>
               </div>
             )}
+          </div>
+          {/* Owner block — optional. If both name and email are supplied
+              the backend creates (or attaches) a Pro user and emails
+              them a magic-link set-password URL so they can log in and
+              take over the account. */}
+          <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-2.5">
+            <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
+              Owner (Pro user)
+            </div>
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Full name</label>
+                <input
+                  data-testid="new-enterprise-owner-name"
+                  type="text"
+                  value={ownerName}
+                  onChange={(e) => setOwnerName(e.target.value)}
+                  placeholder="e.g. Priya Patel"
+                  className="w-full px-3 py-2 rounded-md border border-slate-300 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Login email</label>
+                <input
+                  data-testid="new-enterprise-owner-email"
+                  type="email"
+                  value={ownerEmail}
+                  onChange={(e) => setOwnerEmail(e.target.value)}
+                  placeholder="priya@capstonebooks.com"
+                  className={`w-full px-3 py-2 rounded-md border text-sm focus:ring-1 outline-none bg-white ${ownerEmailValid ? "border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" : "border-rose-400 focus:border-rose-500 focus:ring-rose-500"}`}
+                />
+              </div>
+            </div>
+            <div className="text-[11px] text-slate-500 leading-snug">
+              Leave blank to create an unassigned enterprise. If you fill both, we'll create the Pro account and email a magic-link so they can set their password.
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

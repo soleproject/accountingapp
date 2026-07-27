@@ -343,12 +343,21 @@ class EnterpriseCreate(BaseModel):
     a new Enterprise record. Everything except `name` is optional; the
     slug auto-generates from `name` if left blank, and we default the
     product/discount/allotment to the same values used for
-    Pro-auto-spawn (`ensure_personal_enterprise_for_pro`). Ownership is
-    optional — most manually-created enterprises are unassigned until
-    a Pro is later linked from the enterprise detail page."""
+    Pro-auto-spawn (`ensure_personal_enterprise_for_pro`).
+
+    Two owner-provisioning modes are supported:
+      * `owner_user_id` — attach an existing Pro user directly.
+      * `owner_email` + `owner_name` — create/attach a Pro by email:
+        if the email already belongs to a Pro we simply set
+        `enterprise_id`; if it doesn't exist we insert a fresh Pro
+        user with a placeholder password and email them a magic-link
+        set-password URL so they can log in and take over the account.
+    """
     name: str = Field(..., min_length=1, max_length=120)
     slug: Optional[str] = Field(default=None, max_length=80)
     owner_user_id: Optional[str] = None
+    owner_email: Optional[EmailStr] = None
+    owner_name: Optional[str] = Field(default=None, max_length=200)
     free_user_allotment: int = Field(default=0, ge=0, le=10_000)
     default_product: str = "simple_start"
     default_discount: bool = False
@@ -360,27 +369,65 @@ async def create_enterprise(
     user: dict = Depends(require_role("superadmin")),
 ):
     """Superadmin — mint a new Enterprise. Slug is auto-generated from
-    the name (kebab-case) with de-dupe suffixing when necessary. If
-    `owner_user_id` is provided we also attach that user to the
-    enterprise (updates `users.enterprise_id`) so the roll-up KPIs
-    reflect them immediately."""
+    the name (kebab-case) with de-dupe suffixing when necessary.
+
+    When `owner_email` is supplied we ALSO provision a Pro user for
+    that email — creating one with `must_set_password=True` if it
+    doesn't already exist, and dispatching a Resend magic-link
+    welcome email so the new owner can log in and set their password.
+    """
     now = datetime.now(timezone.utc).isoformat()
     slug_base = _ent._slugify(payload.slug or payload.name)
     slug = await _ent._resolve_unique_slug(slug_base)
-    # Verify the target owner (if any) is a real Pro on the platform —
-    # attaching a client to an enterprise as its owner would be nonsense.
+
+    # Resolve the owner up-front so the enterprise is stamped with the
+    # correct `owner_user_id` on first insert (avoids two write hops).
+    owner_user_id: Optional[str] = None
+    owner_provisioned = False  # True when we minted a NEW pro user
+    magic_token: Optional[str] = None
     if payload.owner_user_id:
         owner = await db.users.find_one({"id": payload.owner_user_id})
         if not owner:
             raise HTTPException(400, "owner_user_id does not exist")
         if owner.get("role") != "pro":
             raise HTTPException(400, "owner_user_id must be a Pro user")
+        owner_user_id = owner["id"]
+    elif payload.owner_email:
+        owner_email = str(payload.owner_email).lower().strip()
+        existing = await db.users.find_one({"email": owner_email})
+        if existing:
+            if existing.get("role") != "pro":
+                raise HTTPException(
+                    400,
+                    "That email belongs to a non-pro account and cannot own an enterprise.",
+                )
+            owner_user_id = existing["id"]
+        else:
+            # Fresh Pro user with a random placeholder password. The
+            # welcome email carries a magic-link password-set token
+            # (7-day TTL, purpose='welcome') so the invitee never sees
+            # a plaintext credential and rotation is baked in.
+            import secrets as _secrets
+            placeholder = hash_password(_secrets.token_urlsafe(48))
+            owner_user_id = str(uuid.uuid4())
+            await db.users.insert_one({
+                "id": owner_user_id,
+                "email": owner_email,
+                "name": (payload.owner_name or owner_email.split("@")[0]).strip(),
+                "password": placeholder,
+                "role": "pro",
+                "must_set_password": True,
+                "created_at": now,
+                "updated_at": now,
+            })
+            owner_provisioned = True
+
     ent = {
         "id": str(uuid.uuid4()),
         "name": payload.name.strip(),
         "slug": slug,
         "is_default": False,
-        "owner_user_id": payload.owner_user_id,
+        "owner_user_id": owner_user_id,
         "free_user_allotment": payload.free_user_allotment,
         "default_product": payload.default_product,
         "default_discount": payload.default_discount,
@@ -388,13 +435,55 @@ async def create_enterprise(
         "updated_at": now,
     }
     await db.enterprises.insert_one(ent)
-    if payload.owner_user_id:
+    if owner_user_id:
         await db.users.update_one(
-            {"id": payload.owner_user_id},
+            {"id": owner_user_id},
             {"$set": {"enterprise_id": ent["id"]}},
         )
+
+    # Dispatch the welcome / invite email best-effort. Failure to email
+    # never blocks the enterprise-create flow — the admin can hit
+    # "Resend welcome link" from the enterprise detail page later.
+    email_status = None
+    email_error = None
+    if owner_provisioned:
+        try:
+            from routes.auth import mint_password_set_token
+            from email_dispatcher import dispatch, public_base_url
+            import email_templates as _tmpl
+            magic_token = await mint_password_set_token(owner_user_id, purpose="welcome")
+            magic_url = f"{public_base_url()}/set-password/{magic_token}"
+            subject, html = _tmpl.team_invite(
+                invitee_name=(payload.owner_name or "there"),
+                inviter_name=user.get("name") or user.get("email") or "SmartBooks",
+                role_label="Enterprise owner",
+                role_description=f"you'll own the {ent['name']} enterprise on SmartBooks and can invite Pros, add clients, and manage billing.",
+                company_names=[],
+                magic_url=magic_url,
+            )
+            result = await dispatch(
+                kind="team_invite",
+                to=str(payload.owner_email),
+                subject=subject, html=html,
+                initiating_user_id=user["id"],
+                company_id=None,
+                related={"enterprise_id": ent["id"], "kind": "enterprise_owner_welcome"},
+            )
+            email_status = result.get("status", "failed")
+            email_error = result.get("error")
+        except Exception as _exc:  # noqa: BLE001
+            import logging as _lg
+            _lg.getLogger(__name__).exception("Enterprise owner welcome email failed (user still created)")
+            email_status = "failed"
+            email_error = str(_exc)
+
     stats = await _ent.rollup_stats(ent["id"])
-    return {"enterprise": _ent.serialize(ent, stats=stats)}
+    return {
+        "enterprise": _ent.serialize(ent, stats=stats),
+        "owner_provisioned": owner_provisioned,
+        "email_status": email_status,
+        "email_error": email_error,
+    }
 
 
 @router.get("/admin/enterprises")
