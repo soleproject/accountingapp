@@ -401,6 +401,20 @@ export default function AiPanel({ collapsed, onToggle }) {
   useEffect(() => { micModeRef.current = micMode; }, [micMode]);
   const [interim, setInterim] = useState("");
   const [voiceOn, setVoiceOn] = useState(() => localStorage.getItem("axiom_tts") === "1");
+  // Listen for `axiom-tts-changed` broadcasts (fired from
+  // WelcomeModal's speaker toggle + the "Onboard with sound / chat
+  // only" CTAs). AiPanel reads `axiom_tts` at mount only, so without
+  // this sync it would keep narrating even after a user asks for a
+  // silent onboarding.
+  useEffect(() => {
+    const onChange = (e) => {
+      const desired = !!(e?.detail?.on ?? (localStorage.getItem("axiom_tts") === "1"));
+      setVoiceOn(desired);
+      if (!desired && "speechSynthesis" in window) window.speechSynthesis.cancel();
+    };
+    window.addEventListener("axiom-tts-changed", onChange);
+    return () => window.removeEventListener("axiom-tts-changed", onChange);
+  }, []);
   const [voiceName, setVoiceName] = useState(() => localStorage.getItem("axiom_tts_voice") || "Google UK English Female");
   const [voices, setVoices] = useState([]);
   const [voiceMenuOpen, setVoiceMenuOpen] = useState(false);

@@ -211,20 +211,21 @@ export default function WelcomeModal({ open, onClose }) {
   // is one click.
   const startOnboarding = (withSound) => {
     try { localStorage.setItem("axiom_tts", withSound ? "1" : "0"); } catch { /* quota */ }
+    // AiPanel reads `axiom_tts` at mount only — dispatch a broadcast so
+    // its listener flips `voiceOn` state to match. Without this the
+    // sidebar keeps narrating replies even after the user chose
+    // "Onboard with chat only."
+    window.dispatchEvent(new CustomEvent("axiom-tts-changed", { detail: { on: withSound } }));
     if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     onClose();
     navigate("/onboarding");
   };
 
-  // Speaker toggle — cancels the current utterance immediately on mute
-  // and replays the current slide from the top on unmute so the audio
-  // and typewriter stay in sync. Persisted to the AiPanel preference
-  // key so a user who mutes mid-tour is silent-by-default in-app too
-  // (until they toggle it back or hit "Onboard with sound").
   const toggleMuted = () => {
     setMuted((prev) => {
       const next = !prev;
       try { localStorage.setItem("axiom_tts", next ? "0" : "1"); } catch { /* ignore */ }
+      window.dispatchEvent(new CustomEvent("axiom-tts-changed", { detail: { on: !next } }));
       if (next && "speechSynthesis" in window) {
         window.speechSynthesis.cancel();
       }
