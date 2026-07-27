@@ -49,10 +49,15 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
     setSearchParams(next, { replace: true });
   };
 
-  // Breadcrumb back to Balance Sheet — restores the exact scroll position
-  // saved when the user clicked into this account.
+  // Breadcrumb back to the source report (Balance Sheet or Income
+  // Statement) — restores the exact scroll position saved when the
+  // user clicked into this account. Falls back to Balance Sheet if
+  // the sessionStorage packet is missing (older bookmark, hard reload).
+  const returnLabel = sessionStorage.getItem("reportReturnLabel") || "Balance Sheet";
   const goBackToBalanceSheet = () => {
-    const returnUrl = sessionStorage.getItem("bsReturnUrl") || "/reports/balance-sheet";
+    const returnUrl = sessionStorage.getItem("reportReturnUrl")
+      || sessionStorage.getItem("bsReturnUrl")
+      || "/reports/balance-sheet";
     navigate(returnUrl);
   };
 
@@ -111,7 +116,7 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
           onClick={goBackToBalanceSheet}
           className="inline-flex items-center gap-1 hover:text-indigo-700 hover:underline"
         >
-          <ChevronLeft size={12} /> Balance Sheet
+          <ChevronLeft size={12} /> {returnLabel}
         </button>
         <span className="text-slate-300">/</span>
         <span className="text-slate-700">{account.code} · {account.name}</span>
@@ -344,31 +349,33 @@ export default function ReportView() {
   const [end, setEnd] = useState(urlEnd || today());
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
-  // Balance-sheet drilldown: clicking a row navigates to the full-page
-  // Account Detail report so users can review, PDF-export, or bulk-move
-  // transactions using the same UX as any other financial report. We stash
-  // the current URL + scroll position (from the <main> scroll container in
-  // the app shell) so the breadcrumb can restore both.
+  // Report drilldown: clicking a row on either the Balance Sheet OR
+  // the Income Statement navigates to the full-page Account Detail
+  // report. We stash the current URL + scroll position + human-readable
+  // label so the breadcrumb can restore all three when the user hits
+  // back. Keeping the storage keys generic (`reportReturn*` rather
+  // than `bs*`) means both reports share the exact same UX.
   const goToAccountDetail = (row) => {
     if (!row?.id) return;
     try {
       const scroller = document.querySelector("main");
       const y = scroller ? scroller.scrollTop : (window.scrollY || 0);
-      sessionStorage.setItem("bsReturnUrl",
-        `/reports/balance-sheet${window.location.search || ""}`);
-      sessionStorage.setItem("bsScrollY", String(y));
+      const isIS = kind === "income-statement";
+      sessionStorage.setItem("reportReturnUrl",
+        `/reports/${kind}${window.location.search || ""}`);
+      sessionStorage.setItem("reportReturnLabel", isIS ? "Income Statement" : "Balance Sheet");
+      sessionStorage.setItem("reportScrollY", String(y));
     } catch { /* private mode / quota — fine to ignore */ }
     navigate(`/reports/account-detail?account=${row.id}`);
   };
 
-  // Restore Balance Sheet scroll position on return from Account Detail.
+  // Restore source-report scroll position on return from Account Detail.
   useEffect(() => {
-    if (kind !== "balance-sheet" || !data) return;
-    const y = sessionStorage.getItem("bsScrollY");
+    if (!(kind === "balance-sheet" || kind === "income-statement") || !data) return;
+    const y = sessionStorage.getItem("reportScrollY")
+      || sessionStorage.getItem("bsScrollY"); // legacy key
     if (y == null) return;
     const top = parseInt(y, 10) || 0;
-    // Double rAF + a tiny fallback timeout ensures the scroll container has
-    // finished sizing after the BS re-render (children rows arrive last).
     let cancelled = false;
     const apply = () => {
       if (cancelled) return;
@@ -377,7 +384,11 @@ export default function ReportView() {
       else window.scrollTo({ top, behavior: "instant" });
     };
     requestAnimationFrame(() => requestAnimationFrame(apply));
-    const t = setTimeout(() => { apply(); sessionStorage.removeItem("bsScrollY"); }, 120);
+    const t = setTimeout(() => {
+      apply();
+      sessionStorage.removeItem("reportScrollY");
+      sessionStorage.removeItem("bsScrollY");
+    }, 120);
     return () => { cancelled = true; clearTimeout(t); };
   }, [kind, data]);
 
@@ -507,7 +518,7 @@ export default function ReportView() {
           </div>
 
           {kind === "income-statement" && Array.isArray(data.revenue) && (
-            <IncomeStatementBody data={data} />
+            <IncomeStatementBody data={data} onDrilldown={goToAccountDetail} />
           )}
           {kind === "balance-sheet" && Array.isArray(data.assets) && (
             <BalanceSheetBody data={data} onDrilldown={goToAccountDetail} />
@@ -557,7 +568,7 @@ function Row({ id, code, name, amount, bold, parent_code, onClick }) {
     <div
       className={`grid grid-cols-12 gap-2 px-3 py-1.5 border-b border-slate-100 ${bold ? "font-semibold border-slate-800" : ""} ${isChild ? "bg-slate-50/60" : ""} ${clickable ? "cursor-pointer hover:bg-indigo-50/60 transition-colors" : ""}`}
       onClick={clickable ? () => onClick({ id, code, name, amount }) : undefined}
-      data-testid={clickable ? `bs-row-${code}` : undefined}
+      data-testid={clickable ? `report-row-${code}` : undefined}
     >
       <div className="col-span-2 font-mono-num text-xs text-slate-500">
         {isChild ? <span className="opacity-40 mr-1">↳</span> : null}
@@ -569,14 +580,14 @@ function Row({ id, code, name, amount, bold, parent_code, onClick }) {
   );
 }
 
-function IncomeStatementBody({ data }) {
+function IncomeStatementBody({ data, onDrilldown }) {
   return (
     <div className="text-sm">
       <Section title="Revenue" />
-      {data.revenue.map(r => <Row key={r.code} {...r} />)}
+      {data.revenue.map(r => <Row key={`${r.code}-${r.parent_code || ""}`} {...r} onClick={onDrilldown} />)}
       <Row code="" name="Total Revenue" amount={data.total_revenue} bold />
       <Section title="Operating Expenses" />
-      {data.expenses.map(r => <Row key={r.code} {...r} />)}
+      {data.expenses.map(r => <Row key={`${r.code}-${r.parent_code || ""}`} {...r} onClick={onDrilldown} />)}
       <Row code="" name="Total Expenses" amount={data.total_expense} bold />
       <div className="mt-4 grid grid-cols-12 gap-2 px-3 py-2 border-t-2 border-slate-800 bg-slate-50 rounded">
         <div className="col-span-9 font-heading font-bold uppercase text-sm">Net Income</div>

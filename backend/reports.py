@@ -180,9 +180,9 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
         if abs(disp) < 0.005:
             continue
         if a["type"] == "revenue":
-            revenue_rows.append({"code": a["code"], "name": a["name"], "amount": round(disp, 2)})
+            revenue_rows.append({"id": a["id"], "code": a["code"], "name": a["name"], "amount": round(disp, 2)})
         elif a["type"] == "expense":
-            expense_rows.append({"code": a["code"], "name": a["name"], "amount": round(disp, 2)})
+            expense_rows.append({"id": a["id"], "code": a["code"], "name": a["name"], "amount": round(disp, 2)})
 
     total_revenue = round(sum(r["amount"] for r in revenue_rows), 2)
     total_expense = round(sum(r["amount"] for r in expense_rows), 2)
