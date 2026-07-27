@@ -688,6 +688,10 @@ function OnboardingNudge({ company }) {
     // mount and the message never lands in the chat (TTS still speaks it
     // because the speak path is invoked directly on emit).
     const firstName = (user?.name || "").split(" ")[0];
+    // Greet by name ONCE — the initial dashboard nudge is the very
+    // first thing they see, and a personal hello helps. Every
+    // downstream onboarding-step message drops the name so we don't
+    // parrot it across every prompt (was previously reading as pushy).
     const hello = firstName ? `Hi ${firstName} — ` : "Welcome — ";
     setTimeout(() => {
       emitAction("onboarding-coach-greet", {

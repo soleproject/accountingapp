@@ -27,15 +27,14 @@ const COACH_SCRIPTS = {
     // wave us through ("nope, good to go") or tack on corrections in one
     // sentence.
     message: (ctx) => {
-      const hello = ctx.userFirst ? `Hi ${ctx.userFirst}` : "Hi";
       const bt = ctx.answers?.business_type || ctx.current?.business_type;
       const bd = ctx.answers?.business_description || ctx.current?.business_description;
       if (bt || bd) {
         const cleanBd = bd ? String(bd).trim().replace(/[.!]+$/, "") : "";
         const bits = [bt && `a **${bt}**`, cleanBd && `— ${cleanBd}`].filter(Boolean).join(" ");
-        return `${hello} — I have ${ctx.name || "this business"} down as ${bits}. Want to change anything, or should we move on? A quick "nope" / "good to go" works, or tell me what to tweak.`;
+        return `I have ${ctx.name || "this business"} down as ${bits}. Want to change anything, or should we move on? A quick "nope" / "good to go" works, or tell me what to tweak.`;
       }
-      return `${hello} — let's set up ${ctx.name || "your"} books together. Tell me what kind of business this is and what it does (e.g. "we're an LLC doing IT security consulting for hospitals"). I'll fill in the fields on the right for you. You can also fill them manually if you prefer.`;
+      return `Let's set up ${ctx.name || "your"} books together. Tell me what kind of business this is and what it does (e.g. "we're an LLC doing IT security consulting for hospitals"). I'll fill in the fields on the right for you. You can also fill them manually if you prefer.`;
     },
     extractStep: "business_profile",
     // Auto-advance when we already had (or just captured) both essentials,
@@ -57,10 +56,8 @@ const COACH_SCRIPTS = {
   },
   1: {
     key: "onboarding.qbo_link",
-    message: (ctx) => {
-      const hello = ctx.userFirst ? `${ctx.userFirst}, do` : "Do";
-      return `${hello} you already use QuickBooks Online and want to migrate the information?`;
-    },
+    message: () =>
+      `Do you already use QuickBooks Online and want to migrate the information?`,
     extractStep: "qbo_link",
     ready: (fields) => fields.qbo === "yes" || fields.qbo === "no",
     confirm: (_bits, _ready, fields) =>
@@ -70,10 +67,8 @@ const COACH_SCRIPTS = {
   },
   2: {
     key: "onboarding.interview",
-    message: (ctx) => {
-      const hello = ctx.userFirst ? `${ctx.userFirst}, five` : "Five";
-      return `${hello} short questions coming up — should take about 30 seconds. Your answers help me tailor the chart of accounts and pre-seed bank-feed rules for your exact business. Hit "Start AI interview" whenever you're ready.`;
-    },
+    message: () =>
+      `Five short questions coming up — should take about 30 seconds. Your answers help me tailor the chart of accounts and pre-seed bank-feed rules for your exact business. Hit "Start AI interview" whenever you're ready.`,
     // No extractStep — user drives the interview UI, not chat.
   },
   3: {
@@ -87,10 +82,8 @@ const COACH_SCRIPTS = {
   },
   4: {
     key: "onboarding.plaid",
-    message: (ctx) => {
-      const hello = ctx.userFirst ? `${ctx.userFirst}, we` : "We";
-      return `${hello} are on a roll! Do you want to hook up your bank accounts so that we can download transactions automatically?`;
-    },
+    message: () =>
+      `We are on a roll! Do you want to hook up your bank accounts so that we can download transactions automatically?`,
     extractStep: "plaid_intent",
     // Advance on either explicit "skip"/"no" OR after they successfully
     // linked at least one Plaid account (handled by the local move-on
@@ -114,10 +107,8 @@ const COACH_SCRIPTS = {
   },
   6: {
     key: "onboarding.ready",
-    message: (ctx) => {
-      const hello = ctx.userFirst ? `${ctx.userFirst}, you're` : "You're";
-      return `${hello} all set. Every transaction I could categorize is ready to review; anything I wasn't sure about is flagged. Say "let's go" whenever you want me to take you into your books.`;
-    },
+    message: () =>
+      `You're all set. Every transaction I could categorize is ready to review; anything I wasn't sure about is flagged. Say "let's go" whenever you want me to take you into your books.`,
     extractStep: "ready_confirm",
     ready: (fields) => fields.confirm === true,
     confirm: () => `Perfect — taking you in now.`,
