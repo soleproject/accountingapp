@@ -366,7 +366,19 @@ export default function ReportView() {
       sessionStorage.setItem("reportReturnLabel", isIS ? "Income Statement" : "Balance Sheet");
       sessionStorage.setItem("reportScrollY", String(y));
     } catch { /* private mode / quota — fine to ignore */ }
-    navigate(`/reports/account-detail?account=${row.id}`);
+    // Match the source report's period on the Account Detail drill-down
+    // so a P&L click doesn't return every historical row for that
+    // account — user reported seeing $796 of Entertainment when the P&L
+    // period only had $47. Income Statement passes `start` + `end`
+    // (the full period). Balance Sheet passes only `end` (as-of).
+    const parts = [`account=${row.id}`];
+    if (kind === "income-statement") {
+      if (start) parts.push(`start=${encodeURIComponent(start)}`);
+      if (end)   parts.push(`end=${encodeURIComponent(end)}`);
+    } else if (kind === "balance-sheet") {
+      if (end)   parts.push(`end=${encodeURIComponent(end)}`);
+    }
+    navigate(`/reports/account-detail?${parts.join("&")}`);
   };
 
   // Restore source-report scroll position on return from Account Detail.
