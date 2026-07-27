@@ -486,6 +486,52 @@ async def create_enterprise(
     }
 
 
+@router.post("/admin/impersonate/{target_user_id}")
+async def impersonate_user(
+    target_user_id: str,
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Superadmin — obtain a fresh JWT for another user so the admin
+    can drive the platform AS them (customer support / QA). The
+    frontend stashes the ORIGINAL superadmin token in localStorage
+    before swapping in the impersonation token so "Stop impersonating"
+    can restore the session in one click. Audited to `admin_audit_log`
+    with kind=`impersonate_start` (superadmin_id, target_user_id,
+    timestamp) — non-blocking if the collection isn't seeded.
+    """
+    target = await db.users.find_one({"id": target_user_id})
+    if not target:
+        raise HTTPException(404, "User not found")
+    # Refuse to impersonate another superadmin — that just muddies the
+    # audit trail and offers no support benefit.
+    if target.get("role") == "superadmin":
+        raise HTTPException(400, "Cannot impersonate another superadmin.")
+    token = create_token(target["id"], target["role"])
+    try:
+        await db.admin_audit_log.insert_one({
+            "id": str(uuid.uuid4()),
+            "kind": "impersonate_start",
+            "superadmin_id": user["id"],
+            "superadmin_email": user.get("email"),
+            "target_user_id": target["id"],
+            "target_email": target.get("email"),
+            "target_role": target.get("role"),
+            "at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception:  # noqa: BLE001 — audit failure never blocks impersonation
+        pass
+    return {
+        "token": token,
+        "user": {
+            "id": target["id"],
+            "email": target["email"],
+            "name": target.get("name") or target["email"],
+            "role": target["role"],
+        },
+    }
+
+
+
 @router.get("/admin/enterprises")
 async def list_enterprises(user: dict = Depends(require_role("superadmin"))):
     """Every enterprise on the platform + roll-up KPIs. Sorted with the

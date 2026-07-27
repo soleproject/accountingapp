@@ -20,6 +20,36 @@ export default function ProClients() {
   // the Enterprises tab. On success we re-run the enterprises fetch so
   // the new record shows up immediately in the grid without a reload.
   const [creatingEnterprise, setCreatingEnterprise] = useState(false);
+  // Superadmin-only: "Open" button on an enterprise card impersonates
+  // the owner Pro — fresh JWT from `/admin/impersonate/{uid}`, cache
+  // the previous superadmin token so `<ImpersonateBanner>` can flip
+  // back with one click.
+  const openAsOwner = async (ent) => {
+    if (!ent?.owner_user_id) return;
+    try {
+      const r = await api.post(`/admin/impersonate/${ent.owner_user_id}`);
+      const newTok = r.data?.token;
+      const newUsr = r.data?.user;
+      if (!newTok || !newUsr) throw new Error("Bad impersonate response");
+      // Stash the original token+user so we can Stop impersonating.
+      const prevTok = localStorage.getItem("axiom_token");
+      const prevUsr = localStorage.getItem("axiom_user");
+      if (prevTok) localStorage.setItem("axiom_impersonate_prev_token", prevTok);
+      if (prevUsr) localStorage.setItem("axiom_impersonate_prev_user", prevUsr);
+      localStorage.setItem("axiom_impersonate_target", JSON.stringify({ name: newUsr.name, email: newUsr.email, enterprise_name: ent.name }));
+      localStorage.setItem("axiom_token", newTok);
+      localStorage.setItem("axiom_user", JSON.stringify(newUsr));
+      // Clear the previously-selected company so the impersonated user's
+      // own company-switcher default kicks in.
+      localStorage.removeItem("axiom_company_id");
+      toast.success(`Signing in as ${newUsr.name}…`);
+      // Full reload → new token is picked up by every axios request +
+      // the top-level Auth provider re-hydrates from localStorage.
+      window.location.href = "/dashboard";
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Impersonation failed");
+    }
+  };
   const [showOnlyAction, setShowOnlyAction] = useState(false);
   const [resending, setResending] = useState({});
   const { switchCompany, refresh } = useCompany();
@@ -184,7 +214,7 @@ export default function ProClients() {
       </div>
 
       {mode === "enterprise" ? (
-        <EnterprisesGrid enterprises={enterprises} loading={entLoading} />
+        <EnterprisesGrid enterprises={enterprises} loading={entLoading} onOpenAsOwner={openAsOwner} />
       ) : (
       <>
       <FirmAttentionTile
@@ -489,7 +519,7 @@ function ClientsList({ visible, onOpen, onResend, resending }) {
 // card opens /admin/enterprises/{eid} — the detail page with KPI row
 // and companies list report.
 // --------------------------------------------------------------------------
-function EnterprisesGrid({ enterprises, loading }) {
+function EnterprisesGrid({ enterprises, loading, onOpenAsOwner }) {
   if (loading) {
     return (
       <div className="rounded-xl border border-dashed p-10 text-center text-slate-500 flex items-center justify-center gap-2">
@@ -575,8 +605,27 @@ function EnterprisesGrid({ enterprises, loading }) {
               </div>
             </div>
 
-            <div className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-indigo-700 group-hover:text-indigo-900 self-start">
-              Open enterprise <ArrowRight size={12} className="transition-transform group-hover:translate-x-0.5" />
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <div className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700 group-hover:text-indigo-900">
+                Open enterprise <ArrowRight size={12} className="transition-transform group-hover:translate-x-0.5" />
+              </div>
+              {e.owner_user_id && (
+                <button
+                  data-testid={`enterprise-open-as-owner-${e.id}`}
+                  onClick={(evt) => {
+                    // Cancel the enclosing <Link> navigation so we
+                    // impersonate INSTEAD of drilling into the admin
+                    // enterprise detail page.
+                    evt.preventDefault();
+                    evt.stopPropagation();
+                    onOpenAsOwner && onOpenAsOwner(e);
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium shadow-sm"
+                  title="Sign in as the enterprise owner"
+                >
+                  Open <ArrowRight size={11} />
+                </button>
+              )}
             </div>
           </div>
         </Link>
