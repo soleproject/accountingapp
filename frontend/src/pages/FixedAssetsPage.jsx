@@ -416,14 +416,27 @@ function FixedAssetModal({ currentId, editRow, onClose }) {
           </label>
           <div className="mt-1 grid grid-cols-4 gap-1">
             {[
-              { k: "cash", l: "Cash" },
-              { k: "loan", l: "Loan" },
-              { k: "owner_equity", l: "Owner" },
-              { k: "obe", l: "Opening" },
-            ].map(({ k, l }) => (
+              {
+                k: "cash", l: "Cash",
+                tip: "Paid for out of a business bank or cash account. We'll DEBIT the fixed asset and CREDIT the bank/cash account you pick below — cash goes out, asset comes in.",
+              },
+              {
+                k: "loan", l: "Loan",
+                tip: "Financed the purchase — mortgage, auto loan, equipment loan, line of credit, etc. We'll DEBIT the fixed asset and CREDIT the loan liability. Later principal payments reduce the loan balance without touching the asset.",
+              },
+              {
+                k: "owner_equity", l: "Owner",
+                tip: "The owner personally contributed the asset — or paid for it out of pocket without going through a business bank account. We'll DEBIT the fixed asset and CREDIT an owner contribution / equity account.",
+              },
+              {
+                k: "obe", l: "Opening",
+                tip: "The business already owned this asset when you started keeping books here. We'll DEBIT the fixed asset and CREDIT 3050 Opening Balance Equity — representing pre-existing net worth so retained earnings aren't distorted.",
+              },
+            ].map(({ k, l, tip }) => (
               <button
                 key={k}
                 type="button"
+                title={tip}
                 data-testid={`fa-offset-kind-${k}`}
                 onClick={() => setOffsetKind(k)}
                 className={`px-2 py-1.5 rounded text-xs border ${
