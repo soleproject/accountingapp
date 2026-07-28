@@ -109,6 +109,64 @@ class EnsureAccountIn(BaseModel):
     parent_account_id: Optional[str] = None
 
 
+# ---------- Sub-account policy -----------------------------------------
+# Loans, mortgages, HELOCs, and credit cards should ALWAYS live under a
+# canonical parent so the balance sheet stays grouped:
+#   Loans Payable         (2500)  → loans, mortgages, notes payable, HELOCs
+#   Credit Cards Payable  (2100)  → all credit card liabilities
+# The helper below auto-creates the parent if it doesn't exist and returns
+# its id. It skips when the account BEING created IS the parent itself.
+LOAN_KEYWORDS = re.compile(
+    r"\b(loan|mortgage|note[s]?\s+payable|line\s+of\s+credit|heloc|home\s+equity)\b",
+    re.I,
+)
+LOAN_SUBTYPES = {"long_term_debt", "long_term_liability", "note_payable",
+                 "notes_payable", "line_of_credit", "mortgage_payable", "heloc"}
+CARD_KEYWORDS = re.compile(r"\bcredit\s*card\b", re.I)
+CARD_SUBTYPES = {"credit_card", "credit_cards_payable"}
+PARENT_ROOTS = {"loans payable", "credit cards payable"}
+
+
+async def _resolve_liability_parent(cid: str, name: str, subtype: str) -> Optional[str]:
+    """Find or create the canonical parent for a loan/HELOC/credit-card
+    liability so it's always grouped under a proper root on the balance
+    sheet. Returns None when no auto-parenting applies (e.g., the account
+    IS the root, or it doesn't match the policy)."""
+    name_norm = re.sub(r"\s+", " ", (name or "").strip()).lower()
+    subtype_norm = (subtype or "").strip().lower()
+    if name_norm in PARENT_ROOTS:
+        return None  # don't parent a root to itself
+    is_card = bool(CARD_KEYWORDS.search(name or "")) or subtype_norm in CARD_SUBTYPES
+    is_loan = (bool(LOAN_KEYWORDS.search(name or "")) or subtype_norm in LOAN_SUBTYPES) and not is_card
+    if not (is_card or is_loan):
+        return None
+    parent_name = "Credit Cards Payable" if is_card else "Loans Payable"
+    parent_code = "2100" if is_card else "2500"
+    parent_subtype = "credit_card" if is_card else "long_term_liability"
+    # Find existing parent by name (case-insensitive) among liability accounts.
+    parent_norm = parent_name.lower()
+    async for a in db.accounts.find({"company_id": cid, "type": "liability"}):
+        if re.sub(r"\s+", " ", (a.get("name") or "").strip()).lower() == parent_norm:
+            return a["id"]
+    # Create the parent on demand. Prefer the canonical code if free.
+    used = {a["code"] for a in await db.accounts.find(
+        {"company_id": cid, "code": {"$exists": True}}
+    ).to_list(2000)}
+    code = parent_code if parent_code not in used else None
+    if not code:
+        for n in range(2100, 3000, 10):
+            if str(n) not in used:
+                code = str(n); break
+    aid = str(uuid.uuid4()); now = now_iso()
+    await db.accounts.insert_one({
+        "id": aid, "company_id": cid, "code": code, "name": parent_name,
+        "type": "liability", "subtype": parent_subtype, "active": True,
+        "balance": 0.0, "parent_account_id": None,
+        "created_at": now, "updated_at": now, "source": "policy_auto_parent",
+    })
+    return aid
+
+
 @router.post("/companies/{cid}/accounts/ensure")
 async def ensure_account(cid: str, inp: EnsureAccountIn, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
@@ -132,6 +190,15 @@ async def ensure_account(cid: str, inp: EnsureAccountIn, user: dict = Depends(ge
                         parent = a
                         break
             inp.parent_account_id = parent["id"] if parent else None
+
+    # Policy: loans, mortgages, HELOCs, and credit cards are ALWAYS created
+    # as sub-accounts under a canonical parent so the balance sheet stays
+    # grouped. If no parent was explicitly passed, auto-resolve one now
+    # (creating "Loans Payable" or "Credit Cards Payable" if missing).
+    if t == "liability" and not inp.parent_account_id:
+        auto_parent = await _resolve_liability_parent(cid, inp.name, inp.subtype or "")
+        if auto_parent:
+            inp.parent_account_id = auto_parent
 
     # Match by normalized name (case-insensitive) OR exact code.
     # When creating a sub-account, don't reuse the parent's code —

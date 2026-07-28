@@ -2310,3 +2310,35 @@ Added a PROPOSAL EMISSION RULES section that explicitly:
 - `/app/backend/asset_service.py` (offsets alias + UUID resolution)
 - `/app/backend/routes/chat.py` (directive)
 
+
+## Firm-Wide Policy: Loans/HELOCs/Credit Cards Are Always Sub-Accounts (Feb 28, 2026) ✅
+**User request:** *"Always make loans or home equity lines of credit (HELOCs) or credit cards, always make those sub-accounts."*
+
+**What was built:**
+A firm-wide policy enforced at the backend — every liability that matches the loan / mortgage / note-payable / line-of-credit / HELOC / credit-card class is automatically created as a child of a canonical parent, whether the account is created via the AI Panel, a Sparkles proposal, or a manual CoA form.
+
+**Parent conventions:**
+- Loans / mortgages / notes payable / HELOCs → **"Loans Payable"** (code 2500)
+- Credit cards → **"Credit Cards Payable"** (code 2100)
+- The parent is auto-created on demand if it doesn't already exist.
+
+**Backend (`routes/accounts.py`):**
+- New helper `_resolve_liability_parent(cid, name, subtype)` classifies by keyword/subtype and returns (or creates) the appropriate parent id.
+- `ensure_account` now calls the helper whenever `type=='liability'` and no explicit `parent_account_id` was provided.
+- The root parent itself is exempt from self-parenting (e.g., creating "Loans Payable" won't try to parent it under itself).
+- Unrelated liabilities (Accrued Payroll, Sales Tax Payable, etc.) are untouched by the policy.
+
+**AI directive (`routes/chat.py`):**
+Added a SUB-ACCOUNT POLICY block instructing the LLM to always include `parent_account_id` in `create-liability-account` proposals for loans/HELOCs/credit cards, even on the first creation. Backend acts as a safety net when the LLM forgets.
+
+**Verified via curl (5 scenarios, all pass):**
+1. Wells Fargo mortgage (no parent hint) → auto-parented under Loans Payable ✓
+2. HELOC → auto-parented under Loans Payable ✓
+3. Amex Business Credit Card → auto-parented under newly-created Credit Cards Payable ✓
+4. Accrued Payroll → NOT parented (correct — unrelated liability) ✓
+5. "Loans Payable" itself → NOT self-parented ✓
+
+**Files changed:**
+- `/app/backend/routes/accounts.py`
+- `/app/backend/routes/chat.py`
+
