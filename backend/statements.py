@@ -165,6 +165,17 @@ async def upload_statement(
     except Exception:  # noqa: BLE001 — never let this break the upload
         pass
 
+    # -------- Auto-create reconciliation for this statement period --------
+    # Every txn we just inserted came directly from the statement, so the
+    # ledger is provably reconciled with the statement bookends. Turn that
+    # into a `reconciliations` doc so the user sees the recon appear in
+    # the history table immediately — no "Match statement PDF" click
+    # required. Back-links via `statement_import_id` for cascade delete.
+    # NOTE: We must finalize the import row FIRST (below), otherwise the
+    # engine sees status != "completed" and skips. That's why we set the
+    # `opening_balance_je` + `ending_balance` etc. above, then update the
+    # row, then create the recon.
+
     # -------- Finalize the import row --------
     await db.statement_imports.update_one(
         {"id": import_id},
@@ -200,6 +211,20 @@ async def upload_statement(
     except Exception:  # noqa: BLE001
         pass
 
+    # -------- Auto-create reconciliation for this statement period --------
+    # Runs AFTER the import row is finalized (needs status="completed").
+    # Every txn from this statement gets cleared_at/cleared_source
+    # pointing at the new recon. Back-linked via `statement_import_id`
+    # for cascade delete.
+    auto_recon = None
+    try:
+        from reconciliation_engine import create_reconciliation_from_statement_import
+        auto_recon = await create_reconciliation_from_statement_import(
+            cid, import_id,
+        )
+    except Exception:  # noqa: BLE001 — never break the upload.
+        pass
+
     return {
         "import_id": import_id,
         "status": "completed",
@@ -216,6 +241,7 @@ async def upload_statement(
         "bank_name": resolved.get("bank_name"),
         "last4": resolved.get("last4"),
         "opening_balance_je": opening_je_info,
+        "auto_reconciliation": auto_recon,
     }
 
 
@@ -304,6 +330,17 @@ async def delete_import(cid: str, import_id: str, *, cascade: bool = True) -> di
         raise HTTPException(404, "Import not found")
     bank_account_id = doc.get("account_id")
 
+    # Cascade-delete the auto-generated reconciliation FIRST so the
+    # un-clear step it performs finds every txn while they still exist.
+    recon_deleted = None
+    try:
+        from reconciliation_engine import delete_reconciliation_for_statement_import
+        recon_deleted = await delete_reconciliation_for_statement_import(
+            cid, import_id,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
     txn_deleted = 0
     if cascade:
         result = await db.transactions.delete_many({
@@ -334,6 +371,7 @@ async def delete_import(cid: str, import_id: str, *, cascade: bool = True) -> di
         "deleted": True,
         "transactions_deleted": txn_deleted,
         "opening_balance_je": opening_je_info,
+        "auto_reconciliation_deleted": recon_deleted,
     }
 
 

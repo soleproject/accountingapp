@@ -268,6 +268,153 @@ def _month_last_day(y: int, m: int) -> int:
 
 
 # ---------------------------------------------------------------------------
+# R3B — Statement-driven auto-reconciliation (Veryfi upload → recon record)
+# ---------------------------------------------------------------------------
+#
+# When a Veryfi statement upload lands, every transaction we insert into the
+# ledger came DIRECTLY from that statement — so by definition all of them
+# reconcile with the statement's opening/ending bookends. This helper turns
+# that certainty into a `reconciliations` doc so the user sees:
+#
+#   - The Reconciliation history table populated automatically
+#   - Every imported txn marked `cleared_at = period_end`,
+#     `cleared_source = "veryfi_statement"`,
+#     `cleared_reconciliation_id = <new_recon_id>`
+#   - A stable back-link (`statement_import_id`) for cascade delete
+#
+# Design decisions:
+#   * One `reconciliations` doc per `statement_imports` row — spanning the
+#     exact statement period (not month-split like `complete_recon`). Users
+#     audit against the statement as a whole, not chopped up by calendar
+#     month.
+#   * Dedup on `statement_import_id` so re-runs are idempotent.
+#   * `source = "veryfi_statement"` distinguishes it from manual & Plaid
+#     bootstraps in the history table and enables cascade-delete.
+#   * Skips txns already cleared by another reconciliation — respects
+#     manual work.
+
+async def create_reconciliation_from_statement_import(
+    cid: str, import_id: str,
+) -> dict:
+    """Auto-create a reconciliation doc from a Veryfi statement upload.
+
+    Returns a diagnostic dict:
+      {ok, action ∈ {"created", "already_exists", "skipped"},
+       reconciliation_id, reason?}
+    """
+    imp = await db.statement_imports.find_one({
+        "id": import_id, "company_id": cid, "status": "completed",
+    })
+    if not imp:
+        return {"ok": False, "action": "skipped", "reason": "import_not_found"}
+
+    # Idempotence — never post two recons for the same statement.
+    existing = await db.reconciliations.find_one({
+        "company_id": cid, "statement_import_id": import_id,
+    })
+    if existing:
+        return {"ok": True, "action": "already_exists",
+                "reconciliation_id": existing["id"]}
+
+    bank_account_id = imp.get("account_id")
+    period_start = imp.get("period_start")
+    period_end = imp.get("period_end")
+    opening = imp.get("starting_balance")
+    closing = imp.get("ending_balance")
+    if not all([bank_account_id, period_start, period_end,
+                opening is not None, closing is not None]):
+        return {"ok": False, "action": "skipped",
+                "reason": "missing_required_fields"}
+
+    # Every txn produced by THIS import is, by definition, reconciled with
+    # the statement it came from. We only clear rows that are still
+    # uncleared — anything already attached to another reconciliation is
+    # left alone (the manual/Plaid recon takes precedence).
+    txns = await db.transactions.find({
+        "company_id": cid, "statement_import_id": import_id, "posted": True,
+        "$or": [
+            {"cleared_at": None},
+            {"cleared_at": {"$exists": False}},
+            {"cleared_at": ""},
+            # Statement-match orphan clears from the legacy flow are
+            # eligible — they'll get re-attached to this proper recon.
+            {"cleared_source": "statement_match",
+             "cleared_reconciliation_id": {"$in": [None, ""]}},
+            {"cleared_source": "statement_match",
+             "cleared_reconciliation_id": {"$exists": False}},
+        ],
+    }).to_list(10000)
+
+    txn_ids = [t["id"] for t in txns]
+    cleared_sum = round(sum(float(t.get("amount") or 0) for t in txns), 2)
+    opening_r = round(float(opening), 2)
+    closing_r = round(float(closing), 2)
+    difference = round(closing_r - opening_r - cleared_sum, 2)
+
+    now = now_iso()
+    rec_id = str(uuid.uuid4())
+    doc = {
+        "id": rec_id, "company_id": cid, "bank_account_id": bank_account_id,
+        "as_of": period_end,
+        "period_start": period_start, "period_end": period_end,
+        "opening_balance": opening_r, "closing_balance": closing_r,
+        "statement_balance": closing_r,  # legacy readers
+        "cleared_sum": cleared_sum,
+        "difference": difference,
+        "cleared_txn_ids": txn_ids,
+        "matched_count": len(txn_ids),
+        "source": "veryfi_statement",
+        # Back-link for cascade delete when the underlying statement is removed.
+        "statement_import_id": import_id,
+        "status": "reconciled",
+        "completed_at": now, "completed_by": "system",
+        "auto_generated": True,
+        "created_at": now, "updated_at": now,
+    }
+    await db.reconciliations.insert_one(doc)
+    if txn_ids:
+        await db.transactions.update_many(
+            {"company_id": cid, "id": {"$in": txn_ids}},
+            {"$set": {
+                "cleared_at": period_end,
+                "cleared_source": "veryfi_statement",
+                "cleared_reconciliation_id": rec_id,
+                "updated_at": now,
+            }},
+        )
+    return {"ok": True, "action": "created", "reconciliation_id": rec_id,
+            "cleared_count": len(txn_ids), "difference": difference}
+
+
+async def delete_reconciliation_for_statement_import(
+    cid: str, import_id: str,
+) -> dict:
+    """Cascade delete: when a `statement_imports` row is removed, drop the
+    auto-generated reconciliation doc AND un-clear the txns it attached.
+    Idempotent — safe to call whether or not the recon exists."""
+    rec = await db.reconciliations.find_one({
+        "company_id": cid, "statement_import_id": import_id,
+    })
+    if not rec:
+        return {"ok": True, "action": "no_op"}
+    now = now_iso()
+    # Un-clear every txn attached to this recon so the ledger doesn't
+    # carry orphan clears. (`delete_import`'s cascade already deletes
+    # the txns themselves when cascade=True, so this is a defensive
+    # cleanup for any that survived the delete window.)
+    await db.transactions.update_many(
+        {"company_id": cid, "cleared_reconciliation_id": rec["id"]},
+        {"$set": {
+            "cleared_at": None, "cleared_source": "",
+            "cleared_reconciliation_id": "", "updated_at": now,
+        }},
+    )
+    await db.reconciliations.delete_one({"id": rec["id"]})
+    return {"ok": True, "action": "deleted",
+            "reconciliation_id": rec["id"]}
+
+
+# ---------------------------------------------------------------------------
 # R3 — Statement fuzzy matcher
 # ---------------------------------------------------------------------------
 
