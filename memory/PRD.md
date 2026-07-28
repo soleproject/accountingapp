@@ -2489,3 +2489,24 @@ Added a LIVE FORM-FILL block to the Phase 1 directive instructing the LLM to emi
 - `/app/frontend/src/components/AiPanel.jsx` (DRAFT parser + dispatch, dedup ref, marker strip, per-stream reset)
 - `/app/frontend/src/pages/FixedAssetsPage.jsx` (modal listener merging partial fields into form state)
 
+
+## Onboarding Coach TTS Barge-In on Manual Step Skip (Feb 28, 2026) ✅
+**User feedback:** *"when someone is going through the onboarding and they click the button faster than the AI can speak, the AI just keeps going even if I am on the Bank connection step it is still finishing up the message that belongs to 1. Business Profile."*
+
+**Root cause:** Two layers stacked stale messages:
+1. `Onboarding.jsx` scheduled the step-greeting emit with `setTimeout(500)` but never cancelled prior timeouts, so several greetings could queue if the user clicked Next faster than 500ms per step.
+2. Even after the emit fired, `AiPanel`'s `speakOne` call did a plain `window.speechSynthesis.speak(u)` which QUEUES behind any already-playing utterance instead of replacing it.
+
+**Fix:**
+- **`Onboarding.jsx`:** The step useEffect now tracks the greeting timeout in `coachTimerRef`. On every step change (or cleanup), it:
+  - Clears the pending timeout so the stale step's greeting never lands
+  - Cancels the browser speech queue (`speechSynthesis.cancel()`)
+  - Emits a new `ai-stop-tts` action so `AiPanel` clears its own TTS state flags (`ttsSpeakingRef`, `ttsTailUntilRef`, `spokenIdxRef`)
+- **`AiPanel.jsx`:** New `ai-stop-tts` action listener wired as the external kill-switch. Clears browser queue + internal state, so the next step's greeting can start immediately without any barge-in / tail-grace suppression.
+
+**Result:** clicking Next fast now immediately silences the previous step's greeting and begins the current step's greeting (or none, if the user is skipping past AI-only steps).
+
+**Files changed:**
+- `/app/frontend/src/pages/Onboarding.jsx` (step effect + cleanup)
+- `/app/frontend/src/components/AiPanel.jsx` (new `ai-stop-tts` listener)
+

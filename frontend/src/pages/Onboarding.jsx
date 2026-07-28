@@ -212,10 +212,26 @@ export default function Onboarding() {
 
   // AI onboarding coach — fire a greeting whenever the step changes (and
   // once on initial load). Debounced via a ref so we only greet each step
-  // once per session, even if React re-renders.
+  // once per session, even if React re-renders. When the user manually
+  // clicks Next / Back fast (faster than the AI can speak the current
+  // step's message), the cleanup cancels the pending greeting emit AND
+  // stops any in-flight speech so we don't finish reading the OLD step
+  // while the user is already on a new one.
   const coachedStepsRef = useRef(new Set());
+  const coachTimerRef = useRef(null);
   useEffect(() => {
     if (!currentId || !loaded) return;
+    // Cancel prior speech + pending emit — the user has moved on.
+    if (coachTimerRef.current) {
+      clearTimeout(coachTimerRef.current);
+      coachTimerRef.current = null;
+    }
+    try {
+      if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+      // AiPanel exposes a hook to stop its own TTS state flags; if unavailable
+      // the raw cancel() above is enough to silence the audio.
+      emitAction("ai-stop-tts");
+    } catch { /* noop */ }
     const script = COACH_SCRIPTS[step];
     if (!script) return;
     const key = `${currentId}::${script.key}`;
@@ -228,7 +244,8 @@ export default function Onboarding() {
     // TTS speaks it but the chat bubble never lands.
     emitAction("ai-open");
     const userFirst = (user?.name || "").split(" ")[0];
-    setTimeout(() => {
+    coachTimerRef.current = setTimeout(() => {
+      coachTimerRef.current = null;
       emitAction("onboarding-coach-greet", {
         message: script.message({
           name: current?.name,
@@ -238,6 +255,14 @@ export default function Onboarding() {
         }),
       });
     }, 500);
+    // Cleanup: if the step changes again before the timer fires, this
+    // cancels the queued emit so the outdated greeting never lands.
+    return () => {
+      if (coachTimerRef.current) {
+        clearTimeout(coachTimerRef.current);
+        coachTimerRef.current = null;
+      }
+    };
   }, [currentId, step, current?.name, loaded]);
 
   // When the user replies in the chat while on this page, feed the reply

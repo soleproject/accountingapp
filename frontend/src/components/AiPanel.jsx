@@ -711,6 +711,21 @@ export default function AiPanel({ collapsed, onToggle }) {
     if (voiceOnRef.current) speakOne(msg.replace(/\*\*/g, ""));
   });
 
+  // External kill-switch for TTS — used by the onboarding coach when the
+  // user clicks Next/Back faster than the AI can speak. Cancels the
+  // browser's speech queue AND clears our internal "TTS is speaking"
+  // flags so the next step's greeting can start immediately without the
+  // barge-in / tail-grace suppression firing.
+  useActionListener("ai-stop-tts", () => {
+    try {
+      if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    } catch { /* noop */ }
+    ttsSpeakingRef.current = false;
+    setTtsActive(false);
+    ttsTailUntilRef.current = 0;
+    spokenIdxRef.current = 0;
+  });
+
   // ------------------------- Open-mic + TTS-echo protection -------------------------
   // Rules (see architecture doc in PR):
   //   1. Recognizer is continuous + self-heals on `onend` while a "listening" flag holds.
