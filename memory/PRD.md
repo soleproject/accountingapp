@@ -2466,3 +2466,26 @@ Verified via unit test (9 cases including labels, hyphens, casing, invalid) and 
 **Files changed:**
 - `/app/backend/asset_service.py`
 
+
+## Live Form-Fill for the New Fixed Asset Modal (Feb 28, 2026) ✅
+**User request:** *"it should be filling out this form while we say it"*
+
+**What was built:** As you talk to the AI, the New Fixed Asset modal now populates in real-time — you watch each field fill in as the AI extracts it from your speech, then you review the fully-populated form before confirming.
+
+### Architecture
+- **New streaming marker `[[DRAFT:{...}]]`** — the AI emits it early and often, with a *partial* payload (any subset of `name`, `purchase_date`, `cost`, `asset_type`, `useful_life_years`, `salvage_value`).
+- **AiPanel streaming parser** — new `draftRe` regex extracts each marker, dedups via a ref so the same marker doesn't refire during chunked streaming, and dispatches an `ai:fixed-asset-draft` window CustomEvent with the partial payload. Markers stripped from the visible chat text.
+- **FixedAssetModal listener** — merges each partial into the form state: `name`, `purchase_date`, `cost`, `salvage_value`, `asset_type` (with forgiving normalization matching the backend fix), and `useful_life_years` (auto-filled from the asset_type preset when not explicitly stated).
+
+### AI directive update
+Added a LIVE FORM-FILL block to the Phase 1 directive instructing the LLM to emit `[[DRAFT:...]]` markers as soon as any field is known — even if only 1-2 fields. Example flow shown in the prompt: *"I bought 123 Main for $175k on Jan 5"* → immediate `[[DRAFT:{name, cost, purchase_date}]]` on the SAME reply that asks about `asset_type`. The final `[[PROPOSAL:create-fixed-asset]]` comes at the end when all fields are ready.
+
+### Verified end-to-end
+- **Live LLM stream test:** User said *"I bought 123 Main Street on January 5 for $175,000, residential real estate"* → AI emitted `[[DRAFT:{"name":"123 Main Street","purchase_date":"2026-01-05","cost":175000,"asset_type":"residential_real_estate"}]]` in one shot ✓
+- **Playwright screenshot:** Dispatched the same draft event manually → modal populated Asset Name, Asset Type dropdown (with auto-selected "Residential Real Estate — 27.5 yrs"), Purchase Date, Useful Life (27.5 auto-filled), Cost, and Remaining ($175k) ✓
+
+**Files changed:**
+- `/app/backend/routes/chat.py` (LIVE FORM-FILL directive block)
+- `/app/frontend/src/components/AiPanel.jsx` (DRAFT parser + dispatch, dedup ref, marker strip, per-stream reset)
+- `/app/frontend/src/pages/FixedAssetsPage.jsx` (modal listener merging partial fields into form state)
+

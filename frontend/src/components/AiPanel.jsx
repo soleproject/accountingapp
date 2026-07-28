@@ -439,6 +439,9 @@ export default function AiPanel({ collapsed, onToggle }) {
   // "confirm" utterance submits it via API; "cancel" clears it.
   const [pendingIntent, setPendingIntent] = useState(null);
   const pendingIntentRef = useRef(null);
+  // Track DRAFT markers we've already dispatched in the current stream
+  // so we don't refire them each time the same chunk is reparsed.
+  const dispatchedDraftsRef = useRef(new Set());
   useEffect(() => { pendingIntentRef.current = pendingIntent; }, [pendingIntent]);
 
   // Weekly-review mode: paced multi-step briefing. When active, the panel
@@ -2283,6 +2286,8 @@ export default function AiPanel({ collapsed, onToggle }) {
     if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     ttsSpeakingRef.current = false;
     ttsTailUntilRef.current = 0;
+    // Fresh stream → clear DRAFT dedup so new markers can fire.
+    dispatchedDraftsRef.current = new Set();
     setStreaming(true);
     try {
       const token = localStorage.getItem("axiom_token");
@@ -2330,6 +2335,25 @@ export default function AiPanel({ collapsed, onToggle }) {
                 // text and, if a fully-formed marker just landed, stash it
                 // as a pendingIntent so a follow-up "yes / do it" executes.
                 const propRe = /\[\[PROPOSAL:([^\]]+)\]\]/;
+                // [[DRAFT:{...}]] markers — the AI emits these as it learns
+                // fields for a new fixed asset. Dispatched to the open
+                // "New Fixed Asset" modal so the form fills in real time
+                // as the user talks. Multiple DRAFT markers can appear
+                // in a single message — we handle each and remove them
+                // from the visible text.
+                const draftRe = /\[\[DRAFT:(\{[^\]]+\})\]\]/g;
+                let draftMatch;
+                while ((draftMatch = draftRe.exec(nextRaw)) !== null) {
+                  const key = draftMatch[0];
+                  if (dispatchedDraftsRef.current.has(key)) continue;
+                  dispatchedDraftsRef.current.add(key);
+                  try {
+                    const partial = JSON.parse(draftMatch[1]);
+                    window.dispatchEvent(new CustomEvent(
+                      "ai:fixed-asset-draft", { detail: partial },
+                    ));
+                  } catch { /* incomplete JSON while streaming — retry on next chunk */ }
+                }
                 const pm = nextRaw.match(propRe);
                 if (pm && !pendingIntentRef.current) {
                   const raw = pm[1].trim();
@@ -2387,7 +2411,11 @@ export default function AiPanel({ collapsed, onToggle }) {
                     }
                   }
                 }
-                const next = nextRaw.replace(propRe, "").replace(/\n\s*\n\s*$/, "").trimEnd();
+                const next = nextRaw
+                  .replace(propRe, "")
+                  .replace(/\[\[DRAFT:\{[^\]]+\}\]\]/g, "")
+                  .replace(/\n\s*\n\s*$/, "")
+                  .trimEnd();
                 copy[copy.length - 1] = { role: "assistant", content: next };
                 // Feed newly-completed sentences to speechSynthesis
                 // immediately — this is what makes the voice "real-time":

@@ -279,6 +279,45 @@ function FixedAssetModal({ currentId, editRow, onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEdit, editRow, accounts]);
 
+  // Live-fill listener: when the AI panel captures partial field values
+  // from the user's speech (name, purchase_date, cost, asset_type,
+  // useful_life_years), it dispatches `ai:fixed-asset-draft` events with
+  // a partial payload. We merge them into the form state so the user
+  // watches the modal fill in real-time as they talk.
+  useEffect(() => {
+    const onDraft = (e) => {
+      const p = e?.detail || {};
+      if (typeof p.name === "string" && p.name.trim()) setName(p.name.trim());
+      if (typeof p.purchase_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.purchase_date)) {
+        setPurchaseDate(p.purchase_date);
+      }
+      if (p.cost != null && !Number.isNaN(Number(p.cost))) setCost(String(p.cost));
+      if (p.salvage_value != null && !Number.isNaN(Number(p.salvage_value))) {
+        setSalvage(String(p.salvage_value));
+      }
+      if (typeof p.asset_type === "string" && p.asset_type.trim()) {
+        // Normalize asset_type variations ("Residential Real Estate",
+        // "residential real estate", etc.) to match the dropdown keys.
+        const norm = p.asset_type.trim().toLowerCase().replace(/[\s\-]+/g, "_");
+        const match = assetTypes.find(t =>
+          t.key === p.asset_type ||
+          t.key === norm ||
+          t.label.toLowerCase().replace(/[\s\-]+/g, "_") === norm
+        );
+        if (match) {
+          setAssetType(match.key);
+          if (match.depreciable === false) setLifeYears("0");
+          else if (match.years != null && !lifeYears) setLifeYears(String(match.years));
+        }
+      }
+      if (p.useful_life_years != null && !Number.isNaN(Number(p.useful_life_years))) {
+        setLifeYears(String(p.useful_life_years));
+      }
+    };
+    window.addEventListener("ai:fixed-asset-draft", onDraft);
+    return () => window.removeEventListener("ai:fixed-asset-draft", onDraft);
+  }, [assetTypes, lifeYears]);
+
   const setAssetTypeAndLife = (key) => {
     setAssetType(key);
     const t = assetTypes.find(x => x.key === key);
