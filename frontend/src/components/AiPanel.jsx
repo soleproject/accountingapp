@@ -1613,6 +1613,7 @@ export default function AiPanel({ collapsed, onToggle }) {
       clearChat: clearChatMessages,
       focus,
       batchActive: !!batchRef.current,
+      hasPendingIntent: !!pendingIntentRef.current,
     });
 
     // --- Batch resolve mode: entry ---

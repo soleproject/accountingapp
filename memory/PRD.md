@@ -2267,3 +2267,19 @@ Rewrote `/accounting/lets-review` per user feedback ("literally could have clone
 - `/app/backend/routes/accounts.py`
 - `/app/frontend/src/components/AiPanel.jsx`
 
+
+## Bug Fix: Client-Side Voice-Command Parser Was Swallowing Long Sentences (Feb 28, 2026) ✅
+**Symptom (round 3):** After the Fixed Asset directive was strengthened, the user opened the AI Panel and dictated *"okay I just bought a property at 123 Main Street it was 250,000 but the company put $50,000 down and then we got 200k financed"*. The AI responded with *"Nothing pending to confirm."* three times in a row — the message never reached the LLM at all.
+
+**Root cause:** `/frontend/src/lib/voiceCommands.js:489` had a regex `/^(confirm|yes|yep|yeah|yup|sure|ok(ay)?|save it?|do it|go ahead|looks good|sounds good|that.?s good|create it|make it|book it|post it|approve it?)\b/i` that only anchored at the start (`^`) with a word-boundary (`\b`) — no end anchor. It short-circuited any message that STARTED with "okay", "yes", "sure", etc., regardless of what followed. Since no proposal was actually pending, it fell into the "Nothing pending to confirm." fallback and never called the LLM.
+
+**Fix:**
+1. **End-anchored regex** — the CONFIRM/CANCEL regexes now require the whole utterance to be an affirmative + optional short filler ("okay", "sure, go ahead", "yes please", "ok do it"). Long narratives that just happen to start with "okay" fall through to the LLM.
+2. **`hasPendingIntent` gating** — the parser now takes a `hasPendingIntent` context flag from `AiPanel`. Confirm/cancel are only interpreted when a proposal is actually pending; otherwise the message is forwarded to the LLM. Defensive belt-and-suspenders in case a novel affirmative slips past the regex.
+
+**Verified with 16-case regex matrix** — all short affirmatives still confirm; all long narratives fall through.
+
+**Files changed:**
+- `/app/frontend/src/lib/voiceCommands.js`
+- `/app/frontend/src/components/AiPanel.jsx` (adds `hasPendingIntent` to ctx)
+

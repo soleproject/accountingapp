@@ -485,12 +485,24 @@ export function resolveVoiceCommand(text, ctx) {
     return { handled: true, review: "exit" };
   }
 
-  // Confirm synonyms — covers casual affirmatives users actually say ("looks good", "yep")
-  if (/^(confirm|yes|yep|yeah|yup|sure|ok(ay)?|save it?|do it|go ahead|looks good|sounds good|that.?s good|create it|make it|book it|post it|approve it?)\b/i.test(t)) {
-    return { handled: true, pending: "confirm" };
-  }
-  if (/^(cancel|no,?\s*don'?t|nope|nah|nevermind|never mind|forget it|scrap that|discard)\b/i.test(t)) {
-    return { handled: true, pending: "cancel" };
+  // Confirm synonyms — covers casual affirmatives users actually say ("looks good", "yep").
+  // Anchored to end-of-string with a small optional trailing-filler window so
+  // "okay" alone → confirm, but "okay I just bought a property at 1234 Main Street..."
+  // (starts with "okay" but is a full narrative) does NOT short-circuit the LLM.
+  // Also gated on `hasPendingIntent` — if no proposal is actually pending, we
+  // let the LLM handle the message rather than answering "Nothing pending to
+  // confirm." for something that was never a confirmation to begin with.
+  const _AFF = "confirm|yes|yep|yeah|yup|sure|ok(?:ay)?|save it?|do it|go ahead|looks good|sounds good|that.?s good|create it|make it|book it|post it|approve it?";
+  const _FILL = "please|now|thanks|thank you|it|that|this|and|do|already";
+  const CONFIRM_RE = new RegExp(`^(?:${_AFF})(?:[\\s,.!]+(?:${_AFF}|${_FILL}))*[\\s.!]*$`, "i");
+  const CANCEL_RE  = /^(?:cancel|no,?\s*don'?t|nope|nah|nevermind|never mind|forget it|scrap that|discard)(?:[\s,.!]+(?:please|now|it|that|this|and)\b)*[\s.!]*$/i;
+  if (ctx.hasPendingIntent) {
+    if (CONFIRM_RE.test(t)) {
+      return { handled: true, pending: "confirm" };
+    }
+    if (CANCEL_RE.test(t)) {
+      return { handled: true, pending: "cancel" };
+    }
   }
 
   // ---- 2. "read me the numbers" — TTS-narrated report summary ----
