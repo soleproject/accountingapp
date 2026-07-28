@@ -21,34 +21,7 @@ export default function StatementsTab({ companyId, bare = false }) {
   const [imports, setImports] = useState([]);
   const [loading, setLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const [recomputing, setRecomputing] = useState(false);
   const inputRef = useRef(null);
-
-  const recomputeOpeningBalances = useCallback(async () => {
-    setRecomputing(true);
-    try {
-      const r = await api.post(
-        `/companies/${companyId}/accounts/recompute-opening-balances`,
-      );
-      const posted = r.data?.posted || 0;
-      const deleted = r.data?.deleted || 0;
-      const processed = r.data?.processed || 0;
-      if (processed === 0) {
-        toast.info("No uploaded statements yet — nothing to recompute.");
-      } else if (posted || deleted) {
-        toast.success(
-          `Ledger baseline refreshed — ${posted} opening balance JE${posted === 1 ? "" : "s"} posted / updated${deleted ? `, ${deleted} deleted` : ""}. Refresh your Balance Sheet.`,
-          { duration: 8000 },
-        );
-      } else {
-        toast.success("All bank accounts already have correct baselines.");
-      }
-    } catch (e) {
-      toast.error(e.response?.data?.detail || "Recompute failed");
-    } finally {
-      setRecomputing(false);
-    }
-  }, [companyId]);
 
   const loadAssets = useCallback(async () => {
     try {
@@ -224,18 +197,6 @@ export default function StatementsTab({ companyId, bare = false }) {
                 </option>
               ))}
             </select>
-            <button
-              type="button"
-              data-testid="recompute-obe-btn"
-              onClick={recomputeOpeningBalances}
-              disabled={recomputing}
-              title="Backfill / refresh the auto-managed opening balance JE for every bank account with an uploaded statement."
-              className="ml-2 inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              {recomputing
-                ? <><Loader2 size={12} className="animate-spin" /> Recomputing…</>
-                : <>Fix ledger baseline</>}
-            </button>
           </label>
         </div>
 
