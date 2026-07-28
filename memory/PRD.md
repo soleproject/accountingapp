@@ -2416,3 +2416,30 @@ Complete two-phase directive with FIRST rule: *"CHECK `pending_funding_assets`. 
 - Phase 1: user says *"$450k property, May 15"* → AI proposes `create-fixed-asset` with no offsets, asset shell created (330 depreciation entries, monthly $1,363.64) ✓
 - Phase 2: user says *"$100k B of A + $200k Wells Fargo mortgage"* → AI recognizes pending asset, proposes mortgage sub-account with loan metadata (lender/principal/term_months=360) ✓
 
+
+## Bug Fix: Fixed Assets Nesting Under Wrong Parent (Feb 28, 2026) ✅
+**Symptom (production 431 LLC):** *"Why is the asset a sub-account of 1510?"* — screenshot showed `1510 · 123 Main Street` and `1515 · 123 Main Street — Accumulated Depreciation` visually indented under `1500 · Prepaid Expenses` instead of a proper "Fixed Assets" parent.
+
+**Root cause:** `asset_service._ensure_fixed_assets_parent` looked up the parent by **code** (`code=1500`) assuming that slot was always "Fixed Assets". But many seeded CoAs (including 431 LLC's) reserve code 1500 for "Prepaid Expenses", so the fetch returned the wrong parent and every new asset silently nested under it.
+
+**Two-part fix:**
+
+### Corrected parent lookup order
+1. Existing account NAMED "Fixed Assets" (case-insensitive) — the canonical parent whatever code it lives at.
+2. Existing top-level asset with subtype `fixed_asset` and no parent — reuse if the name suggests it's a group.
+3. Auto-create a fresh "Fixed Assets" parent at the FIRST FREE code in the 1500-1899 range (skipping any taken codes).
+
+### One-time repair migration
+Whenever `_ensure_fixed_assets_parent` runs, it now scans for any `fixed_asset` / `accumulated_depreciation` sub-accounts nested under a non-fixed-asset parent (like Prepaid Expenses) and idempotently re-homes them under the correct parent. Runs automatically on the next asset creation OR on-demand via `POST /api/companies/{cid}/assets/fix-hierarchy`.
+
+### Code-collision fix
+`_next_asset_code` now checks against ALL company codes (not just siblings of the parent). This came up when the auto-created "Fixed Assets" parent landed at 1510 and the first child would have collided at 1510 too.
+
+**Verified via curl:**
+- Set up busted state (fixed_asset rows nested under Prepaid Expenses) → call `/assets/fix-hierarchy` → rows correctly re-homed under a real "Fixed Assets" parent ✓
+- Create a new asset when 1500 is Prepaid Expenses → parent auto-created at 1510, asset lands at 1520, accum depr at 1525, no collision ✓
+
+**Files changed:**
+- `/app/backend/asset_service.py` (`_ensure_fixed_assets_parent` overhaul, `_next_asset_code` global scan)
+- `/app/backend/routes/inventory.py` (new `POST /assets/fix-hierarchy` repair endpoint)
+

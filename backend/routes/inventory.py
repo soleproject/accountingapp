@@ -150,6 +150,24 @@ async def update_asset(cid: str, aid: str, payload: dict,
     return result
 
 
+@router.post("/companies/{cid}/assets/fix-hierarchy")
+async def fix_asset_hierarchy(cid: str, user: dict = Depends(get_current_user)):
+    """One-shot repair: re-home any fixed_asset / accumulated_depreciation
+    sub-accounts that were nested under the wrong parent (a legacy bug
+    where the code fetched code=1500 assuming it was "Fixed Assets" —
+    but 1500 is often "Prepaid Expenses" in seeded CoAs). Idempotent."""
+    await require_company(user, cid)
+    import asset_service
+    parent = await asset_service._ensure_fixed_assets_parent(cid)
+    try:
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "fixed_assets_parent": {
+        "id": parent["id"], "code": parent.get("code"), "name": parent.get("name"),
+    }}
+
+
 @router.post("/companies/{cid}/assets/{aid}/fund")
 async def fund_asset(cid: str, aid: str, payload: dict,
                      user: dict = Depends(get_current_user)):

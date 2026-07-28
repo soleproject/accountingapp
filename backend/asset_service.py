@@ -86,22 +86,95 @@ async def _ensure_fixed_asset_suspense(cid: str) -> dict:
 
 
 async def _ensure_fixed_assets_parent(cid: str) -> dict:
-    """Top-level `1500 Fixed Assets` account. All per-asset sub-accounts
-    and their accumulated-depreciation contras nest under it."""
-    a = await db.accounts.find_one({
-        "company_id": cid, "code": FIXED_ASSETS_PARENT_CODE,
-    })
-    if a:
-        return a
-    doc = {
-        "id": str(uuid.uuid4()), "company_id": cid,
-        "code": FIXED_ASSETS_PARENT_CODE, "name": FIXED_ASSETS_PARENT_NAME,
-        "type": "asset", "subtype": "fixed_asset",
-        "active": True,
-        "created_at": now_iso(), "updated_at": now_iso(),
-    }
-    await db.accounts.insert_one(doc)
-    return doc
+    """Locate (or create) the "Fixed Assets" grouping parent under which
+    all per-asset sub-accounts nest.
+
+    Historical bug: this used to fetch by code=1500, but 1500 is used by
+    many seed CoAs for "Prepaid Expenses". That silently nested asset
+    sub-accounts under Prepaid Expenses, distorting the balance sheet.
+
+    New lookup order:
+      1. Existing account named "Fixed Assets" (case-insensitive) — the
+         canonical parent whatever code it lives at.
+      2. Existing top-level asset with subtype "fixed_asset" and NO
+         parent_account_id — reuse it if named appropriately.
+      3. Create a fresh "Fixed Assets" parent at the FIRST FREE code in
+         the 1500-1899 range (skipping any taken codes like 1500-Prepaid).
+
+    Also performs an idempotent one-time migration: any fixed_asset
+    sub-account currently parented under a non-fixed-asset row (e.g.
+    Prepaid Expenses because of the historical bug) is re-parented under
+    the correct Fixed Assets group.
+    """
+    parent = None
+    # 1) Match by name.
+    async for a in db.accounts.find(
+        {"company_id": cid, "type": "asset"}
+    ):
+        if (a.get("name") or "").strip().lower() == FIXED_ASSETS_PARENT_NAME.lower():
+            parent = a
+            break
+    if not parent:
+        # 2) Existing top-level fixed_asset group.
+        async for a in db.accounts.find(
+            {"company_id": cid, "type": "asset", "subtype": "fixed_asset",
+             "parent_account_id": None}
+        ):
+            nm = (a.get("name") or "").strip().lower()
+            if "fixed asset" in nm or nm == "fixed_assets":
+                parent = a
+                break
+    if not parent:
+        # 3) Create fresh — pick first free code in 1500-1899.
+        used = set(await db.accounts.distinct("code", {"company_id": cid}))
+        code = None
+        for candidate in [FIXED_ASSETS_PARENT_CODE] + [str(n) for n in range(1500, 1900, 10)]:
+            if candidate not in used:
+                code = candidate
+                break
+        if code is None:
+            code = FIXED_ASSETS_PARENT_CODE
+        doc = {
+            "id": str(uuid.uuid4()), "company_id": cid,
+            "code": code, "name": FIXED_ASSETS_PARENT_NAME,
+            "type": "asset", "subtype": "fixed_asset",
+            "parent_account_id": None,
+            "active": True,
+            "created_at": now_iso(), "updated_at": now_iso(),
+        }
+        await db.accounts.insert_one(doc)
+        parent = doc
+
+    # One-time repair: any fixed_asset / accumulated_depreciation
+    # sub-account currently parented under a non-fixed-asset row (the
+    # old code=1500 lookup bug) is re-homed under the real parent.
+    misplaced_ids: list[str] = []
+    async for child in db.accounts.find({
+        "company_id": cid,
+        "subtype": {"$in": ["fixed_asset", "accumulated_depreciation"]},
+        "parent_account_id": {"$ne": None},
+    }):
+        parent_id = child.get("parent_account_id")
+        if parent_id == parent["id"]:
+            continue
+        p = await db.accounts.find_one({"id": parent_id, "company_id": cid})
+        if not p:
+            continue
+        # A "correct" parent is either the canonical Fixed Assets group
+        # or another fixed_asset row (grand-nesting is fine). Anything
+        # else (Prepaid Expenses, Cash, whatever) → re-home.
+        p_name = (p.get("name") or "").strip().lower()
+        p_sub = (p.get("subtype") or "").lower()
+        if p_sub == "fixed_asset" or "fixed asset" in p_name:
+            continue
+        misplaced_ids.append(child["id"])
+    if misplaced_ids:
+        await db.accounts.update_many(
+            {"id": {"$in": misplaced_ids}, "company_id": cid},
+            {"$set": {"parent_account_id": parent["id"],
+                      "updated_at": now_iso()}},
+        )
+    return parent
 
 
 async def _ensure_depreciation_expense(cid: str) -> dict:
@@ -119,9 +192,15 @@ async def _next_asset_code(cid: str, parent_id: str) -> tuple[str, str]:
        * Nth asset: `15{N}0` for the fixed-asset row,
                     `15{N}5` for its accumulated-depreciation contra.
        * Wraps to 3-digit suffixes past N=9 (`15100`, `15105`, ...).
+
+    We check ALL codes in the company (not just under the given parent)
+    so the parent's own code isn't reused by a child. This came up when
+    the seeded CoA had 1500=Prepaid Expenses, forcing the auto-created
+    "Fixed Assets" parent to land on 1510 — then the first child would
+    have collided at 1510 too without this global check.
     """
     existing_codes = set(await db.accounts.distinct(
-        "code", {"company_id": cid, "parent_account_id": parent_id},
+        "code", {"company_id": cid},
     ))
     n = 1
     while True:
