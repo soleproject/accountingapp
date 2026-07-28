@@ -264,6 +264,62 @@ async def sync_and_import(cid: str, item: dict, selected_account_ids: list[str] 
             categorize_fn=_cat, is_period_closed_fn=is_period_closed,
         )
         imported += len(inserted)
+
+    # Retry deferred opening-balance JEs — an item connected with <30 days
+    # of history will have skipped the initial OBE post. Each webhook /
+    # manual sync gets another chance once the 30-day threshold is met.
+    if imported:
+        import opening_balance_service
+        for pa_id, m in mappings.items():
+            if m.get("opening_je_id"):
+                continue  # Already posted at connect (had enough history).
+            ledger_id = m.get("ledger_account_id")
+            if not ledger_id:
+                continue
+            has_enough = await opening_balance_service.plaid_history_meets_minimum_days(
+                cid, pa_id,
+            )
+            if not has_enough:
+                continue
+            # Recompute + post using the same math as connect flow.
+            all_for_acct = await db.transactions.find(
+                {"company_id": cid, "plaid_account_id": pa_id}
+            ).to_list(10000)
+            if not all_for_acct:
+                continue
+            net_movement = sum(float(t.get("amount") or 0) for t in all_for_acct)
+            # `balance_current` lives on the item's `accounts` array (refreshed
+            # every sync by `_apply_sync_balance_snapshot`), not on the
+            # mapping. Look it up from the fresh `item` doc.
+            plaid_acct = next(
+                (a for a in (item.get("accounts") or []) if a.get("account_id") == pa_id),
+                None,
+            )
+            snap = float((plaid_acct or {}).get("balance_current") or 0.0)
+            ledger_bank = next((a for a in accts if a["id"] == ledger_id), None)
+            if not ledger_bank:
+                continue
+            is_liability = ledger_bank["type"] == "liability"
+            opening = round(
+                (snap + net_movement) if is_liability else (snap - net_movement),
+                2,
+            )
+            oldest_date = min(t["date"] for t in all_for_acct)
+            as_of = plaid_connect._yesterday_iso(oldest_date)
+            memo = f"Opening balance — {ledger_bank['name']} (deferred first-sync)"
+            je_id = await plaid_connect.post_opening_balance_je(
+                cid, ledger_bank, opening, as_of, memo,
+            )
+            if je_id:
+                m["opening_je_id"] = je_id
+                m["opening_balance"] = opening
+                m["opening_as_of"] = as_of
+                await db.plaid_items.update_one(
+                    {"id": item["id"]},
+                    {"$set": {"account_mappings": mappings,
+                              "updated_at": now_iso()}},
+                )
+
     if imported:
         await log_ai(cid, "webhook_sync", imported)
     return imported

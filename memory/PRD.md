@@ -39,6 +39,43 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 (latest) — Auto-managed opening balance JEs
+
+- **New service** `/app/backend/opening_balance_service.py` — a single
+  idempotent, delta-driven helper `ensure_opening_balance_for_account(cid,
+  bank_account_id)` that upserts one Opening Balance Equity JE per bank
+  account, tagged `source: "opening_balance_auto"`. Runs whenever bank
+  data enters the system (statement upload OR Plaid connect / sync).
+- **Out-of-order safety.** Helper always anchors to the EARLIEST known
+  `{period_start, opening_balance}` across every completed
+  `statement_imports` row for the account. Newer upload → no-op; older
+  upload → JE date+amount recompute in place (same row updated).
+- **Respects manual work.** If a `source: "opening_balance"` JE already
+  exists (Plaid-connect-posted or user-posted), helper defers and never
+  competes.
+- **Closed-period aware.** Skips write with `reason: "closed_period"` +
+  frontend toast when the target date falls inside a closed month.
+- **Plaid 30-day gate.** New `plaid_history_meets_minimum_days(cid,
+  plaid_account_id, min_days=30)` prevents the initial OBE JE from firing
+  during a partial-history reconnect. `plaid_connect.sync_plaid_history_for_account`
+  gates the connect-time post on it; `deps.sync_and_import` retries the
+  post on every subsequent webhook/manual sync once the 30-day threshold
+  is met (`opening_je_id` stored back onto `plaid_items.account_mappings`).
+- **Persisted OCR fields.** `statement_imports` rows now carry
+  `ending_balance` in addition to the existing `starting_balance` so
+  future logic (report reconciliation, ledger baseline drift alerts) has
+  authoritative statement bookends to work with.
+- **Frontend feedback.** `StatementsTab.jsx` shows an additional green
+  toast — *"Auto-posted opening balance of $3,281.78 on 2026-04-22 so
+  your ledger baseline matches the statement."* — and a yellow warning
+  toast when a closed period blocked the auto-post.
+- **8 regression tests** in `/app/backend/tests/test_opening_balance_service.py`:
+  first-upload asset & liability JE creation, newer-upload no-op,
+  older-upload date+amount shift, manual-OBE deference, delta-zero
+  auto-row deletion, closed-period guard, Plaid 30-day gate boundary.
+  All passing.
+
+
 ### Feb 2026 (later) — Veryfi description + Plaid AI attribution fixes
 
 - **Veryfi bank-statement merchant no longer truncated to first word.**

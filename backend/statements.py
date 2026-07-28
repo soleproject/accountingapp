@@ -152,6 +152,19 @@ async def upload_statement(
     imported = inserted_count
     await log_ai_event(cid, "veryfi_ocr", imported)
 
+    # -------- Auto-post opening balance JE (delta / idempotent) --------
+    # Runs AFTER the txns are inserted so the delta math sees them.
+    # Handles out-of-order uploads via the shared helper — recomputes to
+    # the earliest known statement's opening balance every time.
+    opening_je_info = None
+    try:
+        import opening_balance_service
+        opening_je_info = await opening_balance_service.ensure_opening_balance_for_account(
+            cid, bank_account_id,
+        )
+    except Exception:  # noqa: BLE001 — never let this break the upload
+        pass
+
     # -------- Finalize the import row --------
     await db.statement_imports.update_one(
         {"id": import_id},
@@ -169,6 +182,9 @@ async def upload_statement(
             "bank_name": resolved.get("bank_name"),
             "last4": resolved.get("last4"),
             "starting_balance": resolved.get("starting_balance"),
+            "ending_balance": statement_account_resolver
+                ._statement_fields(veryfi_data).get("ending_balance"),
+            "opening_balance_je": opening_je_info,
             "veryfi_document_id": (
                 str(veryfi_data.get("id")) if veryfi_data.get("id") else None
             ),
@@ -199,6 +215,7 @@ async def upload_statement(
         },
         "bank_name": resolved.get("bank_name"),
         "last4": resolved.get("last4"),
+        "opening_balance_je": opening_je_info,
     }
 
 

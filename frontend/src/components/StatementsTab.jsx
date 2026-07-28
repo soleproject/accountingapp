@@ -87,6 +87,25 @@ export default function StatementsTab({ companyId, bare = false }) {
         (r.data.account?.matched === false ? " (new account)" : ""),
         { duration: 6000 },
       );
+      // Auto-opening-balance JE feedback — when the first statement for a
+      // bank account lands (or a NEWER earliest arrives), the backend
+      // upserts a system-managed Opening Balance Equity JE so the ledger
+      // baseline matches reality without the user hunting down closing
+      // balances by hand.
+      const obe = r.data.opening_balance_je;
+      if (obe?.ok && obe.action === "upserted" && obe.amount) {
+        toast.success(
+          `Auto-posted opening balance of $${Math.abs(obe.amount).toLocaleString(
+            undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 },
+          )} on ${obe.as_of} so your ledger baseline matches the statement.`,
+          { duration: 8000 },
+        );
+      } else if (obe && obe.reason === "closed_period") {
+        toast.warning(
+          `Couldn't auto-post opening balance — ${obe.target_date} falls in a closed period. Reopen the period or post the JE manually.`,
+          { duration: 8000 },
+        );
+      }
       loadImports();
     } catch (e) {
       const msg = e.response?.data?.detail || e.message;

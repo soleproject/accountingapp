@@ -561,10 +561,20 @@ async def connect_plaid_account(
     })
     je_id = None
     if not existing:
-        memo = f"Opening balance — {plaid_acct.get('name') or ledger_bank['name']}"
-        je_id = await post_opening_balance_je(
-            cid, ledger_bank, opening, opening_as_of, memo,
+        # 30-day history gate — a fresh reconnect can occasionally return
+        # <5 days of Plaid transactions, which would produce a nonsensical
+        # opening JE anchored ~yesterday. Wait until we have a meaningful
+        # window; a later manual/webhook sync will retry via
+        # opening_balance_service on subsequent runs.
+        import opening_balance_service
+        has_enough = await opening_balance_service.plaid_history_meets_minimum_days(
+            cid, plaid_account_id,
         )
+        if has_enough:
+            memo = f"Opening balance — {plaid_acct.get('name') or ledger_bank['name']}"
+            je_id = await post_opening_balance_je(
+                cid, ledger_bank, opening, opening_as_of, memo,
+            )
 
     # Persist mapping on the plaid_item document
     mappings = item.get("account_mappings") or {}
