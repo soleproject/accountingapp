@@ -59,6 +59,23 @@ async def ai_chat_stream(inp: ChatIn, user: dict = Depends(get_current_user)):
     await require_company(user, inp.company_id)
     session_id = inp.session_id or f"chat-{inp.company_id}-{user['id']}"
     now = now_iso()
+    # Fetch prior turns for this session BEFORE inserting the new user
+    # message so the LLM sees full multi-turn context (fixes the bug
+    # where the AI re-asked for details already given, e.g. Fixed Asset
+    # $350k / May 15 / $100k down + rest financed). Cap to the last 20
+    # turns to keep the prompt bounded.
+    prior_docs = await db.chat_messages.find(
+        {"session_id": session_id, "role": {"$in": ["user", "assistant"]}}
+    ).sort("created_at", -1).limit(20).to_list(20)
+    prior_docs.reverse()
+    _PROP_RE_HIST = re.compile(r"\[\[PROPOSAL:[^\]]+\]\]")
+    history = []
+    for d in prior_docs:
+        content = d.get("content") or ""
+        if d.get("role") == "assistant":
+            content = _PROP_RE_HIST.sub("", content).rstrip()
+        if content:
+            history.append({"role": d.get("role"), "content": content})
     # persist user message
     await db.chat_messages.insert_one({
         "id": str(uuid.uuid4()), "session_id": session_id, "company_id": inp.company_id,
@@ -292,7 +309,8 @@ async def ai_chat_stream(inp: ChatIn, user: dict = Depends(get_current_user)):
 
     async def event_gen():
         async for chunk in chat_stream(session_id, inp.message, combined_context,
-                                        terseness=inp.terseness or "balanced"):
+                                        terseness=inp.terseness or "balanced",
+                                        history=history):
             full_reply["text"] += chunk
             yield f"data: {json.dumps({'delta': chunk})}\n\n"
         # save assistant msg — strip the hidden proposal marker first.

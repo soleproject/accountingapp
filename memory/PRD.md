@@ -2223,3 +2223,21 @@ Rewrote `/accounting/lets-review` per user feedback ("literally could have clone
 - Every existing Transactions feature (search, date filters, per-row actions, AI Copilot chip strip, chat side-panel, "Approve AI Categorized" flow) works unchanged
 - Setup checklist Step 2 Review button continues to link to `/accounting/lets-review` — user drops straight into the vendor stepper with the Copilot's questions ready in chat
 
+
+## Bug Fix: AI Chat Now Has Multi-Turn Memory (Feb 28, 2026) ✅
+**Symptom:** In the AI Fixed Asset creation flow, the user said "I bought a property for $350k on May 15th, $100k cash down, rest financed." AI asked "residential or commercial?" User answered "residential property." AI then re-asked *"What's the purchase price? Cash, loan, or combination?"* — completely forgetting the details already given.
+
+**Root cause:** `llm_client.py` sent every LLM call as a stateless `[system, user]` pair with **no chat history**. Session-id was accepted but silently ignored (see docstring line 25). Multi-turn conversations had zero memory between turns.
+
+**Fix:**
+- `LlmChat.stream_message` / `_stream_openai` / `_stream_anthropic` now accept an optional `history: list[{role, content}]` param, which is inserted between the system prompt and the current user message.
+- `ai_service.chat_stream` gained a `history` kwarg and forwards it to the LLM client.
+- `routes/chat.py` `/ai/chat/stream` route now fetches the last 20 turns from `chat_messages` **before** persisting the new user message and passes them as history. Hidden `[[PROPOSAL:...]]` markers are stripped from history entries so the LLM doesn't confuse itself.
+
+**Verified with 3-turn conversation:** AI now correctly recalls $350k, $100k down, mortgage from Turn 1 across Turns 2 & 3, then proposes mortgage account + correctly flags land/building depreciation split.
+
+**Files changed:**
+- `/app/backend/llm_client.py`
+- `/app/backend/ai_service.py`
+- `/app/backend/routes/chat.py`
+

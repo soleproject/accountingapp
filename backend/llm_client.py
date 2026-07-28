@@ -22,8 +22,9 @@ the rest of the codebase doesn't change:
 Notes:
 - `send_message` is a non-streaming convenience that returns the full
   reply as a plain str.
-- `session_id` is accepted for API compat but not used — every call is a
-  fresh, stateless request (matches how the rest of the app used it).
+- `session_id` is accepted for API compat but not used — pass a
+  `history` list to `stream_message`/`send_message` for multi-turn
+  conversations. Without history each call is stateless.
 - If `with_model` is called it wins over the env default. This lets
   callers pick a cheaper model (Haiku/mini) for lightweight tasks
   without a global env change.
@@ -112,24 +113,33 @@ class LlmChat:
     # Streaming — yields TextDelta(content=…) chunks then a StreamDone()
     # ------------------------------------------------------------------
     async def stream_message(
-        self, msg: UserMessage
+        self, msg: UserMessage, history: list | None = None,
     ) -> AsyncGenerator[Union[TextDelta, StreamDone], None]:
+        # `history` is an optional list of prior turns —
+        #   [{"role": "user"|"assistant", "content": "..."}, ...]
+        # It is prepended before the new user message so multi-turn
+        # conversations keep state (e.g. AI Fixed Asset flow remembering
+        # $350k / May 15 / $100k down across follow-up messages).
         provider = self._resolve_provider()
         if provider == "anthropic":
-            async for ev in self._stream_anthropic(msg.text):
+            async for ev in self._stream_anthropic(msg.text, history):
                 yield ev
         else:
-            async for ev in self._stream_openai(msg.text):
+            async for ev in self._stream_openai(msg.text, history):
                 yield ev
 
-    async def _stream_openai(self, text: str):
+    async def _stream_openai(self, text: str, history: list | None = None):
         client = _openai()
+        messages = [{"role": "system", "content": self.system}]
+        for m in (history or []):
+            role = m.get("role")
+            content = m.get("content")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": text})
         stream = await client.chat.completions.create(
             model=self.model,
-            messages=[
-                {"role": "system", "content": self.system},
-                {"role": "user", "content": text},
-            ],
+            messages=messages,
             stream=True,
             # Ask OpenAI to include a final usage chunk so we can log tokens.
             stream_options={"include_usage": True},
@@ -151,14 +161,21 @@ class LlmChat:
         await self._record_usage("openai", input_tokens, output_tokens)
         yield StreamDone()
 
-    async def _stream_anthropic(self, text: str):
+    async def _stream_anthropic(self, text: str, history: list | None = None):
         client = _anthropic()
         input_tokens = 0
         output_tokens = 0
+        messages = []
+        for m in (history or []):
+            role = m.get("role")
+            content = m.get("content")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": text})
         async with client.messages.stream(
             model=self.model,
             system=self.system,
-            messages=[{"role": "user", "content": text}],
+            messages=messages,
             max_tokens=4096,
         ) as stream:
             async for delta in stream.text_stream:

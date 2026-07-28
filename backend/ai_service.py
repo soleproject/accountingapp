@@ -324,7 +324,7 @@ TERSENESS_OVERLAYS = {
 
 async def chat_stream(
     session_id: str, user_text: str, context: Optional[dict] = None,
-    terseness: str = "balanced",
+    terseness: str = "balanced", history: Optional[list] = None,
 ) -> AsyncGenerator[str, None]:
     prompt = user_text
     if context:
@@ -332,7 +332,7 @@ async def chat_stream(
     overlay = TERSENESS_OVERLAYS.get(terseness or "balanced", "")
     chat = _new_chat(ASSISTANT_SYSTEM + overlay, session_id, feature="ai-chat")
     try:
-        async for ev in chat.stream_message(UserMessage(text=prompt)):
+        async for ev in chat.stream_message(UserMessage(text=prompt), history=history):
             if isinstance(ev, TextDelta):
                 yield ev.content
             elif isinstance(ev, StreamDone):
