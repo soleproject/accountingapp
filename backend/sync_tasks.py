@@ -282,6 +282,22 @@ async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool,
                       "historical_update_at": now_iso(),
                       "updated_at": now_iso()}},
         )
+        # Re-run the auto-reconciliation bootstrap now that we have the
+        # FULL history + a refreshed `opening_as_of` on every mapping.
+        # `bootstrap_from_plaid` is idempotent — its `_overlaps` guard
+        # skips any month that already has a reconciliation, so the ~30
+        # days worth of connect-time recons stay put while every
+        # historical month (going back 24 months for most institutions)
+        # gets a fresh reconciled record.
+        try:
+            from reconciliation_engine import bootstrap_from_plaid
+            await bootstrap_from_plaid(company_id, plaid_item_id=item["id"])
+        except Exception as e:  # noqa: BLE001
+            import logging
+            logging.getLogger("axiom.app").warning(
+                "post-HISTORICAL bootstrap failed for cid=%s: %s",
+                company_id, e,
+            )
     return imported
 
 

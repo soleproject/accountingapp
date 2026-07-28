@@ -654,6 +654,76 @@ async def bootstrap_from_plaid(
         acct_snapshots = {a.get("account_id"): a for a in (item.get("accounts") or [])}
         mappings = item.get("account_mappings") or {}
 
+        # ---- Self-heal mapping openings: opening_as_of stored at connect
+        # time is anchored to whatever ~30 days of history Plaid returned
+        # in INITIAL_UPDATE. Once HISTORICAL_UPDATE lands months later,
+        # the true oldest txn is much older — but the mapping still
+        # points at the connect-day estimate, so the month-by-month
+        # bootstrap below only iterates ~30 days into the past.
+        # Re-derive `opening_as_of` and `opening_balance` from the actual
+        # ledger + Plaid current balance snapshot so bootstrap always
+        # sees the full historical range regardless of WHEN it's called.
+        mapping_updates_needed = False
+        for pa_id, m in mappings.items():
+            ledger_id = m.get("ledger_account_id")
+            if not ledger_id:
+                continue
+            snap = acct_snapshots.get(pa_id) or {}
+            plaid_current = snap.get("balance_current")
+            if plaid_current is None:
+                continue
+            all_for_acct = await db.transactions.find({
+                "company_id": cid,
+                "bank_account_id": ledger_id,
+                "source": {"$regex": "^plaid"},
+                "posted": True,
+            }).sort("date", 1).to_list(50000)
+            if not all_for_acct:
+                continue
+            true_oldest = all_for_acct[0].get("date")
+            if not true_oldest:
+                continue
+            current_as_of = m.get("opening_as_of") or ""
+            # Only shift backwards — never forwards (would truncate valid
+            # historical reconciliations already created).
+            if current_as_of and current_as_of <= true_oldest:
+                continue
+            net_movement = round(
+                sum(float(t.get("amount") or 0) for t in all_for_acct), 2,
+            )
+            ledger_bank = await db.accounts.find_one(
+                {"id": ledger_id, "company_id": cid},
+            )
+            is_liability = ledger_bank and ledger_bank.get("type") == "liability"
+            plaid_current = float(plaid_current)
+            true_opening = round(
+                (plaid_current + net_movement) if is_liability
+                else (plaid_current - net_movement),
+                2,
+            )
+            # `opening_as_of` = day BEFORE oldest txn, matching the
+            # convention in `sync_plaid_history_for_account`.
+            from datetime import date as _dt_date
+            try:
+                _od = _dt_date.fromisoformat(true_oldest[:10])
+                new_as_of = (_od - timedelta(days=1)).isoformat()
+            except Exception:
+                new_as_of = true_oldest[:10]
+            mappings[pa_id] = {
+                **m,
+                "opening_as_of": new_as_of,
+                "opening_balance": true_opening,
+                "opening_refreshed_at": now,
+            }
+            mapping_updates_needed = True
+
+        if mapping_updates_needed:
+            await db.plaid_items.update_one(
+                {"id": item_id},
+                {"$set": {"account_mappings": mappings,
+                          "updated_at": now}},
+            )
+
         # ---- Self-heal: sweep any Plaid txns for a mapped account that
         # somehow landed on the wrong ledger row (webhook races during
         # initial connect can drop txns onto the default fallback checking
