@@ -302,6 +302,17 @@ async def ai_chat_stream(inp: ChatIn, user: dict = Depends(get_current_user)):
                 "field so it's created underneath the existing parent. The "
                 "id looks like '3f8a1c2b-...-4d9e' — never pass the 4-digit "
                 "code as parent_account_id.\n\n"
+                "LOAN METADATA — when the user mentions the lender ('Wells "
+                "Fargo mortgage', 'Chase HELOC'), the principal amount, an "
+                "interest rate, or a term in months/years, include them "
+                'directly in the create-liability-account proposal as '
+                '"lender", "principal", "rate", and "term_months" fields. '
+                "The backend spawns a linked Loans-page row automatically "
+                "using these fields — mirroring the Fixed Assets lifecycle "
+                "so the balance sheet, the CoA, and the Loans page stay in "
+                "sync. Convert years to months for term_months (30-year "
+                "mortgage → 360). Missing fields are OK — the row is created "
+                "with placeholders the user can complete later.\n\n"
                 "SUB-ACCOUNT POLICY (firm-wide, applies to ALL loan/HELOC/"
                 "credit-card creations, not just when the user asks): every "
                 "loan, mortgage, note payable, line of credit, HELOC, or "

@@ -107,6 +107,13 @@ class EnsureAccountIn(BaseModel):
     code: Optional[str] = None
     subtype: Optional[str] = ""
     parent_account_id: Optional[str] = None
+    # Optional loan metadata — when the caller (AI or manual UI) knows the
+    # lender/principal/rate/term for a new loan/HELOC/mortgage sub-account,
+    # a linked Loans row is auto-spawned so the Loans page mirrors the CoA.
+    lender: Optional[str] = None
+    principal: Optional[float] = None
+    rate: Optional[float] = None
+    term_months: Optional[int] = None
 
 
 # ---------- Sub-account policy -----------------------------------------
@@ -125,6 +132,42 @@ LOAN_SUBTYPES = {"long_term_debt", "long_term_liability", "note_payable",
 CARD_KEYWORDS = re.compile(r"\bcredit\s*card\b", re.I)
 CARD_SUBTYPES = {"credit_card", "credit_cards_payable"}
 PARENT_ROOTS = {"loans payable", "credit cards payable"}
+
+
+def _is_loan_class(name: str, subtype: str) -> bool:
+    """True when a new liability qualifies as a loan/mortgage/HELOC —
+    the classes we auto-spawn a Loans row for. Credit cards deliberately
+    excluded (they live on their own page/lifecycle)."""
+    name_norm = re.sub(r"\s+", " ", (name or "").strip()).lower()
+    subtype_norm = (subtype or "").strip().lower()
+    if name_norm in PARENT_ROOTS:
+        return False  # the parent itself
+    if CARD_KEYWORDS.search(name or "") or subtype_norm in CARD_SUBTYPES:
+        return False
+    return bool(LOAN_KEYWORDS.search(name or "")) or subtype_norm in LOAN_SUBTYPES
+
+
+def _lender_from_name(name: str) -> str:
+    """Heuristic to derive a lender label from an account name.
+    "Mortgage Payable — 123 Main" → "123 Main"
+    "Wells Fargo Mortgage" → "Wells Fargo"
+    "HELOC — Chase" → "Chase"
+    Falls back to the account name itself when no split is obvious."""
+    s = (name or "").strip()
+    # Prefer whatever follows an em-dash / en-dash / hyphen separator.
+    for sep in [" — ", " – ", " - ", "—", "–"]:
+        if sep in s:
+            parts = s.split(sep, 1)
+            tail = parts[1].strip()
+            if tail:
+                return tail
+    # Strip common leading category words like "Mortgage Payable", "Loan", etc.
+    stripped = re.sub(
+        r"^(?:mortgage\s+payable|mortgage|note[s]?\s+payable|loan[s]?\s+payable|"
+        r"loan|line\s+of\s+credit|heloc|home\s+equity(?:\s+line(?:\s+of\s+credit)?)?)"
+        r"[:\s]*", "", s, flags=re.I,
+    ).strip()
+    return stripped or s
 
 
 async def _resolve_liability_parent(cid: str, name: str, subtype: str) -> Optional[str]:
@@ -247,6 +290,28 @@ async def ensure_account(cid: str, inp: EnsureAccountIn, user: dict = Depends(ge
         "created_at": now, "updated_at": now, "source": "ai_ensure",
     }
     await db.accounts.insert_one(doc)
+
+    # Auto-spawn a linked Loans row when the new sub-account is a
+    # loan/HELOC/mortgage (i.e., it's parented under Loans Payable via
+    # the policy). This mirrors the fixed-asset lifecycle — the balance
+    # sheet, the Loans page, and the loan schedule all stay in sync.
+    if t == "liability" and inp.parent_account_id and _is_loan_class(inp.name, inp.subtype or ""):
+        # Derive a sensible default lender from the account name if the
+        # caller didn't provide one. "Mortgage Payable — 123 Main" →
+        # "123 Main"; "Wells Fargo Mortgage" → "Wells Fargo"; etc.
+        lender = (inp.lender or "").strip() or _lender_from_name(inp.name)
+        loan_doc = {
+            "id": str(uuid.uuid4()),
+            "company_id": cid,
+            "account_id": aid,   # <— link back to the CoA sub-account
+            "lender": lender,
+            "principal": float(inp.principal) if inp.principal is not None else 0.0,
+            "rate": float(inp.rate) if inp.rate is not None else None,
+            "term_months": int(inp.term_months) if inp.term_months is not None else None,
+            "created_at": now, "updated_at": now, "source": "auto_from_account",
+        }
+        await db.loans.insert_one(loan_doc)
+
     return {"created": True, **coerce(doc)}
 
 
@@ -262,6 +327,9 @@ async def update_account(cid: str, aid: str, payload: dict, user: dict = Depends
 async def delete_account(cid: str, aid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     await db.accounts.delete_one({"id": aid, "company_id": cid})
+    # Cascade: drop any auto-spawned Loan row that pointed at this account
+    # so the Loans page and CoA never desync.
+    await db.loans.delete_many({"company_id": cid, "account_id": aid})
     return {"ok": True}
 
 

@@ -2342,3 +2342,36 @@ Added a SUB-ACCOUNT POLICY block instructing the LLM to always include `parent_a
 - `/app/backend/routes/accounts.py`
 - `/app/backend/routes/chat.py`
 
+
+## Loan Sub-Accounts Now Auto-Spawn Linked Loans-Page Records (Feb 28, 2026) ✅
+**User feedback (from production `app.smartbookssoftware.ai`):** *"it creates the chart of accounts but not the Fixed Assets record or the Loans record that should be linked to the chart of account items."*
+
+**What was built:** Whenever `ensure_account` creates a new liability sub-account that qualifies as a loan / mortgage / note payable / HELOC / line of credit (matched by keyword + subtype heuristics), a companion row is auto-inserted into the `loans` collection with an `account_id` back-link to the CoA account. The Loans page now stays in perfect sync with the CoA.
+
+**What auto-spawns include:**
+- `account_id` — links back to the CoA sub-account
+- `lender` — caller-supplied OR derived from the account name (`"Mortgage Payable — 123 Main"` → `"123 Main"`, `"HELOC — Chase Bank"` → `"Chase Bank"`, `"Wells Fargo Mortgage"` → `"Wells Fargo"`)
+- `principal`, `rate`, `term_months` — populated when the AI or manual UI provides them; placeholder-null otherwise, ready for user completion
+
+**Cascade delete:** Deleting a loan CoA account now also deletes its linked Loans row so the two views never desync.
+
+**Not affected (correct behavior):**
+- Credit cards — deliberately excluded; they have their own lifecycle
+- Non-loan liabilities (Accrued Payroll, Sales Tax Payable, etc.)
+- Root parent accounts ("Loans Payable", "Credit Cards Payable") — don't self-spawn
+
+**AI directive update (`chat.py`):** Added a LOAN METADATA section instructing the LLM to include `lender`, `principal`, `rate`, and `term_months` in the `create-liability-account` proposal when the user mentions them ("Wells Fargo mortgage for $300k at 6.5% over 30 years"). LLM converts years → months automatically. Missing fields are fine — placeholders are inserted and the user can complete later.
+
+**AiPanel intent handler + streaming parser:** Both now capture and forward the loan metadata fields end-to-end.
+
+**Verified via curl (4 scenarios, all pass):**
+1. Mortgage with full metadata → account + Loan row linked, all fields populated ✓
+2. HELOC with no metadata → account + Loan row with heuristic lender + null placeholders ✓
+3. Accrued Payroll → account created, NO Loan row (correct — not a loan class) ✓
+4. Delete loan account → Loan row cascade-deleted, Loans page empty ✓
+
+**Files changed:**
+- `/app/backend/routes/accounts.py` (helpers `_is_loan_class`, `_lender_from_name`; auto-spawn on insert; cascade on delete; extended `EnsureAccountIn`)
+- `/app/backend/routes/chat.py` (LOAN METADATA directive)
+- `/app/frontend/src/components/AiPanel.jsx` (proposal parser + intent handler forward loan fields)
+

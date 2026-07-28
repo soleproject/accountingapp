@@ -1743,11 +1743,16 @@ export default function AiPanel({ collapsed, onToggle }) {
             name: p.name, type: "liability", subtype: p.subtype || "long_term_debt",
             code: p.code,
             parent_account_id: p.parent_account_id || null,
+            lender: p.lender || null,
+            principal: p.principal != null ? Number(p.principal) : null,
+            rate: p.rate != null ? Number(p.rate) : null,
+            term_months: p.term_months != null ? Number(p.term_months) : null,
           });
           const created = r.data?.created;
           const parentSuffix = p.parent_account_id && created ? " as a sub-account" : "";
+          const loanSuffix = created && (p.lender || p.principal != null) ? " Linked Loan record also created." : "";
           const msg = created
-            ? `Created ${r.data.code} · ${r.data.name} (liability)${parentSuffix}. You can now use it as a Loan funding source.`
+            ? `Created ${r.data.code} · ${r.data.name} (liability)${parentSuffix}.${loanSuffix} You can now use it as a Loan funding source.`
             : `${r.data.code} · ${r.data.name} already exists — I'll use it.`;
           setMessages(m => [...m, { role: "assistant", content: msg }]);
           if (voiceOnRef.current) speakOne(msg);
@@ -2310,6 +2315,10 @@ export default function AiPanel({ collapsed, onToggle }) {
                           name: j.name, code: j.code,
                           subtype: j.subtype || "long_term_debt",
                           parent_account_id: j.parent_account_id || null,
+                          lender: j.lender || null,
+                          principal: j.principal != null ? Number(j.principal) : null,
+                          rate: j.rate != null ? Number(j.rate) : null,
+                          term_months: j.term_months != null ? Number(j.term_months) : null,
                         };
                       }
                     } catch {}
