@@ -175,7 +175,12 @@ async def create_fixed_asset(cid: str, payload: dict) -> dict:
         name              : str, human label
         purchase_date     : ISO date str
         cost              : positive number
-        offset_account_id : CoA row credited on acquisition
+        offsets           : list of `{account_id, amount}` — must sum
+                            EXACTLY to cost. Represents how the asset was
+                            paid for; supports mixed funding (e.g. cash
+                            down + mortgage + trade-in equity). Legacy
+                            single `offset_account_id` still accepted —
+                            we normalize it to a one-item list internally.
     Optional:
         asset_type        : key from ASSET_TYPES (drives depreciable+years)
         useful_life_years : positive number — required UNLESS asset_type
@@ -185,11 +190,32 @@ async def create_fixed_asset(cid: str, payload: dict) -> dict:
     name = (payload.get("name") or "").strip()
     purchase_date = payload.get("purchase_date") or ""
     cost = float(payload.get("cost") or 0)
-    offset_id = payload.get("offset_account_id")
     salvage = float(payload.get("salvage_value") or 0)
     asset_type_key = payload.get("asset_type") or "other"
     asset_type = _lookup_asset_type(asset_type_key)
     depreciable = bool(asset_type["depreciable"]) if asset_type else True
+
+    # Normalize offsets — accept legacy single field OR the new list.
+    offsets_raw = payload.get("offsets")
+    if not offsets_raw and payload.get("offset_account_id"):
+        offsets_raw = [{"account_id": payload["offset_account_id"], "amount": cost}]
+    if not offsets_raw or not isinstance(offsets_raw, list):
+        raise ValueError("offsets is required — provide a list of "
+                         "{account_id, amount} entries totaling `cost`")
+    offsets: list[dict] = []
+    for row in offsets_raw:
+        aid = row.get("account_id")
+        amt = float(row.get("amount") or 0)
+        if not aid or amt <= 0:
+            raise ValueError(
+                "each offset must have `account_id` and positive `amount`"
+            )
+        offsets.append({"account_id": aid, "amount": round(amt, 2)})
+    offset_sum = round(sum(o["amount"] for o in offsets), 2)
+    if abs(offset_sum - round(cost, 2)) > 0.005:
+        raise ValueError(
+            f"offset amounts total ${offset_sum:.2f} but cost is ${cost:.2f} — must match exactly"
+        )
 
     # Determine useful life: explicit payload > asset_type preset > error
     payload_years = payload.get("useful_life_years")
@@ -202,10 +228,9 @@ async def create_fixed_asset(cid: str, payload: dict) -> dict:
     else:
         raise ValueError("useful_life_years required for depreciable asset types")
 
-    if not name or not purchase_date or cost <= 0 or not offset_id:
+    if not name or not purchase_date or cost <= 0:
         raise ValueError(
-            "name, purchase_date, cost, offset_account_id are required "
-            "and cost must be positive"
+            "name, purchase_date, cost are required and cost must be positive"
         )
     if depreciable and life_years <= 0:
         raise ValueError("useful_life_years must be positive for depreciable assets")
@@ -217,9 +242,14 @@ async def create_fixed_asset(cid: str, payload: dict) -> dict:
     if await is_period_closed(cid, purchase_date[:10]):
         raise ValueError(f"purchase_date {purchase_date[:10]} falls in a closed period")
 
-    offset = await db.accounts.find_one({"id": offset_id, "company_id": cid})
-    if not offset:
-        raise ValueError(f"offset_account_id {offset_id} not found in this company")
+    # Resolve every offset account up front so we can build the JE lines
+    # atomically without doing N mongo round-trips inside the loop.
+    offset_accts: list[dict] = []
+    for o in offsets:
+        acct = await db.accounts.find_one({"id": o["account_id"], "company_id": cid})
+        if not acct:
+            raise ValueError(f"offset account {o['account_id']} not found")
+        offset_accts.append({"acct": acct, "amount": o["amount"]})
 
     # 1) CoA scaffolding. Land skips the accumulated-depreciation contra
     # since it never depreciates.
@@ -244,7 +274,10 @@ async def create_fixed_asset(cid: str, payload: dict) -> dict:
         "useful_life_years": life_years,
         "asset_type": asset_type_key,
         "depreciable": depreciable,
-        "offset_account_id": offset_id,
+        "offsets": offsets,
+        # Keep the legacy singular field populated with the LARGEST
+        # offset so old readers (Balance Sheet, reports) don't break.
+        "offset_account_id": max(offsets, key=lambda o: o["amount"])["account_id"],
         "ledger_account_id": asset_acct["id"],
         "ledger_account_code": asset_acct["code"],
         "accumulated_depreciation_account_id": contra_acct["id"] if contra_acct else None,
@@ -256,17 +289,22 @@ async def create_fixed_asset(cid: str, payload: dict) -> dict:
     }
     await db.assets.insert_one(asset_row)
 
-    # 3) Acquisition JE.
+    # 3) Acquisition JE — one debit line to the fixed asset, one credit
+    # line per offset (supports mixed funding like $20k cash + $80k loan).
     acq_lines = [
         {"account_id": asset_acct["id"], "account_code": asset_acct["code"],
          "account_name": asset_acct["name"],
          "debit": round(cost, 2), "credit": 0.0,
          "description": f"Acquisition of {name}"},
-        {"account_id": offset["id"], "account_code": offset["code"],
-         "account_name": offset["name"],
-         "debit": 0.0, "credit": round(cost, 2),
-         "description": f"Paid via {offset['name']}"},
     ]
+    for entry in offset_accts:
+        oa = entry["acct"]
+        acq_lines.append({
+            "account_id": oa["id"], "account_code": oa["code"],
+            "account_name": oa["name"],
+            "debit": 0.0, "credit": round(entry["amount"], 2),
+            "description": f"Paid via {oa['name']}",
+        })
     acq_je_id = await _post_je(
         cid, date_iso=purchase_date[:10],
         memo=f"Fixed asset acquisition — {name}",
@@ -321,6 +359,7 @@ async def create_fixed_asset(cid: str, payload: dict) -> dict:
         "depreciation_months": months,
         "depreciation_jes_posted": len(dep_je_ids),
         "depreciable": depreciable,
+        "offsets": offsets,
     }
 
 
@@ -341,7 +380,7 @@ async def update_fixed_asset(cid: str, asset_id: str, payload: dict) -> dict:
 
     financial_fields = {
         "cost", "salvage_value", "useful_life_years", "purchase_date",
-        "offset_account_id", "asset_type",
+        "offset_account_id", "offsets", "asset_type",
     }
     is_financial_edit = any(
         k in payload and payload[k] != row.get(k) for k in financial_fields
@@ -374,9 +413,33 @@ async def update_fixed_asset(cid: str, asset_id: str, payload: dict) -> dict:
     # Financial edit — teardown + recreate. Preserve the row id so any
     # external references remain stable across the swap.
     merged = {**row, **payload}
-    # `create_fixed_asset` treats `offset_account_id` as required; leave
-    # existing value when caller didn't override.
-    merged.setdefault("offset_account_id", row.get("offset_account_id"))
+    # `create_fixed_asset` treats `offsets` as required. If the payload
+    # didn't override it, fall back to the row's existing offsets — or
+    # synthesize a single-item list from the legacy `offset_account_id`.
+    if "offsets" not in merged and merged.get("offset_account_id"):
+        merged["offsets"] = [{
+            "account_id": merged["offset_account_id"],
+            "amount": float(row.get("cost") or 0),
+        }]
+    # If cost changed but offsets didn't, scale offsets pro-rata so the
+    # new totals still match cost. Users editing only the cost expect
+    # their previous funding-source split to survive.
+    if ("cost" in payload and "offsets" not in payload
+            and merged.get("offsets")):
+        old_cost = float(row.get("cost") or 0)
+        new_cost = float(merged["cost"])
+        if old_cost > 0 and abs(new_cost - old_cost) > 0.005:
+            merged["offsets"] = [
+                {"account_id": o["account_id"],
+                 "amount": round(o["amount"] * new_cost / old_cost, 2)}
+                for o in merged["offsets"]
+            ]
+            # Fix any lingering rounding drift by pushing it into the
+            # largest offset (guaranteed to be at least $0.01).
+            drift = round(new_cost - sum(o["amount"] for o in merged["offsets"]), 2)
+            if abs(drift) >= 0.01:
+                biggest = max(merged["offsets"], key=lambda o: o["amount"])
+                biggest["amount"] = round(biggest["amount"] + drift, 2)
     await delete_fixed_asset(cid, asset_id)
     new_result = await create_fixed_asset(cid, {
         "name": merged.get("name"),
@@ -385,7 +448,7 @@ async def update_fixed_asset(cid: str, asset_id: str, payload: dict) -> dict:
         "salvage_value": merged.get("salvage_value") or 0,
         "useful_life_years": merged.get("useful_life_years"),
         "asset_type": merged.get("asset_type"),
-        "offset_account_id": merged.get("offset_account_id"),
+        "offsets": merged.get("offsets"),
     })
     # Rewrite the fresh asset's id back to the original so external
     # references (audit logs, tag joins, etc.) keep resolving.

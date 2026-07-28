@@ -178,13 +178,51 @@ function FixedAssetModal({ currentId, editRow, onClose }) {
     editRow?.salvage_value ? String(editRow.salvage_value) : "",
   );
   const [assetType, setAssetType] = useState(editRow?.asset_type || "");
-  const [offsetKind, setOffsetKind] = useState("cash");
-  const [offsetAccountId, setOffsetAccountId] = useState(
-    editRow?.offset_account_id || "",
-  );
   const [accounts, setAccounts] = useState([]);
   const [assetTypes, setAssetTypes] = useState([]);
   const [saving, setSaving] = useState(false);
+
+  // Multi-source offset builder — one row per funding source. `enabled`
+  // toggles whether that row participates in the acquisition JE.
+  // `account_id` filters to the right subset of the CoA per kind.
+  const KINDS = useMemo(() => [
+    {
+      k: "cash", l: "Cash",
+      tip: "Paid for out of a business bank or cash account. DEBIT the fixed asset, CREDIT the bank/cash account.",
+      hint: "Bank / cash account",
+      filter: (a) => a.type === "asset"
+        && a.subtype !== "fixed_asset"
+        && a.subtype !== "accumulated_depreciation"
+        && a.active !== false,
+    },
+    {
+      k: "loan", l: "Loan",
+      tip: "Financed the purchase — mortgage, auto loan, equipment loan, line of credit, etc. DEBIT the fixed asset, CREDIT the loan liability.",
+      hint: "Loan / liability account",
+      filter: (a) => a.type === "liability" && a.active !== false,
+    },
+    {
+      k: "owner_equity", l: "Owner",
+      tip: "Owner personally contributed the asset — or paid out of pocket without going through a business bank account. CREDIT an owner contribution / equity account.",
+      hint: "Owner / equity account",
+      filter: (a) => a.type === "equity" && a.active !== false
+        && a.code !== "3050" && !/opening balance/i.test(a.name || ""),
+    },
+    {
+      k: "obe", l: "Opening",
+      tip: "The business already owned this asset when you started keeping books here. CREDIT 3050 Opening Balance Equity so retained earnings aren't distorted.",
+      hint: "Opening Balance Equity",
+      filter: (a) => a.type === "equity"
+        && (a.code === "3050" || /opening balance/i.test(a.name || "")),
+    },
+  ], []);
+
+  // rows: { cash: {enabled, account_id, amount}, loan: {...}, ... }
+  const [rows, setRows] = useState(() => {
+    const initial = {};
+    for (const k of KINDS) initial[k.k] = { enabled: false, account_id: "", amount: "" };
+    return initial;
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -202,74 +240,91 @@ function FixedAssetModal({ currentId, editRow, onClose }) {
     return () => { cancelled = true; };
   }, [currentId]);
 
-  // When user picks an asset type, auto-fill the useful-life field
-  // unless they've already typed a custom value (skip on edit re-open).
+  // When editing, hydrate the rows from the existing `offsets` list.
+  useEffect(() => {
+    if (!isEdit || !editRow || !accounts.length) return;
+    const existing = editRow.offsets && editRow.offsets.length
+      ? editRow.offsets
+      : (editRow.offset_account_id
+          ? [{ account_id: editRow.offset_account_id, amount: editRow.cost }]
+          : []);
+    if (!existing.length) return;
+    const next = {};
+    for (const k of KINDS) next[k.k] = { enabled: false, account_id: "", amount: "" };
+    for (const off of existing) {
+      const acct = accounts.find(a => a.id === off.account_id);
+      if (!acct) continue;
+      // Classify offset back to a kind by re-running each kind's filter.
+      const kind = KINDS.find(k => k.filter(acct));
+      if (!kind) continue;
+      next[kind.k] = {
+        enabled: true,
+        account_id: off.account_id,
+        amount: String(off.amount),
+      };
+    }
+    setRows(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEdit, editRow, accounts]);
+
   const setAssetTypeAndLife = (key) => {
     setAssetType(key);
     const t = assetTypes.find(x => x.key === key);
     if (!t) return;
-    if (t.depreciable === false) {
-      setLifeYears("0");
-    } else if (t.years !== null && t.years !== undefined) {
-      setLifeYears(String(t.years));
-    }
+    if (t.depreciable === false) setLifeYears("0");
+    else if (t.years !== null && t.years !== undefined) setLifeYears(String(t.years));
   };
 
   const selectedType = assetTypes.find(t => t.key === assetType);
   const isDepreciable = selectedType ? selectedType.depreciable !== false : true;
 
-  // Filter accounts by offset kind.
-  const eligibleAccounts = useMemo(() => {
-    if (offsetKind === "cash") {
-      return accounts.filter(a =>
-        a.type === "asset" &&
-        a.subtype !== "fixed_asset" &&
-        a.subtype !== "accumulated_depreciation" &&
-        a.active !== false
-      );
-    }
-    if (offsetKind === "loan") {
-      return accounts.filter(a => a.type === "liability" && a.active !== false);
-    }
-    if (offsetKind === "owner_equity" || offsetKind === "obe") {
-      return accounts.filter(a => a.type === "equity" && a.active !== false);
-    }
-    return accounts;
-  }, [accounts, offsetKind]);
+  const costNum = Number(cost) || 0;
+  const totalAllocated = Object.values(rows).reduce(
+    (s, r) => s + (r.enabled ? (Number(r.amount) || 0) : 0), 0,
+  );
+  const remaining = round2(costNum - totalAllocated);
+  const balanced = costNum > 0 && Math.abs(remaining) < 0.005;
 
-  useEffect(() => {
-    // Skip pre-selection when editing (respect existing offset_account_id).
-    if (isEdit && editRow?.offset_account_id) return;
-    if (!eligibleAccounts.length) {
-      setOffsetAccountId("");
-      return;
+  const setRow = (k, patch) => setRows(prev => ({ ...prev, [k]: { ...prev[k], ...patch } }));
+
+  const autoFillFirst = () => {
+    // Helper: if only ONE source is enabled and its amount is blank, fill
+    // it with the full cost. Runs when user enables a single source.
+    const enabledKeys = Object.entries(rows)
+      .filter(([, r]) => r.enabled).map(([k]) => k);
+    if (enabledKeys.length === 1 && !rows[enabledKeys[0]].amount && costNum > 0) {
+      setRow(enabledKeys[0], { amount: String(costNum) });
     }
-    if (offsetKind === "obe") {
-      const obe = eligibleAccounts.find(a => a.code === "3050"
-        || /opening balance equity/i.test(a.name));
-      setOffsetAccountId((obe || eligibleAccounts[0]).id);
-    } else {
-      setOffsetAccountId(eligibleAccounts[0].id);
-    }
-  }, [eligibleAccounts, offsetKind, isEdit, editRow]);
+  };
+  useEffect(autoFillFirst, [rows, costNum]);  // eslint-disable-line
 
   const save = async () => {
     if (!name.trim()) { toast.error("Asset name is required"); return; }
-    if (!(Number(cost) > 0)) { toast.error("Cost must be positive"); return; }
+    if (!(costNum > 0)) { toast.error("Cost must be positive"); return; }
     if (isDepreciable && !(Number(lifeYears) > 0)) {
       toast.error("Useful life must be positive"); return;
     }
-    if (!offsetAccountId) { toast.error("Select an offset account"); return; }
+    const activeOffsets = Object.entries(rows)
+      .filter(([, r]) => r.enabled && r.account_id && Number(r.amount) > 0)
+      .map(([, r]) => ({ account_id: r.account_id, amount: Number(r.amount) }));
+    if (!activeOffsets.length) {
+      toast.error("Select at least one funding source (Cash / Loan / Owner / Opening)");
+      return;
+    }
+    if (!balanced) {
+      toast.error(`Funding sources total $${totalAllocated.toFixed(2)} but cost is $${costNum.toFixed(2)}. Adjust amounts so they match exactly.`);
+      return;
+    }
 
     setSaving(true);
     try {
       const payload = {
         name: name.trim(),
         purchase_date: purchaseDate,
-        cost: Number(cost),
+        cost: costNum,
         useful_life_years: Number(lifeYears) || 0,
         salvage_value: Number(salvage) || 0,
-        offset_account_id: offsetAccountId,
+        offsets: activeOffsets,
         asset_type: assetType || "other",
       };
       let r;
@@ -285,15 +340,14 @@ function FixedAssetModal({ currentId, editRow, onClose }) {
         toast.success("Fixed asset renamed.");
       } else if (isDepreciable) {
         toast.success(
-          `Fixed asset ${isEdit ? (action === "regenerated" ? "regenerated" : "saved") : "created"} — acquisition JE posted, ` +
+          `Fixed asset ${isEdit ? (action === "regenerated" ? "regenerated" : "saved") : "created"} — acquisition JE posted (${activeOffsets.length} funding source${activeOffsets.length === 1 ? "" : "s"}), ` +
           `${posted} depreciation entries scheduled ($${Number(monthly).toLocaleString(undefined,
             { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / month).`,
           { duration: 8000 },
         );
       } else {
         toast.success(
-          `Fixed asset ${isEdit ? "regenerated" : "created"} — acquisition JE posted. ` +
-          `Non-depreciable (land) — no depreciation schedule.`,
+          `Fixed asset ${isEdit ? "regenerated" : "created"} — acquisition JE posted (${activeOffsets.length} funding source${activeOffsets.length === 1 ? "" : "s"}). Non-depreciable — no depreciation schedule.`,
           { duration: 8000 },
         );
       }
@@ -317,7 +371,7 @@ function FixedAssetModal({ currentId, editRow, onClose }) {
 
         {isEdit && (
           <div className="text-[11px] bg-amber-50 border border-amber-200 text-amber-900 rounded px-2 py-1.5">
-            Changing <b>cost</b>, <b>life</b>, <b>type</b>, <b>date</b>, or <b>offset account</b> will re-generate every journal entry for this asset. Renames are cheap.
+            Changing <b>cost</b>, <b>life</b>, <b>type</b>, <b>date</b>, or <b>funding sources</b> will re-generate every journal entry for this asset. Renames are cheap.
           </div>
         )}
 
@@ -410,79 +464,97 @@ function FixedAssetModal({ currentId, editRow, onClose }) {
           </div>
         </div>
 
-        <div>
-          <label className="text-xs uppercase text-slate-500">
-            How was this paid for?
-          </label>
-          <div className="mt-1 grid grid-cols-4 gap-1">
-            {[
-              {
-                k: "cash", l: "Cash",
-                tip: "Paid for out of a business bank or cash account. We'll DEBIT the fixed asset and CREDIT the bank/cash account you pick below — cash goes out, asset comes in.",
-              },
-              {
-                k: "loan", l: "Loan",
-                tip: "Financed the purchase — mortgage, auto loan, equipment loan, line of credit, etc. We'll DEBIT the fixed asset and CREDIT the loan liability. Later principal payments reduce the loan balance without touching the asset.",
-              },
-              {
-                k: "owner_equity", l: "Owner",
-                tip: "The owner personally contributed the asset — or paid for it out of pocket without going through a business bank account. We'll DEBIT the fixed asset and CREDIT an owner contribution / equity account.",
-              },
-              {
-                k: "obe", l: "Opening",
-                tip: "The business already owned this asset when you started keeping books here. We'll DEBIT the fixed asset and CREDIT 3050 Opening Balance Equity — representing pre-existing net worth so retained earnings aren't distorted.",
-              },
-            ].map(({ k, l, tip }) => (
-              <button
-                key={k}
-                type="button"
-                title={tip}
-                data-testid={`fa-offset-kind-${k}`}
-                onClick={() => setOffsetKind(k)}
-                className={`px-2 py-1.5 rounded text-xs border ${
-                  offsetKind === k
-                    ? "bg-slate-900 text-white border-slate-900"
-                    : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+        <div className="space-y-1.5">
+          <div className="flex items-baseline justify-between">
+            <label className="text-xs uppercase text-slate-500">
+              Funding Sources
+            </label>
+            <div className={`text-xs font-mono-num ${
+              balanced ? "text-emerald-700" :
+              (totalAllocated > costNum ? "text-red-600" : "text-amber-700")
+            }`}>
+              {balanced
+                ? "✓ Balanced"
+                : `${remaining >= 0 ? "Remaining" : "Over by"} $${Math.abs(remaining).toLocaleString(undefined,
+                    { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-500">
+            Check one or more sources and set an amount for each — totals must equal Cost. Supports mixed funding (e.g. $20k cash down + $80k mortgage).
+          </p>
+
+          {KINDS.map((kind) => {
+            const row = rows[kind.k];
+            const eligible = accounts.filter(kind.filter);
+            return (
+              <div
+                key={kind.k}
+                title={kind.tip}
+                data-testid={`fa-offset-row-${kind.k}`}
+                className={`border rounded-md p-2 ${
+                  row.enabled ? "bg-slate-50 border-slate-300" : "bg-white border-slate-200"
                 }`}
               >
-                {l}
-              </button>
-            ))}
-          </div>
-          <p className="mt-1 text-[11px] text-slate-500">
-            {offsetKind === "cash" && "We'll credit the bank/cash account you pick below."}
-            {offsetKind === "loan" && "We'll credit the liability (loan) account you pick below."}
-            {offsetKind === "owner_equity" && "We'll credit an owner contribution / equity account."}
-            {offsetKind === "obe" && "Best for assets already owned when starting the books — credits Opening Balance Equity."}
-          </p>
-        </div>
-
-        <div>
-          <label className="text-xs uppercase text-slate-500">Offset Account</label>
-          <select
-            data-testid="fa-offset-account"
-            value={offsetAccountId}
-            onChange={(e) => setOffsetAccountId(e.target.value)}
-            className="w-full mt-1 border rounded px-2 py-1.5 text-sm bg-white"
-          >
-            <option value="">— select —</option>
-            {eligibleAccounts.map(a => (
-              <option key={a.id} value={a.id}>
-                {a.code} · {a.name}
-              </option>
-            ))}
-          </select>
-          {!eligibleAccounts.length && (
-            <p className="mt-1 text-[11px] text-amber-700">
-              No matching account found. Add one under Chart of Accounts first, or pick a different offset type.
-            </p>
-          )}
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    data-testid={`fa-offset-kind-${kind.k}`}
+                    checked={row.enabled}
+                    onChange={(e) => {
+                      const enabled = e.target.checked;
+                      setRow(kind.k, {
+                        enabled,
+                        // Pre-select first eligible when enabling; wipe on disable.
+                        account_id: enabled
+                          ? (row.account_id || eligible[0]?.id || "")
+                          : "",
+                        amount: enabled ? row.amount : "",
+                      });
+                    }}
+                    className="rounded"
+                  />
+                  <span className="font-medium">{kind.l}</span>
+                  <span className="text-[11px] text-slate-500">— {kind.hint}</span>
+                </label>
+                {row.enabled && (
+                  <div className="mt-2 grid grid-cols-[1fr_120px] gap-2">
+                    <select
+                      value={row.account_id}
+                      onChange={(e) => setRow(kind.k, { account_id: e.target.value })}
+                      className="border rounded px-2 py-1 text-sm bg-white"
+                      data-testid={`fa-offset-account-${kind.k}`}
+                    >
+                      <option value="">— select account —</option>
+                      {eligible.map(a => (
+                        <option key={a.id} value={a.id}>{a.code} · {a.name}</option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="$"
+                      value={row.amount}
+                      onChange={(e) => setRow(kind.k, { amount: e.target.value })}
+                      className="border rounded px-2 py-1 text-sm font-mono-num text-right"
+                      data-testid={`fa-offset-amount-${kind.k}`}
+                    />
+                  </div>
+                )}
+                {row.enabled && !eligible.length && (
+                  <p className="mt-1 text-[11px] text-amber-700">
+                    No matching account exists yet — add one under Chart of Accounts first.
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         <button
           data-testid={TID.saveBtn}
           onClick={save}
-          disabled={saving}
+          disabled={saving || !balanced}
           className="w-full py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50 flex items-center justify-center gap-2"
         >
           {saving && <Loader2 size={14} className="animate-spin" />}
@@ -493,4 +565,9 @@ function FixedAssetModal({ currentId, editRow, onClose }) {
       </div>
     </div>
   );
+}
+
+
+function round2(n) {
+  return Math.round(n * 100) / 100;
 }

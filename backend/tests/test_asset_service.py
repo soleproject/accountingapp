@@ -396,6 +396,85 @@ def test_update_financial_change_regenerates_schedule():
     asyncio.run(_go())
 
 
+def test_mixed_funding_creates_multiline_acquisition_je():
+    """User buys a $100k house with $20k cash down + $80k mortgage. The
+    acquisition JE should have three lines: DR asset $100k, CR cash $20k,
+    CR loan $80k."""
+    async def _go():
+        cid, cash = await _seed_company_with_cash(50_000)
+        try:
+            # Seed a mortgage liability.
+            loan_id = str(uuid.uuid4())
+            await db.accounts.insert_one({
+                "id": loan_id, "company_id": cid,
+                "code": "2500", "name": "Rocket Mortgage",
+                "type": "liability", "subtype": "loan",
+                "active": True, "created_at": now_iso(),
+            })
+            r = await A.create_fixed_asset(cid, {
+                "name": "123 Main St.", "purchase_date": "2026-01-01",
+                "cost": 100_000, "asset_type": "residential_real_estate",
+                "offsets": [
+                    {"account_id": cash["id"], "amount": 20_000},
+                    {"account_id": loan_id, "amount": 80_000},
+                ],
+            })
+            acq = await db.journal_entries.find_one({"id": r["acquisition_je_id"]})
+            assert acq is not None
+            assert len(acq["lines"]) == 3
+            # Verify each line
+            asset_line = next(l for l in acq["lines"] if l["debit"] > 0)
+            cash_line = next(l for l in acq["lines"] if l["account_id"] == cash["id"])
+            loan_line = next(l for l in acq["lines"] if l["account_id"] == loan_id)
+            assert asset_line["debit"] == 100_000
+            assert cash_line["credit"] == 20_000
+            assert loan_line["credit"] == 80_000
+            # Balanced: debits == credits
+            total_dr = sum(l["debit"] for l in acq["lines"])
+            total_cr = sum(l["credit"] for l in acq["lines"])
+            assert abs(total_dr - total_cr) < 0.005
+        finally:
+            await _cleanup(cid)
+    asyncio.run(_go())
+
+
+def test_offsets_must_sum_to_cost():
+    """Total of offsets must match cost exactly."""
+    async def _go():
+        cid, cash = await _seed_company_with_cash()
+        try:
+            try:
+                await A.create_fixed_asset(cid, {
+                    "name": "Underfunded", "purchase_date": "2026-01-01",
+                    "cost": 100_000, "useful_life_years": 5,
+                    "offsets": [{"account_id": cash["id"], "amount": 50_000}],
+                })
+                assert False, "should have raised"
+            except ValueError as e:
+                assert "match exactly" in str(e).lower(), e
+        finally:
+            await _cleanup(cid)
+    asyncio.run(_go())
+
+
+def test_legacy_single_offset_still_accepted():
+    """Backward compat — passing `offset_account_id` as before still works."""
+    async def _go():
+        cid, cash = await _seed_company_with_cash()
+        try:
+            r = await A.create_fixed_asset(cid, {
+                "name": "Legacy", "purchase_date": "2026-01-01",
+                "cost": 5000, "useful_life_years": 3,
+                "offset_account_id": cash["id"],
+            })
+            # Row should have a synthesized offsets list.
+            row = await db.assets.find_one({"id": r["id"]})
+            assert row["offsets"] == [{"account_id": cash["id"], "amount": 5000}]
+        finally:
+            await _cleanup(cid)
+    asyncio.run(_go())
+
+
 if __name__ == "__main__":
     import asyncio as _a
     _orig_run = _a.run
