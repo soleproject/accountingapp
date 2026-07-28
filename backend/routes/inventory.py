@@ -150,6 +150,28 @@ async def update_asset(cid: str, aid: str, payload: dict,
     return result
 
 
+@router.post("/companies/{cid}/assets/{aid}/fund")
+async def fund_asset(cid: str, aid: str, payload: dict,
+                     user: dict = Depends(get_current_user)):
+    """Phase-2 funding for an asset created without funding sources.
+    Body: `{"sources": [{"account_id": "...", "amount": ...}, ...]}`.
+    Sweeps balance out of the Fixed Asset Suspense clearing account
+    into the real funding accounts (cash, mortgage, owner, etc.).
+    Can be called multiple times if funding trickles in."""
+    await require_company(user, cid)
+    sources = payload.get("sources") or payload.get("offsets") or []
+    try:
+        import asset_service
+        result = await asset_service.fund_fixed_asset(cid, aid, sources)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    try:
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+    return result
+
+
 @router.delete("/companies/{cid}/assets/{aid}")
 async def delete_asset(cid: str, aid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)

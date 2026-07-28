@@ -1718,19 +1718,58 @@ export default function AiPanel({ collapsed, onToggle }) {
           const r = await api.post(`/companies/${currentId}/assets`, p.payload);
           const monthly = r.data?.monthly_depreciation;
           const posted = r.data?.depreciation_jes_posted;
-          const msg = posted
-            ? `Fixed asset created — acquisition JE posted, ${posted} depreciation entries scheduled at $${Number(monthly).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}/month.`
-            : `Fixed asset created — acquisition JE posted (non-depreciable, no schedule).`;
+          const pending = !!r.data?.pending_funding;
+          const cost = Number(p.payload?.cost || 0);
+          const baseMsg = posted
+            ? `Fixed asset created — on the Fixed Assets page + Chart of Accounts, ${posted} depreciation entries scheduled at $${Number(monthly).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}/month.`
+            : `Fixed asset created — on the Fixed Assets page + Chart of Accounts (non-depreciable, no schedule).`;
+          const fundingMsg = pending
+            ? ` The acquisition is booked against Fixed Asset Suspense for $${cost.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}. Next: how was it funded? (cash / loan / owner — you can mix multiple)`
+            : "";
+          const msg = baseMsg + fundingMsg;
           setMessages(m => [...m, { role: "assistant", content: msg }]);
           if (voiceOnRef.current) speakOne(msg);
           window.dispatchEvent(new CustomEvent("fixed-assets:created", { detail: r.data }));
-          setFocus(null);
+          if (!pending) setFocus(null);
         } catch (e) {
           const err = e.response?.data?.detail || "Sorry — I couldn't create that asset.";
           setMessages(m => [...m, { role: "assistant", content: err }]);
         }
         return;
       }
+
+      // Fund-fixed-asset card: Phase 2 of the two-phase asset flow.
+      // Sweeps balance out of Fixed Asset Suspense into real funding
+      // sources (cash, mortgage, owner). Can fire multiple times if
+      // funding trickles in from different sources across turns.
+      if (p.kind === "fund-fixed-asset") {
+        pendingIntentRef.current = null;
+        setPendingIntent(null);
+        setMessages(m => [...m, { role: "user", content: userMsg }]);
+        try {
+          const assetId = p.payload?.asset_id;
+          const sources = p.payload?.sources || [];
+          const r = await api.post(
+            `/companies/${currentId}/assets/${assetId}/fund`,
+            { sources },
+          );
+          const funded = Number(r.data?.funded_amount || 0);
+          const remaining = Number(r.data?.remaining || 0);
+          const stillPending = !!r.data?.pending_funding;
+          const msg = stillPending
+            ? `Funded $${funded.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} — $${remaining.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} still to go. How's the rest covered?`
+            : `Fully funded — $${funded.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} swept out of Suspense. Balance Sheet and Loans page are now in sync.`;
+          setMessages(m => [...m, { role: "assistant", content: msg }]);
+          if (voiceOnRef.current) speakOne(msg);
+          window.dispatchEvent(new CustomEvent("fixed-assets:created", { detail: r.data }));
+          if (!stillPending) setFocus(null);
+        } catch (e) {
+          const err = e.response?.data?.detail || "Sorry — I couldn't apply that funding.";
+          setMessages(m => [...m, { role: "assistant", content: err }]);
+        }
+        return;
+      }
+
 
       // Create-liability-account card: sets up a mortgage / loan account
       // so the AI can then use it as a Loan funding source on the next turn.
@@ -2307,6 +2346,11 @@ export default function AiPanel({ collapsed, onToggle }) {
                       if (j.kind === "create-fixed-asset" && j.payload) {
                         pendingIntentRef.current = {
                           kind: "create-fixed-asset",
+                          payload: j.payload,
+                        };
+                      } else if (j.kind === "fund-fixed-asset" && j.payload) {
+                        pendingIntentRef.current = {
+                          kind: "fund-fixed-asset",
                           payload: j.payload,
                         };
                       } else if (j.kind === "create-liability-account") {

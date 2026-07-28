@@ -2375,3 +2375,44 @@ Added a SUB-ACCOUNT POLICY block instructing the LLM to always include `parent_a
 - `/app/backend/routes/chat.py` (LOAN METADATA directive)
 - `/app/frontend/src/components/AiPanel.jsx` (proposal parser + intent handler forward loan fields)
 
+
+## Two-Phase Fixed Asset Creation (Feb 28, 2026) ✅
+**User feedback:** *"maybe we should have the asset created first, have it populate in the fixed assets and on the chart of accounts, and then go from there."*
+
+**What was built:** The AI Fixed Asset flow is now split into two phases, matching how a real CPA thinks (asset shell first, funding second):
+
+### Phase 1 — Asset shell
+The AI asks only for name/purchase_date/cost/asset_type/useful_life_years — NO funding questions. On confirm, the asset is created immediately with:
+- Fixed Assets page row ✓
+- 1510/1515 CoA sub-accounts ✓
+- Full 27.5-year (or type-appropriate) depreciation schedule ✓
+- **Acquisition JE credits a system-managed "Fixed Asset Suspense" clearing account (code 2990)** so debits still equal credits with zero funding info yet.
+
+The user sees the asset on Fixed Assets + CoA within one confirmation.
+
+### Phase 2 — Funding (deferred, multi-turn)
+On subsequent turns, the AI sees `pending_funding_assets` in the context and skips Phase 1 entirely, going straight to funding conversation. Funding sources can be added one at a time; each posts a JE `DR Suspense / CR real funding account`. Net effect after full funding = the original acquisition JE with correct offsets.
+
+Verified accounting math: Suspense zeros out to $0.00 after full funding (450k debited during acquisition, 450k credited across 2 funding calls = 150k cash + 300k mortgage).
+
+### New endpoint
+`POST /api/companies/{cid}/assets/{aid}/fund` with body `{"sources": [{"account_id","amount"},...]}`. Idempotent per call; can fire multiple times if funding trickles in. Refuses to fund past the asset's cost.
+
+### New AI intent
+`fund-fixed-asset` — payload `{asset_id, sources:[{account_id, amount},...]}`. AiPanel intent handler wired end-to-end with success/partial messages ("Funded $X — $Y still to go" vs "Fully funded — balance sheet in sync").
+
+### Directive rewrite
+Complete two-phase directive with FIRST rule: *"CHECK `pending_funding_assets`. If NON-EMPTY, an asset shell already exists — SKIP PHASE 1 and go straight to PHASE 2."* AI now correctly detects pending assets and jumps to funding conversation instead of re-creating.
+
+**Backend files:**
+- `/app/backend/asset_service.py` — new `_ensure_fixed_asset_suspense`, `fund_fixed_asset`; `create_fixed_asset` accepts empty offsets → Suspense
+- `/app/backend/routes/inventory.py` — new `POST /assets/{aid}/fund`
+- `/app/backend/routes/chat.py` — two-phase directive; injects `pending_funding_assets` context
+
+**Frontend files:**
+- `/app/frontend/src/components/AiPanel.jsx` — `fund-fixed-asset` streaming parser + intent handler; Phase 1 success message points user to Phase 2
+
+**Verified end-to-end with live LLM stream:**
+- Phase 1: user says *"$450k property, May 15"* → AI proposes `create-fixed-asset` with no offsets, asset shell created (330 depreciation entries, monthly $1,363.64) ✓
+- Phase 2: user says *"$100k B of A + $200k Wells Fargo mortgage"* → AI recognizes pending asset, proposes mortgage sub-account with loan metadata (lender/principal/term_months=360) ✓
+

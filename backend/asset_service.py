@@ -47,6 +47,42 @@ FIXED_ASSETS_PARENT_CODE = "1500"
 FIXED_ASSETS_PARENT_NAME = "Fixed Assets"
 DEPRECIATION_EXPENSE_CODE = "5900"
 DEPRECIATION_EXPENSE_NAME = "Depreciation Expense"
+# Two-phase asset creation: when the user creates the asset shell before
+# specifying funding, the acquisition JE credits this system-managed
+# clearing account. Later `fund_fixed_asset()` calls sweep the balance
+# out of Suspense into the real funding accounts (cash, mortgage, owner).
+FIXED_ASSET_SUSPENSE_CODE = "2990"
+FIXED_ASSET_SUSPENSE_NAME = "Fixed Asset Suspense"
+
+
+async def _ensure_fixed_asset_suspense(cid: str) -> dict:
+    """System-managed clearing liability. Auto-created on first use."""
+    a = await db.accounts.find_one({
+        "company_id": cid, "code": FIXED_ASSET_SUSPENSE_CODE,
+    })
+    if a:
+        return a
+    # Fall back to name-match in case a company already has a suspense
+    # under a different code from an older seed.
+    a = await db.accounts.find_one({
+        "company_id": cid, "type": "liability",
+        "name": FIXED_ASSET_SUSPENSE_NAME,
+    })
+    if a:
+        return a
+    now = now_iso()
+    doc = {
+        "id": str(uuid.uuid4()), "company_id": cid,
+        "code": FIXED_ASSET_SUSPENSE_CODE,
+        "name": FIXED_ASSET_SUSPENSE_NAME,
+        "type": "liability", "subtype": "clearing",
+        "active": True, "balance": 0.0,
+        "parent_account_id": None, "system_managed": True,
+        "created_at": now, "updated_at": now,
+        "source": "fixed_asset_suspense_auto",
+    }
+    await db.accounts.insert_one(doc)
+    return doc
 
 
 async def _ensure_fixed_assets_parent(cid: str) -> dict:
@@ -201,7 +237,18 @@ async def create_fixed_asset(cid: str, payload: dict) -> dict:
     offsets_raw = payload.get("offsets") or payload.get("funding_sources")
     if not offsets_raw and payload.get("offset_account_id"):
         offsets_raw = [{"account_id": payload["offset_account_id"], "amount": cost}]
-    if not offsets_raw or not isinstance(offsets_raw, list):
+    # Two-phase creation: when offsets are absent/empty, book the full
+    # cost to the Fixed Asset Suspense clearing account. The user (or AI)
+    # later calls `fund_fixed_asset()` to move it into real funding
+    # accounts. This lets a CPA see the asset on Fixed Assets + CoA
+    # immediately and worry about funding separately.
+    pending_funding = not offsets_raw
+    if pending_funding:
+        if cost <= 0:
+            raise ValueError("cost must be positive")
+        suspense = await _ensure_fixed_asset_suspense(cid)
+        offsets_raw = [{"account_id": suspense["id"], "amount": cost}]
+    if not isinstance(offsets_raw, list):
         raise ValueError("offsets is required — provide a list of "
                          "{account_id, amount} entries totaling `cost`")
     # LLM proposals sometimes pass a 4-digit code ("2500") or a name
@@ -293,6 +340,11 @@ async def create_fixed_asset(cid: str, payload: dict) -> dict:
         "asset_type": asset_type_key,
         "depreciable": depreciable,
         "offsets": offsets,
+        # Track two-phase funding state. `funded_amount` climbs from 0 to
+        # cost as `fund_fixed_asset` calls sweep Suspense into real
+        # accounts. `pending_funding` flips to False when fully swept.
+        "pending_funding": pending_funding,
+        "funded_amount": 0.0 if pending_funding else round(cost, 2),
         # Keep the legacy singular field populated with the LARGEST
         # offset so old readers (Balance Sheet, reports) don't break.
         "offset_account_id": max(offsets, key=lambda o: o["amount"])["account_id"],
@@ -378,6 +430,128 @@ async def create_fixed_asset(cid: str, payload: dict) -> dict:
         "depreciation_jes_posted": len(dep_je_ids),
         "depreciable": depreciable,
         "offsets": offsets,
+        "pending_funding": pending_funding,
+        "funded_amount": 0.0 if pending_funding else round(cost, 2),
+    }
+
+
+async def fund_fixed_asset(cid: str, asset_id: str, sources: list[dict]) -> dict:
+    """Two-phase funding: sweep balance out of the Fixed Asset Suspense
+    clearing account into the real funding sources.
+
+    Each entry in `sources` is `{account_id, amount}`. The sum of the
+    sources cannot exceed the remaining unfunded balance. On each call
+    we post ONE journal entry:
+        DR Fixed Asset Suspense   (total funded amount this call)
+        CR each funding source    (their respective amounts)
+    Net effect after full funding: Suspense zeros out and the original
+    acquisition JE (DR Asset / CR Suspense) has been transformed into
+    (DR Asset / CR real funding accounts).
+
+    Also accepts non-UUID `account_id` (code or name) — mirrors the LLM
+    tolerance we built into `create_fixed_asset`.
+    """
+    row = await db.assets.find_one({"id": asset_id, "company_id": cid})
+    if not row:
+        raise ValueError(f"asset {asset_id} not found")
+    if not sources or not isinstance(sources, list):
+        raise ValueError("sources must be a non-empty list of {account_id, amount}")
+
+    cost = float(row.get("cost") or 0)
+    funded = float(row.get("funded_amount") or 0)
+    remaining = round(cost - funded, 2)
+    if remaining <= 0:
+        raise ValueError(f"{row.get('name')} is already fully funded")
+
+    # Resolve account ids (code/name → UUID) and validate amounts.
+    import re as _re
+    uuid_re = _re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", _re.I)
+    resolved: list[dict] = []
+    for row_in in sources:
+        aid = row_in.get("account_id")
+        amt = float(row_in.get("amount") or 0)
+        if not aid or amt <= 0:
+            raise ValueError("each source needs account_id and positive amount")
+        if not uuid_re.match(str(aid)):
+            key = str(aid).strip()
+            acct = await db.accounts.find_one({"company_id": cid, "code": key})
+            if not acct:
+                key_norm = _re.sub(r"\s+", " ", key).lower()
+                async for a in db.accounts.find({"company_id": cid}):
+                    if _re.sub(r"\s+", " ", (a.get("name") or "").strip()).lower() == key_norm:
+                        acct = a
+                        break
+            if not acct:
+                raise ValueError(f"funding account {aid} not found")
+            aid = acct["id"]
+        else:
+            acct = await db.accounts.find_one({"id": aid, "company_id": cid})
+            if not acct:
+                raise ValueError(f"funding account {aid} not found")
+        resolved.append({"acct": acct, "amount": round(amt, 2)})
+
+    total_this_call = round(sum(r["amount"] for r in resolved), 2)
+    if total_this_call > remaining + 0.005:
+        raise ValueError(
+            f"funding total ${total_this_call:.2f} exceeds remaining ${remaining:.2f}"
+        )
+
+    suspense = await _ensure_fixed_asset_suspense(cid)
+    today_iso = date.today().isoformat()
+    if await is_period_closed(cid, today_iso):
+        raise ValueError(f"today ({today_iso}) falls in a closed period")
+
+    lines = [{
+        "account_id": suspense["id"], "account_code": suspense["code"],
+        "account_name": suspense["name"],
+        "debit": total_this_call, "credit": 0.0,
+        "description": f"Clear Fixed Asset Suspense — {row.get('name')}",
+    }]
+    for r in resolved:
+        a = r["acct"]
+        lines.append({
+            "account_id": a["id"], "account_code": a["code"],
+            "account_name": a["name"],
+            "debit": 0.0, "credit": r["amount"],
+            "description": f"Fund {row.get('name')} via {a['name']}",
+        })
+    je_id = await _post_je(
+        cid, date_iso=today_iso,
+        memo=f"Fund fixed asset — {row.get('name')}",
+        source="asset_funding", asset_id=asset_id, lines=lines,
+    )
+
+    # Update the assets row: append to offsets, bump funded_amount,
+    # clear pending_funding when fully funded.
+    new_funded = round(funded + total_this_call, 2)
+    still_pending = new_funded < cost - 0.005
+    prior_offsets = list(row.get("offsets") or [])
+    # Strip the suspense placeholder offset if we're finishing funding.
+    if not still_pending:
+        prior_offsets = [
+            o for o in prior_offsets if o.get("account_id") != suspense["id"]
+        ]
+    for r in resolved:
+        prior_offsets.append({
+            "account_id": r["acct"]["id"], "amount": r["amount"],
+        })
+    await db.assets.update_one(
+        {"id": asset_id},
+        {"$set": {
+            "offsets": prior_offsets,
+            "funded_amount": new_funded,
+            "pending_funding": still_pending,
+            "funding_je_ids": (row.get("funding_je_ids") or []) + [je_id],
+            "updated_at": now_iso(),
+        }},
+    )
+
+    return {
+        "id": asset_id,
+        "je_id": je_id,
+        "funded_amount": new_funded,
+        "remaining": round(cost - new_funded, 2),
+        "pending_funding": still_pending,
     }
 
 
