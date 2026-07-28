@@ -258,6 +258,34 @@ export default function Reconciliation() {
           { duration: 6000 },
         );
       }
+      // Auto-fill statement dates + opening/ending balances from the OCR
+      // so the user doesn't have to re-type numbers already visible on
+      // the PDF. Always overwrite — the statement is authoritative for a
+      // reconciliation of THIS statement, even if the user pre-typed
+      // something before uploading.
+      const autoFilled = [];
+      if (r.data?.statement_period_start) {
+        setPeriodStart(r.data.statement_period_start);
+        autoFilled.push("start");
+      }
+      if (r.data?.statement_period_end) {
+        setPeriodEnd(r.data.statement_period_end);
+        autoFilled.push("end");
+      }
+      if (r.data?.statement_opening_balance != null) {
+        setOpenBal(String(r.data.statement_opening_balance));
+        autoFilled.push("opening");
+      }
+      if (r.data?.statement_closing_balance != null) {
+        setCloseBal(String(r.data.statement_closing_balance));
+        autoFilled.push("ending");
+      }
+      if (autoFilled.length) {
+        toast.success(
+          `Auto-filled ${autoFilled.join(" · ")} from statement PDF.`,
+          { duration: 5000 },
+        );
+      }
       setMatchResult(r.data);
       setShowMatchModal(true);
     } catch (e) {

@@ -284,6 +284,20 @@ async def match_statement(
         "used_bank_account_id": bank_account_id,
         "statement_bank_name": stmt_fields.get("bank_name"),
         "statement_last4": stmt_fields.get("last4"),
+        # Auto-fill payload for the reconciliation form — the frontend
+        # populates opening_balance / ending_balance / statement_start /
+        # statement_end when these come back non-null so the user doesn't
+        # have to re-type numbers already visible on the PDF.
+        "statement_opening_balance": (
+            float(stmt_fields["starting_balance"])
+            if stmt_fields.get("starting_balance") is not None else None
+        ),
+        "statement_closing_balance": (
+            float(stmt_fields["ending_balance"])
+            if stmt_fields.get("ending_balance") is not None else None
+        ),
+        "statement_period_start": stmt_fields.get("period_start"),
+        "statement_period_end": stmt_fields.get("period_end"),
         **matches,
     }
 

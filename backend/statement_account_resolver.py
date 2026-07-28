@@ -153,11 +153,35 @@ def _statement_fields(veryfi_doc: dict) -> dict:
         or (acct or {}).get("beginning_balance")
     )
 
+    # Ending balance mirrors the same shape variance.
+    ending_balance = (
+        veryfi_doc.get("ending_balance")
+        or veryfi_doc.get("closing_balance")
+        or (acct or {}).get("ending_balance")
+        or (acct or {}).get("closing_balance")
+    )
+
+    # Statement period — used to auto-fill the reconciliation date range.
+    period_start = (
+        veryfi_doc.get("period_start_date")
+        or veryfi_doc.get("start_date")
+        or veryfi_doc.get("statement_period_start")
+    )
+    period_end = (
+        veryfi_doc.get("period_end_date")
+        or veryfi_doc.get("end_date")
+        or veryfi_doc.get("statement_period_end")
+        or veryfi_doc.get("statement_date")
+    )
+
     return {
         "bank_name": bank_name,
         "account_number": account_number,
         "account_type": account_type,
         "starting_balance": starting_balance,
+        "ending_balance": ending_balance,
+        "period_start": str(period_start)[:10] if period_start else None,
+        "period_end": str(period_end)[:10] if period_end else None,
         "last4": _last4(account_number),
     }
 
