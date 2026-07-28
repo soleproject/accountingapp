@@ -2510,3 +2510,17 @@ Added a LIVE FORM-FILL block to the Phase 1 directive instructing the LLM to emi
 - `/app/frontend/src/pages/Onboarding.jsx` (step effect + cleanup)
 - `/app/frontend/src/components/AiPanel.jsx` (new `ai-stop-tts` listener)
 
+
+## AI Cleanup Copilot — Barge-In on Manual Vendor Skip (Feb 28, 2026) ✅
+**User request:** *"lets do the same thing for Step 2"* — apply the onboarding barge-in fix to the AI Cleanup Copilot's vendor-by-vendor flow so that clicking Next / Skip on a vendor immediately silences the previous vendor's message.
+
+**What was done:**
+- Extracted the TTS kill-switch into a reusable `stopTtsNow()` helper on AiPanel.
+- Called `stopTtsNow()` inside the `cleanup-inquiry` action handler right before `speakOne(msg)` so any still-playing previous vendor's message is silenced before the new vendor's message begins.
+- Refactored the existing `ai-stop-tts` listener to delegate to the same helper.
+
+**Result:** When the user clicks Next → to advance from vendor 4 (Patientco Inc) to vendor 5 (…) — or clicks any Skip chip — the AI stops mid-sentence and immediately begins the new vendor's inquiry.
+
+**Files changed:**
+- `/app/frontend/src/components/AiPanel.jsx` (`stopTtsNow` helper, added to `cleanup-inquiry` handler)
+

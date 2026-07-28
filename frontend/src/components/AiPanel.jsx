@@ -596,6 +596,10 @@ export default function AiPanel({ collapsed, onToggle }) {
     }
 
     setMessages(m => [...m, { role: "assistant", content: msg, splitHint, showSkip: true, skipContact: { id: a.contact_id, name: a.contact_name, kind: a.kind } }]);
+    // Barge in on any still-playing previous vendor's message when the
+    // user manually clicks Skip / Next on the AI Cleanup Copilot — same
+    // "manual advance stops the AI mid-sentence" behavior as onboarding.
+    stopTtsNow();
     if (voiceOnRef.current) speakOne(msg.replace(/\*\*/g, ""));
     emitAction("ai-open");
   });
@@ -707,16 +711,18 @@ export default function AiPanel({ collapsed, onToggle }) {
   useActionListener("onboarding-coach-greet", (payload) => {
     const msg = (payload?.message || "").trim();
     if (!msg) return;
+    stopTtsNow();
     setMessages(m => [...m, { role: "assistant", content: msg }]);
     if (voiceOnRef.current) speakOne(msg.replace(/\*\*/g, ""));
   });
 
-  // External kill-switch for TTS — used by the onboarding coach when the
-  // user clicks Next/Back faster than the AI can speak. Cancels the
-  // browser's speech queue AND clears our internal "TTS is speaking"
-  // flags so the next step's greeting can start immediately without the
-  // barge-in / tail-grace suppression firing.
-  useActionListener("ai-stop-tts", () => {
+  // Reusable kill-switch — cancels the browser speech queue AND clears
+  // our internal TTS state flags so the next utterance can start
+  // immediately without the barge-in / tail-grace suppression firing.
+  // Used both externally (ai-stop-tts action) and internally right
+  // before any coach-style bubble is spoken so we barge in on any
+  // still-playing previous message from a step the user has moved past.
+  const stopTtsNow = () => {
     try {
       if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     } catch { /* noop */ }
@@ -724,6 +730,15 @@ export default function AiPanel({ collapsed, onToggle }) {
     setTtsActive(false);
     ttsTailUntilRef.current = 0;
     spokenIdxRef.current = 0;
+  };
+
+  // External kill-switch for TTS — used by the onboarding coach when the
+  // user clicks Next/Back faster than the AI can speak. Cancels the
+  // browser's speech queue AND clears our internal "TTS is speaking"
+  // flags so the next step's greeting can start immediately without the
+  // barge-in / tail-grace suppression firing.
+  useActionListener("ai-stop-tts", () => {
+    stopTtsNow();
   });
 
   // ------------------------- Open-mic + TTS-echo protection -------------------------
