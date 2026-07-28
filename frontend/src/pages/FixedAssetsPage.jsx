@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, Loader2 } from "lucide-react";
+import { Plus, Trash2, X, Loader2, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -16,12 +16,14 @@ import { toast } from "sonner";
  *      per month-end for the entire useful life). Balance Sheet
  *      respects `as_of` so future entries stay invisible until due.
  *
- * Deleting cascades the JEs + sub-accounts before removing the row.
+ * Editing a financial field (cost/life/date/offset/type) tears down the
+ * schedule and re-generates from scratch — id stable across the swap.
+ * Non-financial edits (rename) are cheap.
  */
 export default function FixedAssetsPage() {
   const { currentId } = useCompany();
   const [items, setItems] = useState([]);
-  const [creating, setCreating] = useState(false);
+  const [modalMode, setModalMode] = useState(null); // null | "create" | {edit: row}
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
@@ -63,7 +65,7 @@ export default function FixedAssetsPage() {
         </h1>
         <button
           data-testid={TID.addBtn}
-          onClick={() => setCreating(true)}
+          onClick={() => setModalMode("create")}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs"
         >
           <Plus size={13} /> Add Fixed Asset
@@ -75,6 +77,7 @@ export default function FixedAssetsPage() {
           <thead className="bg-slate-50 text-xs uppercase text-slate-500 border-b">
             <tr>
               <th className="px-3 py-2 text-left">Asset</th>
+              <th className="px-3 py-2 text-left">Type</th>
               <th className="px-3 py-2 text-left">Ledger</th>
               <th className="px-3 py-2 text-left">Purchased</th>
               <th className="px-3 py-2 text-right">Cost</th>
@@ -87,6 +90,9 @@ export default function FixedAssetsPage() {
             {items.map((x) => (
               <tr key={x.id} className="border-b hover:bg-slate-50">
                 <td className="px-3 py-2 font-medium">{x.name}</td>
+                <td className="px-3 py-2 text-xs text-slate-500">
+                  {formatAssetType(x.asset_type)}
+                </td>
                 <td className="px-3 py-2 text-xs text-slate-500 font-mono-num">
                   {x.ledger_account_code || "—"}
                 </td>
@@ -96,13 +102,20 @@ export default function FixedAssetsPage() {
                     { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
                 <td className="px-3 py-2 text-right font-mono-num">
-                  {x.useful_life_years}
+                  {x.depreciable === false ? "—" : x.useful_life_years}
                 </td>
                 <td className="px-3 py-2 text-right font-mono-num text-slate-500">
-                  ${Number(x.monthly_depreciation || 0).toLocaleString(undefined,
-                    { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {x.depreciable === false ? "—" : `$${Number(x.monthly_depreciation || 0).toLocaleString(undefined,
+                    { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                 </td>
-                <td className="px-3 py-2 text-right">
+                <td className="px-3 py-2 text-right whitespace-nowrap">
+                  <button
+                    data-testid={`edit-asset-${x.id}`}
+                    onClick={() => setModalMode({ edit: x })}
+                    className="text-slate-500 p-1 hover:text-slate-900 mr-1"
+                  >
+                    <Pencil size={13} />
+                  </button>
                   <button
                     data-testid={`delete-asset-${x.id}`}
                     onClick={() => del(x)}
@@ -115,7 +128,7 @@ export default function FixedAssetsPage() {
             ))}
             {!items.length && !loading && (
               <tr>
-                <td colSpan={7} className="text-center py-8 text-slate-500">
+                <td colSpan={8} className="text-center py-8 text-slate-500">
                   No fixed assets yet. Click <b>Add Fixed Asset</b> to get started —
                   we'll auto-post the acquisition entry and generate the full
                   depreciation schedule.
@@ -124,7 +137,7 @@ export default function FixedAssetsPage() {
             )}
             {loading && (
               <tr>
-                <td colSpan={7} className="text-center py-8 text-slate-400">
+                <td colSpan={8} className="text-center py-8 text-slate-400">
                   <Loader2 size={16} className="inline animate-spin mr-2" /> Loading…
                 </td>
               </tr>
@@ -133,10 +146,11 @@ export default function FixedAssetsPage() {
         </table>
       </div>
 
-      {creating && (
+      {modalMode && (
         <FixedAssetModal
           currentId={currentId}
-          onClose={() => { setCreating(false); load(); }}
+          editRow={modalMode?.edit || null}
+          onClose={() => { setModalMode(null); load(); }}
         />
       )}
     </div>
@@ -144,32 +158,67 @@ export default function FixedAssetsPage() {
 }
 
 
-function FixedAssetModal({ currentId, onClose }) {
-  const [name, setName] = useState("");
+function formatAssetType(key) {
+  if (!key || key === "other") return "Other";
+  return key.split("_").map(s => s[0].toUpperCase() + s.slice(1)).join(" ");
+}
+
+
+function FixedAssetModal({ currentId, editRow, onClose }) {
+  const isEdit = !!editRow;
+  const [name, setName] = useState(editRow?.name || "");
   const [purchaseDate, setPurchaseDate] = useState(
-    new Date().toISOString().slice(0, 10),
+    editRow?.purchase_date || new Date().toISOString().slice(0, 10),
   );
-  const [cost, setCost] = useState("");
-  const [lifeYears, setLifeYears] = useState("");
-  const [salvage, setSalvage] = useState("");
+  const [cost, setCost] = useState(editRow?.cost ? String(editRow.cost) : "");
+  const [lifeYears, setLifeYears] = useState(
+    editRow?.useful_life_years ? String(editRow.useful_life_years) : "",
+  );
+  const [salvage, setSalvage] = useState(
+    editRow?.salvage_value ? String(editRow.salvage_value) : "",
+  );
+  const [assetType, setAssetType] = useState(editRow?.asset_type || "");
   const [offsetKind, setOffsetKind] = useState("cash");
-  const [offsetAccountId, setOffsetAccountId] = useState("");
+  const [offsetAccountId, setOffsetAccountId] = useState(
+    editRow?.offset_account_id || "",
+  );
   const [accounts, setAccounts] = useState([]);
+  const [assetTypes, setAssetTypes] = useState([]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const r = await api.get(`/companies/${currentId}/accounts`);
-        if (!cancelled) setAccounts(r.data.accounts || []);
+        const [ra, rt] = await Promise.all([
+          api.get(`/companies/${currentId}/accounts`),
+          api.get(`/assets/types`),
+        ]);
+        if (cancelled) return;
+        setAccounts(ra.data.accounts || []);
+        setAssetTypes(rt.data.asset_types || []);
       } catch { /* silent */ }
     })();
     return () => { cancelled = true; };
   }, [currentId]);
 
-  // Filter accounts by offset kind. `cash` → asset type & no fixed_asset
-  // subtype. `loan` → liability. `owner_equity` / `obe` → equity.
+  // When user picks an asset type, auto-fill the useful-life field
+  // unless they've already typed a custom value (skip on edit re-open).
+  const setAssetTypeAndLife = (key) => {
+    setAssetType(key);
+    const t = assetTypes.find(x => x.key === key);
+    if (!t) return;
+    if (t.depreciable === false) {
+      setLifeYears("0");
+    } else if (t.years !== null && t.years !== undefined) {
+      setLifeYears(String(t.years));
+    }
+  };
+
+  const selectedType = assetTypes.find(t => t.key === assetType);
+  const isDepreciable = selectedType ? selectedType.depreciable !== false : true;
+
+  // Filter accounts by offset kind.
   const eligibleAccounts = useMemo(() => {
     if (offsetKind === "cash") {
       return accounts.filter(a =>
@@ -189,7 +238,8 @@ function FixedAssetModal({ currentId, onClose }) {
   }, [accounts, offsetKind]);
 
   useEffect(() => {
-    // Pre-select the most-common default per offset kind.
+    // Skip pre-selection when editing (respect existing offset_account_id).
+    if (isEdit && editRow?.offset_account_id) return;
     if (!eligibleAccounts.length) {
       setOffsetAccountId("");
       return;
@@ -201,32 +251,52 @@ function FixedAssetModal({ currentId, onClose }) {
     } else {
       setOffsetAccountId(eligibleAccounts[0].id);
     }
-  }, [eligibleAccounts, offsetKind]);
+  }, [eligibleAccounts, offsetKind, isEdit, editRow]);
 
   const save = async () => {
     if (!name.trim()) { toast.error("Asset name is required"); return; }
     if (!(Number(cost) > 0)) { toast.error("Cost must be positive"); return; }
-    if (!(Number(lifeYears) > 0)) { toast.error("Useful life must be positive"); return; }
+    if (isDepreciable && !(Number(lifeYears) > 0)) {
+      toast.error("Useful life must be positive"); return;
+    }
     if (!offsetAccountId) { toast.error("Select an offset account"); return; }
 
     setSaving(true);
     try {
-      const r = await api.post(`/companies/${currentId}/assets`, {
+      const payload = {
         name: name.trim(),
         purchase_date: purchaseDate,
         cost: Number(cost),
-        useful_life_years: Number(lifeYears),
+        useful_life_years: Number(lifeYears) || 0,
         salvage_value: Number(salvage) || 0,
         offset_account_id: offsetAccountId,
-      });
+        asset_type: assetType || "other",
+      };
+      let r;
+      if (isEdit) {
+        r = await api.patch(`/companies/${currentId}/assets/${editRow.id}`, payload);
+      } else {
+        r = await api.post(`/companies/${currentId}/assets`, payload);
+      }
       const monthly = r.data?.monthly_depreciation;
       const posted = r.data?.depreciation_jes_posted;
-      toast.success(
-        `Fixed asset created — acquisition JE posted, ${posted} depreciation ` +
-        `entries scheduled ($${Number(monthly).toLocaleString(undefined,
-          { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / month).`,
-        { duration: 8000 },
-      );
+      const action = r.data?.action;
+      if (action === "renamed") {
+        toast.success("Fixed asset renamed.");
+      } else if (isDepreciable) {
+        toast.success(
+          `Fixed asset ${isEdit ? (action === "regenerated" ? "regenerated" : "saved") : "created"} — acquisition JE posted, ` +
+          `${posted} depreciation entries scheduled ($${Number(monthly).toLocaleString(undefined,
+            { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / month).`,
+          { duration: 8000 },
+        );
+      } else {
+        toast.success(
+          `Fixed asset ${isEdit ? "regenerated" : "created"} — acquisition JE posted. ` +
+          `Non-depreciable (land) — no depreciation schedule.`,
+          { duration: 8000 },
+        );
+      }
       onClose();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Save failed");
@@ -237,11 +307,19 @@ function FixedAssetModal({ currentId, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-5 space-y-3">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-5 space-y-3 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between">
-          <h3 className="font-heading font-semibold">New Fixed Asset</h3>
+          <h3 className="font-heading font-semibold">
+            {isEdit ? "Edit Fixed Asset" : "New Fixed Asset"}
+          </h3>
           <button onClick={onClose}><X size={16} /></button>
         </div>
+
+        {isEdit && (
+          <div className="text-[11px] bg-amber-50 border border-amber-200 text-amber-900 rounded px-2 py-1.5">
+            Changing <b>cost</b>, <b>life</b>, <b>type</b>, <b>date</b>, or <b>offset account</b> will re-generate every journal entry for this asset. Renames are cheap.
+          </div>
+        )}
 
         <div>
           <label className="text-xs uppercase text-slate-500">Asset Name</label>
@@ -252,6 +330,28 @@ function FixedAssetModal({ currentId, onClose }) {
             placeholder="e.g. 123 Main St. · Ford F-150 · Espresso Machine"
             className="w-full mt-1 border rounded px-2 py-1.5 text-sm"
           />
+        </div>
+
+        <div>
+          <label className="text-xs uppercase text-slate-500">Asset Type</label>
+          <select
+            data-testid="fa-asset-type"
+            value={assetType}
+            onChange={(e) => setAssetTypeAndLife(e.target.value)}
+            className="w-full mt-1 border rounded px-2 py-1.5 text-sm bg-white"
+          >
+            <option value="">— select type (auto-fills life) —</option>
+            {assetTypes.map(t => (
+              <option key={t.key} value={t.key}>
+                {t.label}{t.years !== null && t.years !== undefined ? ` — ${t.years} yrs` : ""}
+              </option>
+            ))}
+          </select>
+          {selectedType?.depreciable === false && (
+            <p className="mt-1 text-[11px] text-blue-700">
+              Land is non-depreciable. We'll post the acquisition entry only — no monthly schedule.
+            </p>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -274,8 +374,9 @@ function FixedAssetModal({ currentId, onClose }) {
               min="0"
               value={lifeYears}
               onChange={(e) => setLifeYears(e.target.value)}
-              placeholder="e.g. 5 · 7 · 27.5 (real estate)"
-              className="w-full mt-1 border rounded px-2 py-1.5 text-sm font-mono-num"
+              disabled={!isDepreciable}
+              placeholder={isDepreciable ? "auto-filled from type" : "n/a"}
+              className="w-full mt-1 border rounded px-2 py-1.5 text-sm font-mono-num disabled:bg-slate-100"
             />
           </div>
         </div>
@@ -302,8 +403,9 @@ function FixedAssetModal({ currentId, onClose }) {
               min="0"
               value={salvage}
               onChange={(e) => setSalvage(e.target.value)}
-              placeholder="0"
-              className="w-full mt-1 border rounded px-2 py-1.5 text-sm font-mono-num"
+              disabled={!isDepreciable}
+              placeholder={isDepreciable ? "0" : "n/a"}
+              className="w-full mt-1 border rounded px-2 py-1.5 text-sm font-mono-num disabled:bg-slate-100"
             />
           </div>
         </div>
@@ -371,7 +473,9 @@ function FixedAssetModal({ currentId, onClose }) {
           className="w-full py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50 flex items-center justify-center gap-2"
         >
           {saving && <Loader2 size={14} className="animate-spin" />}
-          {saving ? "Posting entries…" : "Save & post journal entries"}
+          {saving
+            ? (isEdit ? "Saving…" : "Posting entries…")
+            : (isEdit ? "Save changes" : "Save & post journal entries")}
         </button>
       </div>
     </div>

@@ -282,6 +282,120 @@ def test_salvage_value_reduces_depreciable_base():
     asyncio.run(_go())
 
 
+def test_asset_type_land_skips_depreciation():
+    """Land is non-depreciable — creation should post acquisition JE
+    only and skip both the contra-asset sub-account and the schedule."""
+    async def _go():
+        cid, cash = await _seed_company_with_cash(500_000)
+        try:
+            r = await A.create_fixed_asset(cid, {
+                "name": "12 acres, Rte 22",
+                "purchase_date": "2026-01-01",
+                "cost": 250_000,
+                "asset_type": "land",
+                "offset_account_id": cash["id"],
+            })
+            assert r["depreciable"] is False
+            assert r["depreciation_jes_posted"] == 0
+            assert r["depreciation_months"] == 0
+            assert r["accumulated_depreciation_account"] is None
+            # Acquisition JE exists.
+            acq = await db.journal_entries.find_one({"id": r["acquisition_je_id"]})
+            assert acq is not None
+            # No depreciation JEs.
+            dep = await db.journal_entries.count_documents({
+                "company_id": cid, "asset_id": r["id"], "source": "depreciation",
+            })
+            assert dep == 0
+            # No accum-depreciation sub-account was created for this asset.
+            assets_row = await db.assets.find_one({"id": r["id"]})
+            assert assets_row["accumulated_depreciation_account_id"] is None
+        finally:
+            await _cleanup(cid)
+    asyncio.run(_go())
+
+
+def test_asset_type_preset_fills_useful_life():
+    """When asset_type has a preset years, `useful_life_years` is
+    auto-derived and the schedule matches the preset."""
+    async def _go():
+        cid, cash = await _seed_company_with_cash()
+        try:
+            r = await A.create_fixed_asset(cid, {
+                "name": "1234 Elm St. rental",
+                "purchase_date": "2026-01-01",
+                "cost": 200_000,
+                "asset_type": "residential_real_estate",  # 27.5 yrs preset
+                "offset_account_id": cash["id"],
+            })
+            assert r["depreciation_months"] == 330  # 27.5 * 12
+        finally:
+            await _cleanup(cid)
+    asyncio.run(_go())
+
+
+def test_update_rename_only_is_cheap():
+    """Non-financial edit — just renames the row + sub-accounts, no
+    teardown of JEs."""
+    async def _go():
+        cid, cash = await _seed_company_with_cash()
+        try:
+            r = await A.create_fixed_asset(cid, {
+                "name": "Old name", "purchase_date": "2026-01-01",
+                "cost": 10_000, "useful_life_years": 5,
+                "offset_account_id": cash["id"],
+            })
+            aid = r["id"]
+            original_acq_id = r["acquisition_je_id"]
+            up = await A.update_fixed_asset(cid, aid, {"name": "New name"})
+            assert up["action"] == "renamed"
+            row = await db.assets.find_one({"id": aid})
+            assert row["name"] == "New name"
+            # Sub-accounts renamed too.
+            asset_a = await db.accounts.find_one({"id": row["ledger_account_id"]})
+            contra_a = await db.accounts.find_one({"id": row["accumulated_depreciation_account_id"]})
+            assert asset_a["name"] == "New name"
+            assert contra_a["name"] == "New name — Accumulated Depreciation"
+            # Acquisition JE untouched.
+            acq = await db.journal_entries.find_one({"id": original_acq_id})
+            assert acq is not None
+        finally:
+            await _cleanup(cid)
+    asyncio.run(_go())
+
+
+def test_update_financial_change_regenerates_schedule():
+    """Editing cost/life triggers a full teardown + regenerate. Asset
+    id is preserved so external references still resolve."""
+    async def _go():
+        cid, cash = await _seed_company_with_cash(500_000)
+        try:
+            r = await A.create_fixed_asset(cid, {
+                "name": "Widget", "purchase_date": "2026-01-01",
+                "cost": 10_000, "useful_life_years": 5,
+                "offset_account_id": cash["id"],
+            })
+            aid = r["id"]
+            original_acq = r["acquisition_je_id"]
+
+            # Cost doubles.
+            up = await A.update_fixed_asset(cid, aid, {"cost": 20_000})
+            assert up["action"] == "regenerated"
+            assert up["id"] == aid, "asset_id must be stable across regenerate"
+            # New acquisition JE — different id from the old one.
+            row = await db.assets.find_one({"id": aid})
+            assert row["cost"] == 20_000
+            assert row["acquisition_je_id"] != original_acq
+            # Old JE should be gone (teardown wiped it).
+            old = await db.journal_entries.find_one({"id": original_acq})
+            assert old is None
+            # New monthly depreciation reflects new cost.
+            assert abs(row["monthly_depreciation"] - round(20_000 / (5 * 12), 2)) < 0.005
+        finally:
+            await _cleanup(cid)
+    asyncio.run(_go())
+
+
 if __name__ == "__main__":
     import asyncio as _a
     _orig_run = _a.run

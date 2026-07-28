@@ -95,6 +95,15 @@ _make_crud("connections", "connections")
 
 # ----------------------- Fixed Assets (custom lifecycle) -----------------------
 
+@router.get("/assets/types")
+async def list_asset_types():
+    """Public metadata used by the FixedAssetsPage modal — returns the
+    canonical asset-type dropdown with default useful-life years so the
+    frontend can auto-populate the life field on selection."""
+    import asset_service
+    return {"asset_types": asset_service.ASSET_TYPES}
+
+
 @router.get("/companies/{cid}/assets")
 async def list_assets(cid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
@@ -110,7 +119,6 @@ async def create_asset(cid: str, payload: dict, user: dict = Depends(get_current
         result = await asset_service.create_fixed_asset(cid, payload)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    # Invalidate report cache so the Balance Sheet refreshes on next load.
     try:
         await get_cache().ainvalidate(cid)
     except Exception:  # noqa: BLE001
@@ -121,20 +129,25 @@ async def create_asset(cid: str, payload: dict, user: dict = Depends(get_current
 @router.patch("/companies/{cid}/assets/{aid}")
 async def update_asset(cid: str, aid: str, payload: dict,
                        user: dict = Depends(get_current_user)):
-    """Patch is limited to non-financial fields — cost / life / dates
-    would require re-issuing the acquisition JE and the entire
-    depreciation schedule, which the caller should do by deleting +
-    re-creating.
+    """Edit an existing fixed asset.
+
+    Non-financial edits (name/notes/tag_ids/metadata) are cheap — just
+    update the row and rename the linked sub-accounts. Financial edits
+    (cost / life / dates / offset / asset type) delete the acquisition
+    JE + every depreciation JE and re-generate the whole schedule with
+    the new values. The asset's `id` stays stable across the swap.
     """
     await require_company(user, cid)
-    editable = {k: v for k, v in payload.items()
-                if k in ("name", "notes", "tag_ids", "metadata")}
-    if not editable:
-        return {"ok": True}
-    editable["updated_at"] = now_iso()
-    await db.assets.update_one({"id": aid, "company_id": cid},
-                               {"$set": editable})
-    return {"ok": True}
+    try:
+        import asset_service
+        result = await asset_service.update_fixed_asset(cid, aid, payload)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    try:
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+    return result
 
 
 @router.delete("/companies/{cid}/assets/{aid}")
