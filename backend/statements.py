@@ -220,7 +220,24 @@ async def upload_statement(
 
 
 async def list_imports(cid: str, limit: int = 50, offset: int = 0) -> dict:
-    """List import batches for a company, newest first."""
+    """List import batches for a company, newest first.
+
+    Piggybacks a lazy one-shot opening-balance backfill for pre-Feb-2026
+    statements. This is safe to inline because:
+      1. The endpoint is called only when a user opens Connections →
+         Statements — not from the dashboard, balance sheet, or any hot
+         path. Steady-state overhead is effectively zero.
+      2. The `companies.opening_balance_backfilled_at` marker + atomic
+         `$exists: false` update means the actual work happens exactly
+         ONCE per company for its entire lifetime; every subsequent visit
+         is a single indexed marker read that short-circuits.
+      3. Wrapped in try/except so a helper failure never breaks the
+         imports list from loading.
+    """
+    try:
+        await _lazy_backfill_opening_balances(cid)
+    except Exception:  # noqa: BLE001 — never block the imports list.
+        pass
     total = await db.statement_imports.count_documents({"company_id": cid})
     cursor = (
         db.statement_imports
@@ -231,6 +248,25 @@ async def list_imports(cid: str, limit: int = 50, offset: int = 0) -> dict:
     )
     imports = [coerce(d) async for d in cursor]
     return {"total": total, "imports": imports}
+
+
+async def _lazy_backfill_opening_balances(cid: str) -> None:
+    """Fire the OBE helper once per company (atomic marker on the
+    `companies` doc). Handles ALL bank accounts that have completed
+    statement_imports for this company."""
+    result = await db.companies.update_one(
+        {"id": cid, "opening_balance_backfilled_at": {"$exists": False}},
+        {"$set": {"opening_balance_backfilled_at": now_iso()}},
+    )
+    if result.modified_count == 0:
+        return  # Marker already set — never do work again for this company.
+    import opening_balance_service as obs
+    imported_account_ids = await db.statement_imports.distinct(
+        "account_id", {"company_id": cid, "status": "completed"},
+    )
+    for aid in imported_account_ids:
+        if aid:
+            await obs.ensure_opening_balance_for_account(cid, aid)
 
 
 async def get_import_detail(cid: str, import_id: str) -> dict:
