@@ -2443,7 +2443,26 @@ export default function AiPanel({ collapsed, onToggle }) {
 
       {focus && (
         <div className="mx-3 mt-3 border rounded-md p-2.5 bg-indigo-50/50 border-indigo-200 text-xs" data-testid="ai-focus-card">
-          {focus.bucket ? (
+          {focus.kind === "new-fixed-asset" ? (
+            <>
+              <div className="font-medium text-slate-700 mb-0.5 flex items-center gap-1">
+                <Sparkles size={11} className="text-indigo-600" />
+                {focus.editing ? "Editing fixed asset" : "New fixed asset"}
+              </div>
+              <div className="text-slate-600">
+                Describe what you bought and how it was paid. I can suggest the
+                right IRS class, set up a mortgage/loan account if needed, and
+                split the funding sources for you.
+              </div>
+              {focus.draft?.name && (
+                <div className="mt-1 text-[11px] text-slate-500 truncate">
+                  Draft: <b>{focus.draft.name}</b>
+                  {focus.draft.cost && <> · ${Number(focus.draft.cost).toLocaleString()}</>}
+                  {focus.draft.asset_type && <> · {focus.draft.asset_type}</>}
+                </div>
+              )}
+            </>
+          ) : focus.bucket ? (
             <>
               <div className="font-medium text-slate-700 mb-0.5">Focused bucket</div>
               <div className="text-slate-600 truncate">

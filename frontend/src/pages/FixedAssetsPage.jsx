@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { useAiFocus } from "@/lib/aiFocus";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, Loader2, Pencil } from "lucide-react";
+import { Plus, Trash2, X, Loader2, Pencil, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -166,6 +167,7 @@ function formatAssetType(key) {
 
 function FixedAssetModal({ currentId, editRow, onClose }) {
   const isEdit = !!editRow;
+  const { setFocus } = useAiFocus();
   const [name, setName] = useState(editRow?.name || "");
   const [purchaseDate, setPurchaseDate] = useState(
     editRow?.purchase_date || new Date().toISOString().slice(0, 10),
@@ -366,7 +368,47 @@ function FixedAssetModal({ currentId, editRow, onClose }) {
           <h3 className="font-heading font-semibold">
             {isEdit ? "Edit Fixed Asset" : "New Fixed Asset"}
           </h3>
-          <button onClick={onClose}><X size={16} /></button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              data-testid="fa-ai-assist"
+              title="Ask the AI to walk you through adding this asset — it can suggest an asset type, help set up a loan account if there's a mortgage, and split the funding sources for you."
+              onClick={() => {
+                // Hand off the current form state to the AI panel so the
+                // assistant can pick up wherever the user is and ask the
+                // right next question ("What kind of asset?", "Is there a
+                // loan on it?", "Should I create the mortgage account for
+                // you?", etc.). The panel already knows how to render a
+                // focus header — we just tag the kind so it can seed the
+                // right system-prompt context and, in the follow-up phase,
+                // invoke `create_fixed_asset` / `create_account` tool calls
+                // to fill in the modal fields end-to-end.
+                setFocus({
+                  kind: "new-fixed-asset",
+                  editing: isEdit,
+                  asset_id: editRow?.id || null,
+                  draft: {
+                    name, purchase_date: purchaseDate, cost: cost,
+                    useful_life_years: lifeYears, salvage_value: salvage,
+                    asset_type: assetType,
+                    funding_sources: Object.entries(rows)
+                      .filter(([, r]) => r.enabled)
+                      .map(([k, r]) => ({
+                        kind: k, account_id: r.account_id, amount: r.amount,
+                      })),
+                  },
+                }, { pin: true });
+                toast.info(
+                  "AI is ready — describe what you bought and how you paid in the chat panel, and it'll walk you through the rest.",
+                  { duration: 5000 },
+                );
+              }}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-gradient-to-br from-indigo-500 to-purple-600 text-white text-xs shadow-sm hover:opacity-90"
+            >
+              <Sparkles size={12} /> Ask AI
+            </button>
+            <button onClick={onClose}><X size={16} /></button>
+          </div>
         </div>
 
         {isEdit && (
