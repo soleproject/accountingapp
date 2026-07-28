@@ -220,7 +220,14 @@ async def match_statement(
     user: dict = Depends(get_current_user),
 ):
     """Veryfi-OCR a statement PDF (or CSV) and return per-line match candidates
-    grouped by confidence tier. Nothing is written; UI drives the apply step."""
+    grouped by confidence tier. Nothing is written; UI drives the apply step.
+
+    Auto-corrects the target account when Veryfi's bank-name + last-4
+    resolve to a DIFFERENT existing CoA row than the one the user picked
+    from the dropdown — otherwise a user who selects "1000 Cash and Bank"
+    but uploads a "1011 Bank of America Checking ···6084" statement gets
+    94 phantom "missing from ledger" rows.
+    """
     await require_company(user, cid)
     raw = await file.read()
     if not raw:
@@ -231,6 +238,39 @@ async def match_statement(
         )
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"Veryfi error: {e}")
+
+    # Try to auto-detect the correct bank account from the Veryfi OCR
+    # (bank name + last-4). Only override the user's selection when the
+    # resolver LINKED TO AN EXISTING account (matched=True) that differs
+    # from the picked one — never silently create a new account here, and
+    # never override a spot-on selection.
+    import statement_account_resolver
+    stmt_fields = statement_account_resolver._statement_fields(veryfi_data)
+    resolved = None
+    account_override = False
+    try:
+        existing = await db.accounts.find({
+            "company_id": cid, "active": True,
+        }).to_list(1000)
+        last4 = stmt_fields.get("last4")
+        matched_acct = None
+        if last4:
+            for a in existing:
+                if last4 in (a.get("name") or ""):
+                    matched_acct = a
+                    break
+        if matched_acct and matched_acct["id"] != bank_account_id:
+            resolved = {
+                "id": matched_acct["id"],
+                "name": matched_acct["name"],
+                "code": matched_acct["code"],
+                "reason": f"Detected last-4 ···{last4} in ledger account",
+            }
+            bank_account_id = matched_acct["id"]
+            account_override = True
+    except Exception:  # noqa: BLE001 — best-effort auto-detect
+        pass
+
     lines = veryfi_service.extract_transactions(veryfi_data)
     matches = await match_statement_lines(cid, bank_account_id, lines)
     return {
@@ -239,6 +279,11 @@ async def match_statement(
         "suggest_count": len(matches["suggest"]),
         "manual_count": len(matches["manual"]),
         "missing_from_statement_count": len(matches.get("missing_from_statement", [])),
+        "resolved_account": resolved,
+        "account_overridden": account_override,
+        "used_bank_account_id": bank_account_id,
+        "statement_bank_name": stmt_fields.get("bank_name"),
+        "statement_last4": stmt_fields.get("last4"),
         **matches,
     }
 

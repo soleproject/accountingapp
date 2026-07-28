@@ -245,6 +245,19 @@ export default function Reconciliation() {
         fd,
         { headers: { "Content-Type": "multipart/form-data" }, timeout: 120_000 },
       );
+      // Auto-correct the bank account picker when the OCR resolved the
+      // statement to a different existing ledger account than the one
+      // selected. Example: user selects "1000 Cash and Bank" but uploads
+      // a "1011 Bank of America Checking ···6084" statement — we switch
+      // the picker to 1011 so the reconciliation session works against
+      // the correct 89 uncleared txns rather than the empty 1000 account.
+      if (r.data?.account_overridden && r.data?.resolved_account) {
+        setAcctId(r.data.resolved_account.id);
+        toast.info(
+          `Switched to ${r.data.resolved_account.name} — detected on the statement (${r.data.resolved_account.reason}).`,
+          { duration: 6000 },
+        );
+      }
       setMatchResult(r.data);
       setShowMatchModal(true);
     } catch (e) {
@@ -658,6 +671,19 @@ function MatchResultModal({ result, onClose, onApply }) {
                 <> · <b className="text-red-700">{result.missing_from_statement_count} in books but not on statement</b></>
               )}
             </p>
+            {result.account_overridden && result.resolved_account && (
+              <div className="mt-2 inline-flex items-center gap-1.5 text-xs bg-cyan-50 text-cyan-900 border border-cyan-200 px-2 py-1 rounded" data-testid="recon-match-account-override">
+                <Sparkles size={11} className="text-cyan-700" />
+                Auto-switched to <b>{result.resolved_account.name}</b> — {result.resolved_account.reason}.
+              </div>
+            )}
+            {!result.account_overridden && result.auto_count === 0 && result.suggest_count === 0 && result.line_count > 0 && (
+              <div className="mt-2 inline-flex items-center gap-1.5 text-xs bg-amber-50 text-amber-900 border border-amber-200 px-2 py-1 rounded" data-testid="recon-match-no-candidates">
+                No candidates found in the ledger for this account
+                {result.statement_last4 && <> (statement ···{result.statement_last4})</>}.
+                Confirm you picked the right bank account, or import the statement first via <b>Connections → Statements</b>.
+              </div>
+            )}
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-900 text-sm">Close</button>
         </div>
