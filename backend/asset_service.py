@@ -33,6 +33,7 @@ Design decisions:
 """
 from __future__ import annotations
 import uuid
+import re
 from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
 
@@ -809,9 +810,31 @@ ASSET_TYPES = [
 
 
 def _lookup_asset_type(key: str | None) -> dict | None:
+    """Forgiving asset-type lookup. Accepts any of:
+      * exact key: "residential_real_estate"
+      * lowercase/spaced variant: "residential real estate"
+      * label: "Residential Real Estate"
+      * mixed case with punctuation stripped
+    """
     if not key:
         return None
+    raw = str(key).strip()
+    if not raw:
+        return None
+    # Try exact match first (fast path).
     for row in ASSET_TYPES:
-        if row["key"] == key:
+        if row["key"] == raw:
+            return row
+    # Normalize: lowercase, collapse whitespace, hyphens → underscores.
+    norm = re.sub(r"[\s\-]+", "_", raw.strip().lower())
+    norm = re.sub(r"[^a-z0-9_]", "", norm)
+    for row in ASSET_TYPES:
+        if row["key"] == norm:
+            return row
+        if re.sub(r"[\s\-]+", "_", row["label"].lower()) == norm:
+            return row
+        # Match by simplified label (spaces/underscores/hyphens all collapsed).
+        row_label_norm = re.sub(r"[^a-z0-9]", "", row["label"].lower())
+        if re.sub(r"[^a-z0-9]", "", norm) == row_label_norm:
             return row
     return None

@@ -2443,3 +2443,26 @@ Whenever `_ensure_fixed_assets_parent` runs, it now scans for any `fixed_asset` 
 - `/app/backend/asset_service.py` (`_ensure_fixed_assets_parent` overhaul, `_next_asset_code` global scan)
 - `/app/backend/routes/inventory.py` (new `POST /assets/fix-hierarchy` repair endpoint)
 
+
+## Bug Fix: Forgiving asset_type Lookup (Feb 28, 2026) ✅
+**Symptom (production `app.smartbookssoftware.ai`):** User walked the AI through creating a $175k residential real estate asset. AI said *"I'll proceed to record this asset now"* — but the backend responded with the error `"useful_life_years required for depreciable asset types"` and the asset never created.
+
+**Root cause:** `_lookup_asset_type` required an *exact* key match ("residential_real_estate"). But the LLM's proposal payload can arrive with any of these variations:
+- Label: `"Residential Real Estate"`
+- Lowercase spaced: `"residential real estate"`
+- Uppercase: `"RESIDENTIAL_REAL_ESTATE"`
+- Hyphenated: `"residential-real-estate"`
+
+When the lookup returned `None`, the 27.5-year preset was lost, `useful_life_years` wasn't in the payload either, and the validation guard fired.
+
+**Fix:** `_lookup_asset_type` now normalizes the input (lowercase, collapse whitespace/hyphens to underscores, strip punctuation) and tries:
+1. Exact key match
+2. Normalized key match
+3. Normalized label match
+4. Fully-stripped alphanumeric label match
+
+Verified via unit test (9 cases including labels, hyphens, casing, invalid) and via curl (three variations of "Residential Real Estate" — all produce a 330-entry depreciation schedule at $530.30/month).
+
+**Files changed:**
+- `/app/backend/asset_service.py`
+
