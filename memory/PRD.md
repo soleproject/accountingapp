@@ -2283,3 +2283,30 @@ Rewrote `/accounting/lets-review` per user feedback ("literally could have clone
 - `/app/frontend/src/lib/voiceCommands.js`
 - `/app/frontend/src/components/AiPanel.jsx` (adds `hasPendingIntent` to ctx)
 
+
+## AI Fixed-Asset Payload Hardening + Directive Tightening (Feb 28, 2026) ✅
+**Symptom (round 4 from user test):** After the multi-turn memory and voice-command parser fixes, the AI finally engaged with the Fixed Asset flow, remembered all context ($350k / May 15 / $75k down / mortgage financed / residential / Wells Fargo). But it got stuck in a 6-turn "Confirm to proceed?" loop before finally emitting the `[[PROPOSAL:create-fixed-asset]]` marker. When it did, the payload had three bugs:
+1. Field name: `funding_sources` instead of `offsets`
+2. `purchase_date: "2026-07-28"` (today) instead of `"2026-05-15"` (what the user said)
+3. `account_id` values were 4-digit codes (`"2500"`, `"2190"`) instead of UUIDs, AND $75k cash-down was assigned to the Loans Payable account (wrong direction)
+
+**Two-part fix:**
+
+### Backend hardening (`asset_service.create_fixed_asset`)
+- Accepts `funding_sources` as an alias for `offsets` so hallucinated field names don't fail
+- Resolves any non-UUID `account_id` value (code like `"2500"` or name like `"Loans Payable"`) to the real UUID by looking up the account in the current company
+- Validated end-to-end via curl with the exact buggy shape the LLM was producing — asset created cleanly (330 depreciation entries)
+
+### Directive tightening (`chat.py` fixed-asset directive)
+Added a PROPOSAL EMISSION RULES section that explicitly:
+1. Requires the marker AT THE END OF THE SAME MESSAGE that shows the summary (fixes the "Confirm to proceed?" loop where the LLM narrated the plan without emitting the marker)
+2. Names the field literally as `"offsets"` (not `funding_sources`) and lists shape `{account_id, amount}`
+3. Requires `account_id` values to be UUIDs from `offset_candidates[].id`, not codes/names
+4. Adds funding-direction mapping: cash-down → CASH/BANK asset account, financed → LIABILITY account, owner contribution → EQUITY
+5. Forbids fallback dates: "purchase_date must be extracted from the user's stated date — NEVER use today's date"
+6. Adds explicit anti-loop rule: "if the user says 'yes'/'ok' and no proposal was in your previous message, you forgot the marker — emit it NOW"
+
+**Files changed:**
+- `/app/backend/asset_service.py` (offsets alias + UUID resolution)
+- `/app/backend/routes/chat.py` (directive)
+

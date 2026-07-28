@@ -196,12 +196,19 @@ async def create_fixed_asset(cid: str, payload: dict) -> dict:
     depreciable = bool(asset_type["depreciable"]) if asset_type else True
 
     # Normalize offsets — accept legacy single field OR the new list.
-    offsets_raw = payload.get("offsets")
+    # Also accept `funding_sources` as an alias since the LLM occasionally
+    # emits that key name instead of `offsets`.
+    offsets_raw = payload.get("offsets") or payload.get("funding_sources")
     if not offsets_raw and payload.get("offset_account_id"):
         offsets_raw = [{"account_id": payload["offset_account_id"], "amount": cost}]
     if not offsets_raw or not isinstance(offsets_raw, list):
         raise ValueError("offsets is required — provide a list of "
                          "{account_id, amount} entries totaling `cost`")
+    # LLM proposals sometimes pass a 4-digit code ("2500") or a name
+    # ("Loans Payable") for account_id. Resolve those to real UUIDs here
+    # so the strict find_one lookup below doesn't fail.
+    import re as _re
+    uuid_re = _re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", _re.I)
     offsets: list[dict] = []
     for row in offsets_raw:
         aid = row.get("account_id")
@@ -210,6 +217,17 @@ async def create_fixed_asset(cid: str, payload: dict) -> dict:
             raise ValueError(
                 "each offset must have `account_id` and positive `amount`"
             )
+        if not uuid_re.match(str(aid)):
+            key = str(aid).strip()
+            resolved = await db.accounts.find_one({"company_id": cid, "code": key})
+            if not resolved:
+                key_norm = _re.sub(r"\s+", " ", key).lower()
+                async for a in db.accounts.find({"company_id": cid}):
+                    if _re.sub(r"\s+", " ", (a.get("name") or "").strip()).lower() == key_norm:
+                        resolved = a
+                        break
+            if resolved:
+                aid = resolved["id"]
         offsets.append({"account_id": aid, "amount": round(amt, 2)})
     offset_sum = round(sum(o["amount"] for o in offsets), 2)
     if abs(offset_sum - round(cost, 2)) > 0.005:
