@@ -1741,9 +1741,12 @@ export default function AiPanel({ collapsed, onToggle }) {
           const r = await api.post(`/companies/${currentId}/accounts/ensure`, {
             name: p.name, type: "liability", subtype: p.subtype || "long_term_debt",
             code: p.code,
+            parent_account_id: p.parent_account_id || null,
           });
-          const msg = r.data?.created
-            ? `Created ${r.data.code} · ${r.data.name} (liability). You can now use it as a Loan funding source.`
+          const created = r.data?.created;
+          const parentSuffix = p.parent_account_id && created ? " as a sub-account" : "";
+          const msg = created
+            ? `Created ${r.data.code} · ${r.data.name} (liability)${parentSuffix}. You can now use it as a Loan funding source.`
             : `${r.data.code} · ${r.data.name} already exists — I'll use it.`;
           setMessages(m => [...m, { role: "assistant", content: msg }]);
           if (voiceOnRef.current) speakOne(msg);
@@ -2305,6 +2308,7 @@ export default function AiPanel({ collapsed, onToggle }) {
                           kind: "create-liability-account",
                           name: j.name, code: j.code,
                           subtype: j.subtype || "long_term_debt",
+                          parent_account_id: j.parent_account_id || null,
                         };
                       }
                     } catch {}

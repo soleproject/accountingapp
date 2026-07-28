@@ -2241,3 +2241,29 @@ Rewrote `/accounting/lets-review` per user feedback ("literally could have clone
 - `/app/backend/ai_service.py`
 - `/app/backend/routes/chat.py`
 
+
+## AI Fixed-Asset Flow: Stays Focused + Sub-Account Support (Feb 28, 2026) ✅
+**Symptom (round 2 from user test):** After the multi-turn-memory fix, the AI correctly recalled all $200k / $75k down / mortgage details from the initial voice message. But when the user replied "make a sub account" (meaning: create a property-specific mortgage under the existing "Loans Payable 2500"), the AI dropped out of the Fixed Asset flow and answered *"Hover a transaction or click its sparkle first so I know which one to recategorize"* — a generic categorization fallback.
+
+**Two root causes fixed:**
+1. **Directive was too loose** — the Fixed Asset system directive did not forbid the AI from slipping back into transaction-categorization mode. Strengthened it to: *"STAY IN THIS MODE until you emit [[PROPOSAL:create-fixed-asset]] or the user cancels — do NOT ask the user to 'hover a transaction' or 'click the sparkle'."*
+2. **Sub-account intent was missing** — the `create-liability-account` proposal had no way to declare a parent. Added `parent_account_id` to the proposal shape and taught the LLM to include it when the user asks for a "sub account", "child account", or property-specific mortgage under an existing parent like Loans Payable.
+
+**Backend hardening (`routes/accounts.py::ensure_account`):**
+- Accepts `parent_account_id` as UUID **or** 4-digit code **or** plain name — auto-resolves to the real UUID so a hallucinated LLM value (e.g. `"2500"`) doesn't create an orphaned child.
+- When `parent_account_id` is set, the endpoint no longer short-circuits on a matching code — a fresh code is minted in the type range (e.g. 2110, 2120) so property-specific mortgages don't collide with the parent 2500.
+- Name-collision detection is scoped to the same parent so different properties can each have their own "Mortgage Payable — <addr>" child.
+
+**Frontend (`AiPanel.jsx`):**
+- `create-liability-account` proposal parser now reads `parent_account_id` from the JSON marker.
+- The `/accounts/ensure` POST forwards `parent_account_id` and the follow-up assistant message notes *"...as a sub-account"* when applicable.
+
+**Verified end-to-end:**
+- 3-turn conversation → AI holds all context, proposes sub-account with parent link.
+- Direct API test: parent by code (`"2500"`) and parent by name (`"Loans Payable"`) both resolve to the correct UUID; children get fresh codes.
+
+**Files changed:**
+- `/app/backend/routes/chat.py`
+- `/app/backend/routes/accounts.py`
+- `/app/frontend/src/components/AiPanel.jsx`
+

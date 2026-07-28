@@ -277,8 +277,12 @@ async def ai_chat_stream(inp: ChatIn, user: dict = Depends(get_current_user)):
             ],
             "offset_candidates": offset_candidates,
             "directive": (
-                "You are helping the user add a Fixed Asset. Ask short, "
-                "concrete questions to fill any gaps in `draft`: what kind of "
+                "You are helping the user add a Fixed Asset. STAY IN THIS "
+                "MODE until you emit [[PROPOSAL:create-fixed-asset]] or the "
+                "user explicitly says stop/cancel — do NOT ask the user to "
+                "'hover a transaction' or 'click the sparkle', do NOT offer "
+                "generic categorization help. Ask short, concrete questions "
+                "to fill any gaps in `draft`: what kind of "
                 "asset (map to one of asset_types_reference), how it was paid "
                 "for (cash / loan / owner contribution / opening balance "
                 "equity — you can combine multiples like $20k cash + $80k "
@@ -288,9 +292,19 @@ async def ai_chat_stream(inp: ChatIn, user: dict = Depends(get_current_user)):
                 'message: [[PROPOSAL:{"kind":"create-liability-account","name":'
                 '"Mortgage Payable — <asset name>","code":"2500","subtype":'
                 '"long_term_debt"}]] and wait for the user to confirm before '
-                "using it. Once you have name, purchase_date (YYYY-MM-DD), "
-                "cost, asset_type, useful_life_years (optional if type has "
-                "preset), and offsets that sum EXACTLY to cost, emit "
+                "using it. If a matching parent liability like 'Loans Payable' "
+                "or 'Mortgages Payable' already exists in offset_candidates "
+                "AND the user asks for a 'sub account', 'child account', or "
+                "an asset-specific mortgage (common accountant workflow — one "
+                "loan-payable child per property), emit the same proposal "
+                'with an added "parent_account_id":"<the `id` UUID from '
+                'offset_candidates, NOT the code>" '
+                "field so it's created underneath the existing parent. The "
+                "id looks like '3f8a1c2b-...-4d9e' — never pass the 4-digit "
+                "code as parent_account_id. Once "
+                "you have name, purchase_date (YYYY-MM-DD), cost, asset_type, "
+                "useful_life_years (optional if type has preset), and offsets "
+                "that sum EXACTLY to cost, emit "
                 "[[PROPOSAL:{\"kind\":\"create-fixed-asset\",\"payload\":{...}}]] "
                 "where payload is the exact JSON the /assets endpoint expects. "
                 "Offsets must be a list of {account_id, amount}. IMPORTANT: for "

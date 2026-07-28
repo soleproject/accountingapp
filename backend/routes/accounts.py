@@ -116,16 +116,40 @@ async def ensure_account(cid: str, inp: EnsureAccountIn, user: dict = Depends(ge
     if t not in CODE_RANGES:
         raise HTTPException(400, f"Unsupported account type: {inp.type}")
 
+    # Resolve parent_account_id: LLM proposals may pass a 4-digit code
+    # ("2500") or a plain name ("Loans Payable") instead of the actual
+    # UUID. Look it up so the parent link is always a real account id.
+    if inp.parent_account_id:
+        pid = inp.parent_account_id.strip()
+        is_uuid_like = bool(re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", pid.lower()))
+        if not is_uuid_like:
+            # Try code, then name (case-insensitive).
+            parent = await db.accounts.find_one({"company_id": cid, "code": pid})
+            if not parent:
+                pid_norm = re.sub(r"\s+", " ", pid).lower()
+                async for a in db.accounts.find({"company_id": cid, "type": t}):
+                    if re.sub(r"\s+", " ", (a.get("name") or "").strip()).lower() == pid_norm:
+                        parent = a
+                        break
+            inp.parent_account_id = parent["id"] if parent else None
+
     # Match by normalized name (case-insensitive) OR exact code.
+    # When creating a sub-account, don't reuse the parent's code —
+    # always mint a new child so property-specific mortgages, etc.
+    # don't get silently swallowed by an existing "Loans Payable 2500".
     name_norm = re.sub(r"\s+", " ", inp.name.strip()).lower()
     existing = None
-    if inp.code:
+    if inp.code and not inp.parent_account_id:
         existing = await db.accounts.find_one({"company_id": cid, "code": inp.code})
     if not existing:
         # Case-insensitive name match on same type; avoids "Transfer" vs "transfer".
         all_of_type = await db.accounts.find({"company_id": cid, "type": t}).to_list(1000)
         for a in all_of_type:
             if re.sub(r"\s+", " ", a.get("name", "").strip()).lower() == name_norm:
+                # If caller wants a sub-account under a specific parent,
+                # only reuse when the existing row is under the same parent.
+                if inp.parent_account_id and a.get("parent_account_id") != inp.parent_account_id:
+                    continue
                 existing = a
                 break
     if existing:
