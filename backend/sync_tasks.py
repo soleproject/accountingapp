@@ -64,10 +64,19 @@ async def _is_period_closed(company_id: str, txn_date: str) -> bool:
 # Task: run one Plaid sync cycle (cursor-based delta)
 # ---------------------------------------------------------------------------
 
-async def plaid_manual_sync(job_id: str, company_id: str) -> None:
+async def plaid_manual_sync(
+    job_id: str, company_id: str, webhook_code: str | None = None,
+) -> None:
     """Cursor-based delta sync — the "hey, anything new since last time?"
     version. Fast, typically <2 seconds. Runs the PFC-first pipeline for
     every new row.
+
+    `webhook_code` (when set) tells the sync worker WHICH Plaid event
+    triggered this run. Opening balance JEs are only posted after
+    `HISTORICAL_UPDATE` because that's the event that guarantees the
+    historical backfill (up to 24 months) has landed. Firing on
+    `INITIAL_UPDATE` would anchor the JE ~30 days back, which is wrong
+    once the historical data expands the date range.
     """
     await _mark_started(job_id)
     try:
@@ -75,8 +84,12 @@ async def plaid_manual_sync(job_id: str, company_id: str) -> None:
         if not item:
             await _mark_failed(job_id, "No Plaid item linked")
             return
-        imported = await _run_sync(company_id, item, reset_cursor=False, job_id=job_id)
-        await _mark_done(job_id, {"imported": imported})
+        imported = await _run_sync(
+            company_id, item, reset_cursor=False, job_id=job_id,
+            trigger=webhook_code,
+        )
+        await _mark_done(job_id, {"imported": imported,
+                                  "webhook_code": webhook_code})
     except Exception:  # noqa: BLE001
         await _mark_failed(job_id, traceback.format_exc())
         raise
@@ -97,7 +110,12 @@ async def plaid_reset_resync(job_id: str, company_id: str) -> None:
         if not item:
             await _mark_failed(job_id, "No Plaid item linked")
             return
-        imported = await _run_sync(company_id, item, reset_cursor=True, job_id=job_id)
+        imported = await _run_sync(
+            company_id, item, reset_cursor=True, job_id=job_id,
+            # A full re-page always brings complete history, so treat it
+            # as equivalent to HISTORICAL_UPDATE for OBE JE posting.
+            trigger="HISTORICAL_UPDATE",
+        )
         await _mark_done(job_id, {"reset": True, "imported": imported})
     except Exception:  # noqa: BLE001
         await _mark_failed(job_id, traceback.format_exc())
@@ -157,12 +175,20 @@ async def _run_contact_backfill_inline(company_id: str) -> int:
 # ---------------------------------------------------------------------------
 
 async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool,
-                    job_id: str | None = None) -> int:
+                    job_id: str | None = None,
+                    trigger: str | None = None) -> int:
     """Pull txns from Plaid + route through the PFC pipeline. Returns count
     of inserted rows.
 
     Emits progress updates to `sync_jobs.progress` at stage boundaries so the
     Dashboard Sync Pill can display "Downloading…" / "Categorizing X of Y".
+
+    `trigger` is the Plaid webhook code (`INITIAL_UPDATE`,
+    `HISTORICAL_UPDATE`, `DEFAULT_UPDATE`, `SYNC_UPDATES_AVAILABLE`) that
+    kicked off this sync — used to decide whether to post the deferred
+    opening balance JEs at the end. Reset-resync (nuclear re-pull)
+    passes `trigger="HISTORICAL_UPDATE"` to force the post since a full
+    re-page always brings the complete history.
     """
     async def _emit(stage: str, current: int, total: int | None) -> None:
         if job_id:
@@ -238,7 +264,92 @@ async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool,
             logging.getLogger("axiom.app").warning(
                 "internal-transfer detector failed after sync for cid=%s: %s", company_id, e
             )
+
+    # Post-sync: opening-balance JE for each Plaid-linked ledger account
+    # — only after HISTORICAL_UPDATE (or a manual reset-resync). This is
+    # the "everything is downloaded" signal, so anchoring the JE at
+    # (oldest_txn_date - 1) is correct. Skipped on INITIAL_UPDATE +
+    # DEFAULT_UPDATE + SYNC_UPDATES_AVAILABLE because those either lack
+    # historical depth or represent normal delta refreshes.
+    if trigger == "HISTORICAL_UPDATE":
+        await _post_deferred_plaid_opening_balances(company_id, item)
+        # Persist the "historical backfill has landed" marker so any
+        # future connect-time replay knows OBE JEs are safe to post
+        # (see `plaid_connect.sync_plaid_history_for_account`).
+        await db.plaid_items.update_one(
+            {"id": item["id"]},
+            {"$set": {"historical_update_received": True,
+                      "historical_update_at": now_iso(),
+                      "updated_at": now_iso()}},
+        )
     return imported
+
+
+async def _post_deferred_plaid_opening_balances(
+    company_id: str, item: dict,
+) -> None:
+    """Fire the initial opening-balance JE for each Plaid-linked ledger
+    account exactly once, using the identical math as `plaid_connect.
+    sync_plaid_history_for_account`. Idempotent — records the resulting
+    JE id back on the mapping so subsequent HISTORICAL_UPDATE syncs
+    (e.g. reset_resync) don't double-post.
+    """
+    try:
+        item = await db.plaid_items.find_one({"id": item["id"]}) or item
+        mappings = item.get("account_mappings") or {}
+        accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
+        changed = False
+        for pa_id, m in mappings.items():
+            if m.get("opening_je_id"):
+                continue  # Already posted at connect (or a prior HISTORICAL run).
+            ledger_id = m.get("ledger_account_id")
+            if not ledger_id:
+                continue
+            ledger_bank = next((a for a in accts if a["id"] == ledger_id), None)
+            if not ledger_bank:
+                continue
+            all_for_acct = await db.transactions.find(
+                {"company_id": company_id, "plaid_account_id": pa_id}
+            ).to_list(50000)
+            if not all_for_acct:
+                continue
+            net_movement = sum(float(t.get("amount") or 0) for t in all_for_acct)
+            plaid_acct = next(
+                (a for a in (item.get("accounts") or [])
+                 if a.get("account_id") == pa_id), None,
+            )
+            snap = float((plaid_acct or {}).get("balance_current") or 0.0)
+            is_liability = ledger_bank["type"] == "liability"
+            opening = round(
+                (snap + net_movement) if is_liability else (snap - net_movement),
+                2,
+            )
+            oldest_date = min(t["date"] for t in all_for_acct)
+            as_of = plaid_connect._yesterday_iso(oldest_date)
+            memo = (
+                f"Opening balance — {ledger_bank['name']} "
+                "(posted after Plaid historical backfill)"
+            )
+            je_id = await plaid_connect.post_opening_balance_je(
+                company_id, ledger_bank, opening, as_of, memo,
+            )
+            if je_id:
+                mappings[pa_id]["opening_je_id"] = je_id
+                mappings[pa_id]["opening_balance"] = opening
+                mappings[pa_id]["opening_as_of"] = as_of
+                changed = True
+        if changed:
+            await db.plaid_items.update_one(
+                {"id": item["id"]},
+                {"$set": {"account_mappings": mappings,
+                          "updated_at": now_iso()}},
+            )
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger("axiom.app").warning(
+            "deferred Plaid opening-balance post failed for cid=%s: %s",
+            company_id, e,
+        )
 
 
 # ---------------------------------------------------------------------------

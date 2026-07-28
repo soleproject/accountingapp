@@ -51,52 +51,18 @@ from deps import (
 router = APIRouter(prefix="/api")
 
 
-# ----------------------- Auto-opening-balance debounce --------------------
-# `list_accounts` fires on every dashboard / balance sheet / transactions
-# load, so we opportunistically kick the auto-managed opening balance
-# recompute in the BACKGROUND on the same request — but only once every
-# 60 seconds per company to keep Mongo write pressure sane. Fully
-# fire-and-forget: never blocks the accounts response, never surfaces
-# errors to the user. Idempotent by design (see opening_balance_service).
-_OBE_LAST_RUN: dict[str, float] = {}
-_OBE_DEBOUNCE_SECONDS = 60.0
-
-
-async def _auto_recompute_opening_balances(cid: str) -> None:
-    import time as _t
-    import opening_balance_service as obs
-    try:
-        # Only touch accounts that have at least one statement_imports row —
-        # skips the vast majority of accounts on every call.
-        imported_account_ids = await db.statement_imports.distinct(
-            "account_id", {"company_id": cid, "status": "completed"},
-        )
-        if not imported_account_ids:
-            return
-        for aid in imported_account_ids:
-            if not aid:
-                continue
-            await obs.ensure_opening_balance_for_account(cid, aid)
-    except Exception:  # noqa: BLE001 — background, never bubble up.
-        import logging as _l
-        _l.getLogger(__name__).warning(
-            "auto opening-balance recompute failed for company %s", cid,
-        )
-    finally:
-        _OBE_LAST_RUN[cid] = _t.time()
-
-
-def _obe_recompute_needed(cid: str) -> bool:
-    """Reserve the debounce slot atomically. Returns True at most once per
-    `_OBE_DEBOUNCE_SECONDS` per company; concurrent calls after the first
-    within the window all get False.
-    """
-    import time as _t
-    last = _OBE_LAST_RUN.get(cid, 0.0)
-    if _t.time() - last < _OBE_DEBOUNCE_SECONDS:
-        return False
-    _OBE_LAST_RUN[cid] = _t.time()
-    return True
+# Auto-managed opening balance JEs are event-driven:
+#   - Statement upload → `statements.upload_statement` calls the helper
+#     for that account and re-anchors to the earliest known statement
+#     (older uploads shift the JE date backwards, newer uploads no-op).
+#   - Plaid HISTORICAL_UPDATE webhook → `deps.sync_and_import` retries
+#     the OBE post once the account has ≥30 days of history, which is
+#     effectively "after the historical backfill has landed" since a
+#     fresh INITIAL_UPDATE only carries ~30 days.
+# The read path (this file) never triggers recompute — that was the old
+# per-request approach that raised scalability concerns.
+# One-time backfill for pre-Feb-2026 companies lives in
+# `deps.migrate_opening_balances_once` and runs on backend startup.
 
 
 # ----------------------- Accounts (Chart of Accounts) -----------------------
@@ -104,16 +70,6 @@ def _obe_recompute_needed(cid: str) -> bool:
 @router.get("/companies/{cid}/accounts")
 async def list_accounts(cid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
-    # Auto-managed OBE JEs are refreshed in-line on the first accounts
-    # fetch per 60-second window per company — idempotent, cheap when
-    # everything's already correct, and guarantees the very next Balance
-    # Sheet render reflects the right numbers. Wrapped so a helper
-    # failure never breaks accounts loading.
-    if _obe_recompute_needed(cid):
-        try:
-            await _auto_recompute_opening_balances(cid)
-        except Exception:  # noqa: BLE001
-            pass
     docs = await db.accounts.find({"company_id": cid}).sort("code", 1).to_list(2000)
     return {"accounts": [coerce(d) for d in docs]}
 

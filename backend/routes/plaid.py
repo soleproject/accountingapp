@@ -89,8 +89,14 @@ async def plaid_webhook(payload: dict):
             return {"ok": True, "queued_job": existing["id"],
                     "webhook_code": webhook_code, "dedup": True}
         from job_queue import enqueue_job
+        # Pass the triggering webhook_code through — the sync worker uses
+        # it to know when to post opening balance JEs (only after
+        # HISTORICAL_UPDATE, because INITIAL_UPDATE only carries ~30 days
+        # and posting a JE anchored to yesterday would be wrong once the
+        # historical backfill lands).
         job_id = await enqueue_job(
             "plaid_manual_sync", item["company_id"], user_id=None,
+            webhook_code=webhook_code,
         )
         return {"ok": True, "queued_job": job_id, "webhook_code": webhook_code}
     if webhook_code == "TRANSACTIONS_REMOVED":
