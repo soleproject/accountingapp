@@ -554,19 +554,29 @@ export default function Reconciliation() {
         <MatchResultModal
           result={matchResult}
           onClose={() => { setShowMatchModal(false); setMatchResult(null); }}
-          onApply={async (ids) => {
-            try {
-              await api.post(`/companies/${currentId}/reconciliations/apply-matches`, {
-                bank_account_id: acctId,
-                period_end: periodEnd,
-                apply_txn_ids: ids,
-              });
-              toast.success(`Cleared ${ids.length} matched transactions.`);
-              setShowMatchModal(false); setMatchResult(null);
-              load();
-            } catch (e) {
-              toast.error(e.response?.data?.detail || "Apply failed");
+          onApply={(ids) => {
+            // Feed matches into the CURRENT reconciliation session instead
+            // of globally clearing them. The user is inside "New
+            // reconciliation" with opening/ending balances — those matched
+            // rows need to count toward `clearedSum` so the difference
+            // collapses to $0 and the Finish button unlocks. The Finish
+            // flow will then persist `cleared_at` + `cleared_source=manual`
+            // + `cleared_reconciliation_id` for a proper audit trail.
+            // (Previously we hit `/apply-matches`, which set `cleared_at`
+            // out-of-band and left the session's diff untouched — the
+            // symptom the user reported.)
+            if (!ids.length) {
+              setShowMatchModal(false); setMatchResult(null); return;
             }
+            setChecked(prev => {
+              const n = new Set(prev);
+              for (const id of ids) n.add(id);
+              return n;
+            });
+            toast.success(
+              `Pre-checked ${ids.length} matched transaction${ids.length === 1 ? "" : "s"}. Review and Finish reconciliation to save.`
+            );
+            setShowMatchModal(false); setMatchResult(null);
           }}
         />
       )}

@@ -138,6 +138,17 @@ async def preview_recon(
             {"cleared_at": None},
             {"cleared_at": {"$exists": False}},
             {"cleared_at": ""},
+            # Orphan statement-match clears (cleared_at set but never
+            # attached to a reconciliation record — e.g. the previous
+            # "Match statement PDF → Apply" flow that fired
+            # `/apply-matches` out-of-band). Treat these as still
+            # uncleared so they can be pulled into a proper
+            # reconciliation session and get a `cleared_reconciliation_id`
+            # for the audit trail.
+            {"cleared_source": "statement_match",
+             "cleared_reconciliation_id": {"$in": [None, ""]}},
+            {"cleared_source": "statement_match",
+             "cleared_reconciliation_id": {"$exists": False}},
         ],
     }).sort("date", 1).to_list(1000)
 
@@ -340,6 +351,14 @@ async def match_statement_lines(
             {"cleared_at": None},
             {"cleared_at": {"$exists": False}},
             {"cleared_at": ""},
+            # Include orphan statement-match clears so a second run of the
+            # statement matcher can re-match rows that were "applied" by
+            # the legacy out-of-band flow but never attached to a real
+            # reconciliation record.
+            {"cleared_source": "statement_match",
+             "cleared_reconciliation_id": {"$in": [None, ""]}},
+            {"cleared_source": "statement_match",
+             "cleared_reconciliation_id": {"$exists": False}},
         ],
     }).to_list(2000)
 
