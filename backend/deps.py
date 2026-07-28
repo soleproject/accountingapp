@@ -208,6 +208,16 @@ async def sync_and_import(cid: str, item: dict, selected_account_ids: list[str] 
     """Run Plaid transactions_sync + route each new txn through the PFC pipeline.
     Used by both the Plaid webhook handler and the manual-sync endpoint.
     """
+    # Stamp the ai_usage ContextVar so nested LLM / Veryfi / Resend calls
+    # get attributed to this company even when we're invoked from a
+    # background task or webhook (where the auth dependency did NOT run).
+    # `set` is idempotent — if the caller (auth dep) already stamped a
+    # matching value this is a no-op; if not, we recover attribution.
+    try:
+        from ai_usage import set_request_context
+        set_request_context(user_id=None, company_id=cid)
+    except Exception:  # noqa: BLE001 — attribution is best-effort
+        pass
     import plaid_service
     import plaid_connect
     from ai_service import categorize_transaction as _cat

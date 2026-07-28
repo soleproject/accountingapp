@@ -139,9 +139,32 @@ def test_line_items_shape():
     assert all(r["amount"] < 0 for r in rows)
 
 
+# ---------- 8. Full description preserved as merchant (Feb 2026 fix) ----------
+
+def test_merchant_preserves_full_description():
+    """User report: 'When transactions come in from Veryfi, we need the
+    full description in the merchant/description area.' The old extractor
+    took only the first word of the memo as merchant, e.g.
+    'COSTCO WHSE #0646 SPARKS NV' -> 'COSTCO'. Both fields must now carry
+    the full cleaned string so the Transactions UI (which renders
+    `merchant || description`) surfaces the whole memo.
+    """
+    doc = {"accounts": [{"transactions": [
+        {"date": "2026-03-30", "debit_amount": 139.01,
+         "description": "COSTCO WHSE #0646 SPARKS NV"},
+        {"date": "2026-04-01", "credit_amount": 500.0,
+         "description": "ZELLE FROM JOHN SMITH REF#1234"},
+    ]}]}
+    rows = extract_transactions(doc)
+    assert rows[0]["merchant"] == "COSTCO WHSE #0646 SPARKS NV"
+    assert rows[0]["description"] == "COSTCO WHSE #0646 SPARKS NV"
+    assert rows[1]["merchant"] == "ZELLE FROM JOHN SMITH REF#1234"
+    assert rows[1]["description"] == "ZELLE FROM JOHN SMITH REF#1234"
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_") and callable(fn):
             fn()
             print(f"OK: {name}")
-    print("\nAll 7 veryfi_service.extract_transactions tests passed.")
+    print("\nAll veryfi_service.extract_transactions tests passed.")

@@ -86,10 +86,16 @@ def extract_transactions(veryfi_data: dict) -> list[dict]:
             return
         # Collapse Veryfi's `text` field which sometimes has tabs + newlines
         clean = " ".join(desc.split())
+        # Bank-statement rows have no separate "vendor" field — the full
+        # cleaned memo IS the best merchant string we have. Previously we
+        # took only the first token (e.g. "COSTCO WHSE #0646 SPARKS NV"
+        # → "COSTCO"), which dropped location codes, check numbers, and
+        # Zelle recipient names from the UI. Downstream `contact_resolver`
+        # already handles long/noisy merchant strings via its AI path.
         result.append({
             "date": str(date)[:10],
             "description": clean,
-            "merchant": clean.split()[0] if clean else "Statement Line",
+            "merchant": clean or "Statement Line",
             "amount": round(amt, 2),
         })
 

@@ -105,6 +105,19 @@ async def _run_wrapped(fn: Callable[..., Awaitable[Any]], job_id: str,
     """
     sem = _get_semaphore()
     async with sem:
+        # Stamp the ai_usage ContextVar so every LLM / Veryfi / Resend
+        # call made inside this background task gets attributed to the
+        # right company (Feb 2026 fix — background jobs bypass the auth
+        # dependency that normally sets this, so Plaid webhook + manual
+        # sync AI costs were previously landing as "no company").
+        try:
+            from ai_usage import set_request_context
+            doc = await db.sync_jobs.find_one(
+                {"id": job_id}, {"user_id": 1},
+            ) or {}
+            set_request_context(user_id=doc.get("user_id"), company_id=company_id)
+        except Exception:  # noqa: BLE001 — attribution is best-effort
+            pass
         try:
             await fn(job_id, company_id, **kwargs)
         except Exception:  # noqa: BLE001 — safety net

@@ -39,6 +39,36 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 (later) — Veryfi description + Plaid AI attribution fixes
+
+- **Veryfi bank-statement merchant no longer truncated to first word.**
+  In `veryfi_service.extract_transactions` the bank-statement rows (shapes
+  1 & 2) previously set `merchant = clean.split()[0]` — dropping location
+  codes / Zelle recipients / check numbers from the Transactions UI
+  (which renders `merchant || description`). Now `merchant = clean` (full
+  cleaned memo). Descriptions were already full but never surfaced
+  because merchant took precedence in the render tree. Regression test:
+  `test_merchant_preserves_full_description` in
+  `/app/backend/tests/test_veryfi_extract.py` (8 tests, all passing).
+
+- **Background Plaid syncs now stamp `ai_usage` ContextVar.**
+  Root cause of the recurring "Plaid webhook syncs land as unattributed
+  AI cost" bug: FastAPI's auth dependency (`deps.require_company`) is
+  the only place that called `set_request_context()`, but background
+  jobs and the Plaid `/webhook` (no auth) bypass it entirely. Fixed by
+  stamping in TWO spots — belt + suspenders:
+  1. `job_queue._run_wrapped` — reads `sync_jobs.user_id` and sets both
+     `_current_user_id` + `_current_company_id` before invoking the
+     registered task. Covers `plaid_manual_sync`, `plaid_reset_resync`,
+     `plaid_contact_backfill`, and any future task kinds.
+  2. `deps.sync_and_import` — inline stamp with `user_id=None,
+     company_id=cid` at function entry. Handles the direct-inline path
+     (webhook + manual routes) so LLM + Veryfi + Resend calls made
+     inside the shared PFC pipeline all attribute correctly.
+  Regression test: `test_bg_sync_attribution.py` (2 tests: task-wrapper
+  path + inline path, both passing).
+
+
 ### Feb 2026 (later) — Post-Onboarding Tour (client's first dashboard visit)
 Continuation piece to `WelcomeModal` — fires once a new client hits
 `/dashboard` after their company's onboarding flips to complete. Guides
