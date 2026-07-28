@@ -130,6 +130,11 @@ class ChatIn(BaseModel):
     message: str
     focused_transaction_id: Optional[str] = None
     focused_bucket: Optional[dict] = None
+    # Guided fixed-asset creation — Feb 2026. Frontend hands off the modal's
+    # current draft state (name, cost, funding sources so far) so the AI can
+    # ask precise follow-ups AND emit a `create-fixed-asset` proposal when it
+    # has enough info to prefill the modal.
+    focused_new_asset: Optional[dict] = None
     terseness: Optional[str] = "balanced"  # "concise" | "balanced" | "detailed"
 
 

@@ -1706,6 +1706,54 @@ export default function AiPanel({ collapsed, onToggle }) {
         return;
       }
 
+      // Create-fixed-asset card: user said "yes" — AI drafts the full
+      // payload, we POST it, then broadcast a `fixed-assets:created` event
+      // so the FixedAssetsPage refreshes and closes any open modal.
+      if (p.kind === "create-fixed-asset") {
+        pendingIntentRef.current = null;
+        setPendingIntent(null);
+        setMessages(m => [...m, { role: "user", content: userMsg }]);
+        try {
+          const r = await api.post(`/companies/${currentId}/assets`, p.payload);
+          const monthly = r.data?.monthly_depreciation;
+          const posted = r.data?.depreciation_jes_posted;
+          const msg = posted
+            ? `Fixed asset created — acquisition JE posted, ${posted} depreciation entries scheduled at $${Number(monthly).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}/month.`
+            : `Fixed asset created — acquisition JE posted (non-depreciable, no schedule).`;
+          setMessages(m => [...m, { role: "assistant", content: msg }]);
+          if (voiceOnRef.current) speakOne(msg);
+          window.dispatchEvent(new CustomEvent("fixed-assets:created", { detail: r.data }));
+          setFocus(null);
+        } catch (e) {
+          const err = e.response?.data?.detail || "Sorry — I couldn't create that asset.";
+          setMessages(m => [...m, { role: "assistant", content: err }]);
+        }
+        return;
+      }
+
+      // Create-liability-account card: sets up a mortgage / loan account
+      // so the AI can then use it as a Loan funding source on the next turn.
+      if (p.kind === "create-liability-account") {
+        pendingIntentRef.current = null;
+        setPendingIntent(null);
+        setMessages(m => [...m, { role: "user", content: userMsg }]);
+        try {
+          const r = await api.post(`/companies/${currentId}/accounts/ensure`, {
+            name: p.name, type: "liability", subtype: p.subtype || "long_term_debt",
+            code: p.code,
+          });
+          const msg = r.data?.created
+            ? `Created ${r.data.code} · ${r.data.name} (liability). You can now use it as a Loan funding source.`
+            : `${r.data.code} · ${r.data.name} already exists — I'll use it.`;
+          setMessages(m => [...m, { role: "assistant", content: msg }]);
+          if (voiceOnRef.current) speakOne(msg);
+        } catch (e) {
+          setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't create the loan account." }]);
+        }
+        return;
+      }
+
+
       // Create-account (standalone) card: user said "yes" to create the account.
       if (p.kind === "create-account") {
         pendingIntentRef.current = null;
@@ -2204,6 +2252,11 @@ export default function AiPanel({ collapsed, onToggle }) {
             account_code: focus.account_code,
             account_name: focus.account_name,
           } : null,
+          focused_new_asset: focus?.kind === "new-fixed-asset" ? {
+            editing: focus.editing,
+            asset_id: focus.asset_id,
+            draft: focus.draft,
+          } : null,
           terseness,
         }),
       });
@@ -2231,23 +2284,49 @@ export default function AiPanel({ collapsed, onToggle }) {
                 const propRe = /\[\[PROPOSAL:([^\]]+)\]\]/;
                 const pm = nextRaw.match(propRe);
                 if (pm && !pendingIntentRef.current) {
-                  const parts = pm[1].split("|");
-                  const kv = {};
-                  for (const seg of parts) {
-                    const idx = seg.indexOf("=");
-                    if (idx > 0) kv[seg.slice(0, idx).trim()] = seg.slice(idx + 1).trim();
-                  }
-                  if (kv.action === "categorize" && kv.category) {
-                    pendingIntentRef.current = {
-                      kind: "categorize-proposal",
-                      category: kv.category,
-                      scope: kv.scope || "focused",
-                    };
-                  } else if (kv.action === "transfer") {
-                    pendingIntentRef.current = {
-                      kind: "transfer-proposal",
-                      scope: kv.scope || "focused",
-                    };
+                  const raw = pm[1].trim();
+                  // Two supported formats:
+                  //   (legacy)  action=categorize|category=X|scope=Y
+                  //   (JSON)    {"kind":"create-fixed-asset","payload":{...}}
+                  // Detect JSON by the leading `{` and route accordingly so
+                  // structured proposals (fixed-asset creation, mortgage
+                  // account setup) can carry nested objects like the
+                  // `offsets` list without pipe-escaping.
+                  if (raw.startsWith("{")) {
+                    try {
+                      const j = JSON.parse(raw);
+                      if (j.kind === "create-fixed-asset" && j.payload) {
+                        pendingIntentRef.current = {
+                          kind: "create-fixed-asset",
+                          payload: j.payload,
+                        };
+                      } else if (j.kind === "create-liability-account") {
+                        pendingIntentRef.current = {
+                          kind: "create-liability-account",
+                          name: j.name, code: j.code,
+                          subtype: j.subtype || "long_term_debt",
+                        };
+                      }
+                    } catch {}
+                  } else {
+                    const parts = raw.split("|");
+                    const kv = {};
+                    for (const seg of parts) {
+                      const idx = seg.indexOf("=");
+                      if (idx > 0) kv[seg.slice(0, idx).trim()] = seg.slice(idx + 1).trim();
+                    }
+                    if (kv.action === "categorize" && kv.category) {
+                      pendingIntentRef.current = {
+                        kind: "categorize-proposal",
+                        category: kv.category,
+                        scope: kv.scope || "focused",
+                      };
+                    } else if (kv.action === "transfer") {
+                      pendingIntentRef.current = {
+                        kind: "transfer-proposal",
+                        scope: kv.scope || "focused",
+                      };
+                    }
                   }
                 }
                 const next = nextRaw.replace(propRe, "").replace(/\n\s*\n\s*$/, "").trimEnd();

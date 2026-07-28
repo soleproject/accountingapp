@@ -40,6 +40,16 @@ export default function FixedAssetsPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // AI-driven creation path: when the AI panel confirms a
+  // `create-fixed-asset` proposal, it POSTs the payload and dispatches
+  // this event. We refresh the list AND close any open modal so the
+  // user sees the new row appear without extra clicks.
+  useEffect(() => {
+    const handler = () => { setModalMode(null); load(); };
+    window.addEventListener("fixed-assets:created", handler);
+    return () => window.removeEventListener("fixed-assets:created", handler);
+  }, [load]);
+
   const del = async (row) => {
     if (!confirm(
       `Delete "${row.name}"? This will also remove the CoA sub-accounts, ` +

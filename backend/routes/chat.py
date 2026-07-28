@@ -225,6 +225,63 @@ async def ai_chat_stream(inp: ChatIn, user: dict = Depends(get_current_user)):
             "sample_rows": sample,
         }
 
+    # Guided fixed-asset creation focus — set when the user clicked the
+    # Sparkles button on the New/Edit Fixed Asset modal. Injects the
+    # current draft + a directive that tells the LLM to ask discovery
+    # questions and emit `[[PROPOSAL:{"kind":"create-fixed-asset",...}]]`
+    # once it has enough to fill in the form. If the user needs a
+    # mortgage/loan account created first, emit
+    # `[[PROPOSAL:{"kind":"create-liability-account",...}]]` earlier in the
+    # conversation.
+    if inp.focused_new_asset:
+        # Bank + liability + equity accounts the LLM can suggest as offsets.
+        offset_candidates = []
+        async for a in db.accounts.find({
+            "company_id": inp.company_id, "active": True,
+            "type": {"$in": ["asset", "liability", "equity"]},
+        }, {"id": 1, "code": 1, "name": 1, "type": 1, "subtype": 1}).limit(200):
+            offset_candidates.append({
+                "id": a["id"], "code": a.get("code"), "name": a.get("name"),
+                "type": a.get("type"), "subtype": a.get("subtype"),
+            })
+        combined_context["new_fixed_asset"] = {
+            "draft": inp.focused_new_asset.get("draft") or {},
+            "editing": bool(inp.focused_new_asset.get("editing")),
+            "asset_types_reference": [
+                "residential_real_estate (27.5 yrs)",
+                "commercial_real_estate (39 yrs)",
+                "vehicle (5 yrs)",
+                "computer_equipment (5 yrs)",
+                "machinery_equipment (7 yrs)",
+                "office_furniture (7 yrs)",
+                "land_improvements / building_improvements / leasehold_improvements (15 yrs each)",
+                "land (non-depreciable — separate from building)",
+                "other (custom life)",
+            ],
+            "offset_candidates": offset_candidates,
+            "directive": (
+                "You are helping the user add a Fixed Asset. Ask short, "
+                "concrete questions to fill any gaps in `draft`: what kind of "
+                "asset (map to one of asset_types_reference), how it was paid "
+                "for (cash / loan / owner contribution / opening balance "
+                "equity — you can combine multiples like $20k cash + $80k "
+                "mortgage), and whether there's a loan on it. When a mortgage/"
+                "loan is needed and no matching liability account exists in "
+                "offset_candidates, first emit ONE marker at the end of your "
+                'message: [[PROPOSAL:{"kind":"create-liability-account","name":'
+                '"Mortgage Payable — <asset name>","code":"2500","subtype":'
+                '"long_term_debt"}]] and wait for the user to confirm before '
+                "using it. Once you have name, purchase_date (YYYY-MM-DD), "
+                "cost, asset_type, useful_life_years (optional if type has "
+                "preset), and offsets that sum EXACTLY to cost, emit "
+                "[[PROPOSAL:{\"kind\":\"create-fixed-asset\",\"payload\":{...}}]] "
+                "where payload is the exact JSON the /assets endpoint expects. "
+                "Offsets must be a list of {account_id, amount}. IMPORTANT: for "
+                "real estate specifically, remind the user land is not "
+                "depreciable — offer to split into land + building assets."
+            ),
+        }
+
     full_reply = {"text": ""}
 
     # Regex that matches the hidden proposal marker the AI emits (parsed
