@@ -265,6 +265,62 @@ def test_plaid_history_gate():
     asyncio.run(_go())
 
 
+def test_deleting_last_statement_removes_auto_je():
+    """When the only statement for an account is removed, the
+    auto-managed OBE JE must be torn down — otherwise the ledger
+    carries a dangling opening entry that references no supporting
+    document."""
+    async def _go():
+        cid = await _make_company()
+        try:
+            bank = await _make_bank(cid, "asset")
+            iid = await _make_statement_import(
+                cid, bank["id"], "2026-04-01", 5000.0,
+            )
+            r1 = await obs.ensure_opening_balance_for_account(cid, bank["id"])
+            assert r1["action"] == "upserted"
+            # Simulate delete_import removing the only statement.
+            await db.statement_imports.delete_one({"id": iid})
+            r2 = await obs.ensure_opening_balance_for_account(cid, bank["id"])
+            assert r2["ok"] and r2["action"] == "deleted"
+            assert r2["reason"] == "no_statement_anchor_je_removed"
+            gone = await db.journal_entries.find_one({
+                "company_id": cid, "source": obs.AUTO_SOURCE,
+            })
+            assert gone is None, "Auto JE must be removed when anchor is gone."
+        finally:
+            await _cleanup(cid)
+    asyncio.run(_go())
+
+
+def test_deleting_earliest_of_two_reanchors_to_next():
+    """Two statements exist; deleting the OLDER one must re-anchor the
+    auto JE to the newer statement's period_start + opening_balance."""
+    async def _go():
+        cid = await _make_company()
+        try:
+            bank = await _make_bank(cid, "asset")
+            older = await _make_statement_import(
+                cid, bank["id"], "2026-03-24", 2463.10,
+            )
+            await _make_statement_import(
+                cid, bank["id"], "2026-04-23", 3281.78,
+            )
+            r1 = await obs.ensure_opening_balance_for_account(cid, bank["id"])
+            assert r1["as_of"] == "2026-03-23"
+            assert abs(r1["amount"] - 2463.10) < 0.005
+
+            # Delete the older statement — next-earliest should take over.
+            await db.statement_imports.delete_one({"id": older})
+            r2 = await obs.ensure_opening_balance_for_account(cid, bank["id"])
+            assert r2["ok"] and r2["action"] == "upserted"
+            assert r2["as_of"] == "2026-04-22", r2
+            assert abs(r2["amount"] - 3281.78) < 0.005, r2
+        finally:
+            await _cleanup(cid)
+    asyncio.run(_go())
+
+
 if __name__ == "__main__":
     # Run every test in a SHARED event loop — motor's async client caches
     # a loop reference on first use, so calling `asyncio.run(...)` per

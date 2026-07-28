@@ -238,6 +238,20 @@ async def ensure_opening_balance_for_account(
 
     anchor = await _earliest_statement_anchor(cid, bank_account_id)
     if not anchor:
+        # No statement anchor remains for this account (either the user
+        # never uploaded one, OR they just deleted the last import). If
+        # an auto-managed JE still exists from a previous statement that
+        # was since deleted, tear it down so the ledger doesn't carry a
+        # dangling opening entry with no supporting document.
+        stale = await db.journal_entries.find_one({
+            "company_id": cid, "source": AUTO_SOURCE,
+            "lines.account_id": bank_account_id,
+        })
+        if stale:
+            await db.journal_entries.delete_one({"id": stale["id"]})
+            return {"ok": True, "action": "deleted",
+                    "reason": "no_statement_anchor_je_removed",
+                    "je_id": stale["id"]}
         return {"ok": False, "reason": "no_statement_anchor"}
 
     as_of = _yesterday_iso(anchor["period_start"])

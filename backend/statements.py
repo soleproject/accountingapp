@@ -289,10 +289,20 @@ async def delete_import(cid: str, import_id: str, *, cascade: bool = True) -> di
     """Delete an import row. When `cascade=True`, also deletes every
     transaction the import produced (best-effort match on account + period).
     Returns counts.
+
+    Also re-runs the auto-managed opening balance helper for the
+    affected bank account. Three outcomes:
+      1. Other statements remain for this account → JE date/amount
+         recomputes to the next-earliest anchor.
+      2. No statements remain AND an auto-managed OBE JE exists → the
+         helper deletes the JE (returns `action: "deleted"`, reason
+         `"no_statement_anchor_je_removed"`).
+      3. No statements remain AND no auto-managed JE → no-op.
     """
     doc = await db.statement_imports.find_one({"id": import_id, "company_id": cid})
     if not doc:
         raise HTTPException(404, "Import not found")
+    bank_account_id = doc.get("account_id")
 
     txn_deleted = 0
     if cascade:
@@ -302,12 +312,29 @@ async def delete_import(cid: str, import_id: str, *, cascade: bool = True) -> di
         txn_deleted = result.deleted_count
 
     await db.statement_imports.delete_one({"id": import_id})
+
+    # Re-anchor / tear down the auto-managed OBE JE now that this
+    # statement is gone. Idempotent — never raises to the caller.
+    opening_je_info = None
+    if bank_account_id:
+        try:
+            import opening_balance_service as obs
+            opening_je_info = await obs.ensure_opening_balance_for_account(
+                cid, bank_account_id,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
     try:
         from infra import get_cache
         await get_cache().ainvalidate(cid)
     except Exception:  # noqa: BLE001
         pass
-    return {"deleted": True, "transactions_deleted": txn_deleted}
+    return {
+        "deleted": True,
+        "transactions_deleted": txn_deleted,
+        "opening_balance_je": opening_je_info,
+    }
 
 
 async def ensure_indexes() -> None:
