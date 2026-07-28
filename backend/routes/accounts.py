@@ -160,3 +160,44 @@ async def delete_account(cid: str, aid: str, user: dict = Depends(get_current_us
     return {"ok": True}
 
 
+@router.post("/companies/{cid}/accounts/recompute-opening-balances")
+async def recompute_opening_balances(cid: str, user: dict = Depends(get_current_user)):
+    """Run the auto-managed opening balance helper across every bank
+    ledger account in the company. Idempotent — safe to call any time.
+
+    Backfills companies whose statements were uploaded BEFORE the
+    auto-OBE service shipped in Feb 2026, and gives users a manual retry
+    knob when a closed period previously blocked the auto-post.
+    """
+    await require_company(user, cid)
+    import opening_balance_service as obs
+    bank_types = ("asset", "liability")
+    accts = await db.accounts.find({
+        "company_id": cid, "active": True, "type": {"$in": list(bank_types)},
+    }).to_list(1000)
+    # Only run against accounts that at least ONE statement_imports row
+    # references — no point iterating equity/income accounts.
+    imported_account_ids = set(
+        (await db.statement_imports.distinct("account_id", {"company_id": cid})) or []
+    )
+    results = []
+    for a in accts:
+        if a["id"] not in imported_account_ids:
+            continue
+        r = await obs.ensure_opening_balance_for_account(cid, a["id"])
+        results.append({
+            "account_id": a["id"],
+            "account_name": a["name"],
+            "account_code": a["code"],
+            **r,
+        })
+    return {
+        "processed": len(results),
+        "posted": sum(1 for r in results if r.get("action") == "upserted"),
+        "deleted": sum(1 for r in results if r.get("action") == "deleted"),
+        "skipped": sum(1 for r in results if not r.get("ok")),
+        "results": results,
+    }
+
+
+
