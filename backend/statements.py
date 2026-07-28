@@ -152,31 +152,14 @@ async def upload_statement(
     imported = inserted_count
     await log_ai_event(cid, "veryfi_ocr", imported)
 
-    # -------- Auto-post opening balance JE (delta / idempotent) --------
-    # Runs AFTER the txns are inserted so the delta math sees them.
-    # Handles out-of-order uploads via the shared helper — recomputes to
-    # the earliest known statement's opening balance every time.
-    opening_je_info = None
-    try:
-        import opening_balance_service
-        opening_je_info = await opening_balance_service.ensure_opening_balance_for_account(
-            cid, bank_account_id,
-        )
-    except Exception:  # noqa: BLE001 — never let this break the upload
-        pass
-
-    # -------- Auto-create reconciliation for this statement period --------
-    # Every txn we just inserted came directly from the statement, so the
-    # ledger is provably reconciled with the statement bookends. Turn that
-    # into a `reconciliations` doc so the user sees the recon appear in
-    # the history table immediately — no "Match statement PDF" click
-    # required. Back-links via `statement_import_id` for cascade delete.
-    # NOTE: We must finalize the import row FIRST (below), otherwise the
-    # engine sees status != "completed" and skips. That's why we set the
-    # `opening_balance_je` + `ending_balance` etc. above, then update the
-    # row, then create the recon.
-
-    # -------- Finalize the import row --------
+    # -------- Finalize the import row FIRST --------
+    # The auto-OBE helper's `_earliest_statement_anchor` filters on
+    # `status: "completed"`, so the row for THIS upload must be flipped
+    # before we call it — otherwise the helper never sees the current
+    # statement as an anchor. Prior bug: on the first-ever upload no JE
+    # was posted, and only the SECOND upload would create it (using the
+    # first as the anchor). Reversing the order fixes both single-upload
+    # and out-of-order-upload flows.
     await db.statement_imports.update_one(
         {"id": import_id},
         {"$set": {
@@ -195,7 +178,6 @@ async def upload_statement(
             "starting_balance": resolved.get("starting_balance"),
             "ending_balance": statement_account_resolver
                 ._statement_fields(veryfi_data).get("ending_balance"),
-            "opening_balance_je": opening_je_info,
             "veryfi_document_id": (
                 str(veryfi_data.get("id")) if veryfi_data.get("id") else None
             ),
@@ -204,18 +186,32 @@ async def upload_statement(
         }},
     )
 
-    # -------- Invalidate report cache for immediate dashboard refresh --------
+    # -------- Auto-post opening balance JE (delta / idempotent) --------
+    # Handles out-of-order uploads via the shared helper — recomputes to
+    # the earliest known statement's opening balance every time.
+    opening_je_info = None
     try:
-        from infra import get_cache
-        await get_cache().ainvalidate(cid)
-    except Exception:  # noqa: BLE001
+        import opening_balance_service
+        opening_je_info = await opening_balance_service.ensure_opening_balance_for_account(
+            cid, bank_account_id,
+        )
+    except Exception:  # noqa: BLE001 — never let this break the upload
         pass
 
+    # Stash the OBE result on the row for downstream debugging + UI.
+    if opening_je_info is not None:
+        await db.statement_imports.update_one(
+            {"id": import_id},
+            {"$set": {"opening_balance_je": opening_je_info,
+                      "updated_at": now_iso()}},
+        )
+
     # -------- Auto-create reconciliation for this statement period --------
-    # Runs AFTER the import row is finalized (needs status="completed").
-    # Every txn from this statement gets cleared_at/cleared_source
-    # pointing at the new recon. Back-linked via `statement_import_id`
-    # for cascade delete.
+    # Every txn we just inserted came directly from the statement, so the
+    # ledger is provably reconciled with the statement bookends. Turn that
+    # into a `reconciliations` doc so the user sees the recon appear in
+    # the history table immediately — no "Match statement PDF" click
+    # required. Back-links via `statement_import_id` for cascade delete.
     auto_recon = None
     try:
         from reconciliation_engine import create_reconciliation_from_statement_import
@@ -223,6 +219,13 @@ async def upload_statement(
             cid, import_id,
         )
     except Exception:  # noqa: BLE001 — never break the upload.
+        pass
+
+    # -------- Invalidate report cache for immediate dashboard refresh --------
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
         pass
 
     return {

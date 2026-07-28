@@ -321,6 +321,43 @@ def test_deleting_earliest_of_two_reanchors_to_next():
     asyncio.run(_go())
 
 
+def test_processing_status_ignored_completed_included():
+    """The anchor query only trusts `status="completed"` rows — a
+    processing/failed row must not participate. Regression: earlier the
+    OBE helper was called BEFORE `upload_statement` flipped the row to
+    completed, so on the very first upload NO JE was posted; only the
+    SECOND upload retroactively created one. `statements.py` now
+    finalizes the row before calling the helper.
+    """
+    async def _go():
+        cid = await _make_company()
+        try:
+            bank = await _make_bank(cid, "asset")
+            iid = str(uuid.uuid4())
+            await db.statement_imports.insert_one({
+                "id": iid, "company_id": cid, "account_id": bank["id"],
+                # Status is anything BUT completed — helper must ignore.
+                "status": "processing",
+                "period_start": "2026-04-23",
+                "starting_balance": 3281.78,
+                "created_at": now_iso(),
+            })
+            r_before = await obs.ensure_opening_balance_for_account(cid, bank["id"])
+            assert not r_before["ok"] and r_before["reason"] == "no_statement_anchor", r_before
+
+            # Simulate the statements.py "finalize row FIRST, then call
+            # helper" order — flip status and rerun.
+            await db.statement_imports.update_one(
+                {"id": iid}, {"$set": {"status": "completed"}},
+            )
+            r_after = await obs.ensure_opening_balance_for_account(cid, bank["id"])
+            assert r_after["ok"] and r_after["action"] == "upserted", r_after
+            assert abs(r_after["amount"] - 3281.78) < 0.005
+        finally:
+            await _cleanup(cid)
+    asyncio.run(_go())
+
+
 if __name__ == "__main__":
     # Run every test in a SHARED event loop — motor's async client caches
     # a loop reference on first use, so calling `asyncio.run(...)` per
