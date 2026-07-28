@@ -68,7 +68,8 @@ async def _make_statement_import(
 
 
 async def _cleanup(cid: str) -> None:
-    for coll in ("companies", "accounts", "statement_imports",
+    await db.companies.delete_many({"id": cid})
+    for coll in ("accounts", "statement_imports",
                  "journal_entries", "transactions", "close_periods"):
         await db[coll].delete_many({"company_id": cid})
 
