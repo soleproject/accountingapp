@@ -83,10 +83,69 @@ def _make_crud(collection_name: str, path_prefix: str):
 
 
 _make_crud("inventory_items", "inventory")
-_make_crud("assets", "assets")
+# Note: assets uses a custom lifecycle service (see below) — NOT the
+# generic CRUD, because adding a fixed asset also creates CoA
+# sub-accounts, posts an acquisition JE, and generates a monthly
+# depreciation schedule.
 _make_crud("loans", "loans")
 _make_crud("tags", "tags")
 _make_crud("communications", "communications")
 _make_crud("connections", "connections")
+
+
+# ----------------------- Fixed Assets (custom lifecycle) -----------------------
+
+@router.get("/companies/{cid}/assets")
+async def list_assets(cid: str, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    docs = await db.assets.find({"company_id": cid}).to_list(1000)
+    return {"items": [coerce(d) for d in docs]}
+
+
+@router.post("/companies/{cid}/assets")
+async def create_asset(cid: str, payload: dict, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    try:
+        import asset_service
+        result = await asset_service.create_fixed_asset(cid, payload)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    # Invalidate report cache so the Balance Sheet refreshes on next load.
+    try:
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+    return result
+
+
+@router.patch("/companies/{cid}/assets/{aid}")
+async def update_asset(cid: str, aid: str, payload: dict,
+                       user: dict = Depends(get_current_user)):
+    """Patch is limited to non-financial fields — cost / life / dates
+    would require re-issuing the acquisition JE and the entire
+    depreciation schedule, which the caller should do by deleting +
+    re-creating.
+    """
+    await require_company(user, cid)
+    editable = {k: v for k, v in payload.items()
+                if k in ("name", "notes", "tag_ids", "metadata")}
+    if not editable:
+        return {"ok": True}
+    editable["updated_at"] = now_iso()
+    await db.assets.update_one({"id": aid, "company_id": cid},
+                               {"$set": editable})
+    return {"ok": True}
+
+
+@router.delete("/companies/{cid}/assets/{aid}")
+async def delete_asset(cid: str, aid: str, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    import asset_service
+    result = await asset_service.delete_fixed_asset(cid, aid)
+    try:
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+    return result
 
 

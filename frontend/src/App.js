@@ -43,6 +43,7 @@ import AcceptInvite from "@/pages/AcceptInvite";
 import ProTeam from "@/pages/ProTeam";
 import CompanyTeam from "@/pages/CompanyTeam";
 import GenericList from "@/pages/GenericList";
+import FixedAssetsPage from "@/pages/FixedAssetsPage";
 import GeneralLedger from "@/pages/GeneralLedger";
 import Reconciliation from "@/pages/Reconciliation";
 import ReconciliationDetail from "@/pages/ReconciliationDetail";
@@ -107,10 +108,7 @@ function App() {
                 path="inventory" title="Inventory"
                 fields={[{k:"name",l:"Item Name"},{k:"sku",l:"SKU"},{k:"quantity",l:"Qty",t:"number"},{k:"unit_cost",l:"Unit Cost",t:"number"}]}
               />} />
-              <Route path="/accounting/assets" element={<GenericList
-                path="assets" title="Fixed Assets"
-                fields={[{k:"name",l:"Asset"},{k:"purchase_date",l:"Purchased",t:"date"},{k:"cost",l:"Cost",t:"number"},{k:"useful_life_years",l:"Life (yrs)",t:"number"}]}
-              />} />
+              <Route path="/accounting/assets" element={<FixedAssetsPage />} />
               <Route path="/accounting/loans" element={<GenericList
                 path="loans" title="Loans"
                 fields={[{k:"lender",l:"Lender"},{k:"principal",l:"Principal",t:"number"},{k:"rate",l:"Interest Rate %",t:"number"},{k:"term_months",l:"Term (months)",t:"number"}]}
