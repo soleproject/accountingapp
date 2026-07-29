@@ -11,14 +11,6 @@ import { Sparkles, Loader2 } from "lucide-react";
 // A `?firm=acme` query param short-circuits to a direct firm lookup for
 // preview environments where the host doesn't match the real root.
 
-// Private-label tenant roots where the "Demo Accounts" block is hidden
-// (their end-users shouldn't see seeded demo credentials). Everywhere
-// else — SmartBooks platform, preview URLs, unknown hosts — the demo
-// buttons stay visible.
-const HIDE_DEMO_HOSTS = new Set([
-  "cypherpro.accountingapp.ai",
-]);
-
 export default function Login() {
   const { login } = useAuth();
   const nav = useNavigate();
@@ -232,10 +224,11 @@ export default function Login() {
             No account? <a href="/signup" className="text-cyan-700 hover:underline" data-testid="signup-link">Create one</a>
           </div>
 
-          {/* Hide the Demo Accounts block on private-label tenant roots
-              where seeded demo credentials shouldn't leak. Add hostnames
-              here as more white-label roots come online. */}
-          {!HIDE_DEMO_HOSTS.has((typeof window !== "undefined" ? window.location.hostname : "").toLowerCase()) && (
+          {/* Hide the Demo Accounts block per-tenant. The `hide_demo_accounts`
+              flag comes from the resolved firm branding (superadmin/pro can
+              toggle it from Enterprise Settings). We fall back to showing
+              the block on the platform brand and preview URLs. */}
+          {!(mode === "firm" && firm?.hide_demo_accounts) && (
           <div className="pt-4 border-t space-y-2">
             <div className="text-[11px] uppercase tracking-wider text-slate-500">Demo accounts</div>
             <button type="button" data-testid={TID.demoClient} onClick={() => demo("client@axiom.ai", "client123")}

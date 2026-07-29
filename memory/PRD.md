@@ -2541,3 +2541,34 @@ Added a LIVE FORM-FILL block to the Phase 1 directive instructing the LLM to emi
 **Files changed:**
 - `/app/frontend/src/pages/Login.jsx`
 
+
+## Per-Tenant "Hide Demo Accounts" Toggle in Enterprise Settings (Feb 28, 2026) ✅
+**User request:** *"we could make this a per-tenant branding toggle in the superadmin panel — so instead of hardcoding host strings in the frontend, you'd tick a Hide demo accounts on sign-in page checkbox when configuring each private-label firm. That way new white-label tenants can flip this without a code change or redeploy. — yes"*
+
+**What was built:** The one-hostname hardcode is gone. Each private-label firm can now flip a checkbox on their Enterprise Settings page to hide/show the Demo Accounts block on their sign-in page. No redeploy needed.
+
+### Backend
+- `BrandingPatch` schema (`routes/pro.py`) gained a `hide_demo_accounts: Optional[bool]` field
+- `_branding_out()` returns the flag as a coerced `bool`
+- `PATCH /api/pro/branding` handles the update (sets `branding.hide_demo_accounts` on the user doc)
+- Both public branding endpoints — `GET /api/branding/by-subdomain/{sub}` and `GET /api/branding/by-host` — now include `hide_demo_accounts` so the sign-in page can read it without auth
+
+### Frontend
+- `Login.jsx`: removed the hardcoded `HIDE_DEMO_HOSTS` set. The Demo Accounts block is now hidden whenever `mode === "firm" && firm?.hide_demo_accounts`. Falls back to visible on the SmartBooks platform brand + preview URLs + any firm without the flag set.
+- `ProSettings.jsx`: added a new "Sign-in page options" card (with a Sparkles icon) directly under the Sign-in Address section. Contains the toggle + explanatory copy ("Recommended once you have real end-users so the seeded demo shortcut doesn't leak"). Contextual copy names the actual live host (`acme.accountingapp.ai`) when a subdomain is set.
+- Optimistic UI with rollback on error, toast confirmations both ways.
+
+### Verified via curl
+- Baseline GET `/pro/branding` → `hide_demo_accounts: False` ✓
+- PATCH to `true` → returned `True` ✓
+- Public GET `/branding/by-subdomain/acme` → `hide_demo_accounts: True` (accessible without auth) ✓
+- PATCH back to `false` → returned `False` ✓
+
+### Verified via screenshot
+- ProSettings page renders the new toggle card with proper labeling, checkbox, help text ✓
+
+**Files changed:**
+- `/app/backend/routes/pro.py` (schema + update handler + both public endpoints)
+- `/app/frontend/src/pages/Login.jsx` (branding-driven check replacing hardcode)
+- `/app/frontend/src/pages/ProSettings.jsx` (new "Sign-in page options" card + save handler)
+

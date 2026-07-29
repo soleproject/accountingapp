@@ -3,7 +3,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { useBranding, THEME_PRESETS, THEME_TOKEN_META, resolvePalette } from "@/lib/branding";
-import { Loader2, Upload, Trash2, Check, Save, Palette, ImageIcon, Link as LinkIcon, RotateCcw, Type } from "lucide-react";
+import { Loader2, Upload, Trash2, Check, Save, Palette, ImageIcon, Link as LinkIcon, RotateCcw, Type, Sparkles } from "lucide-react";
 
 // Pro-firm branding — slice B: 4 logo variants, per-token custom colors
 // with a live preview card, and a public sign-in subdomain.
@@ -33,6 +33,8 @@ export default function ProSettings() {
   // Public branding config — private-label root domain (e.g. "accountingapp.ai").
   // Fetched from the backend so ops can change it via env var without a rebuild.
   const [labelRoot, setLabelRoot] = useState("accountingapp.ai");
+  const [hideDemo, setHideDemo] = useState(false);
+  const [savingHideDemo, setSavingHideDemo] = useState(false);
   // Live availability check state: null=idle, "checking", "ok", or an error string.
   const [subStatus, setSubStatus] = useState(null);
 
@@ -48,6 +50,7 @@ export default function ProSettings() {
     setFirmName(branding.firm_name_raw || "");
     setPreset(branding.theme_preset || "default");
     setCustom(branding.theme_custom || {});
+    setHideDemo(!!branding.hide_demo_accounts);
   }, [branding]);
 
   // Debounced availability check as the user types. Prevents them saving a
@@ -105,6 +108,24 @@ export default function ProSettings() {
     } catch (e) {
       toast.error(e.response?.data?.detail || "Save failed");
     } finally { setSavingSub(false); }
+  };
+
+  const toggleHideDemo = async (next) => {
+    // Optimistic flip so the checkbox stays responsive; roll back on error.
+    setHideDemo(next);
+    setSavingHideDemo(true);
+    try {
+      await api.patch("/pro/branding", { hide_demo_accounts: next });
+      await refresh();
+      toast.success(
+        next
+          ? "Demo accounts hidden on your sign-in page."
+          : "Demo accounts visible on your sign-in page.",
+      );
+    } catch (e) {
+      setHideDemo(!next);
+      toast.error(e.response?.data?.detail || "Save failed");
+    } finally { setSavingHideDemo(false); }
   };
 
   const saveFirmName = async () => {
@@ -287,6 +308,41 @@ export default function ProSettings() {
         <p className="text-[11px] text-slate-400 mt-2">
           3–40 chars, lowercase letters, digits, and hyphens. Must be unique across all firms.
         </p>
+      </section>
+
+      {/* ---------- Sign-in page options ---------- */}
+      <section className="rounded-xl border bg-white p-6" data-testid="branding-signin-options-card">
+        <div className="flex items-center gap-2 mb-2">
+          <Sparkles size={16} className="text-slate-500" />
+          <h2 className="font-heading font-semibold">Sign-in page options</h2>
+        </div>
+        <p className="text-sm text-slate-500 mb-4">
+          Fine-tune what shows on your firm's sign-in page. Applies to
+          {branding?.signin_subdomain
+            ? <> <span className="font-mono-num text-slate-700">{branding.signin_subdomain}.{labelRoot}</span></>
+            : " your private-label root once you set a subdomain above"}.
+        </p>
+        <label
+          className="flex items-start gap-3 cursor-pointer select-none"
+          data-testid="branding-hide-demo-accounts-toggle"
+        >
+          <input
+            type="checkbox"
+            className="mt-1 h-4 w-4 rounded border-slate-300 text-cyan-700 focus:ring-cyan-500"
+            checked={hideDemo}
+            disabled={savingHideDemo}
+            onChange={(e) => toggleHideDemo(e.target.checked)}
+          />
+          <span className="flex-1">
+            <span className="block text-sm font-medium text-slate-800">
+              Hide "Demo Accounts" block on my sign-in page
+            </span>
+            <span className="block text-[12px] text-slate-500 mt-0.5">
+              Recommended once you have real end-users so the seeded demo shortcut
+              (Client / Accounting Pro / Superadmin buttons) doesn't leak.
+            </span>
+          </span>
+        </label>
       </section>
 
       {/* ---------- Logos (4 variants) ---------- */}

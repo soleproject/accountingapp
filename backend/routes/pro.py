@@ -506,6 +506,10 @@ class BrandingPatch(BaseModel):
     # Sparse object — every key must be in `_THEME_TOKENS`. Pass `null` to
     # reset all custom colors back to the preset.
     theme_custom: Optional[dict] = None
+    # When True, the seeded "Demo Accounts" block on the sign-in page is
+    # hidden for anyone landing on this firm's private-label host. Useful
+    # once the firm has real end-users so the demo shortcut doesn't leak.
+    hide_demo_accounts: Optional[bool] = None
 
 
 def _logos_from(b: dict) -> dict:
@@ -539,6 +543,7 @@ def _branding_out(user_doc: dict) -> dict:
         "signin_subdomain": b.get("signin_subdomain"),
         "theme_preset": b.get("theme_preset") or "default",
         "theme_custom": b.get("theme_custom") or None,
+        "hide_demo_accounts": bool(b.get("hide_demo_accounts")),
     }
 
 
@@ -628,6 +633,8 @@ async def patch_pro_branding(
                 updates["branding.theme_custom"] = cleaned
             else:
                 unsets["branding.theme_custom"] = ""
+    if inp.hide_demo_accounts is not None:
+        updates["branding.hide_demo_accounts"] = bool(inp.hide_demo_accounts)
     mongo_ops: dict = {}
     if updates: mongo_ops["$set"] = updates
     if unsets: mongo_ops["$unset"] = unsets
@@ -716,6 +723,7 @@ async def branding_by_subdomain(sub: str):
         "logos": b["logos"],
         "theme_preset": b["theme_preset"],
         "theme_custom": b["theme_custom"],
+        "hide_demo_accounts": b["hide_demo_accounts"],
     }
 
 
@@ -750,6 +758,7 @@ async def branding_by_host(host: str = Query(..., description="Full hostname (e.
                 "logos": b["logos"],
                 "theme_preset": b["theme_preset"],
                 "theme_custom": b["theme_custom"],
+                "hide_demo_accounts": b["hide_demo_accounts"],
             }
         # Valid subdomain shape but no firm claims it — neutral, not platform.
         return {"mode": "neutral"}
