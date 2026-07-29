@@ -766,6 +766,222 @@ async def list_enterprises(user: dict = Depends(require_role("superadmin"))):
     return {"enterprises": enriched}
 
 
+@router.get("/admin/orphan-memberships")
+async def orphan_memberships(user: dict = Depends(require_role("superadmin"))):
+    """Data-drift lens: surface memberships / user records that look
+    inconsistent so a superadmin can clean them up before customers
+    notice. Read-only.
+
+    Categories returned (in order of severity):
+
+    * ``multi_firm_staff`` — a single user is a pro on client companies
+      belonging to two or more different firms (partitioned by shared
+      pro-management). Legit for contractors, but usually signals a
+      lingering invite that was never revoked.
+    * ``role_mismatch_client_but_pro`` — user.role = ``client`` yet they
+      hold at least one ``role=pro`` membership. Should have been fixed
+      by the Feb-2026 backfill; anything new points to a regression in
+      invite-accept role elevation.
+    * ``role_mismatch_pro_but_no_pro_ms`` — user.role = ``pro`` but no
+      active pro memberships. Their sidebar shows the Clients link with
+      an empty list — either abandoned firm-staff or a manual role edit.
+    * ``dangling_archived`` — memberships with ``archived_at`` set that
+      still exist in the DB. Nothing broken; presented for review /
+      hard-delete decisions.
+    * ``duplicate_memberships`` — the same ``(user_id, company_id, role)``
+      triple appears more than once. Cannot happen through the API but
+      historical seed scripts sometimes created dupes.
+    """
+    # Pull everything once — small tables (<10k) in this app.
+    all_ms = await db.memberships.find({}).to_list(20000)
+    all_users = await db.users.find({}, {
+        "id": 1, "email": 1, "name": 1, "role": 1, "_id": 0,
+    }).to_list(20000)
+    all_companies = await db.companies.find({}, {
+        "id": 1, "name": 1, "_id": 0,
+    }).to_list(20000)
+    U = {u["id"]: u for u in all_users}
+    C = {c["id"]: c for c in all_companies}
+
+    # -------- 1) multi-firm staff via union-find over shared pros --------
+    # Group pros per company; two companies are in the same "firm" if
+    # they share at least one pro (transitive).
+    pros_per_company: dict[str, set[str]] = {}
+    for m in all_ms:
+        if m.get("role") == "pro" and not m.get("archived_at"):
+            pros_per_company.setdefault(m["company_id"], set()).add(m["user_id"])
+
+    parent: dict[str, str] = {cid: cid for cid in pros_per_company}
+    def _find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    def _union(a: str, b: str) -> None:
+        ra, rb = _find(a), _find(b)
+        if ra != rb: parent[ra] = rb
+
+    # Two companies belong to the same firm if they share any pro.
+    pro_to_companies: dict[str, list[str]] = {}
+    for cid, pros in pros_per_company.items():
+        for p in pros:
+            pro_to_companies.setdefault(p, []).append(cid)
+    for cids in pro_to_companies.values():
+        for other in cids[1:]:
+            _union(cids[0], other)
+
+    # firm-id per company = union-find root
+    firm_of_company: dict[str, str] = {cid: _find(cid) for cid in pros_per_company}
+    # For each user, count distinct firm ids they belong to via pro memberships.
+    firms_per_user: dict[str, set[str]] = {}
+    for m in all_ms:
+        if m.get("role") == "pro" and not m.get("archived_at"):
+            fid = firm_of_company.get(m["company_id"])
+            if fid: firms_per_user.setdefault(m["user_id"], set()).add(fid)
+    multi_firm_staff = []
+    for uid, firm_ids in firms_per_user.items():
+        if len(firm_ids) > 1:
+            u = U.get(uid, {})
+            if u.get("role") == "superadmin":
+                continue  # superadmins legitimately touch every firm
+            u_ms = [m for m in all_ms if m["user_id"] == uid and m.get("role") == "pro" and not m.get("archived_at")]
+            multi_firm_staff.append({
+                "user_id": uid,
+                "email": u.get("email"), "name": u.get("name"), "role": u.get("role"),
+                "firm_count": len(firm_ids),
+                "companies": [
+                    {"id": m["company_id"], "name": (C.get(m["company_id"]) or {}).get("name")}
+                    for m in u_ms
+                ],
+            })
+
+    # -------- 2) role mismatch: client user but has pro memberships ------
+    role_mismatch_client_but_pro = []
+    for u in all_users:
+        if u.get("role") != "client": continue
+        has_pro = any(
+            m["user_id"] == u["id"] and m.get("role") == "pro" and not m.get("archived_at")
+            for m in all_ms
+        )
+        if has_pro:
+            role_mismatch_client_but_pro.append({
+                "user_id": u["id"], "email": u.get("email"), "name": u.get("name"),
+            })
+
+    # -------- 3) role mismatch: pro user but no active pro memberships ---
+    role_mismatch_pro_but_no_pro_ms = []
+    for u in all_users:
+        if u.get("role") != "pro": continue
+        has_pro = any(
+            m["user_id"] == u["id"] and m.get("role") == "pro" and not m.get("archived_at")
+            for m in all_ms
+        )
+        if not has_pro:
+            role_mismatch_pro_but_no_pro_ms.append({
+                "user_id": u["id"], "email": u.get("email"), "name": u.get("name"),
+            })
+
+    # -------- 4) dangling archived memberships ---------------------------
+    dangling_archived = []
+    for m in all_ms:
+        if not m.get("archived_at"): continue
+        u = U.get(m["user_id"], {})
+        dangling_archived.append({
+            "user_id": m["user_id"], "email": u.get("email"), "name": u.get("name"),
+            "company_id": m["company_id"],
+            "company_name": (C.get(m["company_id"]) or {}).get("name"),
+            "role": m.get("role"),
+            "archived_at": m.get("archived_at"),
+        })
+
+    # -------- 5) duplicate memberships -----------------------------------
+    seen: dict[tuple, int] = {}
+    for m in all_ms:
+        k = (m["user_id"], m["company_id"], m.get("role"))
+        seen[k] = seen.get(k, 0) + 1
+    duplicate_memberships = []
+    for (uid, cid, role), count in seen.items():
+        if count > 1:
+            u = U.get(uid, {})
+            duplicate_memberships.append({
+                "user_id": uid, "email": u.get("email"), "name": u.get("name"),
+                "company_id": cid,
+                "company_name": (C.get(cid) or {}).get("name"),
+                "role": role, "count": count,
+            })
+
+    return {
+        "generated_at": now_iso(),
+        "totals": {
+            "multi_firm_staff": len(multi_firm_staff),
+            "role_mismatch_client_but_pro": len(role_mismatch_client_but_pro),
+            "role_mismatch_pro_but_no_pro_ms": len(role_mismatch_pro_but_no_pro_ms),
+            "dangling_archived": len(dangling_archived),
+            "duplicate_memberships": len(duplicate_memberships),
+        },
+        "multi_firm_staff": multi_firm_staff,
+        "role_mismatch_client_but_pro": role_mismatch_client_but_pro,
+        "role_mismatch_pro_but_no_pro_ms": role_mismatch_pro_but_no_pro_ms,
+        "dangling_archived": dangling_archived,
+        "duplicate_memberships": duplicate_memberships,
+    }
+
+
+@router.post("/admin/orphan-memberships/purge-duplicates")
+async def orphan_purge_duplicates(user: dict = Depends(require_role("superadmin"))):
+    """Collapse duplicate ``(user_id, company_id, role)`` memberships to
+    a single canonical row. Keeps the OLDEST record (preserves audit
+    trail) and deletes the rest. Idempotent."""
+    all_ms = await db.memberships.find({}).to_list(20000)
+    keep_ids: set[str] = set()
+    delete_ids: list[str] = []
+    seen: dict[tuple, dict] = {}
+    for m in all_ms:
+        k = (m["user_id"], m["company_id"], m.get("role"))
+        if k not in seen:
+            seen[k] = m
+            keep_ids.add(m["id"])
+        else:
+            # keep the earliest created_at
+            existing = seen[k]
+            if (m.get("created_at") or "") < (existing.get("created_at") or ""):
+                delete_ids.append(existing["id"])
+                seen[k] = m
+                keep_ids.discard(existing["id"])
+                keep_ids.add(m["id"])
+            else:
+                delete_ids.append(m["id"])
+    if delete_ids:
+        await db.memberships.delete_many({"id": {"$in": delete_ids}})
+    return {"kept": len(keep_ids), "deleted": len(delete_ids)}
+
+
+@router.post("/admin/orphan-memberships/fix-role-drift")
+async def orphan_fix_role_drift(user: dict = Depends(require_role("superadmin"))):
+    """Re-run the Feb-2026 role-elevation heuristic across all users.
+
+    * Any user with an active ``role=pro`` membership but global role
+      ``client`` is upgraded to ``pro``.
+    * Any user whose global role is ``pro`` but who has ZERO active pro
+      memberships stays put (we don't downgrade automatically — that's a
+      manual decision). Reported in the read endpoint for the operator
+      to review.
+    Returns the number of users elevated.
+    """
+    pro_ms = await db.memberships.find(
+        {"role": "pro", "$or": [
+            {"archived_at": {"$exists": False}}, {"archived_at": None},
+        ]},
+        {"user_id": 1, "_id": 0},
+    ).to_list(20000)
+    pro_uids = list({m["user_id"] for m in pro_ms})
+    result = await db.users.update_many(
+        {"role": "client", "id": {"$in": pro_uids}},
+        {"$set": {"role": "pro"}},
+    )
+    return {"elevated": result.modified_count}
+
+
 @router.get("/admin/enterprises/{eid}")
 async def get_enterprise(eid: str, user: dict = Depends(require_role("superadmin"))):
     """Detail: enterprise + KPI roll-ups + companies list report."""

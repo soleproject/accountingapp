@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import {
   Users, Building, Briefcase, Shield, ChevronRight, ChevronDown,
   Ticket, ExternalLink, ShieldPlus, X, Loader2, Copy, ShieldMinus,
+  AlertTriangle, RefreshCw, Wrench,
 } from "lucide-react";
 import TeamPanel from "@/components/TeamPanel";
 
@@ -121,6 +122,8 @@ export default function SuperadminDash() {
       </div>
 
       <EnterprisesReport />
+
+      <OrphanMembershipsCard />
 
       <div className="rounded-xl border bg-white p-5">
         <TeamPanel mode="admin" />
@@ -516,6 +519,201 @@ function SuperadminRow({ row, onRevoked }) {
         )}
       </td>
     </tr>
+  );
+}
+
+
+
+// --------------------------------------------------------------------------
+// OrphanMembershipsCard — data-drift lens for superadmins. Reads
+// /admin/orphan-memberships and lets the operator run two cleanup
+// actions (elevate role drift + purge duplicate memberships).
+// --------------------------------------------------------------------------
+function OrphanMembershipsCard() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState("");
+  const [open, setOpen] = useState({});
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await api.get("/admin/orphan-memberships");
+      setData(r.data);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't load orphan report");
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  const runFix = async (label, endpoint) => {
+    setBusy(endpoint);
+    try {
+      const r = await api.post(endpoint);
+      const detail = Object.entries(r.data)
+        .map(([k, v]) => `${k}=${v}`).join(", ");
+      toast.success(`${label}: ${detail}`);
+      await load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't run");
+    } finally { setBusy(""); }
+  };
+
+  if (!data && !loading) return null;
+
+  const t = data?.totals || {};
+  const totalIssues = Object.values(t).reduce((a, b) => a + b, 0);
+
+  return (
+    <div className="rounded-xl border bg-white overflow-hidden" data-testid="orphan-card">
+      <div className="px-4 py-3 bg-slate-50 border-b flex items-center gap-3">
+        <AlertTriangle size={16} className={totalIssues ? "text-amber-500" : "text-emerald-500"} />
+        <div className="font-semibold text-slate-700">Data health · orphan memberships</div>
+        {totalIssues > 0 ? (
+          <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-medium">
+            {totalIssues} finding{totalIssues === 1 ? "" : "s"}
+          </span>
+        ) : (
+          <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-medium">
+            All clean
+          </span>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={load}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-md border hover:bg-slate-50 disabled:opacity-50"
+            data-testid="orphan-refresh"
+          >
+            {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {loading && !data ? (
+        <div className="p-6 text-sm text-slate-500">Scanning memberships…</div>
+      ) : (
+        <div className="divide-y">
+          <OrphanRow
+            label="Multi-firm firm-staff"
+            hint="A single user is a pro on client companies belonging to two or more different firms. Legit for contractors, but often a lingering invite that was never revoked."
+            items={data.multi_firm_staff}
+            columns={["email", "firm_count", "companies"]}
+            open={open.multi} onToggle={() => setOpen(s => ({ ...s, multi: !s.multi }))}
+            testId="orphan-multi"
+          />
+          <OrphanRow
+            label="Role drift · client with pro memberships"
+            hint="user.role='client' but they hold at least one active pro membership. Fix upgrades their global role to pro."
+            items={data.role_mismatch_client_but_pro}
+            columns={["email", "name"]}
+            open={open.roleC} onToggle={() => setOpen(s => ({ ...s, roleC: !s.roleC }))}
+            testId="orphan-role-client"
+            action={data.role_mismatch_client_but_pro.length > 0 && (
+              <button
+                onClick={() => runFix("Elevated role drift", "/admin/orphan-memberships/fix-role-drift")}
+                disabled={busy}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-md border border-indigo-200 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                data-testid="orphan-fix-role-drift"
+              >
+                {busy === "/admin/orphan-memberships/fix-role-drift"
+                  ? <Loader2 size={12} className="animate-spin" />
+                  : <Wrench size={12} />}
+                Elevate to pro
+              </button>
+            )}
+          />
+          <OrphanRow
+            label="Dangling pro role · no active memberships"
+            hint="user.role='pro' but they have zero active pro memberships. Sidebar shows an empty Clients list. Consider removing pro role or re-inviting them."
+            items={data.role_mismatch_pro_but_no_pro_ms}
+            columns={["email", "name"]}
+            open={open.roleP} onToggle={() => setOpen(s => ({ ...s, roleP: !s.roleP }))}
+            testId="orphan-role-pro"
+          />
+          <OrphanRow
+            label="Archived memberships still on file"
+            hint="Memberships with archived_at set. Kept for audit history; hard-delete only if you're sure the audit trail is no longer needed."
+            items={data.dangling_archived}
+            columns={["email", "company_name", "role", "archived_at"]}
+            open={open.arch} onToggle={() => setOpen(s => ({ ...s, arch: !s.arch }))}
+            testId="orphan-archived"
+          />
+          <OrphanRow
+            label="Duplicate memberships"
+            hint="Same (user_id, company_id, role) appears more than once — historical seed-script residue. Purge keeps the oldest record."
+            items={data.duplicate_memberships}
+            columns={["email", "company_name", "role", "count"]}
+            open={open.dup} onToggle={() => setOpen(s => ({ ...s, dup: !s.dup }))}
+            testId="orphan-duplicates"
+            action={data.duplicate_memberships.length > 0 && (
+              <button
+                onClick={() => runFix("Duplicates purged", "/admin/orphan-memberships/purge-duplicates")}
+                disabled={busy}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-md border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                data-testid="orphan-purge-duplicates"
+              >
+                {busy === "/admin/orphan-memberships/purge-duplicates"
+                  ? <Loader2 size={12} className="animate-spin" />
+                  : <Wrench size={12} />}
+                Purge duplicates
+              </button>
+            )}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OrphanRow({ label, hint, items, columns, open, onToggle, testId, action }) {
+  const count = items?.length || 0;
+  return (
+    <div data-testid={testId}>
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 text-left"
+      >
+        {open ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium text-slate-700 truncate">{label}</div>
+          <div className="text-xs text-slate-500 truncate">{hint}</div>
+        </div>
+        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+          count === 0 ? "bg-slate-100 text-slate-500" : "bg-amber-100 text-amber-800"
+        }`}>{count}</span>
+        {action && <div onClick={e => e.stopPropagation()}>{action}</div>}
+      </button>
+      {open && count > 0 && (
+        <div className="border-t bg-slate-50/50 overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="text-slate-500 border-b">
+              <tr>
+                {columns.map(c => (
+                  <th key={c} className="px-3 py-1.5 text-left font-medium">{c}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((it, i) => (
+                <tr key={i} className="border-b last:border-b-0">
+                  {columns.map(c => (
+                    <td key={c} className="px-3 py-1.5 text-slate-600 whitespace-nowrap">
+                      {c === "companies"
+                        ? (it[c] || []).map(cc => cc.name).filter(Boolean).join(", ")
+                        : (it[c] ?? "—")}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 

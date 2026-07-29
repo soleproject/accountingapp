@@ -1,0 +1,43 @@
+{
+  "summary": "Iter 48 orphan-memberships lens tested end-to-end. Backend: 8/9 pytest cases pass (shape+3 auth gates + duplicates seed/detect/purge + role-drift seed/detect/fix + dangling_archived via archive endpoint). 1 test failure exposes an algorithmic bug in multi_firm_staff detection. Frontend: /admin renders <OrphanMembershipsCard/> with header 'Data health · orphan memberships', badge '4 findings', Refresh button, and 5 collapsible rows each with the documented data-testid. Row expansion renders a table. Pro user is denied /admin (redirected to /pro/clients) — orphan-card not visible. Seeded a duplicate + client-role drift via Mongo, confirmed 'Purge duplicates' and 'Elevate to pro' buttons appear, click emits correct toast ('kept=32, deleted=2' and 'elevated=1'), and card refreshes with counts back to 0.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/admin/orphan-memberships",
+        "issue": "multi_firm_staff detection is algorithmically dead code — the union-find bridges companies via any pro they share, including the very user we're trying to flag. As soon as a candidate has pro memberships on companies A and B, that user themselves unions(A, B), so len(firms_per_user[uid]) collapses to 1 and they are never reported. Seeded test proves this: created 2 disjoint firms (pro_a on co_a, pro_b on co_b, no other shared pros) + a victim with pro memberships on BOTH — victim did NOT appear in multi_firm_staff. Fix should exclude the candidate user's own memberships when computing the firm partition, e.g. per-candidate union-find using only OTHER users' pro memberships, or partition by enterprise_id where available.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/admin Layout", "issues": ["React hydration warning in console: '<button> cannot be a descendant of <button>' from Layout.jsx line 336 — pre-existing, unrelated to iter48, but worth flagging."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter48_orphan_memberships.py",
+    "/app/test_reports/pytest/iter48.xml"
+  ],
+  "action_items": [
+    "Fix multi_firm_staff union-find in /app/backend/routes/admin.py so candidate users don't self-merge the firm partitions they span (exclude candidate's own pro memberships when building the union, or partition by enterprise_id)."
+  ],
+  "critical_code_review_comments": [
+    "admin.py orphan_memberships(): union-find bridges companies through the very user being evaluated, making multi_firm_staff detection unreachable. See RCA below.",
+    "purge-duplicates handler compares created_at strings with '' fallback — if created_at is None, ordering is undefined; safer to coerce to a stable sortable default or use insertion order. Low priority (existing rows all have created_at).",
+    "fix-role-drift only elevates client→pro; correctly documented that pro→client downgrade is intentional operator decision. No downgrade endpoint yet — consider adding for symmetry if role_mismatch_pro_but_no_pro_ms ever grows.",
+    "Reads whole memberships/users/companies collections into memory (<20k limit). Fine at current scale but should paginate or aggregate if userbase grows past ~10k."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter48_orphan_memberships.py (new)"
+  ],
+  "success_rate": {"backend": "88% (8/9)", "frontend": "100%"},
+  "test_credentials": "admin@axiom.ai/admin123, pro@axiom.ai/pro123 — from /app/memory/test_credentials.md",
+  "seed_data_creation": "All test seed data (TEST_iter48_* users, companies, memberships) is created and torn down within individual test functions. Frontend button smoke-test also seeded 2 duplicate memberships + flipped pro@axiom.ai to client — both restored by pressing the Purge/Elevate buttons themselves (verified: DB shows pro@axiom.ai role=pro, no TEST_uibtn_* rows remain).",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Once main agent fixes the multi_firm_staff union-find bug, re-run pytest /app/backend/tests/test_iter48_orphan_memberships.py::test_multi_firm_staff_detection. The other 8 tests are stable regression coverage. Frontend flows work; no further UI work needed.",
+  "rca of the issue": "In /app/backend/routes/admin.py::orphan_memberships (lines 809-834), the algorithm builds firm partitions by unioning any two companies that share at least one pro user. However, the loop `for cids in pro_to_companies.values(): _union(cids[0], other)` iterates over ALL users, including the candidate later being checked for multi-firm status. Consequently, whenever a candidate holds pro memberships on companies belonging to two would-be-distinct firms, THE CANDIDATE THEMSELVES supplies the bridging edge that unions those firms into one, so firms_per_user[candidate]={single root} and len<2 fails the flagging condition. Reproduction: seed 3 users (pro_a exclusive to co_a, pro_b exclusive to co_b, victim on both). Expected: victim in multi_firm_staff with firm_count=2. Actual: multi_firm_staff==[]. Mitigation: for each candidate uid, rebuild the union-find using only pros OTHER than uid before computing that candidate's firms_per_user, or switch to a partition source that is independent of the memberships being audited (e.g. companies.enterprise_id)."
+}
