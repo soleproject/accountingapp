@@ -39,7 +39,29 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — Superadmin affiliate payout console
+### Feb 2026 (latest) — Affiliate-only signup + Upgrade path
+
+- **New user role `affiliate`.** Reached via `/signup/affiliate` — a
+  dedicated signup form (green "Become an affiliate" branding) that
+  creates a user with `role='affiliate'` and lands them on `/share`.
+- **Chrome stripped for affiliates.** `Layout.jsx` early-returns a
+  minimal header (profile menu only) when `user.role === 'affiliate'`.
+  No sidebar, no CompanySwitcher, no AI panel, no billing modal.
+- **Deep-link gate.** `<Protected/>` in `App.js` bounces affiliates
+  back to `/share` if they try to reach any other authenticated route
+  (dashboard, admin, pro/clients, settings, …).
+- **Upgrade pill.** `<UpgradePill/>` on the Share page — visible only
+  to affiliate users — flips them to a full client account via
+  `POST /api/affiliate/upgrade` (idempotent, preserves slug + earnings)
+  and navigates to `/onboarding`.
+- **Signup role allow-list** — `/api/auth/signup` now validates
+  `role in {client, pro, affiliate}` and 400s on `superadmin`.
+- **Cross-links** between `/signup` ↔ `/signup/affiliate` at the bottom
+  of each form. Login page has a "Become an affiliate" link too.
+- **Regression tests**: `/app/backend/tests/test_iter51_affiliate_role.py`
+  — 18/18 pass. Iter49 + iter50 remain 46/46 green.
+
+### Feb 2026 — Superadmin affiliate payout console
 
 - **Backend**: 4 endpoints in `routes/admin.py`:
   - `GET /api/admin/affiliate/payouts` — per-affiliate roll-up sorted by
