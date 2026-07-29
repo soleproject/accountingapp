@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import {
   Users, Building, Briefcase, Shield, ChevronRight, ChevronDown,
   Ticket, ExternalLink, ShieldPlus, X, Loader2, Copy, ShieldMinus,
-  AlertTriangle, RefreshCw, Wrench,
+  AlertTriangle, RefreshCw, Wrench, DollarSign, CheckCircle2, RotateCcw,
 } from "lucide-react";
 import TeamPanel from "@/components/TeamPanel";
 
@@ -124,6 +124,8 @@ export default function SuperadminDash() {
       <EnterprisesReport />
 
       <OrphanMembershipsCard />
+
+      <AffiliatePayoutsCard />
 
       <div className="rounded-xl border bg-white p-5">
         <TeamPanel mode="admin" />
@@ -715,5 +717,372 @@ function OrphanRow({ label, hint, items, columns, open, onToggle, testId, action
       )}
     </div>
   );
+}
+
+
+
+// --------------------------------------------------------------------------
+// AffiliatePayoutsCard — superadmin payout console. Roll-up of what's
+// owed to each affiliate + a modal to mark accrued invoices paid_out
+// once a Wise/check transfer has cleared. History pane surfaces recent
+// batches so admins can trace "who paid who what when".
+// --------------------------------------------------------------------------
+function AffiliatePayoutsCard() {
+  const [data, setData] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [modal, setModal] = useState(null); // { referrer } | null
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [ov, hs] = await Promise.all([
+        api.get("/admin/affiliate/payouts"),
+        api.get("/admin/affiliate/history?limit=20"),
+      ]);
+      setData(ov.data);
+      setHistory(hs.data.batches || []);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't load payouts");
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  if (!data && !loading) return null;
+  const t = data?.totals || {};
+
+  return (
+    <div className="rounded-xl border bg-white overflow-hidden" data-testid="payouts-card">
+      <div className="px-4 py-3 bg-slate-50 border-b flex items-center gap-3">
+        <DollarSign size={16} className="text-emerald-600" />
+        <div className="font-semibold text-slate-700">Affiliate payouts</div>
+        <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-medium">
+          {fmtUsd(t.accrued_cents)} to pay · {t.affiliates_needing_payout || 0} affiliate
+          {(t.affiliates_needing_payout || 0) === 1 ? "" : "s"}
+        </span>
+        <span className="text-xs text-slate-500 hidden md:inline">
+          Lifetime: {fmtUsd(t.lifetime_cents)}
+        </span>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={load}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-md border hover:bg-slate-50 disabled:opacity-50"
+            data-testid="payouts-refresh"
+          >
+            {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {loading && !data ? (
+        <div className="p-6 text-sm text-slate-500">Loading payout ledger…</div>
+      ) : (data.affiliates || []).length === 0 ? (
+        <div className="p-8 text-center">
+          <div className="text-slate-700 font-medium">No affiliate earnings yet</div>
+          <div className="text-sm text-slate-500 mt-1">
+            When paying subscribers come in via a referral link, this ledger will fill up.
+          </div>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-white text-xs uppercase tracking-wide text-slate-500 border-b">
+              <tr>
+                <th className="px-4 py-2 text-left font-medium">Affiliate</th>
+                <th className="px-4 py-2 text-left font-medium">Slug</th>
+                <th className="px-4 py-2 text-right font-medium">Payers</th>
+                <th className="px-4 py-2 text-right font-medium">Invoices</th>
+                <th className="px-4 py-2 text-right font-medium">Accrued</th>
+                <th className="px-4 py-2 text-right font-medium">Paid</th>
+                <th className="px-4 py-2 text-left font-medium">Last activity</th>
+                <th className="px-4 py-2 text-right font-medium"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {data.affiliates.map(a => (
+                <tr key={a.referrer_user_id} data-testid={`payouts-row-${a.referrer_user_id}`}>
+                  <td className="px-4 py-2.5">
+                    <div className="text-slate-800 font-medium">{a.name || "—"}</div>
+                    <div className="text-[11px] text-slate-500">
+                      {a.email}
+                      {a.firm_name ? <> · <span className="text-cyan-700">{a.firm_name}</span></> : null}
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <span className="text-[11px] font-mono text-slate-600 bg-slate-100 rounded px-1.5 py-0.5">
+                      {a.referral_slug || "—"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{a.unique_payers}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-slate-500">
+                    <span title="Accrued invoices">{a.accrued_count}</span>
+                    {a.paid_count > 0 && (
+                      <span className="text-slate-400"> · {a.paid_count} paid</span>
+                    )}
+                  </td>
+                  <td className={
+                    "px-4 py-2.5 text-right tabular-nums font-medium " +
+                    (a.accrued_cents > 0 ? "text-amber-700" : "text-slate-400")
+                  }>
+                    {fmtUsd(a.accrued_cents)}
+                  </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-emerald-700">
+                    {fmtUsd(a.paid_out_cents)}
+                  </td>
+                  <td className="px-4 py-2.5 text-[11px] text-slate-500">
+                    {fmtDateShort(a.last_activity)}
+                  </td>
+                  <td className="px-4 py-2.5 text-right">
+                    <button
+                      onClick={() => setModal({ referrer: a })}
+                      disabled={!a.needs_payout}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-40 disabled:hover:bg-white"
+                      data-testid={`payouts-mark-paid-${a.referrer_user_id}`}
+                    >
+                      <CheckCircle2 size={12} /> Mark paid
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <button
+        onClick={() => setHistoryOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 hover:bg-slate-100 border-t text-xs"
+        data-testid="payouts-history-toggle"
+      >
+        <span className="flex items-center gap-1.5">
+          {historyOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          <span className="uppercase tracking-widest text-slate-500 font-semibold">
+            History
+          </span>
+          <span className="text-slate-400">({history.length})</span>
+        </span>
+      </button>
+      {historyOpen && (
+        <div className="border-t divide-y bg-slate-50/40" data-testid="payouts-history-list">
+          {history.length === 0 ? (
+            <div className="p-4 text-sm text-slate-500">No payouts recorded yet.</div>
+          ) : (
+            history.map(b => (
+              <div key={b.id} className="px-4 py-2.5 text-xs">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <span className="font-medium text-slate-800">
+                      {fmtUsd(b.amount_cents)}
+                    </span>
+                    <span className="text-slate-500"> to </span>
+                    <span className="font-medium text-slate-700">
+                      {b.referrer?.name || b.referrer?.email || "—"}
+                    </span>
+                    <span className="text-slate-500"> · {b.invoice_count} invoice{b.invoice_count === 1 ? "" : "s"}</span>
+                  </div>
+                  <div className="text-slate-500">{fmtDateShort(b.paid_at)}</div>
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  by {b.paid_by?.name || b.paid_by?.email || "—"}
+                  {b.external_ref && <> · <span className="font-mono">{b.external_ref}</span></>}
+                  {b.note && <> · {b.note}</>}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {modal && (
+        <MarkPaidModal
+          referrer={modal.referrer}
+          onClose={() => setModal(null)}
+          onDone={() => { setModal(null); load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function MarkPaidModal({ referrer, onClose, onDone }) {
+  const [lines, setLines] = useState(null);
+  const [selected, setSelected] = useState(null); // Set of earning IDs, null = all
+  const [externalRef, setExternalRef] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api.get(`/admin/affiliate/payouts/${referrer.referrer_user_id}?status=accrued`)
+      .then(r => setLines(r.data.lines || []))
+      .catch(() => setLines([]));
+  }, [referrer.referrer_user_id]);
+
+  const isAll = selected === null;
+  const effectiveIds = isAll ? (lines || []).map(l => l.id) : Array.from(selected);
+  const totalCents = (lines || [])
+    .filter(l => effectiveIds.includes(l.id))
+    .reduce((s, l) => s + l.share_cents, 0);
+
+  const toggle = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev ?? (lines || []).map(l => l.id));
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const submit = async () => {
+    if (effectiveIds.length === 0) return;
+    setBusy(true);
+    try {
+      const body = {
+        referrer_user_id: referrer.referrer_user_id,
+        earning_ids: isAll ? null : effectiveIds,
+        external_ref: externalRef.trim() || null,
+        note: note.trim() || null,
+      };
+      const r = await api.post("/admin/affiliate/payouts/mark-paid", body);
+      toast.success(`Marked ${r.data.marked} invoice${r.data.marked === 1 ? "" : "s"} paid (${fmtUsd(r.data.amount_cents)})`);
+      onDone();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't mark paid");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/40 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden" data-testid="mark-paid-modal">
+        <div className="px-5 py-3 border-b flex items-center justify-between">
+          <div>
+            <div className="font-semibold text-slate-800">
+              Mark paid — {referrer.name || referrer.email}
+            </div>
+            <div className="text-xs text-slate-500">
+              Records the transfer in the ledger. Reversible if a payment bounces.
+            </div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700"
+                  data-testid="mark-paid-close">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {lines === null ? (
+            <div className="text-sm text-slate-500">
+              <Loader2 size={14} className="inline animate-spin mr-2" /> Loading invoices…
+            </div>
+          ) : lines.length === 0 ? (
+            <div className="text-sm text-slate-500">No accrued invoices for this affiliate.</div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-500">
+                  {effectiveIds.length} of {lines.length} invoice{lines.length === 1 ? "" : "s"} selected
+                </span>
+                <button
+                  onClick={() => setSelected(isAll ? new Set() : null)}
+                  className="text-cyan-700 hover:underline"
+                  data-testid="mark-paid-toggle-all"
+                >
+                  {isAll ? "Deselect all" : "Select all"}
+                </button>
+              </div>
+              <div className="border rounded-md divide-y max-h-56 overflow-y-auto">
+                {lines.map(l => {
+                  const on = isAll || (selected && selected.has(l.id));
+                  return (
+                    <label
+                      key={l.id}
+                      className="flex items-center gap-3 px-3 py-2 text-sm hover:bg-slate-50 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() => toggle(l.id)}
+                        data-testid={`mark-paid-line-${l.id}`}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-slate-700 truncate">
+                          {l.referred_email || "—"}
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          {fmtDateShort(l.date)} · gross {fmtUsd(l.gross_cents)}
+                        </div>
+                      </div>
+                      <div className="text-emerald-700 font-medium tabular-nums">
+                        {fmtUsd(l.share_cents)}
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <div className="text-xs text-slate-600 mb-1">External reference (optional)</div>
+                  <input
+                    value={externalRef}
+                    onChange={e => setExternalRef(e.target.value)}
+                    placeholder="Wise TX, check #, etc."
+                    className="w-full border rounded px-2 py-1.5 text-sm"
+                    data-testid="mark-paid-external-ref"
+                  />
+                </label>
+                <label className="block">
+                  <div className="text-xs text-slate-600 mb-1">Note (optional)</div>
+                  <input
+                    value={note}
+                    onChange={e => setNote(e.target.value)}
+                    placeholder="Feb 2026 batch"
+                    className="w-full border rounded px-2 py-1.5 text-sm"
+                    data-testid="mark-paid-note"
+                  />
+                </label>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="px-5 py-3 border-t bg-slate-50 flex items-center justify-between">
+          <div className="text-sm">
+            <span className="text-slate-500">Total to pay: </span>
+            <span className="font-heading font-bold text-emerald-700 tabular-nums">
+              {fmtUsd(totalCents)}
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={onClose}
+              className="px-3 py-1.5 text-sm rounded border hover:bg-white"
+            >Cancel</button>
+            <button
+              onClick={submit}
+              disabled={busy || effectiveIds.length === 0}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+              data-testid="mark-paid-submit"
+            >
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+              Mark {effectiveIds.length} paid
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function fmtUsd(cents) {
+  return `$${(((cents ?? 0)) / 100).toFixed(2)}`;
+}
+function fmtDateShort(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleDateString(undefined,
+      { month: "short", day: "numeric", year: "2-digit" });
+  } catch { return iso; }
 }
 

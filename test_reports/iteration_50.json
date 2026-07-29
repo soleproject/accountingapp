@@ -1,0 +1,27 @@
+{
+  "summary": "Iteration 50 — Superadmin Affiliate Payouts console: full backend regression suite (14 tests, all passing) plus end-to-end UI validation of the mark-paid modal. All 4 new endpoints (overview, per-referrer, mark-paid, reverse, history) verified for shape, auth gates, seed→mark-paid state transition, cherry-pick semantics, idempotency, and reverse-payout with $unset + reversal_log push. Frontend: modal opens, lines load, deselection updates total-to-pay ($84 → $77), submit closes modal, and History pane renders the new batch with external_ref + note.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter50_payout_console.py",
+    "/app/test_reports/pytest/iter50_results.xml",
+    "/app/scripts/cleanup_iter50_test_data.py"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "SuperadminDash.jsx is 1089 lines with multiple large embedded components (AffiliatePayoutsCard + MarkPaidModal). Consider splitting into separate files under /components/superadmin/ for maintainability once the file crosses 700 lines.",
+    "admin.py is 1586 lines and continues to grow with every iteration. Splitting affiliate/payout endpoints into a dedicated router (routes/admin_affiliate.py) would help readability.",
+    "mark-paid endpoint creates a batch row even when marked=0 could be argued either way; current code short-circuits (returns early) when nothing matches so no zero-amount batch row is created — this is the desired behavior and matches idempotency test expectations.",
+    "reverse_payout endpoint does not delete or reduce the corresponding entry in referral_payout_batches; the batch row still shows the original amount_cents. Consider whether history batches should also be flagged/adjusted when a reversal happens (currently only the earning row is corrected). Non-blocking."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter50_payout_console.py (new)",
+    "/app/scripts/cleanup_iter50_test_data.py (new)"
+  ],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "100%"},
+  "test_credentials": "admin@axiom.ai/admin123, pro@axiom.ai/pro123, client@axiom.ai/client123 — all working",
+  "seed_data_creation": "Backend tests self-seed TEST_earn_* rows and clean them up in finally blocks. UI test used a one-shot seeder (3 accrued rows on pro@axiom.ai referrer, share_cents=[700,1500,2000]). All TEST_-prefixed rows and any WISE-UI-TEST batches have been cleaned via /app/scripts/cleanup_iter50_test_data.py.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "test_iter50_payout_console.py uses parallel-safe patterns: each test seeds its own rows with unique TEST_earn_ ids and cleans up in finally. Do NOT assert exact aggregate totals under xdist parallelism — use >= comparisons or scope assertions to the specific seeded ids. UI checkboxes have data-testid on the <input> element directly (mark-paid-line-{id}), so click the testid rather than a nested selector."
+}

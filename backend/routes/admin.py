@@ -766,6 +766,264 @@ async def list_enterprises(user: dict = Depends(require_role("superadmin"))):
     return {"enterprises": enriched}
 
 
+# ------------------------------------------------------------------
+# Affiliate payout console — close the loop between accrual and
+# actually-paid. All endpoints return `paid_out_at` / `paid_out_by`
+# fields on affected rows so the ledger stays audit-ready even after
+# an admin marks something paid.
+# ------------------------------------------------------------------
+async def _resolve_users_map(user_ids: list[str]) -> dict[str, dict]:
+    """Load a ``{user_id: user_doc}`` map for the ids in one round-trip."""
+    if not user_ids:
+        return {}
+    docs = await db.users.find(
+        {"id": {"$in": list(set(user_ids))}},
+        {"id": 1, "email": 1, "name": 1, "referral_slug": 1,
+         "branding": 1, "_id": 0},
+    ).to_list(2000)
+    return {u["id"]: u for u in docs}
+
+
+@router.get("/admin/affiliate/payouts")
+async def affiliate_payouts_overview(
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Per-affiliate accrued-vs-paid roll-up, sorted by outstanding
+    balance so the largest amounts owed float to the top. Every earnings
+    doc contributes to exactly one row (the referrer). Zero-balance
+    referrers with paid_out history still appear (marked
+    ``needs_payout=False``) so admins can eyeball who's active.
+    """
+    all_e = await db.referral_earnings.find({}).to_list(20000)
+    by_ref: dict[str, dict] = {}
+    for e in all_e:
+        rid = e.get("referrer_user_id")
+        if not rid:
+            continue
+        row = by_ref.setdefault(rid, {
+            "referrer_user_id": rid,
+            "accrued_cents": 0, "paid_out_cents": 0,
+            "accrued_count": 0, "paid_count": 0,
+            "unique_payers": set(),
+            "last_activity": None,
+        })
+        cents = int(e.get("share_cents") or 0)
+        status = e.get("status") or "accrued"
+        if status == "paid_out":
+            row["paid_out_cents"] += cents
+            row["paid_count"] += 1
+        else:
+            row["accrued_cents"] += cents
+            row["accrued_count"] += 1
+        if e.get("referred_user_id"):
+            row["unique_payers"].add(e["referred_user_id"])
+        ts = e.get("paid_out_at") or e.get("created_at")
+        if ts and (not row["last_activity"] or ts > row["last_activity"]):
+            row["last_activity"] = ts
+    users = await _resolve_users_map([rid for rid in by_ref])
+    rows = []
+    for rid, r in by_ref.items():
+        u = users.get(rid) or {}
+        b = u.get("branding") or {}
+        rows.append({
+            "referrer_user_id": rid,
+            "email": u.get("email"),
+            "name": u.get("name"),
+            "referral_slug": u.get("referral_slug"),
+            "firm_name": b.get("firm_name") or None,
+            "accrued_cents": r["accrued_cents"],
+            "paid_out_cents": r["paid_out_cents"],
+            "accrued_count": r["accrued_count"],
+            "paid_count": r["paid_count"],
+            "unique_payers": len(r["unique_payers"]),
+            "last_activity": r["last_activity"],
+            "needs_payout": r["accrued_cents"] > 0,
+        })
+    rows.sort(key=lambda r: (-r["accrued_cents"], -r["paid_out_cents"]))
+    totals_accrued = sum(r["accrued_cents"] for r in rows)
+    totals_paid = sum(r["paid_out_cents"] for r in rows)
+    return {
+        "affiliates": rows,
+        "totals": {
+            "affiliates": len(rows),
+            "affiliates_needing_payout": sum(1 for r in rows if r["needs_payout"]),
+            "accrued_cents": totals_accrued,
+            "paid_out_cents": totals_paid,
+            "lifetime_cents": totals_accrued + totals_paid,
+        },
+    }
+
+
+@router.get("/admin/affiliate/payouts/{referrer_user_id}")
+async def affiliate_payouts_for_referrer(
+    referrer_user_id: str,
+    status: Optional[str] = None,  # accrued | paid_out | None (all)
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Line-item earnings for a single affiliate. The mark-paid modal
+    lists these rows so the admin can either "select all accrued" or
+    cherry-pick specific invoices to include in a payout."""
+    q: dict = {"referrer_user_id": referrer_user_id}
+    if status in {"accrued", "paid_out"}:
+        q["status"] = status
+    earnings = await db.referral_earnings.find(q).to_list(5000)
+    payer_ids = list({e["referred_user_id"] for e in earnings if e.get("referred_user_id")})
+    payers = await _resolve_users_map(payer_ids)
+    ref_user = (await _resolve_users_map([referrer_user_id])).get(referrer_user_id) or {}
+    lines = [{
+        "id": e["id"],
+        "date": e.get("created_at"),
+        "referred_user_id": e.get("referred_user_id"),
+        "referred_email": (payers.get(e.get("referred_user_id")) or {}).get("email"),
+        "referred_name": (payers.get(e.get("referred_user_id")) or {}).get("name"),
+        "gross_cents": int(e.get("gross_cents") or 0),
+        "share_cents": int(e.get("share_cents") or 0),
+        "share_bps": int(e.get("share_bps") or 0),
+        "status": e.get("status") or "accrued",
+        "paid_out_at": e.get("paid_out_at"),
+        "paid_out_by": e.get("paid_out_by_user_id"),
+        "external_ref": e.get("external_ref"),
+        "note": e.get("payout_note"),
+    } for e in earnings]
+    lines.sort(key=lambda r: r["date"] or "", reverse=True)
+    return {
+        "referrer": {
+            "user_id": referrer_user_id,
+            "email": ref_user.get("email"), "name": ref_user.get("name"),
+            "referral_slug": ref_user.get("referral_slug"),
+        },
+        "lines": lines,
+        "totals": {
+            "accrued_cents": sum(l["share_cents"] for l in lines if l["status"] == "accrued"),
+            "paid_out_cents": sum(l["share_cents"] for l in lines if l["status"] == "paid_out"),
+        },
+    }
+
+
+class MarkPaidBody(BaseModel):
+    referrer_user_id: str
+    earning_ids: Optional[list[str]] = None  # None → all accrued rows
+    external_ref: Optional[str] = None
+    note: Optional[str] = None
+
+
+@router.post("/admin/affiliate/payouts/mark-paid")
+async def mark_payouts_paid(
+    inp: MarkPaidBody, user: dict = Depends(require_role("superadmin")),
+):
+    """Flip accrued earnings to ``paid_out`` for a single referrer.
+
+    * ``earning_ids=None`` marks every currently-accrued row for that
+      referrer — the "just paid Priya her full balance" happy path.
+    * ``earning_ids=[…]`` marks only those specific invoice rows so
+      admins can cut a partial check (e.g. minimum payout thresholds).
+    Idempotent — already-paid rows are ignored, not double-marked.
+    """
+    q: dict = {
+        "referrer_user_id": inp.referrer_user_id,
+        "status": "accrued",
+    }
+    if inp.earning_ids:
+        q["id"] = {"$in": list(inp.earning_ids)}
+    matching = await db.referral_earnings.find(q).to_list(5000)
+    if not matching:
+        return {"marked": 0, "amount_cents": 0}
+    ids = [m["id"] for m in matching]
+    total = sum(int(m.get("share_cents") or 0) for m in matching)
+    now = now_iso()
+    set_ops = {
+        "status": "paid_out",
+        "paid_out_at": now,
+        "paid_out_by_user_id": user["id"],
+    }
+    if inp.external_ref is not None:
+        set_ops["external_ref"] = inp.external_ref.strip()[:120] or None
+    if inp.note is not None:
+        set_ops["payout_note"] = inp.note.strip()[:500] or None
+    await db.referral_earnings.update_many(
+        {"id": {"$in": ids}}, {"$set": set_ops},
+    )
+    # Batch record — one row per admin action so the History tab can
+    # show "Alice paid Priya $37 on Feb 12 (Wise TX abc)".
+    await db.referral_payout_batches.insert_one({
+        "id": str(uuid.uuid4()),
+        "referrer_user_id": inp.referrer_user_id,
+        "paid_by_user_id": user["id"],
+        "paid_at": now,
+        "amount_cents": total,
+        "earning_ids": ids,
+        "external_ref": (inp.external_ref or "").strip()[:120] or None,
+        "note": (inp.note or "").strip()[:500] or None,
+    })
+    return {"marked": len(ids), "amount_cents": total}
+
+
+class ReversePayoutBody(BaseModel):
+    reason: Optional[str] = None
+
+
+@router.post("/admin/affiliate/payouts/{earning_id}/reverse")
+async def reverse_payout(
+    earning_id: str, inp: ReversePayoutBody,
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Flip a single ``paid_out`` earning back to ``accrued`` for
+    corrections — bounced checks, incorrect wire, wrong batch."""
+    row = await db.referral_earnings.find_one({"id": earning_id})
+    if not row:
+        raise HTTPException(404, "Earning not found.")
+    if row.get("status") != "paid_out":
+        raise HTTPException(400, "Earning is not in paid_out status.")
+    await db.referral_earnings.update_one(
+        {"id": earning_id},
+        {
+            "$set": {"status": "accrued"},
+            "$unset": {"paid_out_at": "", "paid_out_by_user_id": ""},
+            "$push": {"reversal_log": {
+                "reversed_at": now_iso(),
+                "reversed_by_user_id": user["id"],
+                "reason": (inp.reason or "").strip()[:500] or None,
+            }},
+        },
+    )
+    return {"reversed": earning_id}
+
+
+@router.get("/admin/affiliate/history")
+async def affiliate_payout_history(
+    limit: int = 50,
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Recent payout batches across all affiliates, newest first —
+    powers the History pane on the payout console."""
+    batches = await db.referral_payout_batches.find({}).sort(
+        "paid_at", -1,
+    ).to_list(max(1, min(500, limit)))
+    ref_ids = list({b["referrer_user_id"] for b in batches})
+    admin_ids = list({b["paid_by_user_id"] for b in batches})
+    users = await _resolve_users_map(ref_ids + admin_ids)
+    return {
+        "batches": [{
+            "id": b["id"],
+            "paid_at": b.get("paid_at"),
+            "amount_cents": int(b.get("amount_cents") or 0),
+            "invoice_count": len(b.get("earning_ids") or []),
+            "referrer": {
+                "user_id": b["referrer_user_id"],
+                "email": (users.get(b["referrer_user_id"]) or {}).get("email"),
+                "name": (users.get(b["referrer_user_id"]) or {}).get("name"),
+            },
+            "paid_by": {
+                "user_id": b["paid_by_user_id"],
+                "email": (users.get(b["paid_by_user_id"]) or {}).get("email"),
+                "name": (users.get(b["paid_by_user_id"]) or {}).get("name"),
+            },
+            "external_ref": b.get("external_ref"),
+            "note": b.get("note"),
+        } for b in batches]
+    }
+
+
 @router.get("/admin/orphan-memberships")
 async def orphan_memberships(user: dict = Depends(require_role("superadmin"))):
     """Data-drift lens: surface memberships / user records that look
