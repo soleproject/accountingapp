@@ -506,10 +506,22 @@ class BrandingPatch(BaseModel):
     # Sparse object — every key must be in `_THEME_TOKENS`. Pass `null` to
     # reset all custom colors back to the preset.
     theme_custom: Optional[dict] = None
+    # ---- Sign-in page options -----------------------------------------
     # When True, the seeded "Demo Accounts" block on the sign-in page is
     # hidden for anyone landing on this firm's private-label host. Useful
     # once the firm has real end-users so the demo shortcut doesn't leak.
     hide_demo_accounts: Optional[bool] = None
+    # When True, the "No account? Create one" link is hidden — for firms
+    # that only onboard clients by invite (magic-link flow).
+    hide_signup_link: Optional[bool] = None
+    # Optional replacement for the default "Welcome back. Let's get to the
+    # numbers." tagline under the Sign-in heading. Max 120 chars. Empty
+    # string clears the override and restores the default.
+    signin_tagline: Optional[str] = None
+    # Optional replacement for the SmartBooks marketing hero on the left
+    # half of the login page. Accepts a data URL (`data:image/...`) or a
+    # regular https URL. Empty string clears.
+    signin_hero_image: Optional[str] = None
 
 
 def _logos_from(b: dict) -> dict:
@@ -544,6 +556,9 @@ def _branding_out(user_doc: dict) -> dict:
         "theme_preset": b.get("theme_preset") or "default",
         "theme_custom": b.get("theme_custom") or None,
         "hide_demo_accounts": bool(b.get("hide_demo_accounts")),
+        "hide_signup_link": bool(b.get("hide_signup_link")),
+        "signin_tagline": b.get("signin_tagline") or "",
+        "signin_hero_image": b.get("signin_hero_image") or "",
     }
 
 
@@ -635,6 +650,27 @@ async def patch_pro_branding(
                 unsets["branding.theme_custom"] = ""
     if inp.hide_demo_accounts is not None:
         updates["branding.hide_demo_accounts"] = bool(inp.hide_demo_accounts)
+    if inp.hide_signup_link is not None:
+        updates["branding.hide_signup_link"] = bool(inp.hide_signup_link)
+    if inp.signin_tagline is not None:
+        t = inp.signin_tagline.strip()
+        if not t:
+            unsets["branding.signin_tagline"] = ""
+        else:
+            if len(t) > 120:
+                raise HTTPException(400, "Sign-in tagline must be 120 characters or less.")
+            updates["branding.signin_tagline"] = t
+    if inp.signin_hero_image is not None:
+        img = inp.signin_hero_image.strip()
+        if not img:
+            unsets["branding.signin_hero_image"] = ""
+        else:
+            if not (img.startswith("data:image/") or img.startswith("https://")):
+                raise HTTPException(400, "Hero image must be an https URL or a data:image/... URL.")
+            # Cap data-URL length to keep the user doc small (~2 MB base64).
+            if len(img) > 2_800_000:
+                raise HTTPException(400, "Hero image is too large — keep under ~2 MB.")
+            updates["branding.signin_hero_image"] = img
     mongo_ops: dict = {}
     if updates: mongo_ops["$set"] = updates
     if unsets: mongo_ops["$unset"] = unsets
@@ -724,6 +760,9 @@ async def branding_by_subdomain(sub: str):
         "theme_preset": b["theme_preset"],
         "theme_custom": b["theme_custom"],
         "hide_demo_accounts": b["hide_demo_accounts"],
+        "hide_signup_link": b["hide_signup_link"],
+        "signin_tagline": b["signin_tagline"],
+        "signin_hero_image": b["signin_hero_image"],
     }
 
 
@@ -759,6 +798,9 @@ async def branding_by_host(host: str = Query(..., description="Full hostname (e.
                 "theme_preset": b["theme_preset"],
                 "theme_custom": b["theme_custom"],
                 "hide_demo_accounts": b["hide_demo_accounts"],
+                "hide_signup_link": b["hide_signup_link"],
+                "signin_tagline": b["signin_tagline"],
+                "signin_hero_image": b["signin_hero_image"],
             }
         # Valid subdomain shape but no firm claims it — neutral, not platform.
         return {"mode": "neutral"}

@@ -99,9 +99,10 @@ export default function Login() {
 
   return (
     <div className="min-h-screen w-full flex bg-[#F5F6F8]">
-      {/* Left marketing panel — only on the SmartBooks brand. Hidden when a
-          firm is white-labeling OR on the neutral private-label root, so
-          clients never see the platform's marketing copy. */}
+      {/* Left marketing panel — SmartBooks brand shows the platform hero;
+          firms that have set a custom `signin_hero_image` show it as a
+          cover image (so their private-label sign-in has visual weight
+          without the SmartBooks copy). Neutral hosts render nothing. */}
       {mode === "platform" && (
       <div className="hidden lg:flex flex-1 relative overflow-hidden bg-gradient-to-br from-slate-900 to-slate-800 text-white p-12">
         <div className="absolute inset-0 opacity-[0.04]" style={{
@@ -139,6 +140,13 @@ export default function Login() {
           <div className="text-xs text-slate-400">© SmartBooks, Inc.</div>
         </div>
       </div>
+      )}
+      {mode === "firm" && firm?.signin_hero_image && (
+        <div
+          className="hidden lg:block flex-1 bg-slate-100 bg-cover bg-center"
+          style={{ backgroundImage: `url(${firm.signin_hero_image})` }}
+          data-testid="login-firm-hero-image"
+        />
       )}
 
       <div className="flex-1 flex items-center justify-center p-6">
@@ -178,7 +186,9 @@ export default function Login() {
               no logo, no brand. Just the sign-in form. */}
           <div>
             <h2 className="font-heading text-3xl font-bold tracking-tight">Sign in</h2>
-            <p className="text-sm text-slate-500 mt-1">Welcome back. Let's get to the numbers.</p>
+            <p className="text-sm text-slate-500 mt-1">
+              {(mode === "firm" && firm?.signin_tagline) || "Welcome back. Let's get to the numbers."}
+            </p>
           </div>
           <div className="space-y-3">
             <div>
@@ -220,9 +230,14 @@ export default function Login() {
             </button>
           </div>
 
+          {/* Hide the "Create one" signup link per-tenant. Firms that
+              onboard clients by invite only can flip this in Enterprise
+              Settings so end-users don't see a public signup path. */}
+          {!(mode === "firm" && firm?.hide_signup_link) && (
           <div className="text-center text-xs text-slate-500">
             No account? <a href="/signup" className="text-cyan-700 hover:underline" data-testid="signup-link">Create one</a>
           </div>
+          )}
 
           {/* Hide the Demo Accounts block per-tenant. The `hide_demo_accounts`
               flag comes from the resolved firm branding (superadmin/pro can

@@ -35,6 +35,13 @@ export default function ProSettings() {
   const [labelRoot, setLabelRoot] = useState("accountingapp.ai");
   const [hideDemo, setHideDemo] = useState(false);
   const [savingHideDemo, setSavingHideDemo] = useState(false);
+  const [hideSignup, setHideSignup] = useState(false);
+  const [savingHideSignup, setSavingHideSignup] = useState(false);
+  const [tagline, setTagline] = useState("");
+  const [savingTagline, setSavingTagline] = useState(false);
+  const [heroImage, setHeroImage] = useState("");
+  const [savingHero, setSavingHero] = useState(false);
+  const heroFileRef = useRef(null);
   // Live availability check state: null=idle, "checking", "ok", or an error string.
   const [subStatus, setSubStatus] = useState(null);
 
@@ -51,6 +58,9 @@ export default function ProSettings() {
     setPreset(branding.theme_preset || "default");
     setCustom(branding.theme_custom || {});
     setHideDemo(!!branding.hide_demo_accounts);
+    setHideSignup(!!branding.hide_signup_link);
+    setTagline(branding.signin_tagline || "");
+    setHeroImage(branding.signin_hero_image || "");
   }, [branding]);
 
   // Debounced availability check as the user types. Prevents them saving a
@@ -126,6 +136,75 @@ export default function ProSettings() {
       setHideDemo(!next);
       toast.error(e.response?.data?.detail || "Save failed");
     } finally { setSavingHideDemo(false); }
+  };
+
+  const toggleHideSignup = async (next) => {
+    setHideSignup(next);
+    setSavingHideSignup(true);
+    try {
+      await api.patch("/pro/branding", { hide_signup_link: next });
+      await refresh();
+      toast.success(
+        next
+          ? "Signup link hidden — clients onboard by invite only."
+          : "Signup link visible on your sign-in page.",
+      );
+    } catch (e) {
+      setHideSignup(!next);
+      toast.error(e.response?.data?.detail || "Save failed");
+    } finally { setSavingHideSignup(false); }
+  };
+
+  const saveTagline = async () => {
+    setSavingTagline(true);
+    try {
+      await api.patch("/pro/branding", { signin_tagline: tagline });
+      await refresh();
+      toast.success(tagline.trim() ? "Custom tagline saved." : "Tagline reset to default.");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Save failed");
+    } finally { setSavingTagline(false); }
+  };
+
+  const pickHeroImage = () => heroFileRef.current?.click();
+  const onHeroFileChange = async (e) => {
+    const file = e.target?.files?.[0];
+    if (!file) return;
+    if (file.size > 2_000_000) {
+      toast.error("Hero image too large — keep under 2 MB.");
+      e.target.value = "";
+      return;
+    }
+    // Read as a data URL so it round-trips through the JSON patch endpoint.
+    const dataUrl = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result);
+      r.onerror = () => rej(r.error);
+      r.readAsDataURL(file);
+    });
+    setSavingHero(true);
+    try {
+      await api.patch("/pro/branding", { signin_hero_image: dataUrl });
+      setHeroImage(dataUrl);
+      await refresh();
+      toast.success("Hero image updated.");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Upload failed");
+    } finally {
+      setSavingHero(false);
+      e.target.value = "";
+    }
+  };
+  const clearHeroImage = async () => {
+    setSavingHero(true);
+    try {
+      await api.patch("/pro/branding", { signin_hero_image: "" });
+      setHeroImage("");
+      await refresh();
+      toast.success("Hero image cleared.");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Save failed");
+    } finally { setSavingHero(false); }
   };
 
   const saveFirmName = async () => {
@@ -343,6 +422,120 @@ export default function ProSettings() {
             </span>
           </span>
         </label>
+
+        <label
+          className="flex items-start gap-3 cursor-pointer select-none mt-4 pt-4 border-t border-slate-100"
+          data-testid="branding-hide-signup-link-toggle"
+        >
+          <input
+            type="checkbox"
+            className="mt-1 h-4 w-4 rounded border-slate-300 text-cyan-700 focus:ring-cyan-500"
+            checked={hideSignup}
+            disabled={savingHideSignup}
+            onChange={(e) => toggleHideSignup(e.target.checked)}
+          />
+          <span className="flex-1">
+            <span className="block text-sm font-medium text-slate-800">
+              Hide "Create one" signup link
+            </span>
+            <span className="block text-[12px] text-slate-500 mt-0.5">
+              For invite-only firms — clients only reach the app via magic-link
+              invitations, so a public signup path never appears.
+            </span>
+          </span>
+        </label>
+
+        {/* Custom tagline — inline save. */}
+        <div className="mt-4 pt-4 border-t border-slate-100" data-testid="branding-tagline-field">
+          <label htmlFor="signin-tagline" className="block text-sm font-medium text-slate-800">
+            Sign-in tagline
+          </label>
+          <p className="text-[12px] text-slate-500 mb-2">
+            Replaces the default "Welcome back. Let's get to the numbers."
+            Leave blank to restore the default. Max 120 characters.
+          </p>
+          <div className="flex gap-2">
+            <input
+              id="signin-tagline"
+              type="text"
+              value={tagline}
+              onChange={(e) => setTagline(e.target.value)}
+              maxLength={120}
+              placeholder="Welcome back. Let's get to the numbers."
+              className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:border-slate-500"
+            />
+            <button
+              type="button"
+              onClick={saveTagline}
+              disabled={savingTagline || tagline === (branding?.signin_tagline || "")}
+              className="px-3 py-2 rounded-md bg-slate-900 text-white text-sm font-medium disabled:opacity-50 flex items-center gap-1"
+              data-testid="branding-tagline-save"
+            >
+              {savingTagline ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              Save
+            </button>
+          </div>
+        </div>
+
+        {/* Marketing sidebar hero image. */}
+        <div className="mt-4 pt-4 border-t border-slate-100" data-testid="branding-hero-image-field">
+          <label className="block text-sm font-medium text-slate-800">
+            Marketing sidebar image
+          </label>
+          <p className="text-[12px] text-slate-500 mb-2">
+            Replaces the SmartBooks hero on the left half of the sign-in page
+            on desktop. Recommended: 1200×1600 (portrait), under 2 MB, PNG or
+            JPG. Clients on mobile see just the form as usual.
+          </p>
+          <div className="flex items-start gap-3">
+            <div className="flex-1">
+              {heroImage ? (
+                <div className="rounded-md border border-slate-200 overflow-hidden bg-slate-50">
+                  <img
+                    src={heroImage}
+                    alt="Sign-in hero preview"
+                    className="w-full max-h-56 object-cover"
+                  />
+                </div>
+              ) : (
+                <div className="rounded-md border border-dashed border-slate-300 h-32 flex items-center justify-center text-xs text-slate-400">
+                  No custom hero — SmartBooks default renders in its place.
+                </div>
+              )}
+            </div>
+            <div className="flex flex-col gap-2 w-32">
+              <input
+                ref={heroFileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={onHeroFileChange}
+                data-testid="branding-hero-file-input"
+              />
+              <button
+                type="button"
+                onClick={pickHeroImage}
+                disabled={savingHero}
+                className="px-3 py-2 rounded-md bg-slate-900 text-white text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-1"
+                data-testid="branding-hero-upload-btn"
+              >
+                {savingHero ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                {heroImage ? "Replace" : "Upload"}
+              </button>
+              {heroImage && (
+                <button
+                  type="button"
+                  onClick={clearHeroImage}
+                  disabled={savingHero}
+                  className="px-3 py-2 rounded-md border border-slate-300 text-slate-700 text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-1"
+                  data-testid="branding-hero-clear-btn"
+                >
+                  <Trash2 size={14} /> Clear
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       </section>
 
       {/* ---------- Logos (4 variants) ---------- */}

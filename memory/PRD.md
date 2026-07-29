@@ -2572,3 +2572,42 @@ Added a LIVE FORM-FILL block to the Phase 1 directive instructing the LLM to emi
 - `/app/frontend/src/pages/Login.jsx` (branding-driven check replacing hardcode)
 - `/app/frontend/src/pages/ProSettings.jsx` (new "Sign-in page options" card + save handler)
 
+
+## Sign-in Page Options: 3 More White-Label Toggles (Feb 28, 2026) ✅
+Extended the per-tenant Sign-in page options card with three new high-leverage controls, all self-service via Enterprise Settings — no code changes needed to onboard a new white-label tenant.
+
+### New fields (backend)
+Added to `BrandingPatch`, `_branding_out()`, and both public branding endpoints (`by-subdomain`, `by-host`):
+- `hide_signup_link: bool` — hides the "No account? Create one" link on the firm's sign-in page. For invite-only firms.
+- `signin_tagline: str` (max 120 chars) — replaces the default "Welcome back. Let's get to the numbers." Empty string clears the override.
+- `signin_hero_image: str` — data URL (image upload) or https URL. Replaces the SmartBooks marketing hero on the left half of the sign-in page on desktop. Empty string clears. Server-side validation blocks `javascript:` and other non-image URIs; 2 MB size cap.
+
+### UI (`ProSettings.jsx`)
+The "Sign-in page options" card now has 4 stacked sections separated by soft border-t dividers:
+1. Hide Demo Accounts toggle (shipped previously)
+2. Hide "Create one" signup link toggle (new)
+3. Sign-in tagline text input with inline Save button (new; disabled unless dirty)
+4. Marketing sidebar image with preview, Upload button, and Clear (when set) (new). Reads the file as a data URL so it round-trips through the JSON PATCH endpoint. 2 MB client-side guard.
+
+Each toggle has optimistic UI with rollback on error, toast confirmations both ways, and helpful sub-copy explaining the effect.
+
+### Login page renders (`Login.jsx`)
+- Sign-in tagline uses `firm?.signin_tagline` when set, else the default
+- Signup link is wrapped in a conditional that hides it when `firm?.hide_signup_link`
+- Left marketing panel: platform brand shows the SmartBooks hero; firms with `signin_hero_image` set show a cover-image div; neutral hosts render nothing (unchanged)
+
+### Verified end-to-end via curl
+- PATCH all three fields → persisted correctly ✓
+- Public `/branding/by-subdomain` exposes all four flags without auth ✓
+- 121-char tagline rejected with clear error ("Sign-in tagline must be 120 characters or less.") ✓
+- `javascript:alert(1)` hero URL rejected ("Hero image must be an https URL or a data:image/... URL.") — XSS guard ✓
+- Cleanup (empty strings) clears all three ✓
+
+### Verified via screenshot
+- Full ProSettings page renders all four Sign-in options controls stacked cleanly with proper help copy and contextual host reference (`acme.accountingapp.ai`) ✓
+
+**Files changed:**
+- `/app/backend/routes/pro.py` (schema + branding helper + PATCH + both public endpoints)
+- `/app/frontend/src/pages/ProSettings.jsx` (3 new state pairs, 3 new save handlers, expanded card UI)
+- `/app/frontend/src/pages/Login.jsx` (tagline override, signup-link conditional, hero-image cover panel)
+
