@@ -528,6 +528,11 @@ class BrandingPatch(BaseModel):
     # half of the login page. Accepts a data URL (`data:image/...`) or a
     # regular https URL. Empty string clears.
     signin_hero_image: Optional[str] = None
+    # Optional destination for the affiliate "Refer & earn" link. When
+    # set, the referral link becomes ``{buy_page_url}?ref=<slug>`` — the
+    # firm sends prospects straight to their own pricing / checkout page.
+    # Empty string clears and falls back to the platform signup route.
+    buy_page_url: Optional[str] = None
 
 
 def _logos_from(b: dict) -> dict:
@@ -565,6 +570,7 @@ def _branding_out(user_doc: dict) -> dict:
         "hide_signup_link": bool(b.get("hide_signup_link")),
         "signin_tagline": b.get("signin_tagline") or "",
         "signin_hero_image": b.get("signin_hero_image") or "",
+        "buy_page_url": b.get("buy_page_url") or "",
     }
 
 
@@ -677,6 +683,16 @@ async def patch_pro_branding(
             if len(img) > 2_800_000:
                 raise HTTPException(400, "Hero image is too large — keep under ~2 MB.")
             updates["branding.signin_hero_image"] = img
+    if inp.buy_page_url is not None:
+        url = inp.buy_page_url.strip()
+        if not url:
+            unsets["branding.buy_page_url"] = ""
+        else:
+            if not (url.startswith("http://") or url.startswith("https://")):
+                raise HTTPException(400, "Buy page URL must start with http:// or https://")
+            if len(url) > 500:
+                raise HTTPException(400, "Buy page URL must be 500 characters or less.")
+            updates["branding.buy_page_url"] = url
     mongo_ops: dict = {}
     if updates: mongo_ops["$set"] = updates
     if unsets: mongo_ops["$unset"] = unsets

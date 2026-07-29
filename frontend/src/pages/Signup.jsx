@@ -35,6 +35,7 @@ export default function Signup() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [ref, setRef] = useState("");
+  const [refWho, setRefWho] = useState(null);  // {name, firm_name} once resolved
   const [busy, setBusy] = useState(false);
 
   // Capture ?ref=... on first mount and stash a cookie so it survives an
@@ -49,6 +50,18 @@ export default function Signup() {
       if (c) setRef(c);
     }
   }, [params]);
+
+  // Resolve the slug to a display name so the banner reads "Referred by
+  // Priya Patel (PriyaBooks)" instead of the raw slug. 404s silently
+  // hide the banner rather than showing broken attribution.
+  useEffect(() => {
+    if (!ref) { setRefWho(null); return; }
+    let cancelled = false;
+    api.get(`/share/lookup?ref=${encodeURIComponent(ref)}`)
+      .then(r => { if (!cancelled) setRefWho(r.data); })
+      .catch(() => { if (!cancelled) setRefWho(null); });
+    return () => { cancelled = true; };
+  }, [ref]);
 
   // Already signed in — no need to see the signup form.
   useEffect(() => {
@@ -100,8 +113,21 @@ export default function Signup() {
         </div>
 
         {ref && (
-          <div className="text-xs text-cyan-700 bg-cyan-50 border border-cyan-100 rounded-md px-3 py-2" data-testid="signup-ref-badge">
-            Referred by <span className="font-mono font-medium">{ref}</span>
+          <div
+            className="text-xs text-cyan-800 bg-cyan-50 border border-cyan-100 rounded-md px-3 py-2 leading-relaxed"
+            data-testid="signup-ref-badge"
+          >
+            {refWho ? (
+              <>
+                Referred by <span className="font-semibold">{refWho.name}</span>
+                {refWho.firm_name ? <> from <span className="font-semibold">{refWho.firm_name}</span></> : null}.
+                <span className="block text-cyan-700/80 mt-0.5">
+                  They'll get credit on your subscription — no cost to you.
+                </span>
+              </>
+            ) : (
+              <>Referred by <span className="font-mono font-medium">{ref}</span></>
+            )}
           </div>
         )}
 

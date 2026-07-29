@@ -64,8 +64,44 @@ if _STRIPE_KEY:
 _WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 
 # 20% of gross, stored in basis points so it's precise + audit-friendly
-# when the admin dashboard renders it.
+# when the admin dashboard renders it. Used as the *fallback* — the
+# canonical rate now comes from ``_PAYOUT_TIERS`` below, matched by the
+# gross amount on the paid invoice. This preserves the recurring
+# revenue-share semantics for subscription tiers we haven't priced yet.
 AFFILIATE_SHARE_BPS = int(os.environ.get("AFFILIATE_SHARE_BPS", "2000"))
+
+# Fixed affiliate payout per subscription tier — matched by the invoice's
+# ``amount_paid`` in cents. Applied to EVERY paid invoice (first payment
+# AND recurring monthly renewals), so the affiliate keeps earning for as
+# long as their referral pays. Values chosen by product:
+#     $38  service  → $7  payout
+#     $79  service  → $15 payout
+#     $95  service  → $20 payout
+#     $149 service  → $30 payout
+# Anything not in the table falls back to ``AFFILIATE_SHARE_BPS`` (~20%
+# of gross) so novel plans don't silently pay $0.
+_PAYOUT_TIERS: dict[int, int] = {
+    3800: 700,
+    7900: 1500,
+    9500: 2000,
+    14900: 3000,
+}
+
+
+def _lookup_payout_cents(gross_cents: int) -> tuple[int, int]:
+    """Return ``(payout_cents, share_bps)`` for an invoice grossing
+    ``gross_cents``. Exact tier match wins; otherwise apply the
+    percentage fallback so the ledger row is never zero for a positive
+    invoice. ``share_bps`` is the effective rate we credited, useful
+    for reconciliation and reports.
+    """
+    if gross_cents in _PAYOUT_TIERS:
+        payout = _PAYOUT_TIERS[gross_cents]
+        # Guard against div-by-zero if a $0 invoice ever slips through.
+        bps = int(round(payout * 10_000 / gross_cents)) if gross_cents else 0
+        return payout, bps
+    payout = (gross_cents * AFFILIATE_SHARE_BPS) // 10_000
+    return payout, AFFILIATE_SHARE_BPS
 
 
 # --------------------------------------------------------------------------
@@ -291,7 +327,7 @@ async def _credit_referral_share(
     gross_cents = int(invoice.get("amount_paid") or 0)
     if gross_cents <= 0:
         return
-    share_cents = (gross_cents * AFFILIATE_SHARE_BPS) // 10_000
+    share_cents, share_bps = _lookup_payout_cents(gross_cents)
     # Idempotency guard — one earnings row per (payment, referrer).
     dup = await db.referral_earnings.find_one({
         "platform_payment_id": payment_id, "referrer_user_id": referrer_id,
@@ -305,7 +341,7 @@ async def _credit_referral_share(
         "referrer_user_id": referrer_id,
         "referred_user_id": payer_user["id"],
         "gross_cents": gross_cents,
-        "share_bps": AFFILIATE_SHARE_BPS,
+        "share_bps": share_bps,
         "share_cents": share_cents,
         "currency": (invoice.get("currency") or "usd").lower(),
         # "accrued" until an admin marks it paid_out. No Stripe Connect

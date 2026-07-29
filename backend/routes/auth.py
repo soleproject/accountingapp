@@ -144,23 +144,43 @@ async def signup(inp: SignupIn):
 # ----------------------------------------------------------------------
 # Affiliate — every user has a shareable referral slug + link.
 # ----------------------------------------------------------------------
+def _share_link_for(user: dict, slug: str) -> tuple[str, str]:
+    """Return ``(link, source)`` — the URL to share and a label
+    indicating which config drove it.
+
+    Precedence:
+      1. Firm's custom "buy page URL" (``branding.buy_page_url``) —
+         referrer's site or a dedicated pricing page. Ref param appended
+         as ``?ref=`` (or ``&ref=`` if the URL already has a query).
+      2. Firm's private-label subdomain + ``/signup?ref=…`` — when the
+         pro has ``branding.signin_subdomain`` set and the platform has
+         a ``PRIVATE_LABEL_HOST_TEMPLATE`` env var.
+      3. Platform ``/signup?ref=…`` on ``PRIMARY_HOST``.
+    """
+    b = (user or {}).get("branding") or {}
+    buy_url = (b.get("buy_page_url") or "").strip()
+    if buy_url:
+        sep = "&" if "?" in buy_url else "?"
+        return f"{buy_url}{sep}ref={slug}", "firm_buy_page"
+    firm_slug = (b.get("signin_subdomain") or "").strip() or None
+    template = os.environ.get("PRIVATE_LABEL_HOST_TEMPLATE")
+    if firm_slug and template:
+        host_url = template.replace("{slug}", firm_slug).rstrip("/")
+        return f"{host_url}/signup?ref={slug}", "firm_subdomain"
+    host = os.environ.get("PRIMARY_HOST", "app.smartbookssoftware.ai")
+    return f"https://{host}/signup?ref={slug}", "platform"
+
+
 @router.get("/share")
 async def share_info(user: dict = Depends(get_current_user)):
-    """Return the current user's affiliate assets: their slug, the shareable
-    link (built from PRIMARY_HOST), and a lightweight earnings summary.
-
-    The link uses the platform host by default, but the frontend can
-    override to a firm subdomain when the referrer is a pro who wants
-    their firm-branded URL to be the share destination.
-    """
+    """Return the current user's affiliate assets: their slug, the
+    shareable link (auto-computed per branding), and a lightweight
+    earnings summary. The frontend renders the Refer & earn page from
+    this payload."""
     from referral_util import mint_slug_for_user
     slug = await mint_slug_for_user(user["id"])
-    host = os.environ.get("PRIMARY_HOST", "app.smartbookssoftware.ai")
-    link = f"https://{host}/signup?ref={slug}"
-    # Live counts. `paying_count` = distinct referred users who've paid
-    # at least one invoice; `earnings_cents` = total accrued+paid_out
-    # revenue share owed to this referrer; `pending_cents` = accrued but
-    # not yet paid out.
+    doc = await db.users.find_one({"id": user["id"]}) or {}
+    link, link_source = _share_link_for(doc, slug)
     referred_count = await db.users.count_documents({"referred_by_user_id": user["id"]})
     earnings_docs = await db.referral_earnings.find(
         {"referrer_user_id": user["id"]}
@@ -171,10 +191,151 @@ async def share_info(user: dict = Depends(get_current_user)):
     return {
         "slug": slug,
         "link": link,
+        "link_source": link_source,
+        "buy_page_url": (doc.get("branding") or {}).get("buy_page_url") or "",
         "referred_count": referred_count,
         "paying_count": paying,
         "earnings_cents": accrued + paid_out,
         "pending_cents": accrued,
+    }
+
+
+class SlugPatch(BaseModel):
+    slug: str
+
+
+@router.put("/share/slug")
+async def rename_share_slug(inp: SlugPatch, user: dict = Depends(get_current_user)):
+    """Rename the caller's referral slug — the human-readable ``?ref=``
+    handle on their affiliate link. Validation lives in ``referral_util``.
+    Returns the new share link so the frontend can update without a
+    second round-trip.
+    """
+    from referral_util import set_slug_for_user
+    new_slug = await set_slug_for_user(user["id"], inp.slug)
+    doc = await db.users.find_one({"id": user["id"]}) or {}
+    link, source = _share_link_for(doc, new_slug)
+    return {"slug": new_slug, "link": link, "link_source": source}
+
+
+@router.get("/share/lookup")
+async def share_lookup(ref: str):
+    """Public — resolve ``?ref=<slug>`` to the referrer's display name +
+    firm brand so the signup page can render a "Referred by X" banner.
+    Returns 404 for unknown slugs so the frontend hides the banner
+    gracefully rather than showing a broken attribution.
+    """
+    from referral_util import resolve_referrer_id
+    uid = await resolve_referrer_id(ref)
+    if not uid:
+        raise HTTPException(404, "Unknown referral code.")
+    doc = await db.users.find_one({"id": uid}, {
+        "id": 1, "name": 1, "email": 1, "branding": 1, "_id": 0,
+    }) or {}
+    b = doc.get("branding") or {}
+    return {
+        "name": doc.get("name") or (doc.get("email") or "").split("@")[0],
+        "firm_name": b.get("firm_name") or None,
+        "firm_subdomain": b.get("signin_subdomain") or None,
+    }
+
+
+@router.get("/share/referrals")
+async def share_referrals(user: dict = Depends(get_current_user)):
+    """List of every user who signed up under the caller's referral
+    slug, plus their attribution stats (signup date, paying-or-not,
+    lifetime earned to date). Fuels the "Referrals" table on the Refer
+    & earn page.
+    """
+    referred = await db.users.find(
+        {"referred_by_user_id": user["id"]},
+        {"id": 1, "email": 1, "name": 1, "created_at": 1, "_id": 0},
+    ).to_list(2000)
+    if not referred:
+        return {"referrals": []}
+    uids = [u["id"] for u in referred]
+    earnings = await db.referral_earnings.find(
+        {"referrer_user_id": user["id"], "referred_user_id": {"$in": uids}},
+    ).to_list(20000)
+    by_uid: dict[str, list] = {}
+    for e in earnings:
+        by_uid.setdefault(e["referred_user_id"], []).append(e)
+    rows = []
+    for u in referred:
+        entries = by_uid.get(u["id"], [])
+        total = sum(int(e.get("share_cents") or 0) for e in entries)
+        rows.append({
+            "user_id": u["id"],
+            "email": u.get("email"), "name": u.get("name"),
+            "signed_up_at": u.get("created_at"),
+            "payments": len(entries),
+            "earned_cents": total,
+            "status": "paying" if entries else "signup_only",
+        })
+    rows.sort(key=lambda r: r["signed_up_at"] or "", reverse=True)
+    return {"referrals": rows}
+
+
+@router.get("/share/report")
+async def share_report(
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """Payout report for a date range. Defaults to the current
+    calendar month (UTC). Returns aggregate totals plus a line-by-line
+    ledger so the frontend can render both a summary card and an
+    exportable table (CSV button lives on the client).
+    """
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    if not start:
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        start_dt = month_start
+    else:
+        start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+    if not end:
+        end_dt = now
+    else:
+        end_dt = datetime.fromisoformat(end.replace("Z", "+00:00"))
+    start_iso = start_dt.isoformat()
+    end_iso = end_dt.isoformat()
+    earnings = await db.referral_earnings.find({
+        "referrer_user_id": user["id"],
+        "created_at": {"$gte": start_iso, "$lte": end_iso},
+    }).to_list(5000)
+    # Enrich each row with the payer's email so the report is human-
+    # readable without a second fetch.
+    payer_ids = list({e["referred_user_id"] for e in earnings})
+    payers = {
+        u["id"]: u for u in await db.users.find(
+            {"id": {"$in": payer_ids}}, {"id": 1, "email": 1, "name": 1, "_id": 0},
+        ).to_list(2000)
+    }
+    lines = [{
+        "date": e.get("created_at"),
+        "referred_email": (payers.get(e["referred_user_id"]) or {}).get("email"),
+        "referred_name": (payers.get(e["referred_user_id"]) or {}).get("name"),
+        "gross_cents": int(e.get("gross_cents") or 0),
+        "share_cents": int(e.get("share_cents") or 0),
+        "share_bps": int(e.get("share_bps") or 0),
+        "status": e.get("status") or "accrued",
+    } for e in earnings]
+    lines.sort(key=lambda r: r["date"] or "", reverse=True)
+    accrued = sum(l["share_cents"] for l in lines if l["status"] == "accrued")
+    paid_out = sum(l["share_cents"] for l in lines if l["status"] == "paid_out")
+    gross_total = sum(l["gross_cents"] for l in lines)
+    return {
+        "start": start_iso,
+        "end": end_iso,
+        "totals": {
+            "invoice_count": len(lines),
+            "gross_cents": gross_total,
+            "accrued_cents": accrued,
+            "paid_out_cents": paid_out,
+            "total_cents": accrued + paid_out,
+        },
+        "lines": lines,
     }
 
 

@@ -1,0 +1,40 @@
+{
+  "summary": "Iter 49 — Affiliate v2 (vanity slug, tiered payout, referrals list, payout report, buy-page URL). Wrote 32-case pytest regression suite: 31 passed, 1 xfail (known bug: consecutive dashes in slug not rejected). Frontend UI test verified /share 3-tab UI, inline slug editor with validation, Payouts controls, /pro/settings buy-page field, and /signup?ref= banner (resolved + fallback).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/share/slug", "issue": "SLUG_RE allows consecutive dashes (e.g. 'double--dash' returns 200). slugify_name() collapses '--' → '-' but set_slug_for_user() does NOT reject them. Recommend tightening SLUG_RE to disallow consecutive dashes."},
+      {"endpoint": "PUT /api/share/slug", "issue": "Case-sensitivity risk: collision check `{referral_slug: s, id: {$ne}}` is case-sensitive against DB. Legacy slugs stored with mixed-case (e.g. client@axiom.ai has 'ce7z8tWP') can collide with newly-lowercased user renames. Attribution via /share/lookup lowercases the query but the stored slug retains mixed case → lookup returns 404 for lowercased legacy slugs. Recommend: backfill lowercased legacy slugs OR match case-insensitively in resolve_referrer_id + set_slug_for_user collision check."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter49_affiliate_v2.py",
+    "/app/test_reports/pytest/iter49_results.xml"
+  ],
+  "action_items": [
+    "Tighten SLUG_RE (or add explicit '--' check in set_slug_for_user) so consecutive dashes are rejected — currently a user can rename to 'double--dash' bypassing intended vanity format.",
+    "Fix case-sensitivity: either lowercase-normalize existing referral_slug values in DB or make collision check + resolve_referrer_id case-insensitive. Currently a legacy mixed-case slug can be 'taken' by another user via lowercase rename, splitting attribution.",
+    "Documentation nit: task description said '/settings as Pro' but actual route is '/pro/settings' — /settings maps to CompanySettings (client view). Consider linking Affiliate buy-page URL field from both entry points or clarifying docs."
+  ],
+  "critical_code_review_comments": [
+    "referral_util.py SLUG_RE=`^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])?$` inconsistent with slugify_name() which collapses '--'. Users can bypass canonical form via rename.",
+    "auth.py /share/lookup lowercases query but DB stores original case — legacy uppercase slugs are unreachable via new lowercase share links, silently breaking attribution.",
+    "share_report uses ISO-string range comparison on `created_at`; only correct if all rows insert ISO strings (they do). Fine, just worth noting for future audits.",
+    "_credit_referral_share idempotency key is (platform_payment_id, referrer_user_id) — correct. Tier calc verified: 3800→(700,1842), 7900→(1500,1899), 9500→(2000,2105), 14900→(3000,2013), 5000→(1000,2000)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter49_affiliate_v2.py (new)"
+  ],
+  "success_rate": {"backend": "97% (31/32 tests pass, 1 xfail known bug)", "frontend": "100% (all data-testids present, flows work)"},
+  "test_credentials": "Superadmin admin@axiom.ai/admin123; Pro pro@axiom.ai/pro123; Clients client@axiom.ai/client123, client2@axiom.ai/client123",
+  "seed_data_creation": "Tests create TEST_-prefixed users + referral_earnings rows and clean them up in finally blocks. No permanent seed data added.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "test_iter49_affiliate_v2.py covers: /api/share fields, PUT /share/slug validation/collision/reserved, PATCH /pro/branding buy_page_url + URL validation, GET /share/lookup public + 404, /share/referrals with seeded row, /share/report default+custom window with seeded row, _lookup_payout_cents tier lookup, and _credit_referral_share end-to-end. NOTE: The pro's slug drifts across UI tests (renames leave last test slug persistent). If retesting after main-agent fixes for the two minor bugs, remove the xfail marker on double--dash test case. Route for buy-page settings is /pro/settings NOT /settings.",
+  "rca of the issue": "SLUG_RE regex `[a-z0-9-]{1,38}` treats '-' as a normal repeatable char, allowing 'a--b'. slugify_name uses a separate collapse step (`re.sub(r'-{2,}', '-', ...)`) but set_slug_for_user only validates against SLUG_RE. Fix: either add `if '--' in s: raise 400` in set_slug_for_user or change SLUG_RE to `^[a-z0-9]+(?:-[a-z0-9]+)*$` with length constraints. For the case-sensitivity issue, existing legacy slugs (like 'ce7z8tWP') were minted before the lowercase-normalization was enforced; resolve_referrer_id lowercases input but performs an exact-match find, so legacy mixed-case rows are effectively unreachable via new-style shared links."
+}

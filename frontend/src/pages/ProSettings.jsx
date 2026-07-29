@@ -42,6 +42,8 @@ export default function ProSettings() {
   const [heroImage, setHeroImage] = useState("");
   const [savingHero, setSavingHero] = useState(false);
   const heroFileRef = useRef(null);
+  const [buyPageUrl, setBuyPageUrl] = useState("");
+  const [savingBuyPage, setSavingBuyPage] = useState(false);
   // Live availability check state: null=idle, "checking", "ok", or an error string.
   const [subStatus, setSubStatus] = useState(null);
 
@@ -61,6 +63,7 @@ export default function ProSettings() {
     setHideSignup(!!branding.hide_signup_link);
     setTagline(branding.signin_tagline || "");
     setHeroImage(branding.signin_hero_image || "");
+    setBuyPageUrl(branding.buy_page_url || "");
   }, [branding]);
 
   // Debounced availability check as the user types. Prevents them saving a
@@ -205,6 +208,19 @@ export default function ProSettings() {
     } catch (err) {
       toast.error(err.response?.data?.detail || "Save failed");
     } finally { setSavingHero(false); }
+  };
+
+  const saveBuyPageUrl = async () => {
+    setSavingBuyPage(true);
+    try {
+      await api.patch("/pro/branding", { buy_page_url: buyPageUrl });
+      await refresh();
+      toast.success(buyPageUrl.trim()
+        ? "Buy page URL saved — your referral link now points there."
+        : "Buy page URL cleared — referrals go to the platform signup.");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Save failed");
+    } finally { setSavingBuyPage(false); }
   };
 
   const saveFirmName = async () => {
@@ -472,6 +488,42 @@ export default function ProSettings() {
               data-testid="branding-tagline-save"
             >
               {savingTagline ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              Save
+            </button>
+          </div>
+        </div>
+
+        {/* Affiliate — firm's buy-page URL. */}
+        <div className="mt-4 pt-4 border-t border-slate-100" data-testid="branding-buy-page-field">
+          <label htmlFor="buy-page-url" className="block text-sm font-medium text-slate-800">
+            Affiliate buy page URL
+          </label>
+          <p className="text-[12px] text-slate-500 mb-2">
+            Where your <span className="font-mono">Refer &amp; earn</span> link
+            sends prospects. Paste your own pricing / checkout URL — we'll
+            append <span className="font-mono">?ref=&lt;your-slug&gt;</span>
+            so purchases are still credited to you. Leave blank to fall
+            back to the platform signup page.
+          </p>
+          <div className="flex gap-2">
+            <input
+              id="buy-page-url"
+              type="url"
+              value={buyPageUrl}
+              onChange={(e) => setBuyPageUrl(e.target.value)}
+              maxLength={500}
+              placeholder="https://yourfirm.com/pricing"
+              className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:border-slate-500"
+              data-testid="branding-buy-page-input"
+            />
+            <button
+              type="button"
+              onClick={saveBuyPageUrl}
+              disabled={savingBuyPage || buyPageUrl === (branding?.buy_page_url || "")}
+              className="px-3 py-2 rounded-md bg-slate-900 text-white text-sm font-medium disabled:opacity-50 flex items-center gap-1"
+              data-testid="branding-buy-page-save"
+            >
+              {savingBuyPage ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
               Save
             </button>
           </div>
