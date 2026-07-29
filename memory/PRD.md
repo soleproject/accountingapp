@@ -39,7 +39,15 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — Orphan-memberships admin lens
+### Feb 2026 (latest) — Full white-label email footer
+
+- **`email_templates._wrap`**: when a caller passes `brand_name` (i.e., the
+  Pro has a Private Label Name set), the footer renders as bare
+  `Sent by {firm}` — the trailing ` · smartbookssoftware.ai` platform
+  reference is dropped so branded emails stay fully white-labelled.
+  Non-branded emails keep the SmartBooks + domain footer.
+
+### Feb 2026 — Orphan-memberships admin lens
 
 - **`GET /api/admin/orphan-memberships`** (superadmin-only) — one-click data-drift
   report that surfaces five categories: (1) *multi-firm firm-staff* — a single

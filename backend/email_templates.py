@@ -22,7 +22,7 @@ _WRAP_OPEN = """
 _WRAP_CLOSE_TMPL = """
     </table>
     <div style="max-width:560px;margin:16px auto 0;color:#94a3b8;font-size:11px;line-height:1.5;text-align:center;">
-      Sent by {brand} · <span style="font-family:monospace;">{domain}</span>
+      Sent by {brand}{platform_ref}
     </div>
   </td></tr>
 </table>
@@ -48,15 +48,19 @@ _TABLE_VAL = "font-size:13px;color:#0f172a;padding:4px 0;font-weight:500;"
 def _wrap(inner: str, *, brand_name: Optional[str] = None) -> str:
     """Wrap an email body with the standard slate/cyan chrome.
 
-    When a Pro has set a Private Label Name on their branding, callers pass
-    it as ``brand_name`` and the footer swaps "Sent by SmartBooks" for
-    "Sent by {firm}". The domain still shows the platform host so
-    deliverability isn't affected — pros can override their sending domain
-    at the ESP level later if they want full DNS-level white-label.
+    When a Pro has set a Private Label Name on their branding, callers
+    pass it as ``brand_name`` and the footer swaps "Sent by SmartBooks
+    · smartbookssoftware.ai" for a bare "Sent by {firm}" — the platform
+    reference is dropped so the branding stays fully white-labelled.
+    Non-branded emails keep the SmartBooks + domain footer.
     """
-    brand = escape(brand_name.strip()) if brand_name and brand_name.strip() else "SmartBooks"
-    domain = "smartbookssoftware.ai"
-    close = _WRAP_CLOSE_TMPL.format(brand=brand, domain=domain)
+    private_label = bool(brand_name and brand_name.strip())
+    brand = escape(brand_name.strip()) if private_label else "SmartBooks"
+    platform_ref = (
+        "" if private_label
+        else ' · <span style="font-family:monospace;">smartbookssoftware.ai</span>'
+    )
+    close = _WRAP_CLOSE_TMPL.format(brand=brand, platform_ref=platform_ref)
     return f"{_WRAP_OPEN}<tr><td>{inner}</td></tr>{close}"
 
 
