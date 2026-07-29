@@ -26,9 +26,10 @@ from fastapi import HTTPException
 _ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz"
 _RANDOM_LEN = 8
 # Public slug format: 3–40 chars, lowercase ascii + digits + single dashes,
-# no leading/trailing dash. Same shape whether vanity or random, so the
-# UI can present a single "edit" affordance.
-SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])?$")
+# no leading/trailing dash. Disallows consecutive dashes explicitly — the
+# vanity form must be canonical so people don't accidentally split
+# attribution by re-typing a slightly different variant.
+SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 SLUG_MIN, SLUG_MAX = 3, 40
 _RESERVED_SLUGS = {
     "admin", "api", "app", "billing", "help", "login", "logout", "pricing",
@@ -58,21 +59,26 @@ def slugify_name(name: str | None) -> str:
 
 
 async def _next_free_slug(base: str) -> str:
-    """Return ``base``, or ``base-2``, ``base-3`` etc — first not taken."""
+    """Return ``base``, or ``base-2``, ``base-3`` etc — first not taken.
+
+    Collision check is case-insensitive so a lowercase mint doesn't
+    silently overlap a legacy mixed-case slug still on file.
+    """
     if base in _RESERVED_SLUGS:
         base = f"{base}-x"
-    clash = await db.users.find_one({"referral_slug": base}, {"_id": 1})
-    if not clash:
+    def _q(s: str) -> dict:
+        # ^…$ + re.IGNORECASE via Mongo $regex — matches 'AbC' when we
+        # search 'abc' and vice-versa. `re.escape` guards against dashes
+        # or digits being interpreted as regex metacharacters.
+        return {"referral_slug": {"$regex": f"^{re.escape(s)}$", "$options": "i"}}
+    if not await db.users.find_one(_q(base), {"_id": 1}):
         return base
     for n in range(2, 100):
         cand = f"{base}-{n}"
         if len(cand) > SLUG_MAX:
             break
-        clash = await db.users.find_one({"referral_slug": cand}, {"_id": 1})
-        if not clash:
+        if not await db.users.find_one(_q(cand), {"_id": 1}):
             return cand
-    # Extremely unlikely — fall back to a random suffix so we always
-    # return SOMETHING unique rather than raising.
     return f"{base[:SLUG_MAX - 5]}-{_random_slug()[:4]}"
 
 
@@ -107,7 +113,11 @@ async def set_slug_for_user(user_id: str, new_slug: str) -> str:
     if s in _RESERVED_SLUGS:
         raise HTTPException(400, f"'{s}' is reserved. Try a different one.")
     clash = await db.users.find_one(
-        {"referral_slug": s, "id": {"$ne": user_id}}, {"_id": 1},
+        {
+            "referral_slug": {"$regex": f"^{re.escape(s)}$", "$options": "i"},
+            "id": {"$ne": user_id},
+        },
+        {"_id": 1},
     )
     if clash:
         raise HTTPException(409, f"'{s}' is already taken.")
@@ -128,5 +138,11 @@ async def resolve_referrer_id(ref_slug: str | None) -> str | None:
     s = ref_slug.strip().lower()
     if not s or len(s) > SLUG_MAX:
         return None
-    doc = await db.users.find_one({"referral_slug": s}, {"id": 1})
+    # Case-insensitive so legacy mixed-case slugs (minted before the
+    # lowercase-normalization was enforced) are still reachable via
+    # newly-shared lowercase links.
+    doc = await db.users.find_one(
+        {"referral_slug": {"$regex": f"^{re.escape(s)}$", "$options": "i"}},
+        {"id": 1},
+    )
     return doc["id"] if doc else None

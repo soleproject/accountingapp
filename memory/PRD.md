@@ -39,7 +39,46 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — Full white-label email footer
+### Feb 2026 (latest) — Affiliate v2 (vanity slug, tiered payouts, reports)
+
+- **Vanity referral slugs.** `referral_util.py` rewritten — new users get a
+  human-readable slug derived from their name (`priya-patel`, kebab-case,
+  ASCII-only) instead of an 8-char random code. Legacy slugs preserved
+  as-is; `resolve_referrer_id` now does a case-insensitive lookup so
+  historical shared links still work. `SLUG_RE` disallows consecutive
+  dashes (canonical vanity form only). Reserved-word blocklist.
+- **Editable slug** — `PUT /api/share/slug` with kebab-case validation,
+  collision check, and reserved-word denylist. Frontend has inline edit
+  UI on the Refer & earn overview.
+- **Firm-configurable buy-page URL** — new `branding.buy_page_url` field
+  (`PATCH /api/pro/branding`). When set, `/api/share` returns
+  `link = {buy_page_url}?ref={slug}` (source `firm_buy_page`), so
+  affiliate traffic goes straight to the firm's own pricing page rather
+  than platform signup. Precedence: buy_page_url → firm subdomain → platform.
+- **Referred-by banner on `/signup`** — reads `?ref=<slug>`, calls the
+  new public `GET /api/share/lookup` endpoint, renders "Referred by
+  {name} from {firm}. They'll get credit on your subscription — no cost
+  to you." Falls back to the raw slug when lookup 404s.
+- **Tiered payouts** — replaced 20%-flat with fixed per-tier amounts:
+  $38→$7, $79→$15, $95→$20, $149→$30. Falls back to 20% for any other
+  gross amount. Recurring invoices continue to credit on every
+  `invoice.paid` (unchanged from v1). Applied in
+  `stripe_billing._lookup_payout_cents`.
+- **Referrals list** — `GET /api/share/referrals` returns every user
+  signed up under the caller's slug + payment count + earned to date +
+  status (`paying` | `signup_only`). Rendered as a table on the
+  Refer & earn `Referrals` tab.
+- **Payout report** — `GET /api/share/report?start=&end=` (defaults to
+  calendar-month-to-date UTC). Rendered as the `Payouts` tab with
+  date-range pickers, `This month` / `Last month` / `YTD` presets,
+  summary tiles, line-by-line ledger, and CSV export.
+- **Regression tests** — `/app/backend/tests/test_iter49_affiliate_v2.py`
+  — 32/32 passing, covers slug validation/collision/reserved,
+  buy_page_url patch, lookup public + 404, referrals + report shape,
+  tier lookup with all 4 SKUs + fallback, end-to-end
+  `_credit_referral_share`.
+
+### Feb 2026 — Full white-label email footer
 
 - **`email_templates._wrap`**: when a caller passes `brand_name` (i.e., the
   Pro has a Private Label Name set), the footer renders as bare

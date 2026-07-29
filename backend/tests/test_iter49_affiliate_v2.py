@@ -119,14 +119,7 @@ class TestSlugRename:
         "ab",            # too short
         "-leading",
         "trailing-",
-        pytest.param(
-            "double--dash",
-            marks=pytest.mark.xfail(
-                reason="BUG: SLUG_RE allows consecutive dashes; slugify_name "
-                "collapses them but set_slug_for_user does not.",
-                strict=False,
-            ),
-        ),
+        "double--dash",  # consecutive dashes rejected by tightened SLUG_RE
         "bad slug!",
         "a" * 41,        # too long
     ])
