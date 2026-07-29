@@ -2624,3 +2624,33 @@ Each toggle has optimistic UI with rollback on error, toast confirmations both w
 
 **Verified via screenshot** on the firm-branded login: CypherPro logo big and centered, "Priya Patel, CPA" (the firm name) directly underneath.
 
+
+## "Grant Superadmin" Button in Superadmin Dashboard (Feb 28, 2026) ✅
+**User request:** *"can you add a create superadmin button in superadmin so that I can create it from there?"*
+
+**What was built:** A one-click self-service Grant Superadmin flow in the Superadmin panel — no more shelling into Mongo to promote users.
+
+### Backend endpoint
+`POST /api/admin/superadmins` — accepts `{email, name?}`. Behavior:
+- **Existing user, already superadmin:** idempotent no-op (returns `already_superadmin: true`)
+- **Existing user, any other role:** flips role to superadmin (returns `previous_role`)
+- **Fresh email:** creates a new user with a random placeholder password (`must_set_password: true`), mints a 7-day magic-link welcome token, and dispatches a "Platform Superadmin" welcome email. Returns the magic_url when creation is fresh so ops can manually forward the link if email delivery flops.
+
+Every grant is written to `admin_audit_log` with kind=`superadmin_granted` (granting_admin_id, target_user_id, previous_role, created_new_user, timestamp). Requires `require_role("superadmin")` — client/pro tokens get 403.
+
+### Frontend UI (`SuperadminDash.jsx`)
+- New "Grant Superadmin" button (indigo, ShieldPlus icon) top-right of the Superadmin page header.
+- Opens `GrantSuperadminModal` — email + optional name (only used for fresh creation). Submit shows a result panel:
+  - "Already a superadmin" → info toast
+  - Promoted existing → success toast with `previous_role → superadmin`
+  - Fresh creation → success message + magic-link fallback panel (amber-bordered) with a Copy button when email delivery isn't confirmed
+- "Grant another" resets the form, "Done" closes the modal. Refreshes the overview list so the new user appears immediately.
+
+### Verified end-to-end
+- **Backend curl (4 scenarios):** idempotent already-superadmin, promote existing pro, fresh user creation w/ magic-link, non-superadmin 403 — all pass ✓
+- **UI screenshot:** Superadmin page shows new button + Michael Giorgi already promoted; modal submission creates a new superadmin, Users count bumps 63→64, magic-link fallback rendered with Copy button, success toast ✓
+
+**Files changed:**
+- `/app/backend/routes/admin.py` (new `POST /admin/superadmins` endpoint + Pydantic schema)
+- `/app/frontend/src/pages/SuperadminDash.jsx` (button + `GrantSuperadminModal` component)
+

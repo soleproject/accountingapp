@@ -2,15 +2,18 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { TID } from "@/constants/testIds";
+import { toast } from "sonner";
 import {
   Users, Building, Briefcase, Shield, ChevronRight, ChevronDown,
-  Ticket, ExternalLink,
+  Ticket, ExternalLink, ShieldPlus, X, Loader2, Copy,
 } from "lucide-react";
 import TeamPanel from "@/components/TeamPanel";
 
 export default function SuperadminDash() {
   const [data, setData] = useState(null);
+  const [grantOpen, setGrantOpen] = useState(false);
   useEffect(() => { api.get("/admin/overview").then(r => setData(r.data)); }, []);
+  const refreshData = () => api.get("/admin/overview").then(r => setData(r.data));
   if (!data) return <div className="text-slate-500">Loading…</div>;
   const { users, companies, stats } = data;
   return (
@@ -18,7 +21,23 @@ export default function SuperadminDash() {
       <div className="flex items-center gap-3">
         <Shield className="text-indigo-500" size={22} />
         <h1 className="font-heading text-3xl font-bold tracking-tight">Superadmin</h1>
+        <div className="ml-auto">
+          <button
+            type="button"
+            onClick={() => setGrantOpen(true)}
+            className="inline-flex items-center gap-2 rounded-md bg-indigo-600 text-white px-3 py-2 text-sm font-medium hover:bg-indigo-700"
+            data-testid="grant-superadmin-btn"
+          >
+            <ShieldPlus size={16} /> Grant Superadmin
+          </button>
+        </div>
       </div>
+      {grantOpen && (
+        <GrantSuperadminModal
+          onClose={() => setGrantOpen(false)}
+          onGranted={refreshData}
+        />
+      )}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           ["Users", stats.total_users, Users, "#6366F1"],
@@ -215,3 +234,165 @@ function EnterprisesReport() {
     </div>
   );
 }
+
+// ---------- Grant Superadmin modal --------------------------------------
+// Promotes an existing user (any role) to superadmin, or creates a fresh
+// one from scratch. Fresh users get a magic-link welcome email so they
+// set their own password on first sign-in — no plaintext credential ever
+// leaves the platform. Every grant is audited server-side.
+function GrantSuperadminModal({ onClose, onGranted }) {
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setBusy(true);
+    try {
+      const r = await api.post("/admin/superadmins", {
+        email: email.trim(),
+        name: name.trim() || null,
+      });
+      setResult(r.data);
+      onGranted?.();
+      if (r.data.already_superadmin) {
+        toast.info(`${email} is already a superadmin.`);
+      } else if (r.data.created) {
+        toast.success(`Created superadmin — welcome email ${r.data.email_status === "sent" ? "sent" : "queued (see magic link below if needed)"}.`);
+      } else {
+        toast.success(`Promoted ${email} from ${r.data.previous_role || "user"} to superadmin.`);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Grant failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copyLink = async () => {
+    if (!result?.magic_url) return;
+    try {
+      await navigator.clipboard.writeText(result.magic_url);
+      toast.success("Magic link copied.");
+    } catch { toast.error("Copy failed — long-press to select."); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4" data-testid="grant-superadmin-modal">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+        <div className="flex items-center gap-2 px-5 py-4 border-b">
+          <ShieldPlus size={18} className="text-indigo-500" />
+          <h3 className="font-heading font-semibold">Grant Superadmin</h3>
+          <button type="button" onClick={onClose} className="ml-auto text-slate-400 hover:text-slate-700" data-testid="grant-superadmin-close">
+            <X size={18} />
+          </button>
+        </div>
+        {!result && (
+          <form onSubmit={submit} className="p-5 space-y-4">
+            <p className="text-sm text-slate-500">
+              Enter an email. If a user with that email already exists, their role becomes <span className="font-mono-num text-slate-700">superadmin</span>. If not, we'll create a fresh user and send them a magic-link welcome email so they set their own password.
+            </p>
+            <div>
+              <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">Email</label>
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="michael@bigsaas.ai"
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:border-slate-500"
+                data-testid="grant-superadmin-email"
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">Name <span className="text-slate-400">(only used if creating a new user)</span></label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Michael Giorgi"
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:border-slate-500"
+                data-testid="grant-superadmin-name"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={onClose} className="px-3 py-2 rounded-md border border-slate-300 text-sm text-slate-700">Cancel</button>
+              <button
+                type="submit"
+                disabled={busy || !email.trim()}
+                className="px-3 py-2 rounded-md bg-indigo-600 text-white text-sm font-medium disabled:opacity-50 flex items-center gap-1"
+                data-testid="grant-superadmin-submit"
+              >
+                {busy ? <Loader2 size={14} className="animate-spin" /> : <ShieldPlus size={14} />}
+                Grant
+              </button>
+            </div>
+          </form>
+        )}
+        {result && (
+          <div className="p-5 space-y-4" data-testid="grant-superadmin-result">
+            {result.already_superadmin && (
+              <div className="text-sm text-slate-700">
+                <span className="font-medium">{result.user.email}</span> was already a superadmin — nothing changed.
+              </div>
+            )}
+            {!result.already_superadmin && !result.created && (
+              <div className="text-sm text-slate-700">
+                Promoted <span className="font-medium">{result.user.email}</span> from <span className="font-mono-num text-slate-500">{result.previous_role || "user"}</span> to <span className="font-mono-num text-indigo-600">superadmin</span>. They can access the superadmin panel on their next page load.
+              </div>
+            )}
+            {result.created && (
+              <>
+                <div className="text-sm text-slate-700">
+                  Created new superadmin <span className="font-medium">{result.user.email}</span>. A welcome email with a magic-link password setter has been {result.email_status === "sent" ? "sent" : "attempted"}.
+                </div>
+                {result.email_status !== "sent" && result.magic_url && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 space-y-2">
+                    <div className="text-xs font-medium text-amber-800">
+                      Email delivery {result.email_status}. Copy this magic link and send it manually:
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        readOnly
+                        value={result.magic_url}
+                        className="flex-1 text-xs rounded border border-amber-300 bg-white px-2 py-1.5 font-mono-num text-slate-700"
+                      />
+                      <button
+                        type="button"
+                        onClick={copyLink}
+                        className="px-2 py-1.5 rounded bg-amber-600 text-white text-xs font-medium flex items-center gap-1"
+                        data-testid="grant-superadmin-copy-link"
+                      >
+                        <Copy size={12} /> Copy
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => { setResult(null); setEmail(""); setName(""); }}
+                className="px-3 py-2 rounded-md border border-slate-300 text-sm text-slate-700"
+              >
+                Grant another
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="ml-2 px-3 py-2 rounded-md bg-slate-900 text-white text-sm font-medium"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+

@@ -531,6 +531,139 @@ async def impersonate_user(
     }
 
 
+class SuperadminGrantIn(BaseModel):
+    email: EmailStr
+    # Optional display name — only used when creating a brand-new user
+    # from this endpoint. If the email already exists we keep the
+    # user's current name and just flip their role.
+    name: Optional[str] = None
+
+
+@router.post("/admin/superadmins")
+async def grant_superadmin(
+    payload: SuperadminGrantIn,
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Superadmin — promote an existing user (any role) to superadmin,
+    OR create a brand-new superadmin from scratch. New users get a
+    placeholder password + a 7-day magic-link welcome email so they
+    can set their own credentials on first sign-in.
+
+    Every grant is logged to `admin_audit_log` with kind=
+    `superadmin_granted` (granting_admin_id, target_user_id, previous_
+    role, timestamp) — non-blocking if the collection isn't seeded.
+    """
+    email_norm = str(payload.email).strip().lower()
+    now = datetime.now(timezone.utc).isoformat()
+
+    existing = await db.users.find_one({"email": email_norm})
+    created = False
+    previous_role = None
+    email_status = None
+    email_error = None
+    magic_url_debug = None
+
+    if existing:
+        previous_role = existing.get("role")
+        if previous_role == "superadmin":
+            # Idempotent: no-op if they're already a superadmin.
+            return {
+                "created": False,
+                "already_superadmin": True,
+                "user": {
+                    "id": existing["id"], "email": existing["email"],
+                    "name": existing.get("name"), "role": "superadmin",
+                },
+            }
+        await db.users.update_one(
+            {"id": existing["id"]},
+            {"$set": {"role": "superadmin", "updated_at": now}},
+        )
+        target_id = existing["id"]
+        target_name = existing.get("name") or email_norm.split("@")[0]
+    else:
+        # Fresh user. Random placeholder password + magic-link welcome.
+        import secrets as _secrets
+        placeholder = hash_password(_secrets.token_urlsafe(48))
+        target_id = str(uuid.uuid4())
+        target_name = (payload.name or email_norm.split("@")[0]).strip()
+        await db.users.insert_one({
+            "id": target_id,
+            "email": email_norm,
+            "name": target_name,
+            "password": placeholder,
+            "role": "superadmin",
+            "must_set_password": True,
+            "created_at": now,
+            "updated_at": now,
+        })
+        created = True
+        # Dispatch a welcome magic-link so the new superadmin can set
+        # their own password on first sign-in. Non-blocking — the user
+        # still exists even if email delivery flops.
+        try:
+            from routes.auth import mint_password_set_token
+            from email_dispatcher import dispatch, public_base_url
+            import email_templates as _tmpl
+            magic_token = await mint_password_set_token(target_id, purpose="welcome")
+            magic_url = f"{public_base_url()}/set-password/{magic_token}"
+            magic_url_debug = magic_url
+            subject, html = _tmpl.team_invite(
+                invitee_name=target_name,
+                inviter_name=user.get("name") or user.get("email") or "SmartBooks",
+                role_label="Platform Superadmin",
+                role_description="you have full access to the SmartBooks platform — every firm, every company, every billing record. Use this power carefully.",
+                company_names=[],
+                magic_url=magic_url,
+            )
+            result = await dispatch(
+                kind="team_invite",
+                to=email_norm,
+                subject=subject, html=html,
+                initiating_user_id=user["id"],
+                company_id=None,
+                related={"target_user_id": target_id, "kind": "superadmin_welcome"},
+            )
+            email_status = result.get("status", "failed")
+            email_error = result.get("error")
+        except Exception as _exc:  # noqa: BLE001
+            import logging as _lg
+            _lg.getLogger(__name__).exception("Superadmin welcome email failed (user still created)")
+            email_status = "failed"
+            email_error = str(_exc)
+
+    # Audit trail — never blocks the grant.
+    try:
+        await db.admin_audit_log.insert_one({
+            "id": str(uuid.uuid4()),
+            "kind": "superadmin_granted",
+            "granting_admin_id": user["id"],
+            "granting_admin_email": user.get("email"),
+            "target_user_id": target_id,
+            "target_email": email_norm,
+            "previous_role": previous_role,
+            "created_new_user": created,
+            "at": now,
+        })
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {
+        "created": created,
+        "already_superadmin": False,
+        "previous_role": previous_role,
+        "email_status": email_status,
+        "email_error": email_error,
+        # Included only so ops can copy/paste the link if the email queue
+        # is down. Returned only on fresh-user creation.
+        "magic_url": magic_url_debug if created else None,
+        "user": {
+            "id": target_id, "email": email_norm,
+            "name": target_name, "role": "superadmin",
+        },
+    }
+
+
 
 @router.get("/admin/enterprises")
 async def list_enterprises(user: dict = Depends(require_role("superadmin"))):
