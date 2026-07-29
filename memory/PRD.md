@@ -2524,3 +2524,20 @@ Added a LIVE FORM-FILL block to the Phase 1 directive instructing the LLM to emi
 **Files changed:**
 - `/app/frontend/src/components/AiPanel.jsx` (`stopTtsNow` helper, added to `cleanup-inquiry` handler)
 
+
+## Hide "Demo Accounts" Block on CypherPro Private-Label Root (Feb 28, 2026) ✅
+**User request:** *"only on `cypherpro.accountingapp.ai/login` lets take this off 'Demo Accounts...' but leave it everywhere else"*
+
+**What was done:** Added a module-scoped `HIDE_DEMO_HOSTS` set in `Login.jsx` currently containing just `"cypherpro.accountingapp.ai"`. The demo accounts block (rendered around lines 227-247) is now wrapped in a conditional that hides it when `window.location.hostname.toLowerCase()` is in the set. Case-insensitive match.
+
+**Extending later:** Adding another private-label root that should also hide demo accounts is one line — just add the hostname to the set.
+
+**Verified end-to-end:**
+- Preview URL (`aifinance-hub-6.preview.emergentagent.com/login`) → Demo Accounts VISIBLE ✓
+- Temporarily added preview hostname to HIDE list → Demo Accounts HIDDEN (screenshot confirms only Sign in, Forgot password, Create one visible; the entire Demo block gone) ✓
+- Reverted → Demo Accounts VISIBLE again ✓
+- Unit test on the lookup logic: 5 host variations, all correct routing (case-insensitive)
+
+**Files changed:**
+- `/app/frontend/src/pages/Login.jsx`
+
