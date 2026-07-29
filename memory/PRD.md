@@ -39,7 +39,33 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — Firm-staff scope-consistency fix (stale-membership bug)
+### Feb 2026 (latest) — Orphan-memberships admin lens
+
+- **`GET /api/admin/orphan-memberships`** (superadmin-only) — one-click data-drift
+  report that surfaces five categories: (1) *multi-firm firm-staff* — a single
+  user is a pro across two or more distinct firms (partitioned via union-find
+  over shared pros, *excluding the candidate's own bridging edges* to avoid the
+  self-merge bug the testing agent caught); (2) *role drift · client with pro
+  memberships* — user.role=client yet holds an active pro membership; (3)
+  *dangling pro role · no active memberships* — user.role=pro but zero active
+  pro memberships (empty Clients sidebar); (4) *dangling archived* — memberships
+  with `archived_at` still on file; (5) *duplicate memberships* — identical
+  (user_id, company_id, role) rows.
+- **`POST /api/admin/orphan-memberships/purge-duplicates`** — collapses
+  duplicate triples to a single canonical row, keeping the oldest by
+  `created_at`. Returns `{kept, deleted}`.
+- **`POST /api/admin/orphan-memberships/fix-role-drift`** — re-runs the
+  Feb-2026 client→pro elevation heuristic across all users. Returns
+  `{elevated}`.
+- **Frontend**: new `<OrphanMembershipsCard/>` on the Superadmin dash
+  (`/admin`) — collapsible categories with per-row action buttons (Purge
+  duplicates / Elevate to pro), Refresh, and severity badges. All rows
+  carry `data-testid` for e2e coverage.
+- **Regression tests**: `/app/backend/tests/test_iter48_orphan_memberships.py`
+  — 9/9 pass (shape, 3 auth gates, dup seed→detect→purge, role-drift
+  seed→detect→fix, multi-firm detection, archive→dangling flow).
+
+### Feb 2026 — Firm-staff scope-consistency fix (stale-membership bug)
 
 - **`GET /api/pro/team?company_id=…`** now returns `member.company_ids` scoped
   to **ALL** of the current Pro's clients (was: only the queried company).

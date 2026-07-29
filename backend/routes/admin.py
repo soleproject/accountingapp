@@ -803,55 +803,57 @@ async def orphan_memberships(user: dict = Depends(require_role("superadmin"))):
     U = {u["id"]: u for u in all_users}
     C = {c["id"]: c for c in all_companies}
 
-    # -------- 1) multi-firm staff via union-find over shared pros --------
-    # Group pros per company; two companies are in the same "firm" if
-    # they share at least one pro (transitive).
-    pros_per_company: dict[str, set[str]] = {}
-    for m in all_ms:
-        if m.get("role") == "pro" and not m.get("archived_at"):
-            pros_per_company.setdefault(m["company_id"], set()).add(m["user_id"])
-
-    parent: dict[str, str] = {cid: cid for cid in pros_per_company}
-    def _find(x: str) -> str:
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-    def _union(a: str, b: str) -> None:
-        ra, rb = _find(a), _find(b)
-        if ra != rb: parent[ra] = rb
-
-    # Two companies belong to the same firm if they share any pro.
-    pro_to_companies: dict[str, list[str]] = {}
-    for cid, pros in pros_per_company.items():
-        for p in pros:
-            pro_to_companies.setdefault(p, []).append(cid)
-    for cids in pro_to_companies.values():
-        for other in cids[1:]:
-            _union(cids[0], other)
-
-    # firm-id per company = union-find root
-    firm_of_company: dict[str, str] = {cid: _find(cid) for cid in pros_per_company}
-    # For each user, count distinct firm ids they belong to via pro memberships.
-    firms_per_user: dict[str, set[str]] = {}
-    for m in all_ms:
-        if m.get("role") == "pro" and not m.get("archived_at"):
-            fid = firm_of_company.get(m["company_id"])
-            if fid: firms_per_user.setdefault(m["user_id"], set()).add(fid)
+    # -------- 1) multi-firm staff --------
+    # A "firm" is a maximally connected set of companies linked by shared
+    # pros. To detect a candidate that spans two firms, we MUST rebuild
+    # the union-find WITHOUT the candidate's own memberships — otherwise
+    # the candidate themselves supplies the bridging edge that collapses
+    # the very firms we're trying to detect.
+    #
+    # For each candidate: union all edges from OTHER pros, then count
+    # distinct roots among the candidate's companies. `>1` → multi-firm.
+    active_pro_ms = [
+        m for m in all_ms
+        if m.get("role") == "pro" and not m.get("archived_at")
+    ]
+    cands_cids: dict[str, list[str]] = {}
+    for m in active_pro_ms:
+        cands_cids.setdefault(m["user_id"], []).append(m["company_id"])
     multi_firm_staff = []
-    for uid, firm_ids in firms_per_user.items():
-        if len(firm_ids) > 1:
-            u = U.get(uid, {})
-            if u.get("role") == "superadmin":
-                continue  # superadmins legitimately touch every firm
-            u_ms = [m for m in all_ms if m["user_id"] == uid and m.get("role") == "pro" and not m.get("archived_at")]
+    for uid, cids in cands_cids.items():
+        if len(cids) < 2:
+            continue
+        if (U.get(uid) or {}).get("role") == "superadmin":
+            continue  # superadmins legitimately touch every firm
+        parent: dict[str, str] = {c: c for c in cids}
+        def _find(x: str) -> str:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+        def _union(a: str, b: str) -> None:
+            ra, rb = _find(a), _find(b)
+            if ra != rb: parent[ra] = rb
+        # Group other pros' companies (restricted to the candidate's set)
+        # then union each group.
+        other_groups: dict[str, list[str]] = {}
+        for m in active_pro_ms:
+            if m["user_id"] == uid: continue
+            if m["company_id"] in parent:
+                other_groups.setdefault(m["user_id"], []).append(m["company_id"])
+        for group in other_groups.values():
+            for c in group[1:]:
+                _union(group[0], c)
+        roots = {_find(c) for c in cids}
+        if len(roots) > 1:
+            u = U.get(uid) or {}
             multi_firm_staff.append({
                 "user_id": uid,
                 "email": u.get("email"), "name": u.get("name"), "role": u.get("role"),
-                "firm_count": len(firm_ids),
+                "firm_count": len(roots),
                 "companies": [
-                    {"id": m["company_id"], "name": (C.get(m["company_id"]) or {}).get("name")}
-                    for m in u_ms
+                    {"id": c, "name": (C.get(c) or {}).get("name")}
+                    for c in cids
                 ],
             })
 
