@@ -5,15 +5,33 @@ import { TID } from "@/constants/testIds";
 import { toast } from "sonner";
 import {
   Users, Building, Briefcase, Shield, ChevronRight, ChevronDown,
-  Ticket, ExternalLink, ShieldPlus, X, Loader2, Copy,
+  Ticket, ExternalLink, ShieldPlus, X, Loader2, Copy, ShieldMinus,
 } from "lucide-react";
 import TeamPanel from "@/components/TeamPanel";
 
 export default function SuperadminDash() {
   const [data, setData] = useState(null);
   const [grantOpen, setGrantOpen] = useState(false);
+  const [superadmins, setSuperadmins] = useState(null);
+  const [ownerEmail, setOwnerEmail] = useState(null);
   useEffect(() => { api.get("/admin/overview").then(r => setData(r.data)); }, []);
   const refreshData = () => api.get("/admin/overview").then(r => setData(r.data));
+  // The Grant / Revoke surface is fenced to the platform owner (typically
+  // `michael@bigsaas.ai`, configurable server-side via OWNER_SUPERADMIN_EMAIL).
+  // Every other superadmin still has full panel access, they just can't
+  // hand out or take away superadmin from other users.
+  const refreshSupers = async () => {
+    try {
+      const r = await api.get("/admin/superadmins");
+      setSuperadmins(r.data.items || []);
+      setOwnerEmail(r.data.owner_email || null);
+    } catch {
+      // 403 for non-owner superadmins — expected. Hide the section.
+      setSuperadmins(null);
+    }
+  };
+  useEffect(() => { refreshSupers(); /* eslint-disable-next-line */ }, []);
+  const isOwner = superadmins !== null;
   if (!data) return <div className="text-slate-500">Loading…</div>;
   const { users, companies, stats } = data;
   return (
@@ -21,21 +39,30 @@ export default function SuperadminDash() {
       <div className="flex items-center gap-3">
         <Shield className="text-indigo-500" size={22} />
         <h1 className="font-heading text-3xl font-bold tracking-tight">Superadmin</h1>
-        <div className="ml-auto">
-          <button
-            type="button"
-            onClick={() => setGrantOpen(true)}
-            className="inline-flex items-center gap-2 rounded-md bg-indigo-600 text-white px-3 py-2 text-sm font-medium hover:bg-indigo-700"
-            data-testid="grant-superadmin-btn"
-          >
-            <ShieldPlus size={16} /> Grant Superadmin
-          </button>
-        </div>
+        {isOwner && (
+          <div className="ml-auto">
+            <button
+              type="button"
+              onClick={() => setGrantOpen(true)}
+              className="inline-flex items-center gap-2 rounded-md bg-indigo-600 text-white px-3 py-2 text-sm font-medium hover:bg-indigo-700"
+              data-testid="grant-superadmin-btn"
+            >
+              <ShieldPlus size={16} /> Grant Superadmin
+            </button>
+          </div>
+        )}
       </div>
       {grantOpen && (
         <GrantSuperadminModal
           onClose={() => setGrantOpen(false)}
-          onGranted={refreshData}
+          onGranted={() => { refreshData(); refreshSupers(); }}
+        />
+      )}
+      {isOwner && (
+        <SuperadminsCard
+          items={superadmins}
+          ownerEmail={ownerEmail}
+          onRevoked={() => { refreshData(); refreshSupers(); }}
         />
       )}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -393,6 +420,102 @@ function GrantSuperadminModal({ onClose, onGranted }) {
         )}
       </div>
     </div>
+  );
+}
+
+
+// ---------- Superadmins list w/ per-row revoke -------------------------
+// Only rendered when the caller is the platform owner. The owner row
+// itself shows a locked "Owner" badge instead of the revoke button so
+// no one accidentally locks the platform out of granting new
+// superadmins.
+function SuperadminsCard({ items, ownerEmail, onRevoked }) {
+  return (
+    <div className="rounded-xl border bg-white overflow-hidden" data-testid="superadmins-report">
+      <div className="px-5 py-3 border-b flex items-center gap-2">
+        <Shield size={16} className="text-indigo-500" />
+        <h2 className="font-heading font-semibold">Superadmins</h2>
+        <div className="ml-auto text-xs text-slate-500">
+          {items.length} active · owner: <span className="font-mono-num text-slate-700">{ownerEmail}</span>
+        </div>
+      </div>
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
+          <tr>
+            <th className="px-4 py-2 text-left">Name</th>
+            <th className="px-4 py-2 text-left">Email</th>
+            <th className="px-4 py-2 text-left">Since</th>
+            <th className="px-4 py-2 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((r) => (
+            <SuperadminRow key={r.id} row={r} onRevoked={onRevoked} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SuperadminRow({ row, onRevoked }) {
+  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const revoke = async () => {
+    setBusy(true);
+    try {
+      await api.post(`/admin/superadmins/${row.id}/revoke`);
+      toast.success(`${row.email} demoted to pro.`);
+      setConfirming(false);
+      onRevoked?.();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Revoke failed.");
+    } finally { setBusy(false); }
+  };
+  const since = row.created_at ? new Date(row.created_at).toLocaleDateString() : "—";
+  return (
+    <tr className="border-t hover:bg-slate-50" data-testid={`superadmin-row-${row.id}`}>
+      <td className="px-4 py-3 font-medium text-slate-800">{row.name || "—"}</td>
+      <td className="px-4 py-3 font-mono-num text-slate-600">{row.email}</td>
+      <td className="px-4 py-3 text-slate-500">{since}</td>
+      <td className="px-4 py-3 text-right">
+        {row.is_owner ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 text-indigo-700 px-2.5 py-1 text-[11px] font-medium">
+            <Shield size={12} /> Owner — cannot revoke
+          </span>
+        ) : confirming ? (
+          <div className="inline-flex items-center gap-2">
+            <span className="text-xs text-slate-500">Revoke superadmin?</span>
+            <button
+              type="button"
+              onClick={revoke}
+              disabled={busy}
+              className="inline-flex items-center gap-1 rounded-md bg-red-600 text-white px-2.5 py-1 text-xs font-medium disabled:opacity-50"
+              data-testid={`superadmin-row-${row.id}-confirm`}
+            >
+              {busy ? <Loader2 size={12} className="animate-spin" /> : <ShieldMinus size={12} />}
+              Confirm
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              className="rounded-md border border-slate-300 px-2.5 py-1 text-xs text-slate-700"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            className="inline-flex items-center gap-1 rounded-md border border-slate-300 text-slate-700 hover:bg-red-50 hover:border-red-300 hover:text-red-700 px-2.5 py-1 text-xs font-medium"
+            data-testid={`superadmin-row-${row.id}-revoke`}
+          >
+            <ShieldMinus size={12} /> Revoke
+          </button>
+        )}
+      </td>
+    </tr>
   );
 }
 

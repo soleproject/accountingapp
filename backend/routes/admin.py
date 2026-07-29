@@ -539,10 +539,98 @@ class SuperadminGrantIn(BaseModel):
     name: Optional[str] = None
 
 
+# ---------- Owner-superadmin gate --------------------------------------
+# Only ONE superadmin (by convention) is allowed to grant/revoke other
+# superadmins. Everyone else at role=superadmin can still access the
+# panel and other admin actions, but the promote/demote surface is
+# fenced to this single email so no one accidentally locks the owner
+# out. Configurable via env for redeploys; defaults to the initial
+# platform owner.
+OWNER_SUPERADMIN_EMAIL = os.environ.get(
+    "OWNER_SUPERADMIN_EMAIL", "michael@bigsaas.ai",
+).lower()
+
+
+def require_owner_superadmin(user: dict = Depends(require_role("superadmin"))) -> dict:
+    """Second gate on top of `require_role("superadmin")`. Even other
+    superadmins can't hit these endpoints — only the platform owner."""
+    if (user.get("email") or "").lower() != OWNER_SUPERADMIN_EMAIL:
+        raise HTTPException(
+            403,
+            "Only the platform owner can grant or revoke superadmin access.",
+        )
+    return user
+
+
+@router.get("/admin/superadmins")
+async def list_superadmins(
+    user: dict = Depends(require_owner_superadmin),
+):
+    """Return every user with role=superadmin. The owner (per
+    `OWNER_SUPERADMIN_EMAIL`) is flagged so the UI can hide the revoke
+    button on that row."""
+    rows: list[dict] = []
+    async for u in db.users.find({"role": "superadmin"}).sort("created_at", 1):
+        email = (u.get("email") or "").lower()
+        rows.append({
+            "id": u.get("id"),
+            "email": u.get("email"),
+            "name": u.get("name"),
+            "created_at": u.get("created_at"),
+            "is_owner": email == OWNER_SUPERADMIN_EMAIL,
+        })
+    return {"items": rows, "owner_email": OWNER_SUPERADMIN_EMAIL}
+
+
+@router.post("/admin/superadmins/{user_id}/revoke")
+async def revoke_superadmin(
+    user_id: str,
+    user: dict = Depends(require_owner_superadmin),
+):
+    """Demote a superadmin back to `pro`. The owner cannot revoke
+    themselves — that would lock the platform out of granting future
+    superadmins."""
+    target = await db.users.find_one({"id": user_id})
+    if not target:
+        raise HTTPException(404, "User not found.")
+    if (target.get("email") or "").lower() == OWNER_SUPERADMIN_EMAIL:
+        raise HTTPException(400, "Cannot revoke the platform owner.")
+    if target.get("role") != "superadmin":
+        raise HTTPException(400, f"User is not a superadmin (role={target.get('role')!r}).")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {"role": "pro", "updated_at": now}},
+    )
+    try:
+        await db.admin_audit_log.insert_one({
+            "id": str(uuid.uuid4()),
+            "kind": "superadmin_revoked",
+            "granting_admin_id": user["id"],
+            "granting_admin_email": user.get("email"),
+            "target_user_id": user_id,
+            "target_email": target.get("email"),
+            "previous_role": "superadmin",
+            "new_role": "pro",
+            "at": now,
+        })
+    except Exception:  # noqa: BLE001
+        pass
+    return {
+        "ok": True,
+        "user": {
+            "id": user_id,
+            "email": target.get("email"),
+            "name": target.get("name"),
+            "role": "pro",
+        },
+    }
+
+
 @router.post("/admin/superadmins")
 async def grant_superadmin(
     payload: SuperadminGrantIn,
-    user: dict = Depends(require_role("superadmin")),
+    user: dict = Depends(require_owner_superadmin),
 ):
     """Superadmin — promote an existing user (any role) to superadmin,
     OR create a brand-new superadmin from scratch. New users get a

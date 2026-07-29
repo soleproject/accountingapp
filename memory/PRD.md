@@ -2654,3 +2654,40 @@ Every grant is written to `admin_audit_log` with kind=`superadmin_granted` (gran
 - `/app/backend/routes/admin.py` (new `POST /admin/superadmins` endpoint + Pydantic schema)
 - `/app/frontend/src/pages/SuperadminDash.jsx` (button + `GrantSuperadminModal` component)
 
+
+## Owner-Only Superadmin Management + Revoke List (Feb 28, 2026) ✅
+**User request:** *"only have the 'Grant Superadmin' button on the superadmin michael@bigsaas.ai, as well as the list report of the superadmin with an revoke button per row"*
+
+**What was built:** A second-layer gate fences the promote/demote surface so only ONE designated superadmin (the platform owner, `michael@bigsaas.ai` by default, configurable via `OWNER_SUPERADMIN_EMAIL` env var) can grant or revoke superadmin. All other superadmins retain their existing panel access — they just don't see the management controls.
+
+### Backend
+- **New `require_owner_superadmin` dependency** — stacked on top of `require_role("superadmin")`. Any other superadmin gets 403 with a clear message.
+- **`GET /api/admin/superadmins`** — returns every user with `role="superadmin"`, sorted by `created_at`, plus an `owner_email` field. Each row has an `is_owner: bool` flag so the UI can lock the owner row.
+- **`POST /api/admin/superadmins/{user_id}/revoke`** — demotes to `pro`. Blocks with 400 if:
+  - Target user not found (404)
+  - Target is the owner ("Cannot revoke the platform owner")
+  - Target is not currently a superadmin
+- Audit-logged as `superadmin_revoked` (granting_admin_id/email, target_user_id/email, previous_role, new_role, at).
+- **Grant endpoint** (`POST /admin/superadmins`) tightened from `require_role("superadmin")` → `require_owner_superadmin` — same second gate.
+
+### Frontend (`SuperadminDash.jsx`)
+- On mount, the page probes `GET /admin/superadmins`. If it 403s, we're a non-owner and the promote/list surface stays hidden entirely (no button, no list, no leaked owner email).
+- **Grant Superadmin button** now conditional on `isOwner`.
+- **New "Superadmins" report card** — shows Name / Email / Since / Actions. Per-row Revoke button with a 2-step confirmation (Cancel + Confirm). Owner row shows an indigo `Owner — cannot revoke` locked badge instead.
+- Success/failure toasts on both grant and revoke.
+
+### Verified end-to-end
+- **Backend curl (5 scenarios):**
+  1. Non-owner superadmin GET /admin/superadmins → 403 ✓
+  2. Non-owner superadmin POST /admin/superadmins → 403 ✓
+  3. Owner GET → returns 2 superadmins with `is_owner` correctly flagged, `owner_email: michael@bigsaas.ai` ✓
+  4. Owner revoking self → 400 "Cannot revoke the platform owner" ✓
+  5. Owner revoking another superadmin → 200, new role `pro` ✓
+- **UI screenshots:**
+  - Signed in as `michael@bigsaas.ai` → Grant button visible + Superadmins report card visible with revoke buttons + owner locked badge ✓
+  - Signed in as `admin@axiom.ai` → both the button and the card **completely hidden**, everything else intact ✓
+
+**Files changed:**
+- `/app/backend/routes/admin.py` (`OWNER_SUPERADMIN_EMAIL` env, `require_owner_superadmin` dep, new list + revoke endpoints, tightened grant guard)
+- `/app/frontend/src/pages/SuperadminDash.jsx` (probe → isOwner flag → conditional UI, new `SuperadminsCard` + `SuperadminRow` components with 2-step confirm)
+
