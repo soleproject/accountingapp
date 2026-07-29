@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams, Link } from "react-router-dom";
+import { useNavigate, useSearchParams, Link, useLocation } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Sparkles, DollarSign } from "lucide-react";
 
 /**
  * Public signup page. Captures `?ref=<slug>` from the URL AND persists it
@@ -29,7 +29,15 @@ function readRefCookie() {
 export default function Signup() {
   const { user, setUser } = useAuth();
   const nav = useNavigate();
+  const { pathname } = useLocation();
   const [params] = useSearchParams();
+
+  // Two modes share this page: the default client signup, and an
+  // "affiliate-only" variant reached via `/signup/affiliate` — same
+  // fields (no company name required either way) but a different pitch
+  // in the header, a different role sent to the server, and a
+  // post-signup landing on the Refer & earn page instead of the dashboard.
+  const affiliateMode = pathname.startsWith("/signup/affiliate");
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -65,7 +73,13 @@ export default function Signup() {
 
   // Already signed in — no need to see the signup form.
   useEffect(() => {
-    if (user) nav(user.role === "superadmin" ? "/admin" : user.role === "pro" ? "/pro/clients" : "/dashboard", { replace: true });
+    if (!user) return;
+    const dest =
+      user.role === "superadmin" ? "/admin"
+      : user.role === "pro"       ? "/pro/clients"
+      : user.role === "affiliate" ? "/share"
+      :                             "/dashboard";
+    nav(dest, { replace: true });
   }, [user, nav]);
 
   const submit = async (e) => {
@@ -80,14 +94,14 @@ export default function Signup() {
         name: name.trim(),
         email: email.trim().toLowerCase(),
         password,
-        role: "client",  // organic signups are always client-role
+        role: affiliateMode ? "affiliate" : "client",
         ref: ref || undefined,
       });
       localStorage.setItem("axiom_token", r.data.token);
       localStorage.setItem("axiom_user", JSON.stringify(r.data.user));
       setUser(r.data.user);
-      toast.success("Account created — welcome!");
-      nav("/dashboard");
+      toast.success(affiliateMode ? "Affiliate account created — start sharing." : "Account created — welcome!");
+      nav(affiliateMode ? "/share" : "/dashboard");
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Signup failed");
     } finally {
@@ -99,16 +113,25 @@ export default function Signup() {
     <div className="min-h-screen w-full flex items-center justify-center bg-[#F5F6F8] p-6">
       <form onSubmit={submit} className="w-full max-w-sm space-y-5" data-testid="signup-form">
         <div className="flex items-center gap-2 mb-6">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
-            <Sparkles size={16} className="text-white" />
+          <div className={
+            "w-8 h-8 rounded-lg flex items-center justify-center " +
+            (affiliateMode ? "bg-emerald-600" : "bg-blue-600")
+          }>
+            {affiliateMode
+              ? <DollarSign size={16} className="text-white" />
+              : <Sparkles size={16} className="text-white" />}
           </div>
           <div className="font-heading font-bold">SmartBooks</div>
         </div>
 
         <div>
-          <h1 className="text-2xl font-heading font-bold text-slate-900">Create your account</h1>
+          <h1 className="text-2xl font-heading font-bold text-slate-900">
+            {affiliateMode ? "Become an affiliate" : "Create your account"}
+          </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Free to start — you can upgrade any time.
+            {affiliateMode
+              ? "No subscription required. Share your link, earn on every paying signup — for as long as they pay."
+              : "Free to start — you can upgrade any time."}
           </p>
         </div>
 
@@ -168,15 +191,27 @@ export default function Signup() {
         <button
           type="submit"
           disabled={busy}
-          className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-800 disabled:opacity-50"
+          className={
+            "w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-md text-white text-sm disabled:opacity-50 " +
+            (affiliateMode ? "bg-emerald-600 hover:bg-emerald-700" : "bg-slate-900 hover:bg-slate-800")
+          }
           data-testid="signup-submit"
         >
           {busy && <Loader2 size={13} className="animate-spin" />}
-          Create account
+          {affiliateMode ? "Start earning" : "Create account"}
         </button>
 
-        <div className="text-xs text-slate-500 text-center">
-          Already have an account? <Link to="/login" className="text-cyan-700 hover:underline">Sign in</Link>
+        <div className="text-xs text-slate-500 text-center space-y-1">
+          <div>
+            Already have an account? <Link to="/login" className="text-cyan-700 hover:underline">Sign in</Link>
+          </div>
+          <div>
+            {affiliateMode ? (
+              <>Not an affiliate? <Link to="/signup" className="text-cyan-700 hover:underline">Sign up as a customer</Link></>
+            ) : (
+              <>Just want to refer? <Link to="/signup/affiliate" className="text-cyan-700 hover:underline">Become an affiliate</Link></>
+            )}
+          </div>
         </div>
       </form>
     </div>

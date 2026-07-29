@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { CompanyProvider } from "@/lib/company";
 import { BrandingProvider } from "@/lib/branding";
@@ -52,8 +52,15 @@ import ClosePeriods from "@/pages/ClosePeriods";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
+  const { pathname } = useLocation();
   if (loading) return <div className="p-8 text-slate-500">Loading…</div>;
   if (!user) return <Navigate to="/login" replace />;
+  // Affiliate-only accounts see the Refer & earn page and nothing
+  // else. Any deep-link into a client/pro surface bounces to /share.
+  // The Layout component reads the same role and hides the sidebar.
+  if (user.role === "affiliate" && pathname !== "/share") {
+    return <Navigate to="/share" replace />;
+  }
   return children;
 }
 
@@ -72,6 +79,7 @@ function App() {
             <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
+            <Route path="/signup/affiliate" element={<Signup />} />
             <Route path="/set-password/:token" element={<SetPassword />} />
             <Route path="/invite/:token" element={<AcceptInvite />} />
             <Route path="/q/:token" element={<AskClientAnswer />} />

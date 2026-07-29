@@ -1,0 +1,23 @@
+{
+  "summary": "Iteration 51 — Affiliate role + upgrade path. Wrote 18 backend regression tests in /app/backend/tests/test_iter51_affiliate_role.py (all pass) and ran full end-to-end Playwright test covering signup/affiliate page, sidebar/switcher/AI-panel/alerts-bell hidden for affiliates, deep-link redirect to /share for /dashboard, /pro/clients, /settings, upgrade pill click flow with dialog accept -> /onboarding + pill disappears post-upgrade, and cross-links between /login, /signup, /signup/affiliate. Also ran iter49 + iter50 regression suites — all 46 tests pass, no regression.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter51_affiliate_role.py",
+    "/app/test_reports/pytest/iter51_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "affiliate_upgrade endpoint is clean, idempotent, and preserves referral slug + earnings via user id — no code review concerns.",
+    "signup role allow-list uses a set — good; superadmin correctly rejected with 400.",
+    "Layout early-return for isAffiliate is a nice minimal chrome path; no z-index/overlay problems observed."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter51_affiliate_role.py"],
+  "success_rate": {"backend": "100% (18/18 new; 46/46 including iter49+iter50)", "frontend": "100% (all 8 flows verified)"},
+  "test_credentials": "Superadmin admin@axiom.ai/admin123, Pro pro@axiom.ai/pro123, Client client@axiom.ai/client123. Affiliate users are created on-the-fly with TEST_aff_* prefix and cleaned up automatically.",
+  "seed_data_creation": "Test suite creates and cleans up TEST_aff_* users + referral_earnings rows via fixture teardown. Frontend e2e affiliate user was also cleaned up post-run (deleted 1 doc).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "test_iter51_affiliate_role.py exercises signup roles + affiliate upgrade + role gate. Backend fully green; frontend chrome-hiding and Protected-gate redirect verified in browser. Any future changes to Protected wrapper in App.js or Layout.jsx affiliate branch should re-run this suite. mint_slug_for_user is called lazily on first /api/share hit — the auto-mint assertion depends on the affiliate immediately visiting /share.",
+  "rca of the issue": "No issues found — feature works end-to-end."
+}

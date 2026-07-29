@@ -119,6 +119,15 @@ async def login(inp: LoginIn):
 
 @router.post("/auth/signup")
 async def signup(inp: SignupIn):
+    # Roles a self-service signup is allowed to mint. `pro` accounts can
+    # be created through the public form (they'll get an empty firm
+    # scope until they add clients); `affiliate` accounts are the new
+    # referral-only path (see `POST /auth/signup/affiliate`). We
+    # explicitly refuse `superadmin` — those are only granted from an
+    # existing superadmin session.
+    _ALLOWED_SIGNUP_ROLES = {"client", "pro", "affiliate"}
+    if inp.role not in _ALLOWED_SIGNUP_ROLES:
+        raise HTTPException(400, "Unsupported signup role.")
     if await db.users.find_one({"email": inp.email.lower()}):
         raise HTTPException(400, "Email already registered")
     from referral_util import resolve_referrer_id
@@ -337,6 +346,36 @@ async def share_report(
         },
         "lines": lines,
     }
+
+
+@router.post("/affiliate/upgrade")
+async def affiliate_upgrade(user: dict = Depends(get_current_user)):
+    """Convert an affiliate-only account into a regular client account.
+
+    Idempotent — calling it on a non-affiliate user is a no-op that
+    still returns the caller's current role, so the frontend can retry
+    safely. Elevated users keep their referral slug + earnings intact
+    (the ``id`` never changes, just ``users.role``), so any links they
+    already shared continue to attribute revenue share correctly.
+
+    After the flip the client goes through the normal empty-state
+    onboarding flow — no company is auto-created here since we don't
+    know the business name. The frontend routes the user to
+    ``/onboarding`` on success.
+    """
+    if user["role"] == "affiliate":
+        await db.users.update_one(
+            {"id": user["id"]},
+            {"$set": {"role": "client", "upgraded_from_affiliate_at": now_iso()}},
+        )
+        new_role = "client"
+    else:
+        new_role = user["role"]
+    token = create_token(user["id"], new_role)
+    return {"token": token, "user": {
+        "id": user["id"], "email": user["email"],
+        "name": user["name"], "role": new_role,
+    }}
 
 
 @router.get("/auth/me")

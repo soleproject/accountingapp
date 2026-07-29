@@ -232,8 +232,13 @@ export default function Login() {
               onboard clients by invite only can flip this in Enterprise
               Settings so end-users don't see a public signup path. */}
           {!(mode === "firm" && firm?.hide_signup_link) && (
-          <div className="text-center text-xs text-slate-500">
-            No account? <a href="/signup" className="text-cyan-700 hover:underline" data-testid="signup-link">Create one</a>
+          <div className="text-center text-xs text-slate-500 space-y-1">
+            <div>
+              No account? <a href="/signup" className="text-cyan-700 hover:underline" data-testid="signup-link">Create one</a>
+            </div>
+            <div>
+              Just want to refer? <a href="/signup/affiliate" className="text-emerald-700 hover:underline" data-testid="signup-affiliate-link">Become an affiliate</a>
+            </div>
           </div>
           )}
 

@@ -330,6 +330,28 @@ export default function Layout() {
   useActionListener("ai-open", () => setAiCollapsed(false));
 
   const showBell = user && ["pro", "superadmin"].includes(user.role);
+  // Affiliate-only accounts get a stripped-down chrome: no sidebar, no
+  // company switcher, no AI panel, no billing modal. They only ever see
+  // the Share page — everything else is unreachable via <Protected/>.
+  const isAffiliate = user?.role === "affiliate";
+
+  if (isAffiliate) {
+    return (
+      <div className="flex flex-col h-screen overflow-hidden bg-[#F5F6F8]">
+        <header className="h-16 shrink-0 border-b bg-white flex items-center px-6 gap-4">
+          <div className="ml-auto flex items-center gap-3">
+            <div className="relative z-[1000]">
+              <ProfileMenu />
+            </div>
+          </div>
+        </header>
+        <main className="flex-1 overflow-auto p-6 md:p-8">
+          <Outlet />
+        </main>
+        <Toaster position="bottom-right" />
+      </div>
+    );
+  }
 
   return (
     <AiFocusProvider>

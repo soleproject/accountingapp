@@ -1,10 +1,12 @@
 import { useEffect, useState, useMemo } from "react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { useNavigate } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
 import {
   Share2, Copy, Check, Users, DollarSign, Loader2, Pencil, Save,
-  ExternalLink, Calendar, Download, X,
+  ExternalLink, Calendar, Download, X, Sparkles,
 } from "lucide-react";
 
 /**
@@ -32,6 +34,7 @@ export default function Share() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto" data-testid="share-page">
+      <UpgradePill />
       <div className="flex items-center gap-2 text-slate-500 text-sm mb-1">
         <Share2 size={14} /> Affiliate
       </div>
@@ -445,6 +448,63 @@ function PayoutsTab() {
     </div>
   );
 }
+
+// --------------------------------------------------------------------------
+// UpgradePill — appears at the top of the page for affiliate-only
+// accounts. Clicking upgrades them to a full client account (their
+// referral slug + earnings history come along for the ride).
+// --------------------------------------------------------------------------
+function UpgradePill() {
+  const { user, setUser } = useAuth();
+  const nav = useNavigate();
+  const [busy, setBusy] = useState(false);
+  if (user?.role !== "affiliate") return null;
+  const upgrade = async () => {
+    if (!window.confirm(
+      "Upgrade to a full account? You'll keep your referral link and " +
+      "all earnings. We'll take you to the onboarding flow to set up " +
+      "your first company."
+    )) return;
+    setBusy(true);
+    try {
+      const r = await api.post("/affiliate/upgrade");
+      localStorage.setItem("axiom_token", r.data.token);
+      localStorage.setItem("axiom_user", JSON.stringify(r.data.user));
+      setUser(r.data.user);
+      toast.success("Welcome to the full experience.");
+      nav("/onboarding");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't upgrade");
+    } finally { setBusy(false); }
+  };
+  return (
+    <div
+      className="mb-5 flex items-center gap-3 rounded-lg border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 px-4 py-3"
+      data-testid="upgrade-pill"
+    >
+      <Sparkles size={16} className="text-amber-600 shrink-0" />
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-semibold text-slate-800">
+          Ready for the full platform?
+        </div>
+        <div className="text-xs text-slate-600">
+          Add books, invoices, reports, and everything else — your
+          referral link and earnings stay put.
+        </div>
+      </div>
+      <button
+        onClick={upgrade}
+        disabled={busy}
+        data-testid="upgrade-pill-btn"
+        className="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium disabled:opacity-50"
+      >
+        {busy ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+        Upgrade
+      </button>
+    </div>
+  );
+}
+
 
 // --------------------------------------------------------------------------
 // Presentational helpers.
