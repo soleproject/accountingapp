@@ -333,9 +333,13 @@ async def list_pro_team(
             "role": "pro",
             "user_id": {"$ne": user["id"]},
         }).to_list(1000)
+        # Every pending pro invite for any of the current user's clients —
+        # regardless of who created it. Parity with the /companies/{cid}/team
+        # audit: no `invited_by_user_id` filter.
         invites_q = {
-            "invited_by_user_id": user["id"], "role": "pro", "status": "pending",
-        }
+            "company_ids": {"$in": list(my_cids)},
+            "role": "pro", "status": "pending",
+        } if my_cids else {"_id": "__no_match__"}
 
     grouped: dict[str, list[str]] = {}
     archived_grouped: dict[str, list[str]] = {}

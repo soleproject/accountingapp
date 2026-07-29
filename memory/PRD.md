@@ -39,6 +39,33 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 (latest) — Archive firm staff + client team invite audit
+
+- **Archive/Unarchive firm staff.** New endpoints `POST /api/pro/staff/{user_id}/archive`
+  and `POST /api/pro/staff/{user_id}/unarchive` in `/app/backend/routes/invites.py`.
+  Archive sets `archived_at` on the staff member's `role=pro` memberships (scoped to
+  the current Pro's clients; superadmin can operate platform-wide); Unarchive `$unset`s
+  the flag. `GET /api/pro/team` now returns `members`, `archived_members`, and
+  `pending_invites` — archived staff no longer clutter the active roster but their
+  memberships and audit history stay intact for reversibility.
+- **Frontend Archive button.** `/app/frontend/src/components/TeamPanel.jsx` renders an
+  `Archive` button next to `Remove from firm` on each expanded firm-staff row
+  (`data-testid=team-member-archive-{uid}`). New `ArchivedStaffList` component shows
+  archived members in a collapsible section with a per-row `Restore` action
+  (`team-archived-list`, `team-archived-toggle`, `team-archived-restore-{uid}`).
+- **Client-side team page audit (`GET /api/companies/{cid}/team`).** Pending invites
+  are now filtered by `role: {$in: [editor, reviewer, viewer]}` — pro-firm invites
+  scoped to the same company_id no longer bleed into the client's team page. Persist
+  behavior preserved (no `invited_by_user_id` filter → invites survive refresh
+  regardless of who created them, matches the `/pro/team` fix).
+- **Legacy `/pro/team` (no company_id) parity fix.** Pending-invite lookup unified to
+  `company_ids: {$in: my_cids}` — drops the `invited_by_user_id` filter so a
+  superadmin-created invite for a firm's clients is visible to every other pro on
+  those clients.
+- **Regression coverage.** `/app/backend/tests/test_iter46_archive_and_invite_scope.py`
+  — 8 tests, 100% passing (archive/unarchive round-trip, superadmin scope, editor vs
+  pro invite filtering on both endpoints, cross-user persistence).
+
 ### Feb 2026 (latest) — Auto-managed opening balance JEs
 
 - **New service** `/app/backend/opening_balance_service.py` — a single
