@@ -39,7 +39,26 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — Firm-staff role elevation + Clients-list scoping
+### Feb 2026 (latest) — Firm-staff scope-consistency fix (stale-membership bug)
+
+- **`GET /api/pro/team?company_id=…`** now returns `member.company_ids` scoped
+  to **ALL** of the current Pro's clients (was: only the queried company).
+  This exposes stale pro memberships in the checkbox UI so the Pro can
+  actually uncheck and remove them. Superadmins get the staff's full
+  pro-membership set. Root cause of user report where a firm-staff user
+  was seeing multiple clients while Priya's UI insisted "1 of 2".
+- **Active vs archived split** in `list_pro_team` refactored from
+  per-membership to per-user: a staff with a mix of active + archived
+  memberships now appears once in `members` with only their ACTIVE
+  `company_ids`, never duplicated across sections.
+- **`company_ids_for_user`** in `/app/backend/deps.py` now excludes
+  memberships with `archived_at` set — the top company selector no
+  longer shows clients an archived firm-staff can no longer manage.
+- **Regression tests**: `/app/backend/tests/test_iter47_pro_team_scoping.py`
+  — 10/10 pass, verifying superadmin/pro branches, mixed-status split,
+  end-to-end shrink-access → cleanup propagation.
+
+### Feb 2026 — Firm-staff role elevation + Clients-list scoping
 
 - **Global role elevation on invite accept.** In `/app/backend/routes/invites.py`,
   `public_invite_accept` now upgrades an existing user's global role when a `pro`
