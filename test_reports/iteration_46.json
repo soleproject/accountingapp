@@ -1,0 +1,26 @@
+{
+  "summary": "Regression tested the Archive/Unarchive pro-staff feature and the pending-invite role scoping fix on both /pro/team and /companies/{cid}/team. Backend: 8/8 pytest cases pass — GET /api/pro/team returns members/archived_members/pending_invites, POST /api/pro/staff/{uid}/archive returns {archived:N} and moves the staff into archived_members (idempotent on repeat), POST /pro/staff/{uid}/unarchive restores them (idempotent), superadmin can archive/unarchive any pro staff. Editor invite on /api/companies/{cid}/invites appears in that company's team.pending_invites; a role=pro invite for the SAME company is filtered out of the client team endpoint and returned only by GET /api/pro/team?company_id={cid}. Pending invites on the client team persist across users (superadmin-created invite is visible to client owner). Frontend: /pro/team expanded row shows both Archive (`team-member-archive-{uid}`) and Remove-from-firm buttons; clicking Archive fires a browser confirm, then shows a `MFG Gmail archived.` toast, active count drops to (0), and a collapsed `Archived staff (1)` section renders with data-testid `team-archived-list` + `team-archived-toggle`. Expanding it reveals Restore (`team-archived-restore-{uid}`) which returns the row to Active and hides the archived section. Client /team page renders correctly with owner/pro/editor/reviewer badges — no pro-role invite leaks (verified via backend test since browser JS could not attach JWT).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter46_archive_and_invite_scope.py",
+    "/app/test_reports/pytest/iter46.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "list_pro_team: legacy branch (no company_id) still scopes pending_invites by invited_by_user_id=user['id'] (line ~337). This is inconsistent with the company_id branch (which correctly drops that filter) and with the /companies/{cid}/team fix. If a superadmin invites a pro on behalf of a firm, and the firm's other pros hit /pro/team without a company_id, they still won't see that invite. Consider unifying to `company_ids: {$in: list(my_cids)}` without the inviter filter.",
+    "archive/unarchive endpoints correctly scope by the current pro's client company set for pro users, and go platform-wide for superadmins — matches the delete_pro_staff pattern.",
+    "Idempotency is achieved via update_many's natural no-op on already-set fields (modified_count returned may be 0 on repeat calls, which the frontend handles as success).",
+    "TeamPanel.jsx correctly reads archived_members and only renders the ArchivedStaffList when mode==='pro' and the array is non-empty — company-team page is unaffected.",
+    "COMPANY_ROLES = ('viewer','reviewer','editor') filter in list_company_team is correctly used with $in — properly excludes role='owner' and role='pro' invites (only editor/reviewer/viewer are surfaced).",
+    "Consider adding an index on invites (company_ids, status, role) to keep the team-page fetch fast as invite volume grows."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter46_archive_and_invite_scope.py"],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "100% of critical flows"},
+  "test_credentials": "pro@axiom.ai/pro123, admin@axiom.ai/admin123, client@axiom.ai/client123 (owner of CLIENT_CID=540fbc73-66fd-432f-a357-39db6c84c5bd)",
+  "seed_data_creation": "Test creates a disposable pro staff account via /api/pro/invites + /api/invites/{token}/accept with email test_staff_<uuid>@example.com; the teardown calls DELETE /api/pro/staff/{uid} to remove memberships. The user row remains in db.users (invitee minted) but has no memberships — safe. Pending editor+pro invites in the role-scoping test are revoked via DELETE /api/invites/{id} in a finally-block.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test module: /app/backend/tests/test_iter46_archive_and_invite_scope.py — run with `REACT_APP_BACKEND_URL=<url> pytest -o addopts='' tests/test_iter46_archive_and_invite_scope.py`. The `addopts` override is needed because /app/backend/pytest.ini enforces xdist which the fixture-scoped module fixtures don't tolerate. Emails in invites are lowercased server-side — always compare lowercase. TeamPanel row expand is required before Archive/Remove buttons render (they live inside the expanded StaffRow accordion).",
+  "rca of the issue": "N/A — feature works as designed. Minor code-review note: /api/pro/team legacy branch (no company_id) still filters pending_invites by invited_by_user_id, which is inconsistent with the fix applied to the company_id branch and to /companies/{cid}/team. Low priority since the frontend always sends company_id in current usage, but should be unified for defensive parity."
+}

@@ -257,8 +257,15 @@ async def list_company_team(cid: str, user: dict = Depends(get_current_user)):
         }
         for x in ms
     ]
+    # Client-team page only surfaces client-level invites (editor / reviewer /
+    # viewer). Pro-firm invites for this same company are managed under
+    # `/pro/team` — filtering here prevents them from cluttering the owner's
+    # team view. Note: we intentionally DON'T scope by `invited_by_user_id`
+    # so any teammate invite for this company persists across refresh
+    # regardless of who created it (parity fix with the /pro/team audit).
     invites = await db.invites.find({
         "company_ids": cid, "status": "pending",
+        "role": {"$in": list(COMPANY_ROLES)},
     }).to_list(500)
     return {
         "members": members,
@@ -331,9 +338,12 @@ async def list_pro_team(
         }
 
     grouped: dict[str, list[str]] = {}
+    archived_grouped: dict[str, list[str]] = {}
     for m in others:
-        grouped.setdefault(m["user_id"], []).append(m["company_id"])
-    users = {u["id"]: u for u in await db.users.find({"id": {"$in": list(grouped)}}).to_list(500)}
+        bucket = archived_grouped if m.get("archived_at") else grouped
+        bucket.setdefault(m["user_id"], []).append(m["company_id"])
+    all_uids = list(set(grouped) | set(archived_grouped))
+    users = {u["id"]: u for u in await db.users.find({"id": {"$in": all_uids}}).to_list(500)}
 
     members = [
         {
@@ -344,9 +354,19 @@ async def list_pro_team(
         }
         for uid, cids in grouped.items()
     ]
+    archived_members = [
+        {
+            "user_id": uid,
+            "name": users.get(uid, {}).get("name"),
+            "email": users.get(uid, {}).get("email"),
+            "company_ids": cids,
+        }
+        for uid, cids in archived_grouped.items()
+    ]
     invites = await db.invites.find(invites_q).to_list(500)
     return {
         "members": members,
+        "archived_members": archived_members,
         "pending_invites": [
             {
                 "id": i["id"], "email": i["email"], "role": i["role"],
@@ -459,6 +479,55 @@ async def remove_pro_staff(
             "user_id": user_id, "role": "pro",
         })
     return {"removed": result.deleted_count}
+
+
+@router.post("/pro/staff/{user_id}/archive")
+async def archive_pro_staff(
+    user_id: str, user: dict = Depends(require_role("pro", "superadmin")),
+):
+    """Soft-archive a staff member from the firm — hides them from the
+    active staff list without removing their memberships, so their
+    historical audit trail (posted JEs, approvals, etc.) still resolves
+    to a real user. Reversible via ``/pro/staff/{user_id}/unarchive``.
+    Scope is limited to the current Pro's clients."""
+    if user["role"] == "pro":
+        my = await db.memberships.find(
+            {"user_id": user["id"], "role": "pro"},
+        ).to_list(1000)
+        my_cids = [m["company_id"] for m in my]
+        result = await db.memberships.update_many(
+            {"user_id": user_id, "role": "pro", "company_id": {"$in": my_cids}},
+            {"$set": {"archived_at": now_iso()}},
+        )
+    else:
+        result = await db.memberships.update_many(
+            {"user_id": user_id, "role": "pro"},
+            {"$set": {"archived_at": now_iso()}},
+        )
+    return {"archived": result.modified_count}
+
+
+@router.post("/pro/staff/{user_id}/unarchive")
+async def unarchive_pro_staff(
+    user_id: str, user: dict = Depends(require_role("pro", "superadmin")),
+):
+    """Restore an archived staff member — clears the ``archived_at`` flag
+    on their pro memberships scoped to the current Pro's clients."""
+    if user["role"] == "pro":
+        my = await db.memberships.find(
+            {"user_id": user["id"], "role": "pro"},
+        ).to_list(1000)
+        my_cids = [m["company_id"] for m in my]
+        result = await db.memberships.update_many(
+            {"user_id": user_id, "role": "pro", "company_id": {"$in": my_cids}},
+            {"$unset": {"archived_at": ""}},
+        )
+    else:
+        result = await db.memberships.update_many(
+            {"user_id": user_id, "role": "pro"},
+            {"$unset": {"archived_at": ""}},
+        )
+    return {"unarchived": result.modified_count}
 
 
 class CompanyMemberPatch(BaseModel):

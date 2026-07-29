@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { UserPlus, Loader2, X, Trash2, Users, MailCheck, ShieldCheck, ChevronDown, ChevronRight, Save } from "lucide-react";
+import { UserPlus, Loader2, X, Trash2, Users, MailCheck, ShieldCheck, ChevronDown, ChevronRight, Save, Archive, ArchiveRestore } from "lucide-react";
 
 const COMPANY_ROLE_OPTIONS = [
   { value: "editor",   label: "Editor",   hint: "Post JEs, categorize, reconcile" },
@@ -26,7 +26,7 @@ const ADMIN_ROLE_OPTIONS = [
 ];
 
 export default function TeamPanel({ mode, companyId, availableCompanies = [] }) {
-  const [team, setTeam] = useState({ members: [], pending_invites: [] });
+  const [team, setTeam] = useState({ members: [], archived_members: [], pending_invites: [] });
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const listUrl = useMemo(() => {
@@ -114,6 +114,13 @@ export default function TeamPanel({ mode, companyId, availableCompanies = [] }) 
               </div>
             )}
           </div>
+
+          {mode === "pro" && (team.archived_members || []).length > 0 && (
+            <ArchivedStaffList
+              members={team.archived_members}
+              onChanged={load}
+            />
+          )}
 
           {(team.pending_invites || []).length > 0 && (
             <>
@@ -205,6 +212,19 @@ function MemberRow({ member, mode, companyId, availableCompanies, onChanged }) {
     } finally { setBusy(false); }
   };
 
+  const archive = async () => {
+    const who = member.name || member.email;
+    if (!window.confirm(`Archive ${who}? They'll be hidden from the active staff list but their history and memberships stay intact. You can unarchive them anytime.`)) return;
+    setBusy(true);
+    try {
+      await api.post(`/pro/staff/${member.user_id}/archive`);
+      toast.success(`${who} archived.`);
+      onChanged();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't archive");
+    } finally { setBusy(false); }
+  };
+
   // Owner/Pro roles on a company are structural — no re-role, no removal.
   const structural = ["owner", "pro"].includes(member.role);
 
@@ -285,14 +305,27 @@ function MemberRow({ member, mode, companyId, availableCompanies, onChanged }) {
 
           <div className="flex items-center justify-between gap-2 pt-1">
             {!structural && (
-              <button
-                onClick={remove}
-                disabled={busy}
-                data-testid={`team-member-remove-${member.user_id}`}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-50"
-              >
-                <Trash2 size={12} /> {mode === "pro" ? "Remove from firm" : "Remove from company"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={remove}
+                  disabled={busy}
+                  data-testid={`team-member-remove-${member.user_id}`}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                >
+                  <Trash2 size={12} /> {mode === "pro" ? "Remove from firm" : "Remove from company"}
+                </button>
+                {mode === "pro" && (
+                  <button
+                    onClick={archive}
+                    disabled={busy}
+                    data-testid={`team-member-archive-${member.user_id}`}
+                    title="Hide this staff member from the active list without deleting their memberships or audit history."
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    <Archive size={12} /> Archive
+                  </button>
+                )}
+              </div>
             )}
             {structural && <div />}
             <button
@@ -307,6 +340,71 @@ function MemberRow({ member, mode, companyId, availableCompanies, onChanged }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+
+function ArchivedStaffList({ members, onChanged }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-xl border bg-slate-50 mt-2" data-testid="team-archived-list">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-2 text-xs uppercase tracking-widest text-slate-500 font-semibold hover:bg-slate-100 rounded-t-xl"
+        data-testid="team-archived-toggle"
+      >
+        <span className="flex items-center gap-1.5">
+          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          <Archive size={12} /> Archived staff <span className="text-slate-400">({members.length})</span>
+        </span>
+      </button>
+      {open && (
+        <div className="divide-y border-t">
+          {members.map((m) => (
+            <ArchivedRow key={m.user_id} member={m} onChanged={onChanged} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ArchivedRow({ member, onChanged }) {
+  const [busy, setBusy] = useState(false);
+  const unarchive = async () => {
+    setBusy(true);
+    try {
+      await api.post(`/pro/staff/${member.user_id}/unarchive`);
+      toast.success(`${member.name || member.email} restored.`);
+      onChanged();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't restore");
+    } finally { setBusy(false); }
+  };
+  return (
+    <div
+      className="flex items-center justify-between p-3 text-sm"
+      data-testid={`team-archived-row-${member.user_id}`}
+    >
+      <div className="min-w-0">
+        <div className="font-medium text-slate-700 truncate">{member.name || member.email}</div>
+        <div className="text-xs text-slate-500 truncate">
+          {member.email}
+          {member.company_ids?.length > 0 && (
+            <> · {member.company_ids.length} client{member.company_ids.length === 1 ? "" : "s"}</>
+          )}
+        </div>
+      </div>
+      <button
+        onClick={unarchive}
+        disabled={busy}
+        data-testid={`team-archived-restore-${member.user_id}`}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+      >
+        {busy ? <Loader2 size={12} className="animate-spin" /> : <ArchiveRestore size={12} />}
+        Restore
+      </button>
     </div>
   );
 }
