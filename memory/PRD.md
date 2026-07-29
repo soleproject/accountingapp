@@ -39,7 +39,22 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — Archive firm staff + client team invite audit
+### Feb 2026 (latest) — Firm-staff role elevation + Clients-list scoping
+
+- **Global role elevation on invite accept.** In `/app/backend/routes/invites.py`,
+  `public_invite_accept` now upgrades an existing user's global role when a `pro`
+  or `superadmin` invite is accepted (ranked: client < pro < superadmin, never
+  downgrades). Previously, pre-existing clients invited as firm staff kept
+  `role=client` globally, which hid the `Clients` sidebar link (gated by
+  `role === "pro"`) and blocked `/api/pro/clients`.
+- **One-time backfill migration** in `server.py::startup` — sweeps
+  `users.role='client'` who have an active `memberships.role='pro'` and
+  promotes them to `role='pro'`. Idempotent, no-ops on subsequent restarts.
+- **`/api/pro/clients` skips archived memberships** — archived firm-staff who
+  log in no longer see their former client list. Uses
+  `{archived_at: {$exists: false}} OR {archived_at: null}`.
+
+### Feb 2026 — Archive firm staff + client team invite audit
 
 - **Archive/Unarchive firm staff.** New endpoints `POST /api/pro/staff/{user_id}/archive`
   and `POST /api/pro/staff/{user_id}/unarchive` in `/app/backend/routes/invites.py`.

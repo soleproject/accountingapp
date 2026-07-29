@@ -123,6 +123,23 @@ async def startup():
         name="company_bill_status_date",
     )
     await db.memberships.create_index([("user_id", 1), ("company_id", 1)])
+    # One-time backfill (Feb 2026) — elevate global role for any user
+    # who has an active `role=pro` membership but is still flagged
+    # `role=client` globally. Prior invites of *pre-existing* client
+    # users left them as clients globally, which hid the /pro/clients
+    # sidebar. Idempotent — subsequent startups no-op once caught up.
+    await db.users.update_many(
+        {"role": "client", "id": {"$in": [
+            m["user_id"] for m in await db.memberships.find(
+                {"role": "pro", "$or": [
+                    {"archived_at": {"$exists": False}},
+                    {"archived_at": None},
+                ]},
+                {"user_id": 1, "_id": 0},
+            ).to_list(10000)
+        ]}},
+        {"$set": {"role": "pro"}},
+    )
     await merchant_cache.ensure_indexes()
     await contact_resolver.ensure_contact_index()
     import pfc_resolver

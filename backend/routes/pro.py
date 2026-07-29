@@ -55,7 +55,13 @@ router = APIRouter(prefix="/api")
 
 @router.get("/pro/clients")
 async def pro_clients(user: dict = Depends(require_role("pro", "superadmin"))):
-    ms = await db.memberships.find({"user_id": user["id"], "role": "pro"}).to_list(1000)
+    # Only ACTIVE pro memberships — archived staff shouldn't see their
+    # former client list. Superadmins are unaffected (they get every
+    # company below).
+    ms = await db.memberships.find({
+        "user_id": user["id"], "role": "pro",
+        "$or": [{"archived_at": {"$exists": False}}, {"archived_at": None}],
+    }).to_list(1000)
     company_ids = [m["company_id"] for m in ms]
     if user["role"] == "superadmin":
         companies = await db.companies.find({}).to_list(1000)

@@ -643,23 +643,29 @@ async def public_invite_accept(token: str, inp: AcceptInviteIn):
 
     existing = await _existing_user(inv["email"])
     now = now_iso()
+    # Rank roles so we never *downgrade* a user on invite accept.
+    _RANK = {"client": 0, "pro": 1, "superadmin": 2}
     if existing:
         user_id = existing["id"]
         # Update password only if the account is new-ish (never set their own).
+        set_fields: dict = {"updated_at": now}
         if existing.get("must_set_password"):
-            await db.users.update_one(
-                {"id": user_id},
-                {"$set": {
-                    "password": hash_password(inp.password),
-                    "must_set_password": False,
-                    "name": inp.name or existing.get("name") or inv.get("invitee_name") or existing["email"].split("@")[0],
-                    "updated_at": now,
-                }},
-            )
-        # An existing pro/superadmin invited into a plain company keeps
-        # their firm-level role globally; we still add the per-company
-        # membership below so `require_company` passes.
-        role_for_user = existing.get("role") or inv["role"]
+            set_fields.update({
+                "password": hash_password(inp.password),
+                "must_set_password": False,
+                "name": inp.name or existing.get("name") or inv.get("invitee_name") or existing["email"].split("@")[0],
+            })
+        # Elevate global role when the invite grants a higher-tier role
+        # (e.g. an existing "client" invited as firm-staff / "pro"). Without
+        # this the invitee logs in with the client sidebar and can't reach
+        # the firm-staff surfaces they were just granted access to.
+        if inv["role"] in {"pro", "superadmin"}:
+            cur_rank = _RANK.get(existing.get("role") or "client", 0)
+            new_rank = _RANK[inv["role"]]
+            if new_rank > cur_rank:
+                set_fields["role"] = inv["role"]
+        await db.users.update_one({"id": user_id}, {"$set": set_fields})
+        role_for_user = set_fields.get("role") or existing.get("role") or inv["role"]
     else:
         user_id = str(uuid.uuid4())
         # If the invitee is being minted as a pro/superadmin, that's the
