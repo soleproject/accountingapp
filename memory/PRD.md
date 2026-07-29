@@ -2691,3 +2691,39 @@ Every grant is written to `admin_audit_log` with kind=`superadmin_granted` (gran
 - `/app/backend/routes/admin.py` (`OWNER_SUPERADMIN_EMAIL` env, `require_owner_superadmin` dep, new list + revoke endpoints, tightened grant guard)
 - `/app/frontend/src/pages/SuperadminDash.jsx` (probe → isOwner flag → conditional UI, new `SuperadminsCard` + `SuperadminRow` components with 2-step confirm)
 
+
+## Bug Fix: Firm Staff Pending Invites Persisted + Accepted Staff Now Appears (Feb 28, 2026) ✅
+**User report:** *"I went into Skyward Sparks LLC and added a firm staff. I refreshed and the pending went away so now it says there is no firm staff. Also, the staff received the invite and accepted, but they are still not on the dashboard for firm staff."*
+
+**Two connected root causes, both in `list_pro_team`:**
+
+1. **Pending disappears on refresh** — the endpoint filtered pending invites by `invited_by_user_id: user["id"]` only. Fine when a pro invites, but the query didn't consider company scope — and when a superadmin viewer refreshed, if the invite's `invited_by_user_id` didn't match their own id (e.g., stale JWT, alternate session), the pending vanished.
+
+2. **Accepted staff never appears** — the `members` list is filtered through `my_cids = {companies where I have role="pro"}`. Superadmins have NO `role:"pro"` memberships, so `my_cids = ∅`, meaning `members = []` regardless of what's actually happened on the company.
+
+**Fix — make `/pro/team` company-scoped when the frontend passes `?company_id`:**
+
+### Backend (`routes/invites.py`)
+`list_pro_team` now accepts an optional `company_id` query param:
+- **Company-scoped mode** (companyId provided): 
+  - Verifies access (owner/pro membership OR superadmin) — 404 unknown / 403 unauthorized
+  - Members = every user with `role="pro"` on THIS company (excluding self)
+  - Pending invites = every pending invite for THIS company, regardless of who created it
+- **Legacy mode** (no companyId): preserved for backwards compat
+
+### Frontend
+- `TeamPanel.jsx` — the `listUrl` builder now appends `?company_id=<currentId>` when `mode==="pro"` and a company is picked in the top selector
+- `ProTeam.jsx` — pulls `currentId` from `useCompany()` and passes it to `TeamPanel`. Page copy dynamically shows the current company name ("Staff and pending invites for **Bright Beans Coffee Co.**") when scoped.
+
+**Verified end-to-end via curl:**
+- Baseline company-scoped fetch → 2 existing members ✓
+- Create pro invite as owner → invite persisted with company_ids ✓
+- **Refresh → pending PERSISTS** (was 0 → now 1) — Bug 1 fixed ✓
+- Accept invite via `POST /invites/{token}/accept` → user created with role="pro" ✓
+- **Refresh → accepted staff appears as active member, pending row clears** (members: 2 → 3) — Bug 2 fixed ✓
+
+**Files changed:**
+- `/app/backend/routes/invites.py` (`list_pro_team` accepts optional `company_id`, adds company-scoped mode)
+- `/app/frontend/src/components/TeamPanel.jsx` (`listUrl` appends companyId when set)
+- `/app/frontend/src/pages/ProTeam.jsx` (subscribes to `useCompany`, passes companyId + adds dynamic copy)
+

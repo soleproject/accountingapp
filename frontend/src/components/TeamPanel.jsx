@@ -31,7 +31,14 @@ export default function TeamPanel({ mode, companyId, availableCompanies = [] }) 
   const [showForm, setShowForm] = useState(false);
   const listUrl = useMemo(() => {
     if (mode === "company") return `/companies/${companyId}/team`;
-    if (mode === "pro")     return `/pro/team`;
+    if (mode === "pro") {
+      // When the pro/superadmin has picked a specific client in the top
+      // company selector, scope the firm-staff view to THAT company so
+      // (a) superadmins (no personal pro memberships) still see the
+      //     firm's staff, and (b) pending invites persist after refresh
+      //     regardless of who created them.
+      return companyId ? `/pro/team?company_id=${companyId}` : `/pro/team`;
+    }
     return null;   // admin has no dedicated list — pending invites only
   }, [mode, companyId]);
 

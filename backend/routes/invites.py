@@ -274,19 +274,62 @@ async def list_company_team(cid: str, user: dict = Depends(get_current_user)):
 
 
 @router.get("/pro/team")
-async def list_pro_team(user: dict = Depends(require_role("pro", "superadmin"))):
-    """All firm-staff users the current Pro has invited or who share
-    Pro-memberships on the same client companies."""
-    # Companies I manage.
-    my_ms = await db.memberships.find({"user_id": user["id"], "role": "pro"}).to_list(1000)
-    my_cids = {m["company_id"] for m in my_ms}
+async def list_pro_team(
+    company_id: Optional[str] = None,
+    user: dict = Depends(require_role("pro", "superadmin")),
+):
+    """All firm-staff users the current Pro (or superadmin) can see.
 
-    # Other users with pro membership on any of my companies (my firm).
-    others = await db.memberships.find({
-        "company_id": {"$in": list(my_cids)},
-        "role": "pro",
-        "user_id": {"$ne": user["id"]},
-    }).to_list(1000)
+    Scoping:
+      * When `company_id` is provided → return every pro member + pending
+        invite tied to that ONE company. This is what the "Firm staff"
+        page uses when a company is picked in the top selector. Works
+        for superadmins too (they have no personal pro memberships but
+        can still administer any firm's staff).
+      * When `company_id` is omitted → union across every company the
+        current pro manages (legacy behavior). Superadmins with no pro
+        memberships see nothing under this branch — they should pass a
+        company_id.
+    """
+    if company_id:
+        # Company-scoped mode. Verify access first.
+        company = await db.companies.find_one({"id": company_id})
+        if not company:
+            raise HTTPException(404, "Company not found.")
+        if user["role"] != "superadmin":
+            my_m = await db.memberships.find_one(
+                {"user_id": user["id"], "company_id": company_id, "role": "pro"},
+            )
+            if not my_m:
+                raise HTTPException(403, "You don't have access to this company's firm staff.")
+        my_cids = {company_id}
+        # Every OTHER pro on this company (exclude the viewer themselves).
+        others = await db.memberships.find({
+            "company_id": company_id, "role": "pro",
+            "user_id": {"$ne": user["id"]},
+        }).to_list(1000)
+        # Pending invites for this company — regardless of who created
+        # them. Fixes the "invite disappears on refresh" bug where a
+        # superadmin invited on behalf of the firm and then couldn't see
+        # their own pending because the frontend re-fetched by company.
+        invites_q = {
+            "company_ids": company_id,
+            "role": "pro",
+            "status": "pending",
+        }
+    else:
+        # Legacy user-scoped mode.
+        my_ms = await db.memberships.find({"user_id": user["id"], "role": "pro"}).to_list(1000)
+        my_cids = {m["company_id"] for m in my_ms}
+        others = await db.memberships.find({
+            "company_id": {"$in": list(my_cids)},
+            "role": "pro",
+            "user_id": {"$ne": user["id"]},
+        }).to_list(1000)
+        invites_q = {
+            "invited_by_user_id": user["id"], "role": "pro", "status": "pending",
+        }
+
     grouped: dict[str, list[str]] = {}
     for m in others:
         grouped.setdefault(m["user_id"], []).append(m["company_id"])
@@ -301,9 +344,7 @@ async def list_pro_team(user: dict = Depends(require_role("pro", "superadmin")))
         }
         for uid, cids in grouped.items()
     ]
-    invites = await db.invites.find({
-        "invited_by_user_id": user["id"], "role": "pro", "status": "pending",
-    }).to_list(500)
+    invites = await db.invites.find(invites_q).to_list(500)
     return {
         "members": members,
         "pending_invites": [
@@ -311,6 +352,7 @@ async def list_pro_team(user: dict = Depends(require_role("pro", "superadmin")))
                 "id": i["id"], "email": i["email"], "role": i["role"],
                 "company_ids": i.get("company_ids") or [],
                 "created_at": i["created_at"], "expires_at": i["expires_at"],
+                "invited_by_user_id": i.get("invited_by_user_id"),
             }
             for i in invites
         ],
