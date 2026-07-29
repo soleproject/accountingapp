@@ -151,26 +151,24 @@ export default function Login() {
 
       <div className="flex-1 flex items-center justify-center p-6">
         <form onSubmit={submit} className="w-full max-w-sm space-y-5">
-          {/* Firm white-label header */}
+          {/* Firm white-label header — logo big and centered, firm name under it. */}
           {mode === "firm" && firm && (
-            <div className="flex items-center gap-3 mb-6" data-testid="login-firm-branding">
+            <div className="flex flex-col items-center text-center gap-3 mb-6" data-testid="login-firm-branding">
               {(firm.logos?.logo_light || firm.logos?.icon_light) ? (
                 <img
                   src={firm.logos.logo_light || firm.logos.icon_light}
                   alt={firm.firm_name}
-                  className="h-10 max-w-[180px] object-contain"
+                  className="h-20 max-h-24 max-w-[320px] object-contain"
                 />
               ) : (
-                <div className="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center">
-                  <Sparkles size={18} className="text-white" />
+                <div className="w-20 h-20 rounded-lg bg-blue-600 flex items-center justify-center">
+                  <Sparkles size={36} className="text-white" />
                 </div>
               )}
-              <div>
-                <div className="font-heading font-bold text-slate-900">{firm.firm_name}</div>
-                {/* No "Powered by" — firm's clients get a fully white-labeled
-                    experience. Firms that want platform attribution can turn
-                    it on in Enterprise Settings (future flag). */}
-              </div>
+              <div className="font-heading font-bold text-lg text-slate-900">{firm.firm_name}</div>
+              {/* No "Powered by" — firm's clients get a fully white-labeled
+                  experience. Firms that want platform attribution can turn
+                  it on in Enterprise Settings (future flag). */}
             </div>
           )}
           {/* SmartBooks header on mobile (mirrors the left marketing panel) */}

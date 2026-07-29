@@ -2611,3 +2611,16 @@ Each toggle has optimistic UI with rollback on error, toast confirmations both w
 - `/app/frontend/src/pages/ProSettings.jsx` (3 new state pairs, 3 new save handlers, expanded card UI)
 - `/app/frontend/src/pages/Login.jsx` (tagline override, signup-link conditional, hero-image cover panel)
 
+
+## Firm Login Layout: Big Logo + Name Below (Feb 28, 2026) ✅
+**User request:** *"make the logo big and put the Name under the logo"*
+
+**Before:** logo (h-10, ~40px) and firm name side-by-side, cramped on the top-left of the form.
+
+**After:** logo enlarged to h-20 (~80px) with a max-width of 320px, centered above the firm name which now sits on its own line, also centered, in `font-heading font-bold text-lg`. Both wrapped in `flex flex-col items-center text-center`.
+
+**Files changed:**
+- `/app/frontend/src/pages/Login.jsx` (firm branding block layout)
+
+**Verified via screenshot** on the firm-branded login: CypherPro logo big and centered, "Priya Patel, CPA" (the firm name) directly underneath.
+
