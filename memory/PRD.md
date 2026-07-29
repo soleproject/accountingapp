@@ -39,7 +39,37 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — Affiliate v2 (vanity slug, tiered payouts, reports)
+### Feb 2026 (latest) — Superadmin affiliate payout console
+
+- **Backend**: 4 endpoints in `routes/admin.py`:
+  - `GET /api/admin/affiliate/payouts` — per-affiliate roll-up sorted by
+    outstanding accrued balance. Returns totals (accrued, paid, lifetime,
+    affiliates_needing_payout) and per-row (accrued/paid cents + counts,
+    unique_payers, last_activity, needs_payout, referral_slug, firm_name).
+  - `GET /api/admin/affiliate/payouts/{referrer_id}?status=` — line-item
+    earnings for a single affiliate (all / accrued / paid_out filter).
+  - `POST /api/admin/affiliate/payouts/mark-paid` — flips accrued rows
+    to `paid_out`, records `paid_out_at`, `paid_out_by_user_id`, optional
+    `external_ref` (Wise TX / check #) + `note`. Cherry-pick via
+    `earning_ids`, omit for "pay full balance". Idempotent — already-paid
+    rows are ignored. Writes a `referral_payout_batches` row per action.
+  - `POST /api/admin/affiliate/payouts/{earning_id}/reverse` — flip a
+    paid_out row back to accrued (bounced-check corrections). Pushes to
+    a `reversal_log` array on the earning row.
+  - `GET /api/admin/affiliate/history?limit=` — recent payout batches
+    across all affiliates for auditability.
+- **Frontend**: `<AffiliatePayoutsCard/>` on the Superadmin dash — table
+  of affiliates with balance/paid columns, per-row `Mark paid` button
+  (disabled when balance is $0), collapsible History pane. `MarkPaidModal`
+  lists accrued invoices with select-all / cherry-pick checkboxes,
+  external_ref + note fields, running total-to-pay, submit button. All
+  interactive elements carry `data-testid`s.
+- **Regression tests**: `/app/backend/tests/test_iter50_payout_console.py`
+  — 14/14 pass covering shape, auth gates, seed→mark-paid state
+  transition, cherry-pick, idempotency, reverse-payout (400 for accrued,
+  404 for unknown, $unset + reversal_log push).
+
+### Feb 2026 — Affiliate v2 (vanity slug, tiered payouts, reports)
 
 - **Vanity referral slugs.** `referral_util.py` rewritten — new users get a
   human-readable slug derived from their name (`priya-patel`, kebab-case,
