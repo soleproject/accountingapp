@@ -21,7 +21,13 @@ async def company_ids_for_user(user: dict) -> list[str]:
     if user["role"] == "superadmin":
         docs = await db.companies.find({}).to_list(1000)
         return [d["id"] for d in docs]
-    ms = await db.memberships.find({"user_id": user["id"]}).to_list(1000)
+    # Skip archived memberships — a firm-staff whose pro-membership on a
+    # client was archived shouldn't see that client in the company
+    # switcher any longer.
+    ms = await db.memberships.find({
+        "user_id": user["id"],
+        "$or": [{"archived_at": {"$exists": False}}, {"archived_at": None}],
+    }).to_list(1000)
     return [m["company_id"] for m in ms]
 
 

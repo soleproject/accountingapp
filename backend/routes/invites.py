@@ -309,12 +309,33 @@ async def list_pro_team(
             )
             if not my_m:
                 raise HTTPException(403, "You don't have access to this company's firm staff.")
-        my_cids = {company_id}
-        # Every OTHER pro on this company (exclude the viewer themselves).
-        others = await db.memberships.find({
+        # Step 1: who counts as "firm staff on this company" — anyone with
+        # a pro membership on THIS company (active or archived), except the
+        # viewer themselves.
+        on_company = await db.memberships.find({
             "company_id": company_id, "role": "pro",
             "user_id": {"$ne": user["id"]},
         }).to_list(1000)
+        staff_uids = list({m["user_id"] for m in on_company})
+        # Step 2: expand to ALL of each staff member's pro memberships
+        # within the CURRENT pro's client scope, so the frontend's checkbox
+        # UI accurately reflects which of the pro's clients they can reach.
+        # (Superadmin views the staff's full pro-membership set.) This
+        # fixes the bug where Priya's UI showed "1 of 2" while the DB
+        # still had a stale second membership that only surfaced when the
+        # staff member logged in.
+        if user["role"] == "superadmin":
+            scope_cids = None
+        else:
+            my_pro_ms = await db.memberships.find(
+                {"user_id": user["id"], "role": "pro"},
+            ).to_list(1000)
+            scope_cids = [m["company_id"] for m in my_pro_ms]
+        others_q: dict = {"user_id": {"$in": staff_uids}, "role": "pro"} if staff_uids else {"_id": "__none__"}
+        if scope_cids is not None:
+            others_q["company_id"] = {"$in": scope_cids}
+        others = await db.memberships.find(others_q).to_list(2000)
+        my_cids = {company_id}
         # Pending invites for this company — regardless of who created
         # them. Fixes the "invite disappears on refresh" bug where a
         # superadmin invited on behalf of the firm and then couldn't see
@@ -341,32 +362,38 @@ async def list_pro_team(
             "role": "pro", "status": "pending",
         } if my_cids else {"_id": "__no_match__"}
 
-    grouped: dict[str, list[str]] = {}
-    archived_grouped: dict[str, list[str]] = {}
+    active_by_uid: dict[str, list[str]] = {}
+    archived_by_uid: dict[str, list[str]] = {}
     for m in others:
-        bucket = archived_grouped if m.get("archived_at") else grouped
-        bucket.setdefault(m["user_id"], []).append(m["company_id"])
-    all_uids = list(set(grouped) | set(archived_grouped))
+        (archived_by_uid if m.get("archived_at") else active_by_uid).setdefault(
+            m["user_id"], [],
+        ).append(m["company_id"])
+    # A staff is "active" if they have ANY non-archived pro membership in
+    # scope; otherwise they're archived-only. Prevents the same user from
+    # appearing in both sections when they have a mix of statuses.
+    all_uids = list(set(active_by_uid) | set(archived_by_uid))
     users = {u["id"]: u for u in await db.users.find({"id": {"$in": all_uids}}).to_list(500)}
 
-    members = [
-        {
-            "user_id": uid,
-            "name": users.get(uid, {}).get("name"),
-            "email": users.get(uid, {}).get("email"),
-            "company_ids": cids,
-        }
-        for uid, cids in grouped.items()
-    ]
-    archived_members = [
-        {
-            "user_id": uid,
-            "name": users.get(uid, {}).get("name"),
-            "email": users.get(uid, {}).get("email"),
-            "company_ids": cids,
-        }
-        for uid, cids in archived_grouped.items()
-    ]
+    members = []
+    archived_members = []
+    for uid in all_uids:
+        u = users.get(uid, {})
+        if uid in active_by_uid:
+            members.append({
+                "user_id": uid,
+                "name": u.get("name"),
+                "email": u.get("email"),
+                # Only surface ACTIVE memberships as the staff's current
+                # access set — archived ones show as unchecked.
+                "company_ids": active_by_uid[uid],
+            })
+        else:
+            archived_members.append({
+                "user_id": uid,
+                "name": u.get("name"),
+                "email": u.get("email"),
+                "company_ids": archived_by_uid[uid],
+            })
     invites = await db.invites.find(invites_q).to_list(500)
     return {
         "members": members,

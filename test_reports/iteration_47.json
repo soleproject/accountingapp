@@ -1,0 +1,29 @@
+{
+  "summary": "Iter 47 validation: /api/pro/team now expands each staff member's company_ids to ALL of the current Pro's client scope (fixing the stale-membership invisibility bug), archived pro memberships filter out of /api/companies, and shrinking access via PUT /api/pro/staff/{uid}/access cleanly propagates to /api/pro/clients + /api/companies. Wrote /app/backend/tests/test_iter47_pro_team_scoping.py — 10/10 tests pass. Frontend flow verified end-to-end: logged in as pro@axiom.ai, /pro/team showed MFG Gmail with 'Client access (2 of 12)' and both Bright Beans + TEST_Co_1784642368167 checked; unchecked TEST_Co, clicked 'Save changes' → toast 'MFG Gmail's access updated.'; after refresh the count reads '(1 of 12)' with only Bright Beans checked. MFG's memberships restored to [Bright Beans, TEST_Co] after the E2E test so the state matches the described test-env baseline.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/pro/team — Priya's private-label view", "issues": ["Sidebar shows 'CypherPro' brand + 'Priya Patel, CPA' — task description referenced 'SmartBooks branding', but this is Priya's firm private-label view (expected behavior per app's wildcard sub-domain private-label design). NOT a bug; noted for clarity."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter47_pro_team_scoping.py",
+    "/app/test_reports/pytest/iter47.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "invites.py::list_pro_team — the mixed-active+archived split is now per-user-id (correct). The 'others' query with `scope_cids` correctly bounds the returned memberships to the current Pro's client scope, so a firm-staff member who also works for a different Pro won't leak that unrelated Pro's client ids. Verified via test_pro_team_expands_scope_to_all_pro_clients + superadmin variant.",
+    "deps.py::company_ids_for_user — filter uses $or with archived_at not-exists OR null, which is the safe way to catch legacy docs that may have been created before the archived_at field existed. Good.",
+    "Minor observation (not blocking): the mixed active+archived test in the suite could not be fully exercised because there is no per-membership archive endpoint — /archive and /unarchive operate on all memberships within the current Pro's scope. The full-archived branch is covered instead. If per-membership archive is ever needed, we can revisit."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter47_pro_team_scoping.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "pro@axiom.ai/pro123, admin@axiom.ai/admin123, client@axiom.ai/client123, client2@axiom.ai/client123, michael.f.giorgi@gmail.com/test1234 (unused in tests; MFG state manipulated via pro's PUT /access instead)",
+  "seed_data_creation": "Created ephemeral TEST_staff_multi_<uuid>@example.com via invite+accept fixture; cleaned up in fixture teardown via DELETE /api/pro/staff/{uid}. Also seeded/restored MFG (2de3ee6d...) memberships to [Bright Beans, TEST_Co_1784642368167] before and after the frontend E2E test to preserve the baseline described in the request.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "MFG (2de3ee6d-befe-4a64-beb6-80cdedce65ce) has 2 active pro memberships: Bright Beans (1829a9eb-...) + TEST_Co_1784642368167 (358ff8b8-...). Bright Beans is Priya/pro@axiom.ai's client and TEST_Co is also in her scope. If a future test needs to reset this state, PUT /api/pro/staff/{uid}/access with company_ids=[bright, test_co] as pro@axiom.ai. The pro sees 13 clients; superadmin admin@axiom.ai can also administer.",
+  "rca of the issue": "Original bug: list_pro_team scoped `member.company_ids` to only the queried company, hiding stale memberships from the Pro's UI. Fix (iter47): after finding staff_uids on the queried company, expand a second query for their memberships across the current Pro's full client scope. Also fixed: (a) active/archived split changed from per-membership to per-staff-user so mixed-status staff show up in `members` with their active ids only; (b) company_ids_for_user in deps.py now excludes memberships where archived_at is set, so archived firm-staff no longer see archived clients in the top selector. Both branches are covered by tests."
+}
