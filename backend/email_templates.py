@@ -681,6 +681,89 @@ def affiliate_welcome(
     return "Your affiliate link is live — let's earn.", _wrap(inner)
 
 
+# --------------------------------------------------------------------------
+# Enterprise welcome — fired right after ``/api/auth/signup`` with
+# ``role='pro'`` + ``enterprise_name``. Sends the new firm owner the 3
+# links they need on day 0 (invite staff, add first client, review
+# billing) plus a note that the private-label subdomain unlocks with the
+# paid tier so they know what's coming next.
+# --------------------------------------------------------------------------
+def enterprise_welcome(
+    *, name: str, enterprise_name: str,
+    enterprise_slug: Optional[str],
+    dashboard_url: str, invite_url: str, billing_url: str,
+) -> tuple[str, str]:
+    """Welcome a new firm owner with the toolkit they need on day 0.
+
+    ``enterprise_slug`` is displayed as an FYI-only value — the firm's
+    reserved private-label handle. Full private-label branding (custom
+    subdomain, hero image, tagline) is a paid upgrade in a subsequent
+    iteration; this email flags that so the owner knows to expect it.
+    """
+    slug_hint = (
+        f"""<div style="{_MUTE};padding-top:8px;">
+              Your reserved firm handle:
+              <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#334155;">
+                {escape(enterprise_slug)}
+              </span> — the private-label subdomain unlocks on the paid tier.
+            </div>"""
+        if enterprise_slug else ""
+    )
+    inner = f"""
+      <div style="{_H1}">Welcome to your firm dashboard</div>
+      <div style="{_P}">
+        Hi {escape(name)},<br><br>
+        <b>{escape(enterprise_name)}</b> is live on SmartBooks. Your
+        client list is empty and quiet — let's fix that.
+      </div>
+      <div style="text-align:center;padding:14px 0 4px;">
+        <a href="{dashboard_url}" style="{_BTN}">Open your firm dashboard →</a>
+      </div>
+      {slug_hint}
+      <div style="{_P};padding-top:16px;">
+        <b>Three things to do this week:</b>
+      </div>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+             style="margin:6px 0 4px;border-collapse:collapse;width:100%;">
+        <tr>
+          <td style="{_TABLE_KEY};vertical-align:top;width:32px;">1.</td>
+          <td style="{_TABLE_VAL}">
+            <b>Invite your team.</b> Add bookkeepers, reviewers, and
+            partners — assign them to specific clients.<br>
+            <a href="{invite_url}" style="color:#0891b2;">Invite staff →</a>
+          </td>
+        </tr>
+        <tr>
+          <td style="{_TABLE_KEY};vertical-align:top;">2.</td>
+          <td style="{_TABLE_VAL}">
+            <b>Add your first client.</b> Kick off onboarding with
+            Plaid, Veryfi, and an AI-assisted chart of accounts.<br>
+            <a href="{dashboard_url}" style="color:#0891b2;">Go to
+            My Clients →</a>
+          </td>
+        </tr>
+        <tr>
+          <td style="{_TABLE_KEY};vertical-align:top;">3.</td>
+          <td style="{_TABLE_VAL}">
+            <b>Pick your billing plan.</b> Bill your firm centrally,
+            or pass Stripe subscriptions through to each client.<br>
+            <a href="{billing_url}" style="color:#0891b2;">Review
+            billing →</a>
+          </td>
+        </tr>
+      </table>
+      <div style="{_MUTE};padding-top:16px;">
+        Questions along the way? Reply to this email — a human at
+        SmartBooks reads every one.
+      </div>
+    """
+    return f"{enterprise_name} is live on SmartBooks — welcome.", _wrap(
+        inner, brand_name=enterprise_name,
+    )
+
+
+
+
 
 
 # --------------------------------------------------------------------------

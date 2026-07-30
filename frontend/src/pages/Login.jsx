@@ -237,6 +237,9 @@ export default function Login() {
               No account? <a href="/signup" className="text-cyan-700 hover:underline" data-testid="signup-link">Create one</a>
             </div>
             <div>
+              Running a firm? <a href="/signup/enterprise" className="text-indigo-700 hover:underline" data-testid="signup-enterprise-link">Start on the enterprise plan</a>
+            </div>
+            <div>
               Just want to refer? <a href="/signup/affiliate" className="text-emerald-700 hover:underline" data-testid="signup-affiliate-link">Become an affiliate</a>
             </div>
           </div>

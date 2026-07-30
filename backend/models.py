@@ -22,6 +22,13 @@ class SignupIn(BaseModel):
     # Optional affiliate referral slug — set on the user as
     # `referred_by_user_id` for later revenue-share crediting.
     ref: str | None = None
+    # Enterprise (firm) name — only used when ``role='pro'`` on the
+    # ``/signup/enterprise`` path. When provided, we auto-provision an
+    # Enterprise record owned by the new Pro user right after signup
+    # via ``enterprises.ensure_personal_enterprise_for_pro``. The
+    # private-label subdomain is NOT collected here; that's a paid
+    # upgrade in a later iteration.
+    enterprise_name: str | None = None
 
 
 class CompanyCreate(BaseModel):

@@ -144,8 +144,44 @@ async def signup(inp: SignupIn):
         # changes their slug or is deleted. Downstream revenue share reads
         # this field as the source of truth.
         doc["referred_by_user_id"] = referrer_id
+    # Enterprise (firm) signups arrive on `/signup/enterprise` with
+    # `role='pro'` + `enterprise_name`. Stamp `branding.firm_name` on
+    # insert so the Enterprise auto-provisioner (below) has the name
+    # to key off of. We do NOT collect the private-label subdomain
+    # here — that's gated behind a paid upgrade in a later iteration.
+    enterprise_signup = (inp.role == "pro" and (inp.enterprise_name or "").strip())
+    if enterprise_signup:
+        doc["branding"] = {"firm_name": inp.enterprise_name.strip()}
     await db.users.insert_one(doc)
     token = create_token(uid, inp.role)
+
+    # Fire-and-forget: spawn the Enterprise record + fire the welcome
+    # email so the new firm owner lands with everything they need in
+    # their inbox on day 0. Same defensive try/except pattern as the
+    # affiliate welcome — the response must not 500 on email failure.
+    if enterprise_signup:
+        try:
+            import enterprises as _ent
+            import email_templates as _et
+            from email_dispatcher import dispatch, public_base_url
+            import logging
+            ent = await _ent.ensure_personal_enterprise_for_pro(uid)
+            subject, html = _et.enterprise_welcome(
+                name=inp.name, enterprise_name=inp.enterprise_name.strip(),
+                enterprise_slug=(ent or {}).get("slug"),
+                dashboard_url=f"{public_base_url()}/pro/clients",
+                invite_url=f"{public_base_url()}/pro/team",
+                billing_url=f"{public_base_url()}/billing",
+            )
+            await dispatch(
+                kind="enterprise_welcome", to=inp.email.lower(),
+                subject=subject, html=html, initiating_user_id=uid,
+            )
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "enterprise welcome dispatch failed for user_id=%s email=%s",
+                uid, inp.email,
+            )
 
     # Fire-and-forget: brand-new affiliate → activation email. Wrapped
     # in try/except because dispatcher.dispatch is expected to
