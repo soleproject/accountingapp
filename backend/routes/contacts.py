@@ -346,10 +346,10 @@ import csv as _csv
 # Header aliases → canonical fields. Kept generous so QBO/Xero/Excel
 # exports auto-map without the user having to touch anything.
 _HEADER_ALIASES = {
-    "name":    ["name", "contact", "contact name", "customer", "customer name",
-                "vendor", "vendor name", "supplier", "supplier name",
+    "name":    ["name", "contact", "contact name", "customer name",
+                "vendor name", "supplier name",
                 "company", "company name", "display name", "full name",
-                "client", "client name", "payee"],
+                "client name", "payee"],
     "email":   ["email", "email address", "e-mail", "mail"],
     "phone":   ["phone", "phone number", "phone #", "tel", "telephone",
                 "mobile", "cell", "cell phone"],
@@ -417,11 +417,19 @@ def _parse_csv(data: bytes) -> tuple[list[str], list[list[str]]]:
 
 
 def _parse_pdf(data: bytes) -> tuple[list[str], list[list[str]]]:
-    """Best-effort PDF extraction: pull raw text with pypdf, then run
-    each line through email/phone regex. Every line that yielded at
-    least a name-looking token becomes a row. This works well for
-    printed customer lists / directories; won't beat a proper OCR for
-    scanned/columnar layouts but keeps us dependency-light."""
+    """Best-effort PDF extraction with two strategies:
+
+    **Table mode** — when the top of the extracted text is a run of
+    lines matching known column names (Type / Name / Email / Phone /
+    Address, etc.), we treat those N lines as headers and chunk the
+    remaining lines into groups of N — each group is one row. This is
+    how pypdf flattens standard PDF tables (cell-by-cell in reading
+    order), so this covers exports from Excel/Google Sheets/Word.
+
+    **Fallback mode** — no clear header run, so scan each line with
+    regex for emails and phone numbers, and treat the leftover text as
+    the name. Works for unstructured directories.
+    """
     import pypdf
     reader = pypdf.PdfReader(io.BytesIO(data))
     all_text = []
@@ -432,17 +440,51 @@ def _parse_pdf(data: bytes) -> tuple[list[str], list[list[str]]]:
             continue
     text = "\n".join(all_text)
 
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+    if not lines:
+        return [], []
+
+    # ---- Table-mode detection ----
+    # Walk from the top skipping title-y lines that don't look like
+    # column headers ("Test Contacts Import File", page numbers) until
+    # we hit the first line that IS a known header alias. Then keep
+    # collecting consecutive header-ish lines until we hit a data line.
+    header_start = None
+    for i, ln in enumerate(lines):
+        if _canonical_header(ln):
+            header_start = i
+            break
+    if header_start is not None:
+        headers_raw: list[str] = []
+        seen_canonical: set[str] = set()
+        j = header_start
+        while j < len(lines):
+            canon = _canonical_header(lines[j])
+            if not canon or canon in seen_canonical:
+                break
+            headers_raw.append(lines[j])
+            seen_canonical.add(canon)
+            j += 1
+        n = len(headers_raw)
+        # Need at least a name column, and headers must not swallow the
+        # entire file (defensive against small hand-written docs).
+        if n >= 2 and (len(lines) - j) >= n:
+            body = lines[j:]
+            rows: list[list[str]] = []
+            for k in range(0, len(body) - n + 1, n):
+                chunk = body[k:k + n]
+                if len(chunk) == n:
+                    rows.append(chunk)
+            if rows:
+                return headers_raw, rows
+
+    # ---- Fallback: regex per line ----
     rows: list[list[str]] = []
-    for raw in text.split("\n"):
-        line = raw.strip()
-        if not line or len(line) < 3:
-            continue
-        # Skip pure-numeric or header-y lines like "Page 1 of 4".
-        if re.match(r"^page\s+\d+", line.lower()):
+    for line in lines:
+        if len(line) < 3 or re.match(r"^page\s+\d+", line.lower()):
             continue
         email_m = _EMAIL_RE.search(line)
         phone_m = _PHONE_RE.search(line)
-        # Strip email + phone from the line to leave a plausible name.
         name_part = line
         if email_m: name_part = name_part.replace(email_m.group(0), "")
         if phone_m: name_part = name_part.replace(phone_m.group(0), "")
@@ -450,8 +492,6 @@ def _parse_pdf(data: bytes) -> tuple[list[str], list[list[str]]]:
         name_part = re.sub(r"\s{2,}", " ", name_part).strip(" -")
         if not name_part or len(name_part) < 2:
             continue
-        # Reject purely lowercase 1-word lines — usually noise words
-        # like "email", "phone", "customer".
         if len(name_part.split()) == 1 and name_part.islower():
             continue
         rows.append([

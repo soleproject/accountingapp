@@ -923,34 +923,7 @@ function ImportContactsModal({ currentId, onClose }) {
         {/* ---------- Step: Upload ---------- */}
         {step === "upload" && (
           <div className="p-5 space-y-4">
-            <div className="rounded-lg border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/30 transition-colors p-6 text-center">
-              <input
-                ref={inputRef}
-                type="file"
-                accept=".xlsx,.xls,.xlsm,.csv,.txt,.pdf"
-                className="hidden"
-                onChange={(e) => upload(e.target.files?.[0])}
-                data-testid="import-file-input"
-              />
-              <div className="flex items-center justify-center gap-2 text-slate-400 mb-3">
-                <FileSpreadsheet size={22} /> <FileText size={22} />
-              </div>
-              <div className="text-sm font-medium text-slate-700 mb-1">
-                Drop an Excel / CSV / PDF here
-              </div>
-              <div className="text-xs text-slate-500 mb-3">
-                Auto-detects columns for name, email, phone, address, and type.
-              </div>
-              <button
-                onClick={() => inputRef.current?.click()}
-                disabled={busy}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50"
-                data-testid="import-pick-file"
-              >
-                {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-                Choose file
-              </button>
-            </div>
+            <DropZone busy={busy} onFile={upload} inputRef={inputRef} />
             <div className="flex items-center gap-3">
               <label className="text-xs text-slate-600">
                 Default type when the file doesn't specify:
@@ -966,10 +939,12 @@ function ImportContactsModal({ currentId, onClose }) {
               </select>
             </div>
             <div className="text-[11px] text-slate-500 bg-slate-50 border rounded p-3">
-              <b>Column names we recognize:</b> Name, Contact, Customer, Vendor,
-              Supplier, Company · Email, E-mail · Phone, Mobile, Cell · Address,
-              Street · Type, Kind. Anything else stays as-is. PDFs get scanned
-              for names, emails, and phone numbers line by line.
+              <b>Column names we recognize:</b> Name, Contact, Customer Name,
+              Vendor Name, Supplier Name, Company · Email, E-mail · Phone,
+              Mobile, Cell · Address, Street · Type, Kind. Anything else stays
+              as-is. PDFs with a proper Type/Name/Email/Phone/Address column
+              header row are parsed cell-by-cell; unstructured PDFs are scanned
+              line-by-line for names, emails, and phone numbers.
             </div>
           </div>
         )}
@@ -1122,6 +1097,84 @@ function ImportContactsModal({ currentId, onClose }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+
+
+/**
+ * DropZone — the dashed upload target for the Contacts Import modal.
+ * Supports both click-to-pick AND actual drag-and-drop (which the
+ * original inline version didn't). Highlights on dragenter and
+ * routes the first dropped file to the parent's ``onFile`` handler.
+ */
+function DropZone({ busy, onFile, inputRef }) {
+  const [over, setOver] = React.useState(false);
+  const dragCount = React.useRef(0);
+
+  // dragenter/leave fire for every child element the pointer crosses,
+  // so we track a nesting counter to keep the highlight steady.
+  const onDragEnter = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    dragCount.current += 1;
+    if (e.dataTransfer?.types?.includes("Files")) setOver(true);
+  };
+  const onDragLeave = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    dragCount.current -= 1;
+    if (dragCount.current <= 0) { dragCount.current = 0; setOver(false); }
+  };
+  const onDragOver = (e) => {
+    // Must preventDefault to allow drop.
+    e.preventDefault(); e.stopPropagation();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+  };
+  const onDrop = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    dragCount.current = 0;
+    setOver(false);
+    const f = e.dataTransfer?.files?.[0];
+    if (f) onFile(f);
+  };
+
+  return (
+    <div
+      onDragEnter={onDragEnter}
+      onDragLeave={onDragLeave}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      className={`rounded-lg border-2 border-dashed transition-colors p-6 text-center ${over
+        ? "border-indigo-500 bg-indigo-100/70"
+        : "border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/30"}`}
+      data-testid="import-dropzone"
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".xlsx,.xls,.xlsm,.csv,.txt,.pdf"
+        className="hidden"
+        onChange={(e) => onFile(e.target.files?.[0])}
+        data-testid="import-file-input"
+      />
+      <div className="flex items-center justify-center gap-2 text-slate-400 mb-3 pointer-events-none">
+        <FileSpreadsheet size={22} /> <FileText size={22} />
+      </div>
+      <div className="text-sm font-medium text-slate-700 mb-1 pointer-events-none">
+        {over ? "Drop to upload" : "Drop an Excel / CSV / PDF here"}
+      </div>
+      <div className="text-xs text-slate-500 mb-3 pointer-events-none">
+        Auto-detects columns for name, email, phone, address, and type.
+      </div>
+      <button
+        onClick={() => inputRef.current?.click()}
+        disabled={busy}
+        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50"
+        data-testid="import-pick-file"
+      >
+        {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+        Choose file
+      </button>
     </div>
   );
 }
