@@ -2,11 +2,23 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, Sparkles, Loader2, Pencil, Check, X, GitMerge, AlertTriangle, GripVertical } from "lucide-react";
+import { Plus, Trash2, Sparkles, Loader2, Pencil, Check, X, GitMerge, AlertTriangle, GripVertical, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 
 const TYPES = ["asset", "liability", "equity", "revenue", "cogs", "expense"];
+
+// Section labels — proper English pluralization instead of just tacking
+// an "s" on the end (which produced "EQUITYS", "LIABILITYS", "COGSS").
+// COGS is already plural so it stays as-is.
+const TYPE_LABEL = {
+  asset:     "Assets",
+  liability: "Liabilities",
+  equity:    "Equity",
+  revenue:   "Revenue",
+  cogs:      "COGS",
+  expense:   "Expenses",
+};
 
 // Money formatter — matches the reports pages so the CoA feels
 // consistent. Zero balances render as a subtle "—" rather than "$0.00"
@@ -76,7 +88,19 @@ export default function ChartOfAccounts() {
   };
   useEffect(() => { load(); }, [currentId, basis]);
 
-  // Re-parent a child by dragging it onto a top-level parent row.
+  // Show/hide account code toggle. Persisted in localStorage so the
+  // Pro's preference sticks across sessions. When codes are hidden we
+  // sort each type's list alphabetically by name (the user's mental
+  // model shifts from "1000 → 6999" to "A → Z" the moment codes
+  // disappear from the row).
+  const [showCodes, setShowCodes] = useState(() => {
+    try { const v = localStorage.getItem("axiom_coa_show_codes"); return v === null ? true : v === "true"; }
+    catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("axiom_coa_show_codes", String(showCodes)); } catch {}
+  }, [showCodes]);
+
   // Fires the same PATCH the edit form uses, then reloads.
   const reparent = async (childId, newParentId) => {
     if (!childId || childId === newParentId) return;
@@ -105,17 +129,21 @@ export default function ChartOfAccounts() {
 
   // Group by type AND respect parent/child hierarchy: parents render first,
   // then their children indented right below. Orphans (no parent) still show.
+  // Sort keys flip when the CPA hides account codes — code becomes
+  // meaningless without the column, so alphabetical by name wins.
+  const cmpBy = showCodes
+    ? (x, y) => String(x.code).localeCompare(String(y.code))
+    : (x, y) => String(x.name).localeCompare(String(y.name), undefined, { sensitivity: "base" });
   const grouped = TYPES.map(t => {
     const items = accts.filter(a => a.type === t);
-    // Sort: top-level by code, then each parent's kids by code right after it.
     const byId = Object.fromEntries(items.map(a => [a.id, a]));
     const topLevel = items.filter(a => !a.parent_account_id || !byId[a.parent_account_id]);
-    topLevel.sort((x, y) => String(x.code).localeCompare(String(y.code)));
+    topLevel.sort(cmpBy);
     const ordered = [];
     for (const p of topLevel) {
       ordered.push({ ...p, _depth: 0 });
       const kids = items.filter(a => a.parent_account_id === p.id);
-      kids.sort((x, y) => String(x.code).localeCompare(String(y.code)));
+      kids.sort(cmpBy);
       for (const k of kids) ordered.push({ ...k, _depth: 1 });
     }
     return { type: t, items: ordered };
@@ -129,6 +157,17 @@ export default function ChartOfAccounts() {
           <p className="text-slate-500 text-sm mt-1">GAAP-organized accounts. Add or edit anything.</p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Show/hide account code toggle — codes make sense to seasoned
+              CPAs but new firm-owners often just want alphabetical
+              lists. When hidden, each type is re-sorted A→Z by name. */}
+          <button
+            onClick={() => setShowCodes(v => !v)}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] ${showCodes ? "border-slate-300 bg-white text-slate-700 hover:bg-slate-50" : "border-indigo-300 bg-indigo-50 text-indigo-800 hover:bg-indigo-100"}`}
+            title={showCodes ? "Hide account numbers and sort A→Z" : "Show account numbers"}
+            data-testid="coa-toggle-codes"
+          >
+            {showCodes ? <><EyeOff size={12} /> Hide codes</> : <><Eye size={12} /> Show codes</>}
+          </button>
           {/* Balance-column basis toggle — Smart auto-picks the right
               lens per account; the other three force a single view.  */}
           <div className="inline-flex text-[11px] rounded-md border overflow-hidden" data-testid="coa-basis-toggle">
@@ -239,7 +278,7 @@ export default function ChartOfAccounts() {
         {grouped.map(g => (
           <div key={g.type} className="rounded-xl border bg-white overflow-hidden">
             <div className="px-4 py-2 bg-slate-50 border-b text-xs uppercase tracking-widest text-slate-600 font-semibold flex items-center justify-between">
-              <span>{g.type}s · {g.items.length}</span>
+              <span>{TYPE_LABEL[g.type] || g.type} · {g.items.length}</span>
               <span className="text-[10px] normal-case tracking-normal font-normal text-slate-500">
                 {basis === "month" ? "MTD"
                   : basis === "cumulative" ? "All-time"
@@ -261,6 +300,7 @@ export default function ChartOfAccounts() {
                     allAccounts={accts}
                     currentId={currentId}
                     balance={val}
+                    showCodes={showCodes}
                     onSaved={load}
                     onDeleted={load}
                     onMerge={(source) => setMergeState({ source })}
@@ -296,7 +336,7 @@ export default function ChartOfAccounts() {
   );
 }
 
-function AccountRow({ a, allAccounts, currentId, balance, onSaved, onDeleted, onMerge,
+function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSaved, onDeleted, onMerge,
                      dragSourceId, onDragStart, onDragEnd, onReparent }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -585,7 +625,7 @@ function AccountRow({ a, allAccounts, currentId, balance, onSaved, onDeleted, on
       onDragLeave={onDragLeaveInternal}
       onDrop={onDropInternal}
     >
-      <div className="col-span-2 font-mono-num text-slate-500 text-sm flex items-center gap-1">
+      <div className={`${showCodes ? "col-span-2" : "col-span-1"} font-mono-num text-slate-500 text-sm flex items-center gap-1`}>
         {canDrag ? (
           <span
             className="text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing -ml-1"
@@ -596,9 +636,9 @@ function AccountRow({ a, allAccounts, currentId, balance, onSaved, onDeleted, on
           </span>
         ) : <span className="w-3 shrink-0" />}
         {a._depth ? <span className="opacity-40">↳</span> : null}
-        {a.code}
+        {showCodes ? a.code : null}
       </div>
-      <div className={`col-span-5 text-sm ${a._depth ? "pl-4 text-slate-700" : "font-medium"}`}>
+      <div className={`${showCodes ? "col-span-5" : "col-span-6"} text-sm ${a._depth ? "pl-4 text-slate-700" : "font-medium"}`}>
         {a.name}
         {a.created_by_ai && a.parent_account_id && (
           <span className="ml-2 text-[10px] uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
