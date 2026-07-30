@@ -39,7 +39,22 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — Contacts Import (Excel / CSV / PDF)
+### Feb 2026 (latest) — Column Mapping UI + Import Log (with Undo)
+
+**Backend (`routes/contacts.py`)**
+- `_rows_to_contacts()` now accepts an optional `mapping_override` (col index → canonical field) so the UI can remap without re-uploading.
+- `POST /contacts/import/preview` returns `raw_rows`, `detected_headers`, `auto_mapping`, and `known_fields` alongside the resolved contacts.
+- New `POST /contacts/import/remap` — resolves the raw rows against a UI-supplied mapping and returns the same shape as preview.
+- `POST /contacts/import/commit` now writes an **import batch log** in `db.contact_imports` with per-row previous-doc snapshots (for undo).
+- New `GET /contacts/imports` — list recent batches (newest first, actor name attached).
+- New `POST /contacts/imports/{batch_id}/undo` — deletes every contact the batch created and restores every contact it overwrote via `replace_one` back to the pre-import snapshot. Idempotent.
+
+**Frontend (`pages/Contacts.jsx` — ImportContactsModal)**
+- **Column mapping bar** above the review table — one dropdown per detected column (Type/Name/Email/Phone/Address or Skip). Editing a mapping fires `/import/remap` and refreshes the preview live. Already-claimed fields disable in other columns' options.
+- **Import history** section on the upload step (collapsed by default) — lists batches with filename, source, timestamp, actor, and per-outcome counts. Un-undone rows get a red **Undo** button; undone rows show a grey **UNDONE** pill.
+- Fixed pypdf table parsing (headers cell-by-cell → chunks of N per row) and drag-and-drop file upload.
+
+### Feb 2026 — Contacts Import (Excel / CSV / PDF)
 
 **Backend (`routes/contacts.py`)**
 - `POST /companies/{cid}/contacts/import/preview` — parse `.xlsx / .xls / .csv / .pdf` (multipart upload), auto-detect columns by header alias (Name/Contact/Customer/Vendor/Company · Email · Phone/Mobile/Cell · Address/Street · Type), dedupe within upload by normalized_name, and flag existing rows so the UI can show "will update" vs "new" pills. No DB writes yet.

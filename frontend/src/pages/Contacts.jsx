@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, Pencil, GitMerge, ExternalLink, Tag, Sparkles, Upload, FileSpreadsheet, FileText, Loader2, Check, ArrowLeft } from "lucide-react";
+import { Plus, Trash2, X, Pencil, GitMerge, ExternalLink, Tag, Sparkles, Upload, FileSpreadsheet, FileText, Loader2, Check, ArrowLeft, History, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
@@ -839,11 +839,22 @@ function ImportContactsModal({ currentId, onClose }) {
   const [step, setStep] = useState("upload"); // upload | review | done
   const [busy, setBusy] = useState(false);
   const [defaultType, setDefaultType] = useState("customer");
-  const [preview, setPreview] = useState(null); // {source, filename, contacts[], ...}
+  const [preview, setPreview] = useState(null); // {source, filename, contacts[], raw_rows, detected_headers, auto_mapping, known_fields}
+  const [mapping, setMapping] = useState({});   // {colIndex: canonical | ""}
   const [rows, setRows] = useState([]);         // editable copy of preview.contacts
   const [selected, setSelected] = useState(new Set());
-  const [result, setResult] = useState(null);   // {created, updated, skipped}
+  const [result, setResult] = useState(null);   // {created, updated, skipped, batch_id}
+  const [batches, setBatches] = useState([]);   // recent import history
+  const [historyOpen, setHistoryOpen] = useState(false);
   const inputRef = React.useRef(null);
+
+  const loadHistory = async () => {
+    try {
+      const r = await api.get(`/companies/${currentId}/contacts/imports?limit=10`);
+      setBatches(r.data?.batches || []);
+    } catch { /* history is advisory */ }
+  };
+  useEffect(() => { loadHistory(); }, [currentId]);
 
   const upload = async (file) => {
     if (!file) return;
@@ -859,12 +870,35 @@ function ImportContactsModal({ currentId, onClose }) {
       );
       const d = r.data;
       setPreview(d);
+      // Auto-mapping arrives as {"0": "type", "1": "name", ...} — keep
+      // as-is (strings) so React uses stable keys.
+      setMapping(d.auto_mapping || {});
       setRows(d.contacts || []);
-      // Default-select every parsed row so the CPA can just hit Import.
       setSelected(new Set((d.contacts || []).map((_, i) => i)));
       setStep("review");
     } catch (e) {
       toast.error(e.response?.data?.detail || "Couldn't parse the file");
+    } finally { setBusy(false); }
+  };
+
+  // Re-resolve rows client-side when the CPA changes a column mapping.
+  // Uses the /remap endpoint so we keep the same dedup + existing-flag
+  // logic the initial preview ran — no need to duplicate it here.
+  const remap = async (nextMapping) => {
+    if (!preview) return;
+    setMapping(nextMapping);
+    setBusy(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/contacts/import/remap`, {
+        headers: preview.detected_headers,
+        raw_rows: preview.raw_rows,
+        mapping: nextMapping,
+        default_type: defaultType,
+      });
+      setRows(r.data?.contacts || []);
+      setSelected(new Set((r.data?.contacts || []).map((_, i) => i)));
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Remap failed");
     } finally { setBusy(false); }
   };
 
@@ -892,13 +926,32 @@ function ImportContactsModal({ currentId, onClose }) {
     try {
       const r = await api.post(
         `/companies/${currentId}/contacts/import/commit`,
-        { contacts: payload },
+        {
+          contacts: payload,
+          filename: preview?.filename,
+          source: preview?.source,
+        },
       );
       setResult(r.data);
       setStep("done");
+      loadHistory();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Import failed");
     } finally { setBusy(false); }
+  };
+
+  const undoBatch = async (batchId) => {
+    // eslint-disable-next-line no-alert
+    if (!window.confirm("Undo this import? Every contact it created will be deleted and every contact it updated will be restored to its previous state.")) return;
+    try {
+      const r = await api.post(`/companies/${currentId}/contacts/imports/${batchId}/undo`);
+      toast.success(`Undo complete — deleted ${r.data?.deleted || 0}, restored ${r.data?.restored || 0}.`);
+      loadHistory();
+      // Signal the parent to reload the contacts table.
+      onClose(true);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Undo failed");
+    }
   };
 
   return (
@@ -946,6 +999,57 @@ function ImportContactsModal({ currentId, onClose }) {
               header row are parsed cell-by-cell; unstructured PDFs are scanned
               line-by-line for names, emails, and phone numbers.
             </div>
+
+            {/* Import history — collapsed by default. Renders per-batch
+                row counts + an Undo button. Undoing deletes every
+                contact the batch created and restores every contact it
+                overwrote to the previous snapshot. */}
+            {batches.length > 0 && (
+              <div className="rounded-lg border bg-white">
+                <button
+                  onClick={() => setHistoryOpen(o => !o)}
+                  className="w-full px-4 py-2 flex items-center gap-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  data-testid="import-history-toggle"
+                >
+                  <History size={13} className="text-slate-500" />
+                  Import history ({batches.length})
+                  <span className="ml-auto text-slate-400">{historyOpen ? "▼" : "▶"}</span>
+                </button>
+                {historyOpen && (
+                  <ul className="divide-y">
+                    {batches.map((b) => (
+                      <li key={b.id} className="px-4 py-2.5 flex items-center gap-3 text-xs">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium truncate text-slate-800">
+                            {b.filename}
+                            <span className="text-[10px] ml-2 text-slate-400 uppercase">{b.source}</span>
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            {new Date(b.at).toLocaleString()} · {b.user_name} ·
+                            {" "}created <b>{b.created_count}</b>, updated <b>{b.updated_count}</b>
+                            {b.skipped_count ? <>, skipped <b>{b.skipped_count}</b></> : ""}
+                          </div>
+                        </div>
+                        {b.undone ? (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200 uppercase tracking-wide">
+                            Undone
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => undoBatch(b.id)}
+                            className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border border-rose-200 text-rose-700 hover:bg-rose-50"
+                            data-testid={`import-undo-${b.id}`}
+                            title="Delete created + restore updated"
+                          >
+                            <Undo2 size={11} /> Undo
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -955,9 +1059,9 @@ function ImportContactsModal({ currentId, onClose }) {
             <div className="px-5 py-2 border-b bg-slate-50/40 flex items-center gap-3 text-xs">
               <span className="text-slate-700">
                 <b>{preview.filename}</b> ·{" "}
-                {preview.row_count_after_dedupe} contact{preview.row_count_after_dedupe !== 1 ? "s" : ""} parsed
-                {preview.row_count_raw !== preview.row_count_after_dedupe && (
-                  <span className="text-slate-500"> ({preview.row_count_raw - preview.row_count_after_dedupe} deduped)</span>
+                {rows.length} contact{rows.length !== 1 ? "s" : ""} parsed
+                {preview.row_count_raw !== rows.length && (
+                  <span className="text-slate-500"> ({preview.row_count_raw - rows.length} deduped/skipped)</span>
                 )}
               </span>
               <button
@@ -967,6 +1071,63 @@ function ImportContactsModal({ currentId, onClose }) {
                 <ArrowLeft size={12} /> Choose different file
               </button>
             </div>
+
+            {/* Column mapping bar — one control per detected column so the
+                CPA can override the auto-detection (or map a column the
+                auto-detector missed). Setting a column to "Skip" removes
+                it from the parse. */}
+            {preview.detected_headers?.length > 0 && (
+              <div className="px-5 py-3 border-b bg-white">
+                <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2">
+                  Column mapping · edit if any field auto-detected wrong
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {preview.detected_headers.map((h, colIdx) => {
+                    const current = mapping[String(colIdx)] || "";
+                    const known = preview.known_fields || ["name", "email", "phone", "address", "type"];
+                    // Options: the current selection, "Skip", plus any
+                    // field not already claimed by another column.
+                    const claimed = new Set(
+                      Object.entries(mapping)
+                        .filter(([k]) => Number(k) !== colIdx)
+                        .map(([, v]) => v)
+                        .filter(Boolean)
+                    );
+                    return (
+                      <div key={colIdx} className="flex flex-col gap-0.5">
+                        <div className="text-[10px] text-slate-500 uppercase tracking-wide truncate max-w-[140px]" title={h}>
+                          {h || `Column ${colIdx + 1}`}
+                        </div>
+                        <select
+                          value={current}
+                          onChange={(e) => {
+                            const next = { ...mapping };
+                            // "" = skip; keep the key in place for clarity.
+                            next[String(colIdx)] = e.target.value;
+                            remap(next);
+                          }}
+                          className={`border rounded px-2 py-1 text-xs bg-white ${current ? "" : "text-slate-400"}`}
+                          data-testid={`import-map-col-${colIdx}`}
+                        >
+                          <option value="">— Skip —</option>
+                          {known.map(f => (
+                            <option
+                              key={f}
+                              value={f}
+                              disabled={claimed.has(f) && current !== f}
+                            >
+                              {f.charAt(0).toUpperCase() + f.slice(1)}
+                              {claimed.has(f) && current !== f ? " (used)" : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div className="flex-1 overflow-auto">
               {!rows.length ? (
                 <div className="p-8 text-center text-slate-500 text-sm">

@@ -521,21 +521,48 @@ def _parse_upload(filename: str, data: bytes) -> dict:
     return {"headers": headers, "rows": rows, "source": source}
 
 
-def _rows_to_contacts(headers: list[str], rows: list[list[str]],
-                      default_type: str) -> list[dict]:
-    """Map raw parsed rows into contact dicts using auto-detected
-    header aliases. Rows without a resolvable name are dropped."""
-    idx: dict[str, int] = {}
-    for i, h in enumerate(headers):
-        canonical = _canonical_header(h)
-        if canonical and canonical not in idx:
-            idx[canonical] = i
-    # Fallback: no known headers found → assume the first column is a name.
-    if not idx and headers:
-        idx["name"] = 0
+def _rows_to_contacts(
+    headers: list[str],
+    rows: list[list[str]],
+    default_type: str,
+    mapping_override: Optional[dict[int, str]] = None,
+) -> tuple[list[dict], dict[int, str]]:
+    """Map raw parsed rows into contact dicts.
 
-    def _get(row, key):
-        i = idx.get(key)
+    - When ``mapping_override`` is provided (from the UI's column mapper),
+      it wins — the key is the column index (int) and the value is the
+      canonical field ("name" / "email" / "phone" / "address" / "type" /
+      "" to skip).
+    - Otherwise falls back to header alias detection.
+
+    Returns ``(contacts, resolved_mapping)`` so the UI can render which
+    columns were used vs skipped.
+    """
+    resolved: dict[int, str] = {}
+    if mapping_override:
+        # Trust the UI. Normalize keys to int (they may arrive as strings
+        # from JSON).
+        for k, v in mapping_override.items():
+            try:
+                i = int(k)
+            except (ValueError, TypeError):
+                continue
+            if v and v in _HEADER_ALIASES:
+                resolved[i] = v
+    else:
+        for i, h in enumerate(headers):
+            canonical = _canonical_header(h)
+            if canonical and canonical not in resolved.values():
+                resolved[i] = canonical
+        # Fallback: no known headers found → assume first column is a name.
+        if not resolved and headers:
+            resolved[0] = "name"
+
+    # Invert to {canonical: column_index} for lookup convenience.
+    by_field: dict[str, int] = {v: k for k, v in resolved.items()}
+
+    def _get(row, field):
+        i = by_field.get(field)
         return row[i].strip() if i is not None and i < len(row) and row[i] else ""
 
     out: list[dict] = []
@@ -550,7 +577,7 @@ def _rows_to_contacts(headers: list[str], rows: list[list[str]],
             "address": _get(r, "address"),
             "type": _guess_type(_get(r, "type"), default_type),
         })
-    return out
+    return out, resolved
 
 
 @router.post("/companies/{cid}/contacts/import/preview")
@@ -564,9 +591,8 @@ async def contacts_import_preview(
     without touching the database. Use this to render a review table
     the CPA can proofread before hitting Commit.
 
-    Returns per-row ``existing`` flag when a contact with the same
-    normalized name already exists in this company — so the UI can
-    show "will update" vs "will create" pills."""
+    Returns the raw parsed cells alongside the resolved contacts so the
+    UI can offer a column-mapping override (remap without re-uploading)."""
     await require_company(user, cid)
     if default_type not in ("customer", "vendor"):
         raise HTTPException(400, "default_type must be customer or vendor")
@@ -574,7 +600,7 @@ async def contacts_import_preview(
     if len(data) > 15 * 1024 * 1024:
         raise HTTPException(413, "File too large. Max 15 MB.")
     parsed = _parse_upload(file.filename or "", data)
-    contacts = _rows_to_contacts(parsed["headers"], parsed["rows"], default_type)
+    contacts, mapping = _rows_to_contacts(parsed["headers"], parsed["rows"], default_type)
     # Deduplicate within the upload itself — a spreadsheet often has
     # the same customer listed twice. Keep the first occurrence.
     seen = set()
@@ -585,8 +611,6 @@ async def contacts_import_preview(
             continue
         seen.add(key)
         deduped.append({**c, "normalized_name": key})
-    # Flag rows that already exist so the review UI can preview upsert
-    # vs insert. One aggregate query, not per-row.
     if deduped:
         existing_keys = {
             d["normalized_name"] async for d in db.contacts.find(
@@ -601,14 +625,66 @@ async def contacts_import_preview(
         "source": parsed["source"],
         "filename": file.filename,
         "detected_headers": parsed["headers"],
+        "raw_rows": parsed["rows"],
+        "auto_mapping": {str(k): v for k, v in mapping.items()},
+        "known_fields": list(_HEADER_ALIASES.keys()),
         "row_count_raw": len(parsed["rows"]),
         "row_count_after_dedupe": len(deduped),
         "contacts": deduped,
     }
 
 
+class RemapIn(BaseModel):
+    headers: list[str]
+    raw_rows: list[list[str]]
+    mapping: dict[str, str]
+    default_type: str = "customer"
+
+
+@router.post("/companies/{cid}/contacts/import/remap")
+async def contacts_import_remap(
+    cid: str,
+    inp: RemapIn,
+    user: dict = Depends(get_current_user),
+):
+    """Re-resolve raw parsed rows with a UI-supplied column mapping.
+    Called when the CPA overrides the auto-detected mapping in the
+    import modal — avoids re-uploading the file. Returns the same
+    shape as ``preview`` for a clean drop-in replacement."""
+    await require_company(user, cid)
+    if inp.default_type not in ("customer", "vendor"):
+        raise HTTPException(400, "default_type must be customer or vendor")
+    override = {int(k): v for k, v in inp.mapping.items() if v}
+    contacts, resolved = _rows_to_contacts(inp.headers, inp.raw_rows, inp.default_type, override)
+    seen: set[str] = set()
+    deduped: list[dict] = []
+    for c in contacts:
+        key = contact_resolver.normalize_contact_name(c["name"])
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append({**c, "normalized_name": key})
+    if deduped:
+        existing_keys = {
+            d["normalized_name"] async for d in db.contacts.find(
+                {"company_id": cid,
+                 "normalized_name": {"$in": [c["normalized_name"] for c in deduped]}},
+                {"normalized_name": 1, "_id": 0},
+            )
+        }
+        for c in deduped:
+            c["existing"] = c["normalized_name"] in existing_keys
+    return {
+        "row_count_after_dedupe": len(deduped),
+        "resolved_mapping": {str(k): v for k, v in resolved.items()},
+        "contacts": deduped,
+    }
+
+
 class ContactsImportCommitIn(BaseModel):
     contacts: list[dict]
+    filename: Optional[str] = None
+    source: Optional[str] = None  # excel | csv | pdf, for log display
 
 
 @router.post("/companies/{cid}/contacts/import/commit")
@@ -618,12 +694,13 @@ async def contacts_import_commit(
     user: dict = Depends(get_current_user),
 ):
     """Insert (or upsert) the contacts the CPA confirmed in the preview.
-    Returns per-outcome counts so the UI can render a success toast
-    like "Added 42, updated 3, skipped 1 duplicate"."""
+    Also writes an ``contact_imports`` batch log with per-row snapshots
+    of the previous contact state so an accidental import can be
+    undone in one click. Returns per-outcome counts."""
     await require_company(user, cid)
     now = now_iso()
-    created = 0
-    updated = 0
+    created_ids: list[str] = []
+    updated_snapshots: list[dict] = []
     skipped = 0
     for c in inp.contacts:
         name = (c.get("name") or "").strip()
@@ -649,22 +726,121 @@ async def contacts_import_commit(
         }
         existing = await db.contacts.find_one(
             {"company_id": cid, "normalized_name": key},
-            {"id": 1, "_id": 0},
         )
         if existing:
+            # Snapshot the ENTIRE previous doc so undo can restore it
+            # even if fields we don't currently overwrite change later.
+            prev = {k: v for k, v in existing.items() if k != "_id"}
             await db.contacts.update_one(
                 {"id": existing["id"], "company_id": cid},
                 {"$set": payload},
             )
-            updated += 1
+            updated_snapshots.append({"id": existing["id"], "prev": prev})
         else:
             payload["id"] = str(uuid.uuid4())
             payload["created_at"] = now
             await db.contacts.insert_one(payload)
-            created += 1
+            created_ids.append(payload["id"])
+    # Write the batch log (only when something happened — a fully-
+    # skipped import doesn't deserve a rollback row).
+    log_id: Optional[str] = None
+    if created_ids or updated_snapshots:
+        log_id = str(uuid.uuid4())
+        await db.contact_imports.insert_one({
+            "id": log_id,
+            "company_id": cid,
+            "user_id": user.get("id"),
+            "at": now,
+            "filename": inp.filename or "(unknown)",
+            "source": inp.source or "",
+            "created_ids": created_ids,
+            "updated_snapshots": updated_snapshots,
+            "created_count": len(created_ids),
+            "updated_count": len(updated_snapshots),
+            "skipped_count": skipped,
+            "undone": False,
+        })
     try:
         await get_cache().ainvalidate(cid)
     except Exception:  # noqa: BLE001
         pass
-    return {"ok": True, "created": created, "updated": updated,
-            "skipped": skipped, "total": created + updated + skipped}
+    return {"ok": True,
+            "created": len(created_ids),
+            "updated": len(updated_snapshots),
+            "skipped": skipped,
+            "total": len(created_ids) + len(updated_snapshots) + skipped,
+            "batch_id": log_id}
+
+
+@router.get("/companies/{cid}/contacts/imports")
+async def contacts_import_history(
+    cid: str,
+    limit: int = 20,
+    user: dict = Depends(get_current_user),
+):
+    """List recent import batches so the CPA can see what was imported
+    and (if needed) undo one. Ordered newest-first."""
+    await require_company(user, cid)
+    docs = await db.contact_imports.find(
+        {"company_id": cid},
+        {"_id": 0, "updated_snapshots": 0},  # trim the payload
+    ).sort("at", -1).to_list(min(limit, 100))
+    # Attach the actor's display name so the log reads nicely.
+    user_ids = list({d.get("user_id") for d in docs if d.get("user_id")})
+    name_map = {}
+    if user_ids:
+        for u in await db.users.find(
+            {"id": {"$in": user_ids}}, {"id": 1, "name": 1, "email": 1, "_id": 0},
+        ).to_list(len(user_ids)):
+            name_map[u["id"]] = u.get("name") or u.get("email") or "—"
+    for d in docs:
+        d["user_name"] = name_map.get(d.get("user_id"), "—")
+    return {"batches": docs}
+
+
+@router.post("/companies/{cid}/contacts/imports/{batch_id}/undo")
+async def contacts_import_undo(
+    cid: str,
+    batch_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Roll a specific import batch back:
+      - every contact created by this batch is deleted
+      - every contact updated by this batch has its previous doc restored
+
+    Idempotent: calling it again is a no-op (the ``undone`` flag flips
+    on the first call). Returns per-outcome counts so the UI can render
+    a matching toast."""
+    await require_company(user, cid)
+    batch = await db.contact_imports.find_one({"id": batch_id, "company_id": cid})
+    if not batch:
+        raise HTTPException(404, "Import batch not found")
+    if batch.get("undone"):
+        return {"ok": True, "already_undone": True, "deleted": 0, "restored": 0}
+    created_ids = batch.get("created_ids") or []
+    snapshots = batch.get("updated_snapshots") or []
+    deleted = 0
+    if created_ids:
+        r = await db.contacts.delete_many({"id": {"$in": created_ids}, "company_id": cid})
+        deleted = r.deleted_count
+    restored = 0
+    for snap in snapshots:
+        prev = snap.get("prev") or {}
+        if not prev.get("id"):
+            continue
+        # Overwrite the current doc with the pre-import snapshot. Using
+        # replace_one keeps things simple: whatever was there at time-of-
+        # import is exactly what we restore.
+        r = await db.contacts.replace_one(
+            {"id": prev["id"], "company_id": cid}, prev
+        )
+        restored += r.modified_count
+    await db.contact_imports.update_one(
+        {"id": batch_id, "company_id": cid},
+        {"$set": {"undone": True, "undone_at": now_iso(), "undone_by": user.get("id")}},
+    )
+    try:
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "deleted": deleted, "restored": restored}
