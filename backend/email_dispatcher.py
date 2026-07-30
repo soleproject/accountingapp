@@ -55,6 +55,7 @@ DEFAULT_PREFS = {
     "month_close_signoff":      True,
     "payment_failed_client":    True,   # Client card declined — CTA to update card
     "payment_failed_pro":       True,   # Pro-side heads-up when a client card fails
+    "affiliate_welcome":        True,   # Day-0 activation email — link + QR + tier table
 }
 
 

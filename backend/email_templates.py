@@ -576,6 +576,114 @@ def stripe_welcome(*, name: str, magic_url: str) -> tuple[str, str]:
 
 
 # --------------------------------------------------------------------------
+# Affiliate welcome — fired right after an ``/api/auth/signup`` where the
+# role is ``affiliate``. The goal is *day-0 activation*: give the new
+# affiliate everything they need (unique link, QR code, payout tier
+# reference) inside the very first inbox touch so they don't lose the
+# thread waiting to find "how do I share?" in the app.
+#
+# Note on QR embedding — PNG data URI is the widest-compatible option
+# (SVG breaks in Outlook). `segno` generates a compact monochrome PNG
+# with no PIL/pillow dependency; the resulting base64 is ~800B so total
+# email size stays well under the Gmail-clip-warning 102KB threshold.
+# --------------------------------------------------------------------------
+def _qr_png_data_uri(payload: str, scale: int = 5) -> str:
+    """Return a ``data:image/png;base64,…`` string for ``payload`` at the
+    given per-module scale. Falls back to ``""`` if ``segno`` isn't
+    importable so callers don't have to defensively try/except.
+    """
+    try:
+        import io, base64, segno
+        buf = io.BytesIO()
+        segno.make(payload, error="M").save(buf, kind="png", scale=scale, border=2)
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        return f"data:image/png;base64,{b64}"
+    except Exception:
+        return ""
+
+
+def affiliate_welcome(
+    *, name: str, share_link: str, slug: str,
+    dashboard_url: str, referrer_name: Optional[str] = None,
+) -> tuple[str, str]:
+    """Welcome an affiliate + hand them their toolkit inline.
+
+    * ``name`` — the affiliate's own display name (used in salutation).
+    * ``share_link`` — the buy-page / signup URL with ?ref=<slug>
+      already baked in.
+    * ``slug`` — for display below the QR.
+    * ``dashboard_url`` — deep-link to /share so they can see live stats.
+    * ``referrer_name`` — if the affiliate was themselves referred, we
+      thank the upstream affiliate in the sign-off (optional).
+    """
+    qr = _qr_png_data_uri(share_link, scale=6)
+    qr_block = f"""
+      <div style="text-align:center;padding:20px 0 4px;">
+        <img src="{qr}" alt="Referral QR"
+             style="width:180px;height:180px;border:1px solid #e2e8f0;border-radius:8px;padding:8px;background:#ffffff;" />
+        <div style="{_MUTE};padding-top:6px;">
+          <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">
+            {escape(slug)}
+          </span>
+        </div>
+      </div>
+    """ if qr else ""
+    tier_rows = "".join([
+        f"""<tr>
+          <td style="{_TABLE_KEY}">{svc} plan</td>
+          <td style="{_TABLE_VAL}">→ {payout}/mo payout</td>
+        </tr>"""
+        for svc, payout in [("$38", "$7"), ("$79", "$15"), ("$95", "$20"), ("$149", "$30")]
+    ])
+    thank_line = (
+        f"<br><br>Big thanks to <b>{escape(referrer_name)}</b> for pointing you our way "
+        "— you're on their team."
+        if referrer_name else ""
+    )
+    inner = f"""
+      <div style="{_H1}">Welcome — you're officially earning</div>
+      <div style="{_P}">
+        Hi {escape(name)},<br><br>
+        Your affiliate link is live. Every signup that comes through it
+        is permanently attributed to you, and every invoice they pay
+        (this month, next month, every month) earns you a fixed payout.
+        No cost to you, no cost to them.{thank_line}
+      </div>
+      <div style="text-align:center;padding:14px 0 4px;">
+        <a href="{share_link}" style="{_BTN}">Grab your link →</a>
+      </div>
+      <div style="{_MUTE};text-align:center;padding:4px 0 12px;">
+        <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#334155;">
+          {escape(share_link)}
+        </span>
+      </div>
+      {qr_block}
+      <div style="{_P};padding-top:16px;">
+        <b>Payouts, at a glance:</b>
+      </div>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+             style="margin:4px 0 4px;border-collapse:collapse;">
+        {tier_rows}
+      </table>
+      <div style="{_P};padding-top:16px;">
+        <b>Quick win:</b> share this with 5 friends this week. If just
+        one of them subscribes to any plan, you've hit your first payout
+        — and every renewal after keeps stacking.
+      </div>
+      <div style="padding:14px 0 4px;">
+        <a href="{dashboard_url}" style="{_BTN_SECONDARY}">Open your dashboard</a>
+      </div>
+      <div style="{_MUTE}">
+        See live signups, mark a custom vanity slug, or upgrade to a
+        full account any time from your Refer &amp; earn page.
+      </div>
+    """
+    return "Your affiliate link is live — let's earn.", _wrap(inner)
+
+
+
+
+# --------------------------------------------------------------------------
 # Payment failed — sent when Stripe fires ``invoice.payment_failed``.
 # Two variants: one to the paying client (call-to-action to update their
 # card), and one to the accounting Pro (heads-up so they can nudge the

@@ -146,6 +146,37 @@ async def signup(inp: SignupIn):
         doc["referred_by_user_id"] = referrer_id
     await db.users.insert_one(doc)
     token = create_token(uid, inp.role)
+
+    # Fire-and-forget: brand-new affiliate → activation email. Wrapped
+    # in try/except because dispatcher.dispatch is expected to
+    # never-raise, but we defensively cover any import / template blowup
+    # so a bad email doesn't 500 the signup. The dispatcher's own audit
+    # log will surface the failure.
+    if inp.role == "affiliate":
+        try:
+            from referral_util import mint_slug_for_user
+            import email_templates as _et
+            from email_dispatcher import dispatch, public_base_url
+            slug = await mint_slug_for_user(uid)
+            fresh = await db.users.find_one({"id": uid}) or {}
+            link, _ = _share_link_for(fresh, slug)
+            referrer_name = None
+            if referrer_id:
+                ref_u = await db.users.find_one({"id": referrer_id}, {"name": 1, "email": 1})
+                if ref_u:
+                    referrer_name = ref_u.get("name") or (ref_u.get("email") or "").split("@")[0]
+            subject, html = _et.affiliate_welcome(
+                name=inp.name, share_link=link, slug=slug,
+                dashboard_url=f"{public_base_url()}/share",
+                referrer_name=referrer_name,
+            )
+            await dispatch(
+                kind="affiliate_welcome", to=inp.email.lower(),
+                subject=subject, html=html, initiating_user_id=uid,
+            )
+        except Exception:
+            pass
+
     return {"token": token, "user": {"id": uid, "email": inp.email.lower(),
             "name": inp.name, "role": inp.role}}
 

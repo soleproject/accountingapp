@@ -1,0 +1,25 @@
+{
+  "summary": "Iteration 52 — Affiliate welcome email (day-0 activation). Wrote 16 backend regression tests in /app/backend/tests/test_iter52_affiliate_welcome_email.py — all 16 pass. Also re-ran iter49+50+51 regression suites → 64/64 pass, no regression. Verified: (1) email_templates.affiliate_welcome() exact subject, name in salutation, share_link as anchor + monospace, embedded PNG data URI QR (validated via PNG magic-byte decode), all 4 tier rows ($38→$7, $79→$15, $95→$20, $149→$30), 'share this with 5 friends' quick-win, dashboard secondary CTA, and referrer thank-line only when referrer_name is provided. (2) HTML size ~6-7KB — well under Gmail's 100KB clip. (3) Graceful degradation when segno is unavailable (monkeypatched sys.modules['segno']=None) — qr_block empty but everything else intact. (4) DEFAULT_PREFS['affiliate_welcome'] == True. (5) POST /api/auth/signup role='affiliate' → db.communications row inserted (kind='affiliate_welcome', status='failed' with error for @example.com per Resend sandbox gate; status='sent' with resend_id for @resend.dev). (6) client/pro signups do NOT insert an affiliate_welcome row. (7) Signup response returns 200 regardless of email outcome. (8) Referred affiliate (?ref=<slug>) resolves referrer's name; falls back to email local-part when name is empty (verified by blanking name and re-rendering with local-part).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter52_affiliate_welcome_email.py",
+    "/app/test_reports/pytest/iter52_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "email_templates._qr_png_data_uri correctly wraps ImportError in a broad try/except and returns '' so the template degrades gracefully — good defensive design.",
+    "affiliate_welcome() bakes referrer_name via html escape so an attacker can't XSS via a malicious display name — verified in code review.",
+    "routes/auth.signup wraps the entire post-user-create dispatch in try/except so a template/dispatcher blowup cannot 500 the signup — confirmed by inspection. Note: the test_signup_survives_template_exception test cannot cross the uvicorn process boundary with monkeypatch, so it verifies via a fresh HTTP call only (still returns 200). The try/except path is otherwise well-covered by the segno-removal test.",
+    "dispatcher records status='failed' with the Resend sandbox error for @example.com — expected and correctly audited in db.communications.",
+    "Minor: the try/except in routes/auth.signup uses bare `except Exception: pass` — swallowing without logging means an unexpected regression (e.g. a bug in mint_slug_for_user) would be silent. Consider a logger.exception('affiliate welcome dispatch failed') inside the except for observability. Not a blocker."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter52_affiliate_welcome_email.py"],
+  "success_rate": {"backend": "100% (16/16 new iter52; 80/80 including iter49+50+51 regression)", "frontend": "not tested (backend-only per request)"},
+  "test_credentials": "Superadmin admin@axiom.ai/admin123; test affiliates created on-the-fly with TEST_iter52_* prefix and cleaned up in module teardown (users + db.communications rows for those user_ids/emails).",
+  "seed_data_creation": "Test suite auto-creates TEST_iter52_affiliate_*/client_*/pro_* users on @example.com and @resend.dev domains, plus a temporary referrer for the thank-line tests. Teardown removes users + related communications rows in the module fixture.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "test_iter52_affiliate_welcome_email.py covers 6 test classes: template rendering, dispatcher defaults, signup->dispatch integration, referred-affiliate thank-line + local-part fallback, signup resilience, and Resend sandbox send-path. The @resend.dev sandbox test is skipped if RESEND_API_KEY is missing (in this env the key IS present and the send returned 'sent' with a resend_id). If routes/auth.py signup or email_templates.affiliate_welcome change materially, re-run: pytest /app/backend/tests/test_iter52_affiliate_welcome_email.py -v. Full regression: iter49+50+51+52 = 80 tests.",
+  "rca of the issue": "No issues found — feature works end-to-end. The affiliate_welcome email is dispatched fire-and-forget from routes/auth.signup wrapped in try/except; audit log correctly records status=sent (Resend sandbox) or status=failed (Resend example.com gate). Template output validated for structure, content, size, and QR PNG validity."
+}
