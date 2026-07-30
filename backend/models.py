@@ -170,6 +170,12 @@ class ReceiptCreate(BaseModel):
     date: str
     amount: float
     merchant: str
+    # Optional contact link — when picked from the vendor dropdown, the
+    # frontend passes both `contact_id` and denormalized `contact_name`
+    # so vendor rollups pick it up without a re-resolve pass. `merchant`
+    # stays populated (mirrors contact_name) for backwards-compat.
+    contact_id: Optional[str] = None
+    contact_name: Optional[str] = None
     category_account_id: Optional[str] = None
     notes: Optional[str] = ""
     # Payment source account — the bank/CC/cash the receipt was paid from.

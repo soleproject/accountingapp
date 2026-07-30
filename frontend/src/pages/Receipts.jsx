@@ -9,14 +9,18 @@ export default function Receipts() {
   const { currentId } = useCompany();
   const [items, setItems] = useState([]);
   const [accts, setAccts] = useState([]);
+  const [contacts, setContacts] = useState([]);
   const [creating, setCreating] = useState(false);
   const load = async () => {
     if (!currentId) return;
-    const [r, a] = await Promise.all([
+    const [r, a, c] = await Promise.all([
       api.get(`/companies/${currentId}/receipts`),
       api.get(`/companies/${currentId}/accounts`),
+      api.get(`/companies/${currentId}/contacts`),
     ]);
-    setItems(r.data.receipts || []); setAccts(a.data.accounts || []);
+    setItems(r.data.receipts || []);
+    setAccts(a.data.accounts || []);
+    setContacts(c.data.contacts || []);
   };
   useEffect(() => { load(); }, [currentId]);
   const del = async (id) => { if (confirm("Delete?")) { await api.delete(`/companies/${currentId}/receipts/${id}`); load(); } };
@@ -74,21 +78,53 @@ export default function Receipts() {
           </tbody>
         </table>
       </div>
-      {creating && <RecModal currentId={currentId} accts={accts} onClose={() => { setCreating(false); load(); }} />}
+      {creating && <RecModal currentId={currentId} accts={accts} contacts={contacts} onClose={() => { setCreating(false); load(); }} />}
     </div>
   );
 }
 
-function RecModal({ currentId, accts, onClose }) {
+function RecModal({ currentId, accts, contacts, onClose }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [merchant, setMerchant] = useState("");
+  const [contactId, setContactId] = useState("");
   const [amount, setAmount] = useState("");
   const [cat, setCat] = useState("");
   const [payAcct, setPayAcct] = useState("");
   const [notes, setNotes] = useState("");
   const [attachment, setAttachment] = useState(null); // {data_url, filename, size}
   const [busy, setBusy] = useState(false);
+  const [addingVendor, setAddingVendor] = useState(false);
+  const [newVendorName, setNewVendorName] = useState("");
+  const [creatingVendor, setCreatingVendor] = useState(false);
   const fileRef = useRef(null);
+
+  // Vendors first, then any other contacts as a fallback so users can
+  // still pick e.g. an employee reimbursement recipient. Sorted alpha
+  // for consistent scanability.
+  const vendors = contacts
+    .filter(c => c.type === "vendor")
+    .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const otherContacts = contacts
+    .filter(c => c.type !== "vendor")
+    .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+  const createVendor = async () => {
+    const nm = newVendorName.trim();
+    if (!nm) { toast.error("Vendor name is required."); return; }
+    setCreatingVendor(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/contacts`, { name: nm, type: "vendor" });
+      const newId = r.data?.id;
+      // Optimistically add so the picker updates immediately without a
+      // full parent reload (parent reloads on close anyway).
+      contacts.push({ id: newId, name: nm, type: "vendor" });
+      setContactId(newId);
+      setAddingVendor(false);
+      setNewVendorName("");
+      toast.success(`Vendor "${nm}" added`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Could not add vendor.");
+    } finally { setCreatingVendor(false); }
+  };
 
   // Accounts eligible as a "paid from" source — true payment instruments
   // only (bank, cash-on-hand, credit card). Excludes A/R, Inventory,
@@ -119,11 +155,16 @@ function RecModal({ currentId, accts, onClose }) {
   };
 
   const save = async () => {
-    if (!merchant.trim() || !amount) { toast.error("Merchant and amount are required."); return; }
+    const c = contacts.find(x => x.id === contactId);
+    if (!c || !amount) { toast.error("Vendor and amount are required."); return; }
     setBusy(true);
     try {
       await api.post(`/companies/${currentId}/receipts`, {
-        date, merchant: merchant.trim(), amount: parseFloat(amount),
+        date,
+        merchant: c.name,
+        contact_id: c.id,
+        contact_name: c.name,
+        amount: parseFloat(amount),
         category_account_id: cat || null,
         payment_account_id: payAcct || null,
         notes,
@@ -145,7 +186,61 @@ function RecModal({ currentId, accts, onClose }) {
           <button onClick={onClose}><X size={16} /></button>
         </div>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border rounded px-2 py-1.5 text-sm" />
-        <input placeholder="Merchant (e.g. Walmart)" value={merchant} onChange={(e) => setMerchant(e.target.value)} className="w-full border rounded px-2 py-1.5 text-sm" />
+
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Vendor</label>
+          {addingVendor ? (
+            <div className="flex gap-1.5">
+              <input
+                autoFocus
+                placeholder="New vendor name"
+                value={newVendorName}
+                onChange={(e) => setNewVendorName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") createVendor(); if (e.key === "Escape") { setAddingVendor(false); setNewVendorName(""); } }}
+                className="flex-1 border rounded px-2 py-1.5 text-sm"
+                data-testid="receipt-new-vendor-input"
+              />
+              <button
+                type="button"
+                onClick={createVendor}
+                disabled={creatingVendor}
+                className="px-3 py-1.5 rounded bg-slate-900 text-white text-xs inline-flex items-center gap-1 disabled:opacity-60"
+                data-testid="receipt-new-vendor-save"
+              >
+                {creatingVendor && <Loader2 size={12} className="animate-spin" />}
+                Add
+              </button>
+              <button
+                type="button"
+                onClick={() => { setAddingVendor(false); setNewVendorName(""); }}
+                className="px-2 py-1.5 rounded border text-xs"
+                data-testid="receipt-new-vendor-cancel"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <select
+              value={contactId}
+              onChange={(e) => {
+                if (e.target.value === "__add__") { setAddingVendor(true); return; }
+                setContactId(e.target.value);
+              }}
+              className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+              data-testid="receipt-vendor-select"
+            >
+              <option value="">— Pick vendor —</option>
+              {vendors.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {otherContacts.length > 0 && (
+                <optgroup label="Other contacts">
+                  {otherContacts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </optgroup>
+              )}
+              <option value="__add__">+ Add new vendor…</option>
+            </select>
+          )}
+        </div>
+
         <input type="number" step="0.01" placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full border rounded px-2 py-1.5 text-sm font-mono-num" />
 
         <div>
