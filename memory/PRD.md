@@ -39,7 +39,18 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — Column Mapping UI + Import Log (with Undo)
+### Feb 2026 (latest) — AI-Enhanced PDF Parse + Bulk-Assign Type
+
+**Backend (`routes/contacts.py`)**
+- `_ai_parse_pdf(data)` — pypdf text extraction (capped 12 KB) → GPT via existing `LlmChat` wrapper (`ai-pdf-import` feature tag) → strict JSON `{contacts[]}`. Returns headers + rows shaped like the deterministic parser so downstream code is agnostic.
+- `POST /contacts/import/preview` accepts `ai=true` form field to force the AI parser on PDFs (any layout). Source tagged `pdf-ai` in the response.
+- New `POST /companies/{cid}/contacts/bulk-set-type` — flips type on every id in a payload list. Only writes when type differs (no-op-safe).
+
+**Frontend (`pages/Contacts.jsx`)**
+- **Contacts header**: When 1+ rows selected, shows `N selected` + emerald **→ Customer** and amber **→ Vendor** buttons. One click bulk-flips via `/bulk-set-type` and toasts the modified count.
+- **ImportContactsModal review step**: Fuchsia **Try AI parsing** button appears for deterministic PDF parses; **AI parsed** fuchsia pill labels AI-sourced previews. Last-file kept in a ref so the AI retry doesn't require re-uploading.
+
+### Feb 2026 — Column Mapping UI + Import Log (with Undo)
 
 **Backend (`routes/contacts.py`)**
 - `_rows_to_contacts()` now accepts an optional `mapping_override` (col index → canonical field) so the UI can remap without re-uploading.

@@ -326,6 +326,38 @@ async def backfill_contact_logos(cid: str, user: dict = Depends(get_current_user
 
 
 
+class BulkTypeIn(BaseModel):
+    ids: list[str]
+    type: str  # "customer" | "vendor"
+
+
+@router.post("/companies/{cid}/contacts/bulk-set-type")
+async def bulk_set_contact_type(
+    cid: str,
+    inp: BulkTypeIn,
+    user: dict = Depends(get_current_user),
+):
+    """Change the ``type`` on every contact whose id is in ``ids`` to
+    ``customer`` or ``vendor``. Used by the Contacts list bulk-action
+    bar to fix a wrong default-type import in one shot. Returns the
+    number of docs actually flipped so the UI can toast accurately."""
+    await require_company(user, cid)
+    if inp.type not in ("customer", "vendor"):
+        raise HTTPException(400, "type must be 'customer' or 'vendor'")
+    if not inp.ids:
+        return {"ok": True, "modified": 0}
+    r = await db.contacts.update_many(
+        {"id": {"$in": inp.ids}, "company_id": cid, "type": {"$ne": inp.type}},
+        {"$set": {"type": inp.type, "updated_at": now_iso()}},
+    )
+    try:
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "modified": r.modified_count, "new_type": inp.type}
+
+
+
 # --------------------------------------------------------------------------
 # Contacts Import — Excel / CSV / PDF → contact rows
 #
@@ -521,6 +553,87 @@ def _parse_upload(filename: str, data: bytes) -> dict:
     return {"headers": headers, "rows": rows, "source": source}
 
 
+async def _ai_parse_pdf(data: bytes) -> tuple[list[str], list[list[str]]]:
+    """Fallback for PDFs the deterministic parser can't structure —
+    scanned tables, multi-column vendor lists, unstructured
+    directories. Runs the extracted text through the same LLM the
+    categorizer uses and asks for a strict JSON array of contact
+    dicts. Returns (headers, rows) matching the deterministic
+    parser's shape so downstream code doesn't need to branch.
+
+    Bounded to 12 KB of PDF text and 200 rows to keep token cost
+    predictable — any larger and the deterministic parser is a better
+    fit anyway."""
+    import pypdf
+    reader = pypdf.PdfReader(io.BytesIO(data))
+    text_parts = []
+    for page in reader.pages:
+        try:
+            text_parts.append(page.extract_text() or "")
+        except Exception:
+            continue
+    text = "\n".join(text_parts).strip()
+    if not text:
+        return [], []
+    # Cap the input so a 200-page PDF doesn't blow the token budget.
+    text = text[:12000]
+
+    from llm_client import LlmChat, UserMessage
+    system = (
+        "You are a data extraction assistant. Given raw text pulled from a PDF "
+        "of contacts (customers, vendors, or a directory), return a strict JSON "
+        "object with a single key `contacts` whose value is an array of objects. "
+        "Each object has these fields (empty string if unknown): "
+        "`name` (required), `email`, `phone`, `address`, `type` (either "
+        "`customer` or `vendor` — infer from context, default to `customer`). "
+        "Return ONLY the JSON, no prose, no code fences. Skip page headers, "
+        "footers, and column labels. Merge multi-line addresses into one field."
+    )
+    session_id = f"pdf-import-{uuid.uuid4().hex[:8]}"
+    chat = LlmChat(
+        api_key="",
+        session_id=session_id,
+        system_message=system,
+        feature="ai-pdf-import",
+    ).with_model(
+        os.environ.get("LLM_PROVIDER", "openai"),
+        os.environ.get("LLM_MODEL", "gpt-4o-mini"),
+    )
+    try:
+        reply = await chat.send_message(UserMessage(text=text))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"AI parse failed: {e}") from e
+
+    # Reply may include surrounding text or code fences — extract the
+    # first {...} block that looks like JSON.
+    m = re.search(r"\{[\s\S]*\}", str(reply or ""))
+    if not m:
+        return [], []
+    try:
+        parsed = json.loads(m.group(0))
+    except Exception:
+        return [], []
+    contacts = parsed.get("contacts") if isinstance(parsed, dict) else None
+    if not isinstance(contacts, list):
+        return [], []
+    headers = ["name", "email", "phone", "address", "type"]
+    rows: list[list[str]] = []
+    for c in contacts[:200]:
+        if not isinstance(c, dict):
+            continue
+        name = (c.get("name") or "").strip()
+        if not name:
+            continue
+        rows.append([
+            name,
+            (c.get("email") or "").strip(),
+            (c.get("phone") or "").strip(),
+            (c.get("address") or "").strip(),
+            (c.get("type") or "").strip().lower(),
+        ])
+    return headers, rows
+
+
 def _rows_to_contacts(
     headers: list[str],
     rows: list[list[str]],
@@ -585,6 +698,7 @@ async def contacts_import_preview(
     cid: str,
     file: UploadFile = File(...),
     default_type: str = Form("customer"),
+    ai: str = Form("false"),  # "true" forces the AI PDF parser
     user: dict = Depends(get_current_user),
 ):
     """Parse an Excel / CSV / PDF upload and return the extracted rows
@@ -592,14 +706,25 @@ async def contacts_import_preview(
     the CPA can proofread before hitting Commit.
 
     Returns the raw parsed cells alongside the resolved contacts so the
-    UI can offer a column-mapping override (remap without re-uploading)."""
+    UI can offer a column-mapping override (remap without re-uploading).
+
+    When ``ai=true`` and the file is a PDF, the deterministic parser is
+    skipped in favor of the GPT-based extractor — useful for messy
+    layouts (multi-column, scanned, unstructured directories). Non-PDF
+    uploads ignore the flag."""
     await require_company(user, cid)
     if default_type not in ("customer", "vendor"):
         raise HTTPException(400, "default_type must be customer or vendor")
     data = await file.read()
     if len(data) > 15 * 1024 * 1024:
         raise HTTPException(413, "File too large. Max 15 MB.")
-    parsed = _parse_upload(file.filename or "", data)
+    fname = (file.filename or "").lower()
+    use_ai = (str(ai).lower() == "true") and fname.endswith(".pdf")
+    if use_ai:
+        headers, rows = await _ai_parse_pdf(data)
+        parsed = {"headers": headers, "rows": rows, "source": "pdf-ai"}
+    else:
+        parsed = _parse_upload(file.filename or "", data)
     contacts, mapping = _rows_to_contacts(parsed["headers"], parsed["rows"], default_type)
     # Deduplicate within the upload itself — a spreadsheet often has
     # the same customer listed twice. Keep the first occurrence.

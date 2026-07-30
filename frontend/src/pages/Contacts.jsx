@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, Pencil, GitMerge, ExternalLink, Tag, Sparkles, Upload, FileSpreadsheet, FileText, Loader2, Check, ArrowLeft, History, Undo2 } from "lucide-react";
+import { Plus, Trash2, X, Pencil, GitMerge, ExternalLink, Tag, Sparkles, Upload, FileSpreadsheet, FileText, Loader2, Check, ArrowLeft, History, Undo2, UserCircle, Store } from "lucide-react";
 import { toast } from "sonner";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
@@ -111,6 +111,54 @@ export default function Contacts() {
               Details
             </button>
           </div>
+          {selected.size >= 1 && (
+            <>
+              <div
+                className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-slate-900 text-white"
+                data-testid="contacts-bulk-toolbar"
+              >
+                <b>{selected.size}</b> selected
+              </div>
+              <button
+                onClick={async () => {
+                  try {
+                    const r = await api.post(
+                      `/companies/${currentId}/contacts/bulk-set-type`,
+                      { ids: [...selected], type: "customer" },
+                    );
+                    toast.success(`Set ${r.data?.modified || 0} to Customer.`);
+                    load();
+                  } catch (e) {
+                    toast.error(e.response?.data?.detail || "Bulk update failed");
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-emerald-300 bg-emerald-50 text-emerald-800 text-[11px] hover:bg-emerald-100"
+                data-testid="contacts-bulk-customer"
+                title="Set every selected contact's type to Customer"
+              >
+                <UserCircle size={12} /> → Customer
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    const r = await api.post(
+                      `/companies/${currentId}/contacts/bulk-set-type`,
+                      { ids: [...selected], type: "vendor" },
+                    );
+                    toast.success(`Set ${r.data?.modified || 0} to Vendor.`);
+                    load();
+                  } catch (e) {
+                    toast.error(e.response?.data?.detail || "Bulk update failed");
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-amber-300 bg-amber-50 text-amber-800 text-[11px] hover:bg-amber-100"
+                data-testid="contacts-bulk-vendor"
+                title="Set every selected contact's type to Vendor"
+              >
+                <Store size={12} /> → Vendor
+              </button>
+            </>
+          )}
           {selected.size >= 2 && (
             <button
               data-testid="contacts-merge-btn"
@@ -856,13 +904,15 @@ function ImportContactsModal({ currentId, onClose }) {
   };
   useEffect(() => { loadHistory(); }, [currentId]);
 
-  const upload = async (file) => {
+  const upload = async (file, opts = {}) => {
     if (!file) return;
+    const useAi = !!opts.ai;
     setBusy(true);
     try {
       const fd = new FormData();
       fd.append("file", file);
       fd.append("default_type", defaultType);
+      if (useAi) fd.append("ai", "true");
       const r = await api.post(
         `/companies/${currentId}/contacts/import/preview`,
         fd,
@@ -870,16 +920,20 @@ function ImportContactsModal({ currentId, onClose }) {
       );
       const d = r.data;
       setPreview(d);
-      // Auto-mapping arrives as {"0": "type", "1": "name", ...} — keep
-      // as-is (strings) so React uses stable keys.
       setMapping(d.auto_mapping || {});
       setRows(d.contacts || []);
       setSelected(new Set((d.contacts || []).map((_, i) => i)));
       setStep("review");
+      if (useAi) toast.success(`AI parsed ${d.contacts?.length || 0} contact${d.contacts?.length === 1 ? "" : "s"} from the PDF.`);
     } catch (e) {
       toast.error(e.response?.data?.detail || "Couldn't parse the file");
     } finally { setBusy(false); }
   };
+
+  // Keep a ref to the last-uploaded file so the "Try AI parsing"
+  // button on the review step doesn't force the user to re-drag it.
+  const lastFileRef = React.useRef(null);
+  const uploadWithFile = (f, opts) => { lastFileRef.current = f; return upload(f, opts); };
 
   // Re-resolve rows client-side when the CPA changes a column mapping.
   // Uses the /remap endpoint so we keep the same dedup + existing-flag
@@ -976,7 +1030,7 @@ function ImportContactsModal({ currentId, onClose }) {
         {/* ---------- Step: Upload ---------- */}
         {step === "upload" && (
           <div className="p-5 space-y-4">
-            <DropZone busy={busy} onFile={upload} inputRef={inputRef} />
+            <DropZone busy={busy} onFile={(f) => uploadWithFile(f)} inputRef={inputRef} />
             <div className="flex items-center gap-3">
               <label className="text-xs text-slate-600">
                 Default type when the file doesn't specify:
@@ -1063,7 +1117,24 @@ function ImportContactsModal({ currentId, onClose }) {
                 {preview.row_count_raw !== rows.length && (
                   <span className="text-slate-500"> ({preview.row_count_raw - rows.length} deduped/skipped)</span>
                 )}
+                {preview.source === "pdf-ai" && (
+                  <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 uppercase tracking-wide">
+                    AI parsed
+                  </span>
+                )}
               </span>
+              {preview.source === "pdf" && lastFileRef.current && (
+                <button
+                  onClick={() => uploadWithFile(lastFileRef.current, { ai: true })}
+                  disabled={busy}
+                  className="text-fuchsia-700 hover:bg-fuchsia-50 border border-fuchsia-200 rounded px-2 py-1 text-[11px] inline-flex items-center gap-1 disabled:opacity-50"
+                  data-testid="import-try-ai"
+                  title="Re-parse this PDF with GPT-5.2 — useful for messy multi-column layouts"
+                >
+                  {busy ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+                  Try AI parsing
+                </button>
+              )}
               <button
                 onClick={() => { setStep("upload"); setPreview(null); setRows([]); }}
                 className="ml-auto text-slate-500 hover:text-slate-900 inline-flex items-center gap-1"
