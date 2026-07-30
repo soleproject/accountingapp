@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, Sparkles, Loader2 } from "lucide-react";
+import { Plus, Trash2, Sparkles, Loader2, Pencil, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 
@@ -30,12 +30,6 @@ export default function ChartOfAccounts() {
     setSuggestOpen(false);
     load();
   });
-
-  const del = async (id) => {
-    if (!confirm("Delete account?")) return;
-    await api.delete(`/companies/${currentId}/accounts/${id}`);
-    load();
-  };
 
   // Group by type AND respect parent/child hierarchy: parents render first,
   // then their children indented right below. Orphans (no parent) still show.
@@ -84,27 +78,13 @@ export default function ChartOfAccounts() {
             </div>
             <div>
               {g.items.map(a => (
-                <div key={a.id}
-                     className={`grid grid-cols-12 gap-3 px-4 py-2 border-b border-slate-100 items-center hover:bg-slate-50 ${a._depth ? "bg-slate-50/40" : ""}`}
-                     data-testid={a.parent_account_id ? "coa-child-row" : "coa-parent-row"}>
-                  <div className="col-span-2 font-mono-num text-slate-500 text-sm">
-                    {a._depth ? <span className="opacity-40 mr-1">↳</span> : null}
-                    {a.code}
-                  </div>
-                  <div className={`col-span-7 text-sm ${a._depth ? "pl-4 text-slate-700" : "font-medium"}`}>
-                    {a.name}
-                    {a.created_by_ai && a.parent_account_id && (
-                      <span className="ml-2 text-[10px] uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
-                        auto
-                      </span>
-                    )}
-                  </div>
-                  <div className="col-span-2 text-xs text-slate-500">{a.subtype}</div>
-                  <div className="col-span-1 text-right">
-                    <button onClick={() => del(a.id)} className="text-red-500 hover:bg-red-50 rounded p-1"
-                            data-testid={TID.deleteBtn}><Trash2 size={13} /></button>
-                  </div>
-                </div>
+                <AccountRow
+                  key={a.id}
+                  a={a}
+                  currentId={currentId}
+                  onSaved={load}
+                  onDeleted={load}
+                />
               ))}
             </div>
           </div>
@@ -121,6 +101,195 @@ export default function ChartOfAccounts() {
     </div>
   );
 }
+
+function AccountRow({ a, currentId, onSaved, onDeleted }) {
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [code, setCode] = useState(a.code);
+  const [name, setName] = useState(a.name);
+  const [type, setType] = useState(a.type);
+  const [subtype, setSubtype] = useState(a.subtype || "");
+
+  // Re-sync the local edit buffer if the row's props change under us
+  // (e.g. after a bulk reload). Doesn't trip while the user is editing.
+  useEffect(() => {
+    if (!editing) {
+      setCode(a.code);
+      setName(a.name);
+      setType(a.type);
+      setSubtype(a.subtype || "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [a.code, a.name, a.type, a.subtype]);
+
+  const startEdit = () => setEditing(true);
+  const cancel = () => {
+    setCode(a.code);
+    setName(a.name);
+    setType(a.type);
+    setSubtype(a.subtype || "");
+    setEditing(false);
+  };
+
+  const save = async () => {
+    const trimmedCode = String(code).trim();
+    const trimmedName = name.trim();
+    if (!trimmedCode) { toast.error("Code is required."); return; }
+    if (!trimmedName) { toast.error("Name is required."); return; }
+    if (!TYPES.includes(type)) { toast.error("Invalid type."); return; }
+    // No-op guard — nothing changed.
+    if (
+      trimmedCode === String(a.code) &&
+      trimmedName === a.name &&
+      type === a.type &&
+      subtype.trim() === (a.subtype || "")
+    ) {
+      setEditing(false);
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.patch(`/companies/${currentId}/accounts/${a.id}`, {
+        code: trimmedCode,
+        name: trimmedName,
+        type,
+        subtype: subtype.trim(),
+      });
+      toast.success("Account updated.");
+      setEditing(false);
+      onSaved?.();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Save failed");
+    } finally { setBusy(false); }
+  };
+
+  const del = async () => {
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(`Delete account "${a.name}"? This can't be undone.`)) return;
+    setBusy(true);
+    try {
+      await api.delete(`/companies/${currentId}/accounts/${a.id}`);
+      toast.success("Account deleted.");
+      onDeleted?.();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Delete failed");
+      setBusy(false);
+    }
+  };
+
+  const onKey = (e) => {
+    if (e.key === "Enter") save();
+    if (e.key === "Escape") cancel();
+  };
+
+  return (
+    <div
+      className={`grid grid-cols-12 gap-3 px-4 py-2 border-b border-slate-100 items-center hover:bg-slate-50 ${a._depth ? "bg-slate-50/40" : ""} ${editing ? "bg-indigo-50/40 ring-1 ring-inset ring-indigo-200" : ""}`}
+      data-testid={a.parent_account_id ? "coa-child-row" : "coa-parent-row"}
+    >
+      {editing ? (
+        <>
+          <div className="col-span-2">
+            <input
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              onKeyDown={onKey}
+              className="w-full border rounded px-2 py-1 text-sm font-mono-num focus:outline-none focus:border-slate-500"
+              data-testid={`coa-edit-code-${a.id}`}
+              placeholder="Code"
+              autoFocus
+            />
+          </div>
+          <div className="col-span-5">
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={onKey}
+              className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:border-slate-500"
+              data-testid={`coa-edit-name-${a.id}`}
+              placeholder="Account name"
+            />
+          </div>
+          <div className="col-span-2">
+            <select
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+              className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:border-slate-500"
+              data-testid={`coa-edit-type-${a.id}`}
+            >
+              {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div className="col-span-2">
+            <input
+              value={subtype}
+              onChange={(e) => setSubtype(e.target.value)}
+              onKeyDown={onKey}
+              className="w-full border rounded px-2 py-1 text-xs focus:outline-none focus:border-slate-500"
+              placeholder="Subtype"
+              data-testid={`coa-edit-subtype-${a.id}`}
+            />
+          </div>
+          <div className="col-span-1 flex items-center justify-end gap-1">
+            <button
+              onClick={save}
+              disabled={busy}
+              className="text-emerald-600 hover:bg-emerald-50 rounded p-1 disabled:opacity-50"
+              title="Save (Enter)"
+              data-testid={`coa-save-${a.id}`}
+            >
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+            </button>
+            <button
+              onClick={cancel}
+              disabled={busy}
+              className="text-slate-500 hover:bg-slate-100 rounded p-1 disabled:opacity-50"
+              title="Cancel (Esc)"
+              data-testid={`coa-cancel-${a.id}`}
+            >
+              <X size={13} />
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="col-span-2 font-mono-num text-slate-500 text-sm">
+            {a._depth ? <span className="opacity-40 mr-1">↳</span> : null}
+            {a.code}
+          </div>
+          <div className={`col-span-7 text-sm ${a._depth ? "pl-4 text-slate-700" : "font-medium"}`}>
+            {a.name}
+            {a.created_by_ai && a.parent_account_id && (
+              <span className="ml-2 text-[10px] uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
+                auto
+              </span>
+            )}
+          </div>
+          <div className="col-span-2 text-xs text-slate-500">{a.subtype}</div>
+          <div className="col-span-1 flex items-center justify-end gap-1">
+            <button
+              onClick={startEdit}
+              className="text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded p-1"
+              title="Edit account"
+              data-testid={`coa-edit-${a.id}`}
+            >
+              <Pencil size={13} />
+            </button>
+            <button
+              onClick={del}
+              className="text-red-500 hover:bg-red-50 rounded p-1"
+              title="Delete account"
+              data-testid={TID.deleteBtn}
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 
 function SuggestCoAModal({ currentId, onClose }) {
   const [loading, setLoading] = useState(true);
