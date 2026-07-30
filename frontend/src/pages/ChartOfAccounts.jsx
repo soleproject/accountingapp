@@ -46,6 +46,46 @@ const SUBTYPES_BY_TYPE = {
 
 const subtypesFor = (t) => SUBTYPES_BY_TYPE[t] || SUBTYPES_BY_TYPE.expense;
 
+// Standard GAAP numbering ranges we auto-assign into when the CPA
+// hides account codes. Kept aligned with the AI-seed generator so
+// hand-created accounts fall into the same visual buckets:
+//   1000s asset  · 2000s liability · 3000s equity ·
+//   4000s revenue · 5000s cogs     · 6000s expense
+const CODE_RANGE = {
+  asset:     { start: 1000, end: 1999 },
+  liability: { start: 2000, end: 2999 },
+  equity:    { start: 3000, end: 3999 },
+  revenue:   { start: 4000, end: 4999 },
+  cogs:      { start: 5000, end: 5999 },
+  expense:   { start: 6000, end: 9999 },
+};
+
+/**
+ * Pick the next-available code for a given account type. Scans the
+ * caller's current CoA, honors the standard range for the type, and
+ * returns the LOWEST unused number as a string (so codes stay compact
+ * even after deletes). Falls back to the range start if the CoA is
+ * empty for that type.
+ */
+function nextCodeForType(type, accounts) {
+  const range = CODE_RANGE[type] || CODE_RANGE.expense;
+  const used = new Set(
+    (accounts || [])
+      .filter(a => a.type === type)
+      .map(a => Number(a.code))
+      .filter(n => Number.isFinite(n))
+  );
+  for (let n = range.start; n <= range.end; n += 10) {
+    if (!used.has(n)) return String(n);
+  }
+  // Fallback: dense scan if every 10-step is taken.
+  for (let n = range.start; n <= range.end; n += 1) {
+    if (!used.has(n)) return String(n);
+  }
+  // Absurd edge case — 4,999 expense accounts already booked.
+  return String(range.end);
+}
+
 export default function ChartOfAccounts() {
   const { currentId } = useCompany();
   const [accts, setAccts] = useState([]);
@@ -315,7 +355,7 @@ export default function ChartOfAccounts() {
           </div>
         ))}
       </div>
-      {creating && <CreateAccount currentId={currentId} prefill={creatingPrefill} allAccounts={accts}
+      {creating && <CreateAccount currentId={currentId} prefill={creatingPrefill} allAccounts={accts} showCodes={showCodes}
                                     onClose={() => { setCreating(false); setCreatingPrefill(null); load(); }} />}
       {suggestOpen && (
         <SuggestCoAModal
@@ -385,9 +425,20 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
     .sort((x, y) => String(x.code).localeCompare(String(y.code)));
 
   const save = async () => {
-    const trimmedCode = String(code).trim();
+    // Auto-generate a code when the CPA has codes hidden and left the
+    // field blank — the whole point of the toggle is to not care about
+    // numbering. Existing rows keep their code unless the user cleared
+    // it deliberately, in which case we still auto-fill.
+    let effectiveCode = String(code).trim();
+    if (!effectiveCode) {
+      if (!showCodes) {
+        effectiveCode = nextCodeForType(type, allAccounts || []);
+        setCode(effectiveCode);
+      } else {
+        toast.error("Code is required."); return;
+      }
+    }
     const trimmedName = name.trim();
-    if (!trimmedCode) { toast.error("Code is required."); return; }
     if (!trimmedName) { toast.error("Name is required."); return; }
     if (!TYPES.includes(type)) { toast.error("Invalid type."); return; }
     // If a parent is set, guard against self-parenting and mismatched types
@@ -403,7 +454,7 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
     const nextParentId = parentId || null;
     // No-op guard — nothing changed.
     if (
-      trimmedCode === String(a.code) &&
+      effectiveCode === String(a.code) &&
       trimmedName === a.name &&
       type === a.type &&
       subtype.trim() === (a.subtype || "") &&
@@ -415,7 +466,7 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
     setBusy(true);
     try {
       await api.patch(`/companies/${currentId}/accounts/${a.id}`, {
-        code: trimmedCode,
+        code: effectiveCode,
         name: trimmedName,
         type,
         subtype: subtype.trim(),
@@ -499,19 +550,21 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
     >
       {/* Main edit row — code / name / type / subtype / save·cancel */}
       <div className="grid grid-cols-12 gap-3 items-center">
-        <div className="col-span-2">
-          <label className="block text-[9px] uppercase tracking-wide text-slate-500 mb-0.5">Code</label>
-          <input
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            onKeyDown={onKey}
-            className="w-full border rounded px-2 py-1 text-sm font-mono-num focus:outline-none focus:border-slate-500"
-            data-testid={`coa-edit-code-${a.id}`}
-            placeholder="Code"
-            autoFocus
-          />
-        </div>
-        <div className="col-span-5">
+        {showCodes && (
+          <div className="col-span-2">
+            <label className="block text-[9px] uppercase tracking-wide text-slate-500 mb-0.5">Code</label>
+            <input
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              onKeyDown={onKey}
+              className="w-full border rounded px-2 py-1 text-sm font-mono-num focus:outline-none focus:border-slate-500"
+              data-testid={`coa-edit-code-${a.id}`}
+              placeholder="Code"
+              autoFocus
+            />
+          </div>
+        )}
+        <div className={showCodes ? "col-span-5" : "col-span-7"}>
           <label className="block text-[9px] uppercase tracking-wide text-slate-500 mb-0.5">Account name</label>
           <input
             value={name}
@@ -520,6 +573,7 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
             className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:border-slate-500"
             data-testid={`coa-edit-name-${a.id}`}
             placeholder="Account name"
+            autoFocus={!showCodes}
           />
         </div>
         <div className="col-span-2">
@@ -998,7 +1052,7 @@ function SuggestCoAModal({ currentId, onClose }) {
   );
 }
 
-function CreateAccount({ currentId, prefill, allAccounts, onClose }) {
+function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onClose }) {
   const p = prefill || {};
   const [code, setCode] = useState(p.code || "");
   const [name, setName] = useState(p.name || "");
@@ -1017,8 +1071,19 @@ function CreateAccount({ currentId, prefill, allAccounts, onClose }) {
     .sort((x, y) => String(x.code).localeCompare(String(y.code)));
 
   const save = async () => {
+    // Same auto-code rule as the inline row editor: when codes are
+    // hidden, fill in the next-available number in the type's range.
+    let effectiveCode = String(code).trim();
+    if (!effectiveCode) {
+      if (!showCodes) {
+        effectiveCode = nextCodeForType(type, allAccounts || []);
+      } else {
+        toast.error("Code is required."); return;
+      }
+    }
+    if (!name.trim()) { toast.error("Name is required."); return; }
     await api.post(`/companies/${currentId}/accounts`, {
-      code, name, type, subtype,
+      code: effectiveCode, name: name.trim(), type, subtype,
       parent_account_id: parentId || null,
     });
     toast.success("Account created"); onClose();
@@ -1027,8 +1092,10 @@ function CreateAccount({ currentId, prefill, allAccounts, onClose }) {
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-3">
         <h3 className="font-heading font-semibold">New Account</h3>
-        <input placeholder="Code (e.g. 6250)" value={code} onChange={(e) => setCode(e.target.value)}
-               className="w-full border rounded px-3 py-2 text-sm font-mono-num" />
+        {showCodes && (
+          <input placeholder="Code (e.g. 6250)" value={code} onChange={(e) => setCode(e.target.value)}
+                 className="w-full border rounded px-3 py-2 text-sm font-mono-num" />
+        )}
         <input placeholder="Account name" value={name} onChange={(e) => setName(e.target.value)}
                className="w-full border rounded px-3 py-2 text-sm" />
         <select
