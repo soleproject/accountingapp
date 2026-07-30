@@ -39,7 +39,40 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — Affiliate welcome email (day-0 activation)
+### Feb 2026 (latest) — Enterprise (firm) signup at `/signup/enterprise`
+
+- **New signup path** `/signup/enterprise` — same UX pattern as
+  `/signup/affiliate` (indigo palette, `Building2` icon, "Start my
+  firm" CTA) with one extra field: **Firm / enterprise name**. No
+  subdomain field — that unlocks with the paid tier in a later
+  iteration.
+- **`SignupIn.enterprise_name`** (optional). When `role='pro'` +
+  `enterprise_name` is provided, `signup()` in `routes/auth.py`:
+  1. Stamps `users.branding.firm_name` before insert.
+  2. Calls `enterprises.ensure_personal_enterprise_for_pro(uid)` to
+     spawn the Enterprise record (auto-slug via `_resolve_unique_slug`).
+  3. Dispatches an `enterprise_welcome` email — all wrapped in
+     `try/except` with `logger.exception` so a template blowup can
+     never 500 the signup.
+- **New email template** `email_templates.enterprise_welcome()` —
+  subject `f"{enterprise_name} is live on SmartBooks — welcome."`,
+  private-label footer (`Sent by {enterprise_name}`, no
+  `smartbookssoftware.ai`), 3-step "this week" checklist (invite
+  staff / add first client / review billing) with deep links, and
+  a "reserved firm handle" FYI block noting the subdomain is a
+  paid-tier upgrade.
+- **`DEFAULT_PREFS['enterprise_welcome'] = True`** — new firm
+  owners are opted in.
+- **Cross-links** — `/signup`, `/signup/affiliate`, and
+  `/signup/enterprise` all cross-link to the other two at the
+  bottom of the form. Login page has 3 stacked signup CTAs.
+- **Backwards-compat** — `role='pro'` without `enterprise_name`
+  still works (no enterprise auto-spawned); `role='client'` with
+  `enterprise_name` ignores the field.
+- **Regression tests**: `/app/backend/tests/test_iter53_enterprise_signup.py`
+  — 13/13 pass. Full suite iter49-53: 93/93 green.
+
+### Feb 2026 — Affiliate welcome email (day-0 activation)
 
 - **New email template** `email_templates.affiliate_welcome(name,
   share_link, slug, dashboard_url, referrer_name=None)` — subject
