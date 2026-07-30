@@ -46,6 +46,22 @@ const SUBTYPES_BY_TYPE = {
 
 const subtypesFor = (t) => SUBTYPES_BY_TYPE[t] || SUBTYPES_BY_TYPE.expense;
 
+// Turn machine-y keys ("operating_expense", "cogs", "long_term_liability")
+// into human-friendly labels ("Operating Expense", "COGS", "Long Term Liability").
+// The raw values stay in the DB / API payloads — this only shapes what
+// the CPA sees in dropdowns and the subtype column.
+const ACRONYMS = new Set(["cogs", "ap", "ar"]);
+const prettyLabel = (s) => {
+  if (!s) return "";
+  const lower = String(s).toLowerCase();
+  if (ACRONYMS.has(lower)) return lower.toUpperCase();
+  return lower
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map(w => ACRONYMS.has(w) ? w.toUpperCase() : (w[0].toUpperCase() + w.slice(1)))
+    .join(" ");
+};
+
 // Standard GAAP numbering ranges we auto-assign into when the CPA
 // hides account codes. Kept aligned with the AI-seed generator so
 // hand-created accounts fall into the same visual buckets:
@@ -291,7 +307,7 @@ export default function ChartOfAccounts() {
                           <span className="font-mono-num text-slate-500 text-xs w-12 shrink-0">{a.code}</span>
                           <span className="truncate">{a.name}</span>
                           {a.subtype && (
-                            <span className="text-[10px] text-slate-400 hidden sm:inline">· {a.subtype}</span>
+                            <span className="text-[10px] text-slate-400 hidden sm:inline">· {prettyLabel(a.subtype)}</span>
                           )}
                         </div>
                         <button
@@ -598,7 +614,7 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
             className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:border-slate-500"
             data-testid={`coa-edit-type-${a.id}`}
           >
-            {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            {TYPES.map(t => <option key={t} value={t}>{prettyLabel(t)}</option>)}
           </select>
         </div>
         <div className="col-span-2">
@@ -610,10 +626,10 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
             data-testid={`coa-edit-subtype-${a.id}`}
           >
             {!subtypesFor(type).includes(subtype) && subtype && (
-              <option value={subtype}>{subtype} (legacy)</option>
+              <option value={subtype}>{prettyLabel(subtype)} (legacy)</option>
             )}
             {subtypesFor(type).map(s => (
-              <option key={s} value={s}>{s}</option>
+              <option key={s} value={s}>{prettyLabel(s)}</option>
             ))}
           </select>
         </div>
@@ -700,7 +716,7 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
           </span>
         )}
       </div>
-      <div className="col-span-2 text-xs text-slate-500">{a.subtype}</div>
+      <div className="col-span-2 text-xs text-slate-500">{prettyLabel(a.subtype)}</div>
       <div
         className={`col-span-2 text-right font-mono-num text-[13px] ${balance == null || Math.abs(Number(balance)) < 0.005 ? "text-slate-300" : "text-slate-800"}`}
         data-testid={`coa-balance-${a.id}`}
@@ -1115,7 +1131,7 @@ function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onCl
           }}
           className="w-full border rounded px-3 py-2 text-sm"
         >
-          {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          {TYPES.map(t => <option key={t} value={t}>{prettyLabel(t)}</option>)}
         </select>
         <select
           value={subtype}
@@ -1123,7 +1139,7 @@ function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onCl
           className="w-full border rounded px-3 py-2 text-sm"
         >
           {subtypesFor(type).map(s => (
-            <option key={s} value={s}>{s}</option>
+            <option key={s} value={s}>{prettyLabel(s)}</option>
           ))}
         </select>
         <div>
