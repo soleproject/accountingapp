@@ -226,30 +226,24 @@ export default function ChartOfAccounts() {
           </button>
           {/* Balance-column basis toggle — Smart auto-picks the right
               lens per account; the other three force a single view.  */}
-          <div className="inline-flex text-[11px] rounded-md border overflow-hidden" data-testid="coa-basis-toggle">
-            {[
-              ["smart", "Smart"],
-              ["month", "MTD"],
-              ["ytd", "YTD"],
-              ["cumulative", "All-time"],
-            ].map(([k, label]) => (
-              <button
-                key={k}
-                onClick={() => setBasis(k)}
-                className={`px-2 py-1 ${basis === k ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
-                data-testid={`coa-basis-${k}`}
-                title={
-                  k === "smart"
-                    ? "YTD for revenue/expense, cumulative for asset/liability/equity"
-                    : k === "month" ? "Month-to-date across every account"
-                    : k === "ytd" ? "Year-to-date across every account"
-                    : "All-time cumulative across every account"
-                }
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <select
+            value={basis}
+            onChange={(e) => setBasis(e.target.value)}
+            className="px-2 py-1 rounded-md border border-slate-300 bg-white text-slate-800 text-[11px] focus:outline-none focus:border-slate-500 cursor-pointer"
+            data-testid="coa-basis-toggle"
+            title={
+              basis === "smart"
+                ? "Smart — YTD for revenue/expense, cumulative for asset/liability/equity"
+                : basis === "month" ? "Month-to-date across every account"
+                : basis === "ytd" ? "Year-to-date across every account"
+                : "All-time cumulative across every account"
+            }
+          >
+            <option value="smart">Smart</option>
+            <option value="month">MTD</option>
+            <option value="ytd">YTD</option>
+            <option value="cumulative">All-time</option>
+          </select>
           <button
             onClick={() => setSuggestOpen(true)}
             data-testid="coa-suggest-btn"
