@@ -90,23 +90,27 @@ function RecModal({ currentId, accts, onClose }) {
   const [busy, setBusy] = useState(false);
   const fileRef = useRef(null);
 
-  // Accounts eligible as a "paid from" source. Bank accounts, credit
-  // cards, and cash-on-hand all fit — anything that represents a payment
-  // instrument. Prepaids / clearing get filtered out to keep the list
-  // short. Falls back to all assets/liabilities if the CoA lacks the
-  // subtypes we're filtering on.
-  const PAY_SUBTYPES = new Set(["current_asset", "cash", "credit_card", "clearing", "current_liability"]);
+  // Accounts eligible as a "paid from" source — true payment instruments
+  // only (bank, cash-on-hand, credit card). Excludes A/R, Inventory,
+  // Prepaids, A/P, Sales Tax Payable which are NOT payment sources.
+  // Match by explicit subtype OR by name pattern (bank / checking /
+  // savings / cash / credit card) for CoAs without subtype tagging.
+  const NAME_RE = /(bank|checking|savings|cash on hand|petty cash|credit card|amex|visa|mastercard)/i;
   const paySource = accts.filter(a => {
-    if (a.type === "asset" && (a.subtype === "current_asset" || /bank|cash/i.test(a.name))) return true;
-    if (a.type === "liability" && (a.subtype === "credit_card" || /credit card|card/i.test(a.name))) return true;
-    return PAY_SUBTYPES.has(a.subtype);
+    if (a.subtype === "cash" || a.subtype === "credit_card") return true;
+    if (a.type === "asset" && NAME_RE.test(a.name)) return true;
+    if (a.type === "liability" && NAME_RE.test(a.name)) return true;
+    return false;
   });
-  const paymentOptions = paySource.length ? paySource : accts.filter(a => ["asset", "liability"].includes(a.type));
+  const paymentOptions = paySource;
 
   const onPickFile = (f) => {
     if (!f) return;
-    if (f.size > 8 * 1024 * 1024) {
-      toast.error("Attachment too large. Max 8 MB.");
+    // Guard the raw size AND the base64-encoded size (~4/3 larger).
+    // Warn near 6 MB raw so the encoded payload stays under typical
+    // 10 MB proxy limits.
+    if (f.size > 6 * 1024 * 1024) {
+      toast.error("Attachment too large. Max 6 MB.");
       return;
     }
     const reader = new FileReader();
@@ -202,7 +206,7 @@ function RecModal({ currentId, accts, onClose }) {
               className="w-full py-2 rounded border border-slate-200 bg-white hover:bg-slate-50 text-xs text-slate-700 inline-flex items-center justify-center gap-1.5"
               data-testid="receipt-attach-btn"
             >
-              <Paperclip size={12} /> Attach receipt (image or PDF, max 8 MB)
+              <Paperclip size={12} /> Attach receipt (image or PDF, max 6 MB)
             </button>
           )}
         </div>

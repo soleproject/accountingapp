@@ -14,6 +14,21 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - **Frontend**: React 19 + React Router + Tailwind + shadcn/ui + lucide-react + sonner + axios
 - **AI**: Claude Sonnet 4.5 via Emergent Universal Key (categorization, chat, industry-specific CoA)
 - **Auth**: JWT (bcrypt), role-based access (superadmin / pro / client), multi-tenant memberships
+
+## What's been implemented (Feb 2026)
+
+### Feb 2026 (latest) — Receipts: image/PDF uploads + Payment Source
+
+**Backend (`models.py` + `routes/payments.py`)**
+- `ReceiptCreate` gained `payment_account_id`, `attachment_data_url`, `attachment_filename` fields
+- `POST /api/companies/{cid}/receipts` persists all three via `model_dump()` spread. Attachment stored inline as base64 data URL (planned migration to object storage once size becomes an issue).
+
+**Frontend (`pages/Receipts.jsx`)**
+- New Receipt modal: **Paid from** dropdown (bank/cash/credit-card accounts only — filter is now strict to true payment instruments), **Attach receipt** dashed drop-zone (image or PDF), thumbnail preview for images, filename+size chip for PDFs, X to remove. Raw-size guard at 6 MB (base64 encoded stays under 10 MB proxy cap).
+- Receipts list: new **Paid from** column shows `code · name`; **Receipt** column shows Paperclip "View" link that opens the data URL in a new tab; `—` fallback when either field is empty.
+- 10/10 frontend E2E test criteria PASSED (`/app/test_reports/iteration_55.json`).
+
+
 - **Storage**: MongoDB (users, companies, memberships, accounts, transactions, invoices, bills, payments,
   receipts, contacts, journal_entries, rules, rule_candidates, ai_activity, chat_messages,
   reconciliations, book_reviews, close_periods, inventory_items, assets, loans, tags,
