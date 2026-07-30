@@ -123,6 +123,9 @@ class AccountCreate(BaseModel):
     name: str
     type: str
     subtype: str = ""
+    # Optional parent for sub-account grouping (e.g. Utilities → Electric,
+    # Phone, Water, Gas). One level deep only — enforced client-side.
+    parent_account_id: Optional[str] = None
 
 
 class JECreate(BaseModel):

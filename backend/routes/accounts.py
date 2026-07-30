@@ -78,11 +78,25 @@ async def list_accounts(cid: str, user: dict = Depends(get_current_user)):
 async def create_account(cid: str, inp: AccountCreate, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     aid = str(uuid.uuid4()); now = now_iso()
-    await db.accounts.insert_one({
+    doc = {
         "id": aid, "company_id": cid, "code": inp.code, "name": inp.name,
         "type": inp.type, "subtype": inp.subtype, "active": True, "balance": 0.0,
         "created_at": now, "updated_at": now,
-    })
+    }
+    # Sub-account link — validate the parent belongs to the same company
+    # and same type, and isn't itself nested (single-level trees only).
+    if inp.parent_account_id:
+        parent = await db.accounts.find_one({
+            "id": inp.parent_account_id, "company_id": cid,
+        })
+        if not parent:
+            raise HTTPException(400, "Parent account not found in this company.")
+        if parent.get("type") != inp.type:
+            raise HTTPException(400, "Parent account must be the same type.")
+        if parent.get("parent_account_id"):
+            raise HTTPException(400, "Parent must be a top-level account (only one level of nesting).")
+        doc["parent_account_id"] = inp.parent_account_id
+    await db.accounts.insert_one(doc)
     return {"id": aid}
 
 
@@ -318,6 +332,36 @@ async def ensure_account(cid: str, inp: EnsureAccountIn, user: dict = Depends(ge
 @router.patch("/companies/{cid}/accounts/{aid}")
 async def update_account(cid: str, aid: str, payload: dict, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
+    # Sub-account parent — validate before saving so we never persist an
+    # orphan or a 3-level tree. `None` / empty string clears the parent
+    # (promotes to top-level).
+    if "parent_account_id" in payload:
+        pid = payload.get("parent_account_id")
+        if pid in ("", None):
+            payload["parent_account_id"] = None
+        else:
+            if pid == aid:
+                raise HTTPException(400, "An account can't be its own parent.")
+            parent = await db.accounts.find_one({"id": pid, "company_id": cid})
+            if not parent:
+                raise HTTPException(400, "Parent account not found in this company.")
+            # Determine the effective type after this PATCH — the caller
+            # can be changing type + parent in the same request.
+            effective_type = payload.get("type")
+            if effective_type is None:
+                me = await db.accounts.find_one({"id": aid, "company_id": cid})
+                effective_type = (me or {}).get("type")
+            if parent.get("type") != effective_type:
+                raise HTTPException(400, "Parent account must be the same type.")
+            if parent.get("parent_account_id"):
+                raise HTTPException(400, "Parent must be a top-level account (only one level of nesting).")
+            # And any existing children of THIS account block it from being
+            # nested (would create a 3-level tree).
+            child_count = await db.accounts.count_documents({
+                "company_id": cid, "parent_account_id": aid,
+            })
+            if child_count:
+                raise HTTPException(400, "This account has sub-accounts of its own — flatten them before nesting.")
     payload["updated_at"] = now_iso()
     await db.accounts.update_one({"id": aid, "company_id": cid}, {"$set": payload})
     return {"ok": True}

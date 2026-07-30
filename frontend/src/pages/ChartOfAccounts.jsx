@@ -96,6 +96,7 @@ export default function ChartOfAccounts() {
                 <AccountRow
                   key={a.id}
                   a={a}
+                  allAccounts={accts}
                   currentId={currentId}
                   onSaved={load}
                   onDeleted={load}
@@ -105,7 +106,7 @@ export default function ChartOfAccounts() {
           </div>
         ))}
       </div>
-      {creating && <CreateAccount currentId={currentId} prefill={creatingPrefill}
+      {creating && <CreateAccount currentId={currentId} prefill={creatingPrefill} allAccounts={accts}
                                     onClose={() => { setCreating(false); setCreatingPrefill(null); load(); }} />}
       {suggestOpen && (
         <SuggestCoAModal
@@ -117,13 +118,18 @@ export default function ChartOfAccounts() {
   );
 }
 
-function AccountRow({ a, currentId, onSaved, onDeleted }) {
+function AccountRow({ a, allAccounts, currentId, onSaved, onDeleted }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [code, setCode] = useState(a.code);
   const [name, setName] = useState(a.name);
   const [type, setType] = useState(a.type);
   const [subtype, setSubtype] = useState(a.subtype || "");
+  // Parent account (sub-account support): pick any top-level account of
+  // the SAME type. Nesting more than one level deep is intentionally
+  // blocked so the hierarchy stays a clean 2-level tree Pros can reason
+  // about (e.g. Utilities > Electric, not Utilities > Electric > Sub-electric).
+  const [parentId, setParentId] = useState(a.parent_account_id || "");
 
   // Re-sync the local edit buffer if the row's props change under us
   // (e.g. after a bulk reload). Doesn't trip while the user is editing.
@@ -133,9 +139,10 @@ function AccountRow({ a, currentId, onSaved, onDeleted }) {
       setName(a.name);
       setType(a.type);
       setSubtype(a.subtype || "");
+      setParentId(a.parent_account_id || "");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [a.code, a.name, a.type, a.subtype]);
+  }, [a.code, a.name, a.type, a.subtype, a.parent_account_id]);
 
   const startEdit = () => setEditing(true);
   const cancel = () => {
@@ -143,8 +150,20 @@ function AccountRow({ a, currentId, onSaved, onDeleted }) {
     setName(a.name);
     setType(a.type);
     setSubtype(a.subtype || "");
+    setParentId(a.parent_account_id || "");
     setEditing(false);
   };
+
+  // Candidate parents: same type, not the row itself, and top-level
+  // (parent has no parent) so we don't build 3-level trees. Filtered
+  // client-side because the CoA is small (≤200 rows typical).
+  const eligibleParents = (allAccounts || [])
+    .filter((p) =>
+      p.id !== a.id
+      && p.type === type
+      && !p.parent_account_id
+    )
+    .sort((x, y) => String(x.code).localeCompare(String(y.code)));
 
   const save = async () => {
     const trimmedCode = String(code).trim();
@@ -152,12 +171,24 @@ function AccountRow({ a, currentId, onSaved, onDeleted }) {
     if (!trimmedCode) { toast.error("Code is required."); return; }
     if (!trimmedName) { toast.error("Name is required."); return; }
     if (!TYPES.includes(type)) { toast.error("Invalid type."); return; }
+    // If a parent is set, guard against self-parenting and mismatched types
+    // (the eligibleParents filter already excludes both but a stale prop
+    // update could theoretically slip a bad value through).
+    if (parentId) {
+      const p = (allAccounts || []).find(x => x.id === parentId);
+      if (!p) { toast.error("Parent account not found."); return; }
+      if (p.id === a.id) { toast.error("An account can't be its own parent."); return; }
+      if (p.type !== type) { toast.error("Parent must be the same type."); return; }
+      if (p.parent_account_id) { toast.error("Parent must be a top-level account."); return; }
+    }
+    const nextParentId = parentId || null;
     // No-op guard — nothing changed.
     if (
       trimmedCode === String(a.code) &&
       trimmedName === a.name &&
       type === a.type &&
-      subtype.trim() === (a.subtype || "")
+      subtype.trim() === (a.subtype || "") &&
+      nextParentId === (a.parent_account_id || null)
     ) {
       setEditing(false);
       return;
@@ -169,6 +200,7 @@ function AccountRow({ a, currentId, onSaved, onDeleted }) {
         name: trimmedName,
         type,
         subtype: subtype.trim(),
+        parent_account_id: nextParentId,
       });
       toast.success("Account updated.");
       setEditing(false);
@@ -197,126 +229,164 @@ function AccountRow({ a, currentId, onSaved, onDeleted }) {
     if (e.key === "Escape") cancel();
   };
 
-  return (
+  return editing ? (
     <div
-      className={`grid grid-cols-12 gap-3 px-4 py-2 border-b border-slate-100 items-center hover:bg-slate-50 ${a._depth ? "bg-slate-50/40" : ""} ${editing ? "bg-indigo-50/40 ring-1 ring-inset ring-indigo-200" : ""}`}
+      className="px-4 py-3 border-b border-slate-100 bg-indigo-50/40 ring-1 ring-inset ring-indigo-200 space-y-2"
       data-testid={a.parent_account_id ? "coa-child-row" : "coa-parent-row"}
     >
-      {editing ? (
-        <>
-          <div className="col-span-2">
-            <input
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              onKeyDown={onKey}
-              className="w-full border rounded px-2 py-1 text-sm font-mono-num focus:outline-none focus:border-slate-500"
-              data-testid={`coa-edit-code-${a.id}`}
-              placeholder="Code"
-              autoFocus
-            />
-          </div>
-          <div className="col-span-5">
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={onKey}
-              className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:border-slate-500"
-              data-testid={`coa-edit-name-${a.id}`}
-              placeholder="Account name"
-            />
-          </div>
-          <div className="col-span-2">
-            <select
-              value={type}
-              onChange={(e) => {
-                const nextType = e.target.value;
-                setType(nextType);
-                // Keep the existing subtype only if it's still valid under the
-                // new parent type; otherwise snap to the first option so we
-                // never save an orphan combo like {type: "asset", subtype: "operating_expense"}.
-                if (!subtypesFor(nextType).includes(subtype)) {
-                  setSubtype(subtypesFor(nextType)[0]);
-                }
-              }}
-              className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:border-slate-500"
-              data-testid={`coa-edit-type-${a.id}`}
-            >
-              {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-          <div className="col-span-2">
-            <select
-              value={subtypesFor(type).includes(subtype) ? subtype : ""}
-              onChange={(e) => setSubtype(e.target.value)}
-              className="w-full border rounded px-2 py-1 text-xs focus:outline-none focus:border-slate-500"
-              data-testid={`coa-edit-subtype-${a.id}`}
-            >
-              {!subtypesFor(type).includes(subtype) && subtype && (
-                // Legacy / hand-typed subtypes stay pickable so re-saving
-                // an old row doesn't force a change the Pro didn't intend.
-                <option value={subtype}>{subtype} (legacy)</option>
-              )}
-              {subtypesFor(type).map(s => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-          </div>
-          <div className="col-span-1 flex items-center justify-end gap-1">
-            <button
-              onClick={save}
-              disabled={busy}
-              className="text-emerald-600 hover:bg-emerald-50 rounded p-1 disabled:opacity-50"
-              title="Save (Enter)"
-              data-testid={`coa-save-${a.id}`}
-            >
-              {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
-            </button>
-            <button
-              onClick={cancel}
-              disabled={busy}
-              className="text-slate-500 hover:bg-slate-100 rounded p-1 disabled:opacity-50"
-              title="Cancel (Esc)"
-              data-testid={`coa-cancel-${a.id}`}
-            >
-              <X size={13} />
-            </button>
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="col-span-2 font-mono-num text-slate-500 text-sm">
-            {a._depth ? <span className="opacity-40 mr-1">↳</span> : null}
-            {a.code}
-          </div>
-          <div className={`col-span-7 text-sm ${a._depth ? "pl-4 text-slate-700" : "font-medium"}`}>
-            {a.name}
-            {a.created_by_ai && a.parent_account_id && (
-              <span className="ml-2 text-[10px] uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
-                auto
-              </span>
+      {/* Main edit row — code / name / type / subtype / save·cancel */}
+      <div className="grid grid-cols-12 gap-3 items-center">
+        <div className="col-span-2">
+          <label className="block text-[9px] uppercase tracking-wide text-slate-500 mb-0.5">Code</label>
+          <input
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            onKeyDown={onKey}
+            className="w-full border rounded px-2 py-1 text-sm font-mono-num focus:outline-none focus:border-slate-500"
+            data-testid={`coa-edit-code-${a.id}`}
+            placeholder="Code"
+            autoFocus
+          />
+        </div>
+        <div className="col-span-5">
+          <label className="block text-[9px] uppercase tracking-wide text-slate-500 mb-0.5">Account name</label>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={onKey}
+            className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:border-slate-500"
+            data-testid={`coa-edit-name-${a.id}`}
+            placeholder="Account name"
+          />
+        </div>
+        <div className="col-span-2">
+          <label className="block text-[9px] uppercase tracking-wide text-slate-500 mb-0.5">Type</label>
+          <select
+            value={type}
+            onChange={(e) => {
+              const nextType = e.target.value;
+              setType(nextType);
+              // Keep the existing subtype only if it's still valid under the
+              // new parent type; otherwise snap to the first option.
+              if (!subtypesFor(nextType).includes(subtype)) {
+                setSubtype(subtypesFor(nextType)[0]);
+              }
+              // Parent-account restriction: must match the new type, so
+              // drop the parent if the type change broke the relationship.
+              if (parentId) {
+                const p = (allAccounts || []).find(x => x.id === parentId);
+                if (!p || p.type !== nextType) setParentId("");
+              }
+            }}
+            className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:border-slate-500"
+            data-testid={`coa-edit-type-${a.id}`}
+          >
+            {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        <div className="col-span-2">
+          <label className="block text-[9px] uppercase tracking-wide text-slate-500 mb-0.5">Subtype</label>
+          <select
+            value={subtypesFor(type).includes(subtype) ? subtype : ""}
+            onChange={(e) => setSubtype(e.target.value)}
+            className="w-full border rounded px-2 py-1 text-xs focus:outline-none focus:border-slate-500"
+            data-testid={`coa-edit-subtype-${a.id}`}
+          >
+            {!subtypesFor(type).includes(subtype) && subtype && (
+              <option value={subtype}>{subtype} (legacy)</option>
             )}
-          </div>
-          <div className="col-span-2 text-xs text-slate-500">{a.subtype}</div>
-          <div className="col-span-1 flex items-center justify-end gap-1">
-            <button
-              onClick={startEdit}
-              className="text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded p-1"
-              title="Edit account"
-              data-testid={`coa-edit-${a.id}`}
-            >
-              <Pencil size={13} />
-            </button>
-            <button
-              onClick={del}
-              className="text-red-500 hover:bg-red-50 rounded p-1"
-              title="Delete account"
-              data-testid={TID.deleteBtn}
-            >
-              <Trash2 size={13} />
-            </button>
-          </div>
-        </>
-      )}
+            {subtypesFor(type).map(s => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </div>
+        <div className="col-span-1 flex items-end justify-end gap-1 pb-0.5">
+          <button
+            onClick={save}
+            disabled={busy}
+            className="text-emerald-600 hover:bg-emerald-50 rounded p-1 disabled:opacity-50"
+            title="Save (Enter)"
+            data-testid={`coa-save-${a.id}`}
+          >
+            {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+          </button>
+          <button
+            onClick={cancel}
+            disabled={busy}
+            className="text-slate-500 hover:bg-slate-100 rounded p-1 disabled:opacity-50"
+            title="Cancel (Esc)"
+            data-testid={`coa-cancel-${a.id}`}
+          >
+            <X size={13} />
+          </button>
+        </div>
+      </div>
+      {/* Sub-account row — pick a parent of the same type to nest this
+          account under (Utilities > Electric, etc). Only shown when a
+          same-type top-level candidate exists to keep the UI clean for
+          new / first-of-type accounts. */}
+      <div className="grid grid-cols-12 gap-3 items-center">
+        <div className="col-span-2 text-[10px] uppercase tracking-wide text-slate-500 self-center">
+          Sub-account of
+        </div>
+        <div className="col-span-9">
+          <select
+            value={parentId}
+            onChange={(e) => setParentId(e.target.value)}
+            className="w-full border rounded px-2 py-1 text-sm bg-white focus:outline-none focus:border-slate-500"
+            data-testid={`coa-edit-parent-${a.id}`}
+          >
+            <option value="">— None (top-level account) —</option>
+            {eligibleParents.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.code} · {p.name}
+              </option>
+            ))}
+          </select>
+          {eligibleParents.length === 0 && (
+            <div className="text-[10px] text-slate-500 mt-1">
+              No other top-level {type} accounts exist yet — create one first to nest under it.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  ) : (
+    <div
+      className={`grid grid-cols-12 gap-3 px-4 py-2 border-b border-slate-100 items-center hover:bg-slate-50 ${a._depth ? "bg-slate-50/40" : ""}`}
+      data-testid={a.parent_account_id ? "coa-child-row" : "coa-parent-row"}
+    >
+      <div className="col-span-2 font-mono-num text-slate-500 text-sm">
+        {a._depth ? <span className="opacity-40 mr-1">↳</span> : null}
+        {a.code}
+      </div>
+      <div className={`col-span-7 text-sm ${a._depth ? "pl-4 text-slate-700" : "font-medium"}`}>
+        {a.name}
+        {a.created_by_ai && a.parent_account_id && (
+          <span className="ml-2 text-[10px] uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
+            auto
+          </span>
+        )}
+      </div>
+      <div className="col-span-2 text-xs text-slate-500">{a.subtype}</div>
+      <div className="col-span-1 flex items-center justify-end gap-1">
+        <button
+          onClick={startEdit}
+          className="text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded p-1"
+          title="Edit account"
+          data-testid={`coa-edit-${a.id}`}
+        >
+          <Pencil size={13} />
+        </button>
+        <button
+          onClick={del}
+          className="text-red-500 hover:bg-red-50 rounded p-1"
+          title="Delete account"
+          data-testid={TID.deleteBtn}
+        >
+          <Trash2 size={13} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -462,7 +532,7 @@ function SuggestCoAModal({ currentId, onClose }) {
   );
 }
 
-function CreateAccount({ currentId, prefill, onClose }) {
+function CreateAccount({ currentId, prefill, allAccounts, onClose }) {
   const p = prefill || {};
   const [code, setCode] = useState(p.code || "");
   const [name, setName] = useState(p.name || "");
@@ -472,8 +542,19 @@ function CreateAccount({ currentId, prefill, onClose }) {
       ? p.subtype
       : subtypesFor(TYPES.includes(p.type) ? p.type : "expense")[0]
   );
+  // Sub-account parent — prefilled if the caller passed one (used by
+  // some AI actions that spawn nested accounts directly).
+  const [parentId, setParentId] = useState(p.parent_account_id || "");
+
+  const eligibleParents = (allAccounts || [])
+    .filter((row) => row.type === type && !row.parent_account_id)
+    .sort((x, y) => String(x.code).localeCompare(String(y.code)));
+
   const save = async () => {
-    await api.post(`/companies/${currentId}/accounts`, { code, name, type, subtype });
+    await api.post(`/companies/${currentId}/accounts`, {
+      code, name, type, subtype,
+      parent_account_id: parentId || null,
+    });
     toast.success("Account created"); onClose();
   };
   return (
@@ -489,9 +570,14 @@ function CreateAccount({ currentId, prefill, onClose }) {
           onChange={(e) => {
             const nextType = e.target.value;
             setType(nextType);
-            // Snap subtype into the new type's valid range on every switch.
             if (!subtypesFor(nextType).includes(subtype)) {
               setSubtype(subtypesFor(nextType)[0]);
+            }
+            // Drop the parent if the new type invalidates it — sub-accounts
+            // must live under a parent of the same type.
+            if (parentId) {
+              const par = (allAccounts || []).find(r => r.id === parentId);
+              if (!par || par.type !== nextType) setParentId("");
             }
           }}
           className="w-full border rounded px-3 py-2 text-sm"
@@ -507,6 +593,29 @@ function CreateAccount({ currentId, prefill, onClose }) {
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+            Sub-account of (optional)
+          </label>
+          <select
+            value={parentId}
+            onChange={(e) => setParentId(e.target.value)}
+            className="w-full border rounded px-3 py-2 text-sm bg-white"
+            data-testid="coa-create-parent"
+          >
+            <option value="">— None (top-level account) —</option>
+            {eligibleParents.map(par => (
+              <option key={par.id} value={par.id}>
+                {par.code} · {par.name}
+              </option>
+            ))}
+          </select>
+          {eligibleParents.length === 0 && (
+            <div className="text-[10px] text-slate-500 mt-1">
+              No top-level {type} accounts yet — this will be a top-level account.
+            </div>
+          )}
+        </div>
         <div className="flex gap-2">
           <button data-testid={TID.saveBtn} onClick={save} className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm">Save</button>
           <button data-testid={TID.cancelBtn} onClick={onClose} className="flex-1 py-2 rounded-md border text-sm">Cancel</button>
