@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { useBranding, THEME_PRESETS, THEME_TOKEN_META, resolvePalette } from "@/lib/branding";
 import PlanComparisonCard from "@/components/PlanComparisonCard";
-import { Loader2, Upload, Trash2, Check, Save, Palette, ImageIcon, Link as LinkIcon, RotateCcw, Type, Sparkles } from "lucide-react";
+import { Loader2, Upload, Trash2, Check, Save, Palette, ImageIcon, Link as LinkIcon, RotateCcw, Type, Sparkles, Lock } from "lucide-react";
 
 // Pro-firm branding — slice B: 4 logo variants, per-token custom colors
 // with a live preview card, and a public sign-in subdomain.
@@ -48,6 +48,71 @@ export default function ProSettings() {
   const [plansOpen, setPlansOpen] = useState(false);
   // Live availability check state: null=idle, "checking", "ok", or an error string.
   const [subStatus, setSubStatus] = useState(null);
+  // White-label unlock state — read from branding. Locked pros see
+  // greyed-out sections + an "Upgrade to unlock" CTA that opens Stripe.
+  const unlocked = !!branding?.whitelabel_unlocked;
+  const unlockSource = branding?.whitelabel_source || null;
+  const [unlockBusy, setUnlockBusy] = useState(false);
+  // Superadmins can always edit branding on any tenant they impersonate.
+  const bypassLock = user?.role === "superadmin";
+  const isLocked = !unlocked && !bypassLock;
+
+  const startCheckout = async () => {
+    setUnlockBusy(true);
+    try {
+      const r = await api.post("/pro/branding/whitelabel-checkout", {
+        origin_url: window.location.origin,
+      });
+      if (r.data?.already_unlocked) {
+        toast.success("Already unlocked — refreshing…");
+        await refresh();
+        return;
+      }
+      if (r.data?.checkout_url) {
+        window.location.href = r.data.checkout_url;
+        return;
+      }
+      toast.error("Couldn't start checkout.");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't start checkout");
+    } finally { setUnlockBusy(false); }
+  };
+
+  // Post-checkout landing — Stripe returns to /pro/settings?whitelabel=success.
+  // Poll /pro/branding a few times so the webhook has a chance to flip the
+  // flag, then show a success toast. The URL param is stripped on unmount.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const flag = params.get("whitelabel");
+    if (!flag) return;
+    if (flag === "success") {
+      let cancelled = false;
+      let tries = 0;
+      const poll = async () => {
+        if (cancelled) return;
+        tries += 1;
+        await refresh();
+        // eslint-disable-next-line no-await-in-loop
+        const r = await api.get("/pro/branding").catch(() => null);
+        if (r?.data?.whitelabel_unlocked) {
+          toast.success("White-label unlocked — every branding field is live.");
+          return;
+        }
+        if (tries < 6) setTimeout(poll, 1200);
+        else toast.message("Payment received — refresh in a moment if branding isn't unlocked yet.");
+      };
+      poll();
+    } else if (flag === "cancel") {
+      toast("Checkout canceled — no changes made.");
+    }
+    // Strip the query param so a browser reload doesn't retrigger.
+    const url = new URL(window.location.href);
+    url.searchParams.delete("whitelabel");
+    url.searchParams.delete("session_id");
+    window.history.replaceState(null, "", url.toString());
+    return () => {};
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     api.get("/branding/config")
@@ -316,11 +381,60 @@ export default function ProSettings() {
         <PlanComparisonCard
           variant="modal"
           loggedIn={true}
+          paidCurrent={unlocked}
           onClose={() => setPlansOpen(false)}
         />
       )}
 
+      {/* ---------- White-label unlock banner ---------- */}
+      {isLocked ? (
+        <section
+          className="rounded-xl border-2 border-dashed border-indigo-200 bg-gradient-to-br from-indigo-50/70 via-white to-fuchsia-50/40 p-5"
+          data-testid="whitelabel-lock-banner"
+        >
+          <div className="flex items-start gap-4">
+            <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0">
+              <Lock size={18} className="text-indigo-700" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-slate-900 mb-0.5">
+                White-label is locked on your firm
+              </div>
+              <div className="text-xs text-slate-600">
+                Every field on this page — private label name, subdomain,
+                theme, hero image, logos — stays greyed out until you
+                unlock white-labeling. Ask your platform admin for a comp
+                grant, or upgrade below to unlock instantly.
+              </div>
+            </div>
+            <button
+              onClick={startCheckout}
+              disabled={unlockBusy}
+              className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium disabled:opacity-60"
+              data-testid="whitelabel-upgrade-btn"
+            >
+              {unlockBusy ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+              Upgrade to unlock
+            </button>
+          </div>
+        </section>
+      ) : unlocked ? (
+        <section
+          className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-2.5 flex items-center gap-3"
+          data-testid="whitelabel-unlocked-banner"
+        >
+          <Check size={14} className="text-emerald-700 shrink-0" />
+          <div className="text-xs text-emerald-900">
+            <b>White-label unlocked</b>
+            {unlockSource === "comp"
+              ? " — comped by your platform admin. All branding controls are enabled."
+              : " — thank you for upgrading! All branding controls are enabled."}
+          </div>
+        </section>
+      ) : null}
+
       {/* ---------- Private Label Name ---------- */}
+      <LockedSection isLocked={isLocked} testId="branding-firm-name-card-locked">
       <section className="rounded-xl border bg-white p-6" data-testid="branding-firm-name-card">
         <div className="flex items-center gap-2 mb-2">
           <Type size={16} className="text-slate-500" />
@@ -363,8 +477,10 @@ export default function ProSettings() {
           Up to 60 characters. Changes apply on next page load — no rebuild required.
         </p>
       </section>
+      </LockedSection>
 
       {/* ---------- Sign-in address ---------- */}
+      <LockedSection isLocked={isLocked} testId="branding-signin-card-locked">
       <section className="rounded-xl border bg-white p-6" data-testid="branding-signin-card">
         <div className="flex items-center gap-2 mb-2">
           <LinkIcon size={16} className="text-slate-500" />
@@ -439,8 +555,10 @@ export default function ProSettings() {
           3–40 chars, lowercase letters, digits, and hyphens. Must be unique across all firms.
         </p>
       </section>
+      </LockedSection>
 
       {/* ---------- Sign-in page options ---------- */}
+      <LockedSection isLocked={isLocked} testId="branding-signin-options-card-locked">
       <section className="rounded-xl border bg-white p-6" data-testid="branding-signin-options-card">
         <div className="flex items-center gap-2 mb-2">
           <Sparkles size={16} className="text-slate-500" />
@@ -624,8 +742,10 @@ export default function ProSettings() {
           </div>
         </div>
       </section>
+      </LockedSection>
 
       {/* ---------- Logos (4 variants) ---------- */}
+      <LockedSection isLocked={isLocked} testId="branding-logos-card-locked">
       <section className="rounded-xl border bg-white p-6" data-testid="branding-logos-card">
         <div className="flex items-center gap-2 mb-2">
           <ImageIcon size={16} className="text-slate-500" />
@@ -642,8 +762,10 @@ export default function ProSettings() {
           <LogoSlot variant="icon_dark"   label="Icon · dark"   bg="bg-slate-900" url={logos.icon_dark}   refresh={refresh} square />
         </div>
       </section>
+      </LockedSection>
 
       {/* ---------- Theme (presets + custom pickers + live preview) ---------- */}
+      <LockedSection isLocked={isLocked} testId="branding-theme-card-locked">
       <section className="rounded-xl border bg-white p-6" data-testid="branding-theme-card">
         <div className="flex items-center gap-2 mb-2">
           <Palette size={16} className="text-slate-500" />
@@ -734,6 +856,25 @@ export default function ProSettings() {
           </div>
         </div>
       </section>
+      </LockedSection>
+    </div>
+  );
+}
+
+// LockedSection — greys out gated branding sections and swallows pointer
+// events when the firm hasn't unlocked white-label. The wrapped children
+// still render (so pros can see WHAT they're unlocking) but no click or
+// keystroke reaches them.
+function LockedSection({ isLocked, testId, children }) {
+  if (!isLocked) return <>{children}</>;
+  return (
+    <div className="relative" data-testid={testId}>
+      <div className="pointer-events-none select-none opacity-50 grayscale-[40%]">
+        {children}
+      </div>
+      <div className="absolute top-4 right-4 inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-indigo-100 border border-indigo-200 text-[11px] font-medium text-indigo-800 shadow-sm">
+        <Lock size={11} /> Locked
+      </div>
     </div>
   );
 }

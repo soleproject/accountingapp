@@ -9,12 +9,11 @@ import { Check, Sparkles, X, Building2, Loader2 } from "lucide-react";
  * value prop) and as a modal inside ProSettings when an existing firm
  * owner clicks "Compare plans".
  *
- * The Paid CTA is intentionally aspirational for now — full Stripe
- * checkout wiring lives in the next iteration. Clicking it POSTs to
- * ``/api/pro/branding/whitelabel-waitlist`` when the caller is signed
- * in, otherwise it's a "learn more" toast for logged-out visitors on
- * the signup page. This gives us a real conversion signal to prioritize
- * the payment build without shipping a half-done checkout.
+ * Logged-in Pros: the Paid CTA POSTs to
+ * ``/api/pro/branding/whitelabel-checkout`` which returns a Stripe
+ * Checkout URL — we redirect straight to it. Logged-out visitors on
+ * the signup page still see an inline "you can upgrade from Settings"
+ * hint since we can't spin up a checkout without an authenticated pro.
  */
 export default function PlanComparisonCard({
   variant = "card",   // "card" (inline) | "modal"
@@ -23,7 +22,6 @@ export default function PlanComparisonCard({
   paidCurrent = false, // hide the CTA if the user is already on the paid tier
 }) {
   const [busy, setBusy] = useState(false);
-  const [joined, setJoined] = useState(false);
   // Pre-auth routes don't mount a Sonner <Toaster/>, so we render an
   // inline hint below the CTA instead of firing a toast that would be
   // silently dropped. Logged-in flows use toast normally.
@@ -36,11 +34,20 @@ export default function PlanComparisonCard({
     }
     setBusy(true);
     try {
-      await api.post("/pro/branding/whitelabel-waitlist");
-      setJoined(true);
-      toast.success("You're on the list — we'll email you the moment private-label is live.");
+      const r = await api.post("/pro/branding/whitelabel-checkout", {
+        origin_url: window.location.origin,
+      });
+      if (r.data?.already_unlocked) {
+        toast.success("Your firm is already unlocked — reload to see white-label settings.");
+        return;
+      }
+      if (r.data?.checkout_url) {
+        window.location.href = r.data.checkout_url;
+        return;
+      }
+      toast.error("Couldn't start checkout — no URL returned.");
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Couldn't join waitlist");
+      toast.error(e.response?.data?.detail || "Couldn't start checkout");
     } finally {
       setBusy(false);
     }
@@ -72,8 +79,8 @@ export default function PlanComparisonCard({
         />
         <PlanTile
           name="White-label"
-          price="Paid"
-          priceHint="coming soon"
+          price="Upgrade"
+          priceHint="unlock branding"
           accent="indigo"
           highlight={paidCurrent === true}
           items={PAID_FEATURES}
@@ -83,14 +90,12 @@ export default function PlanComparisonCard({
             <>
               <button
                 onClick={clickPaidCta}
-                disabled={busy || joined}
+                disabled={busy}
                 className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium disabled:opacity-60"
                 data-testid="plan-paid-cta"
               >
                 {busy && <Loader2 size={13} className="animate-spin" />}
-                {joined ? "You're on the list ✓"
-                 : loggedIn ? "Join the white-label waitlist"
-                            : "Learn more"}
+                {loggedIn ? "Unlock white-label — checkout" : "Learn more"}
               </button>
               {inlineHint && (
                 <div

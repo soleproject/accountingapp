@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import {
   ArrowLeft, Loader2, Save, Shield, Users2, Building2, Ticket, Gift, Pencil,
   Sparkles, CheckCircle2, Clock, X, Receipt, Play, ChevronRight, ChevronDown,
+  Lock, Unlock,
 } from "lucide-react";
 
 const PRODUCT_LABELS = {
@@ -215,13 +216,16 @@ export default function AdminEnterpriseDetail() {
           <h2 className="font-heading font-semibold text-sm">
             Pros ({data.pros.length})
           </h2>
+          <span className="text-[10px] text-slate-500 ml-auto">
+            White-label comp column · toggle to grant/revoke free branding
+          </span>
         </div>
         {!data.pros.length ? (
           <div className="p-6 text-sm text-slate-500">No Pros belong to this enterprise yet.</div>
         ) : (
           <ul className="divide-y">
             {data.pros.map((p) => (
-              <li key={p.id} className="px-5 py-3 flex items-center justify-between text-sm">
+              <li key={p.id} className="px-5 py-3 flex items-center justify-between text-sm gap-3">
                 <div className="min-w-0">
                   <div className="font-medium truncate">{p.name || p.email}</div>
                   <div className="text-xs text-slate-500 truncate">{p.email}</div>
@@ -232,6 +236,15 @@ export default function AdminEnterpriseDetail() {
                       {p.firm_name}
                     </span>
                   )}
+                  <WhitelabelCompToggle
+                    proId={p.id}
+                    initial={{
+                      comp: !!p.whitelabel_comp,
+                      paid: !!p.whitelabel_paid,
+                      unlocked: !!p.whitelabel_unlocked,
+                      source: p.whitelabel_source,
+                    }}
+                  />
                   <span className="text-[11px] text-slate-400">
                     Joined {p.joined_at ? new Date(p.joined_at).toLocaleDateString() : "—"}
                   </span>
@@ -576,8 +589,7 @@ function EnterpriseBillingSection({ eid }) {
 
 
 
-function KpiCard({ icon, label, value, tone = "slate" }) {
-  const tones = {
+function KpiCard({ icon, label, value, tone = "slate" }) {  const tones = {
     slate:   "bg-slate-50   text-slate-700   border-slate-200",
     indigo:  "bg-indigo-50  text-indigo-700  border-indigo-200",
     cyan:    "bg-cyan-50    text-cyan-700    border-cyan-200",
@@ -593,3 +605,69 @@ function KpiCard({ icon, label, value, tone = "slate" }) {
     </div>
   );
 }
+
+
+/**
+ * WhitelabelCompToggle — inline pill button that flips a pro's
+ * ``branding.whitelabel_comp`` flag via ``POST /admin/pros/{id}/
+ * whitelabel-comp``. Optimistically updates local state so the row
+ * feels instant; rolls back on error. Shows the source (comp vs paid)
+ * so admins never accidentally comp a paying customer.
+ */
+export function WhitelabelCompToggle({ proId, initial }) {
+  const [state, setState] = useState(initial);
+  const [busy, setBusy] = useState(false);
+
+  const toggle = async (e) => {
+    e.stopPropagation();
+    const next = !state.comp;
+    setBusy(true);
+    // Optimistic — the row updates instantly and rolls back on error.
+    setState((s) => ({ ...s, comp: next, unlocked: next || s.paid, source: next ? "comp" : (s.paid ? "paid" : null) }));
+    try {
+      const r = await api.post(`/admin/pros/${proId}/whitelabel-comp`, { granted: next });
+      setState({
+        comp: !!r.data.whitelabel_comp,
+        paid: !!r.data.whitelabel_paid,
+        unlocked: !!r.data.whitelabel_unlocked,
+        source: r.data.whitelabel_source,
+      });
+      toast.success(next
+        ? "White-label comped — Pro can edit branding immediately."
+        : "Comp revoked. If they aren't paying, branding is locked again.");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Toggle failed");
+      setState(initial);
+    } finally { setBusy(false); }
+  };
+
+  const icon = state.unlocked ? <Unlock size={11} /> : <Lock size={11} />;
+  const label = state.unlocked
+    ? (state.source === "comp" ? "Comped" : "Paid")
+    : "Locked";
+  const pillClass = state.unlocked
+    ? (state.source === "comp"
+        ? "bg-violet-50 text-violet-700 border-violet-200"
+        : "bg-emerald-50 text-emerald-700 border-emerald-200")
+    : "bg-slate-50 text-slate-600 border-slate-200";
+
+  return (
+    <div className="flex items-center gap-2" data-testid={`whitelabel-toggle-${proId}`}>
+      <span className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border ${pillClass}`}>
+        {icon} {label}
+      </span>
+      <button
+        type="button"
+        onClick={toggle}
+        disabled={busy || state.paid /* never comp on top of paid to avoid confusion */}
+        className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border transition ${state.comp ? "border-rose-200 text-rose-700 hover:bg-rose-50" : "border-indigo-200 text-indigo-700 hover:bg-indigo-50"} disabled:opacity-50 disabled:cursor-not-allowed`}
+        title={state.paid ? "This Pro is on a paid plan — no need to comp." : (state.comp ? "Revoke free white-label" : "Comp free white-label")}
+        data-testid={`whitelabel-toggle-btn-${proId}`}
+      >
+        {busy ? <Loader2 size={11} className="animate-spin" /> : (state.comp ? <Lock size={11} /> : <Unlock size={11} />)}
+        {state.comp ? "Revoke" : "Comp"}
+      </button>
+    </div>
+  );
+}
+

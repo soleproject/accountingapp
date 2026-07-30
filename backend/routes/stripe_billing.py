@@ -467,6 +467,27 @@ async def _handle_checkout_completed(session: dict) -> None:
             }},
         )
 
+    # White-label upgrade — the pro paid to unlock branding. Flip the
+    # gate on the target user (identified by metadata.pro_user_id, which
+    # we set at session-create time). Handles both one-time and
+    # subscription price types.
+    md = session.get("metadata") or {}
+    if (md.get("whitelabel_upgrade") or "").lower() == "true":
+        pro_uid = md.get("pro_user_id")
+        # Prefer the explicit pro_user_id from metadata; fall back to
+        # matching the payer's email in case metadata got stripped (e.g.
+        # Payment Links with promo codes).
+        target_uid = pro_uid or (user or {}).get("id")
+        if target_uid:
+            await db.users.update_one(
+                {"id": target_uid},
+                {"$set": {
+                    "branding.whitelabel_paid": True,
+                    "branding.whitelabel_paid_at": now_iso(),
+                    "branding.whitelabel_paid_session_id": session.get("id"),
+                }},
+            )
+
 
 async def _handle_invoice_paid(invoice: dict) -> None:
     stripe_customer_id = invoice.get("customer")
@@ -711,6 +732,32 @@ async def _handle_subscription_change(sub: dict) -> None:
             {"stripe_subscription_id": sub_id},
             {"$set": {"billing_state": state, "updated_at": now_iso()}},
         )
+
+    # White-label subscription lifecycle — the sub's metadata carries the
+    # `whitelabel_upgrade` marker we set at checkout create time. On a
+    # `canceled` event we revoke the paid unlock (comp status is
+    # untouched — Superadmin overrides always win).
+    md = sub.get("metadata") or {}
+    if (md.get("whitelabel_upgrade") or "").lower() == "true":
+        pro_uid = md.get("pro_user_id")
+        if pro_uid:
+            if status in ("canceled", "incomplete_expired", "unpaid"):
+                await db.users.update_one(
+                    {"id": pro_uid},
+                    {"$set": {
+                        "branding.whitelabel_paid": False,
+                        "branding.whitelabel_paid_canceled_at": now_iso(),
+                    }},
+                )
+            elif status in ("active", "trialing"):
+                # Renewal / reactivation — make sure the flag is on.
+                await db.users.update_one(
+                    {"id": pro_uid, "branding.whitelabel_comp": {"$ne": True}},
+                    {"$set": {
+                        "branding.whitelabel_paid": True,
+                        "branding.whitelabel_paid_at": now_iso(),
+                    }},
+                )
 
 
 def _sub_status_to_billing_state(sub_status: Optional[str]) -> str:
@@ -1088,6 +1135,108 @@ async def create_company_checkout_session(
         "session_id": session.id,
         "mode": "live" if _STRIPE_KEY.startswith("sk_live_") else "test",
     }
+
+
+class WhitelabelCheckoutIn(BaseModel):
+    origin_url: Optional[str] = None
+
+
+@router.post("/pro/branding/whitelabel-checkout")
+async def create_whitelabel_checkout_session(
+    inp: WhitelabelCheckoutIn,
+    user: dict = Depends(get_current_user),
+):
+    """Create a Stripe Checkout Session that unlocks white-label
+    branding on the current pro's firm. Price is set via the
+    ``STRIPE_WHITELABEL_PRICE_ID`` env var so ops can pick monthly /
+    annual / one-time in the Stripe dashboard without a code deploy.
+
+    Metadata:
+      • ``whitelabel_upgrade = "true"``  — webhook fan-out marker
+      • ``pro_user_id``                   — who to flip on success
+    """
+    if user.get("role") not in {"pro", "superadmin"}:
+        raise HTTPException(403, "Only accounting pros can purchase white-label.")
+
+    # Refresh the user doc so we can short-circuit if they're already
+    # unlocked (comp'd by superadmin or previously paid). Prevents double-
+    # charging and gives the frontend a clean idempotent response.
+    me = await db.users.find_one({"id": user["id"]})
+    b = (me or {}).get("branding") or {}
+    if b.get("whitelabel_comp") or b.get("whitelabel_paid"):
+        return {"already_unlocked": True, "source": "comp" if b.get("whitelabel_comp") else "paid"}
+
+    price_id = os.environ.get("STRIPE_WHITELABEL_PRICE_ID", "").strip()
+    if not price_id:
+        raise HTTPException(
+            400,
+            "White-label pricing isn't configured. Ask an admin to set "
+            "STRIPE_WHITELABEL_PRICE_ID (a Stripe Price ID starting with `price_...`) "
+            "in the Railway environment.",
+        )
+    if not _STRIPE_KEY:
+        raise HTTPException(
+            503,
+            "Stripe is not configured on this environment. Set STRIPE_SECRET_KEY "
+            "(and STRIPE_WEBHOOK_SECRET) then redeploy.",
+        )
+
+    base = (inp.origin_url or _platform_base_url()).rstrip("/")
+    success_url = f"{base}/pro/settings?whitelabel=success&session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{base}/pro/settings?whitelabel=cancel"
+
+    # Detect subscription vs one-time price so we set the right mode. The
+    # env var could point at either; peek at Stripe to be safe.
+    mode = "subscription"
+    try:
+        price = stripe.Price.retrieve(price_id)
+        if not (price.get("recurring")):
+            mode = "payment"
+    except stripe.error.StripeError as e:
+        logger.exception("Stripe price lookup failed for whitelabel price")
+        raise HTTPException(502, f"Stripe error: {e.user_message or str(e)}")
+
+    customer_kwargs = {}
+    if me.get("stripe_customer_id"):
+        customer_kwargs["customer"] = me["stripe_customer_id"]
+    elif me.get("email"):
+        customer_kwargs["customer_email"] = me["email"]
+
+    md = {
+        "whitelabel_upgrade": "true",
+        "pro_user_id": user["id"],
+        "pro_email": me.get("email") or "",
+    }
+    try:
+        session = stripe.checkout.Session.create(
+            mode=mode,
+            line_items=[{"price": price_id, "quantity": 1}],
+            success_url=success_url,
+            cancel_url=cancel_url,
+            allow_promotion_codes=True,
+            metadata=md,
+            # Mirror the metadata onto the subscription so recurring
+            # invoices carry the marker too (used for renewal audit).
+            subscription_data=({"metadata": md} if mode == "subscription" else None),
+            **customer_kwargs,
+        )
+    except stripe.error.StripeError as e:
+        logger.exception("Stripe whitelabel checkout session failed for user %s", user["id"])
+        raise HTTPException(502, f"Stripe error: {e.user_message or str(e)}")
+
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {
+            "branding.whitelabel_last_session_id": session.id,
+            "updated_at": now_iso(),
+        }},
+    )
+    return {
+        "checkout_url": session.url,
+        "session_id": session.id,
+        "mode": "live" if _STRIPE_KEY.startswith("sk_live_") else "test",
+    }
+
 
 
 @router.get("/admin/billing/env-check")

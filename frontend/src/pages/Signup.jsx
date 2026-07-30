@@ -48,6 +48,34 @@ export default function Signup() {
   const [refWho, setRefWho] = useState(null);  // {name, firm_name} once resolved
   const [busy, setBusy] = useState(false);
 
+  // White-label branding — when the visitor lands on {firm}.accountingapp.ai,
+  // hit /branding/by-host and swap the SmartBooks header for the firm's
+  // logo + name. Mirrors the Login page behavior so a Pro's affiliates,
+  // customers, and enterprise recruits all see the same brand.
+  const [firm, setFirm] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    // 1. `?firm=acme` explicit override wins — same pattern as Login,
+    //    so previewers can test any firm's brand from the platform host.
+    const q = new URLSearchParams(window.location.search).get("firm");
+    if (q) {
+      api.get(`/branding/by-subdomain/${encodeURIComponent(q.toLowerCase().trim())}`)
+        .then(r => { if (!cancelled) setFirm(r.data); })
+        .catch(() => { /* unknown firm → platform brand */ });
+      return () => { cancelled = true; };
+    }
+    // 2. Server-resolved from the current hostname — same endpoint
+    //    Login uses, so a Pro's affiliates, customers, and enterprise
+    //    recruits all see the same brand on every entry point.
+    api.get(`/branding/by-host?host=${encodeURIComponent(window.location.hostname)}`)
+      .then(r => {
+        if (cancelled) return;
+        if (r.data.mode === "firm") setFirm(r.data);
+      })
+      .catch(() => { /* platform brand is the fallback */ });
+    return () => { cancelled = true; };
+  }, []);
+
   // Capture ?ref=... on first mount and stash a cookie so it survives an
   // out-and-back detour through Stripe Checkout or a marketing page.
   useEffect(() => {
@@ -136,21 +164,50 @@ export default function Signup() {
         <form onSubmit={submit} className={
           "w-full space-y-5 " + (enterpriseMode ? "max-w-sm mx-auto bg-white rounded-xl border p-6 shadow-sm" : "")
         } data-testid="signup-form">
-        <div className="flex items-center gap-2 mb-6">
-          <div className={
-            "w-8 h-8 rounded-lg flex items-center justify-center " +
-            (enterpriseMode ? "bg-indigo-600" :
-             affiliateMode  ? "bg-emerald-600" :
-                              "bg-blue-600")
-          }>
-            {enterpriseMode
-              ? <Building2 size={16} className="text-white" />
-              : affiliateMode
-                ? <DollarSign size={16} className="text-white" />
-                : <Sparkles   size={16} className="text-white" />}
+        {firm ? (
+          <div
+            className="flex flex-col items-center text-center gap-3 mb-6"
+            data-testid="signup-firm-branding"
+          >
+            {(firm.logos?.logo_light || firm.logos?.icon_light) ? (
+              <img
+                src={firm.logos.logo_light || firm.logos.icon_light}
+                alt={firm.firm_name}
+                className="h-16 max-h-20 max-w-[280px] object-contain"
+              />
+            ) : (
+              <div className={
+                "w-16 h-16 rounded-lg flex items-center justify-center " +
+                (enterpriseMode ? "bg-indigo-600" :
+                 affiliateMode  ? "bg-emerald-600" :
+                                  "bg-blue-600")
+              }>
+                {enterpriseMode ? <Building2 size={28} className="text-white" />
+                 : affiliateMode ? <DollarSign size={28} className="text-white" />
+                 :                 <Sparkles   size={28} className="text-white" />}
+              </div>
+            )}
+            <div className="font-heading font-bold text-lg text-slate-900">
+              {firm.firm_name}
+            </div>
           </div>
-          <div className="font-heading font-bold">SmartBooks</div>
-        </div>
+        ) : (
+          <div className="flex items-center gap-2 mb-6">
+            <div className={
+              "w-8 h-8 rounded-lg flex items-center justify-center " +
+              (enterpriseMode ? "bg-indigo-600" :
+               affiliateMode  ? "bg-emerald-600" :
+                                "bg-blue-600")
+            }>
+              {enterpriseMode
+                ? <Building2 size={16} className="text-white" />
+                : affiliateMode
+                  ? <DollarSign size={16} className="text-white" />
+                  : <Sparkles   size={16} className="text-white" />}
+            </div>
+            <div className="font-heading font-bold">SmartBooks</div>
+          </div>
+        )}
 
         <div>
           <h1 className="text-2xl font-heading font-bold text-slate-900">

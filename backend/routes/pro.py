@@ -544,10 +544,37 @@ def _logos_from(b: dict) -> dict:
     return {k: logos.get(k) for k in ["logo_light", "logo_dark", "icon_light", "icon_dark"]}
 
 
+def _whitelabel_state(user_doc: dict) -> dict:
+    """Compute white-label unlock state for a pro. Comp (granted by
+    superadmin) takes precedence over Paid so a comped firm never gets
+    downgraded even after their subscription lapses.
+
+    Returns::
+
+        {
+            "whitelabel_unlocked": bool,
+            "whitelabel_source":   "comp" | "paid" | None,
+            "whitelabel_comp":     bool,
+            "whitelabel_paid":     bool,
+        }
+    """
+    b = (user_doc or {}).get("branding") or {}
+    comp = bool(b.get("whitelabel_comp"))
+    paid = bool(b.get("whitelabel_paid"))
+    src = "comp" if comp else ("paid" if paid else None)
+    return {
+        "whitelabel_unlocked": comp or paid,
+        "whitelabel_source": src,
+        "whitelabel_comp": comp,
+        "whitelabel_paid": paid,
+    }
+
+
 def _branding_out(user_doc: dict) -> dict:
     b = (user_doc or {}).get("branding") or {}
     fallback = (user_doc or {}).get("name") or None
     stored = b.get("firm_name") or None
+    wl = _whitelabel_state(user_doc)
     return {
         # The firm's display name — falls back to the user's own name so
         # newly-signed-up pros get something sensible in the tab title / UI
@@ -571,6 +598,10 @@ def _branding_out(user_doc: dict) -> dict:
         "signin_tagline": b.get("signin_tagline") or "",
         "signin_hero_image": b.get("signin_hero_image") or "",
         "buy_page_url": b.get("buy_page_url") or "",
+        # White-label gate — every editable branding field except `buy_page_url`
+        # (which is affiliate-facing) is off-limits until this flips true,
+        # either by a Superadmin comp grant or a successful Stripe payment.
+        **wl,
     }
 
 
@@ -627,6 +658,26 @@ async def patch_pro_branding(
     inp: BrandingPatch,
     user: dict = Depends(require_role("pro", "superadmin")),
 ):
+    # ------------------------------------------------------------------
+    # White-label gate — every branding field EXCEPT the affiliate
+    # ``buy_page_url`` is locked until the firm is unlocked (Superadmin
+    # comp or Stripe-paid). Superadmins editing their own tenant bypass.
+    # ------------------------------------------------------------------
+    _wl_gated_fields = {
+        "firm_name", "signin_subdomain", "theme_preset", "theme_custom",
+        "hide_demo_accounts", "hide_signup_link", "signin_tagline",
+        "signin_hero_image",
+    }
+    requested = {k for k in inp.dict(exclude_unset=True).keys()
+                 if k in _wl_gated_fields}
+    if requested and user.get("role") != "superadmin":
+        me = await db.users.find_one({"id": user["id"]})
+        if not _whitelabel_state(me).get("whitelabel_unlocked"):
+            raise HTTPException(
+                402,
+                "White-label is locked on your firm. Upgrade to unlock branding, "
+                "or ask an admin to comp your account.",
+            )
     updates: dict = {}
     unsets: dict = {}
     if inp.firm_name is not None:
@@ -738,6 +789,10 @@ async def upload_pro_logo(
     `branding.logos.<variant>` where variant ∈ {logo_light, logo_dark,
     icon_light, icon_dark}. Only `logo_light` is strictly required; the
     others fall back at render time when unset."""
+    if user.get("role") != "superadmin":
+        me = await db.users.find_one({"id": user["id"]})
+        if not _whitelabel_state(me).get("whitelabel_unlocked"):
+            raise HTTPException(402, "White-label is locked — upload logos after unlocking.")
     if variant not in _LOGO_VARIANTS:
         raise HTTPException(400, f"Unknown variant — must be one of {sorted(_LOGO_VARIANTS)}")
     if file.content_type not in {"image/png", "image/jpeg", "image/svg+xml", "image/webp"}:
@@ -762,6 +817,10 @@ async def delete_pro_logo(
     variant: str = "logo_light",
     user: dict = Depends(require_role("pro", "superadmin")),
 ):
+    if user.get("role") != "superadmin":
+        me = await db.users.find_one({"id": user["id"]})
+        if not _whitelabel_state(me).get("whitelabel_unlocked"):
+            raise HTTPException(402, "White-label is locked — nothing to remove.")
     if variant not in _LOGO_VARIANTS:
         raise HTTPException(400, f"Unknown variant — must be one of {sorted(_LOGO_VARIANTS)}")
     unset = {f"branding.logos.{variant}": ""}

@@ -9,6 +9,7 @@ import {
   AlertTriangle, RefreshCw, Wrench, DollarSign, CheckCircle2, RotateCcw,
 } from "lucide-react";
 import TeamPanel from "@/components/TeamPanel";
+import { WhitelabelCompToggle } from "@/pages/AdminEnterpriseDetail";
 
 export default function SuperadminDash() {
   const [data, setData] = useState(null);
@@ -122,6 +123,8 @@ export default function SuperadminDash() {
       </div>
 
       <EnterprisesReport />
+
+      <AccountingProsCard />
 
       <OrphanMembershipsCard />
 
@@ -266,6 +269,132 @@ function EnterprisesReport() {
     </div>
   );
 }
+
+
+// --------------------------------------------------------------------------
+// AccountingProsCard — full list of every Pro on the platform with an
+// inline white-label comp toggle. Superadmins can flip a Pro's free
+// branding grant without navigating to the enterprise detail page.
+// --------------------------------------------------------------------------
+function AccountingProsCard() {
+  const [pros, setPros] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("all"); // all | locked | comped | paid
+  const [q, setQ] = useState("");
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await api.get("/admin/pros");
+      setPros(r.data?.pros || []);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to load pros");
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const rows = pros.filter((p) => {
+    if (filter === "locked" && (p.whitelabel_comp || p.whitelabel_paid)) return false;
+    if (filter === "comped" && !p.whitelabel_comp) return false;
+    if (filter === "paid" && !p.whitelabel_paid) return false;
+    if (!q.trim()) return true;
+    const s = q.trim().toLowerCase();
+    return (p.email || "").toLowerCase().includes(s)
+        || (p.name || "").toLowerCase().includes(s)
+        || (p.firm_name || "").toLowerCase().includes(s);
+  });
+
+  const counts = {
+    all: pros.length,
+    locked: pros.filter(p => !p.whitelabel_comp && !p.whitelabel_paid).length,
+    comped: pros.filter(p => p.whitelabel_comp).length,
+    paid: pros.filter(p => p.whitelabel_paid).length,
+  };
+
+  return (
+    <div className="rounded-xl border bg-white overflow-hidden" data-testid="superadmin-pros-card">
+      <div className="px-4 py-2.5 bg-slate-50 border-b flex items-center gap-2 flex-wrap">
+        <Briefcase size={13} className="text-indigo-500" />
+        <span className="text-xs uppercase font-semibold text-slate-600">Accounting Pros</span>
+        <span className="text-[11px] text-slate-500 ml-1">
+          {counts.all} total · {counts.locked} locked · {counts.comped} comped · {counts.paid} paid
+        </span>
+        <div className="ml-auto flex items-center gap-2 flex-wrap">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search name, email, firm…"
+            className="border rounded-md px-2 py-1 text-xs w-52"
+            data-testid="pros-search-input"
+          />
+          <div className="inline-flex text-[11px] rounded-md border overflow-hidden">
+            {[["all", "All"], ["locked", "Locked"], ["comped", "Comped"], ["paid", "Paid"]].map(([k, label]) => (
+              <button
+                key={k}
+                onClick={() => setFilter(k)}
+                className={`px-2 py-1 ${filter === k ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                data-testid={`pros-filter-${k}`}
+              >
+                {label} ({counts[k]})
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      {loading ? (
+        <div className="p-5 text-sm text-slate-500 flex items-center gap-2">
+          <Loader2 size={14} className="animate-spin" /> Loading pros…
+        </div>
+      ) : !rows.length ? (
+        <div className="p-5 text-sm text-slate-500">No pros match this filter.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50/40 text-xs text-slate-500">
+              <tr>
+                <th className="text-left px-4 py-2 font-medium">Pro</th>
+                <th className="text-left px-3 py-2 font-medium">Email</th>
+                <th className="text-left px-3 py-2 font-medium">Firm name</th>
+                <th className="text-left px-3 py-2 font-medium">White-label</th>
+                <th className="text-left px-3 py-2 font-medium">Joined</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((p) => (
+                <tr key={p.id} className="border-t hover:bg-slate-50/40" data-testid={`pros-row-${p.id}`}>
+                  <td className="px-4 py-2.5 font-medium">{p.name || <span className="text-slate-400">—</span>}</td>
+                  <td className="px-3 py-2.5 text-slate-600 text-[12px]">{p.email}</td>
+                  <td className="px-3 py-2.5 text-slate-700 text-[12px]">
+                    {p.firm_name ? (
+                      <span className="text-[11px] px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        {p.firm_name}
+                      </span>
+                    ) : <span className="text-slate-400">—</span>}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <WhitelabelCompToggle
+                      proId={p.id}
+                      initial={{
+                        comp: !!p.whitelabel_comp,
+                        paid: !!p.whitelabel_paid,
+                        unlocked: !!p.whitelabel_unlocked,
+                        source: p.whitelabel_source,
+                      }}
+                    />
+                  </td>
+                  <td className="px-3 py-2.5 text-[11px] text-slate-500">
+                    {p.created_at ? new Date(p.created_at).toLocaleDateString() : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 // ---------- Grant Superadmin modal --------------------------------------
 // Promotes an existing user (any role) to superadmin, or creates a fresh

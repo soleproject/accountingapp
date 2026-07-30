@@ -39,7 +39,43 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — Railway deployment fix (emergentintegrations resolution)
+### Feb 2026 (latest) — Paid White-Label Upgrade Block + Superadmin Comp Toggle
+
+Monetization loop for B2B Pro tier + platform-owner ergonomics for comping specific firms.
+
+**Backend**
+- `pro.py::_whitelabel_state(user)` — resolves unlocked = comp OR paid; source pill = "comp" | "paid" | null.
+- `_branding_out()` now emits `whitelabel_unlocked`, `whitelabel_source`, `whitelabel_comp`, `whitelabel_paid` on every read.
+- `PATCH /pro/branding` returns **402 Payment Required** when a locked pro tries to edit any gated field (firm_name, subdomain, theme, hide_demo, hide_signup, tagline, hero image). `buy_page_url` stays editable for affiliates. Superadmins bypass.
+- `POST /pro/branding/logo` + `DELETE /pro/branding/logo` share the same 402 gate.
+- New `POST /pro/branding/whitelabel-checkout` — creates a Stripe Checkout session (`mode` auto-detects one-time vs subscription based on the Price object). Metadata carries `whitelabel_upgrade=true` + `pro_user_id` so the webhook can flip the flag on `checkout.session.completed`. Env var: `STRIPE_WHITELABEL_PRICE_ID`.
+- `_handle_checkout_completed()` — detects the whitelabel metadata and stamps `branding.whitelabel_paid=True`, `whitelabel_paid_at`, `whitelabel_paid_session_id` on the target pro.
+- `_handle_subscription_change()` — on `canceled` / `incomplete_expired` / `unpaid` revokes `whitelabel_paid` (comp still wins). On `active` / `trialing` re-enables it (idempotent renewal).
+- `admin.py::GET /admin/pros` — list every pro on the platform with whitelabel status columns.
+- `admin.py::POST /admin/pros/{pro_id}/whitelabel-comp {granted: bool}` — Superadmin comp toggle. Stamps `whitelabel_comp_at` / `whitelabel_comp_by` for audit trail. Comp trumps paid status.
+- `GET /admin/enterprises/{eid}` — response now includes whitelabel fields per pro so the inline toggle on the enterprise detail page renders with the correct initial state.
+
+**Frontend**
+- `PlanComparisonCard.jsx` — CTA now calls `/pro/branding/whitelabel-checkout` (was `/whitelabel-waitlist`) and redirects the browser to Stripe. Handles `already_unlocked` short-circuit.
+- `ProSettings.jsx` — reads `branding.whitelabel_unlocked`. If locked, shows a dashed **"White-label is locked on your firm"** banner with a purple **"Upgrade to unlock"** button that fires checkout. Every gated section wrapped in a `LockedSection` component that greys out the UI + adds a `[Lock] Locked` corner pill. Post-checkout return URL polls `/pro/branding` up to 6 times so the UI updates once the webhook fires.
+- `AdminEnterpriseDetail.jsx` — new **`WhitelabelCompToggle`** component (exported) shows a `LOCKED`/`COMPED`/`PAID` pill + `Comp`/`Revoke` button on every Pro row. Optimistic UI, rollback on error.
+- `SuperadminDash.jsx` — new **`AccountingProsCard`** section listing all pros on the platform. Columns: Pro / Email / Firm name / White-label status + Comp toggle / Joined. Search + filters (All / Locked / Comped / Paid). Reuses `WhitelabelCompToggle`.
+
+**Env var required for full flow**
+- `STRIPE_WHITELABEL_PRICE_ID` — a Stripe Price ID (starts with `price_...`). Ops picks monthly/annual/one-time in the Stripe dashboard; code auto-detects.
+
+### Feb 2026 — Firm-branded signup pages
+
+- **`Signup.jsx`** now resolves firm branding via
+  `GET /branding/by-host?host=…` (same endpoint Login uses) on mount,
+  with a `?firm=…` query-param override for previews. When a firm
+  brand is resolved, the header swaps the SmartBooks icon+wordmark
+  for the firm's centered logo + firm-name (mirrors the Login page
+  treatment). Applies to all three signup variants: `/signup`,
+  `/signup/affiliate`, and `/signup/enterprise`.
+- New `data-testid="signup-firm-branding"` for e2e coverage.
+
+### Feb 2026 — Railway deployment fix (emergentintegrations resolution)
 
 - **Root cause**: Railway's default nixpacks Python builder runs
   `pip install -r requirements.txt` with the modern (2020) resolver

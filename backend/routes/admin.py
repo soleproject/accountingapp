@@ -1320,6 +1320,18 @@ async def get_enterprise(eid: str, user: dict = Depends(require_role("superadmin
                 "email": p.get("email") or "",
                 "firm_name": (p.get("branding") or {}).get("firm_name") or None,
                 "joined_at": p.get("created_at"),
+                # White-label unlock state so the Superadmin can flip the
+                # comp toggle inline without navigating away.
+                "whitelabel_comp": bool((p.get("branding") or {}).get("whitelabel_comp")),
+                "whitelabel_paid": bool((p.get("branding") or {}).get("whitelabel_paid")),
+                "whitelabel_unlocked": bool(
+                    (p.get("branding") or {}).get("whitelabel_comp")
+                    or (p.get("branding") or {}).get("whitelabel_paid")
+                ),
+                "whitelabel_source": (
+                    "comp" if (p.get("branding") or {}).get("whitelabel_comp")
+                    else ("paid" if (p.get("branding") or {}).get("whitelabel_paid") else None)
+                ),
             } for p in pros
         ],
         "companies": company_rows,
@@ -1583,3 +1595,89 @@ async def admin_bulk_delete_by_owner(
 
     plan["records_removed"] = per_collection_totals
     return plan
+
+
+
+# --------------------------------------------------------------------------
+# White-label comp toggle — Superadmin can grant or revoke free
+# white-label branding on any pro's firm. Comp trumps paid status: a
+# comped firm stays unlocked even if their Stripe subscription lapses.
+# --------------------------------------------------------------------------
+class WhitelabelCompIn(BaseModel):
+    granted: bool
+
+
+@router.get("/admin/pros")
+async def admin_list_pros(user: dict = Depends(require_role("superadmin"))):
+    """List every pro on the platform with the info the Superadmin needs
+    for the White-label Comp column: firm name, email, comp/paid status,
+    and the resolved unlocked flag."""
+    pros = await db.users.find(
+        {"role": "pro"},
+        {"_id": 0, "id": 1, "name": 1, "email": 1, "branding": 1, "created_at": 1},
+    ).to_list(2000)
+    rows = []
+    for p in pros:
+        b = p.get("branding") or {}
+        comp = bool(b.get("whitelabel_comp"))
+        paid = bool(b.get("whitelabel_paid"))
+        rows.append({
+            "id": p["id"],
+            "name": p.get("name") or "",
+            "email": p.get("email") or "",
+            "firm_name": b.get("firm_name") or None,
+            "created_at": p.get("created_at"),
+            "whitelabel_comp": comp,
+            "whitelabel_paid": paid,
+            "whitelabel_unlocked": comp or paid,
+            "whitelabel_source": "comp" if comp else ("paid" if paid else None),
+            "whitelabel_comp_at": b.get("whitelabel_comp_at"),
+            "whitelabel_paid_at": b.get("whitelabel_paid_at"),
+        })
+    # Newest pros first — matches the enterprise detail page ordering.
+    rows.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    return {"pros": rows}
+
+
+@router.post("/admin/pros/{pro_id}/whitelabel-comp")
+async def admin_toggle_whitelabel_comp(
+    pro_id: str,
+    inp: WhitelabelCompIn,
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Flip ``branding.whitelabel_comp`` on for the target pro (or off
+    when ``granted=False``). Stamps ``whitelabel_comp_at`` +
+    ``whitelabel_comp_by`` for audit trail. Idempotent — repeated calls
+    with the same value just refresh the timestamp/actor."""
+    pro = await db.users.find_one({"id": pro_id})
+    if not pro:
+        raise HTTPException(404, "Pro not found")
+    if pro.get("role") not in {"pro", "superadmin"}:
+        raise HTTPException(400, "Target user is not a Pro.")
+    if inp.granted:
+        await db.users.update_one(
+            {"id": pro_id},
+            {"$set": {
+                "branding.whitelabel_comp": True,
+                "branding.whitelabel_comp_at": now_iso(),
+                "branding.whitelabel_comp_by": user["id"],
+            }},
+        )
+    else:
+        await db.users.update_one(
+            {"id": pro_id},
+            {"$set": {"branding.whitelabel_comp": False,
+                      "branding.whitelabel_comp_revoked_at": now_iso(),
+                      "branding.whitelabel_comp_revoked_by": user["id"]}},
+        )
+    pro = await db.users.find_one({"id": pro_id})
+    b = pro.get("branding") or {}
+    comp = bool(b.get("whitelabel_comp"))
+    paid = bool(b.get("whitelabel_paid"))
+    return {
+        "id": pro["id"],
+        "whitelabel_comp": comp,
+        "whitelabel_paid": paid,
+        "whitelabel_unlocked": comp or paid,
+        "whitelabel_source": "comp" if comp else ("paid" if paid else None),
+    }
