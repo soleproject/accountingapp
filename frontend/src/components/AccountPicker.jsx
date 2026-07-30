@@ -23,6 +23,10 @@ export default function AccountPicker({ value, accounts, onChange, companyId, is
   const [addMode, setAddMode] = useState(false);
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState("expense");
+  // Sub-account parent — pick an existing top-level same-type account
+  // to nest the new one under (e.g. Utilities → Electric). Left blank
+  // = top-level.
+  const [newParentId, setNewParentId] = useState("");
   const [busy, setBusy] = useState(false);
   const rootRef = useRef(null);
   const searchRef = useRef(null);
@@ -74,11 +78,15 @@ export default function AccountPicker({ value, accounts, onChange, companyId, is
     if (!name || !companyId) return;
     setBusy(true);
     try {
-      const r = await api.post(`/companies/${companyId}/accounts/ensure`, { name, type: newType });
+      const r = await api.post(`/companies/${companyId}/accounts/ensure`, {
+        name,
+        type: newType,
+        parent_account_id: newParentId || null,
+      });
       const newId = r.data?.id;
       if (newId) onChange?.(newId);
       // Reset then close so the trigger repaints with the new label.
-      setAddMode(false); setNewName(""); setQ(""); setOpen(false);
+      setAddMode(false); setNewName(""); setNewParentId(""); setQ(""); setOpen(false);
       // Kick a refresh so `accounts` upstream repopulates.
       window.dispatchEvent(new CustomEvent("axiom:action", { detail: { kind: "accounts:changed", at: Date.now() } }));
     } catch {
@@ -87,6 +95,14 @@ export default function AccountPicker({ value, accounts, onChange, companyId, is
       setBusy(false);
     }
   };
+
+  // Eligible parents for the "Sub-account of" picker: same type, top-
+  // level only. Recomputed as the CPA switches the type dropdown.
+  const eligibleParents = useMemo(() => {
+    return (accounts || [])
+      .filter(a => a.type === newType && !a.parent_account_id)
+      .sort((x, y) => String(x.code).localeCompare(String(y.code)));
+  }, [accounts, newType]);
 
   // Compute the popover's viewport-anchored position each time it opens
   // (or the window is resized/scrolled). Portal-rendered popovers sidestep
@@ -204,7 +220,13 @@ export default function AccountPicker({ value, accounts, onChange, companyId, is
                 <label className="text-slate-600">Type</label>
                 <select
                   value={newType}
-                  onChange={e => setNewType(e.target.value)}
+                  onChange={e => {
+                    setNewType(e.target.value);
+                    // Any previously-picked parent no longer applies once
+                    // the type changes — clear it so we don't silently
+                    // save a mismatched combo.
+                    setNewParentId("");
+                  }}
                   className="px-2 py-1 border border-slate-300 rounded text-sm bg-white"
                 >
                   <option value="expense">Expense</option>
@@ -215,10 +237,33 @@ export default function AccountPicker({ value, accounts, onChange, companyId, is
                   <option value="equity">Equity</option>
                 </select>
               </div>
+              <div className="flex flex-col gap-1 text-xs">
+                <label className="text-slate-600">
+                  Sub-account of <span className="text-slate-400">(optional)</span>
+                </label>
+                <select
+                  value={newParentId}
+                  onChange={e => setNewParentId(e.target.value)}
+                  className="px-2 py-1 border border-slate-300 rounded text-sm bg-white"
+                  data-testid={`${testId}-add-parent`}
+                >
+                  <option value="">— None (top-level) —</option>
+                  {eligibleParents.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.code} · {p.name}
+                    </option>
+                  ))}
+                </select>
+                {eligibleParents.length === 0 && (
+                  <div className="text-[10px] text-slate-400 mt-0.5">
+                    No top-level {newType} accounts yet — this will be a top-level category.
+                  </div>
+                )}
+              </div>
               <div className="flex gap-2 mt-1">
                 <button
                   type="button"
-                  onClick={() => { setAddMode(false); setNewName(""); }}
+                  onClick={() => { setAddMode(false); setNewName(""); setNewParentId(""); }}
                   disabled={busy}
                   className="flex-1 py-1.5 rounded border border-slate-300 bg-white text-slate-700 text-sm hover:bg-slate-50 disabled:opacity-50"
                 >
