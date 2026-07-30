@@ -39,7 +39,19 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — AI Type Suggestion for CoA Import
+### Feb 2026 (latest) — Historical GL Import (Excel / CSV / PDF)
+
+**Backend (`routes/journal.py`)**
+- `POST /companies/{cid}/journal-entries/import/preview` — parses uploaded file (Excel/CSV/PDF/AI-PDF), groups lines by `(date, reference|memo)` into JEs, resolves accounts by code (primary) or name, and returns per-JE `balanced`, `debit_total`, `credit_total`, `unresolved_accounts` flags. Handles `Debit`/`Credit` split columns OR a single signed `Amount` column. Money parser accepts `$1,234.56`, `(500.00)` (accounting negative), Excel serial dates, and multiple date formats.
+- `POST /companies/{cid}/journal-entries/import/commit` — only commits entries that are balanced AND fully-resolved AND fall in open periods. Writes a batch log with `created_je_ids`. Records skipped entries with reason (`unbalanced`, `unresolved account`, `period closed`, `no lines`).
+- `GET /companies/{cid}/journal-entries/imports` — batch history.
+- `POST /companies/{cid}/journal-entries/imports/{id}/undo` — deletes every JE the batch created. Refuses if any lands in a closed period.
+
+**Frontend (`pages/JournalEntries.jsx`)**
+- New indigo **Import GL** button next to New JE.
+- `ImportGLModal` — drag-and-drop upload → review with per-JE cards showing lines with DR/CR columns, red-flagged unbalanced entries (checkbox disabled), amber flags for unresolved accounts, summary pills at top (`✓ N balanced · ⚠ M unbalanced · ⚠ K unresolved`), "Select all eligible" toggle. Import history section with per-batch Undo.
+
+### Feb 2026 — AI Type Suggestion for CoA Import
 
 **Backend (`routes/accounts.py`)**
 - New `POST /companies/{cid}/accounts/import/ai-classify-types` — takes `{names: [...]}`, batches every name into a single GPT call, returns `{classified: {name → {type, subtype}}}` with validated type ∈ {asset, liability, equity, revenue, cogs, expense} and snake_case subtype (e.g. `rent_expense`, `current_asset`, `retained_earnings`). Bounded to 200 names/call. Feature-tagged `ai-coa-classify`.
