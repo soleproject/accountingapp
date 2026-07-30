@@ -24,10 +24,14 @@ export default function PlanComparisonCard({
 }) {
   const [busy, setBusy] = useState(false);
   const [joined, setJoined] = useState(false);
+  // Pre-auth routes don't mount a Sonner <Toaster/>, so we render an
+  // inline hint below the CTA instead of firing a toast that would be
+  // silently dropped. Logged-in flows use toast normally.
+  const [inlineHint, setInlineHint] = useState("");
 
   const clickPaidCta = async () => {
     if (!loggedIn) {
-      toast.info("Sign up first, then upgrade from Settings any time.");
+      setInlineHint("Create your firm below — you can upgrade from Settings any time.");
       return;
     }
     setBusy(true);
@@ -76,17 +80,27 @@ export default function PlanComparisonCard({
           currentBadge={loggedIn && paidCurrent}
           testId="plan-tile-paid"
           cta={paidCurrent ? null : (
-            <button
-              onClick={clickPaidCta}
-              disabled={busy || joined}
-              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium disabled:opacity-60"
-              data-testid="plan-paid-cta"
-            >
-              {busy && <Loader2 size={13} className="animate-spin" />}
-              {joined ? "You're on the list ✓"
-               : loggedIn ? "Join the white-label waitlist"
-                          : "Learn more"}
-            </button>
+            <>
+              <button
+                onClick={clickPaidCta}
+                disabled={busy || joined}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium disabled:opacity-60"
+                data-testid="plan-paid-cta"
+              >
+                {busy && <Loader2 size={13} className="animate-spin" />}
+                {joined ? "You're on the list ✓"
+                 : loggedIn ? "Join the white-label waitlist"
+                            : "Learn more"}
+              </button>
+              {inlineHint && (
+                <div
+                  className="mt-2 text-[11px] text-slate-600 bg-indigo-50 border border-indigo-100 rounded px-2 py-1.5"
+                  data-testid="plan-paid-hint"
+                >
+                  {inlineHint}
+                </div>
+              )}
+            </>
           )}
         />
       </div>

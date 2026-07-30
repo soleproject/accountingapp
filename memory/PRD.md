@@ -39,7 +39,39 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — Enterprise (firm) signup at `/signup/enterprise`
+### Feb 2026 (latest) — Plan comparison card + white-label waitlist
+
+- **New shared component** `frontend/src/components/PlanComparisonCard.jsx`
+  — side-by-side Free vs White-label tiles with feature check-lists,
+  "coming soon" price hint on Paid, CTA that adapts to context
+  (loggedIn → waitlist POST, logged-out → inline hint). Ships in two
+  variants: `variant='card'` (inline) and `variant='modal'` (overlay
+  with close-X). Uses `data-testid`s throughout for e2e coverage:
+  `plan-comparison-card`, `plan-comparison-modal`, `plan-tile-free`,
+  `plan-tile-paid`, `plan-paid-cta`, `plan-paid-hint`,
+  `plan-modal-close`.
+- **Inline on `/signup/enterprise`** — renders above the signup form
+  as a pre-signup value prop. Widened container (`max-w-3xl`) wraps
+  both the card and the form. Logged-out Paid CTA shows an inline
+  hint below (Sonner Toaster isn't mounted on pre-auth routes, so
+  the toast would have been silently dropped — inline copy is more
+  reliable).
+- **Modal launcher in ProSettings** — new banner card at the top
+  (`data-testid='plan-compare-launcher'`) with `[Compare plans]`
+  button (`data-testid='plan-compare-open'`) that opens the modal
+  variant. Free tile carries a green `CURRENT` badge when the pro is
+  on Free; Paid CTA POSTs to the new waitlist endpoint.
+- **New endpoint** `POST /api/pro/branding/whitelabel-waitlist`
+  (`routes/pro.py`) — one-click interest capture. Sets
+  `users.branding.whitelabel_waitlist_at = now_iso()`, idempotent.
+  Gated to `require_role('pro','superadmin')`. Gives us a real
+  conversion signal before wiring up Stripe checkout for the paid
+  tier in the next iteration.
+- **Regression tests**: `/app/backend/tests/test_iter54_plan_comparison.py`
+  — 5/5 pass (pro OK, superadmin OK, client 403, anon 401,
+  idempotent timestamp refresh). Full suite iter49–54: 98/98 green.
+
+### Feb 2026 — Enterprise (firm) signup at `/signup/enterprise`
 
 - **New signup path** `/signup/enterprise` — same UX pattern as
   `/signup/affiliate` (indigo palette, `Building2` icon, "Start my
