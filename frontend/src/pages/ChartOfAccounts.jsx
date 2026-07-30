@@ -1282,6 +1282,39 @@ function ImportAccountsModal({ currentId, onClose }) {
     }
   };
 
+  // Detect whether the CPA's file lacks a real Type column — either
+  // the mapping never included one, or every row defaulted to
+  // "expense" (a strong signal the column is missing / miscategorized).
+  const typeColMapped = Object.values(mapping).includes("type");
+  const allDefaulted = rows.length > 0 && rows.every(r => r.type === "expense");
+  const showAiClassify = rows.length > 0 && (!typeColMapped || allDefaulted);
+  // Track which rows just got AI-classified so we can flash a badge.
+  const [aiTouched, setAiTouched] = useState(new Set());
+
+  const runAiClassify = async () => {
+    const names = rows.map(r => r.name).filter(Boolean);
+    if (!names.length) return;
+    setBusy(true);
+    try {
+      const r = await api.post(
+        `/companies/${currentId}/accounts/import/ai-classify-types`,
+        { names },
+      );
+      const map = r.data?.classified || {};
+      const touched = new Set();
+      setRows(rs => rs.map((row, idx) => {
+        const hit = map[row.name];
+        if (!hit) return row;
+        touched.add(idx);
+        return { ...row, type: hit.type, subtype: hit.subtype || row.subtype };
+      }));
+      setAiTouched(touched);
+      toast.success(`AI classified ${r.data?.returned || 0} of ${r.data?.requested || 0} accounts.`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "AI classify failed");
+    } finally { setBusy(false); }
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col" data-testid="coa-import-modal">
@@ -1355,6 +1388,18 @@ function ImportAccountsModal({ currentId, onClose }) {
                   Try AI parsing
                 </button>
               )}
+              {showAiClassify && (
+                <button
+                  onClick={runAiClassify}
+                  disabled={busy}
+                  className="text-fuchsia-700 hover:bg-fuchsia-50 border border-fuchsia-200 rounded px-2 py-1 text-[11px] inline-flex items-center gap-1 disabled:opacity-50"
+                  data-testid="coa-import-ai-classify"
+                  title="Ask GPT to classify every row's type + subtype from its name"
+                >
+                  {busy ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+                  Detect types with AI
+                </button>
+              )}
               <button onClick={() => { setStep("upload"); setPreview(null); setRows([]); }} className="ml-auto text-slate-500 hover:text-slate-900 inline-flex items-center gap-1">
                 <ArrowLeft size={12} /> Choose different file
               </button>
@@ -1422,9 +1467,19 @@ function ImportAccountsModal({ currentId, onClose }) {
                           <input value={a.name} onChange={(e) => editRow(i, "name", e.target.value)} className="w-full bg-transparent border-0 focus:outline-none focus:border-b focus:border-slate-400 px-0" />
                         </td>
                         <td className="px-3 py-1.5">
-                          <select value={a.type} onChange={(e) => editRow(i, "type", e.target.value)} className="border rounded px-1.5 py-0.5 text-xs bg-white">
-                            {TYPES.map(t => <option key={t} value={t}>{prettyLabel(t)}</option>)}
-                          </select>
+                          <div className="flex items-center gap-1">
+                            <select value={a.type} onChange={(e) => editRow(i, "type", e.target.value)} className="border rounded px-1.5 py-0.5 text-xs bg-white">
+                              {TYPES.map(t => <option key={t} value={t}>{prettyLabel(t)}</option>)}
+                            </select>
+                            {aiTouched.has(i) && (
+                              <span
+                                className="text-[9px] px-1 py-0.5 rounded bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 uppercase tracking-wide inline-flex items-center gap-0.5"
+                                title="Classified by AI — review before importing"
+                              >
+                                <Sparkles size={8} /> AI
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-3 py-1.5">
                           <input value={a.subtype || ""} onChange={(e) => editRow(i, "subtype", e.target.value)} className="w-full bg-transparent border-0 focus:outline-none focus:border-b focus:border-slate-400 px-0 text-slate-600 text-[13px]" placeholder="—" />

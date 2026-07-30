@@ -732,6 +732,93 @@ def _norm_subtype(raw: str) -> str:
     return s
 
 
+
+class AiClassifyIn(BaseModel):
+    names: list[str]
+
+
+@router.post("/companies/{cid}/accounts/import/ai-classify-types")
+async def accounts_import_ai_classify(
+    cid: str,
+    inp: AiClassifyIn,
+    user: dict = Depends(get_current_user),
+):
+    """Given a list of account names, ask GPT to classify each into one
+    of the 6 canonical types (asset / liability / equity / revenue /
+    cogs / expense) plus an optional snake_case subtype ("cash",
+    "operating_expense", "long_term_liability", …).
+
+    Used by the CoA import modal when the source spreadsheet has no
+    Type column — one click on "Detect types with AI" fills in every
+    row's type and subtype in a single batched call.
+
+    Returns ``{name → {type, subtype}}`` so the frontend can merge the
+    result back into its editable review table. Names GPT couldn't
+    classify are omitted from the response — the caller keeps whatever
+    default was already set."""
+    await require_company(user, cid)
+    names = [n.strip() for n in (inp.names or []) if n and n.strip()]
+    if not names:
+        return {"classified": {}}
+    # Bounded — 200 rows is well beyond a typical CoA and keeps token
+    # cost predictable.
+    names = names[:200]
+
+    from llm_client import LlmChat, UserMessage
+    system = (
+        "You are a GAAP-fluent bookkeeper. Given a list of account names, "
+        "classify each into one of these six canonical `type` values: "
+        "asset, liability, equity, revenue, cogs, expense. Also pick a "
+        "snake_case `subtype` that matches (examples: cash, accounts_receivable, "
+        "current_asset, fixed_asset, current_liability, long_term_liability, "
+        "credit_card, retained_earnings, operating_revenue, service_revenue, "
+        "operating_expense, payroll_expense, rent_expense, depreciation_expense, "
+        "interest_expense). Return ONLY a JSON object shaped like "
+        '{"classifications":[{"name":"<verbatim name>","type":"<one of six>","subtype":"<snake_case>"}]}. '
+        "No prose, no code fences. Skip names you're unsure about."
+    )
+    session_id = f"coa-ai-classify-{uuid.uuid4().hex[:8]}"
+    chat = LlmChat(
+        api_key="",
+        session_id=session_id,
+        system_message=system,
+        feature="ai-coa-classify",
+    ).with_model(
+        os.environ.get("LLM_PROVIDER", "openai"),
+        os.environ.get("LLM_MODEL", "gpt-4o-mini"),
+    )
+    prompt = "Names:\n" + "\n".join(f"- {n}" for n in names) + "\n\nReturn the JSON now."
+    try:
+        reply = await chat.send_message(UserMessage(text=prompt))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"AI classify failed: {e}") from e
+
+    m = re.search(r"\{[\s\S]*\}", str(reply or ""))
+    if not m:
+        return {"classified": {}}
+    try:
+        parsed = json.loads(m.group(0))
+    except Exception:
+        return {"classified": {}}
+    items = parsed.get("classifications") if isinstance(parsed, dict) else None
+    if not isinstance(items, list):
+        return {"classified": {}}
+
+    valid_types = {"asset", "liability", "equity", "revenue", "cogs", "expense"}
+    out: dict[str, dict] = {}
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        nm = (it.get("name") or "").strip()
+        tp = (it.get("type") or "").strip().lower()
+        st = (it.get("subtype") or "").strip().lower()
+        if not nm or tp not in valid_types:
+            continue
+        out[nm] = {"type": tp, "subtype": _norm_subtype(st)}
+    return {"classified": out, "requested": len(names), "returned": len(out)}
+
+
+
 def _coa_rows_to_accounts(
     headers: list[str], rows: list[list[str]],
     mapping_override: Optional[dict[int, str]] = None,

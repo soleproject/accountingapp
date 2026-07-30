@@ -39,7 +39,18 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — CoA Bulk Import (Excel / CSV / PDF)
+### Feb 2026 (latest) — AI Type Suggestion for CoA Import
+
+**Backend (`routes/accounts.py`)**
+- New `POST /companies/{cid}/accounts/import/ai-classify-types` — takes `{names: [...]}`, batches every name into a single GPT call, returns `{classified: {name → {type, subtype}}}` with validated type ∈ {asset, liability, equity, revenue, cogs, expense} and snake_case subtype (e.g. `rent_expense`, `current_asset`, `retained_earnings`). Bounded to 200 names/call. Feature-tagged `ai-coa-classify`.
+
+**Frontend (`pages/ChartOfAccounts.jsx` — ImportAccountsModal)**
+- **"Detect types with AI"** button (fuchsia) appears in the review-step header when either (a) the Type column wasn't mapped or (b) every row defaulted to `expense` (both strong signals the source file lacks a real Type column).
+- One click classifies every parsed name — updates `type` + `subtype` in the editable table in a single batch API call.
+- **✨ AI** badge on the Type dropdown of every AI-touched row so the CPA can spot which rows were AI-set and audit before commit.
+- Non-destructive: names GPT couldn't classify keep their existing default; CPA can override any AI suggestion inline before hitting Import.
+
+### Feb 2026 — CoA Bulk Import (Excel / CSV / PDF)
 
 **Backend (`routes/accounts.py`)**
 - Reuses the contacts importer's file parsers (`_parse_upload`, `_ai_parse_pdf`) so one implementation covers both. CoA-specific aliases handle `code`, `name`, `type`, `subtype`, `parent_code` columns.
