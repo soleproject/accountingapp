@@ -78,45 +78,57 @@ async def list_accounts(cid: str, user: dict = Depends(get_current_user)):
 async def account_balances(
     cid: str,
     as_of: Optional[str] = None,
+    basis: Optional[str] = None,
     user: dict = Depends(get_current_user),
 ):
     """Return per-account balances the Chart of Accounts page shows in
     its balance column.
 
-    Each account gets the balance most useful for its type:
-      • asset / liability / equity → CUMULATIVE (all-time as-of ``as_of``)
-        — matches what appears on the Balance Sheet.
-      • revenue / expense / cogs   → YTD (Jan 1 → ``as_of``) — matches
-        the Income Statement's default period.
+    ``basis`` (optional) forces one lens across every account:
+      • ``ytd``        — Jan 1 of current year → as_of
+      • ``month``      — first day of current month → as_of
+      • ``cumulative`` — all-time through as_of
+
+    When ``basis`` is None (default) each account uses the mode most
+    useful for its type: asset/liability/equity → cumulative,
+    revenue/expense/cogs → YTD. Matches how the Balance Sheet vs
+    Income Statement each treat their accounts.
 
     Returns ``{account_id: {balance, rollup, mode}}`` where ``rollup`` is
     parent's balance plus sum of direct children (single-level nesting),
     ``balance`` is the account's own direct postings, and ``mode`` is
-    "cumulative" | "ytd" so the UI can label ambiguous rows.
-
-    All signs are display-normalized (positive = normal balance for the
-    type) so the UI renders them as-is."""
+    the basis actually applied ("ytd" | "month" | "cumulative"). Signs
+    are display-normalized (positive = normal balance for the type)."""
     await require_company(user, cid)
     today = datetime.now(timezone.utc).date().isoformat()
     end = as_of or today
     ytd_start = datetime.now(timezone.utc).date().replace(month=1, day=1).isoformat()
+    month_start = datetime.now(timezone.utc).date().replace(day=1).isoformat()
 
-    # Compute both bases once — they're both O(n) scans of the JE/txn
-    # collections so running both is cheap enough to save round-trips.
+    forced_basis = (basis or "").strip().lower() or None
+
+    # Compute every basis we might need. Cheap enough to run all three:
+    # each is one aggregate scan of the JE collection.
     cumulative = await R._signed_balances(cid, start=None, end=end, include_pre_period=True)
     ytd_only = await R._signed_balances(cid, ytd_start, end, include_pre_period=False)
+    month_only = None
+    if forced_basis == "month":
+        month_only = await R._signed_balances(cid, month_start, end, include_pre_period=False)
     accts = await db.accounts.find({"company_id": cid}).to_list(2000)
 
-    # Which basis applies per account type. Anything else defaults to
-    # cumulative (safest — never surprises the user with a partial view).
     YTD_TYPES = {"revenue", "expense", "cogs"}
 
     def _basis_for(a):
+        if forced_basis in ("ytd", "month", "cumulative"):
+            return forced_basis
         return "ytd" if a.get("type") in YTD_TYPES else "cumulative"
 
     def _raw_for(a):
-        source = ytd_only if _basis_for(a) == "ytd" else cumulative
-        return source.get(a["id"], 0.0)
+        b = _basis_for(a)
+        if b == "ytd": src = ytd_only
+        elif b == "month": src = month_only
+        else: src = cumulative
+        return (src or {}).get(a["id"], 0.0)
 
     children_of: dict[str, list[dict]] = {}
     for a in accts:
@@ -136,7 +148,71 @@ async def account_balances(
             "rollup": round(rolled, 2),
             "mode": _basis_for(a),
         }
-    return {"balances": out, "ytd_start": ytd_start, "end": end}
+    return {"balances": out, "ytd_start": ytd_start,
+            "month_start": month_start, "end": end,
+            "applied_basis": forced_basis or "smart"}
+
+
+def _normalize_account_name(name: str) -> str:
+    """Collapse variations of the same account name so we can spot dupes.
+
+    Examples that all map to ``meal``::
+        "Meals", "Meal Expense", "Meals & Entertainment  ", " MEALS ".
+    """
+    if not name:
+        return ""
+    s = name.lower().strip()
+    # Strip common accounting-noise suffixes.
+    for suffix in (
+        " expense", " expenses", " income", " revenue",
+        " account", " accounts", " payable", " receivable",
+    ):
+        if s.endswith(suffix):
+            s = s[: -len(suffix)].strip()
+    # Collapse punctuation and whitespace runs.
+    s = re.sub(r"[^\w\s]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    # Drop plural 's' for very short heads so "meal" == "meals".
+    if len(s) > 3 and s.endswith("s"):
+        s = s[:-1]
+    return s
+
+
+@router.get("/companies/{cid}/accounts/duplicates")
+async def find_duplicate_accounts(cid: str, user: dict = Depends(get_current_user)):
+    """Group same-type accounts whose normalized name matches, so the
+    Chart of Accounts page can flag "3 likely duplicates" and offer the
+    Merge dialog pre-filled.
+
+    Returned shape::
+        {"groups": [{"key": "meal", "type": "expense",
+                     "accounts": [{id, code, name, subtype, is_ai}, ...]}]}
+    Only groups with 2+ accounts are returned. Ordered by group size
+    desc so the biggest cluster shows up first."""
+    await require_company(user, cid)
+    accts = await db.accounts.find({"company_id": cid}).to_list(2000)
+    buckets: dict[tuple[str, str], list[dict]] = {}
+    for a in accts:
+        key = _normalize_account_name(a.get("name") or "")
+        if not key:
+            continue
+        buckets.setdefault((a.get("type") or "", key), []).append({
+            "id": a["id"],
+            "code": a.get("code"),
+            "name": a.get("name"),
+            "subtype": a.get("subtype") or "",
+            "created_by_ai": bool(a.get("created_by_ai")),
+            "parent_account_id": a.get("parent_account_id"),
+        })
+    groups = []
+    for (t, key), items in buckets.items():
+        if len(items) < 2:
+            continue
+        items.sort(key=lambda x: str(x.get("code") or ""))
+        groups.append({"key": key, "type": t, "accounts": items})
+    groups.sort(key=lambda g: (-len(g["accounts"]), g["type"], g["key"]))
+    return {"groups": groups, "total_groups": len(groups),
+            "total_duplicates": sum(len(g["accounts"]) for g in groups)}
 
 
 class MergeAccountsIn(BaseModel):

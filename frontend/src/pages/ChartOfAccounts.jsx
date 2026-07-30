@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, Sparkles, Loader2, Pencil, Check, X, GitMerge } from "lucide-react";
+import { Plus, Trash2, Sparkles, Loader2, Pencil, Check, X, GitMerge, AlertTriangle, GripVertical } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 
@@ -40,11 +40,23 @@ export default function ChartOfAccounts() {
   // Per-account balance map — {aid: {balance, rollup, mode}}.
   // Fetched lazily after the accounts land so an empty CoA renders fast.
   const [balances, setBalances] = useState({});
+  // Balance-column basis toggle. "smart" (default) uses YTD for
+  // rev/exp and cumulative for asset/liab/equity; other values force
+  // a single lens across every account.
+  const [basis, setBasis] = useState("smart");
+  // Duplicate detection — groups of same-type accounts with near-
+  // identical names that the Pro likely wants to merge.
+  const [dupeGroups, setDupeGroups] = useState([]);
+  const [dupePanelOpen, setDupePanelOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [creatingPrefill, setCreatingPrefill] = useState(null);
   const [suggestOpen, setSuggestOpen] = useState(false);
   // Merge dialog — {source, options} when set.
   const [mergeState, setMergeState] = useState(null);
+  // Drag-drop reparent state — set on dragstart of a child row, cleared
+  // once the drop lands (or is canceled). Just the source id, kept in
+  // component state so hover targets can style themselves.
+  const [dragSourceId, setDragSourceId] = useState(null);
   const load = async () => {
     if (!currentId) return;
     const r = await api.get(`/companies/${currentId}/accounts`);
@@ -52,11 +64,34 @@ export default function ChartOfAccounts() {
     // Refresh balances alongside — silently fails so a slow/erroring
     // balance calc never blocks the CoA from rendering.
     try {
-      const b = await api.get(`/companies/${currentId}/accounts/balances`);
+      const q = basis === "smart" ? "" : `?basis=${basis}`;
+      const b = await api.get(`/companies/${currentId}/accounts/balances${q}`);
       setBalances(b.data?.balances || {});
     } catch (_) { /* balances are advisory */ }
+    // Duplicates run once per reload (also advisory).
+    try {
+      const d = await api.get(`/companies/${currentId}/accounts/duplicates`);
+      setDupeGroups(d.data?.groups || []);
+    } catch (_) { /* duplicates are advisory */ }
   };
-  useEffect(() => { load(); }, [currentId]);
+  useEffect(() => { load(); }, [currentId, basis]);
+
+  // Re-parent a child by dragging it onto a top-level parent row.
+  // Fires the same PATCH the edit form uses, then reloads.
+  const reparent = async (childId, newParentId) => {
+    if (!childId || childId === newParentId) return;
+    try {
+      await api.patch(`/companies/${currentId}/accounts/${childId}`, {
+        parent_account_id: newParentId || null,
+      });
+      toast.success(newParentId ? "Moved sub-account." : "Promoted to top-level.");
+      await load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Move failed");
+    } finally {
+      setDragSourceId(null);
+    }
+  };
   useCreateListener("account", (prefill) => {
     setCreatingPrefill(prefill || {});
     setCreating(true);
@@ -94,6 +129,32 @@ export default function ChartOfAccounts() {
           <p className="text-slate-500 text-sm mt-1">GAAP-organized accounts. Add or edit anything.</p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Balance-column basis toggle — Smart auto-picks the right
+              lens per account; the other three force a single view.  */}
+          <div className="inline-flex text-[11px] rounded-md border overflow-hidden" data-testid="coa-basis-toggle">
+            {[
+              ["smart", "Smart"],
+              ["month", "MTD"],
+              ["ytd", "YTD"],
+              ["cumulative", "All-time"],
+            ].map(([k, label]) => (
+              <button
+                key={k}
+                onClick={() => setBasis(k)}
+                className={`px-2 py-1 ${basis === k ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                data-testid={`coa-basis-${k}`}
+                title={
+                  k === "smart"
+                    ? "YTD for revenue/expense, cumulative for asset/liability/equity"
+                    : k === "month" ? "Month-to-date across every account"
+                    : k === "ytd" ? "Year-to-date across every account"
+                    : "All-time cumulative across every account"
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <button
             onClick={() => setSuggestOpen(true)}
             data-testid="coa-suggest-btn"
@@ -107,13 +168,83 @@ export default function ChartOfAccounts() {
           </button>
         </div>
       </div>
+
+      {/* Duplicate-detector banner — only rendered when the backend
+          found 1+ likely dup groups. Expands into a per-group list with
+          a one-click Merge button per row. */}
+      {dupeGroups.length > 0 && (
+        <div
+          className="rounded-xl border-2 border-amber-200 bg-amber-50/60 p-3"
+          data-testid="coa-dupe-banner"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center shrink-0">
+              <AlertTriangle size={16} className="text-amber-700" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-amber-900">
+                {dupeGroups.length} likely duplicate group{dupeGroups.length > 1 ? "s" : ""} detected
+              </div>
+              <div className="text-xs text-amber-800/80">
+                Accounts of the same type with near-identical names — merge them so reports
+                aggregate cleanly.
+              </div>
+            </div>
+            <button
+              onClick={() => setDupePanelOpen(o => !o)}
+              className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-300 bg-white hover:bg-amber-50 text-amber-800 font-medium"
+              data-testid="coa-dupe-toggle"
+            >
+              {dupePanelOpen ? "Hide" : "Review duplicates"}
+            </button>
+          </div>
+          {dupePanelOpen && (
+            <div className="mt-3 space-y-3">
+              {dupeGroups.map((g) => (
+                <div key={`${g.type}-${g.key}`} className="rounded-lg border border-amber-200 bg-white p-3">
+                  <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1.5">
+                    {g.type} · {g.accounts.length} matches
+                  </div>
+                  <div className="space-y-1">
+                    {g.accounts.map((a) => (
+                      <div key={a.id} className="flex items-center justify-between text-sm py-1">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="font-mono-num text-slate-500 text-xs w-12 shrink-0">{a.code}</span>
+                          <span className="truncate">{a.name}</span>
+                          {a.subtype && (
+                            <span className="text-[10px] text-slate-400 hidden sm:inline">· {a.subtype}</span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => {
+                            const src = accts.find(x => x.id === a.id);
+                            if (src) setMergeState({ source: src });
+                          }}
+                          className="shrink-0 inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                          data-testid={`coa-dupe-merge-${a.id}`}
+                          title="Merge this one into another account"
+                        >
+                          <GitMerge size={11} /> Merge…
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <div className="space-y-4">
         {grouped.map(g => (
           <div key={g.type} className="rounded-xl border bg-white overflow-hidden">
             <div className="px-4 py-2 bg-slate-50 border-b text-xs uppercase tracking-widest text-slate-600 font-semibold flex items-center justify-between">
               <span>{g.type}s · {g.items.length}</span>
               <span className="text-[10px] normal-case tracking-normal font-normal text-slate-500">
-                {["revenue", "expense", "cogs"].includes(g.type) ? "YTD" : "Balance"}
+                {basis === "month" ? "MTD"
+                  : basis === "cumulative" ? "All-time"
+                  : basis === "ytd" ? "YTD"
+                  : (["revenue", "expense", "cogs"].includes(g.type) ? "YTD" : "Balance")}
               </span>
             </div>
             <div>
@@ -133,6 +264,10 @@ export default function ChartOfAccounts() {
                     onSaved={load}
                     onDeleted={load}
                     onMerge={(source) => setMergeState({ source })}
+                    dragSourceId={dragSourceId}
+                    onDragStart={(id) => setDragSourceId(id)}
+                    onDragEnd={() => setDragSourceId(null)}
+                    onReparent={reparent}
                   />
                 );
               })}
@@ -161,7 +296,8 @@ export default function ChartOfAccounts() {
   );
 }
 
-function AccountRow({ a, allAccounts, currentId, balance, onSaved, onDeleted, onMerge }) {
+function AccountRow({ a, allAccounts, currentId, balance, onSaved, onDeleted, onMerge,
+                     dragSourceId, onDragStart, onDragEnd, onReparent }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [code, setCode] = useState(a.code);
@@ -270,6 +406,50 @@ function AccountRow({ a, allAccounts, currentId, balance, onSaved, onDeleted, on
   const onKey = (e) => {
     if (e.key === "Enter") save();
     if (e.key === "Escape") cancel();
+  };
+
+  // ------------------------------------------------------------------
+  // Drag & drop reparent — HTML5 native events (no library). The
+  // rules mirror the backend PATCH validation to give the CPA
+  // instant "not allowed" feedback:
+  //   • child dragged onto a same-type TOP-LEVEL row  → new parent
+  //   • child dragged onto a section header / empty area → promote to top-level
+  //   • same-type only, never onto self, only children can be dragged
+  // Top-level rows with kids of their own can't be nested either.
+  // ------------------------------------------------------------------
+  const canDrag = !!a.parent_account_id;    // only children are draggable
+  const dragSource = allAccounts?.find(x => x.id === dragSourceId);
+  const isValidDropTarget =
+    dragSource
+    && dragSource.id !== a.id
+    && !a.parent_account_id                  // must be top-level to accept
+    && dragSource.type === a.type
+    && dragSource.parent_account_id !== a.id; // already parented here → noop
+  const [dropHover, setDropHover] = useState(false);
+
+  const onDragStartInternal = (e) => {
+    if (!canDrag) return;
+    e.dataTransfer.setData("text/account-id", a.id);
+    e.dataTransfer.effectAllowed = "move";
+    onDragStart?.(a.id);
+  };
+  const onDragEndInternal = () => {
+    setDropHover(false);
+    onDragEnd?.();
+  };
+  const onDragOverInternal = (e) => {
+    if (!isValidDropTarget) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDropHover(true);
+  };
+  const onDragLeaveInternal = () => setDropHover(false);
+  const onDropInternal = (e) => {
+    setDropHover(false);
+    if (!isValidDropTarget) return;
+    e.preventDefault();
+    const srcId = e.dataTransfer.getData("text/account-id") || dragSourceId;
+    if (srcId && srcId !== a.id) onReparent?.(srcId, a.id);
   };
 
   return editing ? (
@@ -396,11 +576,26 @@ function AccountRow({ a, allAccounts, currentId, balance, onSaved, onDeleted, on
     </div>
   ) : (
     <div
-      className={`grid grid-cols-12 gap-3 px-4 py-2 border-b border-slate-100 items-center hover:bg-slate-50 ${a._depth ? "bg-slate-50/40" : ""}`}
+      className={`grid grid-cols-12 gap-3 px-4 py-2 border-b border-slate-100 items-center transition-colors ${a._depth ? "bg-slate-50/40" : ""} ${dropHover ? "ring-2 ring-inset ring-indigo-400 bg-indigo-50" : "hover:bg-slate-50"} ${canDrag && dragSourceId === a.id ? "opacity-50" : ""}`}
       data-testid={a.parent_account_id ? "coa-child-row" : "coa-parent-row"}
+      draggable={canDrag}
+      onDragStart={onDragStartInternal}
+      onDragEnd={onDragEndInternal}
+      onDragOver={onDragOverInternal}
+      onDragLeave={onDragLeaveInternal}
+      onDrop={onDropInternal}
     >
-      <div className="col-span-2 font-mono-num text-slate-500 text-sm">
-        {a._depth ? <span className="opacity-40 mr-1">↳</span> : null}
+      <div className="col-span-2 font-mono-num text-slate-500 text-sm flex items-center gap-1">
+        {canDrag ? (
+          <span
+            className="text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing -ml-1"
+            title="Drag onto another parent to re-nest"
+            data-testid={`coa-drag-${a.id}`}
+          >
+            <GripVertical size={12} />
+          </span>
+        ) : <span className="w-3 shrink-0" />}
+        {a._depth ? <span className="opacity-40">↳</span> : null}
         {a.code}
       </div>
       <div className={`col-span-5 text-sm ${a._depth ? "pl-4 text-slate-700" : "font-medium"}`}>

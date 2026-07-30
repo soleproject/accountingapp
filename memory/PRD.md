@@ -39,7 +39,18 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — CoA Balances, Reports Roll-up, Merge Accounts
+### Feb 2026 (latest) — Duplicate Detector, Balance Basis Toggle, Drag-Drop Reparent
+
+**Backend**
+- `GET /companies/{cid}/accounts/duplicates` — normalizes names (strips " expense"/" account"/plural suffixes, collapses punctuation) and groups same-type accounts with matching normalized keys. Returns `{groups: [{key, type, accounts[]}]}` ordered by group size desc.
+- `GET /companies/{cid}/accounts/balances?basis={smart|month|ytd|cumulative}` — new `basis` query param forces one lens across every account (Smart = default per-type behavior).
+
+**Frontend (ChartOfAccounts.jsx)**
+- **Basis toggle** — segmented `Smart | MTD | YTD | All-time` control in the page header. Refetches balances on change; section labels swap between "YTD" / "Balance" / "MTD" / "All-time" accordingly.
+- **Duplicate detector banner** — amber warning at top when 1+ groups detected. Expand to see each group + inline "Merge…" button that opens the existing merge dialog pre-filled with the source.
+- **Drag-and-drop reparent** — child rows have a `GripVertical` handle + `draggable=true`. Drag onto any same-type top-level row to re-nest via `PATCH /accounts/{id}` (parent_account_id). Backend already validates same-type / no 3-level trees / no self-parent.
+
+### Feb 2026 — CoA Balances, Reports Roll-up, Merge Accounts
 
 **Backend**
 - `GET /companies/{cid}/accounts/balances` — smart per-type basis: assets/liabilities/equity → cumulative (all-time), revenue/expense/cogs → YTD (Jan 1 → today). Returns `{account_id: {balance, rollup, mode}}` with sign-normalized display values.
