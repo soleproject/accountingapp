@@ -39,7 +39,24 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — AI-Enhanced PDF Parse + Bulk-Assign Type
+### Feb 2026 (latest) — CoA Bulk Import (Excel / CSV / PDF)
+
+**Backend (`routes/accounts.py`)**
+- Reuses the contacts importer's file parsers (`_parse_upload`, `_ai_parse_pdf`) so one implementation covers both. CoA-specific aliases handle `code`, `name`, `type`, `subtype`, `parent_code` columns.
+- `_norm_type()` loose-normalizes "Assets" / "Asset" / "Bank" / "Fixed Asset" / "Credit Card" etc. → 6 canonical types. Granular values ("Current Asset") that don't fit a canonical bucket auto-promote to subtype.
+- New endpoints:
+  - `POST /companies/{cid}/accounts/import/preview` — same shape as contacts (raw_rows + auto_mapping + resolved accounts).
+  - `POST /companies/{cid}/accounts/import/remap` — re-resolve with UI mapping override.
+  - `POST /companies/{cid}/accounts/import/commit` — two-pass upsert (assigns ids in pass 1 so a child row can reference a parent-row in the same batch by code). Auto-assigns codes for blank rows using the GAAP range.
+  - `GET /companies/{cid}/accounts/imports` — batch history.
+  - `POST /companies/{cid}/accounts/imports/{id}/undo` — deletes created + restores updated. Refuses to delete accounts with journal-entry activity (surfaces the conflict).
+
+**Frontend (`pages/ChartOfAccounts.jsx`)**
+- New indigo **Import** button in the header.
+- `ImportAccountsModal` — 3-step flow (upload → review → done) with drag-and-drop, column mapping bar, editable review table (code / name / type / subtype / parent code), and import history with per-batch undo.
+- Extracted `ImportDropZone` for reuse between the two importers.
+
+### Feb 2026 — AI-Enhanced PDF Parse + Bulk-Assign Type
 
 **Backend (`routes/contacts.py`)**
 - `_ai_parse_pdf(data)` — pypdf text extraction (capped 12 KB) → GPT via existing `LlmChat` wrapper (`ai-pdf-import` feature tag) → strict JSON `{contacts[]}`. Returns headers + rows shaped like the deterministic parser so downstream code is agnostic.

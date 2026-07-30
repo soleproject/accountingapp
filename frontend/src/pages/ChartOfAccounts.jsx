@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, Sparkles, Loader2, Pencil, Check, X, GitMerge, AlertTriangle, GripVertical, Eye, EyeOff } from "lucide-react";
+import { Plus, Trash2, Sparkles, Loader2, Pencil, Check, X, GitMerge, AlertTriangle, GripVertical, Eye, EyeOff, Upload, FileSpreadsheet, FileText, ArrowLeft, History, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 
@@ -121,6 +121,8 @@ export default function ChartOfAccounts() {
   const [suggestOpen, setSuggestOpen] = useState(false);
   // Merge dialog — {source, options} when set.
   const [mergeState, setMergeState] = useState(null);
+  // Import modal open/close.
+  const [importOpen, setImportOpen] = useState(false);
   // Drag-drop reparent state — set on dragstart of a child row, cleared
   // once the drop lands (or is canceled). Just the source id, kept in
   // component state so hover targets can style themselves.
@@ -244,6 +246,13 @@ export default function ChartOfAccounts() {
             <option value="ytd">YTD</option>
             <option value="cumulative">All-time</option>
           </select>
+          <button
+            onClick={() => setImportOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-indigo-300 bg-indigo-50 text-indigo-800 text-xs hover:bg-indigo-100"
+            data-testid="coa-import-btn"
+          >
+            <Upload size={13} /> Import
+          </button>
           <button
             onClick={() => setSuggestOpen(true)}
             data-testid="coa-suggest-btn"
@@ -380,6 +389,12 @@ export default function ChartOfAccounts() {
           allAccounts={accts}
           balances={balances}
           onClose={(reload) => { setMergeState(null); if (reload) load(); }}
+        />
+      )}
+      {importOpen && (
+        <ImportAccountsModal
+          currentId={currentId}
+          onClose={(reload) => { setImportOpen(false); if (reload) load(); }}
         />
       )}
     </div>
@@ -1167,3 +1182,325 @@ function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onCl
     </div>
   );
 }
+
+
+/**
+ * ImportAccountsModal — bulk-import chart-of-accounts rows from Excel,
+ * CSV, or PDF. Same 3-step flow (upload → review → done) as the
+ * Contacts importer with a column-mapping bar and undo-able history.
+ */
+function ImportAccountsModal({ currentId, onClose }) {
+  const [step, setStep] = useState("upload");
+  const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [mapping, setMapping] = useState({});
+  const [rows, setRows] = useState([]);
+  const [selected, setSelected] = useState(new Set());
+  const [result, setResult] = useState(null);
+  const [batches, setBatches] = useState([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const inputRef = React.useRef(null);
+  const lastFileRef = React.useRef(null);
+
+  const loadHistory = async () => {
+    try {
+      const r = await api.get(`/companies/${currentId}/accounts/imports?limit=10`);
+      setBatches(r.data?.batches || []);
+    } catch { /* advisory */ }
+  };
+  useEffect(() => { loadHistory(); }, [currentId]);
+
+  const upload = async (file, opts = {}) => {
+    if (!file) return;
+    lastFileRef.current = file;
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      if (opts.ai) fd.append("ai", "true");
+      const r = await api.post(`/companies/${currentId}/accounts/import/preview`, fd,
+        { headers: { "Content-Type": "multipart/form-data" } });
+      const d = r.data;
+      setPreview(d);
+      setMapping(d.auto_mapping || {});
+      setRows(d.accounts || []);
+      setSelected(new Set((d.accounts || []).map((_, i) => i)));
+      setStep("review");
+      if (opts.ai) toast.success(`AI parsed ${d.accounts?.length || 0} account${d.accounts?.length === 1 ? "" : "s"}.`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't parse the file");
+    } finally { setBusy(false); }
+  };
+
+  const remap = async (nextMapping) => {
+    if (!preview) return;
+    setMapping(nextMapping);
+    setBusy(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/accounts/import/remap`, {
+        headers: preview.detected_headers,
+        raw_rows: preview.raw_rows,
+        mapping: nextMapping,
+      });
+      setRows(r.data?.accounts || []);
+      setSelected(new Set((r.data?.accounts || []).map((_, i) => i)));
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Remap failed");
+    } finally { setBusy(false); }
+  };
+
+  const editRow = (i, field, value) => setRows(rs => rs.map((r, idx) => idx === i ? { ...r, [field]: value } : r));
+  const toggleRow = (i) => setSelected(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; });
+  const toggleAll = () => setSelected(prev => prev.size === rows.length ? new Set() : new Set(rows.map((_, i) => i)));
+
+  const commit = async () => {
+    const payload = rows.filter((_, i) => selected.has(i));
+    if (!payload.length) { toast.error("Nothing selected."); return; }
+    setBusy(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/accounts/import/commit`, {
+        accounts: payload, filename: preview?.filename, source: preview?.source,
+      });
+      setResult(r.data);
+      setStep("done");
+      loadHistory();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Import failed");
+    } finally { setBusy(false); }
+  };
+
+  const undoBatch = async (batchId) => {
+    // eslint-disable-next-line no-alert
+    if (!window.confirm("Undo this import? Accounts it created will be deleted (unless they already have journal-entry activity) and any updated rows will be restored.")) return;
+    try {
+      const r = await api.post(`/companies/${currentId}/accounts/imports/${batchId}/undo`);
+      toast.success(`Undo complete — deleted ${r.data?.deleted || 0}, restored ${r.data?.restored || 0}.`);
+      loadHistory();
+      onClose(true);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Undo failed");
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col" data-testid="coa-import-modal">
+        <div className="px-5 py-3 border-b flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0">
+            <Upload size={16} className="text-indigo-700" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-heading font-semibold">Import chart of accounts</h3>
+            <p className="text-xs text-slate-500">Bulk-add or update accounts from Excel, CSV, or PDF. Codes, types, subtypes, and parent links supported.</p>
+          </div>
+          <button onClick={() => onClose(false)} className="p-1 rounded hover:bg-slate-100"><X size={16} /></button>
+        </div>
+
+        {step === "upload" && (
+          <div className="p-5 space-y-4">
+            <ImportDropZone busy={busy} onFile={(f) => upload(f)} inputRef={inputRef} label="Drop an Excel / CSV / PDF here" hint="Auto-detects Code, Name, Type, Subtype, Parent Code." />
+            <div className="text-[11px] text-slate-500 bg-slate-50 border rounded p-3">
+              <b>Columns we recognize:</b> Code · Name · Type (Asset / Liability / Equity / Revenue / COGS / Expense — plurals auto-collapse) · Subtype (Current Asset, Long-Term Liability, Operating Expense, …) · Parent Code (links to another row by its code — same-type only). Rows with a blank code get the next available number in the GAAP range for their type.
+            </div>
+            {batches.length > 0 && (
+              <div className="rounded-lg border bg-white">
+                <button onClick={() => setHistoryOpen(o => !o)} className="w-full px-4 py-2 flex items-center gap-2 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                  <History size={13} className="text-slate-500" />
+                  Import history ({batches.length})
+                  <span className="ml-auto text-slate-400">{historyOpen ? "▼" : "▶"}</span>
+                </button>
+                {historyOpen && (
+                  <ul className="divide-y">
+                    {batches.map(b => (
+                      <li key={b.id} className="px-4 py-2.5 flex items-center gap-3 text-xs">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium truncate text-slate-800">
+                            {b.filename}
+                            <span className="text-[10px] ml-2 text-slate-400 uppercase">{b.source}</span>
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            {new Date(b.at).toLocaleString()} · {b.user_name} · created <b>{b.created_count}</b>, updated <b>{b.updated_count}</b>
+                            {b.skipped_count ? <>, skipped <b>{b.skipped_count}</b></> : ""}
+                          </div>
+                        </div>
+                        {b.undone ? (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200 uppercase tracking-wide">Undone</span>
+                        ) : (
+                          <button onClick={() => undoBatch(b.id)} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border border-rose-200 text-rose-700 hover:bg-rose-50">
+                            <Undo2 size={11} /> Undo
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {step === "review" && preview && (
+          <>
+            <div className="px-5 py-2 border-b bg-slate-50/40 flex items-center gap-3 text-xs">
+              <span className="text-slate-700">
+                <b>{preview.filename}</b> · {rows.length} account{rows.length !== 1 ? "s" : ""} parsed
+                {preview.source === "pdf-ai" && (
+                  <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 uppercase tracking-wide">AI parsed</span>
+                )}
+              </span>
+              {preview.source === "pdf" && lastFileRef.current && (
+                <button onClick={() => upload(lastFileRef.current, { ai: true })} disabled={busy}
+                        className="text-fuchsia-700 hover:bg-fuchsia-50 border border-fuchsia-200 rounded px-2 py-1 text-[11px] inline-flex items-center gap-1 disabled:opacity-50">
+                  {busy ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+                  Try AI parsing
+                </button>
+              )}
+              <button onClick={() => { setStep("upload"); setPreview(null); setRows([]); }} className="ml-auto text-slate-500 hover:text-slate-900 inline-flex items-center gap-1">
+                <ArrowLeft size={12} /> Choose different file
+              </button>
+            </div>
+
+            {preview.detected_headers?.length > 0 && (
+              <div className="px-5 py-3 border-b bg-white">
+                <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2">Column mapping · edit if any field auto-detected wrong</div>
+                <div className="flex flex-wrap gap-2">
+                  {preview.detected_headers.map((h, colIdx) => {
+                    const current = mapping[String(colIdx)] || "";
+                    const known = preview.known_fields || ["code", "name", "type", "subtype", "parent_code"];
+                    const claimed = new Set(Object.entries(mapping).filter(([k]) => Number(k) !== colIdx).map(([, v]) => v).filter(Boolean));
+                    return (
+                      <div key={colIdx} className="flex flex-col gap-0.5">
+                        <div className="text-[10px] text-slate-500 uppercase tracking-wide truncate max-w-[140px]" title={h}>{h || `Column ${colIdx + 1}`}</div>
+                        <select
+                          value={current}
+                          onChange={(e) => { const next = { ...mapping }; next[String(colIdx)] = e.target.value; remap(next); }}
+                          className={`border rounded px-2 py-1 text-xs bg-white ${current ? "" : "text-slate-400"}`}
+                        >
+                          <option value="">— Skip —</option>
+                          {known.map(f => (
+                            <option key={f} value={f} disabled={claimed.has(f) && current !== f}>
+                              {f === "parent_code" ? "Parent code" : f.charAt(0).toUpperCase() + f.slice(1)}
+                              {claimed.has(f) && current !== f ? " (used)" : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="flex-1 overflow-auto">
+              {!rows.length ? (
+                <div className="p-8 text-center text-slate-500 text-sm">No accounts extracted.</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500 border-b sticky top-0">
+                    <tr>
+                      <th className="w-8 px-3 py-2">
+                        <input type="checkbox" checked={selected.size === rows.length && rows.length > 0} onChange={toggleAll} />
+                      </th>
+                      <th className="px-3 py-2 text-left w-20">Code</th>
+                      <th className="px-3 py-2 text-left">Name</th>
+                      <th className="px-3 py-2 text-left">Type</th>
+                      <th className="px-3 py-2 text-left">Subtype</th>
+                      <th className="px-3 py-2 text-left w-20">Parent</th>
+                      <th className="px-3 py-2 text-left">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((a, i) => (
+                      <tr key={i} className={`border-b border-slate-100 ${selected.has(i) ? "" : "opacity-40"}`}>
+                        <td className="px-3 py-1.5">
+                          <input type="checkbox" checked={selected.has(i)} onChange={() => toggleRow(i)} />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <input value={a.code || ""} onChange={(e) => editRow(i, "code", e.target.value)} className="w-full bg-transparent border-0 focus:outline-none focus:border-b focus:border-slate-400 px-0 font-mono-num text-[13px]" placeholder="auto" />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <input value={a.name} onChange={(e) => editRow(i, "name", e.target.value)} className="w-full bg-transparent border-0 focus:outline-none focus:border-b focus:border-slate-400 px-0" />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <select value={a.type} onChange={(e) => editRow(i, "type", e.target.value)} className="border rounded px-1.5 py-0.5 text-xs bg-white">
+                            {TYPES.map(t => <option key={t} value={t}>{prettyLabel(t)}</option>)}
+                          </select>
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <input value={a.subtype || ""} onChange={(e) => editRow(i, "subtype", e.target.value)} className="w-full bg-transparent border-0 focus:outline-none focus:border-b focus:border-slate-400 px-0 text-slate-600 text-[13px]" placeholder="—" />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <input value={a.parent_code || ""} onChange={(e) => editRow(i, "parent_code", e.target.value)} className="w-full bg-transparent border-0 focus:outline-none focus:border-b focus:border-slate-400 px-0 font-mono-num text-[13px]" placeholder="—" />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          {a.existing ? (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 uppercase tracking-wide">Will update</span>
+                          ) : (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 uppercase tracking-wide">New</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="px-5 py-3 border-t bg-slate-50/60 flex items-center gap-3">
+              <span className="text-xs text-slate-600">{selected.size} of {rows.length} selected</span>
+              <button onClick={() => onClose(false)} disabled={busy} className="ml-auto px-3 py-1.5 rounded-md border text-sm">Cancel</button>
+              <button onClick={commit} disabled={busy || !selected.size} className="px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm inline-flex items-center gap-1.5 disabled:opacity-50">
+                {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                Import {selected.size} account{selected.size !== 1 ? "s" : ""}
+              </button>
+            </div>
+          </>
+        )}
+
+        {step === "done" && result && (
+          <div className="p-8 text-center space-y-4">
+            <div className="w-14 h-14 mx-auto rounded-full bg-emerald-100 flex items-center justify-center">
+              <Check size={28} className="text-emerald-700" />
+            </div>
+            <div>
+              <h4 className="text-lg font-semibold">Import complete</h4>
+              <p className="text-sm text-slate-600 mt-1">
+                Added <b>{result.created}</b>, updated <b>{result.updated}</b>
+                {result.skipped ? <>, skipped <b>{result.skipped}</b></> : ""}.
+              </p>
+            </div>
+            <button onClick={() => onClose(true)} className="px-4 py-2 rounded-md bg-slate-900 text-white text-sm">Done</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ImportDropZone({ busy, onFile, inputRef, label, hint }) {
+  const [over, setOver] = useState(false);
+  const dragCount = React.useRef(0);
+  const onDragEnter = (e) => { e.preventDefault(); e.stopPropagation(); dragCount.current += 1; if (e.dataTransfer?.types?.includes("Files")) setOver(true); };
+  const onDragLeave = (e) => { e.preventDefault(); e.stopPropagation(); dragCount.current -= 1; if (dragCount.current <= 0) { dragCount.current = 0; setOver(false); } };
+  const onDragOver = (e) => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer) e.dataTransfer.dropEffect = "copy"; };
+  const onDrop = (e) => { e.preventDefault(); e.stopPropagation(); dragCount.current = 0; setOver(false); const f = e.dataTransfer?.files?.[0]; if (f) onFile(f); };
+  return (
+    <div onDragEnter={onDragEnter} onDragLeave={onDragLeave} onDragOver={onDragOver} onDrop={onDrop}
+         className={`rounded-lg border-2 border-dashed transition-colors p-6 text-center ${over ? "border-indigo-500 bg-indigo-100/70" : "border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/30"}`}>
+      <input ref={inputRef} type="file" accept=".xlsx,.xls,.xlsm,.csv,.txt,.pdf" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
+      <div className="flex items-center justify-center gap-2 text-slate-400 mb-3 pointer-events-none">
+        <FileSpreadsheet size={22} /> <FileText size={22} />
+      </div>
+      <div className="text-sm font-medium text-slate-700 mb-1 pointer-events-none">
+        {over ? "Drop to upload" : (label || "Drop an Excel / CSV / PDF here")}
+      </div>
+      <div className="text-xs text-slate-500 mb-3 pointer-events-none">{hint || "Auto-detects columns."}</div>
+      <button onClick={() => inputRef.current?.click()} disabled={busy}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50">
+        {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+        Choose file
+      </button>
+    </div>
+  );
+}
+

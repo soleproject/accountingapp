@@ -646,3 +646,503 @@ async def recompute_opening_balances(cid: str, user: dict = Depends(get_current_
 
 
 
+
+
+# --------------------------------------------------------------------------
+# Chart of Accounts Import — Excel / CSV / PDF → account rows
+#
+# Same two-step review flow the contacts import uses. Reuses the file
+# parsers directly (routes.contacts._parse_upload) so we get one
+# maintenance surface for Excel/CSV/PDF/AI-PDF handling.
+# --------------------------------------------------------------------------
+import io
+
+# CoA-specific column aliases. Same style as the contacts importer so
+# QBO / Xero / Excel exports auto-map without manual intervention.
+_COA_HEADER_ALIASES = {
+    "code":        ["code", "account code", "number", "account number",
+                    "acct #", "acct#", "acct", "num", "no"],
+    "name":        ["name", "account name", "account", "description",
+                    "title", "gl account", "ledger account"],
+    "type":        ["type", "account type", "category", "class"],
+    "subtype":     ["subtype", "sub-type", "sub type", "detail type",
+                    "sub category", "subcategory"],
+    "parent_code": ["parent", "parent code", "parent account",
+                    "parent account code", "parent number"],
+}
+
+
+def _coa_canonical_header(h: str) -> Optional[str]:
+    if not h:
+        return None
+    key = str(h).strip().lower()
+    for canonical, aliases in _COA_HEADER_ALIASES.items():
+        if key in aliases:
+            return canonical
+    return None
+
+
+# Loose normalizer for the ``type`` value. Users write "Assets", "Asset",
+# "Current Asset", "Bank", "Credit Card", "P&L Income", etc. We map
+# whatever we can to our 6 canonical types and stash the granular
+# detail into subtype when the source column carried it.
+_TYPE_HINTS: dict[str, str] = {
+    "asset": "asset", "assets": "asset", "bank": "asset",
+    "cash": "asset", "accounts receivable": "asset", "a/r": "asset",
+    "fixed asset": "asset", "current asset": "asset",
+    "other asset": "asset", "inventory": "asset",
+    "liability": "liability", "liabilities": "liability",
+    "accounts payable": "liability", "a/p": "liability",
+    "credit card": "liability", "loan": "liability", "long-term liability": "liability",
+    "current liability": "liability", "other liability": "liability",
+    "equity": "equity", "owners equity": "equity", "owner's equity": "equity",
+    "retained earnings": "equity",
+    "income": "revenue", "revenue": "revenue", "sales": "revenue",
+    "other income": "revenue",
+    "cogs": "cogs", "cost of goods sold": "cogs",
+    "cost of sales": "cogs", "materials": "cogs",
+    "expense": "expense", "expenses": "expense",
+    "operating expense": "expense", "other expense": "expense",
+    "payroll": "expense", "tax": "expense",
+}
+
+
+def _norm_type(raw: str) -> Optional[str]:
+    if not raw:
+        return None
+    key = re.sub(r"\s+", " ", str(raw).strip().lower())
+    if key in _TYPE_HINTS:
+        return _TYPE_HINTS[key]
+    # Try suffix strip ("Assets" → "asset").
+    if key.endswith("s") and key[:-1] in _TYPE_HINTS:
+        return _TYPE_HINTS[key[:-1]]
+    return None
+
+
+def _norm_subtype(raw: str) -> str:
+    """Convert 'Current Asset' → 'current_asset', 'Long-Term Liability'
+    → 'long_term_liability'. Left as-is if it already looks snake_case."""
+    if not raw:
+        return ""
+    s = str(raw).strip()
+    if "_" in s and s == s.lower():
+        return s
+    s = re.sub(r"[^\w\s\-]", "", s)
+    s = re.sub(r"[\s\-]+", "_", s.strip()).lower()
+    return s
+
+
+def _coa_rows_to_accounts(
+    headers: list[str], rows: list[list[str]],
+    mapping_override: Optional[dict[int, str]] = None,
+) -> tuple[list[dict], dict[int, str]]:
+    """Same job as ``_rows_to_contacts`` but shaped for CoA rows.
+    Detects code/name/type/subtype/parent_code columns. Rows without
+    a resolvable NAME are dropped — code alone isn't enough."""
+    resolved: dict[int, str] = {}
+    if mapping_override:
+        for k, v in mapping_override.items():
+            try:
+                i = int(k)
+            except (ValueError, TypeError):
+                continue
+            if v and v in _COA_HEADER_ALIASES:
+                resolved[i] = v
+    else:
+        for i, h in enumerate(headers):
+            canonical = _coa_canonical_header(h)
+            if canonical and canonical not in resolved.values():
+                resolved[i] = canonical
+        if not resolved and headers:
+            resolved[0] = "name"
+
+    by_field: dict[str, int] = {v: k for k, v in resolved.items()}
+
+    def _get(row, field):
+        i = by_field.get(field)
+        return row[i].strip() if i is not None and i < len(row) and row[i] else ""
+
+    out: list[dict] = []
+    for r in rows:
+        name = _get(r, "name")
+        if not name:
+            continue
+        raw_type = _get(r, "type")
+        norm_type = _norm_type(raw_type) or "expense"
+        # If the source `type` column carried a granular value ("Current
+        # Asset") that doesn't match a canonical bucket, promote it to
+        # subtype so nothing is lost. Explicit subtype column wins.
+        subtype = _norm_subtype(_get(r, "subtype"))
+        if not subtype and raw_type and _norm_type(raw_type) is not None:
+            key = raw_type.strip().lower()
+            if key not in ("asset", "assets", "liability", "liabilities",
+                           "equity", "revenue", "income", "cogs", "expense",
+                           "expenses"):
+                subtype = _norm_subtype(raw_type)
+        out.append({
+            "code": _get(r, "code"),
+            "name": name,
+            "type": norm_type,
+            "subtype": subtype,
+            "parent_code": _get(r, "parent_code"),
+        })
+    return out, resolved
+
+
+@router.post("/companies/{cid}/accounts/import/preview")
+async def accounts_import_preview(
+    cid: str,
+    file: UploadFile = File(...),
+    ai: str = Form("false"),
+    user: dict = Depends(get_current_user),
+):
+    """Parse a spreadsheet or PDF of accounts and return the extracted
+    rows without touching the database. Auto-detects columns for
+    ``code``, ``name``, ``type``, ``subtype``, and ``parent_code``.
+    Rows are matched against the existing CoA by CODE (primary) or
+    normalized name so the UI can render "will create" vs "will
+    update" pills."""
+    await require_company(user, cid)
+    data = await file.read()
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(413, "File too large. Max 15 MB.")
+    # Reuse the contacts importer's file parsers — one implementation
+    # for xlsx/csv/pdf/ai-pdf covers both use cases.
+    from routes import contacts as _c
+    fname = (file.filename or "").lower()
+    use_ai = (str(ai).lower() == "true") and fname.endswith(".pdf")
+    if use_ai:
+        headers, rows = await _c._ai_parse_pdf(data)
+        parsed = {"headers": headers, "rows": rows, "source": "pdf-ai"}
+    else:
+        parsed = _c._parse_upload(file.filename or "", data)
+    accts, mapping = _coa_rows_to_accounts(parsed["headers"], parsed["rows"])
+
+    # Dedup within the upload — same code OR normalized name.
+    seen_codes: set[str] = set()
+    seen_names: set[str] = set()
+    deduped: list[dict] = []
+    for a in accts:
+        code_key = a["code"].strip() if a["code"] else ""
+        name_key = a["name"].strip().lower()
+        if code_key and code_key in seen_codes:
+            continue
+        if not code_key and name_key in seen_names:
+            continue
+        if code_key: seen_codes.add(code_key)
+        if name_key: seen_names.add(name_key)
+        deduped.append(a)
+
+    # Flag rows that will UPDATE (existing code or name match) vs create.
+    existing_by_code: dict[str, dict] = {}
+    existing_by_name: dict[str, dict] = {}
+    for d in await db.accounts.find(
+        {"company_id": cid},
+        {"id": 1, "code": 1, "name": 1, "type": 1, "_id": 0},
+    ).to_list(3000):
+        if d.get("code"):
+            existing_by_code[str(d["code"]).strip()] = d
+        existing_by_name[str(d.get("name") or "").strip().lower()] = d
+
+    for a in deduped:
+        match = existing_by_code.get(a["code"]) if a["code"] else None
+        if not match:
+            match = existing_by_name.get(a["name"].strip().lower())
+        a["existing"] = bool(match)
+        a["existing_id"] = match["id"] if match else None
+
+    return {
+        "source": parsed["source"],
+        "filename": file.filename,
+        "detected_headers": parsed["headers"],
+        "raw_rows": parsed["rows"],
+        "auto_mapping": {str(k): v for k, v in mapping.items()},
+        "known_fields": list(_COA_HEADER_ALIASES.keys()),
+        "row_count_raw": len(parsed["rows"]),
+        "row_count_after_dedupe": len(deduped),
+        "accounts": deduped,
+    }
+
+
+class CoAImportRemapIn(BaseModel):
+    headers: list[str]
+    raw_rows: list[list[str]]
+    mapping: dict[str, str]
+
+
+@router.post("/companies/{cid}/accounts/import/remap")
+async def accounts_import_remap(
+    cid: str, inp: CoAImportRemapIn,
+    user: dict = Depends(get_current_user),
+):
+    """Re-resolve raw parsed rows with a UI-supplied column mapping."""
+    await require_company(user, cid)
+    override = {int(k): v for k, v in inp.mapping.items() if v}
+    accts, resolved = _coa_rows_to_accounts(inp.headers, inp.raw_rows, override)
+    # Re-run the existing-flag pass so pills stay in sync with the remap.
+    existing_by_code: dict[str, dict] = {}
+    existing_by_name: dict[str, dict] = {}
+    for d in await db.accounts.find(
+        {"company_id": cid},
+        {"id": 1, "code": 1, "name": 1, "_id": 0},
+    ).to_list(3000):
+        if d.get("code"):
+            existing_by_code[str(d["code"]).strip()] = d
+        existing_by_name[str(d.get("name") or "").strip().lower()] = d
+    for a in accts:
+        match = existing_by_code.get(a["code"]) if a["code"] else None
+        if not match:
+            match = existing_by_name.get(a["name"].strip().lower())
+        a["existing"] = bool(match)
+        a["existing_id"] = match["id"] if match else None
+    return {
+        "row_count_after_dedupe": len(accts),
+        "resolved_mapping": {str(k): v for k, v in resolved.items()},
+        "accounts": accts,
+    }
+
+
+# GAAP-standard code ranges — must match the frontend's nextCodeForType.
+_COA_CODE_RANGE = {
+    "asset":     (1000, 1999),
+    "liability": (2000, 2999),
+    "equity":    (3000, 3999),
+    "revenue":   (4000, 4999),
+    "cogs":      (5000, 5999),
+    "expense":   (6000, 9999),
+}
+
+
+def _next_code_for(type_: str, used: set) -> str:
+    lo, hi = _COA_CODE_RANGE.get(type_, _COA_CODE_RANGE["expense"])
+    for n in range(lo, hi + 1, 10):
+        if str(n) not in used:
+            used.add(str(n))
+            return str(n)
+    for n in range(lo, hi + 1):
+        if str(n) not in used:
+            used.add(str(n))
+            return str(n)
+    return str(hi)
+
+
+class CoAImportCommitIn(BaseModel):
+    accounts: list[dict]
+    filename: Optional[str] = None
+    source: Optional[str] = None
+
+
+@router.post("/companies/{cid}/accounts/import/commit")
+async def accounts_import_commit(
+    cid: str, inp: CoAImportCommitIn,
+    user: dict = Depends(get_current_user),
+):
+    """Insert (or update) every account in the payload. Match rule:
+    prefer explicit ``existing_id`` from preview → then code within
+    company → then normalized name. Auto-assigns a code when the
+    caller left it blank (uses the GAAP range for the account's type).
+
+    Writes a batch log in ``account_imports`` with per-row previous-doc
+    snapshots so a bad import can be one-click undone."""
+    await require_company(user, cid)
+    now = now_iso()
+    existing = await db.accounts.find({"company_id": cid}).to_list(3000)
+    by_id = {a["id"]: a for a in existing}
+    by_code = {str(a.get("code") or "").strip(): a for a in existing if a.get("code")}
+    by_name = {str(a.get("name") or "").strip().lower(): a for a in existing}
+    used_codes = set(by_code.keys())
+
+    created_ids: list[str] = []
+    updated_snapshots: list[dict] = []
+    skipped = 0
+
+    # First pass: assign IDs so parent_code links can be resolved after
+    # every account exists (a spreadsheet may list children before parents).
+    passes: list[dict] = []
+    for a in inp.accounts:
+        name = (a.get("name") or "").strip()
+        if not name:
+            skipped += 1
+            continue
+        type_ = (a.get("type") or "expense").strip().lower()
+        if type_ not in _COA_CODE_RANGE:
+            type_ = "expense"
+        code = str(a.get("code") or "").strip()
+        if not code:
+            code = _next_code_for(type_, used_codes)
+        else:
+            used_codes.add(code)
+        subtype = (a.get("subtype") or "").strip()
+        # Match order: existing_id > code > name.
+        match = None
+        if a.get("existing_id") and a["existing_id"] in by_id:
+            match = by_id[a["existing_id"]]
+        elif code in by_code:
+            match = by_code[code]
+        else:
+            match = by_name.get(name.lower())
+        passes.append({
+            "name": name, "code": code, "type": type_, "subtype": subtype,
+            "parent_code": (a.get("parent_code") or "").strip(),
+            "match": match,
+        })
+
+    # Second pass: apply upserts. Parent-code resolution needs the FINAL
+    # code map (built from the first pass + existing rows).
+    final_code_to_id: dict[str, str] = {c: v["id"] for c, v in by_code.items()}
+    for p in passes:
+        if not p["match"]:
+            # Preallocate an id so we can wire children to a just-created
+            # parent within the same import.
+            new_id = str(uuid.uuid4())
+            final_code_to_id[p["code"]] = new_id
+
+    for p in passes:
+        parent_id = None
+        if p["parent_code"] and p["parent_code"] in final_code_to_id:
+            candidate_id = final_code_to_id[p["parent_code"]]
+            # Guard: parent must be same type, top-level. Same-type check
+            # is enforced by looking up either passes-under-creation or
+            # the existing set.
+            candidate_type = None
+            candidate_parent = None
+            candidate_existing = by_id.get(candidate_id)
+            if candidate_existing:
+                candidate_type = candidate_existing.get("type")
+                candidate_parent = candidate_existing.get("parent_account_id")
+            else:
+                # Match within this batch.
+                for q in passes:
+                    if final_code_to_id.get(q["code"]) == candidate_id:
+                        candidate_type = q["type"]
+                        break
+            if candidate_type == p["type"] and not candidate_parent \
+               and candidate_id != final_code_to_id.get(p["code"]):
+                parent_id = candidate_id
+
+        payload = {
+            "company_id": cid,
+            "code": p["code"],
+            "name": p["name"],
+            "type": p["type"],
+            "subtype": p["subtype"],
+            "active": True,
+            "updated_at": now,
+        }
+        if parent_id:
+            payload["parent_account_id"] = parent_id
+        elif p["match"] and p["match"].get("parent_account_id"):
+            # Clearing parent explicitly requires an empty parent_code
+            # column — otherwise we preserve whatever the row already had.
+            payload["parent_account_id"] = p["match"]["parent_account_id"]
+
+        if p["match"]:
+            prev = {k: v for k, v in p["match"].items() if k != "_id"}
+            await db.accounts.update_one(
+                {"id": p["match"]["id"], "company_id": cid},
+                {"$set": payload},
+            )
+            updated_snapshots.append({"id": p["match"]["id"], "prev": prev})
+        else:
+            payload["id"] = final_code_to_id[p["code"]]
+            payload["balance"] = 0.0
+            payload["created_at"] = now
+            await db.accounts.insert_one(payload)
+            created_ids.append(payload["id"])
+
+    log_id: Optional[str] = None
+    if created_ids or updated_snapshots:
+        log_id = str(uuid.uuid4())
+        await db.account_imports.insert_one({
+            "id": log_id,
+            "company_id": cid,
+            "user_id": user.get("id"),
+            "at": now,
+            "filename": inp.filename or "(unknown)",
+            "source": inp.source or "",
+            "created_ids": created_ids,
+            "updated_snapshots": updated_snapshots,
+            "created_count": len(created_ids),
+            "updated_count": len(updated_snapshots),
+            "skipped_count": skipped,
+            "undone": False,
+        })
+    return {"ok": True, "created": len(created_ids),
+            "updated": len(updated_snapshots), "skipped": skipped,
+            "total": len(created_ids) + len(updated_snapshots) + skipped,
+            "batch_id": log_id}
+
+
+@router.get("/companies/{cid}/accounts/imports")
+async def accounts_import_history(
+    cid: str, limit: int = 20,
+    user: dict = Depends(get_current_user),
+):
+    """List recent account-import batches so the CoA import UI can offer
+    Undo. Same shape as the contacts import log."""
+    await require_company(user, cid)
+    docs = await db.account_imports.find(
+        {"company_id": cid},
+        {"_id": 0, "updated_snapshots": 0},
+    ).sort("at", -1).to_list(min(limit, 100))
+    user_ids = list({d.get("user_id") for d in docs if d.get("user_id")})
+    name_map: dict[str, str] = {}
+    if user_ids:
+        for u in await db.users.find(
+            {"id": {"$in": user_ids}}, {"id": 1, "name": 1, "email": 1, "_id": 0},
+        ).to_list(len(user_ids)):
+            name_map[u["id"]] = u.get("name") or u.get("email") or "—"
+    for d in docs:
+        d["user_name"] = name_map.get(d.get("user_id"), "—")
+    return {"batches": docs}
+
+
+@router.post("/companies/{cid}/accounts/imports/{batch_id}/undo")
+async def accounts_import_undo(
+    cid: str, batch_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Roll a specific import batch back — delete every account it
+    created, restore every account it overwrote from the snapshot.
+    Blocks the delete leg if a created account has journal-entry
+    postings against it (would strand JE lines pointing at a ghost)."""
+    await require_company(user, cid)
+    batch = await db.account_imports.find_one({"id": batch_id, "company_id": cid})
+    if not batch:
+        raise HTTPException(404, "Import batch not found")
+    if batch.get("undone"):
+        return {"ok": True, "already_undone": True, "deleted": 0, "restored": 0}
+    created_ids = batch.get("created_ids") or []
+    snapshots = batch.get("updated_snapshots") or []
+
+    # Refuse to delete accounts that already have JE activity — the
+    # import would leave stranded lines. Better to surface the conflict
+    # so the user picks a different fix (e.g. merge).
+    if created_ids:
+        conflict = await db.journal_entries.count_documents({
+            "company_id": cid, "lines.account_id": {"$in": created_ids},
+        })
+        if conflict:
+            raise HTTPException(400,
+                "One or more accounts created by this import already have "
+                f"journal-entry activity ({conflict} entries). Merge or "
+                "reclassify those entries first, then re-run undo.")
+    deleted = 0
+    if created_ids:
+        r = await db.accounts.delete_many({"id": {"$in": created_ids}, "company_id": cid})
+        deleted = r.deleted_count
+    restored = 0
+    for snap in snapshots:
+        prev = snap.get("prev") or {}
+        if not prev.get("id"):
+            continue
+        r = await db.accounts.replace_one(
+            {"id": prev["id"], "company_id": cid}, prev,
+        )
+        restored += r.modified_count
+    await db.account_imports.update_one(
+        {"id": batch_id, "company_id": cid},
+        {"$set": {"undone": True, "undone_at": now_iso(), "undone_by": user.get("id")}},
+    )
+    return {"ok": True, "deleted": deleted, "restored": restored}
+
