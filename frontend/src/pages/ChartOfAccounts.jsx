@@ -8,6 +8,21 @@ import { useCreateListener, useActionListener } from "@/lib/createBus";
 
 const TYPES = ["asset", "liability", "equity", "revenue", "cogs", "expense"];
 
+// GAAP-standard subtypes cascaded from the parent type. Picked to match
+// what the AI seed / Suggest-with-AI generator already writes, so a Pro
+// editing a row never sees a mismatch between the pill on the read-only
+// view and the option they picked in the dropdown.
+const SUBTYPES_BY_TYPE = {
+  asset:     ["current_asset", "fixed_asset", "other_asset", "intangible_asset", "accumulated_depreciation", "clearing"],
+  liability: ["current_liability", "long_term_liability", "other_liability", "credit_card"],
+  equity:    ["equity", "retained_earnings", "owner_draw", "owner_contribution"],
+  revenue:   ["operating_revenue", "other_revenue", "sales_revenue", "service_revenue", "interest_income"],
+  cogs:      ["cogs", "materials", "labor", "manufacturing_overhead"],
+  expense:   ["operating_expense", "cost_of_sales", "payroll_expense", "rent_expense", "utilities_expense", "advertising_expense", "office_expense", "professional_fees", "tax_expense", "interest_expense", "depreciation_expense", "other_expense"],
+};
+
+const subtypesFor = (t) => SUBTYPES_BY_TYPE[t] || SUBTYPES_BY_TYPE.expense;
+
 export default function ChartOfAccounts() {
   const { currentId } = useCompany();
   const [accts, setAccts] = useState([]);
@@ -213,7 +228,16 @@ function AccountRow({ a, currentId, onSaved, onDeleted }) {
           <div className="col-span-2">
             <select
               value={type}
-              onChange={(e) => setType(e.target.value)}
+              onChange={(e) => {
+                const nextType = e.target.value;
+                setType(nextType);
+                // Keep the existing subtype only if it's still valid under the
+                // new parent type; otherwise snap to the first option so we
+                // never save an orphan combo like {type: "asset", subtype: "operating_expense"}.
+                if (!subtypesFor(nextType).includes(subtype)) {
+                  setSubtype(subtypesFor(nextType)[0]);
+                }
+              }}
               className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:border-slate-500"
               data-testid={`coa-edit-type-${a.id}`}
             >
@@ -221,14 +245,21 @@ function AccountRow({ a, currentId, onSaved, onDeleted }) {
             </select>
           </div>
           <div className="col-span-2">
-            <input
-              value={subtype}
+            <select
+              value={subtypesFor(type).includes(subtype) ? subtype : ""}
               onChange={(e) => setSubtype(e.target.value)}
-              onKeyDown={onKey}
               className="w-full border rounded px-2 py-1 text-xs focus:outline-none focus:border-slate-500"
-              placeholder="Subtype"
               data-testid={`coa-edit-subtype-${a.id}`}
-            />
+            >
+              {!subtypesFor(type).includes(subtype) && subtype && (
+                // Legacy / hand-typed subtypes stay pickable so re-saving
+                // an old row doesn't force a change the Pro didn't intend.
+                <option value={subtype}>{subtype} (legacy)</option>
+              )}
+              {subtypesFor(type).map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
           </div>
           <div className="col-span-1 flex items-center justify-end gap-1">
             <button
@@ -436,7 +467,11 @@ function CreateAccount({ currentId, prefill, onClose }) {
   const [code, setCode] = useState(p.code || "");
   const [name, setName] = useState(p.name || "");
   const [type, setType] = useState(TYPES.includes(p.type) ? p.type : "expense");
-  const [subtype, setSubtype] = useState(p.subtype || "operating_expense");
+  const [subtype, setSubtype] = useState(
+    p.subtype && subtypesFor(TYPES.includes(p.type) ? p.type : "expense").includes(p.subtype)
+      ? p.subtype
+      : subtypesFor(TYPES.includes(p.type) ? p.type : "expense")[0]
+  );
   const save = async () => {
     await api.post(`/companies/${currentId}/accounts`, { code, name, type, subtype });
     toast.success("Account created"); onClose();
@@ -449,11 +484,29 @@ function CreateAccount({ currentId, prefill, onClose }) {
                className="w-full border rounded px-3 py-2 text-sm font-mono-num" />
         <input placeholder="Account name" value={name} onChange={(e) => setName(e.target.value)}
                className="w-full border rounded px-3 py-2 text-sm" />
-        <select value={type} onChange={(e) => setType(e.target.value)} className="w-full border rounded px-3 py-2 text-sm">
+        <select
+          value={type}
+          onChange={(e) => {
+            const nextType = e.target.value;
+            setType(nextType);
+            // Snap subtype into the new type's valid range on every switch.
+            if (!subtypesFor(nextType).includes(subtype)) {
+              setSubtype(subtypesFor(nextType)[0]);
+            }
+          }}
+          className="w-full border rounded px-3 py-2 text-sm"
+        >
           {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
-        <input placeholder="Subtype" value={subtype} onChange={(e) => setSubtype(e.target.value)}
-               className="w-full border rounded px-3 py-2 text-sm" />
+        <select
+          value={subtype}
+          onChange={(e) => setSubtype(e.target.value)}
+          className="w-full border rounded px-3 py-2 text-sm"
+        >
+          {subtypesFor(type).map(s => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
         <div className="flex gap-2">
           <button data-testid={TID.saveBtn} onClick={save} className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm">Save</button>
           <button data-testid={TID.cancelBtn} onClick={onClose} className="flex-1 py-2 rounded-md border text-sm">Cancel</button>
