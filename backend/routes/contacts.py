@@ -323,3 +323,308 @@ async def backfill_contact_logos(cid: str, user: dict = Depends(get_current_user
         )
         updated.append({"name": c.get("name"), "logo_url": logo_url})
     return {"ok": True, "updated": len(updated), "contacts": updated}
+
+
+
+# --------------------------------------------------------------------------
+# Contacts Import — Excel / CSV / PDF → contact rows
+#
+# Two-step flow so the CPA can proofread before writes hit the DB:
+#   1. POST /contacts/import/preview  → parse the upload, return rows +
+#      auto-detected column mapping. No DB writes.
+#   2. POST /contacts/import/commit   → user confirms the mapping and
+#      the (possibly edited) rows, we insert.
+#
+# Deduplication: the collection already has a unique index on
+# (company_id, normalized_name), so re-imports are idempotent — we
+# UPSERT by normalized_name and count matches as "updated".
+# --------------------------------------------------------------------------
+import io
+import csv as _csv
+
+
+# Header aliases → canonical fields. Kept generous so QBO/Xero/Excel
+# exports auto-map without the user having to touch anything.
+_HEADER_ALIASES = {
+    "name":    ["name", "contact", "contact name", "customer", "customer name",
+                "vendor", "vendor name", "supplier", "supplier name",
+                "company", "company name", "display name", "full name",
+                "client", "client name", "payee"],
+    "email":   ["email", "email address", "e-mail", "mail"],
+    "phone":   ["phone", "phone number", "phone #", "tel", "telephone",
+                "mobile", "cell", "cell phone"],
+    "address": ["address", "billing address", "street", "street address",
+                "location", "shipping address", "full address"],
+    "type":    ["type", "contact type", "kind", "role"],
+}
+
+
+def _canonical_header(h: str) -> Optional[str]:
+    if not h:
+        return None
+    key = str(h).strip().lower()
+    for canonical, aliases in _HEADER_ALIASES.items():
+        if key in aliases:
+            return canonical
+    return None
+
+
+def _guess_type(row_type: Optional[str], default_type: str) -> str:
+    """Normalize whatever the user's spreadsheet used into
+    ``customer`` / ``vendor``. Anything unrecognized falls back to
+    the caller's default_type."""
+    t = (row_type or "").strip().lower()
+    if t in ("customer", "client", "buyer", "member"):
+        return "customer"
+    if t in ("vendor", "supplier", "payee", "contractor"):
+        return "vendor"
+    return default_type
+
+
+_EMAIL_RE = re.compile(r"([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})")
+_PHONE_RE = re.compile(r"(\+?\d[\d\s\-().]{7,}\d)")
+
+
+def _parse_excel(data: bytes) -> tuple[list[str], list[list[str]]]:
+    """Read the first sheet of an .xlsx file. Returns (headers, rows)."""
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    ws = wb.active
+    headers: list[str] = []
+    rows: list[list[str]] = []
+    for i, row in enumerate(ws.iter_rows(values_only=True)):
+        cells = ["" if c is None else str(c).strip() for c in row]
+        if i == 0:
+            headers = cells
+            continue
+        if any(c for c in cells):
+            rows.append(cells)
+    return headers, rows
+
+
+def _parse_csv(data: bytes) -> tuple[list[str], list[list[str]]]:
+    """Read a CSV file with either \\n or \\r\\n line endings. Assumes
+    utf-8 with a lenient fallback so imports from Excel exports don't
+    choke on a stray latin-1 character."""
+    text = data.decode("utf-8", errors="replace")
+    reader = _csv.reader(io.StringIO(text))
+    all_rows = [r for r in reader]
+    if not all_rows:
+        return [], []
+    headers = [h.strip() for h in all_rows[0]]
+    body = [[c.strip() for c in r] for r in all_rows[1:] if any(c.strip() for c in r)]
+    return headers, body
+
+
+def _parse_pdf(data: bytes) -> tuple[list[str], list[list[str]]]:
+    """Best-effort PDF extraction: pull raw text with pypdf, then run
+    each line through email/phone regex. Every line that yielded at
+    least a name-looking token becomes a row. This works well for
+    printed customer lists / directories; won't beat a proper OCR for
+    scanned/columnar layouts but keeps us dependency-light."""
+    import pypdf
+    reader = pypdf.PdfReader(io.BytesIO(data))
+    all_text = []
+    for page in reader.pages:
+        try:
+            all_text.append(page.extract_text() or "")
+        except Exception:
+            continue
+    text = "\n".join(all_text)
+
+    rows: list[list[str]] = []
+    for raw in text.split("\n"):
+        line = raw.strip()
+        if not line or len(line) < 3:
+            continue
+        # Skip pure-numeric or header-y lines like "Page 1 of 4".
+        if re.match(r"^page\s+\d+", line.lower()):
+            continue
+        email_m = _EMAIL_RE.search(line)
+        phone_m = _PHONE_RE.search(line)
+        # Strip email + phone from the line to leave a plausible name.
+        name_part = line
+        if email_m: name_part = name_part.replace(email_m.group(0), "")
+        if phone_m: name_part = name_part.replace(phone_m.group(0), "")
+        name_part = re.sub(r"[|,;]{1,}", " ", name_part)
+        name_part = re.sub(r"\s{2,}", " ", name_part).strip(" -")
+        if not name_part or len(name_part) < 2:
+            continue
+        # Reject purely lowercase 1-word lines — usually noise words
+        # like "email", "phone", "customer".
+        if len(name_part.split()) == 1 and name_part.islower():
+            continue
+        rows.append([
+            name_part,
+            email_m.group(0) if email_m else "",
+            phone_m.group(0) if phone_m else "",
+        ])
+    return ["name", "email", "phone"], rows
+
+
+def _parse_upload(filename: str, data: bytes) -> dict:
+    """Route the file to the right parser based on extension. Returns
+    a structured dict of parsed rows keyed by canonical field."""
+    fname = (filename or "").lower()
+    if fname.endswith((".xlsx", ".xls", ".xlsm")):
+        headers, rows = _parse_excel(data)
+        source = "excel"
+    elif fname.endswith(".csv") or fname.endswith(".txt"):
+        headers, rows = _parse_csv(data)
+        source = "csv"
+    elif fname.endswith(".pdf"):
+        headers, rows = _parse_pdf(data)
+        source = "pdf"
+    else:
+        raise HTTPException(400,
+            "Unsupported file type. Upload .xlsx, .csv, or .pdf.")
+    return {"headers": headers, "rows": rows, "source": source}
+
+
+def _rows_to_contacts(headers: list[str], rows: list[list[str]],
+                      default_type: str) -> list[dict]:
+    """Map raw parsed rows into contact dicts using auto-detected
+    header aliases. Rows without a resolvable name are dropped."""
+    idx: dict[str, int] = {}
+    for i, h in enumerate(headers):
+        canonical = _canonical_header(h)
+        if canonical and canonical not in idx:
+            idx[canonical] = i
+    # Fallback: no known headers found → assume the first column is a name.
+    if not idx and headers:
+        idx["name"] = 0
+
+    def _get(row, key):
+        i = idx.get(key)
+        return row[i].strip() if i is not None and i < len(row) and row[i] else ""
+
+    out: list[dict] = []
+    for r in rows:
+        name = _get(r, "name")
+        if not name:
+            continue
+        out.append({
+            "name": name,
+            "email": _get(r, "email"),
+            "phone": _get(r, "phone"),
+            "address": _get(r, "address"),
+            "type": _guess_type(_get(r, "type"), default_type),
+        })
+    return out
+
+
+@router.post("/companies/{cid}/contacts/import/preview")
+async def contacts_import_preview(
+    cid: str,
+    file: UploadFile = File(...),
+    default_type: str = Form("customer"),
+    user: dict = Depends(get_current_user),
+):
+    """Parse an Excel / CSV / PDF upload and return the extracted rows
+    without touching the database. Use this to render a review table
+    the CPA can proofread before hitting Commit.
+
+    Returns per-row ``existing`` flag when a contact with the same
+    normalized name already exists in this company — so the UI can
+    show "will update" vs "will create" pills."""
+    await require_company(user, cid)
+    if default_type not in ("customer", "vendor"):
+        raise HTTPException(400, "default_type must be customer or vendor")
+    data = await file.read()
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(413, "File too large. Max 15 MB.")
+    parsed = _parse_upload(file.filename or "", data)
+    contacts = _rows_to_contacts(parsed["headers"], parsed["rows"], default_type)
+    # Deduplicate within the upload itself — a spreadsheet often has
+    # the same customer listed twice. Keep the first occurrence.
+    seen = set()
+    deduped: list[dict] = []
+    for c in contacts:
+        key = contact_resolver.normalize_contact_name(c["name"])
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append({**c, "normalized_name": key})
+    # Flag rows that already exist so the review UI can preview upsert
+    # vs insert. One aggregate query, not per-row.
+    if deduped:
+        existing_keys = {
+            d["normalized_name"] async for d in db.contacts.find(
+                {"company_id": cid,
+                 "normalized_name": {"$in": [c["normalized_name"] for c in deduped]}},
+                {"normalized_name": 1, "_id": 0},
+            )
+        }
+        for c in deduped:
+            c["existing"] = c["normalized_name"] in existing_keys
+    return {
+        "source": parsed["source"],
+        "filename": file.filename,
+        "detected_headers": parsed["headers"],
+        "row_count_raw": len(parsed["rows"]),
+        "row_count_after_dedupe": len(deduped),
+        "contacts": deduped,
+    }
+
+
+class ContactsImportCommitIn(BaseModel):
+    contacts: list[dict]
+
+
+@router.post("/companies/{cid}/contacts/import/commit")
+async def contacts_import_commit(
+    cid: str,
+    inp: ContactsImportCommitIn,
+    user: dict = Depends(get_current_user),
+):
+    """Insert (or upsert) the contacts the CPA confirmed in the preview.
+    Returns per-outcome counts so the UI can render a success toast
+    like "Added 42, updated 3, skipped 1 duplicate"."""
+    await require_company(user, cid)
+    now = now_iso()
+    created = 0
+    updated = 0
+    skipped = 0
+    for c in inp.contacts:
+        name = (c.get("name") or "").strip()
+        if not name:
+            skipped += 1
+            continue
+        key = contact_resolver.normalize_contact_name(name)
+        if not key:
+            skipped += 1
+            continue
+        t = c.get("type") or "customer"
+        if t not in ("customer", "vendor"):
+            t = "customer"
+        payload = {
+            "company_id": cid,
+            "name": name,
+            "type": t,
+            "email": (c.get("email") or "").strip(),
+            "phone": (c.get("phone") or "").strip(),
+            "address": (c.get("address") or "").strip(),
+            "normalized_name": key,
+            "updated_at": now,
+        }
+        existing = await db.contacts.find_one(
+            {"company_id": cid, "normalized_name": key},
+            {"id": 1, "_id": 0},
+        )
+        if existing:
+            await db.contacts.update_one(
+                {"id": existing["id"], "company_id": cid},
+                {"$set": payload},
+            )
+            updated += 1
+        else:
+            payload["id"] = str(uuid.uuid4())
+            payload["created_at"] = now
+            await db.contacts.insert_one(payload)
+            created += 1
+    try:
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "created": created, "updated": updated,
+            "skipped": skipped, "total": created + updated + skipped}

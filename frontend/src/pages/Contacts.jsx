@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, Pencil, GitMerge, ExternalLink, Tag, Sparkles } from "lucide-react";
+import { Plus, Trash2, X, Pencil, GitMerge, ExternalLink, Tag, Sparkles, Upload, FileSpreadsheet, FileText, Loader2, Check, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
@@ -29,6 +29,9 @@ export default function Contacts() {
   const [selected, setSelected] = useState(new Set());
   const [mergeOpen, setMergeOpen] = useState(false);
   const [reportContact, setReportContact] = useState(null); // { contact } drilldown
+  // Import modal open/close. Kept out of the main `modal` state so it
+  // can layer above (or replace) the edit modal cleanly.
+  const [importOpen, setImportOpen] = useState(false);
   const [view, setView] = useState(() =>
     localStorage.getItem("contacts_view") === "details" ? "details" : "analytics"
   );
@@ -117,6 +120,13 @@ export default function Contacts() {
               <GitMerge size={13} /> Merge {selected.size}
             </button>
           )}
+          <button
+            onClick={() => setImportOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-indigo-300 bg-indigo-50 text-indigo-800 text-xs hover:bg-indigo-100"
+            data-testid="contacts-import-btn"
+          >
+            <Upload size={13} /> Import
+          </button>
           <button
             data-testid={TID.addBtn}
             onClick={() => setModal({ mode: "create" })}
@@ -270,6 +280,12 @@ export default function Contacts() {
           contact={reportContact}
           onClose={() => setReportContact(null)}
           onEdit={() => { const c = reportContact; setReportContact(null); setModal({ mode: "edit", contact: c }); }}
+        />
+      )}
+      {importOpen && (
+        <ImportContactsModal
+          currentId={currentId}
+          onClose={(reload) => { setImportOpen(false); if (reload) load(); }}
         />
       )}
     </div>
@@ -806,3 +822,307 @@ function SumTile({ label, value, tone }) {
     </div>
   );
 }
+
+
+/**
+ * ImportContactsModal — two-step upload flow for customer/vendor lists.
+ *
+ * Step 1 (upload): pick an .xlsx / .csv / .pdf, choose a default type
+ *   (customer vs vendor) for rows that don't specify one, POST to
+ *   ``/contacts/import/preview``.
+ * Step 2 (review): show the parsed rows in an editable table with
+ *   per-row "will create" / "will update" pills, let the CPA tweak
+ *   type/email/etc. or uncheck rows they don't want, then POST to
+ *   ``/contacts/import/commit``.
+ */
+function ImportContactsModal({ currentId, onClose }) {
+  const [step, setStep] = useState("upload"); // upload | review | done
+  const [busy, setBusy] = useState(false);
+  const [defaultType, setDefaultType] = useState("customer");
+  const [preview, setPreview] = useState(null); // {source, filename, contacts[], ...}
+  const [rows, setRows] = useState([]);         // editable copy of preview.contacts
+  const [selected, setSelected] = useState(new Set());
+  const [result, setResult] = useState(null);   // {created, updated, skipped}
+  const inputRef = React.useRef(null);
+
+  const upload = async (file) => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("default_type", defaultType);
+      const r = await api.post(
+        `/companies/${currentId}/contacts/import/preview`,
+        fd,
+        { headers: { "Content-Type": "multipart/form-data" } },
+      );
+      const d = r.data;
+      setPreview(d);
+      setRows(d.contacts || []);
+      // Default-select every parsed row so the CPA can just hit Import.
+      setSelected(new Set((d.contacts || []).map((_, i) => i)));
+      setStep("review");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't parse the file");
+    } finally { setBusy(false); }
+  };
+
+  const toggleRow = (i) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(i) ? next.delete(i) : next.add(i);
+      return next;
+    });
+  };
+  const toggleAll = () => {
+    setSelected(prev =>
+      prev.size === rows.length ? new Set() : new Set(rows.map((_, i) => i))
+    );
+  };
+
+  const editRow = (i, field, value) => {
+    setRows(rs => rs.map((r, idx) => idx === i ? { ...r, [field]: value } : r));
+  };
+
+  const commit = async () => {
+    const payload = rows.filter((_, i) => selected.has(i));
+    if (!payload.length) { toast.error("Nothing selected to import."); return; }
+    setBusy(true);
+    try {
+      const r = await api.post(
+        `/companies/${currentId}/contacts/import/commit`,
+        { contacts: payload },
+      );
+      setResult(r.data);
+      setStep("done");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Import failed");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col" data-testid="contacts-import-modal">
+        {/* ---------- Header ---------- */}
+        <div className="px-5 py-3 border-b flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0">
+            <Upload size={16} className="text-indigo-700" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-heading font-semibold">Import contacts</h3>
+            <p className="text-xs text-slate-500">
+              Bulk-add customers &amp; vendors from an Excel, CSV, or PDF list.
+            </p>
+          </div>
+          <button onClick={() => onClose(false)} className="p-1 rounded hover:bg-slate-100" data-testid="import-close">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* ---------- Step: Upload ---------- */}
+        {step === "upload" && (
+          <div className="p-5 space-y-4">
+            <div className="rounded-lg border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/30 transition-colors p-6 text-center">
+              <input
+                ref={inputRef}
+                type="file"
+                accept=".xlsx,.xls,.xlsm,.csv,.txt,.pdf"
+                className="hidden"
+                onChange={(e) => upload(e.target.files?.[0])}
+                data-testid="import-file-input"
+              />
+              <div className="flex items-center justify-center gap-2 text-slate-400 mb-3">
+                <FileSpreadsheet size={22} /> <FileText size={22} />
+              </div>
+              <div className="text-sm font-medium text-slate-700 mb-1">
+                Drop an Excel / CSV / PDF here
+              </div>
+              <div className="text-xs text-slate-500 mb-3">
+                Auto-detects columns for name, email, phone, address, and type.
+              </div>
+              <button
+                onClick={() => inputRef.current?.click()}
+                disabled={busy}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50"
+                data-testid="import-pick-file"
+              >
+                {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                Choose file
+              </button>
+            </div>
+            <div className="flex items-center gap-3">
+              <label className="text-xs text-slate-600">
+                Default type when the file doesn't specify:
+              </label>
+              <select
+                value={defaultType}
+                onChange={(e) => setDefaultType(e.target.value)}
+                className="border rounded px-2 py-1 text-sm bg-white"
+                data-testid="import-default-type"
+              >
+                <option value="customer">Customer</option>
+                <option value="vendor">Vendor</option>
+              </select>
+            </div>
+            <div className="text-[11px] text-slate-500 bg-slate-50 border rounded p-3">
+              <b>Column names we recognize:</b> Name, Contact, Customer, Vendor,
+              Supplier, Company · Email, E-mail · Phone, Mobile, Cell · Address,
+              Street · Type, Kind. Anything else stays as-is. PDFs get scanned
+              for names, emails, and phone numbers line by line.
+            </div>
+          </div>
+        )}
+
+        {/* ---------- Step: Review ---------- */}
+        {step === "review" && preview && (
+          <>
+            <div className="px-5 py-2 border-b bg-slate-50/40 flex items-center gap-3 text-xs">
+              <span className="text-slate-700">
+                <b>{preview.filename}</b> ·{" "}
+                {preview.row_count_after_dedupe} contact{preview.row_count_after_dedupe !== 1 ? "s" : ""} parsed
+                {preview.row_count_raw !== preview.row_count_after_dedupe && (
+                  <span className="text-slate-500"> ({preview.row_count_raw - preview.row_count_after_dedupe} deduped)</span>
+                )}
+              </span>
+              <button
+                onClick={() => { setStep("upload"); setPreview(null); setRows([]); }}
+                className="ml-auto text-slate-500 hover:text-slate-900 inline-flex items-center gap-1"
+              >
+                <ArrowLeft size={12} /> Choose different file
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto">
+              {!rows.length ? (
+                <div className="p-8 text-center text-slate-500 text-sm">
+                  No contacts were extracted from this file.
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500 border-b sticky top-0">
+                    <tr>
+                      <th className="w-8 px-3 py-2">
+                        <input
+                          type="checkbox"
+                          checked={selected.size === rows.length && rows.length > 0}
+                          onChange={toggleAll}
+                          data-testid="import-select-all"
+                        />
+                      </th>
+                      <th className="px-3 py-2 text-left">Name</th>
+                      <th className="px-3 py-2 text-left">Email</th>
+                      <th className="px-3 py-2 text-left">Phone</th>
+                      <th className="px-3 py-2 text-left">Type</th>
+                      <th className="px-3 py-2 text-left">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((c, i) => (
+                      <tr key={i} className={`border-b border-slate-100 ${selected.has(i) ? "" : "opacity-40"}`}>
+                        <td className="px-3 py-1.5">
+                          <input
+                            type="checkbox"
+                            checked={selected.has(i)}
+                            onChange={() => toggleRow(i)}
+                            data-testid={`import-row-check-${i}`}
+                          />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <input
+                            value={c.name}
+                            onChange={(e) => editRow(i, "name", e.target.value)}
+                            className="w-full bg-transparent border-0 focus:outline-none focus:border-b focus:border-slate-400 px-0"
+                          />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <input
+                            value={c.email || ""}
+                            onChange={(e) => editRow(i, "email", e.target.value)}
+                            className="w-full bg-transparent border-0 focus:outline-none focus:border-b focus:border-slate-400 px-0 text-slate-600 text-[13px]"
+                          />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <input
+                            value={c.phone || ""}
+                            onChange={(e) => editRow(i, "phone", e.target.value)}
+                            className="w-full bg-transparent border-0 focus:outline-none focus:border-b focus:border-slate-400 px-0 text-slate-600 text-[13px]"
+                          />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <select
+                            value={c.type}
+                            onChange={(e) => editRow(i, "type", e.target.value)}
+                            className="border rounded px-1.5 py-0.5 text-xs bg-white"
+                          >
+                            <option value="customer">Customer</option>
+                            <option value="vendor">Vendor</option>
+                          </select>
+                        </td>
+                        <td className="px-3 py-1.5">
+                          {c.existing ? (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 uppercase tracking-wide">
+                              Will update
+                            </span>
+                          ) : (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 uppercase tracking-wide">
+                              New
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <div className="px-5 py-3 border-t bg-slate-50/60 flex items-center gap-3">
+              <span className="text-xs text-slate-600">
+                {selected.size} of {rows.length} selected
+              </span>
+              <button
+                onClick={() => onClose(false)}
+                disabled={busy}
+                className="ml-auto px-3 py-1.5 rounded-md border text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={commit}
+                disabled={busy || !selected.size}
+                className="px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm inline-flex items-center gap-1.5 disabled:opacity-50"
+                data-testid="import-commit"
+              >
+                {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                Import {selected.size} contact{selected.size !== 1 ? "s" : ""}
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* ---------- Step: Done ---------- */}
+        {step === "done" && result && (
+          <div className="p-8 text-center space-y-4">
+            <div className="w-14 h-14 mx-auto rounded-full bg-emerald-100 flex items-center justify-center">
+              <Check size={28} className="text-emerald-700" />
+            </div>
+            <div>
+              <h4 className="text-lg font-semibold">Import complete</h4>
+              <p className="text-sm text-slate-600 mt-1">
+                Added <b>{result.created}</b>, updated <b>{result.updated}</b>
+                {result.skipped ? <>, skipped <b>{result.skipped}</b></> : ""}.
+              </p>
+            </div>
+            <button
+              onClick={() => onClose(true)}
+              className="px-4 py-2 rounded-md bg-slate-900 text-white text-sm"
+              data-testid="import-done-close"
+            >
+              Done
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+

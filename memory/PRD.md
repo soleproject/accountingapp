@@ -39,7 +39,24 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — Duplicate Detector, Balance Basis Toggle, Drag-Drop Reparent
+### Feb 2026 (latest) — Contacts Import (Excel / CSV / PDF)
+
+**Backend (`routes/contacts.py`)**
+- `POST /companies/{cid}/contacts/import/preview` — parse `.xlsx / .xls / .csv / .pdf` (multipart upload), auto-detect columns by header alias (Name/Contact/Customer/Vendor/Company · Email · Phone/Mobile/Cell · Address/Street · Type), dedupe within upload by normalized_name, and flag existing rows so the UI can show "will update" vs "new" pills. No DB writes yet.
+- `POST /companies/{cid}/contacts/import/commit` — inserts (or upserts by normalized_name) the confirmed rows. Returns `{created, updated, skipped, total}`.
+- PDFs parsed with `pypdf` + email/phone regex line-scan; Excel with `openpyxl`; CSV with stdlib. Handled gracefully — unsupported files return a clean 400.
+
+**Frontend (`pages/Contacts.jsx`)**
+- New **Import** button (indigo pill) next to New Contact.
+- Two-step modal:
+  1. **Upload**: dashed drop zone + default-type selector (Customer/Vendor) + recognized-columns legend.
+  2. **Review**: editable table of parsed rows with per-row checkbox, inline edit fields (name/email/phone/type), and status pill (New vs Will Update). Bulk select-all header checkbox. "Choose different file" back button.
+  3. **Done**: green success card with `Added N, updated M, skipped K` summary.
+- Idempotent: re-uploading the same file updates rather than duplicates.
+
+**Deps added**: `openpyxl==3.1.5`, `pypdf==6.14.2`.
+
+### Feb 2026 — Duplicate Detector, Balance Basis Toggle, Drag-Drop Reparent
 
 **Backend**
 - `GET /companies/{cid}/accounts/duplicates` — normalizes names (strips " expense"/" account"/plural suffixes, collapses punctuation) and groups same-type accounts with matching normalized keys. Returns `{groups: [{key, type, accounts[]}]}` ordered by group size desc.
