@@ -39,7 +39,26 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — Plan comparison card + white-label waitlist
+### Feb 2026 (latest) — Railway deployment fix (emergentintegrations resolution)
+
+- **Root cause**: Railway's default nixpacks Python builder runs
+  `pip install -r requirements.txt` with the modern (2020) resolver
+  against public PyPI only. Two Emergent-specific quirks combined to
+  break the build:
+  1. `emergentintegrations==0.2.0` lives on the private Emergent
+     CloudFront index (`https://d33sy5i8bnduwe.cloudfront.net/simple/`),
+     not public PyPI → ERROR: No matching distribution.
+  2. `emergentintegrations` requires unpinned `litellm`; requirements.txt
+     pins the exact Emergent-hosted litellm wheel URL. Pip's default
+     resolver refuses; only `--use-deprecated=legacy-resolver` installs
+     both side-by-side.
+- **Fix**: added `/app/backend/nixpacks.toml` overriding `phases.install`
+  with `pip install --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ --use-deprecated=legacy-resolver -r requirements.txt`
+  plus `PIP_EXTRA_INDEX_URL` env var for downstream tooling. Verified
+  the exact same flag combination resolves the full requirements.txt
+  from scratch locally.
+
+### Feb 2026 — Plan comparison card + white-label waitlist
 
 - **New shared component** `frontend/src/components/PlanComparisonCard.jsx`
   — side-by-side Free vs White-label tiles with feature check-lists,
