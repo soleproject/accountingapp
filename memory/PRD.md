@@ -39,7 +39,33 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — Affiliate-only signup + Upgrade path
+### Feb 2026 (latest) — Affiliate welcome email (day-0 activation)
+
+- **New email template** `email_templates.affiliate_welcome(name,
+  share_link, slug, dashboard_url, referrer_name=None)` — subject
+  "Your affiliate link is live — let's earn.", HTML body with:
+  personal salutation, share link (anchor + monospace fallback),
+  embedded PNG QR code via `segno` (data URI — Outlook-safe),
+  all 4 payout tiers as an inline table, a "share with 5 friends
+  this week" quick-win prompt, secondary CTA to `/share`, and an
+  optional "Big thanks to <b>{referrer_name}</b>" line when the
+  affiliate was themselves referred.
+- **Fire-and-forget from `signup()`** — when
+  `POST /api/auth/signup` is called with `role='affiliate'`, the
+  template is rendered and dispatched via
+  `email_dispatcher.dispatch(kind='affiliate_welcome', …)` in a
+  try/except so a template/dispatcher blowup can never 500 the
+  signup. Exceptions are `logger.exception`ed for observability.
+- **`segno==1.6.6`** added to `requirements.txt` — pure-Python QR
+  generator with no PIL dependency. `_qr_png_data_uri` degrades
+  gracefully (returns `""` on ImportError) so the template still
+  renders even if segno is missing at import time.
+- **`DEFAULT_PREFS['affiliate_welcome'] = True`** — new affiliates
+  are opted in by default; a future preferences UI can flip it off.
+- **Regression tests**: `/app/backend/tests/test_iter52_affiliate_welcome_email.py`
+  — 16/16 pass. Iter49–51 all still green: 80/80 total.
+
+### Feb 2026 — Affiliate-only signup + Upgrade path
 
 - **New user role `affiliate`.** Reached via `/signup/affiliate` — a
   dedicated signup form (green "Become an affiliate" branding) that

@@ -175,7 +175,16 @@ async def signup(inp: SignupIn):
                 subject=subject, html=html, initiating_user_id=uid,
             )
         except Exception:
-            pass
+            # Swallowed by design — a broken email template must NEVER
+            # 500 the signup. But log it so an unexpected regression
+            # (e.g. a bug in mint_slug_for_user or a template import
+            # break) is visible in the backend logs rather than
+            # silently disappearing.
+            import logging
+            logging.getLogger(__name__).exception(
+                "affiliate welcome dispatch failed for user_id=%s email=%s",
+                uid, inp.email,
+            )
 
     return {"token": token, "user": {"id": uid, "email": inp.email.lower(),
             "name": inp.name, "role": inp.role}}
