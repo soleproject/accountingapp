@@ -1,0 +1,28 @@
+# Railway / Nixpacks build configuration for the FastAPI backend
+# service. Two Emergent-specific quirks force us to customize the
+# default `pip install -r requirements.txt`:
+#
+#   1. `emergentintegrations` lives on Emergent's private CloudFront
+#      package index, not public PyPI — so we pass
+#      `--extra-index-url` (equivalently exposed via
+#      `PIP_EXTRA_INDEX_URL` so downstream tooling honors it too).
+#
+#   2. `emergentintegrations` declares an unpinned `litellm` dep while
+#      `requirements.txt` pins the exact Emergent-hosted litellm wheel
+#      (both are needed for feature parity with the Emergent runtime).
+#      Pip's default 2020 resolver refuses to reconcile the two
+#      declarations; the legacy resolver installs them side-by-side
+#      which is what actually works in production.
+#
+# If Emergent flips either constraint in a future release, remove this
+# file and revert to the platform default.
+
+[phases.install]
+cmds = [
+  "python -m venv --copies /opt/venv",
+  ". /opt/venv/bin/activate && pip install --upgrade pip",
+  ". /opt/venv/bin/activate && pip install --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ --use-deprecated=legacy-resolver -r requirements.txt",
+]
+
+[variables]
+PIP_EXTRA_INDEX_URL = "https://d33sy5i8bnduwe.cloudfront.net/simple/"
