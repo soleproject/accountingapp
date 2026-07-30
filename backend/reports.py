@@ -173,19 +173,56 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
     accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
     by = await _signed_balances(company_id, start, end)
 
-    revenue_rows, expense_rows = [], []
-    for a in sorted(accts, key=lambda x: x["code"]):
-        raw = by.get(a["id"], 0.0)
-        disp = _display_amount(a, raw)
-        if abs(disp) < 0.005:
-            continue
-        if a["type"] == "revenue":
-            revenue_rows.append({"id": a["id"], "code": a["code"], "name": a["name"], "amount": round(disp, 2)})
-        elif a["type"] == "expense":
-            expense_rows.append({"id": a["id"], "code": a["code"], "name": a["name"], "amount": round(disp, 2)})
+    # Build parent → children index (same pattern used on the balance
+    # sheet). Sub-accounts render indented under their parent and the
+    # parent shows the rolled-up total (own direct postings + kids).
+    children_of: dict[str, list[dict]] = {}
+    for a in accts:
+        pid = a.get("parent_account_id")
+        if pid:
+            children_of.setdefault(pid, []).append(a)
 
-    total_revenue = round(sum(r["amount"] for r in revenue_rows), 2)
-    total_expense = round(sum(r["amount"] for r in expense_rows), 2)
+    def _emit(section_type: str):
+        rows: list[dict] = []
+        top_level = [a for a in accts
+                     if a["type"] == section_type and not a.get("parent_account_id")]
+        top_level.sort(key=lambda x: x["code"])
+        for a in top_level:
+            direct = _display_amount(a, by.get(a["id"], 0.0))
+            kids = sorted(children_of.get(a["id"], []), key=lambda x: x["code"])
+            kids_rows: list[dict] = []
+            kids_total = 0.0
+            for k in kids:
+                if k["type"] != section_type:
+                    continue
+                kd = _display_amount(k, by.get(k["id"], 0.0))
+                if abs(kd) < 0.005:
+                    continue
+                kids_rows.append({
+                    "id": k["id"], "code": k["code"], "name": k["name"],
+                    "amount": round(kd, 2), "parent_code": a["code"],
+                })
+                kids_total += kd
+            rolled = direct + kids_total
+            if abs(rolled) < 0.005:
+                # Nothing to show at parent level, but children with activity
+                # still deserve a line — emit them flat.
+                for kr in kids_rows:
+                    rows.append(kr)
+                continue
+            rows.append({
+                "id": a["id"], "code": a["code"], "name": a["name"],
+                "amount": round(rolled, 2),
+            })
+            rows.extend(kids_rows)
+        return rows
+
+    revenue_rows = _emit("revenue")
+    expense_rows = _emit("expense")
+
+    # Section totals — count TOP-LEVEL rows only (parent_code missing).
+    total_revenue = round(sum(r["amount"] for r in revenue_rows if not r.get("parent_code")), 2)
+    total_expense = round(sum(r["amount"] for r in expense_rows if not r.get("parent_code")), 2)
 
     # Accrual adjustments: add change in A/R to revenue, change in A/P to expense.
     # This converts the cash-based P&L (transactions only) into an accrual view.

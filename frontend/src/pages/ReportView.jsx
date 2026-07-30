@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, BACKEND_URL } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Download, Loader2, ArrowRightCircle, ChevronLeft, Search, SlidersHorizontal, X } from "lucide-react";
+import { Download, Loader2, ArrowRightCircle, ChevronLeft, ChevronDown, ChevronRight, Search, SlidersHorizontal, X } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import { toast } from "sonner";
 
@@ -575,7 +575,7 @@ function Section({ title }) {
     </div>
   );
 }
-function Row({ id, code, name, amount, bold, parent_code, onClick }) {
+function Row({ id, code, name, amount, bold, parent_code, onClick, expandable, expanded, onToggleExpand, childCount }) {
   const isChild = !!parent_code;
   const clickable = !!(onClick && id);
   return (
@@ -584,11 +584,27 @@ function Row({ id, code, name, amount, bold, parent_code, onClick }) {
       onClick={clickable ? () => onClick({ id, code, name, amount }) : undefined}
       data-testid={clickable ? `report-row-${code}` : undefined}
     >
-      <div className="col-span-2 font-mono-num text-xs text-slate-500">
+      <div className="col-span-2 font-mono-num text-xs text-slate-500 flex items-center gap-1">
+        {expandable && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onToggleExpand?.(); }}
+            className="text-slate-400 hover:text-slate-900 -ml-1 p-0.5 rounded hover:bg-slate-100"
+            title={expanded ? "Collapse sub-accounts" : "Expand sub-accounts"}
+            data-testid={`report-expand-${code}`}
+          >
+            {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          </button>
+        )}
         {isChild ? <span className="opacity-40 mr-1">↳</span> : null}
         {code}
       </div>
-      <div className={`col-span-7 ${isChild ? "pl-4 text-slate-600 text-[13px]" : ""}`}>{name}</div>
+      <div className={`col-span-7 ${isChild ? "pl-4 text-slate-600 text-[13px]" : ""}`}>
+        {name}
+        {expandable && !expanded && childCount > 0 && (
+          <span className="ml-2 text-[10px] text-slate-400">+{childCount} sub</span>
+        )}
+      </div>
       <div className={`col-span-3 text-right font-mono-num ${isChild ? "text-slate-600 text-[13px]" : ""}`}>{fmtMoney(amount)}</div>
     </div>
   );
@@ -598,10 +614,10 @@ function IncomeStatementBody({ data, onDrilldown }) {
   return (
     <div className="text-sm">
       <Section title="Revenue" />
-      {data.revenue.map(r => <Row key={`${r.code}-${r.parent_code || ""}`} {...r} onClick={onDrilldown} />)}
+      <RolledUpRows rows={data.revenue} onDrilldown={onDrilldown} />
       <Row code="" name="Total Revenue" amount={data.total_revenue} bold />
       <Section title="Operating Expenses" />
-      {data.expenses.map(r => <Row key={`${r.code}-${r.parent_code || ""}`} {...r} onClick={onDrilldown} />)}
+      <RolledUpRows rows={data.expenses} onDrilldown={onDrilldown} />
       <Row code="" name="Total Expenses" amount={data.total_expense} bold />
       <div className="mt-4 grid grid-cols-12 gap-2 px-3 py-2 border-t-2 border-slate-800 bg-slate-50 rounded">
         <div className="col-span-9 font-heading font-bold uppercase text-sm">Net Income</div>
@@ -615,19 +631,81 @@ function BalanceSheetBody({ data, onDrilldown }) {
   return (
     <div className="text-sm">
       <Section title="Assets" />
-      {data.assets.map(r => <Row key={`${r.code}-${r.parent_code || ""}`} {...r} onClick={onDrilldown} />)}
+      <RolledUpRows rows={data.assets} onDrilldown={onDrilldown} />
       <Row code="" name="Total Assets" amount={data.total_assets} bold />
       <Section title="Liabilities" />
-      {data.liabilities.map(r => <Row key={`${r.code}-${r.parent_code || ""}`} {...r} onClick={onDrilldown} />)}
+      <RolledUpRows rows={data.liabilities} onDrilldown={onDrilldown} />
       <Row code="" name="Total Liabilities" amount={data.total_liabilities} bold />
       <Section title="Equity" />
-      {data.equity.map(r => <Row key={`${r.code}-${r.parent_code || ""}`} {...r} onClick={onDrilldown} />)}
+      <RolledUpRows rows={data.equity} onDrilldown={onDrilldown} />
       <Row code="" name="Total Equity" amount={data.total_equity} bold />
       <div className="mt-4 grid grid-cols-12 gap-2 px-3 py-2 border-t-2 border-slate-800 bg-slate-50 rounded">
         <div className="col-span-9 font-heading font-bold uppercase text-sm">Total Liabilities &amp; Equity</div>
         <div className="col-span-3 text-right font-mono-num font-bold">{fmtMoney(data.total_liabilities_equity)}</div>
       </div>
     </div>
+  );
+}
+
+/**
+ * RolledUpRows — groups an ordered flat list of rows (parent first,
+ * children next with `parent_code` set) into expandable groups.
+ * Parents that have children get a caret button; children stay hidden
+ * until the parent is expanded. Parents without children render as
+ * plain rows.
+ *
+ * The row order coming from the backend is already parent → children,
+ * so grouping is O(n) with a single pass.
+ */
+function RolledUpRows({ rows, onDrilldown }) {
+  const [expanded, setExpanded] = React.useState({}); // {parent_code: true}
+
+  // Group into [{parent, children[]}, ...] preserving original order.
+  const groups = [];
+  let last = null;
+  for (const r of rows) {
+    if (r.parent_code) {
+      if (last && last.parent.code === r.parent_code) {
+        last.children.push(r);
+      } else {
+        // Orphan (parent didn't emit for some reason) — render as-is.
+        groups.push({ parent: r, children: [], orphan: true });
+        last = null;
+      }
+    } else {
+      last = { parent: r, children: [] };
+      groups.push(last);
+    }
+  }
+
+  const toggle = (code) => setExpanded(x => ({ ...x, [code]: !x[code] }));
+
+  return (
+    <>
+      {groups.map((g) => {
+        const hasKids = g.children.length > 0;
+        const isOpen = !!expanded[g.parent.code];
+        return (
+          <React.Fragment key={`${g.parent.code}-${g.parent.parent_code || ""}`}>
+            <Row
+              {...g.parent}
+              onClick={onDrilldown}
+              expandable={hasKids}
+              expanded={isOpen}
+              onToggleExpand={hasKids ? () => toggle(g.parent.code) : undefined}
+              childCount={g.children.length}
+            />
+            {hasKids && isOpen && g.children.map(child => (
+              <Row
+                key={`${child.code}-${child.parent_code || ""}`}
+                {...child}
+                onClick={onDrilldown}
+              />
+            ))}
+          </React.Fragment>
+        );
+      })}
+    </>
   );
 }
 

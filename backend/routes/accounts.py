@@ -74,6 +74,158 @@ async def list_accounts(cid: str, user: dict = Depends(get_current_user)):
     return {"accounts": [coerce(d) for d in docs]}
 
 
+@router.get("/companies/{cid}/accounts/balances")
+async def account_balances(
+    cid: str,
+    as_of: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """Return per-account balances the Chart of Accounts page shows in
+    its balance column.
+
+    Each account gets the balance most useful for its type:
+      • asset / liability / equity → CUMULATIVE (all-time as-of ``as_of``)
+        — matches what appears on the Balance Sheet.
+      • revenue / expense / cogs   → YTD (Jan 1 → ``as_of``) — matches
+        the Income Statement's default period.
+
+    Returns ``{account_id: {balance, rollup, mode}}`` where ``rollup`` is
+    parent's balance plus sum of direct children (single-level nesting),
+    ``balance`` is the account's own direct postings, and ``mode`` is
+    "cumulative" | "ytd" so the UI can label ambiguous rows.
+
+    All signs are display-normalized (positive = normal balance for the
+    type) so the UI renders them as-is."""
+    await require_company(user, cid)
+    today = datetime.now(timezone.utc).date().isoformat()
+    end = as_of or today
+    ytd_start = datetime.now(timezone.utc).date().replace(month=1, day=1).isoformat()
+
+    # Compute both bases once — they're both O(n) scans of the JE/txn
+    # collections so running both is cheap enough to save round-trips.
+    cumulative = await R._signed_balances(cid, start=None, end=end, include_pre_period=True)
+    ytd_only = await R._signed_balances(cid, ytd_start, end, include_pre_period=False)
+    accts = await db.accounts.find({"company_id": cid}).to_list(2000)
+
+    # Which basis applies per account type. Anything else defaults to
+    # cumulative (safest — never surprises the user with a partial view).
+    YTD_TYPES = {"revenue", "expense", "cogs"}
+
+    def _basis_for(a):
+        return "ytd" if a.get("type") in YTD_TYPES else "cumulative"
+
+    def _raw_for(a):
+        source = ytd_only if _basis_for(a) == "ytd" else cumulative
+        return source.get(a["id"], 0.0)
+
+    children_of: dict[str, list[dict]] = {}
+    for a in accts:
+        pid = a.get("parent_account_id")
+        if pid:
+            children_of.setdefault(pid, []).append(a)
+
+    out: dict[str, dict] = {}
+    for a in accts:
+        direct = R._display_amount(a, _raw_for(a))
+        kids = children_of.get(a["id"], [])
+        rolled = direct + sum(
+            R._display_amount(k, _raw_for(k)) for k in kids
+        )
+        out[a["id"]] = {
+            "balance": round(direct, 2),
+            "rollup": round(rolled, 2),
+            "mode": _basis_for(a),
+        }
+    return {"balances": out, "ytd_start": ytd_start, "end": end}
+
+
+class MergeAccountsIn(BaseModel):
+    target_account_id: str
+
+
+@router.post("/companies/{cid}/accounts/{source_id}/merge-into")
+async def merge_accounts(
+    cid: str, source_id: str, inp: MergeAccountsIn,
+    user: dict = Depends(get_current_user),
+):
+    """Merge ``source_id`` INTO ``target_id`` — reassigns every journal
+    entry line and transaction currently pointing at the source, then
+    deletes the source row. Sub-accounts (children of source) are
+    re-parented to target so nothing gets orphaned.
+
+    Idempotent: calling it twice does the right thing (second call is a
+    no-op — nothing left pointing at source).
+
+    Requires:
+      • both accounts belong to the caller's company
+      • same type (asset→asset, expense→expense) — merging across types
+        would silently rewrite a debit account into a credit one.
+
+    Returns per-collection counts of moved rows so the UI can render a
+    "42 journal lines + 15 transactions merged" toast."""
+    await require_company(user, cid)
+    if source_id == inp.target_account_id:
+        raise HTTPException(400, "Source and target must be different accounts.")
+    src = await db.accounts.find_one({"id": source_id, "company_id": cid})
+    tgt = await db.accounts.find_one({"id": inp.target_account_id, "company_id": cid})
+    if not src or not tgt:
+        raise HTTPException(404, "Source or target account not found.")
+    if src.get("type") != tgt.get("type"):
+        raise HTTPException(400, "Accounts must be the same type to merge.")
+
+    moved = {"journal_lines": 0, "transactions": 0, "splits": 0,
+             "rules": 0, "reparented_children": 0}
+
+    # 1. Journal entry lines — rewrite account_id inline. Because lines
+    # are embedded inside a `lines` array we need arrayFilters. Motor's
+    # update_many supports it natively.
+    r = await db.journal_entries.update_many(
+        {"company_id": cid, "lines.account_id": source_id},
+        {"$set": {"lines.$[el].account_id": inp.target_account_id,
+                  "updated_at": now_iso()}},
+        array_filters=[{"el.account_id": source_id}],
+    )
+    moved["journal_lines"] = r.modified_count
+
+    # 2. Transactions — the primary category_account_id.
+    r = await db.transactions.update_many(
+        {"company_id": cid, "category_account_id": source_id},
+        {"$set": {"category_account_id": inp.target_account_id,
+                  "updated_at": now_iso()}},
+    )
+    moved["transactions"] = r.modified_count
+
+    # 3. Split lines inside transactions.
+    r = await db.transactions.update_many(
+        {"company_id": cid, "splits.category_account_id": source_id},
+        {"$set": {"splits.$[el].category_account_id": inp.target_account_id,
+                  "updated_at": now_iso()}},
+        array_filters=[{"el.category_account_id": source_id}],
+    )
+    moved["splits"] = r.modified_count
+
+    # 4. Rules (auto-categorization rules that pin an account_id).
+    r = await db.rules.update_many(
+        {"company_id": cid, "category_account_id": source_id},
+        {"$set": {"category_account_id": inp.target_account_id}},
+    )
+    moved["rules"] = r.modified_count
+
+    # 5. Re-parent any sub-accounts whose parent is the source.
+    r = await db.accounts.update_many(
+        {"company_id": cid, "parent_account_id": source_id},
+        {"$set": {"parent_account_id": inp.target_account_id,
+                  "updated_at": now_iso()}},
+    )
+    moved["reparented_children"] = r.modified_count
+
+    # 6. Finally, drop the source account row.
+    await db.accounts.delete_one({"id": source_id, "company_id": cid})
+
+    return {"ok": True, "moved": moved, "source_deleted": source_id,
+            "target": inp.target_account_id}
+
+
 @router.post("/companies/{cid}/accounts")
 async def create_account(cid: str, inp: AccountCreate, user: dict = Depends(get_current_user)):
     await require_company(user, cid)

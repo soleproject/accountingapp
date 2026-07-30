@@ -2,11 +2,22 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, Sparkles, Loader2, Pencil, Check, X } from "lucide-react";
+import { Plus, Trash2, Sparkles, Loader2, Pencil, Check, X, GitMerge } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 
 const TYPES = ["asset", "liability", "equity", "revenue", "cogs", "expense"];
+
+// Money formatter — matches the reports pages so the CoA feels
+// consistent. Zero balances render as a subtle "—" rather than "$0.00"
+// so the eye skips over empty rows and lands on actual activity.
+const fmtMoney = (n) => {
+  if (n == null || Math.abs(Number(n)) < 0.005) return "—";
+  return Number(n).toLocaleString(undefined, {
+    style: "currency", currency: "USD",
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  });
+};
 
 // GAAP-standard subtypes cascaded from the parent type. Picked to match
 // what the AI seed / Suggest-with-AI generator already writes, so a Pro
@@ -26,13 +37,24 @@ const subtypesFor = (t) => SUBTYPES_BY_TYPE[t] || SUBTYPES_BY_TYPE.expense;
 export default function ChartOfAccounts() {
   const { currentId } = useCompany();
   const [accts, setAccts] = useState([]);
+  // Per-account balance map — {aid: {balance, rollup, mode}}.
+  // Fetched lazily after the accounts land so an empty CoA renders fast.
+  const [balances, setBalances] = useState({});
   const [creating, setCreating] = useState(false);
   const [creatingPrefill, setCreatingPrefill] = useState(null);
   const [suggestOpen, setSuggestOpen] = useState(false);
+  // Merge dialog — {source, options} when set.
+  const [mergeState, setMergeState] = useState(null);
   const load = async () => {
     if (!currentId) return;
     const r = await api.get(`/companies/${currentId}/accounts`);
     setAccts(r.data.accounts || []);
+    // Refresh balances alongside — silently fails so a slow/erroring
+    // balance calc never blocks the CoA from rendering.
+    try {
+      const b = await api.get(`/companies/${currentId}/accounts/balances`);
+      setBalances(b.data?.balances || {});
+    } catch (_) { /* balances are advisory */ }
   };
   useEffect(() => { load(); }, [currentId]);
   useCreateListener("account", (prefill) => {
@@ -88,20 +110,32 @@ export default function ChartOfAccounts() {
       <div className="space-y-4">
         {grouped.map(g => (
           <div key={g.type} className="rounded-xl border bg-white overflow-hidden">
-            <div className="px-4 py-2 bg-slate-50 border-b text-xs uppercase tracking-widest text-slate-600 font-semibold">
-              {g.type}s · {g.items.length}
+            <div className="px-4 py-2 bg-slate-50 border-b text-xs uppercase tracking-widest text-slate-600 font-semibold flex items-center justify-between">
+              <span>{g.type}s · {g.items.length}</span>
+              <span className="text-[10px] normal-case tracking-normal font-normal text-slate-500">
+                {["revenue", "expense", "cogs"].includes(g.type) ? "YTD" : "Balance"}
+              </span>
             </div>
             <div>
-              {g.items.map(a => (
-                <AccountRow
-                  key={a.id}
-                  a={a}
-                  allAccounts={accts}
-                  currentId={currentId}
-                  onSaved={load}
-                  onDeleted={load}
-                />
-              ))}
+              {g.items.map(a => {
+                // Parents show the rolled-up balance (own + children).
+                // Children show only their direct balance so the eye can
+                // add them and see they equal the parent.
+                const b = balances[a.id];
+                const val = !b ? null : (a._depth ? b.balance : b.rollup);
+                return (
+                  <AccountRow
+                    key={a.id}
+                    a={a}
+                    allAccounts={accts}
+                    currentId={currentId}
+                    balance={val}
+                    onSaved={load}
+                    onDeleted={load}
+                    onMerge={(source) => setMergeState({ source })}
+                  />
+                );
+              })}
             </div>
           </div>
         ))}
@@ -114,11 +148,20 @@ export default function ChartOfAccounts() {
           onClose={(reload) => { setSuggestOpen(false); if (reload) load(); }}
         />
       )}
+      {mergeState && (
+        <MergeAccountDialog
+          currentId={currentId}
+          source={mergeState.source}
+          allAccounts={accts}
+          balances={balances}
+          onClose={(reload) => { setMergeState(null); if (reload) load(); }}
+        />
+      )}
     </div>
   );
 }
 
-function AccountRow({ a, allAccounts, currentId, onSaved, onDeleted }) {
+function AccountRow({ a, allAccounts, currentId, balance, onSaved, onDeleted, onMerge }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [code, setCode] = useState(a.code);
@@ -360,7 +403,7 @@ function AccountRow({ a, allAccounts, currentId, onSaved, onDeleted }) {
         {a._depth ? <span className="opacity-40 mr-1">↳</span> : null}
         {a.code}
       </div>
-      <div className={`col-span-7 text-sm ${a._depth ? "pl-4 text-slate-700" : "font-medium"}`}>
+      <div className={`col-span-5 text-sm ${a._depth ? "pl-4 text-slate-700" : "font-medium"}`}>
         {a.name}
         {a.created_by_ai && a.parent_account_id && (
           <span className="ml-2 text-[10px] uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
@@ -369,6 +412,17 @@ function AccountRow({ a, allAccounts, currentId, onSaved, onDeleted }) {
         )}
       </div>
       <div className="col-span-2 text-xs text-slate-500">{a.subtype}</div>
+      <div
+        className={`col-span-2 text-right font-mono-num text-[13px] ${balance == null || Math.abs(Number(balance)) < 0.005 ? "text-slate-300" : "text-slate-800"}`}
+        data-testid={`coa-balance-${a.id}`}
+        title={
+          ["revenue", "expense", "cogs"].includes(a.type)
+            ? "Year-to-date balance"
+            : "Current cumulative balance"
+        }
+      >
+        {fmtMoney(balance)}
+      </div>
       <div className="col-span-1 flex items-center justify-end gap-1">
         <button
           onClick={startEdit}
@@ -377,6 +431,14 @@ function AccountRow({ a, allAccounts, currentId, onSaved, onDeleted }) {
           data-testid={`coa-edit-${a.id}`}
         >
           <Pencil size={13} />
+        </button>
+        <button
+          onClick={() => onMerge?.(a)}
+          className="text-indigo-500 hover:text-indigo-900 hover:bg-indigo-50 rounded p-1"
+          title="Merge into another account"
+          data-testid={`coa-merge-${a.id}`}
+        >
+          <GitMerge size={13} />
         </button>
         <button
           onClick={del}
@@ -390,6 +452,175 @@ function AccountRow({ a, allAccounts, currentId, onSaved, onDeleted }) {
     </div>
   );
 }
+
+
+
+/**
+ * MergeAccountDialog — combine two duplicate accounts. The SOURCE
+ * account's transactions, journal-entry lines, splits, rules, and any
+ * child accounts are all reassigned to the TARGET before the source is
+ * deleted. Both accounts must be the same type (the backend enforces
+ * this too — merging an asset into an expense would silently invert
+ * every balance).
+ */
+function MergeAccountDialog({ currentId, source, allAccounts, balances, onClose }) {
+  const [targetId, setTargetId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+
+  const candidates = (allAccounts || [])
+    .filter(a => a.id !== source.id && a.type === source.type)
+    .sort((x, y) => String(x.code).localeCompare(String(y.code)));
+
+  const target = candidates.find(c => c.id === targetId);
+  const srcBal = balances?.[source.id]?.rollup;
+  const tgtBal = target ? balances?.[target.id]?.rollup : null;
+
+  const doMerge = async () => {
+    if (!target) return;
+    setBusy(true);
+    try {
+      const r = await api.post(
+        `/companies/${currentId}/accounts/${source.id}/merge-into`,
+        { target_account_id: target.id },
+      );
+      const m = r.data?.moved || {};
+      const parts = [];
+      if (m.journal_lines) parts.push(`${m.journal_lines} journal line${m.journal_lines > 1 ? "s" : ""}`);
+      if (m.transactions) parts.push(`${m.transactions} transaction${m.transactions > 1 ? "s" : ""}`);
+      if (m.splits) parts.push(`${m.splits} split${m.splits > 1 ? "s" : ""}`);
+      if (m.rules) parts.push(`${m.rules} rule${m.rules > 1 ? "s" : ""}`);
+      if (m.reparented_children) parts.push(`${m.reparented_children} sub-account${m.reparented_children > 1 ? "s" : ""}`);
+      toast.success(
+        parts.length
+          ? `Merged into ${target.code} · ${target.name} — moved ${parts.join(", ")}.`
+          : `Merged into ${target.code} · ${target.name}.`
+      );
+      onClose(true);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Merge failed");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-5 space-y-4" data-testid="coa-merge-dialog">
+        <div className="flex items-start gap-3">
+          <div className="w-9 h-9 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0">
+            <GitMerge size={16} className="text-indigo-700" />
+          </div>
+          <div>
+            <h3 className="font-heading font-semibold text-base">Merge account</h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Combine two duplicate accounts. Every journal line, transaction,
+              split, rule, and sub-account under the source moves to the target.
+              The source account is then deleted.
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-lg border bg-slate-50 p-3 text-xs space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="uppercase tracking-wide text-slate-500 text-[10px]">Source (will be deleted)</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="font-mono-num text-slate-700">{source.code}</span>
+            <span className="flex-1 mx-2 text-slate-900 font-medium truncate">{source.name}</span>
+            <span className="font-mono-num text-slate-600">
+              {srcBal == null || Math.abs(srcBal) < 0.005
+                ? "—"
+                : Number(srcBal).toLocaleString(undefined, { style: "currency", currency: "USD" })}
+            </span>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+            Merge into…
+          </label>
+          <select
+            value={targetId}
+            onChange={(e) => { setTargetId(e.target.value); setConfirm(false); }}
+            className="w-full border rounded-md px-3 py-2 text-sm bg-white"
+            data-testid="coa-merge-target-select"
+          >
+            <option value="">— Pick the account to keep —</option>
+            {candidates.map(c => (
+              <option key={c.id} value={c.id}>
+                {c.code} · {c.name}
+                {balances?.[c.id]?.rollup != null && Math.abs(balances[c.id].rollup) >= 0.005
+                  ? ` — ${Number(balances[c.id].rollup).toLocaleString(undefined, { style: "currency", currency: "USD" })}`
+                  : ""}
+              </option>
+            ))}
+          </select>
+          {!candidates.length && (
+            <div className="mt-1 text-[11px] text-slate-500">
+              No other <b>{source.type}</b> accounts exist to merge into — create one first, or edit this row instead.
+            </div>
+          )}
+        </div>
+
+        {target && (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 text-xs space-y-1">
+            <div className="uppercase tracking-wide text-emerald-800 text-[10px]">After merge · target balance</div>
+            <div className="flex items-center justify-between">
+              <span className="font-mono-num text-slate-700">{target.code}</span>
+              <span className="flex-1 mx-2 text-slate-900 font-medium truncate">{target.name}</span>
+              <span className="font-mono-num font-semibold text-emerald-800">
+                {(() => {
+                  const combined = (srcBal || 0) + (tgtBal || 0);
+                  return Math.abs(combined) < 0.005
+                    ? "$0.00"
+                    : Number(combined).toLocaleString(undefined, { style: "currency", currency: "USD" });
+                })()}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {target && (
+          <label className="flex items-start gap-2 text-xs text-slate-700">
+            <input
+              type="checkbox"
+              checked={confirm}
+              onChange={(e) => setConfirm(e.target.checked)}
+              className="mt-0.5"
+              data-testid="coa-merge-confirm"
+            />
+            <span>
+              I understand this can't be undone. All history from{" "}
+              <b>{source.code} · {source.name}</b> will appear under{" "}
+              <b>{target.code} · {target.name}</b>.
+            </span>
+          </label>
+        )}
+
+        <div className="flex gap-2 pt-1">
+          <button
+            onClick={doMerge}
+            disabled={!target || !confirm || busy}
+            className="flex-1 py-2 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm inline-flex items-center justify-center gap-1.5 disabled:opacity-50"
+            data-testid="coa-merge-confirm-btn"
+          >
+            {busy ? <Loader2 size={13} className="animate-spin" /> : <GitMerge size={13} />}
+            Merge accounts
+          </button>
+          <button
+            onClick={() => onClose(false)}
+            disabled={busy}
+            className="flex-1 py-2 rounded-md border text-sm"
+            data-testid="coa-merge-cancel-btn"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 
 function SuggestCoAModal({ currentId, onClose }) {

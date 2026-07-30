@@ -39,7 +39,23 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — Paid White-Label Upgrade Block + Superadmin Comp Toggle
+### Feb 2026 (latest) — CoA Balances, Reports Roll-up, Merge Accounts
+
+**Backend**
+- `GET /companies/{cid}/accounts/balances` — smart per-type basis: assets/liabilities/equity → cumulative (all-time), revenue/expense/cogs → YTD (Jan 1 → today). Returns `{account_id: {balance, rollup, mode}}` with sign-normalized display values.
+- `POST /companies/{cid}/accounts/{source_id}/merge-into` — reassigns every journal entry line, transaction, split, rule, and sub-account from source→target, then deletes source. Same-type only, idempotent.
+- `AccountCreate` model + `POST /companies/{cid}/accounts` now accept `parent_account_id` (for sub-accounts, single-level nesting enforced).
+- `PATCH /companies/{cid}/accounts/{aid}` — validates parent changes (same type, no self-parenting, no 3-level trees, blocks nesting an account that already has children).
+- `compute_income_statement()` — now emits parent-first-then-children with `parent_code` markers (same pattern the balance sheet already used) so sub-accounts render indented under their parent and the parent shows the rolled-up total.
+
+**Frontend**
+- `ChartOfAccounts.jsx` — new **Balance column** shows the right value per account type (YTD label on revenue/expense sections, Balance label elsewhere); parents show rolled-up amounts, children show own-only. Zero balances render as `—`.
+- New **Merge (GitMerge icon)** button on each row → opens `MergeAccountDialog` showing source, target selector (same-type only), post-merge combined balance preview, and a "cannot be undone" confirmation checkbox.
+- New **Sub-account of** dropdown in AccountRow edit view + CreateAccount modal — pick a same-type top-level parent.
+- **Subtype dropdown** is now type-aware — pre-defined GAAP subtypes cascade from the type selector (asset → current_asset/fixed_asset/…, expense → operating_expense/rent_expense/…). Legacy hand-typed subtypes stay pickable as `xyz (legacy)`.
+- `ReportView.jsx` — new **`RolledUpRows`** wrapper: parent rows with children get a chevron toggle (▶/▼) + "+N sub" pill. Applied to Income Statement + Balance Sheet.
+
+### Feb 2026 — Paid White-Label Upgrade Block + Superadmin Comp Toggle
 
 Monetization loop for B2B Pro tier + platform-owner ergonomics for comping specific firms.
 
