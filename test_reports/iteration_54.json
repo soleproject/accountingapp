@@ -1,0 +1,34 @@
+{
+  "summary": "Iter54 — Plan comparison card + white-label waitlist. Backend endpoint (POST /api/pro/branding/whitelabel-waitlist) fully verified via pytest (5/5 pass): role guarding (pro OK, superadmin OK, client 403, anonymous 401), idempotent timestamp refresh at users.branding.whitelabel_waitlist_at, ISO format. Frontend: PlanComparisonCard renders inline on /signup/enterprise (both tiles + Learn more CTA), NOT rendered on /signup or /signup/affiliate. ProSettings modal launches from Compare plans button, shows CURRENT badge on Free tile, Paid CTA POSTs to /api/pro/branding/whitelabel-waitlist, flips to 'You're on the list ✓' (disabled), success toast displayed, plan-modal-close dismisses modal. Enterprise signup form still completes end-to-end and lands on /pro/clients. One issue found: the logged-out info toast on /signup/enterprise never renders because <Toaster/> is only mounted inside Layout.jsx, which the pre-auth Signup route does not use — toast.info() is silently dropped. No API is called (correct), so the safety guarantee is preserved, but the intended UX feedback message is missing.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "PlanComparisonCard (variant='card', loggedIn=false) on /signup/enterprise",
+        "issue": "Clicking data-testid='plan-paid-cta' calls toast.info('Sign up first, then upgrade from Settings any time.') but the message never appears on screen. Sonner <Toaster/> is only mounted inside Layout.jsx and the Signup page does not render Layout, so all toasts on this route are silently dropped. The click safely does NOT hit the API (correct), but the user gets zero feedback that anything happened.",
+        "selector": "[data-testid='plan-paid-cta']",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter54_plan_comparison.py",
+    "/app/test_reports/pytest/iter54_results.xml"
+  ],
+  "action_items": [
+    "Mount a <Toaster/> inside /app/frontend/src/pages/Signup.jsx (or wherever the pre-auth routes render) so toast.info('Sign up first...') on /signup/enterprise is actually visible. Alternatively, replace the toast with an inline hint under the Learn more button, or link 'Learn more' to an anchor/section that explains upgrading from Settings post-signup."
+  ],
+  "critical_code_review_comments": [
+    "PlanComparisonCard.jsx (line 30): toast.info() on the logged-out branch relies on a Sonner Toaster that isn't mounted on the Signup route — dead UX feedback path. Either mount a Toaster on pre-auth routes or replace the toast with inline UI.",
+    "pro.py whitelabel_waitlist route is small, correct, and idempotent — no issues. Uses require_role('pro','superadmin') and now_iso() consistently with the rest of the module."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter54_plan_comparison.py"],
+  "success_rate": {"backend": "100%", "frontend": "95%"},
+  "test_credentials": "Read from /app/memory/test_credentials.md (admin@axiom.ai/admin123, pro@axiom.ai/pro123, client@axiom.ai/client123).",
+  "seed_data_creation": "One TEST_ pro user created via /signup/enterprise UI (TESTFirm54_<ts>) and left in place — not cleaned up because there is no delete endpoint used by test flow. Backend pytest suite mutates real pro@axiom.ai.branding.whitelabel_waitlist_at (harmless; also touched by admin@axiom.ai).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend endpoint POST /api/pro/branding/whitelabel-waitlist is fully covered by /app/backend/tests/test_iter54_plan_comparison.py (5 tests). The only outstanding issue is the missing Sonner Toaster on pre-auth pages — the logged-out 'Learn more' click on /signup/enterprise correctly does NOT call the API, but its intended info toast never renders. Once main agent mounts a Toaster on Signup.jsx (or removes the toast in favor of inline copy), this iteration is complete."
+}

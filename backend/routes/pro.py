@@ -607,6 +607,21 @@ async def get_effective_branding(user: dict = Depends(get_current_user)):
     return _branding_out({})
 
 
+@router.post("/pro/branding/whitelabel-waitlist")
+async def whitelabel_waitlist(user: dict = Depends(require_role("pro", "superadmin"))):
+    """One-click "I want white-label" interest capture. Records the
+    firm owner + timestamp on ``users.branding.whitelabel_waitlist_at``
+    so a superadmin can pull the list before enabling the payment
+    block. Idempotent — repeated clicks refresh the timestamp rather
+    than erroring out."""
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"branding.whitelabel_waitlist_at": now_iso()}},
+    )
+    return {"joined": True}
+
+
+
 @router.patch("/pro/branding")
 async def patch_pro_branding(
     inp: BrandingPatch,

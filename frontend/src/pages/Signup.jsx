@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
 import { Loader2, Sparkles, DollarSign, Building2 } from "lucide-react";
+import PlanComparisonCard from "@/components/PlanComparisonCard";
 
 /**
  * Public signup page. Captures `?ref=<slug>` from the URL AND persists it
@@ -124,8 +125,17 @@ export default function Signup() {
   };
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-[#F5F6F8] p-6">
-      <form onSubmit={submit} className="w-full max-w-sm space-y-5" data-testid="signup-form">
+    <div className={
+      "min-h-screen w-full flex items-center justify-center bg-[#F5F6F8] p-6 " +
+      (enterpriseMode ? "py-10" : "")
+    }>
+      <div className={"w-full " + (enterpriseMode ? "max-w-3xl space-y-6" : "max-w-sm")}>
+        {enterpriseMode && (
+          <PlanComparisonCard variant="card" loggedIn={false} />
+        )}
+        <form onSubmit={submit} className={
+          "w-full space-y-5 " + (enterpriseMode ? "max-w-sm mx-auto bg-white rounded-xl border p-6 shadow-sm" : "")
+        } data-testid="signup-form">
         <div className="flex items-center gap-2 mb-6">
           <div className={
             "w-8 h-8 rounded-lg flex items-center justify-center " +
@@ -268,7 +278,8 @@ export default function Signup() {
             </div>
           )}
         </div>
-      </form>
+        </form>
+      </div>
     </div>
   );
 }
