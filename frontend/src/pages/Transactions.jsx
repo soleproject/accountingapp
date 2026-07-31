@@ -1586,8 +1586,8 @@ export default function Transactions() {
       </div>
       )}
 
-      {creating && <ManualTxnModal accts={accts} currentId={currentId} contactOptions={filterContactOptions} onClose={() => { setCreating(false); load(); }} />}
-      {editing && <ManualTxnModal accts={accts} currentId={currentId} contactOptions={filterContactOptions} initialTxn={editing} onClose={() => { setEditing(null); load(); }} />}
+      {creating && <ManualTxnModal accts={accts} currentId={currentId} contactOptions={filterContactOptions} invoices={invoices} bills={bills} onClose={() => { setCreating(false); load(); }} />}
+      {editing && <ManualTxnModal accts={accts} currentId={currentId} contactOptions={filterContactOptions} invoices={invoices} bills={bills} initialTxn={editing} onClose={() => { setEditing(null); load(); }} />}
       {splitting && <SplitModal txn={splitting} accts={accts} currentId={currentId} onClose={() => { setSplitting(null); load(); }} />}
       {linking && <LinkModal txn={linking} invoices={invoices} bills={bills} currentId={currentId} onClose={() => { setLinking(null); load(); }} />}
       {xferPreview && (
@@ -1849,7 +1849,7 @@ function ContactRollup({ data, busy, currentId }) {
   );
 }
 
-function ManualTxnModal({ accts, currentId, contactOptions = [], initialTxn = null, onClose }) {
+function ManualTxnModal({ accts, currentId, contactOptions = [], invoices = [], bills = [], initialTxn = null, onClose }) {
   const isEdit = Boolean(initialTxn);
   const [date, setDate] = useState(initialTxn?.date || new Date().toISOString().slice(0, 10));
   const [description, setDescription] = useState(initialTxn?.description || "");
@@ -1905,6 +1905,21 @@ function ManualTxnModal({ accts, currentId, contactOptions = [], initialTxn = nu
   const amtNum = parseFloat(amount || 0) || 0;
   const splitTotal = splitRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
   const splitsBalance = Math.abs(splitTotal - amtNum) < 0.01;
+  // Link to invoice / bill — the backend already exposes
+  // /transactions/{id}/link (see routes/transactions.py). Positive
+  // amounts default to invoice; negative default to bill. We surface
+  // both dropdowns anyway so a refund-style txn can be re-linked
+  // easily.
+  const [linkKind, setLinkKind] = useState(
+    initialTxn?.linked_bill_id ? "bill"
+    : initialTxn?.linked_invoice_id ? "invoice"
+    : (parseFloat(initialTxn?.amount || 0) >= 0 ? "invoice" : "bill")
+  );
+  const [linkId, setLinkId] = useState(
+    initialTxn?.linked_invoice_id || initialTxn?.linked_bill_id || ""
+  );
+  const linkOptions = linkKind === "invoice" ? invoices : bills;
+
   const save = async () => {
     if (splitsOn) {
       if (!amtNum) { toast.error("Enter the total amount first"); return; }
@@ -1951,11 +1966,37 @@ function ManualTxnModal({ accts, currentId, contactOptions = [], initialTxn = nu
         await api.patch(`/companies/${currentId}/transactions/${initialTxn.id}`, payload);
         toast.success(splitsOn ? "Split transaction updated" : "Transaction updated");
       } else {
-        await api.post(`/companies/${currentId}/transactions`, {
+        const created = await api.post(`/companies/${currentId}/transactions`, {
           ...payload,
           auto_categorize: !splitsOn && !categoryId,
         });
         toast.success(splitsOn ? "Split transaction created" : "Transaction created");
+        // For a brand-new manual txn we still want to honour any picked
+        // link — use the returned id from the POST response.
+        if (linkId) {
+          const newId = created.data?.id;
+          if (newId) {
+            const q = linkKind === "invoice" ? `invoice_id=${linkId}` : `bill_id=${linkId}`;
+            await api.post(`/companies/${currentId}/transactions/${newId}/link?${q}`);
+          }
+        }
+      }
+      // On edit, always push the current link selection so unlinking
+      // (setting to empty) works too. Empty string clears both sides.
+      if (isEdit) {
+        const currentLinked = initialTxn?.linked_invoice_id || initialTxn?.linked_bill_id || "";
+        if (linkId !== currentLinked || (initialTxn?.linked_bill_id && linkKind === "invoice") || (initialTxn?.linked_invoice_id && linkKind === "bill")) {
+          const params = new URLSearchParams();
+          if (linkKind === "invoice") {
+            params.set("invoice_id", linkId || "");
+            // Clear the other side explicitly.
+            if (initialTxn?.linked_bill_id) params.set("bill_id", "");
+          } else {
+            params.set("bill_id", linkId || "");
+            if (initialTxn?.linked_invoice_id) params.set("invoice_id", "");
+          }
+          await api.post(`/companies/${currentId}/transactions/${initialTxn.id}/link?${params.toString()}`);
+        }
       }
       onClose();
     } catch (e) {
@@ -2146,6 +2187,51 @@ function ManualTxnModal({ accts, currentId, contactOptions = [], initialTxn = nu
             </div>
           </div>
         )}
+        <div className="border-t pt-3 space-y-2" data-testid="txn-link-section">
+          <div className="flex items-center justify-between">
+            <label className="text-xs text-slate-600 font-medium">Link to invoice or bill</label>
+            {linkId && (
+              <button
+                type="button"
+                onClick={() => setLinkId("")}
+                className="text-[10px] text-rose-600 hover:underline"
+                data-testid="txn-link-clear"
+              >Unlink</button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <div className="inline-flex rounded-md border bg-slate-50 p-0.5 text-xs">
+              <button
+                type="button"
+                onClick={() => { setLinkKind("invoice"); setLinkId(""); }}
+                data-testid="txn-link-kind-invoice"
+                className={`px-2.5 py-1 rounded ${linkKind === "invoice" ? "bg-emerald-600 text-white" : "text-slate-600"}`}
+              >Invoice</button>
+              <button
+                type="button"
+                onClick={() => { setLinkKind("bill"); setLinkId(""); }}
+                data-testid="txn-link-kind-bill"
+                className={`px-2.5 py-1 rounded ${linkKind === "bill" ? "bg-rose-600 text-white" : "text-slate-600"}`}
+              >Bill</button>
+            </div>
+            <select
+              value={linkId}
+              onChange={(e) => setLinkId(e.target.value)}
+              className="flex-1 border rounded px-2 py-1.5 text-sm bg-white"
+              data-testid="txn-link-select"
+            >
+              <option value="">— None (not linked) —</option>
+              {linkOptions.map(x => (
+                <option key={x.id} value={x.id}>
+                  {x.number} · {x.contact_name || "no contact"} · {fmtMoney(x.total)}{x.status ? ` · ${x.status}` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+          <p className="text-[10px] text-slate-400">
+            Linking marks this transaction as the payment/receipt for the picked {linkKind}. Leave blank to un-link.
+          </p>
+        </div>
         <button data-testid={TID.saveBtn} onClick={save} disabled={busy}
                 className="w-full py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50">
           {busy ? "Saving…" : "Save"}

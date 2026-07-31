@@ -348,6 +348,55 @@ async def purchases_by_category(
     return {"rows": rows, "total": total, "start": start, "end": end}
 
 
+@router.get("/companies/{cid}/reports/spend-by-vendor")
+async def spend_by_vendor(
+    cid: str,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """Roll up bill totals by vendor (contact_name) over a date range.
+
+    Uses the bill's TOTAL (not per-line amounts) since dependency risk
+    lives at the bill level — a $10k bill with 12 line items still
+    represents $10k of exposure to one vendor. Excludes draft/void.
+    Returns rows sorted by amount desc + total + `bill_count` + a
+    `paid_amount` view derived from status='paid'.
+    """
+    await require_company(user, cid)
+    q = {"company_id": cid, "status": {"$nin": ["void", "draft"]}}
+    bills = await db.bills.find(q).to_list(10000)
+    buckets: dict[str, dict] = {}
+    for bill in bills:
+        if not _in_range(bill.get("issue_date"), start, end):
+            continue
+        vid = bill.get("contact_id") or bill.get("vendor_id") or ""
+        vname = bill.get("contact_name") or bill.get("vendor_name") or "Uncategorized vendor"
+        key = vid or f"nm::{vname.lower().strip()}"
+        total_amt = float(bill.get("total") or 0)
+        bal = float(bill.get("balance_due") or 0)
+        b = buckets.setdefault(key, {
+            "vendor_id": vid or None,
+            "vendor_name": vname,
+            "amount": 0.0,
+            "paid_amount": 0.0,
+            "outstanding": 0.0,
+            "bill_count": 0,
+        })
+        b["amount"] += total_amt
+        b["paid_amount"] += max(total_amt - bal, 0.0)
+        b["outstanding"] += bal
+        b["bill_count"] += 1
+    rows = sorted(buckets.values(), key=lambda r: r["amount"], reverse=True)
+    total = round(sum(r["amount"] for r in rows), 2)
+    for r in rows:
+        r["amount"] = round(r["amount"], 2)
+        r["paid_amount"] = round(r["paid_amount"], 2)
+        r["outstanding"] = round(r["outstanding"], 2)
+    return {"rows": rows, "total": total, "start": start, "end": end}
+
+
+
 
 # ---------------------- Bulk Import (CSV / Excel) ----------------------
 

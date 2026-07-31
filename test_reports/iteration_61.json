@@ -1,0 +1,30 @@
+{
+  "summary": "Iter 61 — Vendor Spend Report + inline txn Link. Backend: 4/4 pytest passed (spend-by-vendor aggregation, math + exclusions of draft/void/out-of-range, Uncategorized vendor bucket, /link set + clear). Frontend: verified E2E — 'By Vendor' tab appears only in Purchases mode, shows correct columns (Vendor/Total spend/Paid/Outstanding/Bills/Share), CSV button present, switching to Sales mode hides the tab. Edit Transaction modal shows txn-link-section with Invoice/Bill toggle, select dropdown, and Unlink button (appears once a link is picked). Linking a bill then Save persists (verified by re-opening modal); Unlink + Save clears (verified by re-opening).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Edit transaction modal", "issues": ["React hydration warning: <span> inside <option> in the Account bank-account picker (unrelated to Iter 61 changes but noted). Console logs multiple 500s from prefetch/logo endpoints at page load, not blocking flows."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter61_vendor_spend_and_link.py",
+    "/app/test_reports/pytest/iter61.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "spend-by-vendor uses `bill.total - balance_due` for paid_amount, which correctly represents applied payments. Note: a bill with status='paid' but stale balance_due != 0 (legacy data) would under-report paid_amount. Consider deriving paid_amount from linked Payments collection instead of balance_due for robustness.",
+    "Uncategorized-vendor bucket key uses vendor_name lowercase — this correctly consolidates truly missing vendors, but a bill with contact_name set and contact_id null still gets a synthetic key `nm::<name>`. Behaviour is consistent with sales-by-item pattern.",
+    "POST /transactions/{tid}/link uses query params invoice_id/bill_id/payment_id with `is not None` check — empty string is treated as 'clear' (persists ''). Frontend calls with empty string when Unlink is used; verified persists as empty. Slight nit: `linked_bill_id` stored as '' rather than null; UI treats both as falsy so no user-visible issue."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter61_vendor_spend_and_link.py (new)"
+  ],
+  "success_rate": {"backend": "100% (4/4)", "frontend": "100%"},
+  "test_credentials": "client@axiom.ai / client123 on company 540fbc73-66fd-432f-a357-39db6c84c5bd (TEST_dup)",
+  "seed_data_creation": "Test created + cleaned up ephemeral vendor + 4 bills for math verification and 1 orphan bill for Uncategorized bucket. All deleted at end of tests.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend pytest requires REACT_APP_BACKEND_URL env var. Bills creation endpoint re-derives balance_due — tests PATCH balance_due/status post-create for realistic 'paid' fixtures. Edit-transaction modal is opened via row kebab (data-testid=txn-more-<id>) → 'Edit transaction' menu item. Unlink button (txn-link-clear) only renders when a linkId is currently selected."
+}
