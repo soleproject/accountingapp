@@ -42,6 +42,8 @@ export default function InvoiceEditor() {
 
   const [contacts, setContacts] = useState([]);
   const [itemsCatalog, setItemsCatalog] = useState([]);
+  const [taxes, setTaxes] = useState([]);
+  const [taxModalLineIdx, setTaxModalLineIdx] = useState(null);
 
   // Form state
   const [number, setNumber] = useState("");
@@ -71,13 +73,15 @@ export default function InvoiceEditor() {
     let cancelled = false;
     (async () => {
       try {
-        const [c, it] = await Promise.all([
+        const [c, it, tx] = await Promise.all([
           api.get(`/companies/${currentId}/contacts`),
           api.get(`/companies/${currentId}/items?usage=sales`),
+          api.get(`/companies/${currentId}/taxes`),
         ]);
         if (cancelled) return;
         setContacts(c.data.contacts || []);
         setItemsCatalog(it.data.items || []);
+        setTaxes(tx.data.taxes || []);
         if (editMode) {
           const r = await api.get(`/companies/${currentId}/invoices/${id}`);
           if (cancelled) return;
@@ -141,12 +145,16 @@ export default function InvoiceEditor() {
 
   const totals = useMemo(() => {
     const subtotal = lines.reduce((s, l) => s + Number(l.amount || 0), 0);
+    const lineTax = lines.reduce((s, l) => {
+      const rate = Number(l.tax_rate || 0);
+      return s + (rate ? Number(l.amount || 0) * rate / 100 : 0);
+    }, 0);
     const disc = Number(discount || 0);
     const discAmt = discountType === "percent" ? +(subtotal * disc / 100).toFixed(2) : +(disc).toFixed(2);
     const ship = Number(shipping || 0);
-    const taxV = Number(tax || 0);
+    const taxV = +(Number(tax || 0) + lineTax).toFixed(2);
     const total = +(subtotal - discAmt + ship + taxV).toFixed(2);
-    return { subtotal, discAmt, ship, taxV, total };
+    return { subtotal, discAmt, ship, taxV, total, lineTax: +lineTax.toFixed(2) };
   }, [lines, discount, discountType, shipping, tax]);
 
   // Attachments (base64).
@@ -366,7 +374,8 @@ export default function InvoiceEditor() {
           />
           <EditForm
             {...{
-              contacts, itemsCatalog, contact, setContact,
+              contacts, itemsCatalog, taxes, setTaxes,
+              contact, setContact,
               number, setNumber,
               issue, setIssue, due, setDue,
               termsLabel, setTermsLabel,
@@ -378,6 +387,8 @@ export default function InvoiceEditor() {
               notes, setNotes, internalNotes, setInternalNotes,
               attachments, onAttach, removeAttachment,
               totals,
+              currentId,
+              taxModalLineIdx, setTaxModalLineIdx,
             }}
           />
         </>
@@ -389,6 +400,22 @@ export default function InvoiceEditor() {
           sending={sending}
           onClose={() => setSendOpen(false)}
           onSend={doSend}
+        />
+      )}
+
+      {taxModalLineIdx !== null && (
+        <CreateTaxDialog
+          onClose={() => setTaxModalLineIdx(null)}
+          onCreated={(t) => {
+            setTaxes(prev => [...prev, t].sort((a, b) => a.name.localeCompare(b.name)));
+            // Apply to the line that opened the modal.
+            const i = taxModalLineIdx;
+            setLines(prev => prev.map((x, j) => j === i
+              ? { ...x, tax_id: t.id, tax_name: t.name, tax_rate: Number(t.rate || 0) }
+              : x));
+            setTaxModalLineIdx(null);
+          }}
+          currentId={currentId}
         />
       )}
     </div>
@@ -520,7 +547,8 @@ function BusinessHeaderCard({ company, title, setTitle, summary, setSummary, onL
 // Main invoice form — customer/meta + line items + INLINE totals + notes
 // ─────────────────────────────────────────────────────────────────────────────
 function EditForm({
-  contacts, itemsCatalog, contact, setContact,
+  contacts, itemsCatalog, taxes, setTaxes,
+  contact, setContact,
   number, setNumber,
   issue, setIssue, due, setDue,
   termsLabel, setTermsLabel,
@@ -532,13 +560,22 @@ function EditForm({
   notes, setNotes, internalNotes, setInternalNotes,
   attachments, onAttach, removeAttachment,
   totals,
+  currentId,
+  taxModalLineIdx, setTaxModalLineIdx,
 }) {
   const customerContacts = useMemo(
     () => contacts.filter(c => c.type === "customer" || c.type === "both"),
     [contacts]
   );
+  const applyTaxToLine = (i, taxId) => {
+    if (taxId === "__new__") { setTaxModalLineIdx(i); return; }
+    if (!taxId) { updLine(i, { tax_id: null, tax_name: "", tax_rate: 0 }); return; }
+    const t = taxes.find(x => x.id === taxId);
+    if (!t) return;
+    updLine(i, { tax_id: t.id, tax_name: t.name, tax_rate: Number(t.rate || 0) });
+  };
   return (
-    <section className="rounded-lg border bg-white shadow-sm overflow-hidden">
+    <section className="rounded-lg border bg-white shadow-xl overflow-hidden ring-1 ring-slate-100">
       {/* Top: customer + invoice meta grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 px-6 py-5">
         {/* Left — customer picker */}
@@ -631,46 +668,73 @@ function EditForm({
         </div>
         <div className="divide-y">
           {lines.map((l, i) => (
-            <div
-              key={i}
-              className="grid grid-cols-12 gap-2 items-center py-2"
-              data-testid={`invoice-editor-line-${i}`}
-            >
-              <div className="col-span-6">
-                <ItemPicker
-                  items={itemsCatalog}
-                  value={l.description}
-                  onChangeText={(txt) => updLine(i, { description: txt })}
-                  onPickItem={(it) => updLine(i, {
-                    item_id: it.id, item_name: it.name,
-                    description: it.description || it.name,
-                    rate: Number(it.price || 0),
-                    income_account_id: it.income_account_id || null,
-                    income_account_name: it.income_account_name || "",
-                    category: it.income_account_name || "",
-                  })}
-                  testId={`invoice-editor-line-${i}`}
+            <div key={i} className="py-2" data-testid={`invoice-editor-line-${i}`}>
+              <div className="grid grid-cols-12 gap-2 items-center">
+                <div className="col-span-6">
+                  <ItemPicker
+                    items={itemsCatalog}
+                    value={l.description}
+                    onChangeText={(txt) => updLine(i, { description: txt })}
+                    onPickItem={(it) => updLine(i, {
+                      item_id: it.id, item_name: it.name,
+                      description: it.description || it.name,
+                      rate: Number(it.price || 0),
+                      income_account_id: it.income_account_id || null,
+                      income_account_name: it.income_account_name || "",
+                      category: it.income_account_name || "",
+                    })}
+                    testId={`invoice-editor-line-${i}`}
+                  />
+                </div>
+                <input
+                  type="number" step="0.01" value={l.quantity}
+                  onChange={(e) => updLine(i, { quantity: Number(e.target.value) })}
+                  className="col-span-2 border rounded px-2 py-1.5 text-sm text-right font-mono-num"
+                  data-testid={`invoice-editor-line-${i}-qty`}
                 />
+                <input
+                  type="number" step="0.01" value={l.rate}
+                  onChange={(e) => updLine(i, { rate: Number(e.target.value) })}
+                  className="col-span-2 border rounded px-2 py-1.5 text-sm text-right font-mono-num"
+                  data-testid={`invoice-editor-line-${i}-rate`}
+                />
+                <div className="col-span-1 py-1.5 text-right font-mono-num text-sm">{fmtMoney(l.amount)}</div>
+                <button
+                  onClick={() => removeLine(i)}
+                  disabled={lines.length === 1}
+                  className="col-span-1 justify-self-end p-1 rounded hover:bg-red-50 text-red-500 disabled:opacity-30"
+                  data-testid={`invoice-editor-line-${i}-remove`}
+                ><Trash2 size={13} /></button>
               </div>
-              <input
-                type="number" step="0.01" value={l.quantity}
-                onChange={(e) => updLine(i, { quantity: Number(e.target.value) })}
-                className="col-span-2 border rounded px-2 py-1.5 text-sm text-right font-mono-num"
-                data-testid={`invoice-editor-line-${i}-qty`}
-              />
-              <input
-                type="number" step="0.01" value={l.rate}
-                onChange={(e) => updLine(i, { rate: Number(e.target.value) })}
-                className="col-span-2 border rounded px-2 py-1.5 text-sm text-right font-mono-num"
-                data-testid={`invoice-editor-line-${i}-rate`}
-              />
-              <div className="col-span-1 py-1.5 text-right font-mono-num text-sm">{fmtMoney(l.amount)}</div>
-              <button
-                onClick={() => removeLine(i)}
-                disabled={lines.length === 1}
-                className="col-span-1 justify-self-end p-1 rounded hover:bg-red-50 text-red-500 disabled:opacity-30"
-                data-testid={`invoice-editor-line-${i}-remove`}
-              ><Trash2 size={13} /></button>
+              {/* Per-line "Edit income account | Tax [dropdown]" secondary row */}
+              <div className="grid grid-cols-12 gap-2 items-center mt-1 pl-1">
+                <div className="col-span-6">
+                  <span className="text-xs text-indigo-600 hover:underline cursor-default"
+                        title={l.income_account_name || "Set by picking an item"}>
+                    {l.income_account_name ? `Income · ${l.income_account_name}` : "Edit income account"}
+                  </span>
+                </div>
+                <div className="col-span-4 flex items-center justify-end gap-2">
+                  <span className="text-xs text-slate-500">Tax</span>
+                  <select
+                    value={l.tax_id || ""}
+                    onChange={(e) => applyTaxToLine(i, e.target.value)}
+                    className="border rounded px-2 py-1 text-xs bg-white min-w-[160px]"
+                    data-testid={`invoice-editor-line-${i}-tax`}
+                  >
+                    <option value="">Select a tax</option>
+                    {taxes.map(t => (
+                      <option key={t.id} value={t.id}>{t.name} · {Number(t.rate).toFixed(2)}%</option>
+                    ))}
+                    <option value="__new__">+ Create a new tax…</option>
+                  </select>
+                </div>
+                <div className="col-span-2 text-right text-xs font-mono-num text-slate-500">
+                  {Number(l.tax_rate || 0) > 0
+                    ? fmtMoney(Number(l.amount || 0) * Number(l.tax_rate) / 100)
+                    : "—"}
+                </div>
+              </div>
             </div>
           ))}
         </div>
@@ -724,7 +788,7 @@ function EditForm({
             />
           </div>
           <div className="flex items-center justify-between gap-3">
-            <span className="text-sm text-slate-500">Tax</span>
+            <span className="text-sm text-slate-500">Tax {totals.lineTax > 0 && <span className="text-[10px] text-slate-400">(includes ${totals.lineTax.toFixed(2)} per-line)</span>}</span>
             <input
               type="number" step="0.01" value={tax}
               onChange={(e) => setTax(e.target.value)}
@@ -860,3 +924,74 @@ function SendEmailDialog({ to, setTo, sending, onClose, onSend }) {
     </div>
   );
 }
+
+function CreateTaxDialog({ onClose, onCreated, currentId }) {
+  const [name, setName] = useState("");
+  const [rate, setRate] = useState("");
+  const [saving, setSaving] = useState(false);
+  const submit = async () => {
+    const clean = name.trim();
+    const r = parseFloat(rate);
+    if (!clean) { toast.error("Tax name is required"); return; }
+    if (isNaN(r) || r < 0 || r > 100) { toast.error("Rate must be between 0 and 100"); return; }
+    setSaving(true);
+    try {
+      const resp = await api.post(`/companies/${currentId}/taxes`, { name: clean, rate: r });
+      toast.success(`Tax "${clean}" created`);
+      onCreated(resp.data.tax);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to create tax");
+    } finally { setSaving(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4" data-testid="create-tax-dialog">
+        <div className="flex items-center justify-between border-b pb-3">
+          <h3 className="font-heading font-semibold text-lg">Create a new tax</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
+        </div>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-slate-700 mb-1">
+              Tax name <span className="text-red-500">*</span>
+            </label>
+            <input
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. GST"
+              className="w-full border rounded px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+              data-testid="create-tax-name"
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-700 mb-1">
+              Tax rate <span className="text-red-500">*</span>
+            </label>
+            <div className="relative">
+              <input
+                type="number" step="0.01" min="0" max="100"
+                value={rate}
+                onChange={(e) => setRate(e.target.value)}
+                placeholder="0.00"
+                className="w-full border rounded px-3 py-2 text-sm pr-8 focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+                data-testid="create-tax-rate"
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">%</span>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-2 pt-3 border-t">
+          <button onClick={onClose} className="px-3 py-1.5 rounded-md text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
+          <button
+            onClick={submit}
+            disabled={saving || !name.trim() || rate === ""}
+            className="px-4 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50"
+            data-testid="create-tax-submit"
+          >{saving ? "Saving…" : "Create tax"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+

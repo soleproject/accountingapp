@@ -58,17 +58,65 @@ def _sum_lines(lines: list, tax: float = 0.0, shipping: float = 0.0,
     """Return (subtotal, discount_amount, shipping, tax, total).
 
     Applied order: subtotal → subtract discount → add shipping → add tax.
+    `tax` here is invoice-level. Per-line tax is stored on each line as
+    `tax_rate` (0-100) and rolled up into `tax_amount` automatically; the
+    doc-level `tax` output includes both.
     """
-    subtotal = sum(float(li.get("amount", 0)) for li in lines)
+    subtotal = 0.0
+    line_tax_total = 0.0
+    for li in lines:
+        amt = float(li.get("amount", 0) or 0)
+        subtotal += amt
+        rate = float(li.get("tax_rate", 0) or 0)
+        if rate:
+            line_tax = round(amt * rate / 100.0, 2)
+            li["tax_amount"] = line_tax
+            line_tax_total += line_tax
+        else:
+            # Keep the field in sync even when it should be zero, so old
+            # rows don't linger with stale per-line tax after edits.
+            if "tax_amount" in li:
+                li["tax_amount"] = 0.0
     disc = float(discount or 0)
     if (discount_type or "amount").lower() == "percent":
         disc_amt = round(subtotal * disc / 100.0, 2)
     else:
         disc_amt = round(disc, 2)
     ship = round(float(shipping or 0), 2)
-    tax_v = round(float(tax or 0), 2)
+    tax_v = round(float(tax or 0) + line_tax_total, 2)
     total = round(subtotal - disc_amt + ship + tax_v, 2)
     return round(subtotal, 2), disc_amt, ship, tax_v, total
+
+
+# ----------------------- Tax library (per company) -----------------------
+
+@router.get("/companies/{cid}/taxes")
+async def list_taxes(cid: str, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    docs = await db.taxes.find({"company_id": cid}).sort("name", 1).to_list(500)
+    return {"taxes": [coerce(d) for d in docs]}
+
+
+@router.post("/companies/{cid}/taxes")
+async def create_tax(cid: str, payload: dict, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    name = (payload.get("name") or "").strip()
+    try:
+        rate = float(payload.get("rate", 0) or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Tax rate must be a number")
+    if not name:
+        raise HTTPException(status_code=400, detail="Tax name is required")
+    if rate < 0 or rate > 100:
+        raise HTTPException(status_code=400, detail="Tax rate must be between 0 and 100")
+    dup = await db.taxes.find_one({"company_id": cid, "name": name})
+    if dup:
+        raise HTTPException(status_code=409, detail=f"A tax named '{name}' already exists")
+    tid = str(uuid.uuid4()); now = now_iso()
+    doc = {"id": tid, "company_id": cid, "name": name, "rate": rate,
+           "created_at": now, "updated_at": now}
+    await db.taxes.insert_one(doc)
+    return {"tax": coerce(doc)}
 
 
 @router.get("/companies/{cid}/invoices")

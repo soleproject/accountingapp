@@ -144,17 +144,36 @@ def build_document_pdf(*, kind: str, doc: dict, company: dict | None = None,
         story.append(info)
     story.append(Spacer(1, 14))
 
-    lines_header = [Paragraph("<b>Description</b>", bold), Paragraph("<b>Qty</b>", bold),
-                    Paragraph("<b>Rate</b>", bold), Paragraph("<b>Amount</b>", right)]
-    line_rows = [lines_header]
-    for li in (doc.get("line_items") or []):
-        line_rows.append([
-            Paragraph(li.get("description") or li.get("item_name") or "—", styles["Normal"]),
-            Paragraph(str(li.get("quantity") or 0), styles["Normal"]),
-            Paragraph(_fmt_money(li.get("rate")), styles["Normal"]),
-            Paragraph(_fmt_money(li.get("amount")), right),
-        ])
-    lines = Table(line_rows, colWidths=[3.8 * inch, 0.8 * inch, 1.1 * inch, 1.3 * inch])
+    all_lines = doc.get("line_items") or []
+    has_line_tax = any(float(li.get("tax_rate", 0) or 0) > 0 for li in all_lines)
+    if has_line_tax:
+        lines_header = [Paragraph("<b>Description</b>", bold), Paragraph("<b>Qty</b>", bold),
+                        Paragraph("<b>Rate</b>", bold), Paragraph("<b>Tax</b>", bold),
+                        Paragraph("<b>Amount</b>", right)]
+        line_rows = [lines_header]
+        for li in all_lines:
+            tr = float(li.get("tax_rate", 0) or 0)
+            tax_cell = f"{(li.get('tax_name') or '')} {tr:g}%".strip() if tr else "—"
+            line_rows.append([
+                Paragraph(li.get("description") or li.get("item_name") or "—", styles["Normal"]),
+                Paragraph(str(li.get("quantity") or 0), styles["Normal"]),
+                Paragraph(_fmt_money(li.get("rate")), styles["Normal"]),
+                Paragraph(tax_cell, styles["Normal"]),
+                Paragraph(_fmt_money(li.get("amount")), right),
+            ])
+        lines = Table(line_rows, colWidths=[3.0 * inch, 0.7 * inch, 1.0 * inch, 1.0 * inch, 1.3 * inch])
+    else:
+        lines_header = [Paragraph("<b>Description</b>", bold), Paragraph("<b>Qty</b>", bold),
+                        Paragraph("<b>Rate</b>", bold), Paragraph("<b>Amount</b>", right)]
+        line_rows = [lines_header]
+        for li in all_lines:
+            line_rows.append([
+                Paragraph(li.get("description") or li.get("item_name") or "—", styles["Normal"]),
+                Paragraph(str(li.get("quantity") or 0), styles["Normal"]),
+                Paragraph(_fmt_money(li.get("rate")), styles["Normal"]),
+                Paragraph(_fmt_money(li.get("amount")), right),
+            ])
+        lines = Table(line_rows, colWidths=[3.8 * inch, 0.8 * inch, 1.1 * inch, 1.3 * inch])
     lines.setStyle(TableStyle([
         ("LINEBELOW", (0, 0), (-1, 0), 0.5, colors.HexColor("#94A3B8")),
         ("LINEBELOW", (0, 1), (-1, -1), 0.25, colors.HexColor("#F1F5F9")),
