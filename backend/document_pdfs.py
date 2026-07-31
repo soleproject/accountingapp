@@ -48,6 +48,10 @@ def build_document_pdf(*, kind: str, doc: dict, company: dict | None = None,
     story = []
     company = company or {}
     firm = company.get("name") or "Your Company"
+    # Per-doc title override (e.g. "Deposit invoice", "Retainer" — Wave-
+    # style). Falls back to canonical INVOICE / BILL label.
+    doc_title = (doc.get("title") or "").strip() or ("Invoice" if kind == "invoice" else "Bill")
+    doc_summary = (doc.get("summary") or "").strip()
 
     # Header row: optional logo on the left, firm identity block on the
     # right. Falls back to a plain heading when no logo is uploaded.
@@ -89,7 +93,11 @@ def build_document_pdf(*, kind: str, doc: dict, company: dict | None = None,
         if len(identity_bits) > 1:
             story.append(Paragraph(f"<font size='9' color='#64748B'>{'<br/>'.join(identity_bits[1:])}</font>", subtle))
 
-    story.append(Paragraph(f"<font color='#64748B' size='10'>{label_kind} · {doc.get('number','')}</font>", subtle))
+    story.append(Spacer(1, 8))
+    story.append(Paragraph(f"<font size='16' color='#0F172A'><b>{doc_title}</b></font> "
+                           f"<font size='10' color='#64748B'>· {doc.get('number','')}</font>", styles["Normal"]))
+    if doc_summary:
+        story.append(Paragraph(f"<font size='9' color='#64748B'>{doc_summary}</font>", subtle))
     story.append(Spacer(1, 12))
 
     meta_rows = [

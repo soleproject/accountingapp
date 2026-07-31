@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, Link } from "react-router-dom";
 import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import {
   ArrowLeft, Save, Send, Plus, Trash2, Paperclip, Eye, Pencil,
-  FileText, X,
+  FileText, X, ChevronDown, ChevronUp, Upload, Image as ImageIcon,
 } from "lucide-react";
 import ItemPicker from "@/components/ItemPicker";
 
@@ -21,14 +21,20 @@ const iso = (d) => new Date(d).toISOString().slice(0, 10);
 const addDays = (baseIso, n) => iso(new Date(baseIso).getTime() + n * 86400000);
 
 /**
- * Full-page Invoice Editor — replaces the popup for both create and edit.
+ * Full-page Invoice Editor — Wave-style layout.
  * Routes: /invoices/new  and  /invoices/:id/edit
+ *
+ * Structure (top→bottom, single column, cards):
+ *   1. Header  — back / title / Send email / Save buttons
+ *   2. Tabs    — Edit / Preview
+ *   3. Business card (collapsible) — logo upload, title, summary, company info
+ *   4. Invoice form card — customer + meta + line items + inline totals + notes/attachments
  */
 export default function InvoiceEditor() {
   const { id } = useParams();
   const editMode = !!id;
   const navigate = useNavigate();
-  const { currentId } = useCompany();
+  const { currentId, current, refresh: refreshCompany } = useCompany();
 
   const [tab, setTab] = useState("edit"); // "edit" | "preview"
   const [loading, setLoading] = useState(editMode);
@@ -49,10 +55,12 @@ export default function InvoiceEditor() {
   const [tax, setTax] = useState(0);
   const [shipping, setShipping] = useState(0);
   const [discount, setDiscount] = useState(0);
-  const [discountType, setDiscountType] = useState("amount"); // "amount" | "percent"
+  const [discountType, setDiscountType] = useState("amount");
   const [notes, setNotes] = useState("");
   const [internalNotes, setInternalNotes] = useState("");
-  const [attachments, setAttachments] = useState([]); // [{filename,data_url,size}]
+  const [attachments, setAttachments] = useState([]);
+  const [title, setTitle] = useState("");
+  const [summary, setSummary] = useState("");
 
   const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
   const pdfUrlRef = useRef(null);
@@ -101,6 +109,8 @@ export default function InvoiceEditor() {
           setNotes(inv.notes || "");
           setInternalNotes(inv.internal_notes || "");
           setAttachments(inv.attachments || []);
+          setTitle(inv.title || "");
+          setSummary(inv.summary || "");
         }
       } catch (e) {
         toast.error(e.response?.data?.detail || "Failed to load invoice");
@@ -129,7 +139,6 @@ export default function InvoiceEditor() {
   const addLine = () => setLines(prev => [...prev, { description: "", quantity: 1, rate: 0, amount: 0 }]);
   const removeLine = (i) => setLines(prev => prev.length > 1 ? prev.filter((_, j) => j !== i) : prev);
 
-  // Totals math — mirrors backend _sum_lines.
   const totals = useMemo(() => {
     const subtotal = lines.reduce((s, l) => s + Number(l.amount || 0), 0);
     const disc = Number(discount || 0);
@@ -140,7 +149,7 @@ export default function InvoiceEditor() {
     return { subtotal, discAmt, ship, taxV, total };
   }, [lines, discount, discountType, shipping, tax]);
 
-  // Attachments (base64 for now — matches receipts pattern).
+  // Attachments (base64).
   const onAttach = async (files) => {
     for (const f of files) {
       if (f.size > 6 * 1024 * 1024) { toast.error(`${f.name} > 6 MB, skipped`); continue; }
@@ -154,7 +163,28 @@ export default function InvoiceEditor() {
   };
   const removeAttachment = (i) => setAttachments(prev => prev.filter((_, j) => j !== i));
 
-  // Build request body.
+  // Company logo — uploads through PATCH /companies/{cid} and refreshes context.
+  const onLogoUpload = async (file) => {
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { toast.error("Logo must be under 5 MB"); return; }
+    if (!/^image\//.test(file.type)) { toast.error("Please choose an image file"); return; }
+    const dataUrl = await new Promise((res) => {
+      const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(file);
+    });
+    try {
+      await api.patch(`/companies/${currentId}`, { logo_data_url: dataUrl });
+      await refreshCompany();
+      toast.success("Logo saved");
+    } catch (e) { toast.error(e.response?.data?.detail || "Logo save failed"); }
+  };
+  const onLogoRemove = async () => {
+    try {
+      await api.patch(`/companies/${currentId}`, { logo_data_url: "" });
+      await refreshCompany();
+      toast.success("Logo removed");
+    } catch (e) { toast.error(e.response?.data?.detail || "Remove failed"); }
+  };
+
   const buildBody = () => {
     const c = contacts.find(x => x.id === contact);
     return {
@@ -173,11 +203,12 @@ export default function InvoiceEditor() {
       notes: notes || "",
       internal_notes: internalNotes || "",
       attachments,
+      title: title || "",
+      summary: summary || "",
       ...(number ? { number: number.trim() } : {}),
     };
   };
 
-  // Save handler — returns invoice id on success.
   const save = async ({ silent = false } = {}) => {
     if (saving) return;
     setSaving(true);
@@ -202,20 +233,13 @@ export default function InvoiceEditor() {
     }
   };
 
-  // Preview tab needs a saved invoice — auto-save silently before showing.
   const goPreview = async () => {
     let iid = id;
-    if (!editMode) {
-      iid = await save({ silent: true });
-      if (!iid) return;
-    } else {
-      // Save latest edits first so the preview reflects them.
-      await save({ silent: true });
-    }
+    if (!editMode) { iid = await save({ silent: true }); if (!iid) return; }
+    else { await save({ silent: true }); }
     setTab("preview");
   };
 
-  // Fetch PDF blob whenever we hit preview.
   useEffect(() => {
     if (tab !== "preview" || !currentId || !id) return;
     let cancelled = false;
@@ -231,10 +255,8 @@ export default function InvoiceEditor() {
     })();
     return () => { cancelled = true; };
   }, [tab, id, currentId]);
-  // Revoke blob on unmount.
   useEffect(() => () => { if (pdfUrlRef.current) URL.revokeObjectURL(pdfUrlRef.current); }, []);
 
-  // Send-via-email flow.
   const [sendOpen, setSendOpen] = useState(false);
   const [sendTo, setSendTo] = useState("");
   const [sending, setSending] = useState(false);
@@ -255,17 +277,14 @@ export default function InvoiceEditor() {
       else if (r.data.status === "failed") toast.error("Send failed — check Communications log");
       else toast.info(`Email skipped: ${r.data.status}`);
       setSendOpen(false);
-    } catch (e) {
-      toast.error(e.response?.data?.detail || "Send failed");
-    } finally {
-      setSending(false);
-    }
+    } catch (e) { toast.error(e.response?.data?.detail || "Send failed"); }
+    finally { setSending(false); }
   };
 
   if (loading) return <div className="p-8 text-slate-500">Loading invoice…</div>;
 
   return (
-    <div className="max-w-6xl mx-auto space-y-4">
+    <div className="max-w-5xl mx-auto space-y-4 pb-16">
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
@@ -290,14 +309,13 @@ export default function InvoiceEditor() {
               data-testid="invoice-editor-send"
               onClick={openSend}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm hover:bg-emerald-100"
-              title="Email this invoice"
             ><Send size={14} /> Send email</button>
           )}
           <button
             data-testid="invoice-editor-save"
             onClick={() => save()}
             disabled={saving}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50 shadow-sm"
           ><Save size={14} /> {saving ? "Saving…" : (editMode ? "Save changes" : "Save invoice")}</button>
         </div>
       </div>
@@ -325,43 +343,49 @@ export default function InvoiceEditor() {
       </div>
 
       {tab === "preview" ? (
-        <div className="rounded-xl border bg-slate-50 p-2">
+        <div className="rounded-xl border bg-slate-50 p-2 shadow-sm">
           {pdfBlobUrl ? (
             <iframe
               title="Invoice preview"
               src={pdfBlobUrl}
-              className="w-full h-[78vh] rounded-md bg-white border"
+              className="w-full h-[80vh] rounded-md bg-white border"
               data-testid="invoice-editor-preview-iframe"
             />
           ) : (
-            <div className="h-[78vh] flex items-center justify-center text-slate-400 text-sm">
-              Loading preview…
-            </div>
+            <div className="h-[80vh] flex items-center justify-center text-slate-400 text-sm">Loading preview…</div>
           )}
         </div>
       ) : (
-        <EditForm
-          {...{
-            contacts, itemsCatalog, contact, setContact,
-            number, setNumber,
-            issue, setIssue, due, setDue,
-            termsLabel, setTermsLabel,
-            poNumber, setPoNumber,
-            status, setStatus,
-            lines, addLine, updLine, removeLine,
-            tax, setTax, shipping, setShipping,
-            discount, setDiscount, discountType, setDiscountType,
-            notes, setNotes, internalNotes, setInternalNotes,
-            attachments, onAttach, removeAttachment,
-            totals,
-          }}
-        />
+        <>
+          <BusinessHeaderCard
+            company={current}
+            title={title} setTitle={setTitle}
+            summary={summary} setSummary={setSummary}
+            onLogoUpload={onLogoUpload}
+            onLogoRemove={onLogoRemove}
+          />
+          <EditForm
+            {...{
+              contacts, itemsCatalog, contact, setContact,
+              number, setNumber,
+              issue, setIssue, due, setDue,
+              termsLabel, setTermsLabel,
+              poNumber, setPoNumber,
+              status, setStatus,
+              lines, addLine, updLine, removeLine,
+              tax, setTax, shipping, setShipping,
+              discount, setDiscount, discountType, setDiscountType,
+              notes, setNotes, internalNotes, setInternalNotes,
+              attachments, onAttach, removeAttachment,
+              totals,
+            }}
+          />
+        </>
       )}
 
       {sendOpen && (
         <SendEmailDialog
-          to={sendTo}
-          setTo={setSendTo}
+          to={sendTo} setTo={setSendTo}
           sending={sending}
           onClose={() => setSendOpen(false)}
           onSend={doSend}
@@ -371,6 +395,130 @@ export default function InvoiceEditor() {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Business header — Wave-style collapsible card with logo + title/summary + biz info
+// ─────────────────────────────────────────────────────────────────────────────
+function BusinessHeaderCard({ company, title, setTitle, summary, setSummary, onLogoUpload, onLogoRemove }) {
+  const [open, setOpen] = useState(true);
+  const logo = company?.logo_data_url || "";
+  const fileRef = useRef(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  const handleDrop = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    setDragOver(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) onLogoUpload(f);
+  };
+
+  return (
+    <section className="rounded-lg border bg-white shadow-sm overflow-hidden" data-testid="invoice-editor-business-card">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        data-testid="invoice-editor-business-toggle"
+      >
+        <span>Business address and contact details, title, summary, and logo</span>
+        {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+      </button>
+      {open && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-4 pb-4">
+          {/* Logo (left) */}
+          <div>
+            {logo ? (
+              <div className="rounded-lg border bg-slate-50 p-4 flex flex-col items-start gap-3" data-testid="invoice-editor-logo-present">
+                <img src={logo} alt="Company logo" className="max-h-24 max-w-full rounded" />
+                <div className="flex items-center gap-3 text-xs">
+                  <button
+                    onClick={() => fileRef.current?.click()}
+                    className="inline-flex items-center gap-1 text-indigo-600 hover:underline"
+                    data-testid="invoice-editor-logo-replace"
+                  ><Upload size={12} /> Replace logo</button>
+                  <button
+                    onClick={onLogoRemove}
+                    className="text-red-600 hover:underline"
+                    data-testid="invoice-editor-logo-remove"
+                  >Remove logo</button>
+                </div>
+              </div>
+            ) : (
+              <label
+                htmlFor="invoice-logo-upload"
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={handleDrop}
+                className={`block rounded-lg border-2 border-dashed p-6 text-center cursor-pointer transition ${
+                  dragOver ? "border-indigo-400 bg-indigo-50" : "border-slate-300 bg-slate-50 hover:bg-slate-100"
+                }`}
+                data-testid="invoice-editor-logo-dropzone"
+              >
+                <div className="mx-auto w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center mb-2">
+                  <Upload className="text-indigo-500" size={18} />
+                </div>
+                <div className="text-sm">
+                  <span className="text-indigo-600 font-medium">Browse</span>
+                  <span className="text-slate-500"> or drop your logo here</span>
+                </div>
+                <div className="text-[11px] text-slate-400 mt-2 leading-relaxed">
+                  Maximum 5 MB in size.<br/>
+                  JPG, PNG, or GIF formats.<br/>
+                  Recommended size: 300 x 200 pixels.
+                </div>
+              </label>
+            )}
+            <input
+              id="invoice-logo-upload"
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) onLogoUpload(f); e.target.value = ""; }}
+              data-testid="invoice-editor-logo-input"
+            />
+          </div>
+
+          {/* Title + summary + business info (right) */}
+          <div className="flex flex-col gap-3">
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Invoice"
+              className="w-full text-right text-2xl font-heading font-semibold text-slate-800 border rounded px-3 py-2 focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+              data-testid="invoice-editor-title"
+            />
+            <input
+              type="text"
+              value={summary}
+              onChange={(e) => setSummary(e.target.value)}
+              placeholder="Summary (e.g. project name, description of invoice)"
+              className="w-full text-right text-sm text-slate-600 border rounded px-3 py-2 italic focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+              data-testid="invoice-editor-summary"
+            />
+            <div className="text-right text-sm text-slate-700 leading-relaxed">
+              <div className="font-semibold text-slate-800">{company?.name || "Your Company"}</div>
+              {company?.address && <div>{company.address}</div>}
+              {company?.phone && <div>{company.phone}</div>}
+              {company?.email && <div>{company.email}</div>}
+              {company?.website && <div>{company.website}</div>}
+              {company?.tax_id && <div>Tax ID: {company.tax_id}</div>}
+              <Link
+                to="/settings"
+                className="inline-block text-xs text-indigo-600 hover:underline mt-1"
+                data-testid="invoice-editor-edit-business-info"
+              >Edit business info</Link>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main invoice form — customer/meta + line items + INLINE totals + notes
+// ─────────────────────────────────────────────────────────────────────────────
 function EditForm({
   contacts, itemsCatalog, contact, setContact,
   number, setNumber,
@@ -390,220 +538,160 @@ function EditForm({
     [contacts]
   );
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      {/* LEFT (2/3) — form */}
-      <div className="lg:col-span-2 space-y-4">
-        {/* Bill-to + core meta */}
-        <section className="rounded-xl border bg-white p-4 space-y-3">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Field label="Customer">
-              <select
-                data-testid="invoice-editor-customer"
-                value={contact}
-                onChange={(e) => setContact(e.target.value)}
-                className="w-full border rounded px-2 py-1.5 text-sm"
-              >
-                <option value="">Choose customer…</option>
-                {customerContacts.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Invoice number">
-              <input
-                data-testid="invoice-editor-number"
-                value={number}
-                onChange={(e) => setNumber(e.target.value)}
-                placeholder="INV-1001 (auto-assigned if blank)"
-                className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
-              />
-            </Field>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <Field label="Issue date">
-              <input
-                data-testid="invoice-editor-issue"
-                type="date"
-                value={issue}
-                onChange={(e) => setIssue(e.target.value)}
-                className="w-full border rounded px-2 py-1.5 text-sm"
-              />
-            </Field>
-            <Field label="Terms">
-              <select
-                data-testid="invoice-editor-terms"
-                value={termsLabel}
-                onChange={(e) => setTermsLabel(e.target.value)}
-                className="w-full border rounded px-2 py-1.5 text-sm"
-              >
-                {TERMS_OPTIONS.map(o => (
-                  <option key={o.label} value={o.label}>{o.label}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Due date">
+    <section className="rounded-lg border bg-white shadow-sm overflow-hidden">
+      {/* Top: customer + invoice meta grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 px-6 py-5">
+        {/* Left — customer picker */}
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Customer</label>
+          <select
+            data-testid="invoice-editor-customer"
+            value={contact}
+            onChange={(e) => setContact(e.target.value)}
+            className="w-full border rounded px-3 py-2 text-sm bg-white"
+          >
+            <option value="">Choose customer…</option>
+            {customerContacts.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+        {/* Right — invoice meta */}
+        <div className="space-y-2 text-sm">
+          <MetaRow label="Invoice number">
+            <input
+              data-testid="invoice-editor-number"
+              value={number}
+              onChange={(e) => setNumber(e.target.value)}
+              placeholder="Auto-assigned"
+              className="w-40 border rounded px-2 py-1 text-sm font-mono-num text-right"
+            />
+          </MetaRow>
+          <MetaRow label="P.O./S.O. number">
+            <input
+              data-testid="invoice-editor-po"
+              value={poNumber}
+              onChange={(e) => setPoNumber(e.target.value)}
+              className="w-40 border rounded px-2 py-1 text-sm font-mono-num text-right"
+            />
+          </MetaRow>
+          <MetaRow label="Invoice date">
+            <input
+              data-testid="invoice-editor-issue"
+              type="date"
+              value={issue}
+              onChange={(e) => setIssue(e.target.value)}
+              className="w-40 border rounded px-2 py-1 text-sm"
+            />
+          </MetaRow>
+          <MetaRow label="Payment due" hint={termsLabel !== "Custom" ? termsLabel : ""}>
+            <div className="flex flex-col items-end gap-1">
               <input
                 data-testid="invoice-editor-due"
                 type="date"
                 value={due}
                 onChange={(e) => { setDue(e.target.value); setTermsLabel("Custom"); }}
-                className="w-full border rounded px-2 py-1.5 text-sm"
+                className="w-40 border rounded px-2 py-1 text-sm"
               />
-            </Field>
-            <Field label="Status">
               <select
-                data-testid="invoice-editor-status"
-                value={status}
-                onChange={(e) => setStatus(e.target.value)}
-                className="w-full border rounded px-2 py-1.5 text-sm"
+                data-testid="invoice-editor-terms"
+                value={termsLabel}
+                onChange={(e) => setTermsLabel(e.target.value)}
+                className="w-40 border rounded px-2 py-1 text-xs text-slate-600 bg-white"
               >
-                <option value="draft">Draft</option>
-                <option value="sent">Sent</option>
-                <option value="partial">Partial</option>
-                <option value="paid">Paid</option>
-              </select>
-            </Field>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Field label="PO number">
-              <input
-                data-testid="invoice-editor-po"
-                value={poNumber}
-                onChange={(e) => setPoNumber(e.target.value)}
-                placeholder="Optional purchase-order reference"
-                className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
-              />
-            </Field>
-          </div>
-        </section>
-
-        {/* Line items */}
-        <section className="rounded-xl border bg-white p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="font-heading font-semibold text-sm text-slate-700">Line items</h3>
-          </div>
-          <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wide text-slate-500 pb-1 border-b">
-            <div className="col-span-6">Description / item</div>
-            <div className="col-span-2 text-right">Qty</div>
-            <div className="col-span-2 text-right">Rate</div>
-            <div className="col-span-2 text-right">Amount</div>
-          </div>
-          <div className="space-y-2">
-            {lines.map((l, i) => (
-              <div key={i} className="grid grid-cols-12 gap-2 items-center" data-testid={`invoice-editor-line-${i}`}>
-                <div className="col-span-6">
-                  <ItemPicker
-                    items={itemsCatalog}
-                    value={l.description}
-                    onChangeText={(txt) => updLine(i, { description: txt })}
-                    onPickItem={(it) => updLine(i, {
-                      item_id: it.id, item_name: it.name,
-                      description: it.description || it.name,
-                      rate: Number(it.price || 0),
-                      income_account_id: it.income_account_id || null,
-                      income_account_name: it.income_account_name || "",
-                      category: it.income_account_name || "",
-                    })}
-                    testId={`invoice-editor-line-${i}`}
-                  />
-                </div>
-                <input
-                  type="number" step="0.01" value={l.quantity}
-                  onChange={(e) => updLine(i, { quantity: Number(e.target.value) })}
-                  className="col-span-2 border rounded px-2 py-1.5 text-sm text-right font-mono-num"
-                  data-testid={`invoice-editor-line-${i}-qty`}
-                />
-                <input
-                  type="number" step="0.01" value={l.rate}
-                  onChange={(e) => updLine(i, { rate: Number(e.target.value) })}
-                  className="col-span-2 border rounded px-2 py-1.5 text-sm text-right font-mono-num"
-                  data-testid={`invoice-editor-line-${i}-rate`}
-                />
-                <div className="col-span-1 py-1.5 text-right font-mono-num text-sm">{fmtMoney(l.amount)}</div>
-                <button
-                  onClick={() => removeLine(i)}
-                  disabled={lines.length === 1}
-                  className="col-span-1 justify-self-end p-1 rounded hover:bg-red-50 text-red-500 disabled:opacity-30"
-                  data-testid={`invoice-editor-line-${i}-remove`}
-                ><Trash2 size={13} /></button>
-              </div>
-            ))}
-          </div>
-          <button
-            onClick={addLine}
-            className="inline-flex items-center gap-1.5 text-xs text-slate-600 border border-dashed rounded px-2 py-1.5 hover:bg-slate-50"
-            data-testid="invoice-editor-line-add"
-          ><Plus size={12} /> Add line</button>
-        </section>
-
-        {/* Notes + attachments */}
-        <section className="rounded-xl border bg-white p-4 space-y-3">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Field label="Notes to customer" hint="Renders at the bottom of the PDF.">
-              <textarea
-                data-testid="invoice-editor-notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={3}
-                placeholder="Thanks for your business!"
-                className="w-full border rounded px-2 py-1.5 text-sm"
-              />
-            </Field>
-            <Field label="Internal notes" hint="Private. Never shown on the PDF.">
-              <textarea
-                data-testid="invoice-editor-internal-notes"
-                value={internalNotes}
-                onChange={(e) => setInternalNotes(e.target.value)}
-                rows={3}
-                placeholder="For your team's eyes only."
-                className="w-full border rounded px-2 py-1.5 text-sm"
-              />
-            </Field>
-          </div>
-          <div>
-            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">
-              Attachments
-            </label>
-            <input
-              type="file"
-              multiple
-              onChange={(e) => onAttach(Array.from(e.target.files || []))}
-              className="text-xs"
-              data-testid="invoice-editor-attach"
-            />
-            {attachments.length > 0 && (
-              <ul className="mt-2 divide-y border rounded">
-                {attachments.map((a, i) => (
-                  <li key={i} className="flex items-center justify-between px-3 py-2 text-xs" data-testid={`invoice-editor-attachment-${i}`}>
-                    <span className="inline-flex items-center gap-1.5 truncate">
-                      <Paperclip size={12} /> {a.filename}
-                      <span className="text-slate-400">({Math.round((a.size || 0) / 1024)} KB)</span>
-                    </span>
-                    <button
-                      onClick={() => removeAttachment(i)}
-                      className="text-red-500 hover:bg-red-50 rounded p-1"
-                      data-testid={`invoice-editor-attachment-${i}-remove`}
-                    ><Trash2 size={12} /></button>
-                  </li>
+                {TERMS_OPTIONS.map(o => (
+                  <option key={o.label} value={o.label}>{o.label}</option>
                 ))}
-              </ul>
-            )}
-          </div>
-        </section>
+              </select>
+            </div>
+          </MetaRow>
+          <MetaRow label="Status">
+            <select
+              data-testid="invoice-editor-status"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              className="w-40 border rounded px-2 py-1 text-sm"
+            >
+              <option value="draft">Draft</option>
+              <option value="sent">Sent</option>
+              <option value="partial">Partial</option>
+              <option value="paid">Paid</option>
+            </select>
+          </MetaRow>
+        </div>
       </div>
 
-      {/* RIGHT (1/3) — totals sidebar */}
-      <aside className="space-y-4">
-        <section className="rounded-xl border bg-white p-4 space-y-3 sticky top-4">
-          <h3 className="font-heading font-semibold text-sm text-slate-700">Totals</h3>
-          <Row label="Subtotal" value={fmtMoney(totals.subtotal)} />
-          <div className="space-y-1.5 pt-1 border-t">
-            <label className="block text-[10px] uppercase tracking-wide text-slate-500">Discount</label>
+      {/* Line items table */}
+      <div className="px-6">
+        <div className="border-t border-b bg-slate-50 grid grid-cols-12 gap-2 px-1 py-2 text-[10px] uppercase tracking-wide text-slate-500">
+          <div className="col-span-6">Items</div>
+          <div className="col-span-2 text-right">Quantity</div>
+          <div className="col-span-2 text-right">Price</div>
+          <div className="col-span-2 text-right">Amount</div>
+        </div>
+        <div className="divide-y">
+          {lines.map((l, i) => (
+            <div
+              key={i}
+              className="grid grid-cols-12 gap-2 items-center py-2"
+              data-testid={`invoice-editor-line-${i}`}
+            >
+              <div className="col-span-6">
+                <ItemPicker
+                  items={itemsCatalog}
+                  value={l.description}
+                  onChangeText={(txt) => updLine(i, { description: txt })}
+                  onPickItem={(it) => updLine(i, {
+                    item_id: it.id, item_name: it.name,
+                    description: it.description || it.name,
+                    rate: Number(it.price || 0),
+                    income_account_id: it.income_account_id || null,
+                    income_account_name: it.income_account_name || "",
+                    category: it.income_account_name || "",
+                  })}
+                  testId={`invoice-editor-line-${i}`}
+                />
+              </div>
+              <input
+                type="number" step="0.01" value={l.quantity}
+                onChange={(e) => updLine(i, { quantity: Number(e.target.value) })}
+                className="col-span-2 border rounded px-2 py-1.5 text-sm text-right font-mono-num"
+                data-testid={`invoice-editor-line-${i}-qty`}
+              />
+              <input
+                type="number" step="0.01" value={l.rate}
+                onChange={(e) => updLine(i, { rate: Number(e.target.value) })}
+                className="col-span-2 border rounded px-2 py-1.5 text-sm text-right font-mono-num"
+                data-testid={`invoice-editor-line-${i}-rate`}
+              />
+              <div className="col-span-1 py-1.5 text-right font-mono-num text-sm">{fmtMoney(l.amount)}</div>
+              <button
+                onClick={() => removeLine(i)}
+                disabled={lines.length === 1}
+                className="col-span-1 justify-self-end p-1 rounded hover:bg-red-50 text-red-500 disabled:opacity-30"
+                data-testid={`invoice-editor-line-${i}-remove`}
+              ><Trash2 size={13} /></button>
+            </div>
+          ))}
+        </div>
+        <button
+          onClick={addLine}
+          className="mt-2 inline-flex items-center gap-1.5 text-xs text-indigo-600 hover:underline py-2"
+          data-testid="invoice-editor-line-add"
+        ><Plus size={12} /> Add an item</button>
+      </div>
+
+      {/* INLINE totals — right-aligned block under the items table */}
+      <div className="px-6 pb-5">
+        <div className="ml-auto max-w-sm space-y-2 pt-3 border-t">
+          <TotalsRow label="Subtotal" value={fmtMoney(totals.subtotal)} testId="invoice-editor-subtotal" />
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm text-slate-500">Discount</span>
             <div className="flex items-center gap-2">
               <input
                 type="number" step="0.01" value={discount}
                 onChange={(e) => setDiscount(e.target.value)}
-                className="flex-1 border rounded px-2 py-1.5 text-sm text-right font-mono-num"
+                className="w-20 border rounded px-2 py-1 text-sm text-right font-mono-num"
                 data-testid="invoice-editor-discount"
               />
               <div className="inline-flex rounded-md border overflow-hidden text-xs">
@@ -619,57 +707,121 @@ function EditForm({
                 >%</button>
               </div>
             </div>
-            {totals.discAmt > 0 && (
-              <div className="text-[11px] text-slate-500 text-right">
-                −{fmtMoney(totals.discAmt)} off
-              </div>
-            )}
           </div>
-          <div className="space-y-1.5 pt-1 border-t">
-            <label className="block text-[10px] uppercase tracking-wide text-slate-500">Shipping</label>
+          {totals.discAmt > 0 && (
+            <div className="flex items-center justify-between text-xs text-slate-500">
+              <span>Discount applied</span>
+              <span className="font-mono-num">−{fmtMoney(totals.discAmt)}</span>
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm text-slate-500">Shipping</span>
             <input
               type="number" step="0.01" value={shipping}
               onChange={(e) => setShipping(e.target.value)}
-              className="w-full border rounded px-2 py-1.5 text-sm text-right font-mono-num"
+              className="w-28 border rounded px-2 py-1 text-sm text-right font-mono-num"
               data-testid="invoice-editor-shipping"
             />
           </div>
-          <div className="space-y-1.5 pt-1 border-t">
-            <label className="block text-[10px] uppercase tracking-wide text-slate-500">Tax</label>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm text-slate-500">Tax</span>
             <input
               type="number" step="0.01" value={tax}
               onChange={(e) => setTax(e.target.value)}
-              className="w-full border rounded px-2 py-1.5 text-sm text-right font-mono-num"
+              className="w-28 border rounded px-2 py-1 text-sm text-right font-mono-num"
               data-testid="invoice-editor-tax"
             />
           </div>
-          <div className="pt-2 border-t flex items-center justify-between">
-            <span className="text-sm font-heading font-semibold text-slate-800">Total</span>
-            <span className="text-lg font-mono-num font-semibold text-slate-900" data-testid="invoice-editor-total">
-              {fmtMoney(totals.total)}
-            </span>
+          <div className="flex items-center justify-between pt-2 border-t">
+            <span className="text-base font-semibold text-slate-800">Total</span>
+            <span
+              className="text-lg font-mono-num font-semibold text-slate-900"
+              data-testid="invoice-editor-total"
+            >{fmtMoney(totals.total)}</span>
           </div>
-        </section>
-      </aside>
-    </div>
+          <div className="flex items-center justify-between border-t pt-2">
+            <span className="text-sm font-medium text-slate-700">Amount Due</span>
+            <span className="text-sm font-mono-num font-semibold text-emerald-700">{fmtMoney(totals.total)}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Notes / Terms + attachments */}
+      <div className="px-6 py-5 border-t bg-slate-50/50 grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <div className="text-xs font-semibold text-slate-700 mb-1">Notes / Terms</div>
+          <p className="text-[11px] text-slate-500 mb-2">Enter notes or terms of service that are visible to your customer</p>
+          <textarea
+            data-testid="invoice-editor-notes"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={3}
+            className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+            placeholder="Thanks for your business!"
+          />
+        </div>
+        <div>
+          <div className="text-xs font-semibold text-slate-700 mb-1">Internal notes</div>
+          <p className="text-[11px] text-slate-500 mb-2">Private. Never shown on the PDF.</p>
+          <textarea
+            data-testid="invoice-editor-internal-notes"
+            value={internalNotes}
+            onChange={(e) => setInternalNotes(e.target.value)}
+            rows={3}
+            className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+            placeholder="For your team's eyes only."
+          />
+        </div>
+        <div className="md:col-span-2">
+          <div className="text-xs font-semibold text-slate-700 mb-1">Attachments</div>
+          <input
+            type="file"
+            multiple
+            onChange={(e) => onAttach(Array.from(e.target.files || []))}
+            className="text-xs"
+            data-testid="invoice-editor-attach"
+          />
+          {attachments.length > 0 && (
+            <ul className="mt-2 divide-y border rounded bg-white">
+              {attachments.map((a, i) => (
+                <li key={i} className="flex items-center justify-between px-3 py-2 text-xs"
+                    data-testid={`invoice-editor-attachment-${i}`}>
+                  <span className="inline-flex items-center gap-1.5 truncate">
+                    <Paperclip size={12} /> {a.filename}
+                    <span className="text-slate-400">({Math.round((a.size || 0) / 1024)} KB)</span>
+                  </span>
+                  <button
+                    onClick={() => removeAttachment(i)}
+                    className="text-red-500 hover:bg-red-50 rounded p-1"
+                    data-testid={`invoice-editor-attachment-${i}-remove`}
+                  ><Trash2 size={12} /></button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 
-function Field({ label, hint, children }) {
+function MetaRow({ label, hint, children }) {
   return (
-    <div>
-      <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">{label}</label>
+    <div className="flex items-center justify-between gap-3">
+      <div className="text-sm text-slate-500">
+        {label}
+        {hint && <span className="ml-2 text-[10px] uppercase tracking-wide text-slate-400">{hint}</span>}
+      </div>
       {children}
-      {hint && <p className="text-[11px] text-slate-400 mt-1">{hint}</p>}
     </div>
   );
 }
 
-function Row({ label, value }) {
+function TotalsRow({ label, value, testId }) {
   return (
-    <div className="flex items-center justify-between text-sm">
-      <span className="text-slate-500">{label}</span>
-      <span className="font-mono-num text-slate-800">{value}</span>
+    <div className="flex items-center justify-between">
+      <span className="text-sm text-slate-500">{label}</span>
+      <span className="text-sm font-mono-num text-slate-800" data-testid={testId}>{value}</span>
     </div>
   );
 }
@@ -687,8 +839,7 @@ function SendEmailDialog({ to, setTo, sending, onClose, onSend }) {
         <div className="space-y-1">
           <label className="block text-[10px] uppercase tracking-wide text-slate-500">Send to</label>
           <input
-            type="email"
-            value={to}
+            type="email" value={to}
             onChange={(e) => setTo(e.target.value)}
             placeholder="customer@example.com"
             className="w-full border rounded px-2 py-1.5 text-sm"

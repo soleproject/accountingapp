@@ -105,6 +105,11 @@ class InvoiceCreate(BaseModel):
     discount_type: Optional[str] = "amount"  # "amount" | "percent"
     internal_notes: Optional[str] = ""       # never rendered on PDF
     attachments: Optional[list] = []         # [{filename, data_url, size}]
+    # Wave-style header — optional per-invoice title and summary that
+    # appear at the top of the PDF (below the logo). Title defaults to
+    # "Invoice" if blank.
+    title: Optional[str] = ""
+    summary: Optional[str] = ""
 
 
 class BillCreate(BaseModel):

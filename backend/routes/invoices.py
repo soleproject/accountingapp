@@ -109,6 +109,8 @@ async def create_invoice(cid: str, inp: InvoiceCreate, user: dict = Depends(get_
         "terms": inp.terms or "",
         "internal_notes": inp.internal_notes or "",
         "attachments": inp.attachments or [],
+        "title": inp.title or "",
+        "summary": inp.summary or "",
         "created_at": now, "updated_at": now,
     }
     await db.invoices.insert_one(doc)
