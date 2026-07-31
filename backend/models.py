@@ -188,6 +188,10 @@ class PaymentCreate(BaseModel):
     linked_bill_id: Optional[str] = None
     bank_account_id: Optional[str] = None
     memo: Optional[str] = ""
+    # Feb 2026 — Record-Payment modal can auto-fill from an existing
+    # bank transaction. Setting this locks the payment to the txn so
+    # cascade-delete stays honest.
+    source_transaction_id: Optional[str] = None
 
 
 class ReceiptCreate(BaseModel):

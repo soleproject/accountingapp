@@ -83,6 +83,18 @@ async def create_payment(cid: str, inp: PaymentCreate, user: dict = Depends(get_
             status = "paid" if bal <= 0.01 else "partial"
             await db.bills.update_one({"id": bill["id"]},
                 {"$set": {"balance_due": round(bal, 2), "status": status}})
+    # Stamp the reverse-link back on the source transaction so
+    # cascade-on-transaction-delete knows to reverse this payment.
+    if inp.source_transaction_id:
+        await db.transactions.update_one(
+            {"id": inp.source_transaction_id, "company_id": cid},
+            {"$set": {
+                "linked_payment_id": pid,
+                "linked_invoice_id": inp.linked_invoice_id,
+                "linked_bill_id": inp.linked_bill_id,
+                "updated_at": now,
+            }},
+        )
     return {"id": pid}
 
 
