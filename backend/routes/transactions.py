@@ -1429,7 +1429,11 @@ async def link_transaction(
 
     await db.transactions.update_one({"id": tid, "company_id": cid}, {"$set": upd})
     await _invalidate_dash(cid)
-    return {"ok": True, "linked_payment_id": upd.get("linked_payment_id")}
+    # Surface the existing linked_payment_id on idempotent re-links —
+    # `upd` only holds the newly-set pid, so fall back to the txn's
+    # stored value when the caller didn't change the link.
+    final_pid = upd.get("linked_payment_id") if "linked_payment_id" in upd else txn.get("linked_payment_id")
+    return {"ok": True, "linked_payment_id": final_pid}
 
 
 @router.post("/companies/{cid}/transactions/{tid}/approve")

@@ -17,6 +17,22 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Auto-Payment on Link, Doc PDF preview, Customer Statement email
+
+**Backend**
+- `routes/transactions.py` — `POST /transactions/{tid}/link` now auto-creates a Payment row when the txn is linked to a bill or invoice: amount=abs(txn.amount), date=txn.date, contact copied from the doc, `source_transaction_id=tid`. Applies the balance impact on the doc (partial/paid). Idempotent — same doc twice = same payment. Unlinking (empty string) deletes the payment AND reverses the balance.
+- `document_pdfs.py` (new) — reportlab renderer used by two new endpoints:
+  - `GET /companies/{cid}/invoices/{iid}/pdf` — invoice PDF (header + BILL TO + line items + totals + applied payments).
+  - `GET /companies/{cid}/bills/{bid}/pdf` — same for bills.
+- `routes/items.py` — new `POST /customers/{customer_id}/send-statement?start=&end=&to=` builds an HTML statement of outstanding invoices and routes it through `email_dispatcher.dispatch(kind='customer_statement')`. Filters to non-draft, non-void, balance_due>0, in-range. 404 for unknown customer, 400 when no email on file and no `to` override.
+- `email_dispatcher.py` — added `customer_statement` to `DEFAULT_PREFS` (opt-outable).
+
+**Frontend**
+- `pages/Payments.jsx` — new Link2 icon on rows with `source_transaction_id` linking to `/accounting/transactions?open=<tid>`; the linked-doc column becomes a hyperlink.
+- `pages/Transactions.jsx` — `?open=<tid>` auto-opens the Edit Transaction modal for that txn.
+- `components/ContactDetailModal.jsx` — Eye icon on each doc row opens an inline PDF preview modal (iframe over a blob URL so auth stays intact); customer-mode gains a green **Send statement** button that opens `StatementModal` with the customer's email pre-filled and a Send button.
+- Testing: **7/8 backend pytest + Playwright frontend E2E 100%** on all critical flows (`/app/test_reports/iteration_63.json`). One-liner fix applied to make the link endpoint return the existing `linked_payment_id` on idempotent re-links.
+
 ### Feb 2026 — Customer Revenue Report + Vendor/Customer Drill-Down + Auto-Suggest Link
 
 **Backend (`routes/items.py`)**
