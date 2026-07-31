@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams, Link } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import {
-  ArrowLeft, Save, Plus, Trash2, Paperclip, Eye, Pencil,
-  X, ChevronDown, ChevronUp, Upload,
+  ArrowLeft, Save, Plus, Trash2, Paperclip, Eye, Pencil, X,
 } from "lucide-react";
-import ItemPicker from "@/components/ItemPicker";
 
 const TERMS_OPTIONS = [
   { label: "Due on receipt", days: 0 },
@@ -31,7 +29,7 @@ export default function BillEditor() {
   const { id } = useParams();
   const editMode = !!id;
   const navigate = useNavigate();
-  const { currentId, current, refresh: refreshCompany } = useCompany();
+  const { currentId } = useCompany();
 
   const [tab, setTab] = useState("edit");
   const [loading, setLoading] = useState(editMode);
@@ -39,6 +37,7 @@ export default function BillEditor() {
 
   const [contacts, setContacts] = useState([]);
   const [itemsCatalog, setItemsCatalog] = useState([]);
+  const [expenseAccounts, setExpenseAccounts] = useState([]);
   const [taxes, setTaxes] = useState([]);
   const [taxModalLineIdx, setTaxModalLineIdx] = useState(null);
 
@@ -68,15 +67,22 @@ export default function BillEditor() {
     let cancelled = false;
     (async () => {
       try {
-        const [c, it, tx] = await Promise.all([
+        const [c, it, tx, ac] = await Promise.all([
           api.get(`/companies/${currentId}/contacts`),
           api.get(`/companies/${currentId}/items?usage=purchases`),
           api.get(`/companies/${currentId}/taxes`),
+          api.get(`/companies/${currentId}/accounts`),
         ]);
         if (cancelled) return;
         setContacts(c.data.contacts || []);
         setItemsCatalog(it.data.items || []);
         setTaxes(tx.data.taxes || []);
+        // Expense-type accounts only, sorted by numeric code so 6000s
+        // (SG&A) appear before 8000s (other expenses) etc.
+        const accs = (ac.data.accounts || [])
+          .filter(a => (a.type || "").toLowerCase() === "expense")
+          .sort((x, y) => String(x.code || "").localeCompare(String(y.code || "")));
+        setExpenseAccounts(accs);
         if (editMode) {
           const r = await api.get(`/companies/${currentId}/bills/${id}`);
           if (cancelled) return;
@@ -161,27 +167,6 @@ export default function BillEditor() {
     }
   };
   const removeAttachment = (i) => setAttachments(prev => prev.filter((_, j) => j !== i));
-
-  const onLogoUpload = async (file) => {
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { toast.error("Logo must be under 5 MB"); return; }
-    const dataUrl = await new Promise((res) => {
-      const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(file);
-    });
-    try {
-      await api.patch(`/companies/${currentId}`, { logo_data_url: dataUrl });
-      await refreshCompany();
-      toast.success("Logo saved");
-    } catch (e) { toast.error(e.response?.data?.detail || "Logo save failed"); }
-  };
-  const onLogoRemove = async () => {
-    try {
-      await api.patch(`/companies/${currentId}`, { logo_data_url: "" });
-      await refreshCompany();
-      toast.success("Logo removed");
-    } catch (e) { toast.error(e.response?.data?.detail || "Remove failed"); }
-  };
-
   const buildBody = () => {
     const c = contacts.find(x => x.id === contact);
     return {
@@ -311,36 +296,25 @@ export default function BillEditor() {
           )}
         </div>
       ) : (
-        <>
-          <BusinessHeaderCard
-            company={current}
-            title={title} setTitle={setTitle}
-            summary={summary} setSummary={setSummary}
-            onLogoUpload={onLogoUpload}
-            onLogoRemove={onLogoRemove}
-            defaultTitlePlaceholder="Bill"
-            summaryPlaceholder="Summary (e.g. purchase order name)"
-          />
-          <EditForm
-            {...{
-              contacts, itemsCatalog, taxes, setTaxes,
-              contact, setContact,
-              number, setNumber,
-              issue, setIssue, due, setDue,
-              termsLabel, setTermsLabel,
-              poNumber, setPoNumber,
-              status, setStatus,
-              lines, setLines, addLine, updLine, removeLine,
-              tax, setTax, shipping, setShipping,
-              discount, setDiscount, discountType, setDiscountType,
-              notes, setNotes, internalNotes, setInternalNotes,
-              attachments, onAttach, removeAttachment,
-              totals,
-              currentId,
-              taxModalLineIdx, setTaxModalLineIdx,
-            }}
-          />
-        </>
+        <EditForm
+          {...{
+            contacts, itemsCatalog, taxes, setTaxes, expenseAccounts,
+            contact, setContact,
+            number, setNumber,
+            issue, setIssue, due, setDue,
+            termsLabel, setTermsLabel,
+            poNumber, setPoNumber,
+            status, setStatus,
+            lines, setLines, addLine, updLine, removeLine,
+            tax, setTax, shipping, setShipping,
+            discount, setDiscount, discountType, setDiscountType,
+            notes, setNotes, internalNotes, setInternalNotes,
+            attachments, onAttach, removeAttachment,
+            totals,
+            currentId,
+            taxModalLineIdx, setTaxModalLineIdx,
+          }}
+        />
       )}
 
       {taxModalLineIdx !== null && (
@@ -361,94 +335,21 @@ export default function BillEditor() {
   );
 }
 
-function BusinessHeaderCard({ company, title, setTitle, summary, setSummary, onLogoUpload, onLogoRemove,
-                              defaultTitlePlaceholder = "Invoice",
-                              summaryPlaceholder = "Summary" }) {
-  const [open, setOpen] = useState(true);
-  const logo = company?.logo_data_url || "";
-  const fileRef = useRef(null);
-  const [dragOver, setDragOver] = useState(false);
-  const handleDrop = (e) => {
-    e.preventDefault(); e.stopPropagation();
-    setDragOver(false);
-    const f = e.dataTransfer.files?.[0]; if (f) onLogoUpload(f);
-  };
-  return (
-    <section className="rounded-lg border bg-white shadow-sm overflow-hidden" data-testid="bill-editor-business-card">
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        data-testid="bill-editor-business-toggle"
-      >
-        <span>Business address and contact details, title, summary, and logo</span>
-        {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-      </button>
-      {open && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-4 pb-4">
-          <div>
-            {logo ? (
-              <div className="rounded-lg border bg-slate-50 p-4 flex flex-col items-start gap-3">
-                <img src={logo} alt="Company logo" className="max-h-24 max-w-full rounded" />
-                <div className="flex items-center gap-3 text-xs">
-                  <button onClick={() => fileRef.current?.click()}
-                          className="inline-flex items-center gap-1 text-indigo-600 hover:underline">
-                    <Upload size={12} /> Replace logo</button>
-                  <button onClick={onLogoRemove} className="text-red-600 hover:underline">Remove logo</button>
-                </div>
-              </div>
-            ) : (
-              <label
-                htmlFor="bill-logo-upload"
-                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={handleDrop}
-                className={`block rounded-lg border-2 border-dashed p-6 text-center cursor-pointer transition ${
-                  dragOver ? "border-indigo-400 bg-indigo-50" : "border-slate-300 bg-slate-50 hover:bg-slate-100"
-                }`}
-              >
-                <div className="mx-auto w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center mb-2">
-                  <Upload className="text-indigo-500" size={18} />
-                </div>
-                <div className="text-sm">
-                  <span className="text-indigo-600 font-medium">Browse</span>
-                  <span className="text-slate-500"> or drop your logo here</span>
-                </div>
-                <div className="text-[11px] text-slate-400 mt-2 leading-relaxed">
-                  Maximum 5 MB in size.<br/>JPG, PNG, or GIF formats.<br/>Recommended size: 300 x 200 pixels.
-                </div>
-              </label>
-            )}
-            <input id="bill-logo-upload" ref={fileRef} type="file" accept="image/*" className="hidden"
-                   onChange={(e) => { const f = e.target.files?.[0]; if (f) onLogoUpload(f); e.target.value = ""; }} />
-          </div>
-          <div className="flex flex-col gap-3">
-            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)}
-                   placeholder={defaultTitlePlaceholder}
-                   className="w-full text-right text-2xl font-heading font-semibold text-slate-800 border rounded px-3 py-2 focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
-                   data-testid="bill-editor-title" />
-            <input type="text" value={summary} onChange={(e) => setSummary(e.target.value)}
-                   placeholder={summaryPlaceholder}
-                   className="w-full text-right text-sm text-slate-600 border rounded px-3 py-2 italic focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
-                   data-testid="bill-editor-summary" />
-            <div className="text-right text-sm text-slate-700 leading-relaxed">
-              <div className="font-semibold text-slate-800">{company?.name || "Your Company"}</div>
-              {company?.address && <div>{company.address}</div>}
-              {company?.phone && <div>{company.phone}</div>}
-              {company?.email && <div>{company.email}</div>}
-              {company?.website && <div>{company.website}</div>}
-              {company?.tax_id && <div>Tax ID: {company.tax_id}</div>}
-              <Link to="/settings" className="inline-block text-xs text-indigo-600 hover:underline mt-1">Edit business info</Link>
-            </div>
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Wave-style Bill EditForm — compact meta grid on top, inline-columns line
+// items (Item · Expense Category · Description · Qty · Price · Tax · Amount),
+// right-aligned totals stack, attachments below.
+//
+// Deliberately DOES NOT render the branding/logo card that Invoices have —
+// bills are internal purchase records and never leave the pro's inbox.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const TERMS_LABEL_TO_DAYS = {
+  "Due on receipt": 0, "Net 15": 15, "Net 30": 30, "Net 60": 60,
+};
 
 function EditForm({
-  contacts, itemsCatalog, taxes, setTaxes,
+  contacts, itemsCatalog, taxes, setTaxes, expenseAccounts,
   contact, setContact,
   number, setNumber,
   issue, setIssue, due, setDue,
@@ -475,146 +376,279 @@ function EditForm({
     if (!t) return;
     updLine(i, { tax_id: t.id, tax_name: t.name, tax_rate: Number(t.rate || 0) });
   };
+  const applyItemToLine = (i, itemId) => {
+    if (!itemId) {
+      updLine(i, { item_id: null, item_name: "" });
+      return;
+    }
+    const it = itemsCatalog.find(x => x.id === itemId);
+    if (!it) return;
+    updLine(i, {
+      item_id: it.id,
+      item_name: it.name,
+      // Only auto-fill description when the row description is empty
+      // — respect any hand-typed override.
+      description: (lines[i]?.description) || it.description || it.name || "",
+      rate: Number(it.expense_price ?? it.price ?? lines[i]?.rate ?? 0),
+      expense_account_id: it.expense_account_id || lines[i]?.expense_account_id || null,
+      expense_account_name: it.expense_account_name || lines[i]?.expense_account_name || "",
+    });
+  };
+  const applyExpenseToLine = (i, acctId) => {
+    if (!acctId) {
+      updLine(i, { expense_account_id: null, expense_account_name: "" });
+      return;
+    }
+    const a = expenseAccounts.find(x => x.id === acctId);
+    if (!a) return;
+    updLine(i, { expense_account_id: a.id, expense_account_name: a.name });
+  };
+  // Every line needs a category before Save enables — accountant-strict.
+  const missingCategoryCount = lines.filter(l => !l.expense_account_id).length;
+
   return (
-    <section className="rounded-lg border bg-white shadow-xl overflow-hidden ring-1 ring-slate-100">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 px-6 py-5">
-        <div>
-          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Vendor</label>
-          <select
-            data-testid="bill-editor-vendor"
-            value={contact}
-            onChange={(e) => setContact(e.target.value)}
-            className="w-full border rounded px-3 py-2 text-sm bg-white"
-          >
-            <option value="">Choose vendor…</option>
-            {vendorContacts.map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+    <section className="rounded-lg border bg-white shadow-xl overflow-hidden ring-1 ring-slate-100" data-testid="bill-editor-form">
+      {/* Compact top meta grid — Wave-style single band above the table */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4 px-6 py-5">
+        {/* Column 1 — Vendor + Currency */}
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm text-slate-500 mb-1">Vendor <span className="text-red-500">*</span></label>
+            <select
+              data-testid="bill-editor-vendor"
+              value={contact}
+              onChange={(e) => setContact(e.target.value)}
+              className="w-full border rounded px-3 py-2 text-sm bg-white"
+            >
+              <option value="">Choose…</option>
+              {vendorContacts.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm text-slate-500 mb-1">Currency</label>
+            <div
+              className="w-full border rounded px-3 py-2 text-sm bg-slate-50 text-slate-500 select-none"
+              data-testid="bill-editor-currency"
+              title="Uses the company's default currency"
+            >USD — U.S. dollar</div>
+          </div>
         </div>
-        <div className="space-y-2 text-sm">
-          <MetaRow label="Bill number">
-            <input data-testid="bill-editor-number" value={number} onChange={(e) => setNumber(e.target.value)}
-                   placeholder="Auto-assigned"
-                   className="w-40 border rounded px-2 py-1 text-sm font-mono-num text-right" />
-          </MetaRow>
-          <MetaRow label="P.O./S.O. number">
-            <input data-testid="bill-editor-po" value={poNumber} onChange={(e) => setPoNumber(e.target.value)}
-                   className="w-40 border rounded px-2 py-1 text-sm font-mono-num text-right" />
-          </MetaRow>
-          <MetaRow label="Bill date">
-            <input data-testid="bill-editor-issue" type="date" value={issue} onChange={(e) => setIssue(e.target.value)}
-                   className="w-40 border rounded px-2 py-1 text-sm" />
-          </MetaRow>
-          <MetaRow label="Payment due" hint={termsLabel !== "Custom" ? termsLabel : ""}>
-            <div className="flex flex-col items-end gap-1">
-              <input data-testid="bill-editor-due" type="date" value={due}
-                     onChange={(e) => { setDue(e.target.value); setTermsLabel("Custom"); }}
-                     className="w-40 border rounded px-2 py-1 text-sm" />
-              <select data-testid="bill-editor-terms" value={termsLabel}
-                      onChange={(e) => setTermsLabel(e.target.value)}
-                      className="w-40 border rounded px-2 py-1 text-xs text-slate-600 bg-white">
-                {TERMS_OPTIONS.map(o => <option key={o.label} value={o.label}>{o.label}</option>)}
+
+        {/* Column 2 — Dates + PO */}
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm text-slate-500 mb-1">Bill Date</label>
+            <input
+              data-testid="bill-editor-issue"
+              type="date"
+              value={issue}
+              onChange={(e) => setIssue(e.target.value)}
+              className="w-full border rounded px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <div className="flex items-center justify-between">
+              <label className="text-sm text-slate-500">Due Date</label>
+              <select
+                data-testid="bill-editor-terms"
+                value={termsLabel}
+                onChange={(e) => setTermsLabel(e.target.value)}
+                className="text-xs text-slate-500 bg-transparent border-0 focus:outline-none"
+              >
+                {["Due on receipt", "Net 15", "Net 30", "Net 60", "Custom"].map(l => (
+                  <option key={l} value={l}>{l}</option>
+                ))}
               </select>
             </div>
-          </MetaRow>
-          <MetaRow label="Status">
-            <select data-testid="bill-editor-status" value={status} onChange={(e) => setStatus(e.target.value)}
-                    className="w-40 border rounded px-2 py-1 text-sm">
+            <input
+              data-testid="bill-editor-due"
+              type="date"
+              value={due}
+              onChange={(e) => { setDue(e.target.value); setTermsLabel("Custom"); }}
+              className="w-full border rounded px-3 py-2 text-sm mt-1"
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-500 mb-1">P.O./S.O.</label>
+            <input
+              data-testid="bill-editor-po"
+              value={poNumber}
+              onChange={(e) => setPoNumber(e.target.value)}
+              className="w-full border rounded px-3 py-2 text-sm font-mono-num"
+            />
+          </div>
+        </div>
+
+        {/* Column 3 — Bill # + Notes + Status */}
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm text-slate-500 mb-1">Bill #</label>
+            <input
+              data-testid="bill-editor-number"
+              value={number}
+              onChange={(e) => setNumber(e.target.value)}
+              placeholder="Auto-assigned"
+              className="w-full border rounded px-3 py-2 text-sm font-mono-num"
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-500 mb-1">Notes</label>
+            <textarea
+              data-testid="bill-editor-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={3}
+              className="w-full border rounded px-3 py-2 text-sm resize-none"
+              placeholder="Payment terms, ACH details, memo…"
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-500 mb-1">Status</label>
+            <select
+              data-testid="bill-editor-status"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              className="w-full border rounded px-3 py-2 text-sm bg-white"
+            >
               <option value="open">Open</option>
               <option value="partial">Partial</option>
               <option value="paid">Paid</option>
             </select>
-          </MetaRow>
-        </div>
-      </div>
-
-      <div className="px-6">
-        <div className="border-t border-b bg-slate-50 grid grid-cols-12 gap-2 px-1 py-2 text-[10px] uppercase tracking-wide text-slate-500">
-          <div className="col-span-6">Items</div>
-          <div className="col-span-2 text-right">Quantity</div>
-          <div className="col-span-2 text-right">Price</div>
-          <div className="col-span-2 text-right">Amount</div>
-        </div>
-        <div className="divide-y">
-          {lines.map((l, i) => (
-            <div key={i} className="py-2" data-testid={`bill-editor-line-${i}`}>
-              <div className="grid grid-cols-12 gap-2 items-center">
-                <div className="col-span-6">
-                  <ItemPicker
-                    items={itemsCatalog}
-                    value={l.description}
-                    onChangeText={(txt) => updLine(i, { description: txt })}
-                    onPickItem={(it) => updLine(i, {
-                      item_id: it.id, item_name: it.name,
-                      description: it.description || it.name,
-                      rate: Number(it.expense_price ?? it.price ?? 0),
-                      expense_account_id: it.expense_account_id || null,
-                      expense_account_name: it.expense_account_name || "",
-                      category: it.expense_account_name || "",
-                    })}
-                    testId={`bill-editor-line-${i}`}
-                  />
-                </div>
-                <input type="number" step="0.01" value={l.quantity}
-                       onChange={(e) => updLine(i, { quantity: Number(e.target.value) })}
-                       className="col-span-2 border rounded px-2 py-1.5 text-sm text-right font-mono-num"
-                       data-testid={`bill-editor-line-${i}-qty`} />
-                <input type="number" step="0.01" value={l.rate}
-                       onChange={(e) => updLine(i, { rate: Number(e.target.value) })}
-                       className="col-span-2 border rounded px-2 py-1.5 text-sm text-right font-mono-num"
-                       data-testid={`bill-editor-line-${i}-rate`} />
-                <div className="col-span-1 py-1.5 text-right font-mono-num text-sm">{fmtMoney(l.amount)}</div>
-                <button onClick={() => removeLine(i)} disabled={lines.length === 1}
-                        className="col-span-1 justify-self-end p-1 rounded hover:bg-red-50 text-red-500 disabled:opacity-30"
-                        data-testid={`bill-editor-line-${i}-remove`}>
-                  <Trash2 size={13} />
-                </button>
-              </div>
-              <div className="grid grid-cols-12 gap-2 items-center mt-1 pl-1">
-                <div className="col-span-6">
-                  <span className="text-xs text-indigo-600 hover:underline cursor-default"
-                        title={l.expense_account_name || "Set by picking an item"}>
-                    {l.expense_account_name ? `Expense · ${l.expense_account_name}` : "Edit expense account"}
-                  </span>
-                </div>
-                <div className="col-span-4 flex items-center justify-end gap-2">
-                  <span className="text-xs text-slate-500">Tax</span>
-                  <select
-                    value={l.tax_id || ""}
-                    onChange={(e) => applyTaxToLine(i, e.target.value)}
-                    className="border rounded px-2 py-1 text-xs bg-white min-w-[160px]"
-                    data-testid={`bill-editor-line-${i}-tax`}
-                  >
-                    <option value="">Select a tax</option>
-                    {taxes.map(t => (
-                      <option key={t.id} value={t.id}>{t.name} · {Number(t.rate).toFixed(2)}%</option>
-                    ))}
-                    <option value="__new__">+ Create a new tax…</option>
-                  </select>
-                </div>
-                <div className="col-span-2 text-right text-xs font-mono-num text-slate-500">
-                  {Number(l.tax_rate || 0) > 0
-                    ? fmtMoney(Number(l.amount || 0) * Number(l.tax_rate) / 100)
-                    : "—"}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-        <button onClick={addLine}
-                className="mt-2 inline-flex items-center gap-1.5 text-xs text-indigo-600 hover:underline py-2"
-                data-testid="bill-editor-line-add">
-          <Plus size={12} /> Add an item
-        </button>
-      </div>
-
-      <div className="px-6 pb-5">
-        <div className="ml-auto max-w-sm space-y-2 pt-3 border-t">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-slate-500">Subtotal</span>
-            <span className="text-sm font-mono-num text-slate-800" data-testid="bill-editor-subtotal">{fmtMoney(totals.subtotal)}</span>
           </div>
+        </div>
+      </div>
+
+      {/* Line items — Wave-style inline columns */}
+      <div className="border-t bg-slate-50/50 px-4 py-4">
+        <div className="overflow-x-auto rounded-md border bg-white">
+          <table className="w-full text-sm" data-testid="bill-editor-lines-table">
+            <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="text-left px-3 py-2 w-[140px]">Item</th>
+                <th className="text-left px-3 py-2 w-[170px]">
+                  Expense Category <span className="text-red-500 normal-case">*</span>
+                </th>
+                <th className="text-left px-3 py-2">Description</th>
+                <th className="text-right px-3 py-2 w-[70px]">Qty</th>
+                <th className="text-right px-3 py-2 w-[90px]">Price</th>
+                <th className="text-left px-3 py-2 w-[160px]">Tax</th>
+                <th className="text-right px-3 py-2 w-[100px]">Amount</th>
+                <th className="w-[40px]"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {lines.map((l, i) => {
+                const missingCat = !l.expense_account_id;
+                return (
+                  <tr key={i} data-testid={`bill-editor-line-${i}`}
+                      className={missingCat ? "bg-red-50/40" : ""}>
+                    <td className="px-2 py-1.5">
+                      <select
+                        value={l.item_id || ""}
+                        onChange={(e) => applyItemToLine(i, e.target.value)}
+                        className="w-full border rounded px-2 py-1 text-sm bg-white"
+                        data-testid={`bill-editor-line-${i}-item`}
+                      >
+                        <option value="">Choose…</option>
+                        {itemsCatalog.map(it => (
+                          <option key={it.id} value={it.id}>{it.name}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <select
+                        value={l.expense_account_id || ""}
+                        onChange={(e) => applyExpenseToLine(i, e.target.value)}
+                        className={`w-full border rounded px-2 py-1 text-sm bg-white ${missingCat ? "border-red-300" : ""}`}
+                        data-testid={`bill-editor-line-${i}-category`}
+                      >
+                        <option value="">Choose…</option>
+                        {expenseAccounts.map(a => (
+                          <option key={a.id} value={a.id}>
+                            {a.code ? `${a.code} · ` : ""}{a.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <input
+                        value={l.description || ""}
+                        onChange={(e) => updLine(i, { description: e.target.value })}
+                        placeholder="Add a description"
+                        className="w-full border rounded px-2 py-1 text-sm"
+                        data-testid={`bill-editor-line-${i}-desc`}
+                      />
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <input
+                        type="number" step="0.01"
+                        value={l.quantity}
+                        onChange={(e) => updLine(i, { quantity: Number(e.target.value) })}
+                        className="w-full border rounded px-2 py-1 text-sm text-right font-mono-num"
+                        data-testid={`bill-editor-line-${i}-qty`}
+                      />
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <input
+                        type="number" step="0.01"
+                        value={l.rate}
+                        onChange={(e) => updLine(i, { rate: Number(e.target.value) })}
+                        className="w-full border rounded px-2 py-1 text-sm text-right font-mono-num"
+                        data-testid={`bill-editor-line-${i}-rate`}
+                      />
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <select
+                        value={l.tax_id || ""}
+                        onChange={(e) => applyTaxToLine(i, e.target.value)}
+                        className="w-full border rounded px-2 py-1 text-sm bg-white"
+                        data-testid={`bill-editor-line-${i}-tax`}
+                      >
+                        <option value="">—</option>
+                        {taxes.map(t => (
+                          <option key={t.id} value={t.id}>{t.name} · {Number(t.rate).toFixed(2)}%</option>
+                        ))}
+                        <option value="__new__">+ Create a new tax…</option>
+                      </select>
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-mono-num text-sm text-slate-800">
+                      {fmtMoney(l.amount)}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <button
+                        onClick={() => removeLine(i)}
+                        disabled={lines.length === 1}
+                        className="p-1 rounded hover:bg-red-50 text-red-500 disabled:opacity-30"
+                        data-testid={`bill-editor-line-${i}-remove`}
+                      ><Trash2 size={13} /></button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="flex items-center justify-between mt-3">
+          <button
+            onClick={addLine}
+            className="inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:underline"
+            data-testid="bill-editor-line-add"
+          ><Plus size={14} /> Add a line</button>
+          {missingCategoryCount > 0 && (
+            <span className="text-[11px] text-red-600 inline-flex items-center gap-1" data-testid="bill-editor-cat-warning">
+              {missingCategoryCount} line{missingCategoryCount > 1 ? "s" : ""} still need an expense category.
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Right-aligned totals stack — Wave layout */}
+      <div className="px-6 py-5 border-t">
+        <div className="ml-auto max-w-sm space-y-2">
+          <TotalsRow label="Subtotal" value={fmtMoney(totals.subtotal)} testId="bill-editor-subtotal" />
           <div className="flex items-center justify-between gap-3">
             <span className="text-sm text-slate-500">Discount</span>
             <div className="flex items-center gap-2">
@@ -644,40 +678,41 @@ function EditForm({
                    data-testid="bill-editor-shipping" />
           </div>
           <div className="flex items-center justify-between gap-3">
-            <span className="text-sm text-slate-500">Tax {totals.lineTax > 0 && <span className="text-[10px] text-slate-400">(includes ${totals.lineTax.toFixed(2)} per-line)</span>}</span>
+            <span className="text-sm text-slate-500">
+              Tax {totals.lineTax > 0 && <span className="text-[10px] text-slate-400">(includes ${totals.lineTax.toFixed(2)} per-line)</span>}
+            </span>
             <input type="number" step="0.01" value={tax}
                    onChange={(e) => setTax(e.target.value)}
                    className="w-28 border rounded px-2 py-1 text-sm text-right font-mono-num"
                    data-testid="bill-editor-tax" />
           </div>
           <div className="flex items-center justify-between pt-2 border-t">
-            <span className="text-base font-semibold text-slate-800">Total</span>
+            <span className="text-base font-semibold text-slate-800">Total (USD)</span>
             <span className="text-lg font-mono-num font-semibold text-slate-900" data-testid="bill-editor-total">{fmtMoney(totals.total)}</span>
           </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-slate-500">Total Paid (USD)</span>
+            <span className="text-sm font-mono-num text-slate-800" data-testid="bill-editor-paid">$0.00</span>
+          </div>
           <div className="flex items-center justify-between border-t pt-2">
-            <span className="text-sm font-medium text-slate-700">Amount Due</span>
-            <span className="text-sm font-mono-num font-semibold text-red-700">{fmtMoney(totals.total)}</span>
+            <span className="text-sm font-medium text-slate-700">Amount Due (USD)</span>
+            <span className="text-sm font-mono-num font-semibold text-red-700" data-testid="bill-editor-due-amt">{fmtMoney(totals.total)}</span>
           </div>
         </div>
       </div>
 
+      {/* Attachments + Internal notes — always useful for bills */}
       <div className="px-6 py-5 border-t bg-slate-50/50 grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
-          <div className="text-xs font-semibold text-slate-700 mb-1">Notes / Terms</div>
-          <p className="text-[11px] text-slate-500 mb-2">Notes about this bill (renders on PDF preview)</p>
-          <textarea data-testid="bill-editor-notes" value={notes} onChange={(e) => setNotes(e.target.value)}
-                    rows={3} className="w-full border rounded px-2 py-1.5 text-sm bg-white"
-                    placeholder="e.g. Payment via ACH preferred" />
-        </div>
-        <div>
           <div className="text-xs font-semibold text-slate-700 mb-1">Internal notes</div>
-          <p className="text-[11px] text-slate-500 mb-2">Private. Never shown on the PDF.</p>
+          <p className="text-[11px] text-slate-500 mb-2">Private. Never leaves the app.</p>
           <textarea data-testid="bill-editor-internal-notes" value={internalNotes} onChange={(e) => setInternalNotes(e.target.value)}
                     rows={3} className="w-full border rounded px-2 py-1.5 text-sm bg-white"
                     placeholder="For your team's eyes only." />
         </div>
-        <div className="md:col-span-2">
+        <div>
           <div className="text-xs font-semibold text-slate-700 mb-1">Attachments</div>
+          <p className="text-[11px] text-slate-500 mb-2">Attach the vendor PDF, receipts, or supporting docs.</p>
           <input type="file" multiple onChange={(e) => onAttach(Array.from(e.target.files || []))}
                  className="text-xs" data-testid="bill-editor-attach" />
           {attachments.length > 0 && (
@@ -701,17 +736,16 @@ function EditForm({
   );
 }
 
-function MetaRow({ label, hint, children }) {
+function TotalsRow({ label, value, testId }) {
   return (
-    <div className="flex items-center justify-between gap-3">
-      <div className="text-sm text-slate-500">
-        {label}
-        {hint && <span className="ml-2 text-[10px] uppercase tracking-wide text-slate-400">{hint}</span>}
-      </div>
-      {children}
+    <div className="flex items-center justify-between">
+      <span className="text-sm text-slate-500">{label}</span>
+      <span className="text-sm font-mono-num text-slate-800" data-testid={testId}>{value}</span>
     </div>
   );
 }
+
+
 
 function CreateTaxDialog({ onClose, onCreated, currentId }) {
   const [name, setName] = useState("");
