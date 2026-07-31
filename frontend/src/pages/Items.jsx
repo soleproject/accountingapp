@@ -1,16 +1,19 @@
 import { useEffect, useState } from "react";
 import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
-import { Plus, Trash2, X, Loader2, Pencil, Package, Check } from "lucide-react";
+import { Plus, Trash2, X, Loader2, Pencil, Package, Check, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
+import ItemImportModal from "@/components/ItemImportModal";
 
 export default function Items() {
   const { currentId } = useCompany();
   const [items, setItems] = useState([]);
-  const [accts, setAccts] = useState([]);
+  const [revenueAccts, setRevenueAccts] = useState([]);
+  const [expenseAccts, setExpenseAccts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
 
   const load = async () => {
@@ -22,9 +25,10 @@ export default function Items() {
         api.get(`/companies/${currentId}/accounts`),
       ]);
       setItems(it.data.items || []);
-      // Revenue accounts are the sensible default target for items —
-      // the codebase uses "revenue" (some legacy seeds use "income").
-      setAccts((ac.data.accounts || []).filter(a => a.type === "revenue" || a.type === "income"));
+      const all = ac.data.accounts || [];
+      // The codebase uses "revenue" (some legacy seeds use "income").
+      setRevenueAccts(all.filter(a => a.type === "revenue" || a.type === "income"));
+      setExpenseAccts(all.filter(a => a.type === "expense" || a.type === "cogs"));
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, [currentId]);
@@ -51,13 +55,22 @@ export default function Items() {
           </h1>
           <p className="text-slate-500 text-sm mt-1">Products &amp; services you sell. Pick from this list on any invoice line to auto-fill description and price.</p>
         </div>
-        <button
-          onClick={() => setCreating(true)}
-          data-testid="items-add-btn"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs"
-        >
-          <Plus size={13} /> New item
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setImporting(true)}
+            data-testid="items-import-btn"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border bg-white text-slate-700 text-xs hover:bg-slate-50"
+          >
+            <UploadCloud size={13} /> Import CSV/Excel
+          </button>
+          <button
+            onClick={() => setCreating(true)}
+            data-testid="items-add-btn"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs"
+          >
+            <Plus size={13} /> New item
+          </button>
+        </div>
       </div>
 
       <div className="flex items-center gap-3 text-xs">
@@ -123,20 +136,28 @@ export default function Items() {
         <ItemModal
           currentId={currentId}
           item={editing}
-          accts={accts}
+          revenueAccts={revenueAccts}
+          expenseAccts={expenseAccts}
           onClose={() => { setCreating(false); setEditing(null); load(); }}
+        />
+      )}
+      {importing && (
+        <ItemImportModal
+          currentId={currentId}
+          onClose={() => { setImporting(false); load(); }}
         />
       )}
     </div>
   );
 }
 
-function ItemModal({ currentId, item, accts, onClose }) {
+function ItemModal({ currentId, item, revenueAccts, expenseAccts, onClose }) {
   const edit = !!item;
   const [name, setName] = useState(item?.name || "");
   const [description, setDescription] = useState(item?.description || "");
   const [type, setType] = useState(item?.type || "service");
   const [accountId, setAccountId] = useState(item?.income_account_id || "");
+  const [expenseAccountId, setExpenseAccountId] = useState(item?.expense_account_id || "");
   const [price, setPrice] = useState(item?.price ?? 0);
   const [sku, setSku] = useState(item?.sku || "");
   const [active, setActive] = useState(item?.active !== false);
@@ -145,13 +166,16 @@ function ItemModal({ currentId, item, accts, onClose }) {
     if (!name.trim()) { toast.error("Name is required"); return; }
     setBusy(true);
     try {
-      const acc = accts.find(a => a.id === accountId);
+      const inc = revenueAccts.find(a => a.id === accountId);
+      const exp = expenseAccts.find(a => a.id === expenseAccountId);
       const body = {
         name: name.trim(),
         description,
         type,
         income_account_id: accountId || null,
-        income_account_name: acc?.name || "",
+        income_account_name: inc?.name || "",
+        expense_account_id: expenseAccountId || null,
+        expense_account_name: exp?.name || "",
         price: Number(price) || 0,
         sku: sku || null,
         active,
@@ -207,14 +231,24 @@ function ItemModal({ currentId, item, accts, onClose }) {
           </div>
         </div>
         <div>
-          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Income account</label>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Income account · sales</label>
           <select value={accountId} onChange={(e) => setAccountId(e.target.value)}
                   className="w-full border rounded px-2 py-1.5 text-sm bg-white"
                   data-testid="item-account">
             <option value="">— Pick income account —</option>
-            {accts.map(a => <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>)}
+            {revenueAccts.map(a => <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>)}
           </select>
-          <p className="text-[10px] text-slate-400 mt-1">Categorises this item on Sales by Category and rolls up to your Income Statement.</p>
+          <p className="text-[10px] text-slate-400 mt-1">Used on invoice lines — rolls up on Sales by Category and the Income Statement.</p>
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Expense account · purchases <span className="text-slate-400 normal-case">(optional)</span></label>
+          <select value={expenseAccountId} onChange={(e) => setExpenseAccountId(e.target.value)}
+                  className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+                  data-testid="item-expense-account">
+            <option value="">— Pick expense account —</option>
+            {expenseAccts.map(a => <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>)}
+          </select>
+          <p className="text-[10px] text-slate-400 mt-1">Used on bill lines when you buy this product/service.</p>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>

@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
 import MemorizeModal from "@/components/MemorizeModal";
+import ItemPicker from "@/components/ItemPicker";
 
 const BUCKETS = [
   { key: "current", label: "Current", desc: "Not yet due", color: "emerald" },
@@ -24,6 +25,7 @@ export default function Bills() {
   const { currentId } = useCompany();
   const [items, setItems] = useState([]);
   const [contacts, setContacts] = useState([]);
+  const [itemsCatalog, setItemsCatalog] = useState([]);
   const [aging, setAging] = useState(null);
   const [creating, setCreating] = useState(false);
   const [creatingPrefill, setCreatingPrefill] = useState(null);
@@ -69,12 +71,14 @@ export default function Bills() {
   };
   const load = async () => {
     if (!currentId) return;
-    const [b, c, a] = await Promise.all([
+    const [b, c, a, it] = await Promise.all([
       api.get(`/companies/${currentId}/bills`),
       api.get(`/companies/${currentId}/contacts`),
       api.get(`/companies/${currentId}/reports/ap-aging`),
+      api.get(`/companies/${currentId}/items`),
     ]);
     setItems(b.data.bills || []); setContacts(c.data.contacts || []); setAging(a.data);
+    setItemsCatalog(it.data.items || []);
   };
   useEffect(() => { load(); }, [currentId]);
   useCreateListener("bill", (prefill) => {
@@ -243,15 +247,15 @@ export default function Bills() {
           </tbody>
         </table>
       </div>
-      {creating && <BillModal contacts={contacts} currentId={currentId} prefill={creatingPrefill}
+      {creating && <BillModal contacts={contacts} itemsCatalog={itemsCatalog} currentId={currentId} prefill={creatingPrefill}
                                 onClose={() => { setCreating(false); setCreatingPrefill(null); load(); }} />}
-      {editing && <BillModal contacts={contacts} currentId={currentId} bill={editing} onClose={() => { setEditing(null); load(); }} />}
+      {editing && <BillModal contacts={contacts} itemsCatalog={itemsCatalog} currentId={currentId} bill={editing} onClose={() => { setEditing(null); load(); }} />}
       {memorizing && <MemorizeModal currentId={currentId} source={memorizing} kind="bill" onClose={() => setMemorizing(null)} />}
     </div>
   );
 }
 
-function BillModal({ contacts, currentId, bill, prefill, onClose }) {
+function BillModal({ contacts, itemsCatalog, currentId, bill, prefill, onClose }) {
   const editMode = !!bill;
   const p = prefill || {};
   const initLines = () => {
@@ -342,7 +346,25 @@ function BillModal({ contacts, currentId, bill, prefill, onClose }) {
         <div className="space-y-2">
           {lines.map((l, i) => (
             <div key={i} className="grid grid-cols-12 gap-2">
-              <input placeholder="Description" value={l.description} onChange={(e) => upd(i, { description: e.target.value })} className="col-span-5 border rounded px-2 py-1.5 text-sm" />
+              <div className="col-span-5">
+                <ItemPicker
+                  items={itemsCatalog}
+                  value={l.description}
+                  onChangeText={(txt) => upd(i, { description: txt })}
+                  onPickItem={(it) => upd(i, {
+                    item_id: it.id,
+                    item_name: it.name,
+                    description: it.description || it.name,
+                    rate: Number(it.price || 0),
+                    // Bills use the item's expense-account mapping — falls
+                    // back to income_account when the user hasn't set one.
+                    expense_account_id: it.expense_account_id || null,
+                    expense_account_name: it.expense_account_name || "",
+                    category: it.expense_account_name || it.income_account_name || "",
+                  })}
+                  testId={`bill-line-${i}`}
+                />
+              </div>
               <input type="number" value={l.quantity} onChange={(e) => upd(i, { quantity: Number(e.target.value) })} className="col-span-2 border rounded px-2 py-1.5 text-sm font-mono-num" />
               <input type="number" value={l.rate} onChange={(e) => upd(i, { rate: Number(e.target.value) })} className="col-span-2 border rounded px-2 py-1.5 text-sm font-mono-num" />
               <div className="col-span-2 py-1.5 text-right font-mono-num">{fmtMoney(l.amount)}</div>

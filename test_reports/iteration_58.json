@@ -1,0 +1,25 @@
+{
+  "summary": "Verified Items bulk-import (CSV+Excel), header aliasing, auto-account create, idempotent re-run, no-name rejection, update_existing=false skip behavior, expense_account_id backfill on Item create/patch, and Bill line ItemPicker that persists expense_account_id/name back to the DB. Backend pytest = 10/10 passing. Frontend Playwright walked the /items Import CSV/Excel modal end-to-end (dropzone, both toggles, submit, result panel with resolved column mapping, Done button), the new Expense-account picker on the New-item modal, the ItemPicker on the /bills New-Bill line row (open menu, pick option, free-form typing), and confirmed the two just-imported items showed up immediately in the bill's ItemPicker.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_items_import_and_bills.py",
+    "/app/test_reports/pytest/items_import.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "items.py import_items: `int(idx) + 2` assumes df.index is a RangeIndex — safe today (we don't set index_col), but if a caller ever uploads a CSV with a first-column index it could mis-report the row number in errors[].",
+    "items.py _resolve_account_for_type: auto-created accounts are inserted with `code: None`. accounts.py should already tolerate this, but downstream reports that key off numeric code will show these as un-numbered.",
+    "items.py import_items reads the entire file into memory then iterates row-by-row with an `await db.accounts.find_one` per unique account (cached) and per-row `db.items.find_one` — for very large files (>5k rows) this will be slow; consider a bulk name-lookup on the whole set first.",
+    "ItemImportModal.jsx: no client-side row-count cap or size guard — a user could POST a 50MB xlsx. Not a bug, but worth a soft limit on the frontend.",
+    "Bills.jsx line row: only col-span-5 for the ItemPicker leaves the description text truncated for long item names — cosmetic."
+  ],
+  "updated_files": ["/app/backend/tests/test_items_import_and_bills.py (new)"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "client@axiom.ai / client123 — cid 540fbc73-66fd-432f-a357-39db6c84c5bd (TEST_dup)",
+  "seed_data_creation": "Backend test builds its own TEST_imp_<hex>_* items, an auto-created revenue+expense account pair, and a Bill; all deleted in test_zzz_cleanup. UI test's two TEST_uiimp_* items + the legacy leftover TEST_item_AAA_baaaa3 (from iter57) were pruned via cleanup script.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Run `pytest backend/tests/test_items_import_and_bills.py -v -o addopts=` — needs REACT_APP_BACKEND_URL env (module reads from /app/frontend/.env indirectly, but the test also honours the env var explicitly). Test contract covers data-testids: items-import-btn, item-import-modal/dropzone/file/create-accts/update-existing/submit/result/done, item-expense-account, bill-line-0-open/menu/opt-*/input. GET /api/companies/{cid}/bills/{id} returns 405 (list-only route) — use the list endpoint. Bills accept `vendor_id` field on POST (contact_id also worked as fallback in the retry branch, but wasn't hit).",
+  "rca of the issue": "N/A — no bugs found."
+}
