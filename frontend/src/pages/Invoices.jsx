@@ -321,6 +321,21 @@ function InvoiceModal({ contacts, itemsCatalog, currentId, invoice, prefill, onC
   const [tax, setTax] = useState(invoice?.tax || Number(p.tax || 0));
   const [status, setStatus] = useState(invoice?.status || p.status || "sent");
   const [number, setNumber] = useState(invoice?.number || "");
+  const [mode, setMode] = useState("edit"); // "edit" | "preview"
+  const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
+  useEffect(() => {
+    if (mode !== "preview" || !editMode || !invoice?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.get(`/companies/${currentId}/invoices/${invoice.id}/pdf`, { responseType: "blob" });
+        if (cancelled) return;
+        setPdfBlobUrl(URL.createObjectURL(new Blob([r.data], { type: "application/pdf" })));
+      } catch (e) { toast.error("Could not load preview"); }
+    })();
+    return () => { cancelled = true; if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, invoice?.id, invoice?.updated_at]);
   const upd = (i, patch) => setLines(lines.map((x, j) => j === i ? { ...x, ...patch, amount: (patch.quantity !== undefined ? patch.quantity : x.quantity) * (patch.rate !== undefined ? patch.rate : x.rate) } : x));
   const total = lines.reduce((s, l) => s + Number(l.amount || 0), 0) + Number(tax);
   const save = async () => {
@@ -346,11 +361,36 @@ function InvoiceModal({ contacts, itemsCatalog, currentId, invoice, prefill, onC
   };
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl p-5 space-y-3">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[92vh] overflow-auto p-5 space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="font-heading font-semibold">{editMode ? `Edit Invoice ${invoice.number}` : "New Invoice"}</h3>
+          <div className="flex items-center gap-3">
+            <h3 className="font-heading font-semibold">{editMode ? `Edit Invoice ${invoice.number}` : "New Invoice"}</h3>
+            {editMode && (
+              <div className="inline-flex rounded-md border bg-slate-50 p-0.5 text-xs" data-testid="invoice-view-toggle">
+                <button
+                  type="button"
+                  onClick={() => setMode("edit")}
+                  data-testid="invoice-mode-edit"
+                  className={`px-2.5 py-1 rounded ${mode === "edit" ? "bg-slate-900 text-white" : "text-slate-600"}`}
+                >Edit</button>
+                <button
+                  type="button"
+                  onClick={() => setMode("preview")}
+                  data-testid="invoice-mode-preview"
+                  className={`px-2.5 py-1 rounded ${mode === "preview" ? "bg-emerald-600 text-white" : "text-slate-600"}`}
+                >Preview</button>
+              </div>
+            )}
+          </div>
           <button onClick={onClose}><X size={16} /></button>
         </div>
+        {mode === "preview" ? (
+          pdfBlobUrl ? (
+            <iframe title="Invoice preview" src={pdfBlobUrl} className="w-full h-[70vh] border rounded" data-testid="invoice-preview-iframe" />
+          ) : (
+            <div className="h-[60vh] flex items-center justify-center text-slate-400 text-sm">Loading preview…</div>
+          )
+        ) : (<>
         <div className="grid grid-cols-4 gap-2">
           <select value={contact} onChange={(e) => setContact(e.target.value)} className="border rounded px-2 py-1.5 text-sm">
             <option value="">Customer…</option>
@@ -416,6 +456,7 @@ function InvoiceModal({ contacts, itemsCatalog, currentId, invoice, prefill, onC
             {editMode ? "Save changes" : "Save Invoice"}
           </button>
         </div>
+        </>)}
       </div>
     </div>
   );

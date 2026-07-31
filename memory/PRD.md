@@ -17,6 +17,17 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Invoice Preview toggle (Wave-style incremental)
+
+**Frontend (`pages/Invoices.jsx`)**
+- Existing edit modal gained an **Edit ⇄ Preview** segmented toggle (only on saved invoices). Preview swaps the form for an iframe of the existing `/invoices/{id}/pdf` blob URL, so pros can see exactly what the customer will receive without leaving the modal. Modal widened to `max-w-4xl` and made scrollable for the preview.
+- Compiles clean, no regressions to the edit flow. `useEffect` cleanup revokes the blob URL when the modal closes.
+
+**Deferred to next turn** (bigger scope, needs a fresh context window):
+- Full-page InvoiceEditor route (`/invoices/new`, `/invoices/:id/edit`) with Wave-style two-column layout (branding sidebar + form)
+- Company branding fields: logo upload, address, phone/email/website, tax ID (backend model + settings UI)
+- Branded PDF header once branding fields exist (drop into `document_pdfs.build_document_pdf`)
+
 ### Feb 2026 — Cascade delete for auto-payment link graph
 
 **Backend**
