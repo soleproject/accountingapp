@@ -17,6 +17,18 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Bulk Item Import + ItemPicker on Bills
+
+**Backend (`routes/items.py`)**
+- New `POST /companies/{cid}/items/import` — accepts CSV or Excel upload. Case-insensitive header aliasing (Name/Item/Product, Description/Details, Type, Account/IncomeAccount/Category, ExpenseAccount/COGSAccount, Price/Rate/UnitPrice, SKU/Code, Active). Auto-creates missing revenue + expense accounts when `create_missing_accounts=true`. Updates existing items by name when `update_existing=true` (idempotent re-runs).
+- `ItemIn`/`ItemPatch` extended with `expense_account_id` + `expense_account_name`. Auto-backfills account name from CoA on create/patch.
+
+**Frontend**
+- `components/ItemImportModal.jsx` — drag-drop dropzone, CSV/Excel accept, two behavior toggles, result panel with counters + resolved column mapping + row-level error list.
+- `Items.jsx` — "Import CSV/Excel" button in header, Expense-account picker added to the item modal (below the income picker).
+- `Bills.jsx` — bill lines now use the same `ItemPicker` combobox as invoices. Picking an item fills description + rate + `expense_account_id`/`_name` + category. Free-text typing still supported.
+- Testing: 10/10 backend pytest + Playwright frontend E2E 100%, zero bugs (`/app/test_reports/iteration_58.json`).
+
 ### Feb 2026 — Items catalog + Sales reports by item/category
 
 **Backend (`routes/items.py`)**
