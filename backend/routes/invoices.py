@@ -381,3 +381,184 @@ async def send_invoice_email(
         "to": recipient,
         "email_log_id": result.get("id"),
     }
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Duplicate + Bulk-Tax-Import (Feb 2026)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _duplicate_doc(src: dict, *, kind: str) -> dict:
+    """Return a fresh persist-ready doc that mirrors ``src`` line-for-line
+    but with a new id, new number, today's issue date, +30 due date, and
+    a reset status/balance. Used by both the invoice and bill duplicate
+    endpoints so the two stay behaviourally identical.
+    """
+    now = now_iso()
+    today = datetime.now(timezone.utc).date().isoformat()
+    due = (datetime.now(timezone.utc).date() + timedelta(days=30)).isoformat()
+    prefix = "INV" if kind == "invoice" else "BILL"
+    fresh_number = f"{prefix}-{random.randint(1000, 9999)}"
+    default_status = "draft" if kind == "invoice" else "open"
+    doc = {**src}
+    doc["id"] = str(uuid.uuid4())
+    doc["number"] = fresh_number
+    doc["issue_date"] = today
+    doc["due_date"] = due
+    doc["status"] = default_status
+    doc["balance_due"] = float(doc.get("total") or 0)
+    doc["created_at"] = now
+    doc["updated_at"] = now
+    # Nuke Mongo internal _id (comes back with the projection) and any
+    # linked-payment scars from the original doc — a duplicate is a
+    # brand-new document, no payment history.
+    doc.pop("_id", None)
+    return doc
+
+
+@router.post("/companies/{cid}/invoices/{iid}/duplicate")
+async def duplicate_invoice(cid: str, iid: str, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    src = await db.invoices.find_one({"id": iid, "company_id": cid})
+    if not src:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    dup = _duplicate_doc(src, kind="invoice")
+    await db.invoices.insert_one(dup)
+    return {"id": dup["id"], "invoice": coerce(dup)}
+
+
+@router.post("/companies/{cid}/bills/{bid}/duplicate")
+async def duplicate_bill(cid: str, bid: str, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    src = await db.bills.find_one({"id": bid, "company_id": cid})
+    if not src:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    dup = _duplicate_doc(src, kind="bill")
+    await db.bills.insert_one(dup)
+    return {"id": dup["id"], "bill": coerce(dup)}
+
+
+@router.post("/companies/{cid}/bills/{bid}/send-email")
+async def send_bill_email(
+    cid: str, bid: str,
+    to: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """Email the bill PDF to the vendor.
+
+    Pros use this to forward a copy of the recorded bill back to the
+    vendor (e.g. "here's what I have on file — please confirm").
+    """
+    await require_company(user, cid)
+    b = await db.bills.find_one({"id": bid, "company_id": cid})
+    if not b:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    contact = None
+    if b.get("contact_id"):
+        contact = await db.contacts.find_one({"id": b["contact_id"], "company_id": cid})
+    recipient = (to or (contact or {}).get("email") or "").strip()
+    if not recipient or "@" not in recipient:
+        raise HTTPException(
+            status_code=400,
+            detail="Vendor has no email on file. Pass `to=email@…` to override.",
+        )
+    company = await db.companies.find_one({"id": cid})
+    payments = await db.payments.find({"company_id": cid, "linked_bill_id": bid}).to_list(200)
+    from document_pdfs import build_document_pdf
+    pdf_bytes = build_document_pdf(kind="bill", doc=b, company=company, payments=payments)
+    import base64 as _b64
+    firm = (company or {}).get("name") or "Your accountant"
+    number = b.get("number") or ""
+    total = float(b.get("total") or 0)
+    balance = float(b.get("balance_due") or 0)
+    due = b.get("due_date") or ""
+    to_name = b.get("contact_name") or "there"
+    notes = b.get("notes") or ""
+    html = f"""<!doctype html><html><body style="font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#0F172A;line-height:1.55;max-width:640px;margin:0 auto;padding:24px;">
+  <h2 style="margin:0 0 4px 0;">Bill {number}</h2>
+  <p style="color:#64748B;margin:0 0 16px 0;font-size:13px;">Recorded by {firm}</p>
+  <p>Hi {to_name},</p>
+  <p>We've recorded the attached bill <b>{number}</b> against your account. If anything looks off, please reply so we can update our records.</p>
+  <table style="border-collapse:collapse;margin:16px 0;font-size:14px;">
+    <tr><td style="padding:4px 12px 4px 0;color:#64748B;">Amount due</td><td style="font-variant-numeric:tabular-nums;font-weight:600;">${balance:,.2f}</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#64748B;">Total</td><td style="font-variant-numeric:tabular-nums;">${total:,.2f}</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#64748B;">Due</td><td style="font-variant-numeric:tabular-nums;">{due}</td></tr>
+  </table>
+  {"<p style='color:#334155;'>" + notes + "</p>" if notes else ""}
+</body></html>"""
+    subject = f"Bill {number} on file with {firm}"
+    from email_dispatcher import dispatch
+    result = await dispatch(
+        kind="customer_statement",  # reuses the "transactional" preference bucket
+        to=recipient,
+        subject=subject,
+        html=html,
+        initiating_user_id=user["id"],
+        company_id=cid,
+        contact_id=b.get("contact_id"),
+        related={"bill_id": bid, "bill_number": number},
+        attachments=[{
+            "filename": f"bill-{number}.pdf".replace(" ", "_"),
+            "content": _b64.b64encode(pdf_bytes).decode("ascii"),
+        }],
+    )
+    return {
+        "status": result.get("status"),
+        "to": recipient,
+        "email_log_id": result.get("id"),
+    }
+
+
+@router.post("/companies/{cid}/taxes/bulk-import")
+async def bulk_import_taxes(cid: str, payload: dict, user: dict = Depends(get_current_user)):
+    """Paste-a-CSV bulk import for Tax Library.
+
+    Accepts ``payload = {"rows": [{"name": "...", "rate": 0.0}, ...]}``
+    (typed schema — CSV parsing happens on the frontend so we don't
+    have to guess encodings / delimiters here).
+
+    Behaviour per row:
+      • create new row when the name is unique
+      • update the rate when the name already exists (idempotent
+        re-import)
+      • skip rows with a blank name or an out-of-range rate; report
+        them in the response so the pro can fix and re-paste.
+    """
+    rows = payload.get("rows") or []
+    if not isinstance(rows, list):
+        raise HTTPException(status_code=400, detail="`rows` must be a list")
+    created = 0
+    updated = 0
+    skipped: list[dict] = []
+    now = now_iso()
+    for idx, r in enumerate(rows):
+        name = str((r or {}).get("name") or "").strip()
+        raw_rate = (r or {}).get("rate")
+        try:
+            rate = float(raw_rate)
+        except (TypeError, ValueError):
+            skipped.append({"row": idx + 1, "name": name, "reason": "rate is not a number"})
+            continue
+        if not name:
+            skipped.append({"row": idx + 1, "name": name, "reason": "name is empty"})
+            continue
+        if rate < 0 or rate > 100:
+            skipped.append({"row": idx + 1, "name": name, "reason": "rate must be between 0 and 100"})
+            continue
+        existing = await db.taxes.find_one({"company_id": cid, "name": name})
+        if existing:
+            if float(existing.get("rate", 0)) != rate:
+                await db.taxes.update_one(
+                    {"id": existing["id"], "company_id": cid},
+                    {"$set": {"rate": rate, "updated_at": now}},
+                )
+                updated += 1
+            # else: identical row, nothing to do (silently idempotent).
+        else:
+            await db.taxes.insert_one({
+                "id": str(uuid.uuid4()), "company_id": cid,
+                "name": name, "rate": rate,
+                "created_at": now, "updated_at": now,
+            })
+            created += 1
+    return {"created": created, "updated": updated, "skipped": skipped, "total_rows": len(rows)}

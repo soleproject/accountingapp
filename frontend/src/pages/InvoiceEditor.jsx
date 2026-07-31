@@ -5,7 +5,7 @@ import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import {
   ArrowLeft, Save, Send, Plus, Trash2, Paperclip, Eye, Pencil,
-  FileText, X, ChevronDown, ChevronUp, Upload, Image as ImageIcon,
+  FileText, X, ChevronDown, ChevronUp, Upload, Copy,
 } from "lucide-react";
 import ItemPicker from "@/components/ItemPicker";
 
@@ -268,6 +268,34 @@ export default function InvoiceEditor() {
   const [sendOpen, setSendOpen] = useState(false);
   const [sendTo, setSendTo] = useState("");
   const [sending, setSending] = useState(false);
+
+  // Duplicate the invoice into a fresh draft (routes to the copy in edit mode).
+  const duplicate = async () => {
+    if (!editMode) { toast.info("Save the invoice first, then duplicate."); return; }
+    try {
+      await save({ silent: true });
+      const r = await api.post(`/companies/${currentId}/invoices/${id}/duplicate`);
+      toast.success(`Duplicated as ${r.data.invoice?.number || "new draft"}`);
+      navigate(`/invoices/${r.data.id}/edit`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Duplicate failed");
+    }
+  };
+
+  // "Apply tax to all lines" — set the same tax on every line item.
+  const applyTaxToAllLines = (taxId) => {
+    if (!taxId) {
+      setLines(prev => prev.map(l => ({ ...l, tax_id: null, tax_name: "", tax_rate: 0 })));
+      toast.success("Cleared tax on all lines");
+      return;
+    }
+    const t = taxes.find(x => x.id === taxId);
+    if (!t) return;
+    setLines(prev => prev.map(l => ({
+      ...l, tax_id: t.id, tax_name: t.name, tax_rate: Number(t.rate || 0),
+    })));
+    toast.success(`Applied ${t.name} · ${Number(t.rate).toFixed(2)}% to all lines`);
+  };
   const openSend = async () => {
     const iid = await save({ silent: true });
     if (!iid) return;
@@ -313,11 +341,19 @@ export default function InvoiceEditor() {
         </div>
         <div className="flex items-center gap-2">
           {editMode && (
-            <button
-              data-testid="invoice-editor-send"
-              onClick={openSend}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm hover:bg-emerald-100"
-            ><Send size={14} /> Send email</button>
+            <>
+              <button
+                data-testid="invoice-editor-duplicate"
+                onClick={duplicate}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 text-sm hover:bg-slate-50"
+                title="Duplicate as fresh draft"
+              ><Copy size={14} /> Duplicate</button>
+              <button
+                data-testid="invoice-editor-send"
+                onClick={openSend}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm hover:bg-emerald-100"
+              ><Send size={14} /> Send email</button>
+            </>
           )}
           <button
             data-testid="invoice-editor-save"
@@ -389,6 +425,7 @@ export default function InvoiceEditor() {
               totals,
               currentId,
               taxModalLineIdx, setTaxModalLineIdx,
+              applyTaxToAllLines,
             }}
           />
         </>
@@ -562,6 +599,7 @@ function EditForm({
   totals,
   currentId,
   taxModalLineIdx, setTaxModalLineIdx,
+  applyTaxToAllLines,
 }) {
   const customerContacts = useMemo(
     () => contacts.filter(c => c.type === "customer" || c.type === "both"),
@@ -738,11 +776,30 @@ function EditForm({
             </div>
           ))}
         </div>
-        <button
-          onClick={addLine}
-          className="mt-2 inline-flex items-center gap-1.5 text-xs text-indigo-600 hover:underline py-2"
-          data-testid="invoice-editor-line-add"
-        ><Plus size={12} /> Add an item</button>
+        <div className="mt-2 flex items-center justify-between">
+          <button
+            onClick={addLine}
+            className="inline-flex items-center gap-1.5 text-xs text-indigo-600 hover:underline py-2"
+            data-testid="invoice-editor-line-add"
+          ><Plus size={12} /> Add an item</button>
+          {taxes.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-500">Apply tax to every line:</span>
+              <select
+                onChange={(e) => { applyTaxToAllLines(e.target.value); e.target.value = ""; }}
+                defaultValue=""
+                className="border rounded px-2 py-1 text-xs bg-white"
+                data-testid="invoice-editor-apply-tax-all"
+              >
+                <option value="" disabled>Choose tax…</option>
+                {taxes.map(t => (
+                  <option key={t.id} value={t.id}>{t.name} · {Number(t.rate).toFixed(2)}%</option>
+                ))}
+                <option value="">— clear —</option>
+              </select>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* INLINE totals — right-aligned block under the items table */}

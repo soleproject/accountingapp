@@ -1,0 +1,41 @@
+{
+  "summary": "Iter 68 — Backend + Frontend validation of the 5 add-on features: Duplicate Invoice, Duplicate Bill, Send Bill email, Apply Tax to All Lines (invoice + bill), Bulk CSV Tax Import. All 8 backend pytest cases pass. Backend: POST /invoices/{iid}/duplicate returns fresh id + INV-#### number + issue_date=today + due_date=today+30 + status='draft' + balance_due=total, with all fields (line_items, po_number, terms, discount, discount_type, shipping, tax, notes, internal_notes, attachments, title, summary, contact_name) copied verbatim; verified via GET on new id. Mirror is true for POST /bills/{bid}/duplicate → BILL-#### + status='open'. Both endpoints return 404 for unknown ids. POST /bills/{bid}/send-email works with ?to= override (returns {status,to,email_log_id}); returns 400 when neither contact nor override has an email; 404 for unknown bill. Bulk-tax-import with the exact spec payload returns created=2, updated=0, skipped list of 2 rows with correct reasons ('rate must be between 0 and 100', 'name is empty'); idempotent re-run returns created=0,updated=0,skipped=2; re-run with GST rate changed to 6 returns updated=1 and rate is persisted (verified via GET). Frontend (client@axiom.ai on TEST_dup company): Invoice editor Duplicate button navigates to /invoices/{newId}/edit with a fresh INV-#### number. Bill editor Duplicate mirrors it (fresh BILL-####). Bill Send-to-vendor dialog opens, accepts an email in bill-send-to, Send closes the dialog and completes. Apply-tax-to-every-line dropdown on both editors picks a tax and stamps it onto line-0's tax select (verified matching tax_id). Tax Library Import CSV opens dialog with textarea + example collapsible + live preview showing 2 OK + 2 Skip rows with 'rate out of range' and 'empty name' reasons; submit button shows 'Import 2 rows', click closes the dialog and refreshes the table with GST and HST rows. Regression: existing InvoiceEditor duplicate does NOT overwrite the source (verified source id still fetchable); tax library CRUD path still works.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/companies/{cid}/bills/{bid}/duplicate & /invoices/.../duplicate", "issue": "Duplicate copies the source's `updated_at`? No — helper resets. BUT: existing.tax on source docs already includes rolled-up per-line tax (see iter 67 minor). Since duplicate copies the stored tax verbatim without recomputing, the new doc starts with the same rolled-up value. Not a bug today because a subsequent PATCH would recompute; flagging for symmetry with the iter67 double-count analysis."},
+      {"endpoint": "Bulk-import skip reason strings", "issue": "Backend uses 'rate must be between 0 and 100' and 'name is empty'; frontend preview shows 'rate out of range' and 'empty name'. Two independent validators — they agree on which rows to skip but the human-readable strings drift, so a user comparing preview vs server response sees mismatched wording. Minor UX inconsistency."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "InvoiceEditor / BillEditor apply-tax-all <select>", "issue": "Dropdown has TWO options with value=\"\" — the disabled placeholder 'Choose tax…' AND the enabled '— clear —' choice. HTML/Playwright cannot distinguish them by value; automated test cannot programmatically pick '— clear —', and there's a small chance the browser highlights the wrong one after clear. Fix: use a sentinel value like '__clear__' for the clear option and branch in the onChange handler.", "selector": "[data-testid='invoice-editor-apply-tax-all'], [data-testid='bill-editor-apply-tax-all']", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "InvoiceEditor & BillEditor line-tax <select>", "issues": ["React hydration warning in console: '<span> cannot be a child of <option>'. Comes from the dev-time instrumentation wrapping dynamic {t.name} in a <span data-ve-dynamic>. Only appears in preview build; ship-build should be fine, but worth confirming."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter68_dup_send_bulktax.py",
+    "/app/test_reports/pytest/iter68.xml"
+  ],
+  "action_items": [
+    "Consider replacing the empty-value '— clear —' option with a distinct sentinel to make the apply-tax-all dropdown testable and unambiguous.",
+    "Align skip-reason strings between frontend preview and backend response for the CSV import (either preview echoes the server reason after submit, or both use the same constants).",
+    "iter 67 latent PATCH double-count is still present — not exercised by the new duplicate endpoints but worth cleaning up when touching _sum_lines again."
+  ],
+  "critical_code_review_comments": [
+    "routes/invoices.py _duplicate_doc uses `doc = {**src}` (shallow copy) — line_items and attachments arrays share references with the source doc. If any caller mutates the source's line_items between find_one and insert_one they would leak into the dup. Low-risk today (no such caller) but a deepcopy would be safer.",
+    "Both /bills/{bid}/send-email and /invoices/{iid}/send-email use `kind='customer_statement'` for the dispatch preference bucket — a vendor cannot opt out of bill notifications independently of customer statements. Consider a distinct 'vendor_bill_copy' preference key.",
+    "Bulk-import loop hits Mongo twice per row (find_one + insert/update). For a paste of a few hundred rows it's still snappy, but a single aggregate + bulk_write would scale better and give an atomic result.",
+    "Bulk-import doesn't cap `rows` length — a paste of 100k rows would hold the request open. Add a max_rows guard (e.g. 500) with a 400 response."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter68_dup_send_bulktax.py", "/app/test_reports/pytest/iter68.xml"],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "100% (all 5 features validated)"},
+  "test_credentials": "client@axiom.ai / client123",
+  "seed_data_creation": "Backend pytest created TEST_INV_DUP_68, TEST_BILL_DUP_68, TEST_BILL_SEND_68, TEST_BILL_NO_EMAIL_68 (all deleted). Playwright UI walkthrough duplicated one existing invoice (INL-4c9b7 → INV-9641) and one existing bill (BILL-9125 → BILL-1846) on TEST_dup company; these duplicates remain in the DB for main-agent inspection. UITEST_GST_68 and UITEST_HST_68 taxes created and then cleaned up.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "The apply-tax-all dropdown's '— clear —' option shares value='' with the disabled placeholder — Playwright's select_option(value='') cannot target it deterministically. Use page.evaluate to set the select's value and dispatch a change event, OR fix the option to use a sentinel like '__clear__'. Bulk-import endpoint accepts JSON with `rows` array only (frontend parses CSV client-side). PATCH double-count from iter67 is still latent."
+}

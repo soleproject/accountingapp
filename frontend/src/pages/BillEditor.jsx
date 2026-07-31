@@ -4,7 +4,7 @@ import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import {
-  ArrowLeft, Save, Plus, Trash2, Paperclip, Eye, Pencil, X,
+  ArrowLeft, Save, Send, Plus, Trash2, Paperclip, Eye, Pencil, X, Copy,
 } from "lucide-react";
 
 const TERMS_OPTIONS = [
@@ -220,6 +220,57 @@ export default function BillEditor() {
     setTab("preview");
   };
 
+  // ── Duplicate + Send-email + Apply-tax-all (parity with InvoiceEditor) ──
+  const duplicate = async () => {
+    if (!editMode) { toast.info("Save the bill first, then duplicate."); return; }
+    try {
+      await save({ silent: true });
+      const r = await api.post(`/companies/${currentId}/bills/${id}/duplicate`);
+      toast.success(`Duplicated as ${r.data.bill?.number || "new draft"}`);
+      navigate(`/bills/${r.data.id}/edit`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Duplicate failed");
+    }
+  };
+
+  const [sendOpen, setSendOpen] = useState(false);
+  const [sendTo, setSendTo] = useState("");
+  const [sending, setSending] = useState(false);
+  const openSend = async () => {
+    const bid = await save({ silent: true });
+    if (!bid) return;
+    const c = contacts.find(x => x.id === contact);
+    setSendTo(c?.email || "");
+    setSendOpen(true);
+  };
+  const doSend = async () => {
+    setSending(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/bills/${id}/send-email`, null, {
+        params: sendTo ? { to: sendTo } : {},
+      });
+      if (r.data.status === "sent") toast.success(`Emailed to ${r.data.to}`);
+      else if (r.data.status === "failed") toast.error("Send failed — check Communications log");
+      else toast.info(`Email skipped: ${r.data.status}`);
+      setSendOpen(false);
+    } catch (e) { toast.error(e.response?.data?.detail || "Send failed"); }
+    finally { setSending(false); }
+  };
+
+  const applyTaxToAllLines = (taxId) => {
+    if (!taxId) {
+      setLines(prev => prev.map(l => ({ ...l, tax_id: null, tax_name: "", tax_rate: 0 })));
+      toast.success("Cleared tax on all lines");
+      return;
+    }
+    const t = taxes.find(x => x.id === taxId);
+    if (!t) return;
+    setLines(prev => prev.map(l => ({
+      ...l, tax_id: t.id, tax_name: t.name, tax_rate: Number(t.rate || 0),
+    })));
+    toast.success(`Applied ${t.name} · ${Number(t.rate).toFixed(2)}% to all lines`);
+  };
+
   useEffect(() => {
     if (tab !== "preview" || !currentId || !id) return;
     let cancelled = false;
@@ -259,6 +310,21 @@ export default function BillEditor() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {editMode && (
+            <>
+              <button
+                data-testid="bill-editor-duplicate"
+                onClick={duplicate}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 text-sm hover:bg-slate-50"
+                title="Duplicate as fresh draft"
+              ><Copy size={14} /> Duplicate</button>
+              <button
+                data-testid="bill-editor-send"
+                onClick={openSend}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm hover:bg-emerald-100"
+              ><Send size={14} /> Send to vendor</button>
+            </>
+          )}
           <button
             data-testid="bill-editor-save"
             onClick={() => save()}
@@ -296,25 +362,26 @@ export default function BillEditor() {
           )}
         </div>
       ) : (
-        <EditForm
-          {...{
-            contacts, itemsCatalog, taxes, setTaxes, expenseAccounts,
-            contact, setContact,
-            number, setNumber,
-            issue, setIssue, due, setDue,
-            termsLabel, setTermsLabel,
-            poNumber, setPoNumber,
-            status, setStatus,
-            lines, setLines, addLine, updLine, removeLine,
-            tax, setTax, shipping, setShipping,
-            discount, setDiscount, discountType, setDiscountType,
-            notes, setNotes, internalNotes, setInternalNotes,
-            attachments, onAttach, removeAttachment,
-            totals,
-            currentId,
-            taxModalLineIdx, setTaxModalLineIdx,
-          }}
-        />
+          <EditForm
+            {...{
+              contacts, itemsCatalog, taxes, setTaxes, expenseAccounts,
+              contact, setContact,
+              number, setNumber,
+              issue, setIssue, due, setDue,
+              termsLabel, setTermsLabel,
+              poNumber, setPoNumber,
+              status, setStatus,
+              lines, setLines, addLine, updLine, removeLine,
+              tax, setTax, shipping, setShipping,
+              discount, setDiscount, discountType, setDiscountType,
+              notes, setNotes, internalNotes, setInternalNotes,
+              attachments, onAttach, removeAttachment,
+              totals,
+              currentId,
+              taxModalLineIdx, setTaxModalLineIdx,
+              applyTaxToAllLines,
+            }}
+          />
       )}
 
       {taxModalLineIdx !== null && (
@@ -331,6 +398,50 @@ export default function BillEditor() {
           currentId={currentId}
         />
       )}
+
+      {sendOpen && (
+        <SendEmailDialog
+          to={sendTo} setTo={setSendTo}
+          sending={sending}
+          onClose={() => setSendOpen(false)}
+          onSend={doSend}
+        />
+      )}
+    </div>
+  );
+}
+
+function SendEmailDialog({ to, setTo, sending, onClose, onSend }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-3" data-testid="bill-send-dialog">
+        <div className="flex items-center justify-between">
+          <h3 className="font-heading font-semibold inline-flex items-center gap-2">
+            <Send size={16} /> Send bill to vendor
+          </h3>
+          <button onClick={onClose}><X size={16} /></button>
+        </div>
+        <div className="space-y-1">
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500">Send to</label>
+          <input
+            type="email" value={to}
+            onChange={(e) => setTo(e.target.value)}
+            placeholder="vendor@example.com"
+            className="w-full border rounded px-2 py-1.5 text-sm"
+            data-testid="bill-send-to"
+          />
+          <p className="text-[11px] text-slate-400">A PDF of this bill will be attached.</p>
+        </div>
+        <div className="flex items-center justify-end gap-2 pt-2">
+          <button onClick={onClose} className="px-3 py-1.5 rounded-md text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
+          <button
+            onClick={onSend}
+            disabled={sending || !to || !to.includes("@")}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-600 text-white text-sm disabled:opacity-50"
+            data-testid="bill-send-submit"
+          ><Send size={13} /> {sending ? "Sending…" : "Send"}</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -364,6 +475,7 @@ function EditForm({
   totals,
   currentId,
   taxModalLineIdx, setTaxModalLineIdx,
+  applyTaxToAllLines,
 }) {
   const vendorContacts = useMemo(
     () => contacts.filter(c => c.type === "vendor" || c.type === "both"),
@@ -637,11 +749,30 @@ function EditForm({
             className="inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:underline"
             data-testid="bill-editor-line-add"
           ><Plus size={14} /> Add a line</button>
-          {missingCategoryCount > 0 && (
-            <span className="text-[11px] text-red-600 inline-flex items-center gap-1" data-testid="bill-editor-cat-warning">
-              {missingCategoryCount} line{missingCategoryCount > 1 ? "s" : ""} still need an expense category.
-            </span>
-          )}
+          <div className="flex items-center gap-4">
+            {taxes.length > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-slate-500">Apply tax to every line:</span>
+                <select
+                  onChange={(e) => { applyTaxToAllLines(e.target.value); e.target.value = ""; }}
+                  defaultValue=""
+                  className="border rounded px-2 py-1 text-xs bg-white"
+                  data-testid="bill-editor-apply-tax-all"
+                >
+                  <option value="" disabled>Choose tax…</option>
+                  {taxes.map(t => (
+                    <option key={t.id} value={t.id}>{t.name} · {Number(t.rate).toFixed(2)}%</option>
+                  ))}
+                  <option value="">— clear —</option>
+                </select>
+              </div>
+            )}
+            {missingCategoryCount > 0 && (
+              <span className="text-[11px] text-red-600 inline-flex items-center gap-1" data-testid="bill-editor-cat-warning">
+                {missingCategoryCount} line{missingCategoryCount > 1 ? "s" : ""} still need an expense category.
+              </span>
+            )}
+          </div>
         </div>
       </div>
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, X, Save, Percent } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Save, Percent, Upload, FileText } from "lucide-react";
 
 /**
  * Tax Library — dedicated CRUD page under Accounting.
@@ -17,6 +17,7 @@ export default function TaxLibrary() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(null); // { id, name, rate }
+  const [importing, setImporting] = useState(false);
 
   const load = async () => {
     if (!currentId) return;
@@ -50,11 +51,18 @@ export default function TaxLibrary() {
             Manage the tax rates used on invoices and bills. Rename or delete rates without opening a document.
           </p>
         </div>
-        <button
-          data-testid="tax-library-new"
-          onClick={() => setCreating(true)}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm shadow-sm"
-        ><Plus size={14} /> New tax</button>
+        <div className="flex items-center gap-2">
+          <button
+            data-testid="tax-library-import"
+            onClick={() => setImporting(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 text-sm hover:bg-slate-50"
+          ><Upload size={14} /> Import CSV</button>
+          <button
+            data-testid="tax-library-new"
+            onClick={() => setCreating(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm shadow-sm"
+          ><Plus size={14} /> New tax</button>
+        </div>
       </div>
 
       <div className="rounded-lg border bg-white shadow-sm overflow-hidden">
@@ -123,6 +131,13 @@ export default function TaxLibrary() {
           initial={editing}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); load(); }}
+        />
+      )}
+      {importing && (
+        <BulkImportDialog
+          currentId={currentId}
+          onClose={() => setImporting(false)}
+          onImported={() => { setImporting(false); load(); }}
         />
       )}
     </div>
@@ -196,3 +211,153 @@ function TaxDialog({ currentId, initial, onClose, onSaved }) {
     </div>
   );
 }
+
+/**
+ * BulkImportDialog — accepts pasted CSV text and previews rows before
+ * hitting the backend. Supports header row with columns `name` and
+ * `rate` (case-insensitive) OR headerless "Name,Rate" pairs.
+ */
+function BulkImportDialog({ currentId, onClose, onImported }) {
+  const [text, setText] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const preview = parseCsv(text);
+  const validCount = preview.filter(r => r.valid).length;
+  const invalidCount = preview.length - validCount;
+
+  const submit = async () => {
+    if (validCount === 0) { toast.error("No valid rows to import"); return; }
+    setSaving(true);
+    try {
+      const rows = preview.filter(r => r.valid).map(r => ({ name: r.name, rate: r.rate }));
+      const resp = await api.post(`/companies/${currentId}/taxes/bulk-import`, { rows });
+      const { created, updated, skipped } = resp.data;
+      const parts = [];
+      if (created) parts.push(`${created} created`);
+      if (updated) parts.push(`${updated} updated`);
+      if (skipped?.length) parts.push(`${skipped.length} skipped`);
+      toast.success(parts.join(" · ") || "Done");
+      onImported();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Import failed");
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-5 space-y-4" data-testid="tax-import-dialog">
+        <div className="flex items-center justify-between border-b pb-3">
+          <h3 className="font-heading font-semibold text-lg inline-flex items-center gap-2">
+            <FileText size={18} /> Import taxes from CSV
+          </h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-sm text-slate-600">
+            Paste CSV rows below — one tax per line. Supports optional header row.
+            <br />
+            Existing tax names are updated with the new rate (idempotent).
+          </div>
+          <details className="text-xs bg-slate-50 border rounded p-2">
+            <summary className="cursor-pointer text-slate-600 font-medium">Example</summary>
+            <pre className="mt-2 text-[11px] text-slate-500">name,rate{"\n"}GST,5{"\n"}HST,13{"\n"}QST,9.975{"\n"}VAT,20</pre>
+          </details>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={9}
+            placeholder={`name,rate\nGST,5\nHST,13`}
+            className="w-full border rounded px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+            data-testid="tax-import-textarea"
+          />
+        </div>
+
+        {preview.length > 0 && (
+          <div className="border rounded max-h-56 overflow-y-auto">
+            <table className="w-full text-xs" data-testid="tax-import-preview">
+              <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500 sticky top-0">
+                <tr>
+                  <th className="text-left px-3 py-1.5 w-8">#</th>
+                  <th className="text-left px-3 py-1.5">Name</th>
+                  <th className="text-right px-3 py-1.5 w-20">Rate</th>
+                  <th className="px-3 py-1.5 w-24">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {preview.map((r, i) => (
+                  <tr key={i} className={r.valid ? "" : "bg-red-50/30"}>
+                    <td className="px-3 py-1 text-slate-400">{i + 1}</td>
+                    <td className="px-3 py-1">{r.name || <span className="text-slate-400 italic">(empty)</span>}</td>
+                    <td className="px-3 py-1 text-right font-mono-num">{r.rate ?? ""}%</td>
+                    <td className="px-3 py-1">
+                      {r.valid
+                        ? <span className="text-emerald-600">OK</span>
+                        : <span className="text-red-600" title={r.error}>Skip · {r.error}</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between pt-3 border-t">
+          <div className="text-xs text-slate-500">
+            {preview.length > 0 && (
+              <>
+                <span className="text-emerald-600 font-medium">{validCount} valid</span>
+                {invalidCount > 0 && <span className="text-red-600 ml-2">{invalidCount} skipped</span>}
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className="px-3 py-1.5 rounded-md text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
+            <button
+              onClick={submit}
+              disabled={saving || validCount === 0}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50"
+              data-testid="tax-import-submit"
+            ><Upload size={13} /> {saving ? "Importing…" : `Import ${validCount || ""} row${validCount === 1 ? "" : "s"}`}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Very small CSV parser tuned for the two-column {name, rate} case.
+ * Supports quoted names (for commas in tax labels like "PST, Manitoba").
+ * Header row detected when the first row's first cell is literally "name"
+ * (case-insensitive) — otherwise every row is treated as data.
+ */
+function parseCsv(text) {
+  if (!text || !text.trim()) return [];
+  const lines = text.replace(/\r/g, "").split("\n").map(l => l.trim()).filter(Boolean);
+  const splitRow = (line) => {
+    // Handle quoted commas.
+    const cells = []; let cur = ""; let quoted = false;
+    for (const ch of line) {
+      if (ch === '"') { quoted = !quoted; continue; }
+      if (ch === "," && !quoted) { cells.push(cur.trim()); cur = ""; continue; }
+      cur += ch;
+    }
+    cells.push(cur.trim());
+    return cells;
+  };
+  const hasHeader = /^\s*name\s*$/i.test(splitRow(lines[0])[0] || "");
+  const dataLines = hasHeader ? lines.slice(1) : lines;
+  return dataLines.map((line) => {
+    const cells = splitRow(line);
+    const name = cells[0] || "";
+    const rawRate = (cells[1] || "").replace(/%/g, "").trim();
+    const rate = rawRate === "" ? NaN : Number(rawRate);
+    let valid = true;
+    let error = "";
+    if (!name) { valid = false; error = "empty name"; }
+    else if (!Number.isFinite(rate)) { valid = false; error = "invalid rate"; }
+    else if (rate < 0 || rate > 100) { valid = false; error = "rate out of range"; }
+    return { name, rate: Number.isFinite(rate) ? rate : null, valid, error };
+  });
+}
+
