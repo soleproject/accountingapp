@@ -17,6 +17,27 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Full-page Invoice Editor (Tabs: Edit / Preview)
+
+**Frontend**
+- New `/app/frontend/src/pages/InvoiceEditor.jsx` — dedicated full-page editor at `/invoices/new` and `/invoices/:id/edit`. Replaces the popup for the primary create/edit flow (voice-command `useCreateListener` path still uses `InvoiceModal` for backwards-compat).
+- **Tabs**: `Edit` / `Preview` at the top of the page. Preview auto-saves silently first, then renders the PDF in an iframe (blob URL).
+- **Form** — customer picker, invoice number (editable), issue date, **Terms dropdown** (Due on receipt / Net 15 / Net 30 / Net 60 / Custom — auto-computes due date), due date (manual override flips to Custom), **PO number**, status, line-items table with `ItemPicker` (qty, rate, amount, add/remove), **notes to customer** (renders on PDF), **internal notes** (private), **file attachments** (base64 data URLs — same pattern as receipts, 6 MB per-file cap).
+- **Totals sidebar** — subtotal, **discount** with `$` / `%` toggle, **shipping**, **tax**, total. All computed client-side, mirrors backend `_sum_lines`.
+- **Save** button (create → `POST`, edit → `PATCH`) + **Send email** button (only after save) that opens a small dialog for the recipient and calls `POST /invoices/{iid}/send-email`.
+- `Invoices.jsx` — `New Invoice` button and edit pencil icon now navigate to the new routes instead of opening the popup.
+- New routes wired in `App.js`: `/invoices/new` and `/invoices/:id/edit` → `<InvoiceEditor/>`.
+
+**Backend**
+- `models.InvoiceCreate` extended with `po_number`, `terms`, `shipping`, `discount`, `discount_type` (`amount|percent`), `internal_notes`, `attachments`.
+- `routes/invoices.py::_sum_lines` reworked to return `(subtotal, discount_amount, shipping, tax, total)` with the applied order `subtotal − discount + shipping + tax`.
+- `POST /invoices` persists every new field; `PATCH /invoices/{iid}` recomputes totals whenever `line_items | tax | shipping | discount | discount_type` land in the payload, and preserves the `paid` amount so `balance_due` stays consistent when a partial payment exists.
+- New `GET /invoices/{iid}` single-resource endpoint (needed by the editor page).
+- New `POST /invoices/{iid}/send-email?to=` — builds the PDF, base64-attaches it, dispatches through `email_dispatcher` (kind `customer_statement` — reuses existing opt-out preference), and auto-flips a `draft` invoice to `sent` when the email actually goes through.
+- `document_pdfs.build_document_pdf` renders an optional **PO / Terms strip** below the Bill-To meta block, and the totals table now includes **Discount** and **Shipping** rows (only when non-zero).
+- `email_service.send_email` + `email_dispatcher.dispatch` gained an optional `attachments=[{filename, content: base64}]` param passed straight through to Resend.
+- **Testing**: iter 66 — 7/7 backend pytest + full Playwright E2E, zero defects (`/app/test_reports/iteration_66.json`).
+
 ### Feb 2026 — Invoice Preview toggle (Wave-style incremental)
 
 **Frontend (`pages/Invoices.jsx`)**
