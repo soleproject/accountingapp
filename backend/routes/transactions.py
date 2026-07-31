@@ -2576,8 +2576,10 @@ async def delete_transaction(cid: str, tid: str, user: dict = Depends(get_curren
     existing = await db.transactions.find_one({"id": tid, "company_id": cid})
     if existing:
         await assert_open(cid, existing.get("date"))
+    from link_cascade import cascade_on_transaction_delete
+    cascade = await cascade_on_transaction_delete(cid, existing or {})
     await db.transactions.delete_one({"id": tid, "company_id": cid})
     await _invalidate_dash(cid)
-    return {"ok": True}
+    return {"ok": True, **cascade}
 
 

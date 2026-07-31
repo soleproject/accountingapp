@@ -104,8 +104,10 @@ async def update_bill(cid: str, bid: str, payload: dict, user: dict = Depends(ge
 @router.delete("/companies/{cid}/bills/{bid}")
 async def delete_bill(cid: str, bid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
+    from link_cascade import cascade_on_doc_delete
+    cascade = await cascade_on_doc_delete(cid, "bill", bid)
     await db.bills.delete_one({"id": bid, "company_id": cid})
-    return {"ok": True}
+    return {"ok": True, **cascade}
 
 
 

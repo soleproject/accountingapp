@@ -112,8 +112,10 @@ async def update_invoice(cid: str, iid: str, payload: dict, user: dict = Depends
 @router.delete("/companies/{cid}/invoices/{iid}")
 async def delete_invoice(cid: str, iid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
+    from link_cascade import cascade_on_doc_delete
+    cascade = await cascade_on_doc_delete(cid, "invoice", iid)
     await db.invoices.delete_one({"id": iid, "company_id": cid})
-    return {"ok": True}
+    return {"ok": True, **cascade}
 
 
 
