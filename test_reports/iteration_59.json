@@ -1,0 +1,24 @@
+{
+  "summary": "Verified new Purchases Reports mirror (purchases-by-item + purchases-by-category) plus the unified SalesReports UI with mode toggle. Backend pytest 8/8 passing — CRUD/aggregation, date-range filtering, void+draft exclusion, and sales-endpoint regression all green. Playwright walked /reports (new Purchases card), /sales-reports?mode=purchases deep-link, mode toggle (URL + title + header label Bills↔Invoices), tab switching, and CSV export filename format 'purchases-by-{tab}-{start}-to-{end}.csv'. Purchases + Sales API endpoints both confirmed being hit from the UI. Backend rollups: TEST bill for $300 aggregated under item + COGS-Materials expense category; pre-existing $100 line falls into 'Uncategorized' as expected.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_purchases_reports.py",
+    "/app/test_reports/pytest/purchases_reports.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "items.py purchases_by_category counts `item_count` and `bill_count` identically (one increment per line item). If a single bill has 3 lines all mapping to the same category, bill_count will report 3 not 1 — likely acceptable as 'line contributions' but the field name is misleading. Consider a set-based bill-id dedupe if the label 'Bills' in the header is meant to be distinct bill count. Same pattern already exists on sales-by-category, so it's consistent with sales.",
+    "items.py both purchases endpoints load bills with `.to_list(10000)` and iterate in Python; fine at current scale but ripe for a Mongo aggregation pipeline if bills grow past ~50k.",
+    "SalesReports.jsx: `colSpan={6}` is hard-coded on loading/empty rows even though the category tab only has 5 columns — harmless, but a mismatch worth cleaning up.",
+    "SalesReports.jsx: `mode` param round-trips via URL search params but is not synced to browser back/forward gracefully — clicking Sales after being on Purchases uses `replace: true`, so back-nav from /sales-reports lands on wherever the user came from without an intermediate Purchases view. Intentional per code comment; noting for awareness."
+  ],
+  "updated_files": ["/app/backend/tests/test_purchases_reports.py (new)"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "client@axiom.ai / client123 — cid 540fbc73-66fd-432f-a357-39db6c84c5bd (TEST_dup)",
+  "seed_data_creation": "Backend test creates one TEST_pitem_* item, one open bill ($300 · 3 qty · COGS expense account), and one draft bill; all cleaned up in test_zzz_cleanup. UI test made no persistent changes.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Run `pytest backend/tests/test_purchases_reports.py -v -o addopts=`. Test contract covers new data-testids: report-mode-toggle, report-mode-sales, report-mode-purchases, report-tile-purchases. Existing sales-tab-item/category, sales-start, sales-end, sales-total, sales-export-csv are unchanged and used by both modes. Note: TEST_dup has a pre-existing $100 bill with an unusual issue_date range that shows up in wide-open windows — factor this into any 'empty state' assertions (use a mid-1990s window OR a fresh company).",
+  "rca of the issue": "N/A — feature works as designed."
+}

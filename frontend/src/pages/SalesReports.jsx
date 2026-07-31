@@ -1,32 +1,46 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
-import { BarChart3, Loader2, Download, TrendingUp, Package } from "lucide-react";
+import { BarChart3, Loader2, Download, TrendingUp, TrendingDown, Package, ShoppingCart } from "lucide-react";
 
 const startYtd = () => new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0, 10);
 const today = () => new Date().toISOString().slice(0, 10);
 
+// Sales and Purchases share almost identical shape, so we drive both from
+// this single page with a top-level toggle. Deep-linkable via ?mode=purchases.
 export default function SalesReports() {
   const { currentId } = useCompany();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const mode = searchParams.get("mode") === "purchases" ? "purchases" : "sales";
+  const setMode = (m) => {
+    const n = new URLSearchParams(searchParams);
+    if (m === "sales") n.delete("mode"); else n.set("mode", m);
+    setSearchParams(n, { replace: true });
+  };
   const [tab, setTab] = useState("item"); // "item" | "category"
   const [start, setStart] = useState(startYtd());
   const [end, setEnd] = useState(today());
   const [data, setData] = useState({ rows: [], total: 0 });
   const [loading, setLoading] = useState(false);
 
+  const kindLabel = mode === "purchases" ? "Purchases" : "Sales";
+  const docLabel = mode === "purchases" ? "Bills" : "Invoices";
+  const docCountKey = mode === "purchases" ? "bill_count" : "invoice_count";
+
   const load = async () => {
     if (!currentId) return;
     setLoading(true);
     try {
-      const path = tab === "item" ? "sales-by-item" : "sales-by-category";
+      const path = `${mode === "purchases" ? "purchases" : "sales"}-by-${tab}`;
       const r = await api.get(`/companies/${currentId}/reports/${path}`, { params: { start, end } });
       setData(r.data);
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to load report");
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, tab, start, end]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, mode, tab, start, end]);
 
   const maxAmt = useMemo(() => Math.max(1, ...(data.rows || []).map(r => r.amount)), [data.rows]);
 
@@ -34,29 +48,51 @@ export default function SalesReports() {
     const rows = data.rows || [];
     const isItem = tab === "item";
     const header = isItem
-      ? ["Item", "Category", "Quantity", "Amount", "Invoice count"]
-      : ["Category", "Amount", "Line count", "Invoice count"];
+      ? ["Item", "Category", "Quantity", "Amount", `${docLabel} count`]
+      : ["Category", "Amount", "Line count", `${docLabel} count`];
     const body = rows.map(r => isItem
-      ? [safe(r.item_name), safe(r.category), r.quantity, r.amount, r.invoice_count]
-      : [safe(r.category), r.amount, r.item_count, r.invoice_count]
+      ? [safe(r.item_name), safe(r.category), r.quantity, r.amount, r[docCountKey]]
+      : [safe(r.category), r.amount, r.item_count, r[docCountKey]]
     );
     const csv = [header, ...body].map(row => row.map(csvEscape).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `sales-by-${tab}-${start}-to-${end}.csv`;
+    a.download = `${mode}-by-${tab}-${start}-to-${end}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
+  const barClass = mode === "purchases"
+    ? (tab === "item" ? "bg-orange-500" : "bg-rose-500")
+    : (tab === "item" ? "bg-indigo-500" : "bg-emerald-500");
+
   return (
     <div className="space-y-4" data-testid="sales-reports-page">
-      <div>
-        <h1 className="font-heading text-3xl font-bold tracking-tight inline-flex items-center gap-2">
-          <BarChart3 size={22} /> Sales Reports
-        </h1>
-        <p className="text-slate-500 text-sm mt-1">Revenue rolled up by item or by income category. Excludes draft and voided invoices.</p>
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="font-heading text-3xl font-bold tracking-tight inline-flex items-center gap-2">
+            <BarChart3 size={22} /> {kindLabel} Reports
+          </h1>
+          <p className="text-slate-500 text-sm mt-1">
+            {mode === "purchases"
+              ? "Where the money's going — rolled up by item or by expense category. Excludes drafts and voided bills."
+              : "Revenue rolled up by item or by income category. Excludes draft and voided invoices."}
+          </p>
+        </div>
+        <div className="inline-flex rounded-lg border bg-white p-1 text-xs" data-testid="report-mode-toggle">
+          <button
+            onClick={() => setMode("sales")}
+            data-testid="report-mode-sales"
+            className={`px-3 py-1.5 rounded-md inline-flex items-center gap-1 ${mode === "sales" ? "bg-emerald-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+          ><TrendingUp size={12} /> Sales</button>
+          <button
+            onClick={() => setMode("purchases")}
+            data-testid="report-mode-purchases"
+            className={`px-3 py-1.5 rounded-md inline-flex items-center gap-1 ${mode === "purchases" ? "bg-rose-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+          ><TrendingDown size={12} /> Purchases</button>
+        </div>
       </div>
 
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -70,7 +106,7 @@ export default function SalesReports() {
             onClick={() => setTab("category")}
             data-testid="sales-tab-category"
             className={`px-3 py-1.5 rounded-md inline-flex items-center gap-1 ${tab === "category" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
-          ><TrendingUp size={12} /> By Category</button>
+          ><ShoppingCart size={12} /> By Category</button>
         </div>
         <div className="flex items-center gap-2 text-xs">
           <label className="text-slate-500">From</label>
@@ -89,7 +125,7 @@ export default function SalesReports() {
       <div className="rounded-xl border bg-white overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b bg-slate-50">
           <div className="text-xs uppercase tracking-wide text-slate-500">
-            {tab === "item" ? "Sales by item" : "Sales by category"} · {start} → {end}
+            {kindLabel} by {tab === "item" ? "item" : "category"} · {start} → {end}
           </div>
           <div className="text-sm">
             <span className="text-slate-500">Total: </span>
@@ -106,7 +142,7 @@ export default function SalesReports() {
                 <th className="px-3 py-2 text-left">Category</th>
                 <th className="px-3 py-2 text-right">Qty</th>
                 <th className="px-3 py-2 text-right">Amount</th>
-                <th className="px-3 py-2 text-center">Invoices</th>
+                <th className="px-3 py-2 text-center">{docLabel}</th>
                 <th className="px-3 py-2 text-left w-40">Share</th>
               </tr>
             ) : (
@@ -114,7 +150,7 @@ export default function SalesReports() {
                 <th className="px-3 py-2 text-left">Category</th>
                 <th className="px-3 py-2 text-right">Amount</th>
                 <th className="px-3 py-2 text-center">Line count</th>
-                <th className="px-3 py-2 text-center">Invoices</th>
+                <th className="px-3 py-2 text-center">{docLabel}</th>
                 <th className="px-3 py-2 text-left w-40">Share</th>
               </tr>
             )}
@@ -134,11 +170,11 @@ export default function SalesReports() {
                       <td className="px-3 py-2 text-slate-500 text-xs">{r.category || <span className="text-slate-400">—</span>}</td>
                       <td className="px-3 py-2 text-right font-mono-num text-slate-600">{Number(r.quantity).toLocaleString()}</td>
                       <td className="px-3 py-2 text-right font-mono-num font-semibold">{fmtMoney(r.amount)}</td>
-                      <td className="px-3 py-2 text-center font-mono-num text-slate-500">{r.invoice_count}</td>
+                      <td className="px-3 py-2 text-center font-mono-num text-slate-500">{r[docCountKey]}</td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2">
                           <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                            <div className="h-full bg-indigo-500" style={{ width: `${barPct}%` }} />
+                            <div className={`h-full ${barClass}`} style={{ width: `${barPct}%` }} />
                           </div>
                           <span className="text-[10px] font-mono-num text-slate-500 w-8 text-right">{pct}%</span>
                         </div>
@@ -149,11 +185,11 @@ export default function SalesReports() {
                       <td className="px-3 py-2 font-medium text-slate-800">{r.category}</td>
                       <td className="px-3 py-2 text-right font-mono-num font-semibold">{fmtMoney(r.amount)}</td>
                       <td className="px-3 py-2 text-center font-mono-num text-slate-500">{r.item_count}</td>
-                      <td className="px-3 py-2 text-center font-mono-num text-slate-500">{r.invoice_count}</td>
+                      <td className="px-3 py-2 text-center font-mono-num text-slate-500">{r[docCountKey]}</td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2">
                           <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                            <div className="h-full bg-emerald-500" style={{ width: `${barPct}%` }} />
+                            <div className={`h-full ${barClass}`} style={{ width: `${barPct}%` }} />
                           </div>
                           <span className="text-[10px] font-mono-num text-slate-500 w-8 text-right">{pct}%</span>
                         </div>
@@ -165,7 +201,9 @@ export default function SalesReports() {
             })}
             {!loading && !(data.rows || []).length && (
               <tr><td colSpan={6} className="text-center py-10 text-slate-500 text-sm">
-                No sales in this range. Try a wider date window or send a few invoices first.
+                {mode === "purchases"
+                  ? "No bill activity in this range. Try widening the date window or record a few bills first."
+                  : "No sales in this range. Try a wider date window or send a few invoices first."}
               </td></tr>
             )}
           </tbody>

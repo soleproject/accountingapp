@@ -224,6 +224,92 @@ async def sales_by_category(
     return {"rows": rows, "total": total, "start": start, "end": end}
 
 
+# ---------------------- Purchases (bills) mirror reports ----------------------
+
+@router.get("/companies/{cid}/reports/purchases-by-item")
+async def purchases_by_item(
+    cid: str,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """Aggregate bill line items by item_id (or by description text when
+    no item is linked — bucketed under 'Uncategorized').
+
+    Excludes `status='void'` and `status='draft'`. Returns rows sorted
+    by amount descending.
+    """
+    await require_company(user, cid)
+    q = {"company_id": cid, "status": {"$nin": ["void", "draft"]}}
+    bills = await db.bills.find(q).to_list(10000)
+    buckets: dict[str, dict] = {}
+    for bill in bills:
+        if not _in_range(bill.get("issue_date"), start, end):
+            continue
+        for li in (bill.get("line_items") or []):
+            item_id = li.get("item_id") or ""
+            item_name = li.get("item_name") or li.get("description") or "Uncategorized"
+            key = item_id or f"desc::{item_name.lower().strip()}"
+            b = buckets.setdefault(key, {
+                "item_id": item_id or None,
+                "item_name": item_name,
+                "quantity": 0.0,
+                "amount": 0.0,
+                "bill_count": 0,
+                "category": li.get("category") or li.get("expense_account_name") or "",
+            })
+            b["quantity"] += float(li.get("quantity") or 0)
+            b["amount"] += float(li.get("amount") or 0)
+            b["bill_count"] += 1
+    rows = sorted(buckets.values(), key=lambda r: r["amount"], reverse=True)
+    total = round(sum(r["amount"] for r in rows), 2)
+    for r in rows:
+        r["amount"] = round(r["amount"], 2)
+        r["quantity"] = round(r["quantity"], 4)
+    return {"rows": rows, "total": total, "start": start, "end": end}
+
+
+@router.get("/companies/{cid}/reports/purchases-by-category")
+async def purchases_by_category(
+    cid: str,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """Aggregate bill line items by expense account (the item's linked
+    expense account, or the free-text `category` on the line). Falls
+    back to 'Uncategorized' when neither is present. Same date + status
+    filters as purchases-by-item.
+    """
+    await require_company(user, cid)
+    q = {"company_id": cid, "status": {"$nin": ["void", "draft"]}}
+    bills = await db.bills.find(q).to_list(10000)
+    buckets: dict[str, dict] = {}
+    for bill in bills:
+        if not _in_range(bill.get("issue_date"), start, end):
+            continue
+        for li in (bill.get("line_items") or []):
+            acc_id = li.get("expense_account_id") or ""
+            acc_name = li.get("expense_account_name") or li.get("category") or "Uncategorized"
+            key = acc_id or f"cat::{acc_name.lower().strip()}"
+            b = buckets.setdefault(key, {
+                "account_id": acc_id or None,
+                "category": acc_name,
+                "amount": 0.0,
+                "bill_count": 0,
+                "item_count": 0,
+            })
+            b["amount"] += float(li.get("amount") or 0)
+            b["bill_count"] += 1
+            b["item_count"] += 1
+    rows = sorted(buckets.values(), key=lambda r: r["amount"], reverse=True)
+    total = round(sum(r["amount"] for r in rows), 2)
+    for r in rows:
+        r["amount"] = round(r["amount"], 2)
+    return {"rows": rows, "total": total, "start": start, "end": end}
+
+
+
 # ---------------------- Bulk Import (CSV / Excel) ----------------------
 
 # Common column-name variations we accept, mapped to canonical keys.
