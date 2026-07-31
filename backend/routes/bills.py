@@ -108,7 +108,12 @@ async def update_bill(cid: str, bid: str, payload: dict, user: dict = Depends(ge
         existing = await db.bills.find_one({"id": bid, "company_id": cid})
         if existing:
             lines = payload.get("line_items", existing.get("line_items") or [])
-            tax = payload.get("tax", existing.get("tax", 0))
+            # See invoices.py — peel rolled-up per-line tax off `existing.tax`
+            # before re-summing so partial PATCH doesn't double-count.
+            prev_line_tax = sum(float(li.get("tax_amount") or 0)
+                                for li in (existing.get("line_items") or []))
+            base_tax = float(existing.get("tax", 0) or 0) - prev_line_tax
+            tax = payload.get("tax", base_tax)
             ship = payload.get("shipping", existing.get("shipping", 0))
             disc = payload.get("discount", existing.get("discount", 0))
             dtype = payload.get("discount_type", existing.get("discount_type") or "amount")

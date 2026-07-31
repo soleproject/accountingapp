@@ -237,7 +237,15 @@ async def update_invoice(cid: str, iid: str, payload: dict, user: dict = Depends
         existing = await db.invoices.find_one({"id": iid, "company_id": cid})
         if existing:
             lines = payload.get("line_items", existing.get("line_items") or [])
-            tax = payload.get("tax", existing.get("tax", 0))
+            # `existing.tax` on disk is the ROLLED-UP figure (doc-level
+            # input + Σ line tax). If the caller didn't override `tax`,
+            # we must peel the previously-rolled-up per-line tax back
+            # off before feeding _sum_lines — otherwise line-tax gets
+            # counted twice.
+            prev_line_tax = sum(float(li.get("tax_amount") or 0)
+                                for li in (existing.get("line_items") or []))
+            base_tax = float(existing.get("tax", 0) or 0) - prev_line_tax
+            tax = payload.get("tax", base_tax)
             ship = payload.get("shipping", existing.get("shipping", 0))
             disc = payload.get("discount", existing.get("discount", 0))
             dtype = payload.get("discount_type", existing.get("discount_type") or "amount")

@@ -17,6 +17,24 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Sidebar re-org + Tax Library + Bill Editor parity
+
+**Frontend**
+- **Sidebar restructure** (`components/Sidebar.jsx`) — collapsible grouped nav with disclosure sections: **Sales & Payments** (Invoices/Payments/Items/Recurring/Customer Statements/Customers), **Purchases** (Bills/Vendors/Payments/Items), **Banking** (Connect Accounts/Import Statements), **Accounting** (Transactions, CoA, Assets, Loans, Tags, Reconciliation, Journal Entries, GL, **Tax Library**, AI Cleanup Review, AI Rules, Book Review, Month Close, Close the Books). Standalone: Dashboard, Receipts, Reports, Communications, My Businesses, Billing, Refer & earn, Settings. Groups auto-expand on route match; open-state persists to `localStorage`.
+- **Tax Library page** (`pages/TaxLibrary.jsx`) at `/accounting/taxes` — dedicated CRUD table (name / rate / edit / delete) with a unified create/edit dialog. Empty-state coaching card when the pro hasn't added any taxes.
+- **Bill Editor** (`pages/BillEditor.jsx`) at `/bills/new` and `/bills/:id/edit` — full Wave-style parity with `InvoiceEditor`: business collapsible with logo upload + title/summary, Vendor picker, Bill #/PO/Bill date/Payment due (Net 15/30/60 with auto-computed due date)/Status, line items with `ItemPicker` and per-line **Tax** dropdown + "+ Create a new tax…" modal, inline Subtotal/Discount ($ or %)/Shipping/Tax/Total/Amount Due, Notes/Terms + Internal notes + Attachments, Edit/Preview tabs (Preview auto-saves and shows the PDF in an iframe).
+- **Bills list** now navigates to `/bills/new` and `/bills/:id/edit` (popup edit path retired).
+- **Contacts page** reads `?type=customer|vendor` from the URL: filters the list and swaps the H1 to "Customers" / "Vendors" so sidebar deep-links feel purposeful.
+- **Items page** reads `?usage=sales|purchases` from the URL: initial usage filter honors the deep link and re-applies when it changes.
+
+**Backend**
+- `models.BillCreate` extended with the same fields as `InvoiceCreate` (po_number, terms, shipping, discount, discount_type, internal_notes, attachments, title, summary).
+- `routes/bills.py::create_bill` and `update_bill` reworked to use the shared `_sum_lines` (with shipping/discount/tax/per-line-tax rollup) and persist every new field.
+- New `GET /api/companies/{cid}/bills/{bid}` single-resource endpoint (needed by BillEditor).
+- New Tax CRUD endpoints in `routes/invoices.py`: `PATCH /companies/{cid}/taxes/{tid}` renames/rerates (cascades new name/rate into any referenced invoice + bill line items) and `DELETE` refuses with 409 if the tax is still applied to any doc.
+- **PATCH tax double-count fix** — on invoices/bills PATCH, we now peel the previously-rolled-up per-line tax off `existing.tax` before feeding `_sum_lines`, so a partial PATCH that omits `tax` no longer inflates the total by Σ line_tax.
+- **Tests**: iter 67 — 5/5 backend pytest (`tests/test_iter67_bills_taxes.py`) + full Playwright walkthrough, zero blockers (`/app/test_reports/iteration_67.json`).
+
 ### Feb 2026 — Full-page Invoice Editor (Tabs: Edit / Preview)
 
 **Frontend**
