@@ -8,6 +8,7 @@ import {
   FileText, X, ChevronDown, ChevronUp, Upload, Copy,
 } from "lucide-react";
 import ItemPicker from "@/components/ItemPicker";
+import PaymentHistoryBlock from "@/components/PaymentHistoryBlock";
 
 const TERMS_OPTIONS = [
   { label: "Due on receipt", days: 0 },
@@ -63,6 +64,7 @@ export default function InvoiceEditor() {
   const [attachments, setAttachments] = useState([]);
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
+  const [payments, setPayments] = useState([]);
 
   const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
   const pdfUrlRef = useRef(null);
@@ -115,6 +117,13 @@ export default function InvoiceEditor() {
           setAttachments(inv.attachments || []);
           setTitle(inv.title || "");
           setSummary(inv.summary || "");
+          // Load applied payments — feeds the Payment History + Summary blocks.
+          try {
+            const pr = await api.get(`/companies/${currentId}/payments`);
+            if (!cancelled) {
+              setPayments((pr.data.payments || []).filter(p => p.linked_invoice_id === id));
+            }
+          } catch { /* payments are optional context; ignore */ }
         }
       } catch (e) {
         toast.error(e.response?.data?.detail || "Failed to load invoice");
@@ -426,6 +435,7 @@ export default function InvoiceEditor() {
               currentId,
               taxModalLineIdx, setTaxModalLineIdx,
               applyTaxToAllLines,
+              payments,
             }}
           />
         </>
@@ -600,6 +610,7 @@ function EditForm({
   currentId,
   taxModalLineIdx, setTaxModalLineIdx,
   applyTaxToAllLines,
+  payments = [],
 }) {
   const customerContacts = useMemo(
     () => contacts.filter(c => c.type === "customer" || c.type === "both"),
@@ -866,10 +877,17 @@ function EditForm({
           </div>
           <div className="flex items-center justify-between border-t pt-2">
             <span className="text-sm font-medium text-slate-700">Amount Due</span>
-            <span className="text-sm font-mono-num font-semibold text-emerald-700">{fmtMoney(totals.total)}</span>
+            <span
+              className={`text-sm font-mono-num font-semibold ${((payments || []).length > 0) ? "text-emerald-700" : "text-red-700"}`}
+              data-testid="invoice-editor-amount-due"
+            >{fmtMoney(Math.max(totals.total - (payments || []).reduce((s, p) => s + Number(p.amount || 0), 0), 0))}</span>
           </div>
         </div>
       </div>
+
+      {payments && payments.length > 0 && (
+        <PaymentHistoryBlock payments={payments} original={totals.total} kind="invoice" />
+      )}
 
       {/* Notes / Terms + attachments */}
       <div className="px-6 py-5 border-t bg-slate-50/50 grid grid-cols-1 md:grid-cols-2 gap-6">

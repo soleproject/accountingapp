@@ -216,21 +216,100 @@ def build_document_pdf(*, kind: str, doc: dict, company: dict | None = None,
     story.append(totals)
 
     if payments:
-        story.append(Spacer(1, 12))
-        story.append(Paragraph("<b>Payments applied</b>", bold))
-        pay_rows = [[Paragraph("<b>Date</b>", bold), Paragraph("<b>Method</b>", bold), Paragraph("<b>Amount</b>", right)]]
+        story.append(Spacer(1, 16))
+        # Section title band, matches the Wave-style "Payment History".
+        title_bar = Table([[Paragraph("<b>PAYMENT HISTORY</b>", bold)]], colWidths=[7.0 * inch])
+        title_bar.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F1F5F9")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(title_bar)
+        # Method + Reference columns join the existing Date/Amount pair.
+        pay_rows = [[
+            Paragraph("<b>Payment date</b>", bold),
+            Paragraph("<b>Description</b>", bold),
+            Paragraph("<b>Payment method</b>", bold),
+            Paragraph("<b>Reference / ID</b>", bold),
+            Paragraph("<b>Amount</b>", right),
+        ]]
+        total_paid = 0.0
         for p in payments:
+            amt = float(p.get("amount") or 0)
+            total_paid += amt
+            method_raw = str(p.get("method") or "")
+            method_pretty = {
+                "check": "Check",
+                "ach": "ACH Transfer",
+                "credit_card": "Credit card",
+                "wire": "Wire transfer",
+                "cash": "Cash",
+                "other": "Other",
+            }.get(method_raw.lower(), method_raw.title() or "—")
+            desc = "Payment Received" if kind == "invoice" else "Payment Sent"
             pay_rows.append([
                 Paragraph(str(p.get("date") or ""), styles["Normal"]),
-                Paragraph(str(p.get("method") or ""), styles["Normal"]),
-                Paragraph(_fmt_money(p.get("amount")), right),
+                Paragraph(desc, styles["Normal"]),
+                Paragraph(method_pretty, styles["Normal"]),
+                Paragraph(str(p.get("memo") or p.get("reference") or "—"), styles["Normal"]),
+                Paragraph(_fmt_money(amt), right),
             ])
-        pay_tbl = Table(pay_rows, colWidths=[1.8 * inch, 2.4 * inch, 2.8 * inch])
+        # Total row
+        pay_rows.append([
+            "", "", "",
+            Paragraph("<b>Total Payments Received</b>", bold),
+            Paragraph(f"<b>{_fmt_money(total_paid)}</b>", right),
+        ])
+        pay_tbl = Table(pay_rows, colWidths=[0.9 * inch, 1.4 * inch, 1.7 * inch, 1.7 * inch, 1.3 * inch])
         pay_tbl.setStyle(TableStyle([
             ("LINEBELOW", (0, 0), (-1, 0), 0.5, colors.HexColor("#94A3B8")),
-            ("LINEBELOW", (0, 1), (-1, -1), 0.25, colors.HexColor("#F1F5F9")),
+            ("LINEBELOW", (0, 1), (-1, -2), 0.25, colors.HexColor("#F1F5F9")),
+            ("LINEABOVE", (0, -1), (-1, -1), 0.5, colors.HexColor("#94A3B8")),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ]))
         story.append(pay_tbl)
+
+        # ── Invoice Summary block: Original − Paid − Credits = Remaining ──
+        original = float(doc.get("total") or 0)
+        credits = 0.0  # placeholder — credits engine not wired yet.
+        remaining = round(original - total_paid - credits, 2)
+        story.append(Spacer(1, 12))
+        sum_title = Table([[Paragraph(f"<b>{kind.upper()} SUMMARY</b>", bold)]], colWidths=[7.0 * inch])
+        sum_title.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F1F5F9")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(sum_title)
+        rem_color = colors.HexColor("#059669") if remaining <= 0.01 else colors.HexColor("#B91C1C")
+        remaining_label = "Fully paid" if remaining <= 0.01 else "Remaining Balance Due"
+        sum_rows = [[
+            Paragraph(f"<b>Original {kind.title()} Amount</b><br/><font size='10'>{_fmt_money(original)}</font>", styles["Normal"]),
+            Paragraph("<font size='14'>−</font>", styles["Normal"]),
+            Paragraph(f"<b>Total Payments Received</b><br/><font size='10'>{_fmt_money(total_paid)}</font>", styles["Normal"]),
+            Paragraph("<font size='14'>−</font>", styles["Normal"]),
+            Paragraph(f"<b>Credits Applied</b><br/><font size='10'>{_fmt_money(credits)}</font>", styles["Normal"]),
+            Paragraph("<font size='14'>=</font>", styles["Normal"]),
+            Paragraph(
+                f"<b><font color='{'#059669' if remaining <= 0.01 else '#B91C1C'}'>{remaining_label}</font></b>"
+                f"<br/><font size='12' color='{'#059669' if remaining <= 0.01 else '#B91C1C'}'>{_fmt_money(remaining)}</font>",
+                styles["Normal"],
+            ),
+        ]]
+        sum_tbl = Table(sum_rows, colWidths=[1.4 * inch, 0.3 * inch, 1.5 * inch, 0.3 * inch, 1.3 * inch, 0.3 * inch, 1.9 * inch])
+        sum_tbl.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        _ = rem_color  # silence unused-var warning; color inline above.
+        story.append(sum_tbl)
 
     if doc.get("notes"):
         story.append(Spacer(1, 14))

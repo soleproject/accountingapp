@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import {
   ArrowLeft, Save, Send, Plus, Trash2, Paperclip, Eye, Pencil, X, Copy,
 } from "lucide-react";
+import PaymentHistoryBlock from "@/components/PaymentHistoryBlock";
 
 const TERMS_OPTIONS = [
   { label: "Due on receipt", days: 0 },
@@ -58,6 +59,7 @@ export default function BillEditor() {
   const [attachments, setAttachments] = useState([]);
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
+  const [payments, setPayments] = useState([]);
 
   const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
   const pdfUrlRef = useRef(null);
@@ -119,6 +121,12 @@ export default function BillEditor() {
           setAttachments(b.attachments || []);
           setTitle(b.title || "");
           setSummary(b.summary || "");
+          try {
+            const pr = await api.get(`/companies/${currentId}/payments`);
+            if (!cancelled) {
+              setPayments((pr.data.payments || []).filter(p => p.linked_bill_id === id));
+            }
+          } catch { /* payments optional context */ }
         }
       } catch (e) {
         toast.error(e.response?.data?.detail || "Failed to load bill");
@@ -380,6 +388,7 @@ export default function BillEditor() {
               currentId,
               taxModalLineIdx, setTaxModalLineIdx,
               applyTaxToAllLines,
+              payments,
             }}
           />
       )}
@@ -476,6 +485,7 @@ function EditForm({
   currentId,
   taxModalLineIdx, setTaxModalLineIdx,
   applyTaxToAllLines,
+  payments = [],
 }) {
   const vendorContacts = useMemo(
     () => contacts.filter(c => c.type === "vendor" || c.type === "both"),
@@ -827,14 +837,23 @@ function EditForm({
           </div>
           <div className="flex items-center justify-between">
             <span className="text-sm text-slate-500">Total Paid (USD)</span>
-            <span className="text-sm font-mono-num text-slate-800" data-testid="bill-editor-paid">$0.00</span>
+            <span className="text-sm font-mono-num text-slate-800" data-testid="bill-editor-paid">
+              {fmtMoney((payments || []).reduce((s, p) => s + Number(p.amount || 0), 0))}
+            </span>
           </div>
           <div className="flex items-center justify-between border-t pt-2">
             <span className="text-sm font-medium text-slate-700">Amount Due (USD)</span>
-            <span className="text-sm font-mono-num font-semibold text-red-700" data-testid="bill-editor-due-amt">{fmtMoney(totals.total)}</span>
+            <span
+              className="text-sm font-mono-num font-semibold text-red-700"
+              data-testid="bill-editor-due-amt"
+            >{fmtMoney(Math.max(totals.total - (payments || []).reduce((s, p) => s + Number(p.amount || 0), 0), 0))}</span>
           </div>
         </div>
       </div>
+
+      {payments && payments.length > 0 && (
+        <PaymentHistoryBlock payments={payments} original={totals.total} kind="bill" />
+      )}
 
       {/* Attachments + Internal notes — always useful for bills */}
       <div className="px-6 py-5 border-t bg-slate-50/50 grid grid-cols-1 md:grid-cols-2 gap-6">
