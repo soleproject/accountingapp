@@ -329,20 +329,6 @@ async def update_company(cid: str, patch: dict, user: dict = Depends(get_current
     return coerce(doc)
 
 
-
-    await require_company(user, cid)
-    allowed = {"name", "business_type", "business_description", "reporting_basis"}
-    updates = {k: v for k, v in (patch or {}).items() if k in allowed}
-    if not updates:
-        raise HTTPException(400, "No editable fields provided")
-    updates["updated_at"] = now_iso()
-    r = await db.companies.update_one({"id": cid}, {"$set": updates})
-    if r.matched_count == 0:
-        raise HTTPException(404, "Company not found")
-    doc = await db.companies.find_one({"id": cid})
-    return coerce(doc)
-
-
 @router.delete("/companies/{cid}")
 async def delete_company(cid: str, confirm: str = "", user: dict = Depends(get_current_user)):
     """Hard-delete a company and every record scoped to it. Requires

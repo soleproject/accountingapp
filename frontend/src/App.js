@@ -25,6 +25,7 @@ import ProClients from "@/pages/ProClients";
 import AdminEnterpriseDetail from "@/pages/AdminEnterpriseDetail";
 import { BillingSuccess, BillingCancel } from "@/pages/BillingReturn";
 import Invoices from "@/pages/Invoices";
+import InvoiceEditor from "@/pages/InvoiceEditor";
 import Bills from "@/pages/Bills";
 import Recurring from "@/pages/Recurring";
 import Items from "@/pages/Items";
@@ -98,6 +99,8 @@ function App() {
               <Route path="/admin/enterprises/:eid" element={<AdminEnterpriseDetail />} />
               <Route path="/pro/clients" element={<ProClients />} />
               <Route path="/invoices" element={<Invoices />} />
+              <Route path="/invoices/new" element={<InvoiceEditor />} />
+              <Route path="/invoices/:id/edit" element={<InvoiceEditor />} />
               <Route path="/bills" element={<Bills />} />
               <Route path="/recurring" element={<Recurring />} />
               <Route path="/items" element={<Items />} />

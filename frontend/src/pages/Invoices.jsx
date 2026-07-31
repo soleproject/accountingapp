@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
@@ -34,6 +34,7 @@ const BG = {
 
 export default function Invoices() {
   const { currentId } = useCompany();
+  const navigate = useNavigate();
   const [items, setItems] = useState([]);
   const [contacts, setContacts] = useState([]);
   const [itemsCatalog, setItemsCatalog] = useState([]);
@@ -121,7 +122,7 @@ export default function Invoices() {
           <h1 className="font-heading text-3xl font-bold tracking-tight">Invoices</h1>
           <p className="text-slate-500 text-sm mt-1">Money in · sent to customers.</p>
         </div>
-        <button data-testid={TID.addBtn} onClick={() => setCreating(true)}
+        <button data-testid={TID.addBtn} onClick={() => navigate("/invoices/new")}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs">
           <Plus size={13} /> New Invoice
         </button>
@@ -258,7 +259,7 @@ export default function Invoices() {
                     <button data-testid={`invoice-memorize-btn-${inv.id}`} onClick={() => setMemorizing(inv)}
                             title="Memorize (recurring)"
                             className="p-1 rounded hover:bg-fuchsia-100 text-fuchsia-600"><Repeat size={13} /></button>
-                    <button data-testid="invoice-edit-btn" onClick={() => setEditing(inv)}
+                    <button data-testid="invoice-edit-btn" onClick={() => navigate(`/invoices/${inv.id}/edit`)}
                             className="p-1 rounded hover:bg-indigo-100 text-indigo-600"><Pencil size={13} /></button>
                     <button onClick={() => del(inv.id)} className="p-1 rounded hover:bg-red-100 text-red-500"><Trash2 size={13} /></button>
                   </div>

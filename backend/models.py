@@ -97,6 +97,14 @@ class InvoiceCreate(BaseModel):
     tax: float = 0.0
     notes: Optional[str] = ""
     status: str = "draft"
+    # Feb 2026 — full-page editor fields.
+    po_number: Optional[str] = ""
+    terms: Optional[str] = ""          # "Due on receipt" | "Net 15" | "Net 30" | "Net 60" | "Custom"
+    shipping: float = 0.0
+    discount: float = 0.0              # value; interpretation controlled by discount_type
+    discount_type: Optional[str] = "amount"  # "amount" | "percent"
+    internal_notes: Optional[str] = ""       # never rendered on PDF
+    attachments: Optional[list] = []         # [{filename, data_url, size}]
 
 
 class BillCreate(BaseModel):

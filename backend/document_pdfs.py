@@ -113,6 +113,27 @@ def build_document_pdf(*, kind: str, doc: dict, company: dict | None = None,
         ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
     ]))
     story.append(meta)
+
+    # Optional PO number / Terms strip, rendered only when either is set.
+    po = (doc.get("po_number") or "").strip()
+    terms = (doc.get("terms") or "").strip()
+    if po or terms:
+        info_rows = [[
+            Paragraph(f"<b>PO number</b><br/><font size='9'>{po or '—'}</font>", styles["Normal"]),
+            Paragraph(f"<b>Terms</b><br/><font size='9'>{terms or '—'}</font>", styles["Normal"]),
+        ]]
+        info = Table(info_rows, colWidths=[3.0 * inch, 4.0 * inch])
+        info.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+            ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#F1F5F9")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(Spacer(1, 6))
+        story.append(info)
     story.append(Spacer(1, 14))
 
     lines_header = [Paragraph("<b>Description</b>", bold), Paragraph("<b>Qty</b>", bold),
@@ -140,17 +161,27 @@ def build_document_pdf(*, kind: str, doc: dict, company: dict | None = None,
     tax = float(doc.get("tax", 0) or 0)
     total = float(doc.get("total", 0) or 0)
     balance = float(doc.get("balance_due", 0) or 0)
-    totals_rows = [
-        ["Subtotal", _fmt_money(subtotal)],
-        ["Tax", _fmt_money(tax)],
-        ["Total", _fmt_money(total)],
-        ["Balance due", _fmt_money(balance)],
-    ]
+    disc_amt = float(doc.get("discount_amount", 0) or 0)
+    ship = float(doc.get("shipping", 0) or 0)
+    dtype = (doc.get("discount_type") or "amount").lower()
+    disc_val = float(doc.get("discount", 0) or 0)
+    disc_label = f"Discount ({disc_val:g}%)" if dtype == "percent" and disc_val else "Discount"
+
+    totals_rows = [["Subtotal", _fmt_money(subtotal)]]
+    if disc_amt > 0.005:
+        totals_rows.append([disc_label, f"-{_fmt_money(disc_amt)}"])
+    if ship > 0.005:
+        totals_rows.append(["Shipping", _fmt_money(ship)])
+    totals_rows.append(["Tax", _fmt_money(tax)])
+    totals_rows.append(["Total", _fmt_money(total)])
+    totals_rows.append(["Balance due", _fmt_money(balance)])
     totals = Table(totals_rows, colWidths=[5.7 * inch, 1.3 * inch])
+    total_row = len(totals_rows) - 2
+    balance_row = len(totals_rows) - 1
     totals.setStyle(TableStyle([
-        ("FONTNAME", (0, 2), (-1, 2), "Helvetica-Bold"),
-        ("FONTNAME", (0, 3), (-1, 3), "Helvetica-Bold"),
-        ("TEXTCOLOR", (0, 3), (-1, 3), colors.HexColor("#B91C1C") if balance > 0.01 else colors.HexColor("#059669")),
+        ("FONTNAME", (0, total_row), (-1, total_row), "Helvetica-Bold"),
+        ("FONTNAME", (0, balance_row), (-1, balance_row), "Helvetica-Bold"),
+        ("TEXTCOLOR", (0, balance_row), (-1, balance_row), colors.HexColor("#B91C1C") if balance > 0.01 else colors.HexColor("#059669")),
         ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
         ("TOPPADDING", (0, 0), (-1, -1), 2),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 2),

@@ -116,6 +116,7 @@ async def send_email(
     text: Optional[str] = None,
     reply_to: Optional[str] = None,
     firm_name: Optional[str] = None,
+    attachments: Optional[list] = None,
 ) -> dict:
     """Send one transactional email. Returns the Resend response dict
     (`{"id": "..."}` on success). Raises `EmailError` on any failure — the
@@ -139,6 +140,10 @@ async def send_email(
         params["text"] = text
     if reply_to:
         params["reply_to"] = reply_to
+    if attachments:
+        # Resend accepts base64 content in the `content` field. Callers
+        # should pass [{"filename": "...", "content": "<base64>"}].
+        params["attachments"] = list(attachments)
     try:
         resp = await asyncio.to_thread(resend.Emails.send, params)
     except Exception as e:  # noqa: BLE001 — Resend surfaces auth/domain/rate errors here

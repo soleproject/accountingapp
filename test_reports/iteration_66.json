@@ -1,0 +1,24 @@
+{
+  "summary": "Iter 66 — Full-page Invoice Editor. Ran 7 backend pytest cases + comprehensive Playwright UI walkthrough as client@axiom.ai. Backend: create/get/patch invoice with new fields (po_number, terms, discount, discount_type, discount_amount, shipping, internal_notes, attachments, notes) all correct; PATCH recomputes totals for both amount and percent discount + shipping changes; PDF endpoint returns 200 application/pdf with %PDF header; send-email endpoint returns clean {status,to,email_log_id} JSON (status=sent in preview env with Resend key configured) — no 500 crash — and draft invoice auto-flipped to 'sent'. Frontend: /invoices → New Invoice navigates to /invoices/new full-page editor (not modal); Edit/Preview tabs + Save button rendered with correct header 'New Invoice · Draft — not yet saved'; Terms=Net 30 auto-computes Due=issue+30d, Terms=Net 15 shrinks to issue+15d; qty=3/rate=150 → amount $450.00 + subtotal $450.00; $50 flat discount → 400; 10% discount → 405; +shipping 25 +tax 15 → 445; Save persists, redirects to /invoices/:id/edit with header 'Invoice INV-9999-EDITOR-UI', Send email button appears; Preview tab renders PDF iframe with blob URL (data-testid invoice-editor-preview-iframe); Edit tab return preserves values; page reload re-hydrates PO/terms/discount/shipping/tax/notes/internal_notes correctly; pencil-icon (data-testid invoice-edit-btn) on /invoices row navigates to /invoices/:id/edit with data populated. All checks pass.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter66_invoice_editor.py",
+    "/app/test_reports/pytest/iter66.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "InvoiceEditor.jsx line 231: `catch (e) { toast.error('Could not load preview'); }` swallows the error object — fine for now, but consider logging e.response?.data?.detail for easier debugging.",
+    "routes/invoices.py update_invoice: paid amount is computed as `existing.total - existing.balance_due` which is correct only if payments haven't been made after last save. For invoices with attached payments, consider re-summing from db.payments instead of relying on stored deltas. Not a regression in this iter.",
+    "InvoiceEditor.jsx: attachments stored as base64 data_url in the invoice document — for large PDFs/images this bloats the Mongo doc. Existing pattern (receipts) does the same, so consistent, but flagging for a future move to GridFS or S3.",
+    "send_invoice_email uses email kind='customer_statement' to reuse the opt-out preference. Comment already notes this — consider adding a dedicated 'invoice_email' kind in a follow-up so recipients can opt out of statements without also silencing invoices."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% (all flows validated)"},
+  "test_credentials": "client@axiom.ai / client123",
+  "seed_data_creation": "Created and left one invoice INV-9999-EDITOR-UI on Skyward Sparks (client@axiom.ai's company) for downstream inspection. Backend pytest suite creates a TEST_INV-9999-EDITOR invoice and self-cleans in test_zzz_cleanup.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Full-page editor is stable. If iterating on invoice PDF/email, the Playwright script in this run is a good regression base. `send-email` returned status='sent' in preview env (Resend live), so status auto-flip from draft→sent is exercised.",
+  "rca of the issue": "n/a — no defects surfaced"
+}

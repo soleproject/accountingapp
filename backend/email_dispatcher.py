@@ -112,6 +112,7 @@ async def dispatch(
     company_id: Optional[str] = None,
     contact_id: Optional[str] = None,
     related: Optional[dict] = None,
+    attachments: Optional[list] = None,
 ) -> dict:
     """Send an email of a given `kind` on behalf of `initiating_user_id` and
     write one row to the audit log. Never raises.
@@ -155,7 +156,7 @@ async def dispatch(
     try:
         resp = await send_email(
             to=to, subject=subject, html=html, text=text, reply_to=reply_to,
-            firm_name=firm_name,
+            firm_name=firm_name, attachments=attachments,
         )
     except EmailError as e:
         log_id = await _log({
