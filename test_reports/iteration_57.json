@@ -1,0 +1,35 @@
+{
+  "summary": "Tested Items catalog (CRUD, dup 409, active toggle, filter, edit persistence) and Sales Reports (by item + by category, date filters, exclude drafts, CSV button) end-to-end. Backend pytest = 10/10 passing. Frontend Playwright walk-through of /items, ItemPicker in invoice line, /sales-reports tabs+dates+CSV, /reports Sales Reports card, Sidebar Items nav — all passed. No blocking issues.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/items", "issues": ["Legacy 'TEST_item_AAA_baaaa3' row (from prior iteration) still lingers in the client's TEST_dup company — cosmetic, safe to prune."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_items_and_sales_reports.py",
+    "/app/test_reports/pytest/items_sales.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "items.py sales-by-item/category loads all non-draft invoices into memory then filters by date in Python — fine for small tenants but consider adding a Mongo range filter on issue_date for scale.",
+    "SalesReports.jsx correctly uses api.get with { params: { start, end } } — verified in DevTools network shape via the backend test (query string reaches endpoint).",
+    "ItemPicker: onFocus opens the menu but only mousedown closes it (no Escape key handler). Minor UX polish, not a bug.",
+    "Items.jsx uses window.confirm for delete — consider replacing with the shadcn AlertDialog to match the rest of the app."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_items_and_sales_reports.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "client@axiom.ai / client123 — company id 540fbc73-66fd-432f-a357-39db6c84c5bd (TEST_dup, has Service Revenue / Product Sales / Interest Income revenue accounts).",
+  "seed_data_creation": "Test creates its own items + invoice + draft invoice + optional TEST_customer contact, and deletes them in the zzz_cleanup test. Frontend UI test also deletes the item it created.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Run backend suite with `pytest backend/tests/test_items_and_sales_reports.py -v -o addopts=` (must run serially — module-scoped state; test file already carries xdist_group marker). Test creates ITEM_A and ITEM_B; if any TEST_ prefixed items linger in TEST_dup, safe to bulk-delete via DELETE /api/companies/{cid}/items/{iid}. Frontend Playwright confirmed data-testid contract: items-add-btn, item-name/description/type/price/account/sku/active/save, item-row-{id}, item-edit-{id}, invoice-line-0-open/menu/opt-{id}/input, sales-tab-item/category, sales-start/sales-end, sales-total, sales-export-csv, items-page, sales-reports-page.",
+  "rca of the issue": "N/A — no bugs found."
+}

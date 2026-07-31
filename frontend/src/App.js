@@ -27,6 +27,8 @@ import { BillingSuccess, BillingCancel } from "@/pages/BillingReturn";
 import Invoices from "@/pages/Invoices";
 import Bills from "@/pages/Bills";
 import Recurring from "@/pages/Recurring";
+import Items from "@/pages/Items";
+import SalesReports from "@/pages/SalesReports";
 import Payments from "@/pages/Payments";
 import Receipts from "@/pages/Receipts";
 import Contacts from "@/pages/Contacts";
@@ -98,6 +100,8 @@ function App() {
               <Route path="/invoices" element={<Invoices />} />
               <Route path="/bills" element={<Bills />} />
               <Route path="/recurring" element={<Recurring />} />
+              <Route path="/items" element={<Items />} />
+              <Route path="/sales-reports" element={<SalesReports />} />
               <Route path="/payments" element={<Payments />} />
               <Route path="/receipts" element={<Receipts />} />
               <Route path="/contacts" element={<Contacts />} />

@@ -1,0 +1,243 @@
+import { useEffect, useState } from "react";
+import { api, fmtMoney } from "@/lib/api";
+import { useCompany } from "@/lib/company";
+import { Plus, Trash2, X, Loader2, Pencil, Package, Check } from "lucide-react";
+import { toast } from "sonner";
+
+export default function Items() {
+  const { currentId } = useCompany();
+  const [items, setItems] = useState([]);
+  const [accts, setAccts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
+
+  const load = async () => {
+    if (!currentId) return;
+    setLoading(true);
+    try {
+      const [it, ac] = await Promise.all([
+        api.get(`/companies/${currentId}/items`),
+        api.get(`/companies/${currentId}/accounts`),
+      ]);
+      setItems(it.data.items || []);
+      // Revenue accounts are the sensible default target for items —
+      // the codebase uses "revenue" (some legacy seeds use "income").
+      setAccts((ac.data.accounts || []).filter(a => a.type === "revenue" || a.type === "income"));
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, [currentId]);
+
+  const toggleActive = async (it) => {
+    await api.patch(`/companies/${currentId}/items/${it.id}`, { active: !it.active });
+    load();
+  };
+  const del = async (it) => {
+    if (!confirm(`Delete "${it.name}"?`)) return;
+    await api.delete(`/companies/${currentId}/items/${it.id}`);
+    toast.success("Deleted");
+    load();
+  };
+
+  const visible = items.filter(i => showInactive || i.active !== false);
+
+  return (
+    <div className="space-y-4" data-testid="items-page">
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="font-heading text-3xl font-bold tracking-tight inline-flex items-center gap-2">
+            <Package size={22} /> Items
+          </h1>
+          <p className="text-slate-500 text-sm mt-1">Products &amp; services you sell. Pick from this list on any invoice line to auto-fill description and price.</p>
+        </div>
+        <button
+          onClick={() => setCreating(true)}
+          data-testid="items-add-btn"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs"
+        >
+          <Plus size={13} /> New item
+        </button>
+      </div>
+
+      <div className="flex items-center gap-3 text-xs">
+        <label className="inline-flex items-center gap-1.5 text-slate-500">
+          <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
+          Show inactive
+        </label>
+      </div>
+
+      <div className="rounded-xl border bg-white overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-xs uppercase text-slate-500 border-b">
+            <tr>
+              <th className="px-3 py-2 text-left">Name</th>
+              <th className="px-3 py-2 text-left">Description</th>
+              <th className="px-3 py-2 text-left">Type</th>
+              <th className="px-3 py-2 text-left">Income account</th>
+              <th className="px-3 py-2 text-right">Price</th>
+              <th className="px-3 py-2 text-center">Active</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && (
+              <tr><td colSpan={7} className="text-center py-8 text-slate-400"><Loader2 className="inline animate-spin" size={16} /></td></tr>
+            )}
+            {!loading && visible.map(it => (
+              <tr key={it.id} className="border-b hover:bg-slate-50" data-testid={`item-row-${it.id}`}>
+                <td className="px-3 py-2 font-medium text-slate-800">{it.name}{it.sku ? <span className="text-xs text-slate-400 ml-1">· {it.sku}</span> : null}</td>
+                <td className="px-3 py-2 text-slate-500 text-xs max-w-md truncate">{it.description}</td>
+                <td className="px-3 py-2 text-xs">
+                  <span className={`text-[10px] uppercase px-1.5 py-0.5 rounded ${it.type === "product" ? "bg-emerald-100 text-emerald-800" : "bg-indigo-100 text-indigo-800"}`}>
+                    {it.type || "service"}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-slate-500 text-xs">{it.income_account_name || <span className="text-slate-400">—</span>}</td>
+                <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(it.price)}</td>
+                <td className="px-3 py-2 text-center">
+                  <button
+                    onClick={() => toggleActive(it)}
+                    className={`text-[10px] uppercase px-1.5 py-0.5 rounded ${it.active !== false ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-500"}`}
+                  >{it.active !== false ? "Active" : "Inactive"}</button>
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <div className="inline-flex items-center gap-1">
+                    <button data-testid={`item-edit-${it.id}`} onClick={() => setEditing(it)}
+                            className="p-1 rounded hover:bg-indigo-100 text-indigo-600"><Pencil size={13} /></button>
+                    <button onClick={() => del(it)} className="p-1 rounded hover:bg-red-100 text-red-500"><Trash2 size={13} /></button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {!loading && !visible.length && (
+              <tr><td colSpan={7} className="text-center py-10 text-slate-500 text-sm">
+                No items yet. Click <b>New item</b> to add your first product or service.
+              </td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {(creating || editing) && (
+        <ItemModal
+          currentId={currentId}
+          item={editing}
+          accts={accts}
+          onClose={() => { setCreating(false); setEditing(null); load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ItemModal({ currentId, item, accts, onClose }) {
+  const edit = !!item;
+  const [name, setName] = useState(item?.name || "");
+  const [description, setDescription] = useState(item?.description || "");
+  const [type, setType] = useState(item?.type || "service");
+  const [accountId, setAccountId] = useState(item?.income_account_id || "");
+  const [price, setPrice] = useState(item?.price ?? 0);
+  const [sku, setSku] = useState(item?.sku || "");
+  const [active, setActive] = useState(item?.active !== false);
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    if (!name.trim()) { toast.error("Name is required"); return; }
+    setBusy(true);
+    try {
+      const acc = accts.find(a => a.id === accountId);
+      const body = {
+        name: name.trim(),
+        description,
+        type,
+        income_account_id: accountId || null,
+        income_account_name: acc?.name || "",
+        price: Number(price) || 0,
+        sku: sku || null,
+        active,
+      };
+      if (edit) {
+        await api.patch(`/companies/${currentId}/items/${item.id}`, body);
+        toast.success("Item updated");
+      } else {
+        await api.post(`/companies/${currentId}/items`, body);
+        toast.success("Item created");
+      }
+      onClose();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Save failed");
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-5 space-y-3" data-testid="item-modal">
+        <div className="flex items-center justify-between">
+          <h3 className="font-heading font-semibold inline-flex items-center gap-2"><Package size={16} /> {edit ? "Edit item" : "New item"}</h3>
+          <button onClick={onClose}><X size={16} /></button>
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Name</label>
+          <input value={name} onChange={(e) => setName(e.target.value)}
+                 placeholder="e.g. Monthly Retainer"
+                 className="w-full border rounded px-2 py-1.5 text-sm"
+                 data-testid="item-name" />
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Description</label>
+          <input value={description} onChange={(e) => setDescription(e.target.value)}
+                 placeholder="Long-form description shown on invoices"
+                 className="w-full border rounded px-2 py-1.5 text-sm"
+                 data-testid="item-description" />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Type</label>
+            <select value={type} onChange={(e) => setType(e.target.value)}
+                    className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+                    data-testid="item-type">
+              <option value="service">Service</option>
+              <option value="product">Product</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Price (default rate)</label>
+            <input type="number" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)}
+                   className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+                   data-testid="item-price" />
+          </div>
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Income account</label>
+          <select value={accountId} onChange={(e) => setAccountId(e.target.value)}
+                  className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+                  data-testid="item-account">
+            <option value="">— Pick income account —</option>
+            {accts.map(a => <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>)}
+          </select>
+          <p className="text-[10px] text-slate-400 mt-1">Categorises this item on Sales by Category and rolls up to your Income Statement.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">SKU (optional)</label>
+            <input value={sku} onChange={(e) => setSku(e.target.value)}
+                   className="w-full border rounded px-2 py-1.5 text-sm"
+                   data-testid="item-sku" />
+          </div>
+          <div className="flex items-end">
+            <label className="inline-flex items-center gap-1.5 text-xs text-slate-600">
+              <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)}
+                     data-testid="item-active" />
+              Active
+            </label>
+          </div>
+        </div>
+        <button onClick={save} disabled={busy}
+                data-testid="item-save"
+                className="w-full py-2 rounded-md bg-slate-900 text-white text-sm inline-flex items-center justify-center gap-1.5 disabled:opacity-60">
+          {busy && <Loader2 size={13} className="animate-spin" />}
+          {edit ? "Save changes" : "Create item"}
+        </button>
+      </div>
+    </div>
+  );
+}

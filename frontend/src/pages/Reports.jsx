@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { TID } from "@/constants/testIds";
-import { FileText, Scale, TrendingUp, Notebook, Percent, DollarSign, ClipboardList, Receipt } from "lucide-react";
+import { FileText, Scale, TrendingUp, Notebook, Percent, DollarSign, ClipboardList, Receipt, Package, BarChart3 } from "lucide-react";
 
 const REPORTS = [
   { key: "trial-balance", title: "Trial Balance", desc: "Verify debits = credits across all accounts", icon: Scale, color: "#6366F1", tint: "#E0E7FF" },
@@ -11,6 +11,11 @@ const REPORTS = [
   { key: "sales-tax", title: "Sales Tax Liability", desc: "Sales tax collected vs. remitted and what you owe", icon: Percent, color: "#F97316", tint: "#FFEDD5" },
   { key: "1099-summary", title: "1099 Summary", desc: "Contractors paid ≥ $600 · W-9 status · 1099-NEC prep", icon: Receipt, color: "#3B82F6", tint: "#DBEAFE" },
 ];
+
+// Sales reports live on their own page (/sales-reports) so they can offer
+// interactive item + category tabs with share bars. Linked from here for
+// discoverability.
+const SALES = { key: "sales", title: "Sales Reports", desc: "Revenue by item or by income category with share breakdown", icon: BarChart3, color: "#8B5CF6", tint: "#EDE9FE", to: "/sales-reports" };
 
 export default function Reports() {
   return (
@@ -38,6 +43,19 @@ export default function Reports() {
             </Link>
           );
         })}
+        <Link to={SALES.to}
+              data-testid={`${TID.reportTile}-${SALES.key}`}
+              className="group rounded-xl border bg-white p-5 hover:border-slate-400 transition">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-md flex items-center justify-center" style={{ background: SALES.tint }}>
+              <SALES.icon size={18} style={{ color: SALES.color }} />
+            </div>
+            <div>
+              <div className="font-heading font-semibold text-slate-900">{SALES.title}</div>
+              <div className="text-xs text-slate-500 mt-0.5">{SALES.desc}</div>
+            </div>
+          </div>
+        </Link>
       </div>
     </div>
   );

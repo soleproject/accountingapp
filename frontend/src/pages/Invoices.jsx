@@ -3,11 +3,12 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, AlertTriangle, Pencil, Repeat, Check } from "lucide-react";
+import { Plus, Trash2, X, AlertTriangle, Pencil, Repeat, Check, Package } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
 import MemorizeModal from "@/components/MemorizeModal";
+import ItemPicker from "@/components/ItemPicker";
 
 const BUCKETS = [
   { key: "current", label: "Current", desc: "Not yet due", color: "emerald" },
@@ -35,6 +36,7 @@ export default function Invoices() {
   const { currentId } = useCompany();
   const [items, setItems] = useState([]);
   const [contacts, setContacts] = useState([]);
+  const [itemsCatalog, setItemsCatalog] = useState([]);
   const [aging, setAging] = useState(null);
   const [creating, setCreating] = useState(false);
   const [creatingPrefill, setCreatingPrefill] = useState(null);
@@ -84,12 +86,14 @@ export default function Invoices() {
   };
   const load = async () => {
     if (!currentId) return;
-    const [i, c, a] = await Promise.all([
+    const [i, c, a, it] = await Promise.all([
       api.get(`/companies/${currentId}/invoices`),
       api.get(`/companies/${currentId}/contacts`),
       api.get(`/companies/${currentId}/reports/ar-aging`),
+      api.get(`/companies/${currentId}/items`),
     ]);
     setItems(i.data.invoices || []); setContacts(c.data.contacts || []); setAging(a.data);
+    setItemsCatalog(it.data.items || []);
   };
   useEffect(() => { load(); }, [currentId]);
 
@@ -273,15 +277,15 @@ export default function Invoices() {
           </tbody>
         </table>
       </div>
-      {creating && <InvoiceModal contacts={contacts} currentId={currentId} prefill={creatingPrefill}
+      {creating && <InvoiceModal contacts={contacts} itemsCatalog={itemsCatalog} currentId={currentId} prefill={creatingPrefill}
                                   onClose={() => { setCreating(false); setCreatingPrefill(null); load(); }} />}
-      {editing && <InvoiceModal contacts={contacts} currentId={currentId} invoice={editing} onClose={() => { setEditing(null); load(); }} />}
+      {editing && <InvoiceModal contacts={contacts} itemsCatalog={itemsCatalog} currentId={currentId} invoice={editing} onClose={() => { setEditing(null); load(); }} />}
       {memorizing && <MemorizeModal currentId={currentId} source={memorizing} kind="invoice" onClose={() => setMemorizing(null)} />}
     </div>
   );
 }
 
-function InvoiceModal({ contacts, currentId, invoice, prefill, onClose }) {
+function InvoiceModal({ contacts, itemsCatalog, currentId, invoice, prefill, onClose }) {
   const editMode = !!invoice;
   const p = prefill || {};
   const initLines = () => {
@@ -379,7 +383,23 @@ function InvoiceModal({ contacts, currentId, invoice, prefill, onClose }) {
         <div className="space-y-2">
           {lines.map((l, i) => (
             <div key={i} className="grid grid-cols-12 gap-2">
-              <input placeholder="Description" value={l.description} onChange={(e) => upd(i, { description: e.target.value })} className="col-span-5 border rounded px-2 py-1.5 text-sm" />
+              <div className="col-span-5">
+                <ItemPicker
+                  items={itemsCatalog}
+                  value={l.description}
+                  onChangeText={(txt) => upd(i, { description: txt })}
+                  onPickItem={(it) => upd(i, {
+                    item_id: it.id,
+                    item_name: it.name,
+                    description: it.description || it.name,
+                    rate: Number(it.price || 0),
+                    income_account_id: it.income_account_id || null,
+                    income_account_name: it.income_account_name || "",
+                    category: it.income_account_name || "",
+                  })}
+                  testId={`invoice-line-${i}`}
+                />
+              </div>
               <input type="number" value={l.quantity} onChange={(e) => upd(i, { quantity: Number(e.target.value) })} className="col-span-2 border rounded px-2 py-1.5 text-sm font-mono-num" />
               <input type="number" value={l.rate} onChange={(e) => upd(i, { rate: Number(e.target.value) })} className="col-span-2 border rounded px-2 py-1.5 text-sm font-mono-num" />
               <div className="col-span-2 py-1.5 text-right font-mono-num">{fmtMoney(l.amount)}</div>
