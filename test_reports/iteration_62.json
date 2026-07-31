@@ -1,0 +1,37 @@
+{
+  "summary": "Iter 62 — Customer Revenue Report + Vendor/Customer Detail Drill-Down + Auto-Suggest Link. Backend: 6/6 pytest passed (revenue-by-customer shape+math+exclusions, customer-detail by id incl. draft/out-of-range excluded, vendor-detail by id, both detail endpoints return 400 on missing id+name, customer-detail by name fallback). Frontend: verified E2E — sales-mode shows 'By Customer' tab and hides 'By Vendor'; purchases-mode is the mirror. By Customer table has the exact columns Customer/Total revenue/Paid/Outstanding/Invoices/Share and header total matches sum of rows. Clicking a row opens ContactDetailModal with KPI stats, invoices table with contact-detail-doc-{id} and Linked transactions table. Vendor drill-down works identically. Close button (contact-detail-close) verified working. CSV export in customer mode downloads 'sales-by-customer-{start}-to-{end}.csv'. Edit Transaction modal: filling merchant=<matching-name> + amount=<exact-total> auto-selects the matching open invoice AND shows 'Auto-matched' amber chip (data-testid=txn-link-suggested); manually changing the link removes the chip. Auto-suggest respects already-linked txn (guarded by `if (linkId || suggestApplied) return`).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Edit transaction modal", "issues": ["Pre-existing React hydration warning: <span> inside <option> in account picker (not from Iter 62). Also several /prefetch and /logo endpoints returning 500 on page load — not blocking flows, noted from Iter 61."]},
+      {"screen": "ContactDetailModal", "issues": ["Slide-over close (X) button sits under the AI Assistant floating panel when the assistant chat is expanded — the drill-modal is z-50 and the AI Assistant chat panel overlaps it. Non-blocking (backdrop click / ESC also close), but consider raising ContactDetailModal z-index or auto-collapsing AI Assistant when a modal opens."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter62_customer_revenue_and_detail.py",
+    "/app/test_reports/pytest/iter62.xml"
+  ],
+  "action_items": [
+    "Consider bumping ContactDetailModal z-index (or collapsing the AI assistant panel automatically) so the slide-over close X isn't covered by the assistant chat panel when it's expanded."
+  ],
+  "critical_code_review_comments": [
+    "revenue-by-customer: paid_amount = max(total - balance_due, 0) — correctly handles legacy overpaid rows (would otherwise go negative). Consistent with spend-by-vendor pattern.",
+    "customer-detail / vendor-detail: filters bills/invoices by contact_id or contact_name and further filters in-Python by _in_range. Uses `linked_bill_id` / `linked_invoice_id` on transactions to attach linked txns. Correctly excludes draft/void via `status: {$nin: ['void','draft']}` at query-level.",
+    "customer-detail returns 400 via HTTPException when neither customer_id nor customer_name is passed — matches contract. Same for vendor-detail.",
+    "customer-detail returns empty label 'Customer' if no invoices found for the id, and uses customer_name arg only as fallback label — a valid id with 0 in-range invoices returns a working shape (invoices=[], totals all 0). Good defensive behaviour.",
+    "Transactions.jsx auto-suggest useEffect: gate `if (linkId || suggestApplied) return` prevents overwriting an existing/stored link on edit — verified good. Chip visibility `suggestedId && suggestedId === linkId` correctly hides once user overrides. Match logic requires BOTH amount within $0.01 AND merchant substring — ambiguous same-amount + no merchant match => no auto-suggest, correct per spec.",
+    "Auto-suggest match uses two-way substring (`d.contact_name.includes(m) || m.includes(d.contact_name)`) — this could over-match when merchant is a very short/common word (e.g., 'Inc'). Consider requiring exact case-insensitive equality OR length threshold on the shorter side to avoid false-positives on generic merchant strings. Non-blocking."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter62_customer_revenue_and_detail.py (new)"
+  ],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "100%"},
+  "test_credentials": "client@axiom.ai / client123 on company 540fbc73-66fd-432f-a357-39db6c84c5bd (TEST_dup)",
+  "seed_data_creation": "Ephemeral: created TEST_DrillCust_iter62 customer + 1 open invoice ($842.50, 2026-03-15) to exercise the By Customer table + drill-down + auto-suggest chip. Deleted after test run. pytest module test_iter62 also self-cleans its TEST_Cust_*/TEST_Vend_* + invoices/bills/contacts.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend pytest requires REACT_APP_BACKEND_URL env var (grab from /app/frontend/.env). For By Customer report to show rows in the current UI without changing the date-picker (fill() on the <input type=date> does NOT trigger the component's refetch reliably — the SalesReports component likely refetches on state change but pw.fill may not fire onChange properly on date inputs), seed an invoice with issue_date within the current default range (start of year to today). Edit Transaction modal is opened via kebab `txn-more-{id}` → 'Edit transaction' menu item; manual add button lives at `txn-add-btn`. Auto-suggest fields: `manual-txn-merchant` + `manual-txn-amount`.",
+  "rca of the issue": "N/A — no functional issues found. Only minor UX overlap between the AI Assistant panel and the ContactDetailModal close button."
+}

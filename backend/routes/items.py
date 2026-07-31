@@ -396,6 +396,137 @@ async def spend_by_vendor(
     return {"rows": rows, "total": total, "start": start, "end": end}
 
 
+@router.get("/companies/{cid}/reports/revenue-by-customer")
+async def revenue_by_customer(
+    cid: str,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """Mirror of spend-by-vendor for the sales side — rolls up invoice
+    totals by customer over a date range. Excludes draft/void.
+    """
+    await require_company(user, cid)
+    q = {"company_id": cid, "status": {"$nin": ["void", "draft"]}}
+    invs = await db.invoices.find(q).to_list(10000)
+    buckets: dict[str, dict] = {}
+    for inv in invs:
+        if not _in_range(inv.get("issue_date"), start, end):
+            continue
+        cid_ref = inv.get("contact_id") or inv.get("customer_id") or ""
+        cname = inv.get("contact_name") or inv.get("customer_name") or "Uncategorized customer"
+        key = cid_ref or f"nm::{cname.lower().strip()}"
+        total_amt = float(inv.get("total") or 0)
+        bal = float(inv.get("balance_due") or 0)
+        b = buckets.setdefault(key, {
+            "customer_id": cid_ref or None,
+            "customer_name": cname,
+            "amount": 0.0,
+            "paid_amount": 0.0,
+            "outstanding": 0.0,
+            "invoice_count": 0,
+        })
+        b["amount"] += total_amt
+        b["paid_amount"] += max(total_amt - bal, 0.0)
+        b["outstanding"] += bal
+        b["invoice_count"] += 1
+    rows = sorted(buckets.values(), key=lambda r: r["amount"], reverse=True)
+    total = round(sum(r["amount"] for r in rows), 2)
+    for r in rows:
+        r["amount"] = round(r["amount"], 2)
+        r["paid_amount"] = round(r["paid_amount"], 2)
+        r["outstanding"] = round(r["outstanding"], 2)
+    return {"rows": rows, "total": total, "start": start, "end": end}
+
+
+@router.get("/companies/{cid}/reports/vendor-detail")
+async def vendor_detail(
+    cid: str,
+    vendor_id: Optional[str] = None,
+    vendor_name: Optional[str] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """Every bill + every linked payment/transaction for one vendor in a
+    period. Callers pass `vendor_id` when known, else `vendor_name` for
+    the 'Uncategorized' rollup bucket.
+    """
+    await require_company(user, cid)
+    q: dict = {"company_id": cid, "status": {"$nin": ["void", "draft"]}}
+    if vendor_id:
+        q["contact_id"] = vendor_id
+    elif vendor_name:
+        q["contact_name"] = vendor_name
+    else:
+        raise HTTPException(status_code=400, detail="vendor_id or vendor_name is required")
+    all_bills = await db.bills.find(q).to_list(10000)
+    bills = [coerce(b) for b in all_bills if _in_range(b.get("issue_date"), start, end)]
+    # Any transactions linked to these bills — filter by the ids we just
+    # collected, no need to scan the whole txn table.
+    bill_ids = [b["id"] for b in bills]
+    txns: list[dict] = []
+    if bill_ids:
+        raw = await db.transactions.find({"company_id": cid, "linked_bill_id": {"$in": bill_ids}}).to_list(5000)
+        txns = [coerce(t) for t in raw]
+    label = bills[0].get("contact_name") if bills else (vendor_name or "Vendor")
+    total = round(sum(float(b.get("total") or 0) for b in bills), 2)
+    paid = round(sum(float(b.get("total") or 0) - float(b.get("balance_due") or 0) for b in bills), 2)
+    outstanding = round(sum(float(b.get("balance_due") or 0) for b in bills), 2)
+    return {
+        "vendor_id": vendor_id,
+        "vendor_name": label,
+        "bills": bills,
+        "linked_transactions": txns,
+        "totals": {"amount": total, "paid": paid, "outstanding": outstanding, "bill_count": len(bills)},
+        "start": start,
+        "end": end,
+    }
+
+
+@router.get("/companies/{cid}/reports/customer-detail")
+async def customer_detail(
+    cid: str,
+    customer_id: Optional[str] = None,
+    customer_name: Optional[str] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """Every invoice + every linked receipt/transaction for one customer
+    in a period. Mirrors vendor-detail."""
+    await require_company(user, cid)
+    q: dict = {"company_id": cid, "status": {"$nin": ["void", "draft"]}}
+    if customer_id:
+        q["contact_id"] = customer_id
+    elif customer_name:
+        q["contact_name"] = customer_name
+    else:
+        raise HTTPException(status_code=400, detail="customer_id or customer_name is required")
+    all_invs = await db.invoices.find(q).to_list(10000)
+    invs = [coerce(i) for i in all_invs if _in_range(i.get("issue_date"), start, end)]
+    inv_ids = [i["id"] for i in invs]
+    txns: list[dict] = []
+    if inv_ids:
+        raw = await db.transactions.find({"company_id": cid, "linked_invoice_id": {"$in": inv_ids}}).to_list(5000)
+        txns = [coerce(t) for t in raw]
+    label = invs[0].get("contact_name") if invs else (customer_name or "Customer")
+    total = round(sum(float(i.get("total") or 0) for i in invs), 2)
+    paid = round(sum(float(i.get("total") or 0) - float(i.get("balance_due") or 0) for i in invs), 2)
+    outstanding = round(sum(float(i.get("balance_due") or 0) for i in invs), 2)
+    return {
+        "customer_id": customer_id,
+        "customer_name": label,
+        "invoices": invs,
+        "linked_transactions": txns,
+        "totals": {"amount": total, "paid": paid, "outstanding": outstanding, "invoice_count": len(invs)},
+        "start": start,
+        "end": end,
+    }
+
+
+
+
 
 
 # ---------------------- Bulk Import (CSV / Excel) ----------------------

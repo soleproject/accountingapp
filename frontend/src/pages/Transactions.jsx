@@ -1920,6 +1920,39 @@ function ManualTxnModal({ accts, currentId, contactOptions = [], invoices = [], 
   );
   const linkOptions = linkKind === "invoice" ? invoices : bills;
 
+  // Auto-suggest a match once, on first render, if the user hasn't
+  // manually picked a link yet. We look for a single OPEN doc with
+  // (a) contact_name matching merchant (case-insensitive substring)
+  // and (b) total within a penny of |amount|. Exactly-one match =
+  // pre-select; ambiguous = leave blank and let the CPA decide.
+  const [suggestedId, setSuggestedId] = useState(null);
+  const [suggestApplied, setSuggestApplied] = useState(false);
+  useEffect(() => {
+    if (linkId || suggestApplied) return;
+    const amt = Math.abs(parseFloat(amount || 0) || 0);
+    if (!amt) return;
+    const kind = parseFloat(amount || 0) >= 0 ? "invoice" : "bill";
+    const pool = (kind === "invoice" ? invoices : bills).filter(d => {
+      const st = (d.status || "").toLowerCase();
+      if (st === "paid" || st === "void") return false;
+      const t = parseFloat(d.total || 0);
+      return Math.abs(t - amt) < 0.01;
+    });
+    // Prefer merchant match, but if nothing matches by merchant, don't
+    // trigger — one same-amount doc isn't enough on its own.
+    const m = (merchant || "").trim().toLowerCase();
+    const matches = m
+      ? pool.filter(d => (d.contact_name || "").toLowerCase().includes(m) || m.includes((d.contact_name || "").toLowerCase()))
+      : [];
+    if (matches.length === 1) {
+      setLinkKind(kind);
+      setLinkId(matches[0].id);
+      setSuggestedId(matches[0].id);
+      setSuggestApplied(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [amount, merchant, invoices, bills]);
+
   const save = async () => {
     if (splitsOn) {
       if (!amtNum) { toast.error("Enter the total amount first"); return; }
@@ -2189,11 +2222,20 @@ function ManualTxnModal({ accts, currentId, contactOptions = [], invoices = [], 
         )}
         <div className="border-t pt-3 space-y-2" data-testid="txn-link-section">
           <div className="flex items-center justify-between">
-            <label className="text-xs text-slate-600 font-medium">Link to invoice or bill</label>
+            <label className="text-xs text-slate-600 font-medium inline-flex items-center gap-2">
+              Link to invoice or bill
+              {suggestedId && suggestedId === linkId && (
+                <span
+                  data-testid="txn-link-suggested"
+                  className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-800"
+                  title="Auto-matched by merchant + amount"
+                >Auto-matched</span>
+              )}
+            </label>
             {linkId && (
               <button
                 type="button"
-                onClick={() => setLinkId("")}
+                onClick={() => { setLinkId(""); setSuggestedId(null); }}
                 className="text-[10px] text-rose-600 hover:underline"
                 data-testid="txn-link-clear"
               >Unlink</button>
