@@ -58,6 +58,30 @@ router = APIRouter(prefix="/api")
 async def list_bills(cid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     docs = await db.bills.find({"company_id": cid}).sort("issue_date", -1).to_list(1000)
+    # Batched self-heal (mirror of invoices) — reverses any legacy
+    # payment-delete that skipped the balance recomputation.
+    paid_by_bill: dict[str, float] = {}
+    async for row in db.payments.aggregate([
+        {"$match": {"company_id": cid, "linked_bill_id": {"$ne": None}}},
+        {"$group": {"_id": "$linked_bill_id", "paid": {"$sum": "$amount"}}},
+    ]):
+        paid_by_bill[row["_id"]] = float(row["paid"] or 0)
+    now = now_iso()
+    for d in docs:
+        total = float(d.get("total") or 0)
+        paid = paid_by_bill.get(d["id"], 0.0)
+        expected_bal = round(max(total - paid, 0.0), 2)
+        persisted_bal = float(d.get("balance_due") or 0)
+        if abs(expected_bal - persisted_bal) > 0.01:
+            st = ("paid" if expected_bal <= 0.01
+                  else "partial" if paid > 0
+                  else (d.get("status") or "open"))
+            d["balance_due"] = expected_bal
+            d["status"] = st
+            await db.bills.update_one(
+                {"id": d["id"], "company_id": cid},
+                {"$set": {"balance_due": expected_bal, "status": st, "updated_at": now}},
+            )
     return {"bills": [coerce(d) for d in docs]}
 
 
@@ -67,6 +91,22 @@ async def get_bill(cid: str, bid: str, user: dict = Depends(get_current_user)):
     b = await db.bills.find_one({"id": bid, "company_id": cid})
     if not b:
         raise HTTPException(status_code=404, detail="Bill not found")
+    total = float(b.get("total") or 0)
+    paid = 0.0
+    async for p in db.payments.find({"company_id": cid, "linked_bill_id": bid}):
+        paid += float(p.get("amount") or 0)
+    expected_bal = round(max(total - paid, 0.0), 2)
+    persisted_bal = float(b.get("balance_due") or 0)
+    if abs(expected_bal - persisted_bal) > 0.01:
+        st = ("paid" if expected_bal <= 0.01
+              else "partial" if paid > 0
+              else (b.get("status") or "open"))
+        await db.bills.update_one(
+            {"id": bid, "company_id": cid},
+            {"$set": {"balance_due": expected_bal, "status": st, "updated_at": now_iso()}},
+        )
+        b["balance_due"] = expected_bal
+        b["status"] = st
     return {"bill": coerce(b)}
 
 

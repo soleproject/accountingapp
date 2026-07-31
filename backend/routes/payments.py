@@ -88,9 +88,36 @@ async def create_payment(cid: str, inp: PaymentCreate, user: dict = Depends(get_
 
 @router.delete("/companies/{cid}/payments/{pid}")
 async def delete_payment(cid: str, pid: str, user: dict = Depends(get_current_user)):
+    """Delete a payment AND reverse its impact on any linked invoice/bill.
+
+    Prior to Feb 2026 this route just removed the payments row, leaving
+    the linked doc's ``balance_due`` and ``status`` stuck at their
+    partially-paid values — a real user hit that as "I deleted the
+    payment but the invoice still says $50 due". We now:
+
+    1. Look up the payment first (need the amount + link ids).
+    2. Reverse its balance impact on the linked invoice/bill via the
+       shared cascade helper (adds the amount back to ``balance_due``
+       and flips status open/sent/partial as appropriate).
+    3. Clear ``linked_payment_id`` on any transaction that owned this
+       payment so downstream reports stay consistent.
+    4. Delete the payment row itself.
+    """
     await require_company(user, cid)
+    payment = await db.payments.find_one({"id": pid, "company_id": cid})
+    if not payment:
+        # Idempotent — treat missing payment as already-deleted.
+        return {"ok": True, "reversed": False}
+    from link_cascade import _reverse_payment_impact
+    if payment.get("linked_invoice_id") or payment.get("linked_bill_id"):
+        await _reverse_payment_impact(cid, payment)
+    # Any transaction pointing at this payment loses that ref.
+    await db.transactions.update_many(
+        {"company_id": cid, "linked_payment_id": pid},
+        {"$set": {"linked_payment_id": None, "updated_at": now_iso()}},
+    )
     await db.payments.delete_one({"id": pid, "company_id": cid})
-    return {"ok": True}
+    return {"ok": True, "reversed": bool(payment.get("linked_invoice_id") or payment.get("linked_bill_id"))}
 
 
 @router.get("/companies/{cid}/receipts")

@@ -183,6 +183,37 @@ async def delete_tax(cid: str, tid: str, user: dict = Depends(get_current_user))
 async def list_invoices(cid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     docs = await db.invoices.find({"company_id": cid}).sort("issue_date", -1).to_list(1000)
+    # Batched self-heal: compute Σ(linked payments) per invoice in one
+    # aggregate call and fix any row whose persisted balance/status
+    # drifts. Guards against legacy payment-delete calls that skipped
+    # the reversal (see routes/payments.py::delete_payment).
+    paid_by_inv: dict[str, float] = {}
+    async for row in db.payments.aggregate([
+        {"$match": {"company_id": cid, "linked_invoice_id": {"$ne": None}}},
+        {"$group": {"_id": "$linked_invoice_id", "paid": {"$sum": "$amount"}}},
+    ]):
+        paid_by_inv[row["_id"]] = float(row["paid"] or 0)
+    heal_updates = []
+    for d in docs:
+        total = float(d.get("total") or 0)
+        paid = paid_by_inv.get(d["id"], 0.0)
+        expected_bal = round(max(total - paid, 0.0), 2)
+        persisted_bal = float(d.get("balance_due") or 0)
+        if abs(expected_bal - persisted_bal) > 0.01:
+            st = ("paid" if expected_bal <= 0.01
+                  else "partial" if paid > 0
+                  else (d.get("status") or "sent"))
+            d["balance_due"] = expected_bal
+            d["status"] = st
+            heal_updates.append((d["id"], expected_bal, st))
+    if heal_updates:
+        # Fire off the corrective writes without blocking the response.
+        now = now_iso()
+        for iid, bal, st in heal_updates:
+            await db.invoices.update_one(
+                {"id": iid, "company_id": cid},
+                {"$set": {"balance_due": bal, "status": st, "updated_at": now}},
+            )
     return {"invoices": [coerce(d) for d in docs]}
 
 
@@ -192,6 +223,26 @@ async def get_invoice(cid: str, iid: str, user: dict = Depends(get_current_user)
     inv = await db.invoices.find_one({"id": iid, "company_id": cid})
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    # Self-heal: if the persisted balance_due drifts from the actual
+    # Σ(linked_payments) — e.g. because a legacy DELETE /payments call
+    # didn't reverse — quietly recompute + write back so the UI shows
+    # the true balance. Cheap read-time consistency check.
+    total = float(inv.get("total") or 0)
+    paid = 0.0
+    async for p in db.payments.find({"company_id": cid, "linked_invoice_id": iid}):
+        paid += float(p.get("amount") or 0)
+    expected_bal = round(max(total - paid, 0.0), 2)
+    persisted_bal = float(inv.get("balance_due") or 0)
+    if abs(expected_bal - persisted_bal) > 0.01:
+        st = ("paid" if expected_bal <= 0.01
+              else "partial" if paid > 0
+              else (inv.get("status") or "sent"))
+        await db.invoices.update_one(
+            {"id": iid, "company_id": cid},
+            {"$set": {"balance_due": expected_bal, "status": st, "updated_at": now_iso()}},
+        )
+        inv["balance_due"] = expected_bal
+        inv["status"] = st
     return {"invoice": coerce(inv)}
 
 
