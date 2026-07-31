@@ -17,16 +17,34 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 (latest) — Receipts: image/PDF uploads + Payment Source
+### Feb 2026 — Recurring invoices + bills, editable invoice/bill numbers
+
+**Backend**
+- `recurring_service.py` — domain logic + hourly async scheduler. Idempotent `run_due()` catches up missed anchors, month-end capping (Jan 31 → Feb 28/29), frequencies: weekly / monthly / quarterly / annual, `paused` + optional `end_date` gates.
+- `routes/recurring.py` — full CRUD + `/run-now` + `/pause` + `/resume`.
+- Generated docs land as `status="draft"` with a `recurring_template_id` back-pointer.
+- `invoices.py` + `bills.py` update endpoints now soft-warn on duplicate `number` via `number_conflict: true` (do not block — CPAs sometimes reuse numbers when re-issuing corrections).
+- `server.py` startup registers indexes + starts the scheduler.
+
+**Frontend**
+- New `/recurring` page (`Recurring.jsx`) with Invoices/Bills tabs, per-row Generate-now / Pause / Resume / Edit / Delete, Edit modal (nickname, frequency, next run, end date, net days).
+- `MemorizeModal.jsx` — shared modal on Invoices + Bills row action (Repeat icon) — clones source doc as a template with picked schedule.
+- Inline number editing on both invoice and bill list rows (click number → autoFocus input → Enter save / Escape cancel). Duplicate → warning toast.
+- New `Invoice number` + `Bill number` fields in create/edit modals.
+- Sidebar gains a "Recurring" entry (Repeat icon).
+- Testing: 13/13 backend pytest pass + full frontend E2E pass (`/app/test_reports/iteration_56.json`).
+
+### Feb 2026 — Receipts: image/PDF uploads + Payment Source + Vendor dropdown
 
 **Backend (`models.py` + `routes/payments.py`)**
-- `ReceiptCreate` gained `payment_account_id`, `attachment_data_url`, `attachment_filename` fields
-- `POST /api/companies/{cid}/receipts` persists all three via `model_dump()` spread. Attachment stored inline as base64 data URL (planned migration to object storage once size becomes an issue).
+- `ReceiptCreate` gained `payment_account_id`, `attachment_data_url`, `attachment_filename`, `contact_id`, `contact_name` fields.
+- Attachment stored inline as base64 data URL (planned migration to object storage once size becomes an issue).
 
 **Frontend (`pages/Receipts.jsx`)**
-- New Receipt modal: **Paid from** dropdown (bank/cash/credit-card accounts only — filter is now strict to true payment instruments), **Attach receipt** dashed drop-zone (image or PDF), thumbnail preview for images, filename+size chip for PDFs, X to remove. Raw-size guard at 6 MB (base64 encoded stays under 10 MB proxy cap).
-- Receipts list: new **Paid from** column shows `code · name`; **Receipt** column shows Paperclip "View" link that opens the data URL in a new tab; `—` fallback when either field is empty.
-- 10/10 frontend E2E test criteria PASSED (`/app/test_reports/iteration_55.json`).
+- Merchant is now a Vendor dropdown (vendor contacts + "+ Add new vendor…" inline create). Falls back to other contacts in an optgroup.
+- Paid-from dropdown limited to true payment instruments (bank/cash/credit-card).
+- Attach receipt image or PDF with thumbnail preview, 6 MB raw guard.
+- List shows Paid-from column + Paperclip "View" link.
 
 
 - **Storage**: MongoDB (users, companies, memberships, accounts, transactions, invoices, bills, payments,
