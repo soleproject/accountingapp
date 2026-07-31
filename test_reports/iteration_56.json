@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 56 — Recurring invoice/bill templates + inline invoice-number editing + soft duplicate-number warn. Backend 13/13 pytest pass (create/list/run-now/pause/resume/PATCH/DELETE, bad-frequency & bad-kind → 400, Jan 31 → Feb 28/29 month-end capping via pure next_run_after, generated docs land as draft with recurring_template_id back-pointer, PATCH invoices & bills return number_conflict:true on dup / false on unique). Frontend E2E via Playwright covers: sidebar 'Recurring' entry, /invoices + /bills 'Recurring' header links, inline invoice/bill number edit with autofocus input + Enter save + Escape cancel, MemorizeModal opens with all 6 test-ids and saves successfully, invoice-modal-number / bill-modal-number fields in edit modal, /recurring page with invoice+bill tabs, per-row Generate-now (advances next_run + increments runs + toast), Pause↔Resume toggling Active↔Paused pill, Edit modal opens, Delete confirms via native dialog. Duplicate inline edit shows soft warn toast: 'Heads up — another invoice already uses …'.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter56_recurring.py",
+    "/app/test_reports/pytest/iter56.xml"
+  ],
+  "action_items": [
+    "Seed data drift: the client@axiom.ai user no longer owns 'Skyward Sparks, LLC' — only TEST_dup companies (leftover from prior iterations) are visible. Feature testing worked against TEST_dup, but a fresh reseed of Skyward Sparks + its sample invoices/bills/contacts would restore parity with the credential docs and give future testers realistic data.",
+    "Consider cleaning up TEST_* companies (TEST_dup, TEST_iter8_newclient, TEST_Co_*) from the DB to avoid future confusion."
+  ],
+  "critical_code_review_comments": [
+    "recurring_service.generate_from_template uses random.randint(1000,9999) for the invoice/bill number — collisions are possible; consider a monotonic per-company counter or company-scoped sequence to avoid needing the soft-warn path on freshly generated docs.",
+    "run-now endpoint always uses date.today() and ignores template.next_run_date, so a template with a future start_date will still generate immediately when the user clicks 'Generate now' AND jumps next_run_date to today+freq (skipping any missed anchors before today). That is arguably intentional but should be documented — the review request lists 'Jan 31 → Feb month-end capping' which is now only reachable via the scheduler (run_due), not run-now.",
+    "Delete recurring uses native window.confirm() — non-branded UX; consider replacing with the existing shadcn AlertDialog used elsewhere.",
+    "recurring_service._loop sleeps a fixed 3600s with no jitter; if multiple pods start, they'll tick in lockstep. Low risk since generate is idempotent by next_run_date but worth noting."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter56_recurring.py"],
+  "success_rate": {"backend": "100% (13/13)", "frontend": "100% of covered flows"},
+  "test_credentials": "client@axiom.ai / client123 (owns TEST_dup companies with invoices, bills, contacts)",
+  "seed_data_creation": "Test creates + cleans its own recurring templates. Auto-creates invoices/bills only if fewer than 2 exist for duplicate-warn test.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iter56_recurring.py is stable and idempotent — reuse for regression. Seed data for 'Skyward Sparks, LLC' is missing; the test dynamically discovers a company via /api/companies and creates fixtures as needed. If the main agent restores Skyward Sparks, tests will still pass without changes.",
+  "rca of the issue": "N/A — no bugs found. All backend endpoints and frontend flows in the review scope behave as specified."
+}

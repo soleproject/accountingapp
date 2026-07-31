@@ -88,9 +88,17 @@ async def update_bill(cid: str, bid: str, payload: dict, user: dict = Depends(ge
         payload["tax"] = tax
         payload["total"] = total
         payload["balance_due"] = total
+    number_conflict = False
+    if payload.get("number"):
+        dup = await db.bills.find_one(
+            {"company_id": cid, "number": payload["number"], "id": {"$ne": bid}},
+            {"_id": 0, "id": 1},
+        )
+        if dup:
+            number_conflict = True
     payload["updated_at"] = now_iso()
     await db.bills.update_one({"id": bid, "company_id": cid}, {"$set": payload})
-    return {"ok": True}
+    return {"ok": True, "number_conflict": number_conflict}
 
 
 @router.delete("/companies/{cid}/bills/{bid}")

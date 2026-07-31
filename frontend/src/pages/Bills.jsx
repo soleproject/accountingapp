@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, AlertTriangle, Pencil } from "lucide-react";
+import { Plus, Trash2, X, AlertTriangle, Pencil, Repeat, Check } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
+import MemorizeModal from "@/components/MemorizeModal";
 
 const BUCKETS = [
   { key: "current", label: "Current", desc: "Not yet due", color: "emerald" },
@@ -27,6 +28,25 @@ export default function Bills() {
   const [creating, setCreating] = useState(false);
   const [creatingPrefill, setCreatingPrefill] = useState(null);
   const [editing, setEditing] = useState(null);
+  const [memorizing, setMemorizing] = useState(null);
+  const [numEditId, setNumEditId] = useState(null);
+  const [numEditVal, setNumEditVal] = useState("");
+  const commitNumberEdit = async (bill) => {
+    const val = (numEditVal || "").trim();
+    if (!val || val === bill.number) { setNumEditId(null); return; }
+    try {
+      const r = await api.patch(`/companies/${currentId}/bills/${bill.id}`, { number: val });
+      if (r.data?.number_conflict) {
+        toast.warning(`Heads up — another bill already uses ${val}.`);
+      } else {
+        toast.success("Bill number updated");
+      }
+      setNumEditId(null);
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Update failed");
+    }
+  };
   // Deep-link filters from Month Close: /bills?outstanding=1&as_of=YYYY-MM-DD
   const [params, setParams] = useSearchParams();
   const outstanding = params.get("outstanding") === "1";
@@ -81,6 +101,11 @@ export default function Bills() {
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs">
           <Plus size={13} /> New Bill
         </button>
+      </div>
+      <div className="flex items-center gap-2 text-xs">
+        <Link to="/recurring" data-testid="recurring-link" className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100">
+          <Repeat size={12} /> Recurring bills
+        </Link>
       </div>
 
       {aging && aging.total > 0 && (
@@ -162,7 +187,32 @@ export default function Bills() {
           <tbody>
             {filtered.map(b => (
               <tr key={b.id} className="border-b hover:bg-slate-50">
-                <td className="px-3 py-2 font-mono-num text-slate-600">{b.number}</td>
+                <td className="px-3 py-2 font-mono-num text-slate-600">
+                  {numEditId === b.id ? (
+                    <span className="inline-flex items-center gap-1">
+                      <input
+                        autoFocus
+                        value={numEditVal}
+                        onChange={(e) => setNumEditVal(e.target.value)}
+                        onBlur={() => commitNumberEdit(b)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitNumberEdit(b);
+                          if (e.key === "Escape") setNumEditId(null);
+                        }}
+                        className="w-28 border rounded px-1.5 py-0.5 text-xs font-mono-num"
+                        data-testid={`bill-number-input-${b.id}`}
+                      />
+                      <Check size={12} className="text-emerald-600" />
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => { setNumEditId(b.id); setNumEditVal(b.number || ""); }}
+                      className="text-slate-700 hover:text-indigo-600 hover:underline decoration-dotted"
+                      title="Click to edit"
+                      data-testid={`bill-number-${b.id}`}
+                    >{b.number}</button>
+                  )}
+                </td>
                 <td className="px-3 py-2">{b.contact_name}</td>
                 <td className="px-3 py-2 font-mono-num text-slate-500">{fmtDate(b.issue_date)}</td>
                 <td className="px-3 py-2 font-mono-num text-slate-500">{fmtDate(b.due_date)}</td>
@@ -171,6 +221,9 @@ export default function Bills() {
                 <td className="px-3 py-2"><span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-100">{b.status}</span></td>
                 <td className="px-3 py-2 text-right">
                   <div className="inline-flex items-center gap-1">
+                    <button data-testid={`bill-memorize-btn-${b.id}`} onClick={() => setMemorizing(b)}
+                            title="Memorize (recurring)"
+                            className="p-1 rounded hover:bg-fuchsia-100 text-fuchsia-600"><Repeat size={13} /></button>
                     <button data-testid="bill-edit-btn" onClick={() => setEditing(b)}
                             className="p-1 rounded hover:bg-indigo-100 text-indigo-600"><Pencil size={13} /></button>
                     <button onClick={() => del(b.id)} className="p-1 rounded hover:bg-red-100 text-red-500"><Trash2 size={13} /></button>
@@ -193,6 +246,7 @@ export default function Bills() {
       {creating && <BillModal contacts={contacts} currentId={currentId} prefill={creatingPrefill}
                                 onClose={() => { setCreating(false); setCreatingPrefill(null); load(); }} />}
       {editing && <BillModal contacts={contacts} currentId={currentId} bill={editing} onClose={() => { setEditing(null); load(); }} />}
+      {memorizing && <MemorizeModal currentId={currentId} source={memorizing} kind="bill" onClose={() => setMemorizing(null)} />}
     </div>
   );
 }
@@ -226,6 +280,7 @@ function BillModal({ contacts, currentId, bill, prefill, onClose }) {
   );
   const [lines, setLines] = useState(initLines);
   const [status, setStatus] = useState(bill?.status || p.status || "open");
+  const [number, setNumber] = useState(bill?.number || "");
   const upd = (i, p) => setLines(lines.map((x, j) => j === i ? { ...x, ...p, amount: (p.quantity !== undefined ? p.quantity : x.quantity) * (p.rate !== undefined ? p.rate : x.rate) } : x));
   const total = lines.reduce((s, l) => s + Number(l.amount || 0), 0);
   const save = async () => {
@@ -234,10 +289,16 @@ function BillModal({ contacts, currentId, bill, prefill, onClose }) {
       contact_id: contact || null, contact_name: c?.name || bill?.contact_name || "",
       issue_date: issue, due_date: due, line_items: lines, status,
     };
+    if (number && number !== bill?.number) body.number = number.trim();
     if (editMode) {
-      await api.patch(`/companies/${currentId}/bills/${bill.id}`, body);
-      toast.success("Bill updated");
+      const r = await api.patch(`/companies/${currentId}/bills/${bill.id}`, body);
+      if (r.data?.number_conflict) {
+        toast.warning(`Heads up — another bill already uses ${body.number}.`);
+      } else {
+        toast.success("Bill updated");
+      }
     } else {
+      if (number) body.number = number.trim();
       await api.post(`/companies/${currentId}/bills`, body);
       toast.success("Bill created");
     }
@@ -260,6 +321,16 @@ function BillModal({ contacts, currentId, bill, prefill, onClose }) {
           <select value={status} onChange={(e) => setStatus(e.target.value)} className="border rounded px-2 py-1.5 text-sm">
             <option value="open">Open</option><option value="partial">Partial</option><option value="paid">Paid</option>
           </select>
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Bill number</label>
+          <input
+            value={number}
+            onChange={(e) => setNumber(e.target.value)}
+            placeholder="e.g. BILL-2001 (leave blank to auto-assign)"
+            className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+            data-testid="bill-modal-number"
+          />
         </div>
         <div className="space-y-2">
           {lines.map((l, i) => (

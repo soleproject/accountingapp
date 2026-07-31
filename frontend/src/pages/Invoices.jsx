@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, AlertTriangle, Pencil } from "lucide-react";
+import { Plus, Trash2, X, AlertTriangle, Pencil, Repeat, Check } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
+import MemorizeModal from "@/components/MemorizeModal";
 
 const BUCKETS = [
   { key: "current", label: "Current", desc: "Not yet due", color: "emerald" },
@@ -38,6 +39,26 @@ export default function Invoices() {
   const [creating, setCreating] = useState(false);
   const [creatingPrefill, setCreatingPrefill] = useState(null);
   const [editing, setEditing] = useState(null);
+  const [memorizing, setMemorizing] = useState(null);
+  // Inline-edit state for invoice numbers on list rows.
+  const [numEditId, setNumEditId] = useState(null);
+  const [numEditVal, setNumEditVal] = useState("");
+  const commitNumberEdit = async (inv) => {
+    const val = (numEditVal || "").trim();
+    if (!val || val === inv.number) { setNumEditId(null); return; }
+    try {
+      const r = await api.patch(`/companies/${currentId}/invoices/${inv.id}`, { number: val });
+      if (r.data?.number_conflict) {
+        toast.warning(`Heads up — another invoice already uses ${val}.`);
+      } else {
+        toast.success("Invoice number updated");
+      }
+      setNumEditId(null);
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Update failed");
+    }
+  };
   // Deep-link filters from Month Close: /invoices?outstanding=1&as_of=YYYY-MM-DD
   // Filtering is client-side against the already-loaded /invoices response
   // — matches the backend `_outstanding_count` semantics exactly
@@ -100,6 +121,11 @@ export default function Invoices() {
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs">
           <Plus size={13} /> New Invoice
         </button>
+      </div>
+      <div className="flex items-center gap-2 text-xs">
+        <Link to="/recurring" data-testid="recurring-link" className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100">
+          <Repeat size={12} /> Recurring invoices
+        </Link>
       </div>
 
       {aging && aging.total > 0 && (
@@ -191,7 +217,32 @@ export default function Invoices() {
           <tbody>
             {filtered.map(inv => (
               <tr key={inv.id} className="border-b hover:bg-slate-50">
-                <td className="px-3 py-2 font-mono-num text-slate-600">{inv.number}</td>
+                <td className="px-3 py-2 font-mono-num text-slate-600">
+                  {numEditId === inv.id ? (
+                    <span className="inline-flex items-center gap-1">
+                      <input
+                        autoFocus
+                        value={numEditVal}
+                        onChange={(e) => setNumEditVal(e.target.value)}
+                        onBlur={() => commitNumberEdit(inv)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitNumberEdit(inv);
+                          if (e.key === "Escape") setNumEditId(null);
+                        }}
+                        className="w-28 border rounded px-1.5 py-0.5 text-xs font-mono-num"
+                        data-testid={`invoice-number-input-${inv.id}`}
+                      />
+                      <Check size={12} className="text-emerald-600" />
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => { setNumEditId(inv.id); setNumEditVal(inv.number || ""); }}
+                      className="text-slate-700 hover:text-indigo-600 hover:underline decoration-dotted"
+                      title="Click to edit"
+                      data-testid={`invoice-number-${inv.id}`}
+                    >{inv.number}</button>
+                  )}
+                </td>
                 <td className="px-3 py-2">{inv.contact_name}</td>
                 <td className="px-3 py-2 font-mono-num text-slate-500">{fmtDate(inv.issue_date)}</td>
                 <td className="px-3 py-2 font-mono-num text-slate-500">{fmtDate(inv.due_date)}</td>
@@ -200,6 +251,9 @@ export default function Invoices() {
                 <td className="px-3 py-2"><span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-100">{inv.status}</span></td>
                 <td className="px-3 py-2 text-right">
                   <div className="inline-flex items-center gap-1">
+                    <button data-testid={`invoice-memorize-btn-${inv.id}`} onClick={() => setMemorizing(inv)}
+                            title="Memorize (recurring)"
+                            className="p-1 rounded hover:bg-fuchsia-100 text-fuchsia-600"><Repeat size={13} /></button>
                     <button data-testid="invoice-edit-btn" onClick={() => setEditing(inv)}
                             className="p-1 rounded hover:bg-indigo-100 text-indigo-600"><Pencil size={13} /></button>
                     <button onClick={() => del(inv.id)} className="p-1 rounded hover:bg-red-100 text-red-500"><Trash2 size={13} /></button>
@@ -222,6 +276,7 @@ export default function Invoices() {
       {creating && <InvoiceModal contacts={contacts} currentId={currentId} prefill={creatingPrefill}
                                   onClose={() => { setCreating(false); setCreatingPrefill(null); load(); }} />}
       {editing && <InvoiceModal contacts={contacts} currentId={currentId} invoice={editing} onClose={() => { setEditing(null); load(); }} />}
+      {memorizing && <MemorizeModal currentId={currentId} source={memorizing} kind="invoice" onClose={() => setMemorizing(null)} />}
     </div>
   );
 }
@@ -261,6 +316,7 @@ function InvoiceModal({ contacts, currentId, invoice, prefill, onClose }) {
   const [lines, setLines] = useState(initLines);
   const [tax, setTax] = useState(invoice?.tax || Number(p.tax || 0));
   const [status, setStatus] = useState(invoice?.status || p.status || "sent");
+  const [number, setNumber] = useState(invoice?.number || "");
   const upd = (i, patch) => setLines(lines.map((x, j) => j === i ? { ...x, ...patch, amount: (patch.quantity !== undefined ? patch.quantity : x.quantity) * (patch.rate !== undefined ? patch.rate : x.rate) } : x));
   const total = lines.reduce((s, l) => s + Number(l.amount || 0), 0) + Number(tax);
   const save = async () => {
@@ -269,10 +325,16 @@ function InvoiceModal({ contacts, currentId, invoice, prefill, onClose }) {
       contact_id: contact || null, contact_name: c?.name || invoice?.contact_name || "",
       issue_date: issue, due_date: due, line_items: lines, tax: Number(tax), status,
     };
+    if (number && number !== invoice?.number) body.number = number.trim();
     if (editMode) {
-      await api.patch(`/companies/${currentId}/invoices/${invoice.id}`, body);
-      toast.success("Invoice updated");
+      const r = await api.patch(`/companies/${currentId}/invoices/${invoice.id}`, body);
+      if (r.data?.number_conflict) {
+        toast.warning(`Heads up — another invoice already uses ${body.number}.`);
+      } else {
+        toast.success("Invoice updated");
+      }
     } else {
+      if (number) body.number = number.trim();
       await api.post(`/companies/${currentId}/invoices`, body);
       toast.success("Invoice created");
     }
@@ -296,6 +358,16 @@ function InvoiceModal({ contacts, currentId, invoice, prefill, onClose }) {
             <option value="draft">Draft</option><option value="sent">Sent</option>
             <option value="partial">Partial</option><option value="paid">Paid</option>
           </select>
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Invoice number</label>
+          <input
+            value={number}
+            onChange={(e) => setNumber(e.target.value)}
+            placeholder="e.g. INV-1001 (leave blank to auto-assign)"
+            className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+            data-testid="invoice-modal-number"
+          />
         </div>
         <div className="space-y-2">
           {lines.map((l, i) => (

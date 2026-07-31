@@ -93,9 +93,20 @@ async def update_invoice(cid: str, iid: str, payload: dict, user: dict = Depends
         payload["tax"] = tax
         payload["total"] = total
         payload["balance_due"] = total
+    # Soft duplicate-number warning — the CPA may knowingly reuse a
+    # number when re-issuing a corrected invoice, so we WARN rather
+    # than 409-block. Frontend surfaces the warning via toast.
+    number_conflict = False
+    if payload.get("number"):
+        dup = await db.invoices.find_one(
+            {"company_id": cid, "number": payload["number"], "id": {"$ne": iid}},
+            {"_id": 0, "id": 1},
+        )
+        if dup:
+            number_conflict = True
     payload["updated_at"] = now_iso()
     await db.invoices.update_one({"id": iid, "company_id": cid}, {"$set": payload})
-    return {"ok": True}
+    return {"ok": True, "number_conflict": number_conflict}
 
 
 @router.delete("/companies/{cid}/invoices/{iid}")

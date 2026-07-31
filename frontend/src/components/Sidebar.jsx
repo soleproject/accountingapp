@@ -4,7 +4,7 @@ import {
   LayoutDashboard, FileText, Receipt, CreditCard, ScrollText, BarChart3,
   Users, Link2, Inbox, ChevronRight, ArrowLeft, ArrowLeftRight, Boxes,
   Building2, Wallet, Tags, CheckCheck, ClipboardCheck, CalendarCheck, Calendar,
-  BookOpen, Notebook, ListTree, Sparkles, Shield, Briefcase, Wand2, PanelLeftClose, PanelLeft, Settings2, Share2, Activity,
+  BookOpen, Notebook, ListTree, Sparkles, Shield, Briefcase, Wand2, PanelLeftClose, PanelLeft, Settings2, Share2, Activity, Repeat,
 } from "lucide-react";
 import { TID } from "@/constants/testIds";
 import { useAuth } from "@/lib/auth";
@@ -18,6 +18,7 @@ const NAV = [
   { to: "/bills", label: "Bills", icon: Receipt },
   { to: "/payments", label: "Payments", icon: CreditCard },
   { to: "/receipts", label: "Receipts", icon: ScrollText },
+  { to: "/recurring", label: "Recurring", icon: Repeat },
   { to: "/reports", label: "Reports", icon: BarChart3 },
   { to: "/contacts", label: "Contacts", icon: Users },
   { to: "/connections", label: "Connections", icon: Link2 },

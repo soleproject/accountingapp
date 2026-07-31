@@ -165,6 +165,11 @@ async def startup():
     # AI Ask Client — hourly autonomous email loop (opt-out per pro).
     import ai_ask_client_scheduler
     ai_ask_client_scheduler.start_scheduler()
+    # Recurring invoices / bills — hourly loop that clones any templates
+    # whose next_run_date <= today (default = draft, safe to review).
+    import recurring_service as _rec
+    await _rec.ensure_indexes()
+    _rec.start_scheduler()
     # Any job left in queued/running from a previous process is stuck —
     # mark as failed so the Sync Pill doesn't display "syncing forever".
     stuck = await job_queue.reconcile_stuck_jobs()
