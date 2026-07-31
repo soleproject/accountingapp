@@ -17,6 +17,21 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Item usage: Invoice / Bill / Both
+
+**Backend (`routes/items.py`)**
+- `Item` model gained a `usage` field (`sales` | `purchases` | `both`, default `sales`).
+- `GET /items?usage=sales|purchases` filters items usable in that context — `both` items appear in either filter.
+- Legacy items without a `usage` field are backfilled on read by inferring from account slots (income-only → sales; expense-only → purchases; both → both).
+- CSV import honours an optional `Usage` column; otherwise infers.
+- PATCH rejects invalid values with 400.
+
+**Frontend**
+- Items page has 4 filter tabs — **All / For Invoices / For Bills / Both** — with live counts, a new **Used on** column with color-coded Invoices / Bills / Both badge, and an Accounts column showing both income (↑) and expense (↓) mappings.
+- Item modal has a segmented "Used on" picker that persists on save.
+- Invoices load `?usage=sales`; Bills load `?usage=purchases`, so each picker only shows relevant items.
+- Testing: 10/10 backend pytest + Playwright frontend E2E 100%, zero bugs (`/app/test_reports/iteration_60.json`).
+
 ### Feb 2026 — Purchases By Category / Item (mirror of Sales Reports)
 
 **Backend (`routes/items.py`)**
