@@ -17,6 +17,17 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Purchases By Category / Item (mirror of Sales Reports)
+
+**Backend (`routes/items.py`)**
+- New `GET /companies/{cid}/reports/purchases-by-item` — aggregates bill line_items by `item_id` (falls back to description-based bucket 'Uncategorized'). Excludes `status='void'` and `status='draft'`. Same date-range params as sales endpoints.
+- New `GET /companies/{cid}/reports/purchases-by-category` — same rollup grouped by `expense_account_id`/`_name` (falls back to line's `category` field, then 'Uncategorized').
+
+**Frontend**
+- `SalesReports.jsx` refactored to support both **Sales** and **Purchases** modes via a top-level toggle (`report-mode-toggle`) — deep-linkable through `?mode=purchases`. Labels, headers, colors, CSV filename, and empty-state text swap based on mode.
+- `Reports.jsx` gains a **Purchases Reports** tile that opens the page in purchases mode.
+- Testing: 8/8 backend pytest + Playwright frontend E2E 100%, zero bugs (`/app/test_reports/iteration_59.json`).
+
 ### Feb 2026 — Bulk Item Import + ItemPicker on Bills
 
 **Backend (`routes/items.py`)**
