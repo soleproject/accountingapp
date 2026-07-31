@@ -323,12 +323,19 @@ function BillModal({ contacts, currentId, bill, prefill, onClose }) {
           </select>
         </div>
         <div>
-          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Bill number</label>
+          <label htmlFor={`bill-num-${bill?.id || "new"}`}
+                 className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+            Bill number
+          </label>
           <input
+            id={`bill-num-${bill?.id || "new"}`}
+            key={`bill-num-${bill?.id || "new"}`}
+            type="text"
+            autoComplete="off"
             value={number}
             onChange={(e) => setNumber(e.target.value)}
             placeholder="e.g. BILL-2001 (leave blank to auto-assign)"
-            className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+            className="w-full border rounded px-2 py-1.5 text-sm font-mono-num focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
             data-testid="bill-modal-number"
           />
         </div>

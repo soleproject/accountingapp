@@ -360,12 +360,19 @@ function InvoiceModal({ contacts, currentId, invoice, prefill, onClose }) {
           </select>
         </div>
         <div>
-          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Invoice number</label>
+          <label htmlFor={`inv-num-${invoice?.id || "new"}`}
+                 className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+            Invoice number
+          </label>
           <input
+            id={`inv-num-${invoice?.id || "new"}`}
+            key={`inv-num-${invoice?.id || "new"}`}
+            type="text"
+            autoComplete="off"
             value={number}
             onChange={(e) => setNumber(e.target.value)}
             placeholder="e.g. INV-1001 (leave blank to auto-assign)"
-            className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+            className="w-full border rounded px-2 py-1.5 text-sm font-mono-num focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
             data-testid="invoice-modal-number"
           />
         </div>
