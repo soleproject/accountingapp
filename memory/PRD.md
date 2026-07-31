@@ -17,6 +17,23 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Items catalog + Sales reports by item/category
+
+**Backend (`routes/items.py`)**
+- New `items` collection (per-company Products & Services catalog): name, description, type (service/product), income_account_id/name, price, sku, active.
+- CRUD endpoints with **duplicate-name 409 guard** and auto-backfill of `income_account_name` from CoA.
+- Two new report endpoints:
+  - `GET /reports/sales-by-item` — aggregates invoice `line_items` by `item_id` (falls back to description bucket). Excludes draft/void.
+  - `GET /reports/sales-by-category` — same rollup by income account or free-text category.
+
+**Frontend**
+- `/items` page (`Items.jsx`) — full CRUD, active/inactive toggle, revenue-account picker, show-inactive filter.
+- `components/ItemPicker.jsx` — searchable combobox used on every invoice line. Picking an item auto-fills description + rate + `income_account_id`/`_name` + `category`; free-text still supported.
+- `Invoices.jsx` line rows now use ItemPicker (loads `items` alongside contacts on page mount).
+- `/sales-reports` (`SalesReports.jsx`) — dedicated page with **By Item / By Category** tabs, date range, share bars, running totals, **CSV export**.
+- `Reports.jsx` gains a "Sales Reports" tile linking there. Sidebar gains **Items** entry.
+- Testing: 10/10 backend pytest + full Playwright frontend E2E, zero bugs (`/app/test_reports/iteration_57.json`).
+
 ### Feb 2026 — Recurring invoices + bills, editable invoice/bill numbers
 
 **Backend**
