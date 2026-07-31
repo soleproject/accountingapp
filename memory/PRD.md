@@ -17,6 +17,16 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Cascade delete for auto-payment link graph
+
+**Backend**
+- New `link_cascade.py` module with two helpers, both lazy-imported to avoid cycles:
+  - `cascade_on_doc_delete(cid, kind, doc_id)` — when an invoice or bill is deleted, any payment with `linked_invoice_id`/`linked_bill_id` pointing at it is removed, and any transaction whose `linked_payment_id` referenced those payments has its back-refs cleared.
+  - `cascade_on_transaction_delete(cid, txn)` — when a transaction owning an auto-payment is deleted, the payment's balance impact on the doc is reversed (invoice `paid` → `sent` with balance restored, bill `paid` → `open` with balance restored) and the payment is deleted.
+- `DELETE /invoices/{iid}`, `DELETE /bills/{bid}`, `DELETE /transactions/{tid}` all wired to return `{ok, payments_deleted, ...}`.
+- Downstream reports (`purchases-by-category`, `revenue-by-customer`, etc.) automatically stay consistent because payments and doc balances are the source data.
+- Testing: **8/8 backend pytest pass, zero bugs** (`/app/test_reports/iteration_64.json`).
+
 ### Feb 2026 — Auto-Payment on Link, Doc PDF preview, Customer Statement email
 
 **Backend**
