@@ -57,6 +57,7 @@ DEFAULT_PREFS = {
     "payment_failed_pro":       True,   # Pro-side heads-up when a client card fails
     "affiliate_welcome":        True,   # Day-0 activation email — link + QR + tier table
     "enterprise_welcome":       True,   # Day-0 activation email for new firm owners
+    "customer_statement":       True,   # AR statement email — outstanding invoices list
 }
 
 

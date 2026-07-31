@@ -1,0 +1,43 @@
+{
+  "summary": "Iter 63 — Auto-payment on link, PDF preview, Customer statement email. Backend pytest: 7/8 passed. Frontend E2E: all critical flows verified.\n\nBACKEND (pytest /app/backend/tests/test_iter63_link_pdf_statement.py):\n  ✅ POST /transactions/{tid}/link?bill_id=X auto-creates a payment with source_transaction_id=tid, amount=abs(txn.amount), correct contact_id/bill link; bill goes to status='paid', balance_due=0. Response includes linked_payment_id.\n  ✅ Unlink via ?bill_id= (empty) deletes the auto-payment and reverses the bill back to status='open', balance_due=$500.\n  ❌ Idempotent re-link — payment count stays at 1 (no dup), BUT the 2nd response returns linked_payment_id=null instead of the existing pid. Data correct, response payload incorrect. (See RCA below.)\n  ✅ Invoice partial→paid flow: $400 txn → status='partial'/balance $600; +$600 txn → status='paid' (or 'sent' per code) / balance $0.\n  ✅ GET /invoices/{iid}/pdf → 200 application/pdf, %PDF magic, Content-Disposition filename includes 'invoice-<number>'.\n  ✅ GET /bills/{bid}/pdf → 200 application/pdf, %PDF magic, filename 'bill-<number>'.\n  ✅ POST /customers/{customer_id}/send-statement — 404 unknown customer, 400 no email + no `to`, 200 with keys {status,to,outstanding,invoice_count,email_log_id}. status='failed' as expected (no Resend key).\n  ✅ Statement outstanding computation excludes draft + out-of-range invoices; only in-range non-draft, balance_due>0 rows counted.\n\nFRONTEND (Playwright — SmartBooks preview):\n  ✅ /payments — payments with source_transaction_id show Link2 icon (data-testid='payment-source-txn-<id>', 3 found) linking to /accounting/transactions?open=<tid>. data-testid='payment-linked-<id>' also present (3 found).\n  ✅ /accounting/transactions?open=<tid> auto-opens the Edit Transaction modal (data-testid='txn-edit-modal' rendered).\n  ✅ ContactDetailModal drill-down (via /sales-reports → By Customer → row click) — customer mode: contact-detail-modal, contact-detail-name, contact-detail-close, contact-detail-doc-<id>, contact-detail-pdf-<id>, contact-detail-send-statement all present.\n  ✅ PDF preview: contact-detail-pdf-<id> click opens doc-preview-modal with doc-preview-iframe (blob URL src pointing at the /pdf endpoint) and doc-preview-close X — close works.\n  ✅ Send statement modal: contact-detail-send-statement opens statement-modal with statement-email pre-filled from contact email and statement-send button. Clicking Send hits POST /customers/{id}/send-statement, gets 200, response body has all expected keys ({email_log_id,invoice_count,outstanding,status,to}), status='failed' (Resend not configured — expected).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/companies/{cid}/transactions/{tid}/link", "issue": "Idempotent re-link (same doc, second call) returns linked_payment_id=null in the response even though the payment still exists and is still linked on the txn. Should surface the existing pid (spec explicitly says 'returns existing linked_payment_id'). Fix: in the response, fall back to txn.linked_payment_id when upd doesn't set it. One-liner in routes/transactions.py line ~1432: `return {'ok': True, 'linked_payment_id': upd.get('linked_payment_id') or txn.get('linked_payment_id')}`."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "ContactDetailModal at 1440x900", "issues": ["AI Assistant floating panel on the right can overlap the ContactDetailModal slide-over (right side) and intercept clicks on contact-detail-pdf-<id> / contact-detail-send-statement even though the buttons render. At 1920x1080 with scroll-into-view first, clicks land fine. Non-blocking (matches iter62 note about z-index overlap) but worth raising ContactDetailModal z-index above the AI panel or auto-collapsing the AI panel when the drill-modal opens."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter63_link_pdf_statement.py",
+    "/app/test_reports/pytest/iter63.xml"
+  ],
+  "action_items": [
+    "Backend (minor): make POST /transactions/{tid}/link return the existing linked_payment_id on idempotent re-link (fall back to txn.linked_payment_id when the update didn't set a new one). Not user-visible on the frontend because the frontend refetches the txn after; the API contract mismatch only affects direct callers / tests."
+  ],
+  "critical_code_review_comments": [
+    "routes/transactions.py link_transaction: auto-payment orchestration is correct + idempotent (no dupe rows created on re-link, verified by pytest) — only the response payload leaks the pid inconsistency described above.",
+    "routes/transactions.py: `_reverse_and_delete_payment` reverses the balance on BOTH invoice AND bill fields (in case a payment had both) — good defensive handling. Note: `st = \"sent\" if bal >= total - 0.01 else \"partial\"` on invoice reversal will always set 'sent' because reversal restores full balance — but if the invoice was originally 'draft' or 'paid' pre-payment, this loses that original state. Minor edge case, unlikely in normal flow (auto-payments only exist for non-draft docs) but worth noting.",
+    "routes/items.py send_customer_statement: filter is `balance_due > 0.01 AND status NOT IN [void,draft] AND issue_date in range` — matches spec. Uses `_in_range` helper; verified excludes both draft AND out-of-range.",
+    "email_dispatcher.py: kind='customer_statement' honors opt-out via DEFAULT_PREFS — statement send returns status='skipped_pref_off' when customer has opted out. UI shows warning toast in that case (verified via code inspection of ContactDetailModal.jsx).",
+    "document_pdfs.build_document_pdf: renders %PDF- with reportlab, filename convention includes doc number — clean, matches invoice+bill routes.",
+    "Frontend ContactDetailModal: PDF preview uses blob URL (fetch → URL.createObjectURL) rather than putting the API URL directly into the iframe src — avoids auth issues (bearer token isn't sent by iframe navigation). Solid choice.",
+    "Frontend Payments.jsx Link2 icon: renders per row when source_transaction_id present. Good testid pattern (payment-source-txn-<id>). Verified 3 icons rendered in seeded data.",
+    "AI Assistant panel z-index still overlaps ContactDetailModal at narrower viewports — this is the same issue flagged in iter62. Consider bumping the drill modal to z-[60] or above the AI panel, OR auto-collapsing the assistant when a slide-over opens."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter63_link_pdf_statement.py (new)"
+  ],
+  "success_rate": {"backend": "87.5% (7/8)", "frontend": "100%"},
+  "test_credentials": "client@axiom.ai / client123 on company 540fbc73-66fd-432f-a357-39db6c84c5bd (TEST_dup)",
+  "seed_data_creation": "Ephemeral: created TEST_UIIter63_* customers + invoices to exercise the By Customer drill-down + PDF preview + statement send. All deleted at end of each test flow. Backend pytest also self-cleans TEST_ contacts/bills/invoices/txns.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend pytest needs REACT_APP_BACKEND_URL env var. For UI drill-down testing, the Sales By Customer table filters by the date-picker range (defaults 2026-01-01→today). To force a customer to appear, POST an invoice with issue_date in that range via the API. AI Assistant floating panel (right side) will intercept clicks on ContactDetailModal buttons at 1440-wide viewports — use 1920x1080 + scroll_into_view_if_needed before click, or collapse the assistant via data-testid='ai-panel-toggle'.",
+  "rca of the issue": "Idempotent link response bug: link_transaction builds `upd` dict then persists via update_one. When the re-link finds an existing payment (`already` truthy), it skips creating a new pid and never touches upd['linked_payment_id']. The final `return {'linked_payment_id': upd.get('linked_payment_id')}` returns None. Fix is one-line: `upd.get('linked_payment_id') or txn.get('linked_payment_id')`. No data corruption — the txn's linked_payment_id in DB is still the correct existing pid."
+}

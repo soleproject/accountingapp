@@ -735,6 +735,18 @@ export default function Transactions() {
     }
   }, [params, txns]);
 
+  // Deep-link `?open=<txn_id>` from the Payments page — auto-opens
+  // the Edit Transaction modal so pros can review the source txn
+  // behind an auto-created payment in one click.
+  useEffect(() => {
+    const openId = params.get("open");
+    if (!openId || openId === "split") return;
+    if (!txns.length) return;
+    const t = txns.find(x => x.id === openId);
+    if (t && !editing) setEditing(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params, txns]);
+
   const acctById = useMemo(() => Object.fromEntries(accts.map(a => [a.id, a])), [accts]);
 
   const toggleSel = (id) => {

@@ -108,3 +108,20 @@ async def delete_bill(cid: str, bid: str, user: dict = Depends(get_current_user)
     return {"ok": True}
 
 
+
+
+@router.get("/companies/{cid}/bills/{bid}/pdf")
+async def bill_pdf(cid: str, bid: str, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    bill = await db.bills.find_one({"id": bid, "company_id": cid})
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    company = await db.companies.find_one({"id": cid})
+    payments = await db.payments.find({"company_id": cid, "linked_bill_id": bid}).to_list(200)
+    from document_pdfs import build_document_pdf
+    pdf = build_document_pdf(kind="bill", doc=bill, company=company, payments=payments)
+    filename = f"bill-{bill.get('number','')}.pdf".replace(" ", "_")
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )

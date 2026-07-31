@@ -1309,7 +1309,22 @@ async def link_transaction(
     invoice_id: Optional[str] = None, bill_id: Optional[str] = None, payment_id: Optional[str] = None,
     user: dict = Depends(get_current_user),
 ):
+    """Link a transaction to an invoice/bill/payment.
+
+    When invoice_id or bill_id is set, we ALSO auto-create a matching
+    Payment record so the bill/invoice balance updates and the pro sees
+    the payment on the Payments screen. The payment is tagged with
+    `source_transaction_id=tid` so the UI can surface a "back to txn"
+    icon on each row.
+
+    Clearing the link (empty string) deletes the auto-created payment
+    and reverses the balance impact.
+    """
     await require_company(user, cid)
+    txn = await db.transactions.find_one({"id": tid, "company_id": cid})
+    if not txn:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
     upd = {"updated_at": now_iso()}
     if invoice_id is not None:
         upd["linked_invoice_id"] = invoice_id
@@ -1317,9 +1332,104 @@ async def link_transaction(
         upd["linked_bill_id"] = bill_id
     if payment_id is not None:
         upd["linked_payment_id"] = payment_id
+
+    # ---- Auto-payment orchestration ---------------------------------
+    # Keep this idempotent: if a payment already exists for this txn +
+    # doc combo, don't create a duplicate. If the link is cleared or
+    # switched to a different doc, delete the stale payment first.
+    from db import db as _db  # local import to avoid cycle at import time
+    existing_pid = txn.get("linked_payment_id")
+
+    # Which document is being (un)linked in this call.
+    target_kind = None  # "invoice" | "bill" | None
+    target_id = None
+    if invoice_id is not None:
+        target_kind = "invoice" if invoice_id else None
+        target_id = invoice_id or None
+    elif bill_id is not None:
+        target_kind = "bill" if bill_id else None
+        target_id = bill_id or None
+
+    async def _reverse_and_delete_payment(payment_id_to_delete: str):
+        pay = await _db.payments.find_one({"id": payment_id_to_delete, "company_id": cid})
+        if not pay:
+            return
+        # Reverse the balance impact on whichever doc it was linked to.
+        amt = float(pay.get("amount") or 0)
+        if pay.get("linked_invoice_id"):
+            inv = await _db.invoices.find_one({"id": pay["linked_invoice_id"], "company_id": cid})
+            if inv:
+                bal = float(inv.get("balance_due") or 0) + amt
+                st = "sent" if bal >= float(inv.get("total") or 0) - 0.01 else "partial"
+                await _db.invoices.update_one({"id": inv["id"]},
+                    {"$set": {"balance_due": round(bal, 2), "status": st}})
+        if pay.get("linked_bill_id"):
+            bill = await _db.bills.find_one({"id": pay["linked_bill_id"], "company_id": cid})
+            if bill:
+                bal = float(bill.get("balance_due") or 0) + amt
+                st = "open" if bal >= float(bill.get("total") or 0) - 0.01 else "partial"
+                await _db.bills.update_one({"id": bill["id"]},
+                    {"$set": {"balance_due": round(bal, 2), "status": st}})
+        await _db.payments.delete_one({"id": payment_id_to_delete})
+
+    # If the txn had an auto-payment and the link is now cleared or
+    # switched, delete + reverse the old one first.
+    if existing_pid and (target_id is None or target_kind is not None):
+        old_pay = await _db.payments.find_one({"id": existing_pid, "company_id": cid})
+        if old_pay:
+            currently_on = "invoice" if old_pay.get("linked_invoice_id") else ("bill" if old_pay.get("linked_bill_id") else None)
+            currently_id = old_pay.get("linked_invoice_id") or old_pay.get("linked_bill_id")
+            if (target_id is None) or (target_kind != currently_on) or (target_id != currently_id):
+                await _reverse_and_delete_payment(existing_pid)
+                upd["linked_payment_id"] = None
+
+    # Create the new auto-payment if we're linking (and don't already
+    # have one for this exact doc).
+    if target_kind and target_id:
+        already = await _db.payments.find_one({
+            "company_id": cid, "source_transaction_id": tid,
+            "linked_invoice_id" if target_kind == "invoice" else "linked_bill_id": target_id,
+        })
+        if not already:
+            doc = await (_db.invoices if target_kind == "invoice" else _db.bills).find_one(
+                {"id": target_id, "company_id": cid}
+            )
+            if doc:
+                pay_amt = abs(float(txn.get("amount") or 0))
+                if pay_amt > 0:
+                    pid = str(uuid.uuid4()); now = now_iso()
+                    pay_doc = {
+                        "id": pid,
+                        "company_id": cid,
+                        "date": txn.get("date"),
+                        "amount": round(pay_amt, 2),
+                        "contact_id": doc.get("contact_id"),
+                        "contact_name": doc.get("contact_name") or "",
+                        "method": "bank_transfer",
+                        "bank_account_id": txn.get("bank_account_id"),
+                        "memo": f"Auto-created from transaction ({txn.get('description') or txn.get('merchant') or ''})".strip(),
+                        "linked_invoice_id": target_id if target_kind == "invoice" else None,
+                        "linked_bill_id": target_id if target_kind == "bill" else None,
+                        "source_transaction_id": tid,
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                    await _db.payments.insert_one(pay_doc)
+                    # Apply balance impact.
+                    bal = float(doc.get("balance_due", doc.get("total", 0))) - pay_amt
+                    if target_kind == "invoice":
+                        status = "paid" if bal <= 0.01 else "partial"
+                        await _db.invoices.update_one({"id": target_id},
+                            {"$set": {"balance_due": round(bal, 2), "status": status}})
+                    else:
+                        status = "paid" if bal <= 0.01 else "partial"
+                        await _db.bills.update_one({"id": target_id},
+                            {"$set": {"balance_due": round(bal, 2), "status": status}})
+                    upd["linked_payment_id"] = pid
+
     await db.transactions.update_one({"id": tid, "company_id": cid}, {"$set": upd})
     await _invalidate_dash(cid)
-    return {"ok": True}
+    return {"ok": True, "linked_payment_id": upd.get("linked_payment_id")}
 
 
 @router.post("/companies/{cid}/transactions/{tid}/approve")

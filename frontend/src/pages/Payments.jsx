@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X } from "lucide-react";
+import { Plus, Trash2, X, Link2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Payments() {
@@ -45,16 +46,40 @@ export default function Payments() {
               <th className="px-3 py-2 text-right">Amount</th><th></th></tr>
           </thead>
           <tbody>
-            {items.map(p => (
-              <tr key={p.id} className="border-b hover:bg-slate-50">
+            {items.map(p => {
+              const linkedDoc = p.linked_invoice_id
+                ? (invoices.find(i => i.id === p.linked_invoice_id))
+                : (p.linked_bill_id ? bills.find(b => b.id === p.linked_bill_id) : null);
+              const linkedLabel = p.linked_invoice_id
+                ? (linkedDoc ? `Invoice ${linkedDoc.number}` : "Invoice")
+                : (p.linked_bill_id ? (linkedDoc ? `Bill ${linkedDoc.number}` : "Bill") : "—");
+              const linkedHref = p.linked_invoice_id ? "/invoices" : (p.linked_bill_id ? "/bills" : null);
+              return (
+              <tr key={p.id} className="border-b hover:bg-slate-50" data-testid={`payment-row-${p.id}`}>
                 <td className="px-3 py-2 font-mono-num text-slate-500">{fmtDate(p.date)}</td>
                 <td className="px-3 py-2">{p.contact_name}</td>
                 <td className="px-3 py-2 text-xs text-slate-500">{p.method}</td>
-                <td className="px-3 py-2 text-xs">{p.linked_invoice_id ? "Invoice" : p.linked_bill_id ? "Bill" : "—"}</td>
+                <td className="px-3 py-2 text-xs">
+                  {linkedHref ? (
+                    <Link to={linkedHref} className="text-indigo-600 hover:underline" data-testid={`payment-linked-${p.id}`}>{linkedLabel}</Link>
+                  ) : linkedLabel}
+                </td>
                 <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(p.amount)}</td>
-                <td className="px-3 py-2 text-right"><button onClick={() => del(p.id)} className="text-red-500 p-1"><Trash2 size={13} /></button></td>
+                <td className="px-3 py-2 text-right">
+                  <div className="inline-flex items-center gap-1">
+                    {p.source_transaction_id && (
+                      <Link
+                        to={`/accounting/transactions?open=${p.source_transaction_id}`}
+                        data-testid={`payment-source-txn-${p.id}`}
+                        title="View originating transaction"
+                        className="p-1 rounded hover:bg-indigo-100 text-indigo-600"
+                      ><Link2 size={13} /></Link>
+                    )}
+                    <button onClick={() => del(p.id)} className="text-red-500 p-1"><Trash2 size={13} /></button>
+                  </div>
+                </td>
               </tr>
-            ))}
+            );})}
             {!items.length && <tr><td colSpan={6} className="text-center py-8 text-slate-500">No payments.</td></tr>}
           </tbody>
         </table>

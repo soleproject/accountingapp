@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
-import { X, Loader2, ExternalLink, Users, Truck } from "lucide-react";
+import { toast } from "sonner";
+import { X, Loader2, ExternalLink, Users, Truck, Eye, Mail, Send } from "lucide-react";
 
 /**
  * Drill-down for one vendor or one customer. Shows every bill/invoice
@@ -12,6 +13,9 @@ export default function ContactDetailModal({ currentId, kind, row, start, end, o
   const isVendor = kind === "vendor";
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  // PDF preview state — { url, title }
+  const [preview, setPreview] = useState(null);
+  const [statementOpen, setStatementOpen] = useState(false);
 
   const nameKey = isVendor ? "vendor" : "customer";
   const label = isVendor ? row.vendor_name : row.customer_name;
@@ -35,6 +39,17 @@ export default function ContactDetailModal({ currentId, kind, row, start, end, o
   const txns = data?.linked_transactions || [];
   const totals = data?.totals || {};
 
+  const openPdf = async (doc) => {
+    const path = isVendor ? "bills" : "invoices";
+    try {
+      const r = await api.get(`/companies/${currentId}/${path}/${doc.id}/pdf`, { responseType: "blob" });
+      const url = URL.createObjectURL(new Blob([r.data], { type: "application/pdf" }));
+      setPreview({ url, title: `${isVendor ? "Bill" : "Invoice"} ${doc.number || ""}` });
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Could not load PDF");
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[60] bg-black/40 flex justify-end" data-testid="contact-detail-modal">
       <div className="bg-white w-full max-w-2xl h-full overflow-auto shadow-2xl">
@@ -47,7 +62,17 @@ export default function ContactDetailModal({ currentId, kind, row, start, end, o
             <h3 className="font-heading font-semibold text-lg" data-testid="contact-detail-name">{label}</h3>
             <div className="text-[11px] text-slate-500">{start} → {end}</div>
           </div>
-          <button onClick={onClose} data-testid="contact-detail-close"><X size={18} /></button>
+          <div className="flex items-center gap-2">
+            {!isVendor && (
+              <button
+                onClick={() => setStatementOpen(true)}
+                data-testid="contact-detail-send-statement"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-600 text-white text-xs hover:bg-emerald-700"
+                title="Email an outstanding-invoice statement to this customer"
+              ><Mail size={12} /> Send statement</button>
+            )}
+            <button onClick={onClose} data-testid="contact-detail-close"><X size={18} /></button>
+          </div>
         </div>
 
         {loading ? (
@@ -75,6 +100,7 @@ export default function ContactDetailModal({ currentId, kind, row, start, end, o
                       <th className="px-3 py-2 text-left">Status</th>
                       <th className="px-3 py-2 text-right">Total</th>
                       <th className="px-3 py-2 text-right">Balance</th>
+                      <th></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -92,10 +118,18 @@ export default function ContactDetailModal({ currentId, kind, row, start, end, o
                         </td>
                         <td className="px-3 py-2 text-right font-mono-num font-semibold">{fmtMoney(d.total)}</td>
                         <td className={`px-3 py-2 text-right font-mono-num ${d.balance_due > 0 ? "text-rose-700" : "text-slate-400"}`}>{fmtMoney(d.balance_due)}</td>
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            onClick={() => openPdf(d)}
+                            data-testid={`contact-detail-pdf-${d.id}`}
+                            title="Preview PDF"
+                            className="p-1 rounded hover:bg-indigo-100 text-indigo-600"
+                          ><Eye size={13} /></button>
+                        </td>
                       </tr>
                     ))}
                     {!docs.length && (
-                      <tr><td colSpan={6} className="text-center py-6 text-xs text-slate-400">Nothing in this period.</td></tr>
+                      <tr><td colSpan={7} className="text-center py-6 text-xs text-slate-400">Nothing in this period.</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -132,6 +166,103 @@ export default function ContactDetailModal({ currentId, kind, row, start, end, o
             </section>
           </div>
         )}
+      </div>
+      {preview && (
+        <div className="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center p-4" data-testid="doc-preview-modal">
+          <div className="bg-white rounded-xl w-full max-w-4xl h-[85vh] flex flex-col shadow-2xl">
+            <div className="flex items-center justify-between px-4 py-3 border-b">
+              <div className="font-heading font-semibold text-sm">{preview.title}</div>
+              <div className="flex items-center gap-2">
+                <a href={preview.url} download className="text-xs text-slate-500 hover:text-slate-800 hover:underline">Download</a>
+                <button
+                  onClick={() => { URL.revokeObjectURL(preview.url); setPreview(null); }}
+                  data-testid="doc-preview-close"
+                ><X size={16} /></button>
+              </div>
+            </div>
+            <iframe title={preview.title} src={preview.url} className="flex-1 w-full" data-testid="doc-preview-iframe" />
+          </div>
+        </div>
+      )}
+      {statementOpen && !isVendor && (
+        <StatementModal
+          currentId={currentId}
+          customerId={row.customer_id}
+          defaultEmail=""
+          start={start}
+          end={end}
+          onClose={() => setStatementOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function StatementModal({ currentId, customerId, defaultEmail, start, end, onClose }) {
+  const [to, setTo] = useState(defaultEmail || "");
+  const [busy, setBusy] = useState(false);
+  const [prefill, setPrefill] = useState(null);
+  // Look up the customer's email on mount so we can pre-fill.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await api.get(`/companies/${currentId}/contacts`);
+        const c = (r.data.contacts || []).find(x => x.id === customerId);
+        if (c) { setTo(c.email || ""); setPrefill(c); }
+      } catch (e) { /* non-fatal */ }
+    })();
+  }, [currentId, customerId]);
+  const send = async () => {
+    if (!to || !to.includes("@")) { toast.error("Please enter a valid email address."); return; }
+    setBusy(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/customers/${customerId}/send-statement`,
+        null, { params: { start, end, to } });
+      if (r.data?.status === "sent") {
+        toast.success(`Statement sent to ${to} · ${r.data.invoice_count} invoice(s)`);
+      } else if (r.data?.status === "skipped_pref_off") {
+        toast.warning("Statement not sent — recipient has opted out of statements.");
+      } else {
+        toast.warning(`Send returned status: ${r.data?.status || "unknown"}`);
+      }
+      onClose();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Could not send statement");
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center p-4" data-testid="statement-modal">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-heading font-semibold inline-flex items-center gap-2"><Send size={16} /> Send customer statement</h3>
+          <button onClick={onClose}><X size={16} /></button>
+        </div>
+        <p className="text-xs text-slate-500">
+          Emails an outstanding-invoice statement to {prefill?.name || "the customer"} for {start} → {end}.
+        </p>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Send to</label>
+          <input
+            type="email"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            placeholder="name@company.com"
+            className="w-full border rounded px-2 py-1.5 text-sm"
+            data-testid="statement-email"
+          />
+          {!prefill?.email && (
+            <p className="text-[10px] text-amber-700 mt-1">No email on file for this customer — we'll use whatever you enter here.</p>
+          )}
+        </div>
+        <button
+          onClick={send}
+          disabled={busy || !to}
+          className="w-full py-2 rounded-md bg-emerald-600 text-white text-sm inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
+          data-testid="statement-send"
+        >
+          {busy && <Loader2 size={13} className="animate-spin" />}
+          Send statement
+        </button>
       </div>
     </div>
   );

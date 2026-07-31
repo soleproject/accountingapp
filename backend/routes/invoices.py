@@ -116,3 +116,20 @@ async def delete_invoice(cid: str, iid: str, user: dict = Depends(get_current_us
     return {"ok": True}
 
 
+
+
+@router.get("/companies/{cid}/invoices/{iid}/pdf")
+async def invoice_pdf(cid: str, iid: str, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    inv = await db.invoices.find_one({"id": iid, "company_id": cid})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    company = await db.companies.find_one({"id": cid})
+    payments = await db.payments.find({"company_id": cid, "linked_invoice_id": iid}).to_list(200)
+    from document_pdfs import build_document_pdf
+    pdf = build_document_pdf(kind="invoice", doc=inv, company=company, payments=payments)
+    filename = f"invoice-{inv.get('number','')}.pdf".replace(" ", "_")
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )

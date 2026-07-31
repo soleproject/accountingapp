@@ -525,6 +525,116 @@ async def customer_detail(
     }
 
 
+def _statement_html(company_name: str, customer_name: str, start: str, end: str,
+                    outstanding: list[dict], totals: dict) -> str:
+    """Build a simple, print-friendly HTML statement email."""
+    def money(v):
+        try: return f"${float(v):,.2f}"
+        except (TypeError, ValueError): return "$0.00"
+
+    rows = "".join(
+        f"""<tr>
+             <td style="padding:6px 8px;border-bottom:1px solid #F1F5F9;">{i.get('number','')}</td>
+             <td style="padding:6px 8px;border-bottom:1px solid #F1F5F9;">{i.get('issue_date','')}</td>
+             <td style="padding:6px 8px;border-bottom:1px solid #F1F5F9;">{i.get('due_date','')}</td>
+             <td style="padding:6px 8px;border-bottom:1px solid #F1F5F9;text-align:right;">{money(i.get('total'))}</td>
+             <td style="padding:6px 8px;border-bottom:1px solid #F1F5F9;text-align:right;color:#B91C1C;font-weight:600;">{money(i.get('balance_due'))}</td>
+           </tr>"""
+        for i in outstanding
+    ) or '<tr><td colspan="5" style="padding:12px;text-align:center;color:#64748B;">No outstanding invoices in this period.</td></tr>'
+
+    return f"""<!doctype html>
+<html><body style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#0F172A;max-width:640px;margin:24px auto;padding:0 16px;">
+  <h1 style="font-size:22px;margin:0 0 4px;">{company_name}</h1>
+  <div style="color:#64748B;font-size:13px;margin-bottom:16px;">Account statement · {start} → {end}</div>
+  <p>Hi {customer_name},</p>
+  <p>Here's a summary of your outstanding invoices with us. Please let us know if you have any questions or if a payment is on the way.</p>
+  <table style="border-collapse:collapse;width:100%;font-size:13px;margin:16px 0;">
+    <thead>
+      <tr style="background:#F8FAFC;text-align:left;">
+        <th style="padding:8px;">Invoice</th>
+        <th style="padding:8px;">Issued</th>
+        <th style="padding:8px;">Due</th>
+        <th style="padding:8px;text-align:right;">Total</th>
+        <th style="padding:8px;text-align:right;">Balance</th>
+      </tr>
+    </thead>
+    <tbody>{rows}</tbody>
+    <tfoot>
+      <tr style="background:#F8FAFC;">
+        <td colspan="3" style="padding:10px 8px;font-weight:600;">Total outstanding</td>
+        <td style="padding:10px 8px;text-align:right;">{money(totals.get('amount',0))}</td>
+        <td style="padding:10px 8px;text-align:right;font-weight:700;color:#B91C1C;">{money(totals.get('outstanding',0))}</td>
+      </tr>
+    </tfoot>
+  </table>
+  <p style="color:#64748B;font-size:12px;margin-top:24px;">Thank you for your business.</p>
+</body></html>"""
+
+
+@router.post("/companies/{cid}/customers/{customer_id}/send-statement")
+async def send_customer_statement(
+    cid: str,
+    customer_id: str,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    to: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """Email the customer their outstanding-invoice statement over a period.
+
+    `to` overrides the contact's email if provided (useful for CPAs
+    testing with their own inbox). Uses the shared `dispatch` helper so
+    firm branding, opt-outs, and audit logging come for free.
+    """
+    await require_company(user, cid)
+    contact = await db.contacts.find_one({"id": customer_id, "company_id": cid})
+    if not contact:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    recipient = (to or contact.get("email") or "").strip()
+    if not recipient or "@" not in recipient:
+        raise HTTPException(status_code=400, detail="Customer has no email on file. Pass `to=email@…` to override.")
+
+    # Pull only OUTSTANDING invoices (balance > 0) — draft/void already
+    # filtered — in the period.
+    q = {"company_id": cid, "contact_id": customer_id, "status": {"$nin": ["void", "draft"]}}
+    all_invs = await db.invoices.find(q).to_list(10000)
+    invs = [i for i in all_invs
+            if _in_range(i.get("issue_date"), start, end)
+            and float(i.get("balance_due") or 0) > 0.01]
+    invs.sort(key=lambda i: i.get("issue_date") or "")
+    total_amt = round(sum(float(i.get("total") or 0) for i in invs), 2)
+    outstanding = round(sum(float(i.get("balance_due") or 0) for i in invs), 2)
+    totals = {"amount": total_amt, "outstanding": outstanding, "invoice_count": len(invs)}
+
+    company = await db.companies.find_one({"id": cid})
+    company_name = (company or {}).get("name") or "Your accountant"
+    customer_name = contact.get("name") or "there"
+
+    html = _statement_html(company_name, customer_name, start or "", end or "", invs, totals)
+    subject = f"Statement of account · {company_name}"
+
+    from email_dispatcher import dispatch
+    result = await dispatch(
+        kind="customer_statement",
+        to=recipient,
+        subject=subject,
+        html=html,
+        initiating_user_id=user["id"],
+        company_id=cid,
+        contact_id=customer_id,
+        related={"invoice_ids": [i["id"] for i in invs], "outstanding": outstanding},
+    )
+    return {
+        "status": result.get("status"),
+        "to": recipient,
+        "outstanding": outstanding,
+        "invoice_count": len(invs),
+        "email_log_id": result.get("id"),
+    }
+
+
+
 
 
 
