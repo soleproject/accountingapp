@@ -17,6 +17,18 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Customer Revenue Report + Vendor/Customer Drill-Down + Auto-Suggest Link
+
+**Backend (`routes/items.py`)**
+- New `GET /reports/revenue-by-customer` — mirror of spend-by-vendor for the sales side (invoice totals rolled up by customer with paid/outstanding/invoice_count).
+- New `GET /reports/vendor-detail` and `GET /reports/customer-detail` — return {docs, linked_transactions, totals} for a single entity in a date range (`vendor_id`/`customer_id` preferred, `_name` fallback for 'Uncategorized' bucket). 400 when neither is supplied.
+
+**Frontend**
+- New `components/ContactDetailModal.jsx` — right-side slide-over with 4 KPI stats, docs table, and linked-transactions table. Reused for both vendor and customer.
+- `SalesReports.jsx` — new **By Customer** tab (sales-mode only), row click on By-Vendor/By-Customer opens the drill-over. CSV export supports customer columns.
+- `Transactions.jsx` (ManualTxnModal) — auto-suggest link: when txn amount + merchant match exactly one open bill/invoice, pre-select it and show an amber "Auto-matched" chip. Guards against overwriting an already-linked txn, requires merchant substring ≥ 4 chars on shorter side to avoid over-matching generic tokens.
+- Testing: **6/6 backend pytest + Playwright frontend E2E 100%, zero functional bugs** (`/app/test_reports/iteration_62.json`). Bumped ContactDetailModal z-index to `z-[60]` so it sits above the AI Assistant panel.
+
 ### Feb 2026 — Vendor Spend Report + inline Bill/Invoice link on Edit Transaction
 
 **Backend**

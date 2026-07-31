@@ -36,7 +36,7 @@ export default function ContactDetailModal({ currentId, kind, row, start, end, o
   const totals = data?.totals || {};
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex justify-end" data-testid="contact-detail-modal">
+    <div className="fixed inset-0 z-[60] bg-black/40 flex justify-end" data-testid="contact-detail-modal">
       <div className="bg-white w-full max-w-2xl h-full overflow-auto shadow-2xl">
         <div className="px-5 py-4 border-b flex items-center justify-between sticky top-0 bg-white z-10">
           <div>

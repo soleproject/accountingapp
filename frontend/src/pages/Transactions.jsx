@@ -1939,10 +1939,16 @@ function ManualTxnModal({ accts, currentId, contactOptions = [], invoices = [], 
       return Math.abs(t - amt) < 0.01;
     });
     // Prefer merchant match, but if nothing matches by merchant, don't
-    // trigger — one same-amount doc isn't enough on its own.
+    // trigger — one same-amount doc isn't enough on its own. Require
+    // the shorter side of the pair to be ≥ 4 chars so we don't
+    // over-match generic tokens like "Inc" or "LLC".
     const m = (merchant || "").trim().toLowerCase();
-    const matches = m
-      ? pool.filter(d => (d.contact_name || "").toLowerCase().includes(m) || m.includes((d.contact_name || "").toLowerCase()))
+    const matches = m && m.length >= 4
+      ? pool.filter(d => {
+          const cn = (d.contact_name || "").toLowerCase();
+          if (!cn || cn.length < 4) return false;
+          return cn.includes(m) || m.includes(cn);
+        })
       : [];
     if (matches.length === 1) {
       setLinkKind(kind);
