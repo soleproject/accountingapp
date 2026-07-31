@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 65 — Company branding fields (logo/address/phone/email/website/tax_id) + branded invoice/bill PDFs. Backend (5/5 passed) verifies PATCH allowed-list expansion, round-trip persistence, unknown-field rejection, invoice+bill PDF plain vs branded (branded PDF larger, %PDF-, correct content-type). Frontend validates new Settings 'Invoice & bill branding' section (all 8 testids present), logo upload preview render + persistence after reload, >200KB rejection toast, and existing invoice modal Edit⇄Preview toggle rendering the PDF iframe successfully.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Invoices page", "issues": ["The Synergy AI Assistant chat panel auto-opens and overlays ~30% of the right side of the screen, partially covering table columns and the invoice edit modal. Not a regression from this iteration but worth noting."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter65_company_branding_pdf.py",
+    "/app/test_reports/pytest/iter65.xml"
+  ],
+  "action_items": [
+    "(Nit / cleanup, not blocking) /app/backend/routes/companies.py lines 332-343 contain unreachable dead code (a second copy of the pre-branding PATCH body sitting after `return coerce(doc)` on line 329). Please remove — it never executes but confuses future readers.",
+    "(Perf watch) logo_data_url is stored inline (base64) on the company doc and is returned inside GET /api/companies for every company the user has access to. A user with several companies each near the 200 KB logo cap will see the company-list payload grow >1 MB per page load. Consider excluding logo_data_url from the list endpoint (only include on detail GET) or migrating to object storage. Non-blocking today because current sizes are tiny."
+  ],
+  "critical_code_review_comments": [
+    "companies.py has orphaned dead code (lines 332-343) after the PATCH endpoint's return — leftover from refactor. Remove.",
+    "Backend allowed-list correctly enforced; 400 'No editable fields provided' returned for unknown fields — regression check passes.",
+    "PDF renderer (document_pdfs.py) safely handles missing/invalid logo (try/except on b64 decode falls back to plain heading). Good.",
+    "Frontend 200KB cap is client-side only — no server-side size guard on PATCH payloads. A malicious/curl user could POST a 5MB base64 logo. Consider adding a size check in the PATCH handler (e.g., len(logo_data_url) < 300_000)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter65_company_branding_pdf.py (new)"
+  ],
+  "success_rate": {"backend": "100% (5/5)", "frontend": "100% (all critical flows)"},
+  "test_credentials": "client@axiom.ai / client123 (company 540fbc73-66fd-432f-a357-39db6c84c5bd)",
+  "seed_data_creation": "None — used existing invoices/bills on the seeded client company; branding fields are restored to their pre-test snapshot via a module-scoped autouse fixture.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test file test_iter65_company_branding_pdf.py consolidates all cases into ONE class (TestBrandingAndPdf) to keep them on a single xdist worker (loadscope) — they all mutate the same company doc, so parallel classes would race and cause flaky size comparisons. If splitting, use -n 0."
+}

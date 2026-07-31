@@ -19,6 +19,7 @@ export default function CompanySettings() {
   const nav = useNavigate();
   const [form, setForm] = useState({
     name: "", business_type: "LLC", business_description: "", reporting_basis: "accrual",
+    logo_data_url: "", address: "", phone: "", email: "", website: "", tax_id: "",
   });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -32,6 +33,12 @@ export default function CompanySettings() {
         business_type: current.business_type || "LLC",
         business_description: current.business_description || "",
         reporting_basis: current.reporting_basis || "accrual",
+        logo_data_url: current.logo_data_url || "",
+        address: current.address || "",
+        phone: current.phone || "",
+        email: current.email || "",
+        website: current.website || "",
+        tax_id: current.tax_id || "",
       });
     }
   }, [current]);
@@ -144,6 +151,75 @@ export default function CompanySettings() {
             placeholder="What does this business do? (used by AI to tailor categorization)"
           />
         </Field>
+
+        <div className="border-t pt-4 mt-2">
+          <h3 className="font-heading font-semibold text-sm mb-1">Invoice &amp; bill branding</h3>
+          <p className="text-xs text-slate-500 mb-3">These fields appear on the PDF header of every invoice, bill, and customer statement.</p>
+          <div className="space-y-3">
+            <Field label="Logo">
+              <div className="flex items-center gap-3">
+                {form.logo_data_url ? (
+                  <img src={form.logo_data_url} alt="Logo preview" className="h-14 w-auto max-w-[180px] object-contain border rounded bg-white p-1" data-testid="settings-logo-preview" />
+                ) : (
+                  <div className="h-14 w-32 border border-dashed rounded flex items-center justify-center text-[10px] text-slate-400">No logo</div>
+                )}
+                <label className="text-xs inline-flex items-center gap-1 px-3 py-1.5 rounded-md border bg-white hover:bg-slate-50 cursor-pointer">
+                  Upload
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                    className="hidden"
+                    data-testid="settings-logo-input"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (!f) return;
+                      if (f.size > 200 * 1024) { toast.error("Logo too large. Max 200 KB."); return; }
+                      const reader = new FileReader();
+                      reader.onload = () => setForm({ ...form, logo_data_url: reader.result });
+                      reader.readAsDataURL(f);
+                    }}
+                  />
+                </label>
+                {form.logo_data_url && (
+                  <button type="button" onClick={() => setForm({ ...form, logo_data_url: "" })}
+                          className="text-xs text-rose-600 hover:underline" data-testid="settings-logo-clear">Remove</button>
+                )}
+              </div>
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Address">
+                <textarea rows={2} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })}
+                          className="w-full border rounded-md px-3 py-2 text-sm resize-none"
+                          placeholder="123 Main St, Suite 100&#10;Springfield, IL 62701"
+                          data-testid="settings-address" />
+              </Field>
+              <div className="space-y-2">
+                <Field label="Phone">
+                  <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                         placeholder="(555) 123-4567"
+                         className="w-full border rounded-md px-3 py-2 text-sm" data-testid="settings-phone" />
+                </Field>
+                <Field label="Email">
+                  <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
+                         placeholder="billing@yourcompany.com"
+                         className="w-full border rounded-md px-3 py-2 text-sm" data-testid="settings-email" />
+                </Field>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Website">
+                <input value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })}
+                       placeholder="yourcompany.com"
+                       className="w-full border rounded-md px-3 py-2 text-sm" data-testid="settings-website" />
+              </Field>
+              <Field label="Tax ID / EIN">
+                <input value={form.tax_id} onChange={(e) => setForm({ ...form, tax_id: e.target.value })}
+                       placeholder="12-3456789"
+                       className="w-full border rounded-md px-3 py-2 text-sm" data-testid="settings-tax-id" />
+              </Field>
+            </div>
+          </div>
+        </div>
 
         <div className="pt-2 flex items-center gap-2">
           <button

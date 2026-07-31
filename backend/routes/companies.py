@@ -310,7 +310,14 @@ async def delete_pfc_override(cid: str, pfc_detailed: str,
 @router.patch("/companies/{cid}")
 async def update_company(cid: str, patch: dict, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
-    allowed = {"name", "business_type", "business_description", "reporting_basis", "auto_post_threshold"}
+    allowed = {
+        "name", "business_type", "business_description", "reporting_basis", "auto_post_threshold",
+        # Branding fields used on invoice/bill PDFs and printable views.
+        # Logo is stored inline as a base64 data URL (small — <200KB
+        # practical cap). Migration to object storage TBD once a firm
+        # starts uploading huge logos.
+        "logo_data_url", "address", "phone", "email", "website", "tax_id",
+    }
     updates = {k: v for k, v in (patch or {}).items() if k in allowed}
     if not updates:
         raise HTTPException(400, "No editable fields provided")
