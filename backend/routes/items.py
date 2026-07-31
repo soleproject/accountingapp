@@ -23,6 +23,9 @@ class ItemIn(BaseModel):
     name: str
     description: Optional[str] = ""
     type: str = "service"  # service | product
+    # Where this item is used: "sales" (invoices only), "purchases" (bills
+    # only), or "both". Filters the ItemPicker on invoice vs bill lines.
+    usage: str = "sales"
     income_account_id: Optional[str] = None
     income_account_name: Optional[str] = ""
     # Optional expense-side mapping so the same item auto-fills the
@@ -38,6 +41,7 @@ class ItemPatch(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     type: Optional[str] = None
+    usage: Optional[str] = None
     income_account_id: Optional[str] = None
     income_account_name: Optional[str] = None
     expense_account_id: Optional[str] = None
@@ -47,11 +51,43 @@ class ItemPatch(BaseModel):
     sku: Optional[str] = None
 
 
+_USAGE_VALUES = ("sales", "purchases", "both")
+
+
+def _infer_usage(income_id: Optional[str], expense_id: Optional[str]) -> str:
+    """Infer usage when the user didn't explicitly pick one — based on
+    which account slots are populated. Falls back to 'sales' to match
+    the historical default (items were sales-only)."""
+    has_inc = bool(income_id)
+    has_exp = bool(expense_id)
+    if has_inc and has_exp:
+        return "both"
+    if has_exp and not has_inc:
+        return "purchases"
+    return "sales"
+
+
 @router.get("/companies/{cid}/items")
-async def list_items(cid: str, user: dict = Depends(get_current_user)):
+async def list_items(cid: str, usage: Optional[str] = None, user: dict = Depends(get_current_user)):
+    """List items. Optional `usage=sales|purchases|both` filter — when
+    provided, returns items usable in that context (an item flagged
+    'both' shows up in either filter). Legacy items without a `usage`
+    field are inferred from their account slots so old data works
+    without a migration.
+    """
     await require_company(user, cid)
     docs = await db.items.find({"company_id": cid}).sort("name", 1).to_list(2000)
-    return {"items": [coerce(d) for d in docs]}
+    out = []
+    for d in docs:
+        # Backfill inferred usage on the fly so the frontend never sees
+        # a null. We don't persist the inference — the user can flip it
+        # explicitly whenever they edit the item.
+        if not d.get("usage"):
+            d["usage"] = _infer_usage(d.get("income_account_id"), d.get("expense_account_id"))
+        out.append(coerce(d))
+    if usage in _USAGE_VALUES:
+        out = [i for i in out if i.get("usage") == usage or i.get("usage") == "both"]
+    return {"items": out}
 
 
 @router.post("/companies/{cid}/items")
@@ -81,6 +117,7 @@ async def create_item(cid: str, inp: ItemIn, user: dict = Depends(get_current_us
         "name": nm,
         "description": inp.description or "",
         "type": inp.type or "service",
+        "usage": inp.usage if inp.usage in _USAGE_VALUES else _infer_usage(inp.income_account_id, inp.expense_account_id),
         "income_account_id": inp.income_account_id,
         "income_account_name": inc_name,
         "expense_account_id": inp.expense_account_id,
@@ -101,6 +138,8 @@ async def update_item(cid: str, iid: str, patch: ItemPatch, user: dict = Depends
     upd = {k: v for k, v in patch.model_dump().items() if v is not None}
     if not upd:
         return {"ok": True}
+    if "usage" in upd and upd["usage"] not in _USAGE_VALUES:
+        raise HTTPException(status_code=400, detail=f"usage must be one of {_USAGE_VALUES}")
     if "name" in upd:
         upd["name"] = (upd["name"] or "").strip()
         if not upd["name"]:
@@ -318,6 +357,7 @@ _HEADER_ALIASES = {
     "name":        {"name", "item", "product", "service", "itemname", "productname", "servicename"},
     "description": {"description", "desc", "details", "notes", "productdescription"},
     "type":        {"type", "itemtype", "kind"},
+    "usage":       {"usage", "usedon", "usedfor", "for", "salesorpurchase"},
     "account":     {"account", "incomeaccount", "revenueaccount", "category", "salescategory"},
     "expense_account": {"expenseaccount", "cogsaccount", "purchaseaccount"},
     "price":       {"price", "rate", "amount", "unitprice", "salesprice", "cost"},
@@ -491,6 +531,10 @@ async def import_items(
             exp_id, exp_final = await _resolve_account_for_type(
                 cid, "expense", exp_name, acc_cache, create_missing_accounts
             )
+            # Explicit usage from the file wins; otherwise infer from
+            # which account slots got filled by this row.
+            usage_raw = str(row[cols["usage"]]).strip().lower() if cols["usage"] else ""
+            usage = usage_raw if usage_raw in _USAGE_VALUES else _infer_usage(inc_id, exp_id)
 
             existing = await db.items.find_one({"company_id": cid, "name": nm})
             if existing:
@@ -500,6 +544,7 @@ async def import_items(
                 upd = {
                     "description": desc or existing.get("description") or "",
                     "type": itype,
+                    "usage": usage,
                     "price": price,
                     "sku": sku or existing.get("sku"),
                     "active": active,
@@ -520,6 +565,7 @@ async def import_items(
                     "name": nm,
                     "description": desc,
                     "type": itype,
+                    "usage": usage,
                     "income_account_id": inc_id,
                     "income_account_name": inc_final,
                     "expense_account_id": exp_id,

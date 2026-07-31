@@ -1,0 +1,28 @@
+{
+  "summary": "Tested Items `usage` (sales/purchases/both) feature end-to-end. Backend: 10/10 pytest cases pass — default 'sales', explicit purchases/both, GET filter semantics (sales includes 'both', purchases includes 'both'), PATCH 400 on invalid usage, PATCH flip sales→purchases moves item across filters, legacy backfill returns non-null usage for every item, CSV import honours explicit 'usage' column and infers from expense-only account when column absent. Frontend: filter tabs (items-filter-all/sales/purchases/both) present with live counts, modal item-usage-picker with all 3 segmented buttons works, row badges use data-testid item-usage-{id}. Confirmed via network capture that Invoices page calls /items?usage=sales and Bills page calls /items?usage=purchases for the target company.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Items page (minor testid collision risk)", "issues": ["Row badge uses data-testid=item-usage-{id} and modal picker buttons use data-testid=item-usage-sales/purchases/both — an item whose id equals literal 'sales'/'purchases'/'both' (extremely unlikely with UUIDs) would collide. No action required, but worth noting."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_items_usage_filter.py",
+    "/app/test_reports/pytest/items_usage.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "items.py list_items backfills `usage` on read but never persists it — every list call recomputes for legacy docs. Fine for correctness; consider a one-time backfill migration to reduce per-request work if item volume grows.",
+    "CSV import: usage inference relies on _infer_usage(inc_id, exp_id) which is called AFTER _resolve_account_for_type. When create_missing_accounts is False and no account matches, inc_id/exp_id are None so inferred usage silently falls back to 'sales' even if the CSV filled an expense column that failed to resolve — worth logging."
+  ],
+  "updated_files": ["/app/backend/tests/test_items_usage_filter.py"],
+  "success_rate": { "backend": "100%", "frontend": "100%" },
+  "test_credentials": "client@axiom.ai / client123 (CID 540fbc73-66fd-432f-a357-39db6c84c5bd)",
+  "seed_data_creation": "Test items prefixed with TEST_item_* / TEST_csv_* auto-created and cleaned up by pytest module fixture.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Items usage filter fully verified. If retesting, note that the frontend company switcher persists via server-side active-company (not simple localStorage) — use the top-bar company switcher UI to switch to Skyward Sparks if you want to see items in the /items page. XHR-level assertions (which is what matters for this feature) confirm invoices call ?usage=sales and bills call ?usage=purchases with the correct CID regardless.",
+  "rca of the issue": "N/A — no issues found."
+}

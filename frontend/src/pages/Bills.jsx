@@ -75,7 +75,7 @@ export default function Bills() {
       api.get(`/companies/${currentId}/bills`),
       api.get(`/companies/${currentId}/contacts`),
       api.get(`/companies/${currentId}/reports/ap-aging`),
-      api.get(`/companies/${currentId}/items`),
+      api.get(`/companies/${currentId}/items?usage=purchases`),
     ]);
     setItems(b.data.bills || []); setContacts(c.data.contacts || []); setAging(a.data);
     setItemsCatalog(it.data.items || []);

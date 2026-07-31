@@ -90,7 +90,7 @@ export default function Invoices() {
       api.get(`/companies/${currentId}/invoices`),
       api.get(`/companies/${currentId}/contacts`),
       api.get(`/companies/${currentId}/reports/ar-aging`),
-      api.get(`/companies/${currentId}/items`),
+      api.get(`/companies/${currentId}/items?usage=sales`),
     ]);
     setItems(i.data.invoices || []); setContacts(c.data.contacts || []); setAging(a.data);
     setItemsCatalog(it.data.items || []);

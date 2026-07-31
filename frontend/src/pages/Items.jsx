@@ -15,6 +15,7 @@ export default function Items() {
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
+  const [usageFilter, setUsageFilter] = useState("all"); // all | sales | purchases | both
 
   const load = async () => {
     if (!currentId) return;
@@ -44,7 +45,26 @@ export default function Items() {
     load();
   };
 
-  const visible = items.filter(i => showInactive || i.active !== false);
+  const visible = items.filter(i => {
+    if (!showInactive && i.active === false) return false;
+    if (usageFilter === "all") return true;
+    // "sales" filter shows items usable on invoices — that's sales OR both.
+    // "purchases" filter shows items usable on bills — purchases OR both.
+    if (usageFilter === "sales") return i.usage === "sales" || i.usage === "both";
+    if (usageFilter === "purchases") return i.usage === "purchases" || i.usage === "both";
+    if (usageFilter === "both") return i.usage === "both";
+    return true;
+  });
+
+  const countsBy = items.reduce((acc, i) => {
+    if (i.active === false) return acc;
+    const u = i.usage || "sales";
+    acc.all += 1;
+    if (u === "sales" || u === "both") acc.sales += 1;
+    if (u === "purchases" || u === "both") acc.purchases += 1;
+    if (u === "both") acc.both += 1;
+    return acc;
+  }, { all: 0, sales: 0, purchases: 0, both: 0 });
 
   return (
     <div className="space-y-4" data-testid="items-page">
@@ -53,7 +73,7 @@ export default function Items() {
           <h1 className="font-heading text-3xl font-bold tracking-tight inline-flex items-center gap-2">
             <Package size={22} /> Items
           </h1>
-          <p className="text-slate-500 text-sm mt-1">Products &amp; services you sell. Pick from this list on any invoice line to auto-fill description and price.</p>
+          <p className="text-slate-500 text-sm mt-1">Products &amp; services you sell <b>and</b> buy. Pick from this list on invoice or bill lines to auto-fill description, price, and category.</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -73,8 +93,26 @@ export default function Items() {
         </div>
       </div>
 
-      <div className="flex items-center gap-3 text-xs">
-        <label className="inline-flex items-center gap-1.5 text-slate-500">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="inline-flex rounded-lg border bg-white p-1 text-xs" data-testid="items-usage-filter">
+          {[
+            { key: "all",       label: "All",           count: countsBy.all,       testId: "items-filter-all" },
+            { key: "sales",     label: "For Invoices",  count: countsBy.sales,     testId: "items-filter-sales" },
+            { key: "purchases", label: "For Bills",     count: countsBy.purchases, testId: "items-filter-purchases" },
+            { key: "both",      label: "Both",          count: countsBy.both,      testId: "items-filter-both" },
+          ].map(t => (
+            <button
+              key={t.key}
+              onClick={() => setUsageFilter(t.key)}
+              data-testid={t.testId}
+              className={`px-3 py-1.5 rounded-md inline-flex items-center gap-1.5 ${usageFilter === t.key ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+            >
+              {t.label}
+              <span className={`text-[10px] font-mono-num rounded-full px-1.5 ${usageFilter === t.key ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>{t.count}</span>
+            </button>
+          ))}
+        </div>
+        <label className="inline-flex items-center gap-1.5 text-slate-500 text-xs">
           <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
           Show inactive
         </label>
@@ -87,7 +125,8 @@ export default function Items() {
               <th className="px-3 py-2 text-left">Name</th>
               <th className="px-3 py-2 text-left">Description</th>
               <th className="px-3 py-2 text-left">Type</th>
-              <th className="px-3 py-2 text-left">Income account</th>
+              <th className="px-3 py-2 text-left">Used on</th>
+              <th className="px-3 py-2 text-left">Accounts</th>
               <th className="px-3 py-2 text-right">Price</th>
               <th className="px-3 py-2 text-center">Active</th>
               <th></th>
@@ -95,18 +134,38 @@ export default function Items() {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={7} className="text-center py-8 text-slate-400"><Loader2 className="inline animate-spin" size={16} /></td></tr>
+              <tr><td colSpan={8} className="text-center py-8 text-slate-400"><Loader2 className="inline animate-spin" size={16} /></td></tr>
             )}
-            {!loading && visible.map(it => (
+            {!loading && visible.map(it => {
+              const u = it.usage || "sales";
+              const usageMeta = u === "sales"
+                ? { label: "Invoices", cls: "bg-emerald-100 text-emerald-800" }
+                : u === "purchases"
+                  ? { label: "Bills", cls: "bg-rose-100 text-rose-800" }
+                  : { label: "Both", cls: "bg-indigo-100 text-indigo-800" };
+              return (
               <tr key={it.id} className="border-b hover:bg-slate-50" data-testid={`item-row-${it.id}`}>
                 <td className="px-3 py-2 font-medium text-slate-800">{it.name}{it.sku ? <span className="text-xs text-slate-400 ml-1">· {it.sku}</span> : null}</td>
                 <td className="px-3 py-2 text-slate-500 text-xs max-w-md truncate">{it.description}</td>
                 <td className="px-3 py-2 text-xs">
-                  <span className={`text-[10px] uppercase px-1.5 py-0.5 rounded ${it.type === "product" ? "bg-emerald-100 text-emerald-800" : "bg-indigo-100 text-indigo-800"}`}>
+                  <span className={`text-[10px] uppercase px-1.5 py-0.5 rounded ${it.type === "product" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700"}`}>
                     {it.type || "service"}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-slate-500 text-xs">{it.income_account_name || <span className="text-slate-400">—</span>}</td>
+                <td className="px-3 py-2 text-xs">
+                  <span className={`text-[10px] uppercase px-1.5 py-0.5 rounded ${usageMeta.cls}`} data-testid={`item-usage-${it.id}`}>
+                    {usageMeta.label}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-slate-500 text-xs">
+                  {it.income_account_name && (
+                    <div><span className="text-emerald-600">↑</span> {it.income_account_name}</div>
+                  )}
+                  {it.expense_account_name && (
+                    <div><span className="text-rose-600">↓</span> {it.expense_account_name}</div>
+                  )}
+                  {!it.income_account_name && !it.expense_account_name && <span className="text-slate-400">—</span>}
+                </td>
                 <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(it.price)}</td>
                 <td className="px-3 py-2 text-center">
                   <button
@@ -122,10 +181,12 @@ export default function Items() {
                   </div>
                 </td>
               </tr>
-            ))}
+            );})}
             {!loading && !visible.length && (
-              <tr><td colSpan={7} className="text-center py-10 text-slate-500 text-sm">
-                No items yet. Click <b>New item</b> to add your first product or service.
+              <tr><td colSpan={8} className="text-center py-10 text-slate-500 text-sm">
+                {usageFilter === "all"
+                  ? <>No items yet. Click <b>New item</b> to add your first product or service.</>
+                  : <>No items in this view — try switching to <b>All</b>.</>}
               </td></tr>
             )}
           </tbody>
@@ -156,6 +217,7 @@ function ItemModal({ currentId, item, revenueAccts, expenseAccts, onClose }) {
   const [name, setName] = useState(item?.name || "");
   const [description, setDescription] = useState(item?.description || "");
   const [type, setType] = useState(item?.type || "service");
+  const [usage, setUsage] = useState(item?.usage || "sales");
   const [accountId, setAccountId] = useState(item?.income_account_id || "");
   const [expenseAccountId, setExpenseAccountId] = useState(item?.expense_account_id || "");
   const [price, setPrice] = useState(item?.price ?? 0);
@@ -172,6 +234,7 @@ function ItemModal({ currentId, item, revenueAccts, expenseAccts, onClose }) {
         name: name.trim(),
         description,
         type,
+        usage,
         income_account_id: accountId || null,
         income_account_name: inc?.name || "",
         expense_account_id: expenseAccountId || null,
@@ -212,6 +275,29 @@ function ItemModal({ currentId, item, revenueAccts, expenseAccts, onClose }) {
                  placeholder="Long-form description shown on invoices"
                  className="w-full border rounded px-2 py-1.5 text-sm"
                  data-testid="item-description" />
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Used on</label>
+          <div className="inline-flex rounded-lg border bg-slate-50 p-1 text-xs w-full" data-testid="item-usage-picker">
+            {[
+              { key: "sales",     label: "Invoices", cls: "bg-emerald-600" },
+              { key: "purchases", label: "Bills",    cls: "bg-rose-600" },
+              { key: "both",      label: "Both",     cls: "bg-indigo-600" },
+            ].map(opt => (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => setUsage(opt.key)}
+                data-testid={`item-usage-${opt.key}`}
+                className={`flex-1 px-3 py-1.5 rounded-md transition ${usage === opt.key ? `${opt.cls} text-white` : "text-slate-600 hover:bg-white"}`}
+              >{opt.label}</button>
+            ))}
+          </div>
+          <p className="text-[10px] text-slate-400 mt-1">
+            {usage === "sales" && "Shows up on invoice-line pickers only."}
+            {usage === "purchases" && "Shows up on bill-line pickers only."}
+            {usage === "both" && "Shows up on both invoice and bill line pickers."}
+          </p>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
