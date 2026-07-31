@@ -17,6 +17,16 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Vendor Spend Report + inline Bill/Invoice link on Edit Transaction
+
+**Backend**
+- `routes/items.py` — new `GET /reports/spend-by-vendor` endpoint. Aggregates bill totals by `contact_name` over a date range: `amount`, `paid_amount` (derived from total − balance_due), `outstanding`, `bill_count`. Excludes draft/void. Uncategorised vendors bucket into their own row.
+
+**Frontend**
+- `SalesReports.jsx` — new **By Vendor** tab visible only when `mode=purchases`. Table columns Vendor / Total spend / Paid / Outstanding / Bills / Share. Vendor swaps to another color on the share bar (fuchsia). CSV export supports vendor columns; switching mode back to Sales resets the tab.
+- `Transactions.jsx` (ManualTxnModal) — new **Link to invoice or bill** section right above Save with an Invoice/Bill kind toggle, a select dropdown, and an **Unlink** button. Save runs the transaction PATCH/POST then calls `/link` with the picked kind (or empty string to clear). Works for both new and existing transactions.
+- Testing: 4/4 backend pytest + Playwright frontend E2E 100%, no bugs (`/app/test_reports/iteration_61.json`).
+
 ### Feb 2026 — Item usage: Invoice / Bill / Both
 
 **Backend (`routes/items.py`)**
