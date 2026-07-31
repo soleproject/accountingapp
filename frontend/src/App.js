@@ -27,6 +27,8 @@ import { BillingSuccess, BillingCancel } from "@/pages/BillingReturn";
 import Invoices from "@/pages/Invoices";
 import InvoiceEditor from "@/pages/InvoiceEditor";
 import Bills from "@/pages/Bills";
+import BillEditor from "@/pages/BillEditor";
+import TaxLibrary from "@/pages/TaxLibrary";
 import Recurring from "@/pages/Recurring";
 import Items from "@/pages/Items";
 import SalesReports from "@/pages/SalesReports";
@@ -102,6 +104,8 @@ function App() {
               <Route path="/invoices/new" element={<InvoiceEditor />} />
               <Route path="/invoices/:id/edit" element={<InvoiceEditor />} />
               <Route path="/bills" element={<Bills />} />
+              <Route path="/bills/new" element={<BillEditor />} />
+              <Route path="/bills/:id/edit" element={<BillEditor />} />
               <Route path="/recurring" element={<Recurring />} />
               <Route path="/items" element={<Items />} />
               <Route path="/sales-reports" element={<SalesReports />} />
@@ -148,6 +152,7 @@ function App() {
               <Route path="/accounting/journal-entries" element={<JournalEntries />} />
               <Route path="/accounting/general-ledger" element={<GeneralLedger />} />
               <Route path="/accounting/rules" element={<Rules />} />
+              <Route path="/accounting/taxes" element={<TaxLibrary />} />
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

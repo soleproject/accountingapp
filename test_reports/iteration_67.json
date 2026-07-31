@@ -1,0 +1,36 @@
+{
+  "summary": "Iter 67 — Sidebar re-org + Tax Library + Bills full-page editor. Ran 5 backend pytest cases (5/5 pass) + comprehensive Playwright UI walkthrough as client@axiom.ai. Backend: Tax Library GET/POST/PATCH/DELETE all correct — list returns {taxes:[]}, create rejects duplicate name (409), rejects rate>100 (400), rename cascades name/rate to referenced invoice/bill lines, delete refuses with 409 when tax is still applied to a bill line. Bill Editor backend parity confirmed — POST /companies/{cid}/bills accepts po_number/terms/discount/discount_type/shipping/internal_notes/attachments/title/summary; _sum_lines rolls per-line tax_rate + shipping + $-discount into total correctly (300 subtotal + 10 line-tax − 10 disc + 5 ship = 305); PATCH recomputes when discount switched to percent (300 − 60 + 15 + 10 = 265). GET single-resource returns all new fields. Frontend: Sidebar renders exactly per spec — Dashboard (top standalone), Sales & Payments group (Invoices/Payments/Items/Recurring/Customer Statements/Customers (contacts)), Purchases group (Bills/Vendors (contacts)/Payments/Items), Receipts (standalone), Banking group (Connect Accounts/Import Statements), Reports (standalone), Accounting group (Transactions/Chart of Accounts/Assets/Loans/Tags/Reconciliation/Journal Entries/General Ledger/Tax Library/AI Cleanup Review/AI Rules/Book Review/Month Close/Close the Books), Communications (standalone), My Businesses/Billing/Refer & earn/Settings at bottom. All nav-group-* and nav-link-* testids present. Group auto-expands when route matches (verified: navigating to /accounting/taxes auto-opens Accounting group, aria-expanded=true). Tax Library UI CRUD works end-to-end: new-tax dialog creates TEST_UI_VAT@20%, edit changes rate to 21% (visible in row), delete removes row. Bill Editor full-page: /bills → New Bill navigates to /bills/new (not modal); header, Save button, Edit/Preview tabs, business-card, vendor/number/PO/issue/due/terms/status/line/discount/shipping/tax/notes/internal-notes all rendered with correct testids; Net 15 shifts due date exactly +15 days (2026-07-31 → 2026-08-15); qty=2/rate=50 → Amount and Subtotal both $100; discount 10 + shipping 5 + tax 8 → Total $103.00; Save persists and routes to /bills/{id}/edit; Preview tab renders bill-editor-preview-iframe. Contacts ?type=vendor page title 'Vendors' present; ?type=customer shows 'Customers'. Items ?usage=purchases initializes to 'For Bills' tab (visible in screenshot). No blocking issues.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PATCH /api/companies/{cid}/bills/{bid} (and /invoices/{iid})", "issue": "On partial PATCH that omits `tax` while touching line_items/discount/shipping, backend re-reads the stored `existing.tax` (which already includes rolled-up per-line tax) and passes it into _sum_lines, which adds line_tax_total AGAIN → double-count of per-line tax. Frontend BillEditor/InvoiceEditor always send tax explicitly in buildBody so users don't hit it, but any external API caller or future partial-patch code path (e.g. inline row edit) would silently corrupt totals. Fix: on PATCH, use only doc-level tax (subtract line_tax_total when reusing existing.tax), or store doc-level tax and line_tax_total separately."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter67_bills_taxes.py",
+    "/app/test_reports/pytest/iter67.xml"
+  ],
+  "action_items": [
+    "Bills/Invoices PATCH double-counts per-line tax when caller omits `tax` field — see backend minor issue. Non-blocking today because frontend always sends `tax`, but worth fixing for API robustness.",
+    "React console warning: 'Cannot update a component (AiPanel) while rendering a different component (WelcomeModal)' — WelcomeModal is calling setState on AiPanel during render. Not a functional bug but flag for cleanup."
+  ],
+  "critical_code_review_comments": [
+    "routes/invoices.py _sum_lines mutates the caller's line items in-place (sets `tax_amount` on each dict). Fine for POST/PATCH where the payload is short-lived, but if a caller reuses the same dict list it will surprise them. Consider deep-copying or documenting the mutation.",
+    "routes/invoices.py update_tax cascades name/rate into invoice and bill line_items via update_many with arrayFilters — this rewrites HISTORICAL documents. Comment in code says only display fields update, but for a tax rate change on a rate that was applied to a locked/paid invoice, the tax_rate on the line will silently shift while stored tax_amount stays put — the doc becomes internally inconsistent (rate=15 but tax_amount computed from old rate=13). Consider limiting cascade to open/unpaid docs.",
+    "Sidebar.jsx label→testid derivation `label.replace(/\\s+/g,'-').toLowerCase()` produces testids with parentheses like `nav-link-customers-(contacts)` — brittle for CSS selectors that don't escape parens. Consider a stable slug field per item instead of deriving from label.",
+    "BillEditor.jsx: attachments stored as base64 data_url on the bill doc — same GridFS/S3 flag as InvoiceEditor iter66."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (5/5)", "frontend": "100% (all flows validated)"},
+  "test_credentials": "client@axiom.ai / client123 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Backend pytest creates TEST_HST_67, TEST_LOCK_67, TEST_BILL_LOCK_67 (all self-cleaned). Playwright run created TEST_UI_VAT tax (also deleted). One test bill remains on Skyward Sparks — BILL-TEST-67 — for downstream inspection.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Sidebar group auto-expand + testids are stable and can be reused. If iterating on Bills PDF/email (parity with Invoices), remember to also wire /companies/{cid}/bills/{bid}/send-email if you want the same auto-flip behavior. Also note the PATCH double-count bug is latent in both invoices and bills — if you add any inline/quick-edit UI that omits `tax`, it will corrupt totals until fixed.",
+  "rca of the issue": "PATCH double-count: `existing.tax` in Mongo is the ALREADY-ROLLED-UP figure (doc-level input + Σ line_tax). When _sum_lines runs again on PATCH, it treats `existing.tax` as doc-level input and re-adds Σ line_tax on top, so any partial PATCH that doesn't explicitly override `tax` inflates it by the line_tax_total. Reproduction: create a bill with lines that have tax_rate>0 and no explicit doc-level tax, then PATCH only {shipping:X}. Expected doc.tax unchanged; actual doc.tax = previous + line_tax_total. Mitigation options: (a) store doc-level tax input separately from computed tax; or (b) subtract Σ current line_tax_amount from `existing.tax` before passing to _sum_lines on PATCH; or (c) require callers to always resend `tax`. Frontend BillEditor/InvoiceEditor already do (c), so no user impact today."
+}

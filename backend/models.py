@@ -121,6 +121,17 @@ class BillCreate(BaseModel):
     line_items: list
     tax: float = 0.0
     status: str = "open"
+    notes: Optional[str] = ""
+    # Feb 2026 — full-page bill editor parity with invoices.
+    po_number: Optional[str] = ""
+    terms: Optional[str] = ""
+    shipping: float = 0.0
+    discount: float = 0.0
+    discount_type: Optional[str] = "amount"
+    internal_notes: Optional[str] = ""
+    attachments: Optional[list] = []
+    title: Optional[str] = ""
+    summary: Optional[str] = ""
 
 
 class ContactCreate(BaseModel):

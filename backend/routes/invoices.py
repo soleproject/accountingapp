@@ -119,6 +119,66 @@ async def create_tax(cid: str, payload: dict, user: dict = Depends(get_current_u
     return {"tax": coerce(doc)}
 
 
+@router.patch("/companies/{cid}/taxes/{tid}")
+async def update_tax(cid: str, tid: str, payload: dict, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    updates: dict = {}
+    if "name" in payload:
+        n = (payload.get("name") or "").strip()
+        if not n:
+            raise HTTPException(status_code=400, detail="Tax name cannot be empty")
+        dup = await db.taxes.find_one({"company_id": cid, "name": n, "id": {"$ne": tid}})
+        if dup:
+            raise HTTPException(status_code=409, detail=f"A tax named '{n}' already exists")
+        updates["name"] = n
+    if "rate" in payload:
+        try:
+            r = float(payload.get("rate", 0) or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Tax rate must be a number")
+        if r < 0 or r > 100:
+            raise HTTPException(status_code=400, detail="Tax rate must be between 0 and 100")
+        updates["rate"] = r
+    if not updates:
+        return {"ok": True}
+    updates["updated_at"] = now_iso()
+    await db.taxes.update_one({"id": tid, "company_id": cid}, {"$set": updates})
+    # Cascade the display fields into any invoice/bill lines that
+    # reference this tax so historical documents keep the fresh name/rate.
+    # (Only the DISPLAY name updates; existing tax_amount on saved lines
+    # stays untouched — those are locked historicals.)
+    if "name" in updates or "rate" in updates:
+        set_fields = {}
+        if "name" in updates:
+            set_fields["line_items.$[el].tax_name"] = updates["name"]
+        if "rate" in updates:
+            set_fields["line_items.$[el].tax_rate"] = updates["rate"]
+        for coll in ("invoices", "bills"):
+            await db[coll].update_many(
+                {"company_id": cid, "line_items.tax_id": tid},
+                {"$set": set_fields},
+                array_filters=[{"el.tax_id": tid}],
+            )
+    return {"ok": True}
+
+
+@router.delete("/companies/{cid}/taxes/{tid}")
+async def delete_tax(cid: str, tid: str, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    # Refuse to delete a tax that's still referenced. This forces the pro
+    # to consciously replace it on any active document rather than
+    # silently orphaning line items.
+    for coll in ("invoices", "bills"):
+        stuck = await db[coll].find_one({"company_id": cid, "line_items.tax_id": tid})
+        if stuck:
+            raise HTTPException(
+                status_code=409,
+                detail=f"This tax is still applied to at least one {coll[:-1]}. Remove it there first.",
+            )
+    await db.taxes.delete_one({"id": tid, "company_id": cid})
+    return {"ok": True}
+
+
 @router.get("/companies/{cid}/invoices")
 async def list_invoices(cid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)

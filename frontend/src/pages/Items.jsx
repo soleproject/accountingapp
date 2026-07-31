@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { Plus, Trash2, X, Loader2, Pencil, Package, Check, UploadCloud } from "lucide-react";
@@ -7,6 +8,8 @@ import ItemImportModal from "@/components/ItemImportModal";
 
 export default function Items() {
   const { currentId } = useCompany();
+  const [sp] = useSearchParams();
+  const initialUsage = (["all", "sales", "purchases", "both"].includes(sp.get("usage")) ? sp.get("usage") : "all");
   const [items, setItems] = useState([]);
   const [revenueAccts, setRevenueAccts] = useState([]);
   const [expenseAccts, setExpenseAccts] = useState([]);
@@ -15,7 +18,13 @@ export default function Items() {
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
-  const [usageFilter, setUsageFilter] = useState("all"); // all | sales | purchases | both
+  const [usageFilter, setUsageFilter] = useState(initialUsage);
+  // Re-apply URL filter whenever the query param changes (e.g. Sales
+  // link → clicking Purchases link in the sidebar without a full reload).
+  useEffect(() => {
+    const u = sp.get("usage");
+    if (["all", "sales", "purchases", "both"].includes(u)) setUsageFilter(u);
+  }, [sp]);
 
   const load = async () => {
     if (!currentId) return;

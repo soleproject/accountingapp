@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
@@ -24,6 +25,11 @@ const fmtDate = (iso) => {
 
 export default function Contacts() {
   const { currentId } = useCompany();
+  const [sp] = useSearchParams();
+  // ?type=customer|vendor filter driven by sidebar links. `both` and
+  // missing param both show everything.
+  const urlType = sp.get("type");
+  const typeFilter = urlType === "customer" || urlType === "vendor" ? urlType : "all";
   const [items, setItems] = useState([]);
   const [modal, setModal] = useState(null); // null | { mode, contact? }
   const [selected, setSelected] = useState(new Set());
@@ -80,12 +86,26 @@ export default function Contacts() {
     [items, selected]
   );
 
+  // URL-driven filter (Customers vs Vendors links in the sidebar).
+  // Contacts with type="both" always appear in either view.
+  const visible = useMemo(() => {
+    if (typeFilter === "all") return items;
+    return items.filter(c => c.type === typeFilter || c.type === "both");
+  }, [items, typeFilter]);
+
+  const pageTitle = typeFilter === "customer"
+    ? "Customers"
+    : typeFilter === "vendor" ? "Vendors" : "Contacts";
+  const pageSubtitle = typeFilter === "customer"
+    ? "People and companies you sell to."
+    : typeFilter === "vendor" ? "Suppliers you buy from." : "Customers & vendors.";
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-heading text-3xl font-bold tracking-tight">Contacts</h1>
-          <p className="text-slate-500 text-sm mt-1">Customers &amp; vendors.</p>
+          <h1 className="font-heading text-3xl font-bold tracking-tight">{pageTitle}</h1>
+          <p className="text-slate-500 text-sm mt-1">{pageSubtitle}</p>
         </div>
         <div className="flex items-center gap-2">
           <div
@@ -213,7 +233,7 @@ export default function Contacts() {
             )}
           </thead>
           <tbody>
-            {items.map(c => (
+            {visible.map(c => (
               <tr
                 key={c.id}
                 onClick={() => view === "analytics"

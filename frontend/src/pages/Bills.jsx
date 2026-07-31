@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
@@ -24,6 +24,7 @@ const BG = { emerald: "bg-emerald-50 border-emerald-100", amber: "bg-amber-50 bo
 export default function Bills() {
   const { currentId } = useCompany();
   const [items, setItems] = useState([]);
+  const navigate = useNavigate();
   const [contacts, setContacts] = useState([]);
   const [itemsCatalog, setItemsCatalog] = useState([]);
   const [aging, setAging] = useState(null);
@@ -101,7 +102,7 @@ export default function Bills() {
           <h1 className="font-heading text-3xl font-bold tracking-tight">Bills</h1>
           <p className="text-slate-500 text-sm mt-1">Money out · vendor bills to be paid.</p>
         </div>
-        <button data-testid={TID.addBtn} onClick={() => setCreating(true)}
+        <button data-testid={TID.addBtn} onClick={() => navigate("/bills/new")}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs">
           <Plus size={13} /> New Bill
         </button>
@@ -228,7 +229,7 @@ export default function Bills() {
                     <button data-testid={`bill-memorize-btn-${b.id}`} onClick={() => setMemorizing(b)}
                             title="Memorize (recurring)"
                             className="p-1 rounded hover:bg-fuchsia-100 text-fuchsia-600"><Repeat size={13} /></button>
-                    <button data-testid="bill-edit-btn" onClick={() => setEditing(b)}
+                    <button data-testid="bill-edit-btn" onClick={() => navigate(`/bills/${b.id}/edit`)}
                             className="p-1 rounded hover:bg-indigo-100 text-indigo-600"><Pencil size={13} /></button>
                     <button onClick={() => del(b.id)} className="p-1 rounded hover:bg-red-100 text-red-500"><Trash2 size={13} /></button>
                   </div>

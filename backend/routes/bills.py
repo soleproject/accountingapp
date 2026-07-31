@@ -61,18 +61,39 @@ async def list_bills(cid: str, user: dict = Depends(get_current_user)):
     return {"bills": [coerce(d) for d in docs]}
 
 
+@router.get("/companies/{cid}/bills/{bid}")
+async def get_bill(cid: str, bid: str, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    b = await db.bills.find_one({"id": bid, "company_id": cid})
+    if not b:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    return {"bill": coerce(b)}
+
+
 @router.post("/companies/{cid}/bills")
 async def create_bill(cid: str, inp: BillCreate, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     bid = str(uuid.uuid4()); now = now_iso()
-    subtotal, tax, total = _sum_lines(inp.line_items, inp.tax)
+    subtotal, disc_amt, ship, tax_v, total = _sum_lines(
+        inp.line_items, inp.tax, inp.shipping, inp.discount, inp.discount_type or "amount",
+    )
     doc = {
         "id": bid, "company_id": cid,
         "number": inp.number or f"BILL-{random.randint(100, 999)}",
         "contact_id": inp.contact_id, "contact_name": inp.contact_name,
         "issue_date": inp.issue_date, "due_date": inp.due_date,
         "status": inp.status, "line_items": inp.line_items,
-        "subtotal": subtotal, "tax": tax, "total": total, "balance_due": total,
+        "subtotal": subtotal, "tax": tax_v, "shipping": ship,
+        "discount": float(inp.discount or 0), "discount_type": inp.discount_type or "amount",
+        "discount_amount": disc_amt,
+        "total": total, "balance_due": total,
+        "notes": inp.notes,
+        "po_number": inp.po_number or "",
+        "terms": inp.terms or "",
+        "internal_notes": inp.internal_notes or "",
+        "attachments": inp.attachments or [],
+        "title": inp.title or "",
+        "summary": inp.summary or "",
         "created_at": now, "updated_at": now,
     }
     await db.bills.insert_one(doc)
@@ -82,12 +103,25 @@ async def create_bill(cid: str, inp: BillCreate, user: dict = Depends(get_curren
 @router.patch("/companies/{cid}/bills/{bid}")
 async def update_bill(cid: str, bid: str, payload: dict, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
-    if "line_items" in payload:
-        subtotal, tax, total = _sum_lines(payload["line_items"], payload.get("tax", 0))
-        payload["subtotal"] = subtotal
-        payload["tax"] = tax
-        payload["total"] = total
-        payload["balance_due"] = total
+    totals_fields = {"line_items", "tax", "shipping", "discount", "discount_type"}
+    if totals_fields & set(payload.keys()):
+        existing = await db.bills.find_one({"id": bid, "company_id": cid})
+        if existing:
+            lines = payload.get("line_items", existing.get("line_items") or [])
+            tax = payload.get("tax", existing.get("tax", 0))
+            ship = payload.get("shipping", existing.get("shipping", 0))
+            disc = payload.get("discount", existing.get("discount", 0))
+            dtype = payload.get("discount_type", existing.get("discount_type") or "amount")
+            subtotal, disc_amt, ship_v, tax_v, total = _sum_lines(lines, tax, ship, disc, dtype)
+            paid = float(existing.get("total") or 0) - float(existing.get("balance_due") or 0)
+            payload["subtotal"] = subtotal
+            payload["tax"] = tax_v
+            payload["shipping"] = ship_v
+            payload["discount"] = float(disc or 0)
+            payload["discount_type"] = dtype
+            payload["discount_amount"] = disc_amt
+            payload["total"] = total
+            payload["balance_due"] = round(max(total - paid, 0.0), 2)
     number_conflict = False
     if payload.get("number"):
         dup = await db.bills.find_one(
