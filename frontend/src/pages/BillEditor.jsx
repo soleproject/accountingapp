@@ -754,7 +754,11 @@ function EditForm({
               <div className="flex items-center gap-2">
                 <span className="text-[11px] text-slate-500">Apply tax to every line:</span>
                 <select
-                  onChange={(e) => { applyTaxToAllLines(e.target.value); e.target.value = ""; }}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    applyTaxToAllLines(v === "__clear__" ? "" : v);
+                    e.target.value = "";
+                  }}
                   defaultValue=""
                   className="border rounded px-2 py-1 text-xs bg-white"
                   data-testid="bill-editor-apply-tax-all"
@@ -763,7 +767,7 @@ function EditForm({
                   {taxes.map(t => (
                     <option key={t.id} value={t.id}>{t.name} · {Number(t.rate).toFixed(2)}%</option>
                   ))}
-                  <option value="">— clear —</option>
+                  <option value="__clear__">— clear —</option>
                 </select>
               </div>
             )}

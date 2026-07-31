@@ -354,9 +354,9 @@ function parseCsv(text) {
     const rate = rawRate === "" ? NaN : Number(rawRate);
     let valid = true;
     let error = "";
-    if (!name) { valid = false; error = "empty name"; }
-    else if (!Number.isFinite(rate)) { valid = false; error = "invalid rate"; }
-    else if (rate < 0 || rate > 100) { valid = false; error = "rate out of range"; }
+    if (!name) { valid = false; error = "name is empty"; }
+    else if (!Number.isFinite(rate)) { valid = false; error = "rate is not a number"; }
+    else if (rate < 0 || rate > 100) { valid = false; error = "rate must be between 0 and 100"; }
     return { name, rate: Number.isFinite(rate) ? rate : null, valid, error };
   });
 }
