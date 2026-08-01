@@ -105,13 +105,18 @@ const isItemActive = (loc, item) => {
   const p = item.matchPath || item.to.split("?")[0];
   const pathHit = loc.pathname === p || loc.pathname.startsWith(p + "/");
   if (!pathHit) return false;
-  // If the item's target URL specifies a `type=` query (e.g. Customers
-  // vs Vendors both live under /contacts), require the current URL's
-  // `type` to match — otherwise both groups' sub-items collide.
-  const targetType = new URLSearchParams((item.to.split("?")[1] || "")).get("type");
-  if (targetType) {
-    const currentType = new URLSearchParams(loc.search || "").get("type");
-    if (currentType && currentType !== targetType) return false;
+  // If the item's target URL specifies query params (e.g. ?type=customer
+  // or ?direction=in), require the current URL's corresponding params
+  // to match — otherwise multiple sub-items sharing a pathname collide.
+  const targetQuery = new URLSearchParams(item.to.split("?")[1] || "");
+  if ([...targetQuery.keys()].length === 0) return true;
+  const currentQuery = new URLSearchParams(loc.search || "");
+  for (const [k, v] of targetQuery.entries()) {
+    const cur = currentQuery.get(k);
+    // If the URL has no value for this key, treat as ambiguous — no
+    // sidebar item claims it (so the "all" state highlights nothing).
+    if (cur === null) return false;
+    if (cur !== v) return false;
   }
   return true;
 };

@@ -1,13 +1,25 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, Link2 } from "lucide-react";
+import { Plus, Trash2, X, Link2, Search, ShoppingCart, FileText } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Payments() {
   const { currentId } = useCompany();
+  const [sp, setSp] = useSearchParams();
+  // ?direction=in|out drives the Sales / Purchases toggle. Missing param
+  // means "All" (both flavours in one list).
+  const urlDir = sp.get("direction");
+  const direction = urlDir === "in" ? "in" : urlDir === "out" ? "out" : "all";
+  const setDirection = (v) => {
+    const next = new URLSearchParams(sp);
+    if (v === "in" || v === "out") next.set("direction", v);
+    else next.delete("direction");
+    setSp(next, { replace: true });
+  };
+  const [query, setQuery] = useState("");
   const [items, setItems] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [bills, setBills] = useState([]);
@@ -29,18 +41,93 @@ export default function Payments() {
   };
   useEffect(() => { load(); }, [currentId]);
   const del = async (id) => { if (confirm("Delete?")) { await api.delete(`/companies/${currentId}/payments/${id}`); load(); } };
+
+  // Filter items by direction + search query. Sales = money coming in
+  // (linked to an invoice), Purchases = money going out (linked to a
+  // bill). Payments with no link fall into "All" only.
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return items.filter(p => {
+      if (direction === "in" && !p.linked_invoice_id) return false;
+      if (direction === "out" && !p.linked_bill_id) return false;
+      if (!q) return true;
+      const linkedDoc = p.linked_invoice_id
+        ? invoices.find(i => i.id === p.linked_invoice_id)
+        : (p.linked_bill_id ? bills.find(b => b.id === p.linked_bill_id) : null);
+      const haystack = [
+        p.contact_name, p.method, p.reference, p.notes,
+        linkedDoc?.number, String(p.amount || ""),
+      ].filter(Boolean).join(" ").toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [items, direction, query, invoices, bills]);
+
+  const pageTitle = direction === "in" ? "Sales Payments"
+    : direction === "out" ? "Purchases Payments" : "Payments";
+  const pageSubtitle = direction === "in" ? "Money received · linked to invoices."
+    : direction === "out" ? "Money sent · linked to bills."
+    : "Received & sent · linked to invoices or bills.";
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-heading text-3xl font-bold tracking-tight">Payments</h1>
-          <p className="text-slate-500 text-sm mt-1">Received &amp; sent · linked to invoices or bills.</p>
+          <h1 className="font-heading text-3xl font-bold tracking-tight">{pageTitle}</h1>
+          <p className="text-slate-500 text-sm mt-1">{pageSubtitle}</p>
         </div>
         <button data-testid={TID.addBtn} onClick={() => setCreating(true)}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs">
           <Plus size={13} /> Record Payment
         </button>
       </div>
+
+      {/* Direction toggle + fuzzy search — filter the payment list in unison. */}
+      <div className="flex items-center gap-3 flex-wrap" data-testid="payments-toolbar">
+        <div
+          className="inline-flex rounded-md border border-slate-300 overflow-hidden text-xs bg-white"
+          data-testid="payments-direction-toggle"
+        >
+          <button
+            onClick={() => setDirection("in")}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 ${direction === "in" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50"}`}
+            data-testid="payments-direction-sales"
+          ><FileText size={12} /> Sales</button>
+          <button
+            onClick={() => setDirection("out")}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 border-l border-slate-300 ${direction === "out" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50"}`}
+            data-testid="payments-direction-purchases"
+          ><ShoppingCart size={12} /> Purchases</button>
+          <button
+            onClick={() => setDirection("all")}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 border-l border-slate-300 ${direction === "all" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50"}`}
+            data-testid="payments-direction-all"
+          >All</button>
+        </div>
+        <div className="relative flex-1 min-w-[220px] max-w-md">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by contact, method, invoice/bill #, amount…"
+            className="w-full pl-8 pr-8 py-1.5 rounded-md border border-slate-300 text-xs focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+            data-testid="payments-search"
+          />
+          {query && (
+            <button
+              onClick={() => setQuery("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              data-testid="payments-search-clear"
+              title="Clear search"
+            ><X size={12} /></button>
+          )}
+        </div>
+        {(query || direction !== "all") && (
+          <span className="text-[11px] text-slate-500" data-testid="payments-result-count">
+            <b className="font-mono-num">{visible.length}</b> of {items.length}
+          </span>
+        )}
+      </div>
+
       <div className="rounded-xl border bg-white overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500 border-b">
@@ -49,7 +136,7 @@ export default function Payments() {
               <th className="px-3 py-2 text-right">Amount</th><th></th></tr>
           </thead>
           <tbody>
-            {items.map(p => {
+            {visible.map(p => {
               const linkedDoc = p.linked_invoice_id
                 ? (invoices.find(i => i.id === p.linked_invoice_id))
                 : (p.linked_bill_id ? bills.find(b => b.id === p.linked_bill_id) : null);
@@ -85,7 +172,13 @@ export default function Payments() {
                 </td>
               </tr>
             );})}
-            {!items.length && <tr><td colSpan={6} className="text-center py-8 text-slate-500">No payments.</td></tr>}
+            {!visible.length && (
+              <tr><td colSpan={6} className="text-center py-8 text-slate-500">
+                {items.length
+                  ? (query ? "No payments match your search." : "No payments in this view.")
+                  : "No payments."}
+              </td></tr>
+            )}
           </tbody>
         </table>
       </div>
