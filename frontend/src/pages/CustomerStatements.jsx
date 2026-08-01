@@ -229,7 +229,8 @@ function StatementPreview({ preview }) {
         </div>
         <div className="text-right">
           <div className="font-heading text-2xl font-bold text-slate-900">Statement of Account</div>
-          <div className="text-sm text-slate-500 mt-1">
+          <div className="text-sm font-semibold text-slate-800 mt-1" data-testid="cs-preview-business-name">{company.name}</div>
+          <div className="text-sm text-slate-500 mt-0.5">
             {kind === "outstanding" ? "Outstanding invoices" : "Account activity"}
           </div>
         </div>
