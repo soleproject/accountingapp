@@ -93,12 +93,140 @@ export default function Contacts() {
     return items.filter(c => c.type === typeFilter || c.type === "both");
   }, [items, typeFilter]);
 
+  // Customers page also shows a Vendors card underneath — pre-compute
+  // the vendor slice so both tables render off the same in-memory list.
+  const vendorList = useMemo(
+    () => items.filter(c => c.type === "vendor" || c.type === "both"),
+    [items]
+  );
+
   const pageTitle = typeFilter === "customer"
     ? "Customers"
     : typeFilter === "vendor" ? "Vendors" : "Contacts";
   const pageSubtitle = typeFilter === "customer"
     ? "People and companies you sell to."
     : typeFilter === "vendor" ? "Suppliers you buy from." : "Customers & vendors.";
+
+  // Renders a contacts table for the given row set. Extracted so we can
+  // stack Customers + Vendors on the same page without duplicating markup.
+  const renderContactsTable = (rows, { emptyMsg = "No contacts." } = {}) => (
+    <table className="w-full text-sm">
+      <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500 border-b">
+        {view === "analytics" ? (
+          <tr>
+            <th className="w-8 px-3 py-2"></th>
+            <th className="px-3 py-2 text-left">Contact</th>
+            <th className="px-3 py-2 text-right">Hits</th>
+            <th className="px-3 py-2 text-right">YTD In</th>
+            <th className="px-3 py-2 text-right">YTD Out</th>
+            <th className="px-3 py-2 text-right">Net</th>
+            <th className="px-3 py-2 text-left">Last Seen</th>
+            <th className="px-3 py-2 text-left">Type</th>
+            <th></th>
+          </tr>
+        ) : (
+          <tr>
+            <th className="w-8 px-3 py-2"></th>
+            <th className="px-3 py-2 text-left">Name</th>
+            <th className="px-3 py-2 text-left">Type</th>
+            <th className="px-3 py-2 text-left">Email</th>
+            <th className="px-3 py-2 text-left">Phone</th>
+            <th className="px-3 py-2 text-left">Address</th>
+            <th></th>
+          </tr>
+        )}
+      </thead>
+      <tbody>
+        {rows.map(c => (
+          <tr
+            key={c.id}
+            onClick={() => view === "analytics"
+              ? setReportContact(c)
+              : setModal({ mode: "edit", contact: c })}
+            data-testid={`contact-row-${c.id}`}
+            className="border-b hover:bg-slate-50 cursor-pointer"
+          >
+            <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+              <input
+                type="checkbox"
+                checked={selected.has(c.id)}
+                onChange={(e) => toggleSel(e, c.id)}
+                data-testid={`contact-select-${c.id}`}
+                className="cursor-pointer"
+              />
+            </td>
+            {view === "analytics" ? (
+              <>
+                <td className="px-3 py-2 font-medium">
+                  <div>{c.name}</div>
+                  {(c.email || c.phone) && (
+                    <div className="text-[11px] text-slate-500 truncate">
+                      {[c.email, c.phone].filter(Boolean).join(" · ")}
+                    </div>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-right text-slate-500 tabular-nums">{c.hits ?? 0}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-emerald-700">
+                  {(c.ytd_in ?? 0) > 0 ? fmtMoney(c.ytd_in) : ""}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums text-slate-800">
+                  {(c.ytd_out ?? 0) > 0 ? fmtMoney(c.ytd_out) : ""}
+                </td>
+                <td className={`px-3 py-2 text-right tabular-nums font-medium ${
+                  (c.net ?? 0) < 0 ? "text-rose-600" : "text-slate-900"
+                }`}>
+                  {(c.net ?? 0) === 0 ? "" : fmtMoney(c.net)}
+                </td>
+                <td className="px-3 py-2 text-slate-500 text-xs whitespace-nowrap">
+                  {fmtDate(c.last_seen)}
+                </td>
+                <td className="px-3 py-2">
+                  {c.type && (
+                    <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-100">{c.type}</span>
+                  )}
+                </td>
+              </>
+            ) : (
+              <>
+                <td className="px-3 py-2 font-medium">{c.name}</td>
+                <td className="px-3 py-2">
+                  {c.type && (
+                    <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-100">{c.type}</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-slate-600">{c.email || ""}</td>
+                <td className="px-3 py-2 text-slate-600">{c.phone || ""}</td>
+                <td className="px-3 py-2 text-slate-600 truncate max-w-[280px]" title={c.address || ""}>
+                  {c.address || ""}
+                </td>
+              </>
+            )}
+            <td className="px-3 py-2 text-right whitespace-nowrap">
+              <button
+                onClick={(e) => { e.stopPropagation(); setModal({ mode: "edit", contact: c }); }}
+                data-testid={`contact-edit-${c.id}`}
+                className="text-slate-500 hover:text-slate-900 p-1"
+                title="Edit"
+              >
+                <Pencil size={13} />
+              </button>
+              <button
+                onClick={(e) => del(e, c.id)}
+                data-testid={`contact-delete-${c.id}`}
+                className="text-red-500 hover:text-red-700 p-1"
+                title="Delete"
+              >
+                <Trash2 size={13} />
+              </button>
+            </td>
+          </tr>
+        ))}
+        {rows.length === 0 && (
+          <tr><td colSpan={view === "analytics" ? 9 : 7} className="text-center py-8 text-slate-500">{emptyMsg}</td></tr>
+        )}
+      </tbody>
+    </table>
+  );
 
   return (
     <div className="space-y-4">
@@ -206,123 +334,31 @@ export default function Contacts() {
       </div>
 
       <div className="rounded-xl border bg-white overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500 border-b">
-            {view === "analytics" ? (
-              <tr>
-                <th className="w-8 px-3 py-2"></th>
-                <th className="px-3 py-2 text-left">Contact</th>
-                <th className="px-3 py-2 text-right">Hits</th>
-                <th className="px-3 py-2 text-right">YTD In</th>
-                <th className="px-3 py-2 text-right">YTD Out</th>
-                <th className="px-3 py-2 text-right">Net</th>
-                <th className="px-3 py-2 text-left">Last Seen</th>
-                <th className="px-3 py-2 text-left">Type</th>
-                <th></th>
-              </tr>
-            ) : (
-              <tr>
-                <th className="w-8 px-3 py-2"></th>
-                <th className="px-3 py-2 text-left">Name</th>
-                <th className="px-3 py-2 text-left">Type</th>
-                <th className="px-3 py-2 text-left">Email</th>
-                <th className="px-3 py-2 text-left">Phone</th>
-                <th className="px-3 py-2 text-left">Address</th>
-                <th></th>
-              </tr>
-            )}
-          </thead>
-          <tbody>
-            {visible.map(c => (
-              <tr
-                key={c.id}
-                onClick={() => view === "analytics"
-                  ? setReportContact(c)
-                  : setModal({ mode: "edit", contact: c })}
-                data-testid={`contact-row-${c.id}`}
-                className="border-b hover:bg-slate-50 cursor-pointer"
-              >
-                <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(c.id)}
-                    onChange={(e) => toggleSel(e, c.id)}
-                    data-testid={`contact-select-${c.id}`}
-                    className="cursor-pointer"
-                  />
-                </td>
-                {view === "analytics" ? (
-                  <>
-                    <td className="px-3 py-2 font-medium">
-                      <div>{c.name}</div>
-                      {(c.email || c.phone) && (
-                        <div className="text-[11px] text-slate-500 truncate">
-                          {[c.email, c.phone].filter(Boolean).join(" · ")}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-right text-slate-500 tabular-nums">{c.hits ?? 0}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-emerald-700">
-                      {(c.ytd_in ?? 0) > 0 ? fmtMoney(c.ytd_in) : ""}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-800">
-                      {(c.ytd_out ?? 0) > 0 ? fmtMoney(c.ytd_out) : ""}
-                    </td>
-                    <td className={`px-3 py-2 text-right tabular-nums font-medium ${
-                      (c.net ?? 0) < 0 ? "text-rose-600" : "text-slate-900"
-                    }`}>
-                      {(c.net ?? 0) === 0 ? "" : fmtMoney(c.net)}
-                    </td>
-                    <td className="px-3 py-2 text-slate-500 text-xs whitespace-nowrap">
-                      {fmtDate(c.last_seen)}
-                    </td>
-                    <td className="px-3 py-2">
-                      {c.type && (
-                        <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-100">{c.type}</span>
-                      )}
-                    </td>
-                  </>
-                ) : (
-                  <>
-                    <td className="px-3 py-2 font-medium">{c.name}</td>
-                    <td className="px-3 py-2">
-                      {c.type && (
-                        <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-100">{c.type}</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-slate-600">{c.email || ""}</td>
-                    <td className="px-3 py-2 text-slate-600">{c.phone || ""}</td>
-                    <td className="px-3 py-2 text-slate-600 truncate max-w-[280px]" title={c.address || ""}>
-                      {c.address || ""}
-                    </td>
-                  </>
-                )}
-                <td className="px-3 py-2 text-right whitespace-nowrap">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setModal({ mode: "edit", contact: c }); }}
-                    data-testid={`contact-edit-${c.id}`}
-                    className="text-slate-500 hover:text-slate-900 p-1"
-                    title="Edit"
-                  >
-                    <Pencil size={13} />
-                  </button>
-                  <button
-                    onClick={(e) => del(e, c.id)}
-                    data-testid={`contact-delete-${c.id}`}
-                    className="text-red-500 hover:text-red-700 p-1"
-                    title="Delete"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {!items.length && (
-              <tr><td colSpan={view === "analytics" ? 9 : 7} className="text-center py-8 text-slate-500">No contacts.</td></tr>
-            )}
-          </tbody>
-        </table>
+        {typeFilter === "customer" && (
+          <div className="px-4 py-3 border-b bg-slate-50/60">
+            <div className="font-heading font-semibold text-slate-800 text-sm">Customers</div>
+            <div className="text-[11px] text-slate-500">{visible.length} contact{visible.length === 1 ? "" : "s"}</div>
+          </div>
+        )}
+        {renderContactsTable(visible)}
       </div>
+
+      {typeFilter === "customer" && (
+        <div className="rounded-xl border bg-white overflow-hidden" data-testid="contacts-vendors-card">
+          <div className="px-4 py-3 border-b bg-slate-50/60 flex items-center justify-between">
+            <div>
+              <div className="font-heading font-semibold text-slate-800 text-sm">Vendors</div>
+              <div className="text-[11px] text-slate-500">Suppliers you buy from · {vendorList.length} contact{vendorList.length === 1 ? "" : "s"}</div>
+            </div>
+            <a
+              href="/contacts?type=vendor"
+              className="text-[11px] text-indigo-600 hover:underline"
+              data-testid="contacts-vendors-viewall"
+            >View all vendors →</a>
+          </div>
+          {renderContactsTable(vendorList, { emptyMsg: "No vendors yet." })}
+        </div>
+      )}
 
       {modal && (
         <ContactModal
