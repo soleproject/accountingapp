@@ -10,7 +10,7 @@ import { Mail, MailPlus, ChevronDown, ChevronRight, User, Clock } from "lucide-r
  *
  * Rendered inline in InvoiceEditor next to Payment History.
  */
-export default function FollowupHistoryBlock({ currentId, docId, docLabel }) {
+export default function FollowupHistoryBlock({ currentId, docId, docLabel, onCount }) {
   const [history, setHistory] = useState([]);
   const [lastAt, setLastAt] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -23,15 +23,25 @@ export default function FollowupHistoryBlock({ currentId, docId, docLabel }) {
       try {
         const r = await api.get(`/companies/${currentId}/invoices/${docId}/followup-history`);
         if (cancelled) return;
-        setHistory(r.data?.history || []);
+        const list = r.data?.history || [];
+        setHistory(list);
         setLastAt(r.data?.last_followup_at || null);
-      } catch { /* silently show empty state */ }
+        onCount?.(list.length);
+      } catch { onCount?.(0); }
       finally { if (!cancelled) setLoading(false); }
     })();
     return () => { cancelled = true; };
   }, [currentId, docId]);
 
-  if (loading || history.length === 0) return null;
+  if (loading) return (
+    <div className="px-6 py-8 text-center text-sm text-slate-400" data-testid="invoice-followup-loading">Loading follow-up history…</div>
+  );
+  if (history.length === 0) return (
+    <div className="px-6 py-10 text-center text-sm text-slate-500 space-y-1" data-testid="invoice-followup-empty">
+      <div className="font-heading font-semibold text-slate-800">No follow-ups yet</div>
+      <div>Every AI-drafted chase email you send for this invoice will show up here.</div>
+    </div>
+  );
 
   const fmtSentAt = (iso) => {
     if (!iso) return "";
@@ -46,7 +56,7 @@ export default function FollowupHistoryBlock({ currentId, docId, docLabel }) {
   };
 
   return (
-    <div className="px-6 py-5 border-t bg-white" data-testid="invoice-followup-history">
+    <div className="px-6 py-5" data-testid="invoice-followup-history">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <div className="h-7 w-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center">

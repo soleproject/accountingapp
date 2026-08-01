@@ -4,7 +4,7 @@ import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import {
-  ArrowLeft, Save, Send, Plus, Trash2, Paperclip, Eye, Pencil,
+  ArrowLeft, Save, Send, Plus, Trash2, Paperclip, Eye, Pencil, Mail,
   FileText, X, ChevronDown, ChevronUp, Upload, Copy,
 } from "lucide-react";
 import ItemPicker from "@/components/ItemPicker";
@@ -39,7 +39,8 @@ export default function InvoiceEditor() {
   const navigate = useNavigate();
   const { currentId, current, refresh: refreshCompany } = useCompany();
 
-  const [tab, setTab] = useState("edit"); // "edit" | "preview"
+  const [tab, setTab] = useState("edit"); // "edit" | "preview" | "followup"
+  const [followupCount, setFollowupCount] = useState(null);
   const [loading, setLoading] = useState(editMode);
   const [saving, setSaving] = useState(false);
 
@@ -126,6 +127,12 @@ export default function InvoiceEditor() {
               setPayments((pr.data.payments || []).filter(p => p.linked_invoice_id === id));
             }
           } catch { /* payments are optional context; ignore */ }
+          // Pre-fetch follow-up count so the tab badge shows immediately
+          // (even if the user hasn't opened the Follow-up history tab yet).
+          try {
+            const fr = await api.get(`/companies/${currentId}/invoices/${id}/followup-history`);
+            if (!cancelled) setFollowupCount(fr.data?.count || 0);
+          } catch { /* ignore — badge just stays hidden */ }
         }
       } catch (e) {
         toast.error(e.response?.data?.detail || "Failed to load invoice");
@@ -395,6 +402,27 @@ export default function InvoiceEditor() {
               : "border-transparent text-slate-500 hover:text-slate-700"
           }`}
         ><Eye size={13} /> Preview</button>
+        {editMode && (
+          <button
+            data-testid="invoice-editor-tab-followup"
+            onClick={() => setTab("followup")}
+            className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm border-b-2 -mb-px transition ${
+              tab === "followup"
+                ? "border-indigo-600 text-indigo-700 font-medium"
+                : "border-transparent text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            <Mail size={13} /> Follow-up history
+            {followupCount > 0 && (
+              <span
+                className={`ml-0.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-mono-num ${
+                  tab === "followup" ? "bg-indigo-100 text-indigo-700" : "bg-slate-200 text-slate-700"
+                }`}
+                data-testid="invoice-editor-followup-badge"
+              >{followupCount}</span>
+            )}
+          </button>
+        )}
       </div>
 
       {tab === "preview" ? (
@@ -409,6 +437,15 @@ export default function InvoiceEditor() {
           ) : (
             <div className="h-[80vh] flex items-center justify-center text-slate-400 text-sm">Loading preview…</div>
           )}
+        </div>
+      ) : tab === "followup" ? (
+        <div className="rounded-xl border bg-white shadow-sm" data-testid="invoice-editor-followup-tab">
+          <FollowupHistoryBlock
+            currentId={currentId}
+            docId={id}
+            docLabel={number}
+            onCount={setFollowupCount}
+          />
         </div>
       ) : (
         <>
@@ -904,14 +941,6 @@ function EditForm({
           contactId={contact}
           currentId={currentId}
           onPaymentRecorded={reloadPayments}
-        />
-      )}
-
-      {editMode && (
-        <FollowupHistoryBlock
-          currentId={currentId}
-          docId={docId}
-          docLabel={number}
         />
       )}
 

@@ -3453,3 +3453,29 @@ Every grant is written to `admin_audit_log` with kind=`superadmin_granted` (gran
 - `/app/frontend/src/components/FollowupHistoryBlock.jsx` — new component
 - `/app/frontend/src/pages/InvoiceEditor.jsx` — import + render in edit mode
 
+
+---
+
+## Feb 2026 — Follow-up history promoted to a third tab
+
+**Change:** Move the follow-up timeline out of the scrolling edit body and into a dedicated **"Follow-up history"** tab to the right of Preview, complete with a live count badge.
+
+### Frontend
+- `/app/frontend/src/pages/InvoiceEditor.jsx`:
+  - `tab` state now supports `"edit" | "preview" | "followup"` (still defaults to Edit).
+  - Third tab button renders only when `editMode` is true (new invoices have no history yet). Indigo accent underline when active, `Mail` icon, and a pill badge showing the current count (`3`) when `followupCount > 0`.
+  - Tab body: when `tab === "followup"`, render `FollowupHistoryBlock` inside a `rounded-xl border bg-white shadow-sm` container to match the Preview tab's card treatment.
+  - Removed the inline block below `PaymentHistoryBlock` — the tab is now the single source of truth.
+  - Pre-fetch on invoice load: `GET /followup-history` fires alongside payments so the badge count shows immediately, even before the pro opens the tab.
+- `/app/frontend/src/components/FollowupHistoryBlock.jsx`:
+  - New optional `onCount(n)` callback — fires whenever history loads so the parent tab badge stays in sync.
+  - Now renders three states: `loading`, empty ("No follow-ups yet"), and populated timeline (was previously "render nothing when empty" — but a tab needs *something* when clicked). Empty-state copy explains what the tab will fill with.
+  - Removed the `border-t bg-white` wrapper class — the block now assumes it lives inside a card container provided by the parent tab.
+
+### Bug fixed en-route
+- Initial pass used `docId={docId}` from InvoiceEditor's top scope where only `id` (from `useParams`) is defined. Corrected to `docId={id}`. Runtime error `ReferenceError: docId is not defined` no longer reproduces.
+
+### Verified via Playwright
+- Tab bar: `['Edit', 'Preview', 'Follow-up history\n3']` — badge renders `3` for INV-2042 which has 3 seeded entries ✓
+- Clicking the tab loads the timeline (3 entries), expanding entry-0 reveals the full body pane ✓
+
