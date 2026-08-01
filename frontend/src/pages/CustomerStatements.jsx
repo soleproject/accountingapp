@@ -72,6 +72,26 @@ export default function CustomerStatements() {
 
   return (
     <div className="space-y-4">
+      {/* Scoped print styles — when the user hits Print (or Cmd/Ctrl+P
+          while viewing this page), hide the entire app chrome and let
+          only the statement preview flow onto paper. */}
+      <style>{`
+        @media print {
+          @page { margin: 0.5in; }
+          body > * { visibility: hidden !important; }
+          [data-testid="cs-preview"], [data-testid="cs-preview"] * { visibility: visible !important; }
+          [data-testid="cs-preview"] {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+            box-shadow: none !important;
+            border: 0 !important;
+          }
+        }
+      `}</style>
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-heading text-3xl font-bold tracking-tight">Customer Statements</h1>
@@ -190,7 +210,12 @@ function StatementPreview({ preview }) {
       <div className="flex items-start justify-between mb-10">
         <div className="flex items-start gap-3">
           {company.logo_data_url ? (
-            <img src={company.logo_data_url} alt={company.name} className="h-10 w-10 rounded object-cover border border-slate-200" data-testid="cs-preview-logo" />
+            <img
+              src={company.logo_data_url}
+              alt={company.name}
+              className="max-h-12 max-w-[160px] w-auto h-auto object-contain"
+              data-testid="cs-preview-logo"
+            />
           ) : (
             <div className="h-10 w-10 rounded bg-indigo-100 text-indigo-700 flex items-center justify-center font-heading font-bold">
               {(company.name || "?").charAt(0)}
