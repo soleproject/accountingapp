@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, Pencil, GitMerge, ExternalLink, Tag, Sparkles, Upload, FileSpreadsheet, FileText, Loader2, Check, ArrowLeft, History, Undo2, UserCircle, Store } from "lucide-react";
+import { Plus, Trash2, X, Pencil, GitMerge, ExternalLink, Tag, Sparkles, Upload, FileSpreadsheet, FileText, Loader2, Check, ArrowLeft, History, Undo2, UserCircle, Store, Search } from "lucide-react";
 import { toast } from "sonner";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
@@ -25,11 +25,18 @@ const fmtDate = (iso) => {
 
 export default function Contacts() {
   const { currentId } = useCompany();
-  const [sp] = useSearchParams();
-  // ?type=customer|vendor filter driven by sidebar links. `both` and
-  // missing param both show everything.
+  const [sp, setSp] = useSearchParams();
+  // ?type=customer|vendor filter driven by sidebar links or the on-page
+  // toggle. Missing / "both" / "all" all mean "show everything".
   const urlType = sp.get("type");
   const typeFilter = urlType === "customer" || urlType === "vendor" ? urlType : "all";
+  const setTypeFilter = (v) => {
+    const next = new URLSearchParams(sp);
+    if (v === "customer" || v === "vendor") next.set("type", v);
+    else next.delete("type");
+    setSp(next, { replace: true });
+  };
+  const [query, setQuery] = useState("");
   const [items, setItems] = useState([]);
   const [modal, setModal] = useState(null); // null | { mode, contact? }
   const [selected, setSelected] = useState(new Set());
@@ -86,19 +93,27 @@ export default function Contacts() {
     [items, selected]
   );
 
-  // URL-driven filter (Customers vs Vendors links in the sidebar).
-  // Contacts with type="both" always appear in either view.
-  const visible = useMemo(() => {
-    if (typeFilter === "all") return items;
-    return items.filter(c => c.type === typeFilter || c.type === "both");
-  }, [items, typeFilter]);
+  // Search matcher applied to both cards.
+  const matchesQuery = (c) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return [c.name, c.email, c.phone, c.address].some(v => (v || "").toLowerCase().includes(q));
+  };
 
-  // Customers page also shows a Vendors card underneath — pre-compute
-  // the vendor slice so both tables render off the same in-memory list.
-  const vendorList = useMemo(
-    () => items.filter(c => c.type === "vendor" || c.type === "both"),
-    [items]
+  // URL-driven filter (Customers vs Vendors links in the sidebar).
+  // Contacts with type="both" always appear in either view. Now also
+  // filtered by the on-page search bar.
+  const customerList = useMemo(
+    () => items.filter(c => (c.type === "customer" || c.type === "both") && matchesQuery(c)),
+    [items, query]
   );
+  const vendorList = useMemo(
+    () => items.filter(c => (c.type === "vendor" || c.type === "both") && matchesQuery(c)),
+    [items, query]
+  );
+  const visible = typeFilter === "customer" ? customerList
+    : typeFilter === "vendor" ? vendorList
+    : items.filter(matchesQuery);
 
   const pageTitle = typeFilter === "customer"
     ? "Customers"
@@ -333,30 +348,80 @@ export default function Contacts() {
         </div>
       </div>
 
-      <div className="rounded-xl border bg-white overflow-hidden">
-        {typeFilter === "customer" && (
-          <div className="px-4 py-3 border-b bg-slate-50/60">
-            <div className="font-heading font-semibold text-slate-800 text-sm">Customers</div>
-            <div className="text-[11px] text-slate-500">{visible.length} contact{visible.length === 1 ? "" : "s"}</div>
-          </div>
+      {/* Type toggle + fuzzy search — filters BOTH cards in unison. */}
+      <div className="flex items-center gap-3 flex-wrap" data-testid="contacts-page-toolbar">
+        <div
+          className="inline-flex rounded-md border border-slate-300 overflow-hidden text-xs bg-white"
+          data-testid="contacts-type-toggle"
+        >
+          <button
+            onClick={() => setTypeFilter("customer")}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 ${typeFilter === "customer" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50"}`}
+            data-testid="contacts-type-customer"
+          ><UserCircle size={12} /> Customers</button>
+          <button
+            onClick={() => setTypeFilter("vendor")}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 border-l border-slate-300 ${typeFilter === "vendor" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50"}`}
+            data-testid="contacts-type-vendor"
+          ><Store size={12} /> Vendors</button>
+          <button
+            onClick={() => setTypeFilter("all")}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 border-l border-slate-300 ${typeFilter === "all" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50"}`}
+            data-testid="contacts-type-both"
+          >Both</button>
+        </div>
+        <div className="relative flex-1 min-w-[220px] max-w-md">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search customers and vendors by name, email, phone…"
+            className="w-full pl-8 pr-8 py-1.5 rounded-md border border-slate-300 text-xs focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+            data-testid="contacts-search"
+          />
+          {query && (
+            <button
+              onClick={() => setQuery("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              data-testid="contacts-search-clear"
+              title="Clear search"
+            ><X size={12} /></button>
+          )}
+        </div>
+        {query && (
+          <span className="text-[11px] text-slate-500" data-testid="contacts-search-count">
+            {customerList.length + vendorList.length} match{customerList.length + vendorList.length === 1 ? "" : "es"}
+          </span>
         )}
-        {renderContactsTable(visible)}
       </div>
 
-      {typeFilter === "customer" && (
+      {(typeFilter === "customer" || typeFilter === "all") && (
+        <div className="rounded-xl border bg-white overflow-hidden" data-testid="contacts-customers-card">
+          <div className="px-4 py-3 border-b bg-slate-50/60">
+            <div className="font-heading font-semibold text-slate-800 text-sm">Customers</div>
+            <div className="text-[11px] text-slate-500">People and companies you sell to · {customerList.length} contact{customerList.length === 1 ? "" : "s"}</div>
+          </div>
+          {renderContactsTable(customerList, { emptyMsg: query ? "No matching customers." : "No customers yet." })}
+        </div>
+      )}
+
+      {(typeFilter === "vendor" || typeFilter === "all") && (
         <div className="rounded-xl border bg-white overflow-hidden" data-testid="contacts-vendors-card">
           <div className="px-4 py-3 border-b bg-slate-50/60 flex items-center justify-between">
             <div>
               <div className="font-heading font-semibold text-slate-800 text-sm">Vendors</div>
               <div className="text-[11px] text-slate-500">Suppliers you buy from · {vendorList.length} contact{vendorList.length === 1 ? "" : "s"}</div>
             </div>
-            <a
-              href="/contacts?type=vendor"
-              className="text-[11px] text-indigo-600 hover:underline"
-              data-testid="contacts-vendors-viewall"
-            >View all vendors →</a>
+            {typeFilter === "all" && (
+              <button
+                onClick={() => setTypeFilter("vendor")}
+                className="text-[11px] text-indigo-600 hover:underline"
+                data-testid="contacts-vendors-viewall"
+              >View all vendors →</button>
+            )}
           </div>
-          {renderContactsTable(vendorList, { emptyMsg: "No vendors yet." })}
+          {renderContactsTable(vendorList, { emptyMsg: query ? "No matching vendors." : "No vendors yet." })}
         </div>
       )}
 
