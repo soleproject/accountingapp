@@ -56,7 +56,9 @@ export default function Payments() {
               const linkedLabel = p.linked_invoice_id
                 ? (linkedDoc ? `Invoice ${linkedDoc.number}` : "Invoice")
                 : (p.linked_bill_id ? (linkedDoc ? `Bill ${linkedDoc.number}` : "Bill") : "—");
-              const linkedHref = p.linked_invoice_id ? "/invoices" : (p.linked_bill_id ? "/bills" : null);
+              const linkedHref = p.linked_invoice_id
+                ? `/invoices/${p.linked_invoice_id}/edit`
+                : (p.linked_bill_id ? `/bills/${p.linked_bill_id}/edit` : null);
               return (
               <tr key={p.id} className="border-b hover:bg-slate-50" data-testid={`payment-row-${p.id}`}>
                 <td className="px-3 py-2 font-mono-num text-slate-500">{fmtDate(p.date)}</td>
@@ -92,14 +94,15 @@ export default function Payments() {
   );
 }
 
-function PaymentModal({ currentId, contacts, invoices, bills, transactions = [], onClose }) {
+export function PaymentModal({ currentId, contacts, invoices, bills, transactions = [], preset, onClose }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [amount, setAmount] = useState("");
-  const [kind, setKind] = useState("invoice");
-  const [linkedId, setLinkedId] = useState("");
-  const [contact, setContact] = useState("");
+  const [kind, setKind] = useState(preset?.kind || "invoice");
+  const [linkedId, setLinkedId] = useState(preset?.linkedId || "");
+  const [contact, setContact] = useState(preset?.contactId || "");
   const [method, setMethod] = useState("check");
   const [sourceTxnId, setSourceTxnId] = useState("");
+  const lockedKind = !!preset?.kind;   // Called from an editor → don't let user flip pane
 
   const applyTxn = (t) => {
     if (!t) { setSourceTxnId(""); return; }
@@ -143,12 +146,19 @@ function PaymentModal({ currentId, contacts, invoices, bills, transactions = [],
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-3" data-testid="payment-modal">
         <div className="flex items-center justify-between"><h3 className="font-heading font-semibold">Record Payment</h3><button onClick={onClose}><X size={16} /></button></div>
-        <div className="flex gap-2">
-          <button onClick={() => { setKind("invoice"); setSourceTxnId(""); }}
-                  className={`flex-1 py-1.5 rounded ${kind === "invoice" ? "bg-slate-900 text-white" : "border"}`}>For Invoice</button>
-          <button onClick={() => { setKind("bill"); setSourceTxnId(""); }}
-                  className={`flex-1 py-1.5 rounded ${kind === "bill" ? "bg-slate-900 text-white" : "border"}`}>For Bill</button>
-        </div>
+        {!lockedKind && (
+          <div className="flex gap-2">
+            <button onClick={() => { setKind("invoice"); setSourceTxnId(""); setLinkedId(""); }}
+                    className={`flex-1 py-1.5 rounded ${kind === "invoice" ? "bg-slate-900 text-white" : "border"}`}>For Invoice</button>
+            <button onClick={() => { setKind("bill"); setSourceTxnId(""); setLinkedId(""); }}
+                    className={`flex-1 py-1.5 rounded ${kind === "bill" ? "bg-slate-900 text-white" : "border"}`}>For Bill</button>
+          </div>
+        )}
+        {lockedKind && (
+          <div className="text-xs text-slate-500 px-2 py-1.5 rounded bg-slate-50 border">
+            Recording payment for {kind === "invoice" ? "invoice" : "bill"} <span className="font-medium text-slate-700">{preset?.docLabel || ""}</span>
+          </div>
+        )}
 
         {/* Transaction picker — sits ABOVE the date so a match cascades
             downstream field auto-fills. Custom dropdown, not native
@@ -159,6 +169,11 @@ function PaymentModal({ currentId, contacts, invoices, bills, transactions = [],
           contacts={contacts}
           selectedId={sourceTxnId}
           onPick={applyTxn}
+          targetAmount={(() => {
+            const doc = list.find(x => x.id === linkedId);
+            if (!doc) return null;
+            return Number(doc.balance_due ?? doc.total ?? 0);
+          })()}
         />
 
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
@@ -173,11 +188,13 @@ function PaymentModal({ currentId, contacts, invoices, bills, transactions = [],
           <option value="">Contact…</option>
           {contacts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        <select value={linkedId} onChange={(e) => setLinkedId(e.target.value)}
-                className="w-full border rounded px-2 py-1.5 text-sm">
-          <option value="">Link to {kind}…</option>
-          {list.map(x => <option key={x.id} value={x.id}>{x.number} · {fmtMoney(x.balance_due || x.total)}</option>)}
-        </select>
+        {!lockedKind && (
+          <select value={linkedId} onChange={(e) => setLinkedId(e.target.value)}
+                  className="w-full border rounded px-2 py-1.5 text-sm">
+            <option value="">Link to {kind}…</option>
+            {list.map(x => <option key={x.id} value={x.id}>{x.number} · {fmtMoney(x.balance_due || x.total)}</option>)}
+          </select>
+        )}
         <select value={method} onChange={(e) => setMethod(e.target.value)}
                 className="w-full border rounded px-2 py-1.5 text-sm bg-white">
           <option value="check">Check</option>
@@ -200,7 +217,7 @@ function PaymentModal({ currentId, contacts, invoices, bills, transactions = [],
  * matching the pane sign (money-in for invoices, money-out for bills).
  * Rows show only date · amount · contact (or merchant fallback).
  */
-function TransactionPicker({ transactions, kind, contacts, selectedId, onPick }) {
+function TransactionPicker({ transactions, kind, contacts, selectedId, onPick, targetAmount }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const contactName = (t) => t.contact_name
@@ -208,6 +225,14 @@ function TransactionPicker({ transactions, kind, contacts, selectedId, onPick })
     || t.merchant
     || t.description
     || "—";
+  // Match tier: 0 = no match, 1 = within 10%, 2 = exact (within a cent).
+  const matchTier = (t) => {
+    if (!targetAmount || targetAmount <= 0) return 0;
+    const a = Math.abs(Number(t.amount || 0));
+    if (Math.abs(a - targetAmount) <= 0.01) return 2;
+    if (Math.abs(a - targetAmount) / targetAmount <= 0.10) return 1;
+    return 0;
+  };
   const rows = (transactions || [])
     .filter(t => !t.linked_payment_id || t.id === selectedId)
     .filter(t => kind === "invoice" ? Number(t.amount) > 0 : Number(t.amount) < 0)
@@ -218,8 +243,11 @@ function TransactionPicker({ transactions, kind, contacts, selectedId, onPick })
           || String(Math.abs(Number(t.amount || 0))).includes(s)
           || contactName(t).toLowerCase().includes(s);
     })
+    // Suggested matches float to the top: exact first, then near-match.
+    .sort((a, b) => matchTier(b) - matchTier(a))
     .slice(0, 200);
   const picked = transactions.find(t => t.id === selectedId);
+  const matchCount = targetAmount ? rows.filter(r => matchTier(r) > 0).length : 0;
   return (
     <div className="relative">
       <button
@@ -233,7 +261,9 @@ function TransactionPicker({ transactions, kind, contacts, selectedId, onPick })
         <span className={selectedId ? "text-slate-800" : "text-slate-400"}>
           {picked
             ? `${picked.date} · $${Math.abs(Number(picked.amount || 0)).toFixed(2)} · ${contactName(picked)}`
-            : "Search bank transaction (optional)…"}
+            : (matchCount
+                ? `Search bank transaction · ${matchCount} suggested match${matchCount === 1 ? "" : "es"}`
+                : "Search bank transaction (optional)…")}
         </span>
         <span className="text-slate-400 text-xs">{open ? "▲" : "▼"}</span>
       </button>
@@ -256,29 +286,43 @@ function TransactionPicker({ transactions, kind, contacts, selectedId, onPick })
               className="w-full border rounded px-2 py-1 text-xs"
               data-testid="payment-modal-txn-filter"
             />
+            {targetAmount > 0 && (
+              <div className="text-[10px] text-slate-500 mt-1">
+                Highlighting txns near <span className="font-mono-num">${targetAmount.toFixed(2)}</span> (±10%).
+              </div>
+            )}
           </div>
           {rows.length === 0 ? (
             <div className="px-3 py-4 text-center text-xs text-slate-400">No matching transactions.</div>
           ) : (
             <ul className="divide-y">
-              {rows.map(t => (
-                <li key={t.id}>
-                  <button
-                    type="button"
-                    onClick={() => { onPick(t); setOpen(false); setQ(""); }}
-                    className={`w-full flex items-center gap-3 px-3 py-2 text-sm text-left hover:bg-slate-50 ${
-                      t.id === selectedId ? "bg-emerald-50" : ""
-                    }`}
-                    data-testid={`payment-modal-txn-option-${t.id}`}
-                  >
-                    <span className="text-slate-500 font-mono-num w-20 shrink-0">{t.date}</span>
-                    <span className={`font-mono-num w-20 shrink-0 text-right ${Number(t.amount) < 0 ? "text-red-600" : "text-emerald-700"}`}>
-                      ${Math.abs(Number(t.amount || 0)).toFixed(2)}
-                    </span>
-                    <span className="flex-1 truncate text-slate-700">{contactName(t)}</span>
-                  </button>
-                </li>
-              ))}
+              {rows.map(t => {
+                const tier = matchTier(t);
+                const bg = t.id === selectedId ? "bg-emerald-100"
+                         : tier === 2 ? "bg-emerald-50"
+                         : tier === 1 ? "bg-amber-50"
+                         : "";
+                const chip = tier === 2 ? <span className="text-[9px] font-semibold uppercase text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">exact</span>
+                           : tier === 1 ? <span className="text-[9px] font-semibold uppercase text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">~match</span>
+                           : null;
+                return (
+                  <li key={t.id}>
+                    <button
+                      type="button"
+                      onClick={() => { onPick(t); setOpen(false); setQ(""); }}
+                      className={`w-full flex items-center gap-3 px-3 py-2 text-sm text-left hover:bg-slate-50 ${bg}`}
+                      data-testid={`payment-modal-txn-option-${t.id}`}
+                    >
+                      <span className="text-slate-500 font-mono-num w-20 shrink-0">{t.date}</span>
+                      <span className={`font-mono-num w-20 shrink-0 text-right ${Number(t.amount) < 0 ? "text-red-600" : "text-emerald-700"}`}>
+                        ${Math.abs(Number(t.amount || 0)).toFixed(2)}
+                      </span>
+                      <span className="flex-1 truncate text-slate-700">{contactName(t)}</span>
+                      {chip}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

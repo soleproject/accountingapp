@@ -436,6 +436,15 @@ export default function InvoiceEditor() {
               taxModalLineIdx, setTaxModalLineIdx,
               applyTaxToAllLines,
               payments,
+              editMode,
+              docId: id,
+              reloadPayments: async () => {
+                if (!id) return;
+                try {
+                  const pr = await api.get(`/companies/${currentId}/payments`);
+                  setPayments((pr.data.payments || []).filter(p => p.linked_invoice_id === id));
+                } catch { /* silent */ }
+              },
             }}
           />
         </>
@@ -611,6 +620,9 @@ function EditForm({
   taxModalLineIdx, setTaxModalLineIdx,
   applyTaxToAllLines,
   payments = [],
+  editMode,
+  docId,
+  reloadPayments,
 }) {
   const customerContacts = useMemo(
     () => contacts.filter(c => c.type === "customer" || c.type === "both"),
@@ -885,8 +897,17 @@ function EditForm({
         </div>
       </div>
 
-      {payments && payments.length > 0 && (
-        <PaymentHistoryBlock payments={payments} original={totals.total} kind="invoice" />
+      {editMode && (
+        <PaymentHistoryBlock
+          payments={payments}
+          original={totals.total}
+          kind="invoice"
+          docId={docId}
+          docLabel={number}
+          contactId={contact}
+          currentId={currentId}
+          onPaymentRecorded={reloadPayments}
+        />
       )}
 
       {/* Notes / Terms + attachments */}

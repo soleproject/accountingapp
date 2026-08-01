@@ -389,6 +389,15 @@ export default function BillEditor() {
               taxModalLineIdx, setTaxModalLineIdx,
               applyTaxToAllLines,
               payments,
+              editMode,
+              docId: id,
+              reloadPayments: async () => {
+                if (!id) return;
+                try {
+                  const pr = await api.get(`/companies/${currentId}/payments`);
+                  setPayments((pr.data.payments || []).filter(p => p.linked_bill_id === id));
+                } catch { /* silent */ }
+              },
             }}
           />
       )}
@@ -486,6 +495,9 @@ function EditForm({
   taxModalLineIdx, setTaxModalLineIdx,
   applyTaxToAllLines,
   payments = [],
+  editMode,
+  docId,
+  reloadPayments,
 }) {
   const vendorContacts = useMemo(
     () => contacts.filter(c => c.type === "vendor" || c.type === "both"),
@@ -852,7 +864,28 @@ function EditForm({
       </div>
 
       {payments && payments.length > 0 && (
-        <PaymentHistoryBlock payments={payments} original={totals.total} kind="bill" />
+        <PaymentHistoryBlock
+          payments={payments}
+          original={totals.total}
+          kind="bill"
+          docId={docId}
+          docLabel={number}
+          contactId={contact}
+          currentId={currentId}
+          onPaymentRecorded={reloadPayments}
+        />
+      )}
+      {(!payments || payments.length === 0) && editMode && (
+        <PaymentHistoryBlock
+          payments={[]}
+          original={totals.total}
+          kind="bill"
+          docId={docId}
+          docLabel={number}
+          contactId={contact}
+          currentId={currentId}
+          onPaymentRecorded={reloadPayments}
+        />
       )}
 
       {/* Attachments + Internal notes — always useful for bills */}
