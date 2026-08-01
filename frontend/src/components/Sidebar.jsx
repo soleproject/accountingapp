@@ -137,16 +137,18 @@ const rememberSticky = (group, item) => {
   window.dispatchEvent(new Event(STICKY_EVENT));
 };
 
-const isItemActive = (loc, item, sticky = {}) => {
+const isItemActive = (loc, item, sticky = {}, groupKey = null) => {
   // Prefer explicit matchPath (used when the link carries query params).
   const p = item.matchPath || item.to.split("?")[0];
   const pathHit = loc.pathname === p || loc.pathname.startsWith(p + "/");
   if (!pathHit) return false;
   // Sticky override — when the pathname has multiple sidebar entries,
   // only the last-clicked one lights up (regardless of ?type= / ?direction=).
+  // Match by BOTH groupKey and label because sibling groups may share
+  // an identical label (e.g. "Payments" lives in both Sales and Purchases).
   if (ITEM_PATH_COUNTS[p] > 1) {
     const s = sticky[p];
-    if (s) return s.label === item.label;
+    if (s) return s.label === item.label && s.groupKey === groupKey;
     // No sticky choice yet — fall back to query-matching so a fresh
     // deep-link to `?type=customer` still highlights the right entry.
   }
@@ -167,7 +169,7 @@ const isItemActive = (loc, item, sticky = {}) => {
 };
 
 const isGroupActive = (loc, group, sticky = {}) =>
-  group.items.some((it) => isItemActive(loc, it, sticky));
+  group.items.some((it) => isItemActive(loc, it, sticky, group.key));
 
 export default function Sidebar({ collapsed, onToggle }) {
   const { branding } = useBranding();
@@ -221,7 +223,7 @@ export default function Sidebar({ collapsed, onToggle }) {
   const toggleGroup = (k) => setOpen((p) => ({ ...p, [k]: !p[k] }));
 
   const Item = ({ item, group, indent = false }) => {
-    const active = isItemActive(loc, item, sticky);
+    const active = isItemActive(loc, item, sticky, group?.key || null);
     const Icon = item.icon;
     return (
       <NavLink
