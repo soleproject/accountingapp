@@ -8,6 +8,7 @@ import {
   FileText, X, ChevronDown, ChevronUp, Upload, Copy,
 } from "lucide-react";
 import ItemPicker from "@/components/ItemPicker";
+import ContactCombobox from "@/components/ContactCombobox";
 import PaymentHistoryBlock from "@/components/PaymentHistoryBlock";
 
 const TERMS_OPTIONS = [
@@ -419,7 +420,7 @@ export default function InvoiceEditor() {
           />
           <EditForm
             {...{
-              contacts, itemsCatalog, taxes, setTaxes,
+              contacts, setContacts, itemsCatalog, taxes, setTaxes,
               contact, setContact,
               number, setNumber,
               issue, setIssue, due, setDue,
@@ -603,7 +604,7 @@ function BusinessHeaderCard({ company, title, setTitle, summary, setSummary, onL
 // Main invoice form — customer/meta + line items + INLINE totals + notes
 // ─────────────────────────────────────────────────────────────────────────────
 function EditForm({
-  contacts, itemsCatalog, taxes, setTaxes,
+  contacts, setContacts, itemsCatalog, taxes, setTaxes,
   contact, setContact,
   number, setNumber,
   issue, setIssue, due, setDue,
@@ -639,20 +640,18 @@ function EditForm({
     <section className="rounded-lg border bg-white shadow-xl overflow-hidden ring-1 ring-slate-100">
       {/* Top: customer + invoice meta grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 px-6 py-5">
-        {/* Left — customer picker */}
+        {/* Left — customer picker (searchable + inline-create) */}
         <div>
           <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Customer</label>
-          <select
-            data-testid="invoice-editor-customer"
+          <ContactCombobox
+            contacts={contacts}
             value={contact}
-            onChange={(e) => setContact(e.target.value)}
-            className="w-full border rounded px-3 py-2 text-sm bg-white"
-          >
-            <option value="">Choose customer…</option>
-            {customerContacts.map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+            onChange={setContact}
+            onCreated={(c) => setContacts(prev => [...prev, c])}
+            type="customer"
+            currentId={currentId}
+            testId="invoice-editor-customer"
+          />
         </div>
         {/* Right — invoice meta */}
         <div className="space-y-2 text-sm">

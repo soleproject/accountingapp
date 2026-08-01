@@ -7,6 +7,7 @@ import {
   ArrowLeft, Save, Send, Plus, Trash2, Paperclip, Eye, Pencil, X, Copy,
 } from "lucide-react";
 import PaymentHistoryBlock from "@/components/PaymentHistoryBlock";
+import ContactCombobox from "@/components/ContactCombobox";
 
 const TERMS_OPTIONS = [
   { label: "Due on receipt", days: 0 },
@@ -372,7 +373,7 @@ export default function BillEditor() {
       ) : (
           <EditForm
             {...{
-              contacts, itemsCatalog, taxes, setTaxes, expenseAccounts,
+              contacts, setContacts, itemsCatalog, taxes, setTaxes, expenseAccounts,
               contact, setContact,
               number, setNumber,
               issue, setIssue, due, setDue,
@@ -478,7 +479,7 @@ const TERMS_LABEL_TO_DAYS = {
 };
 
 function EditForm({
-  contacts, itemsCatalog, taxes, setTaxes, expenseAccounts,
+  contacts, setContacts, itemsCatalog, taxes, setTaxes, expenseAccounts,
   contact, setContact,
   number, setNumber,
   issue, setIssue, due, setDue,
@@ -548,17 +549,15 @@ function EditForm({
         <div className="space-y-3">
           <div>
             <label className="block text-sm text-slate-500 mb-1">Vendor <span className="text-red-500">*</span></label>
-            <select
-              data-testid="bill-editor-vendor"
+            <ContactCombobox
+              contacts={contacts}
               value={contact}
-              onChange={(e) => setContact(e.target.value)}
-              className="w-full border rounded px-3 py-2 text-sm bg-white"
-            >
-              <option value="">Choose…</option>
-              {vendorContacts.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
+              onChange={setContact}
+              onCreated={(c) => setContacts(prev => [...prev, c])}
+              type="vendor"
+              currentId={currentId}
+              testId="bill-editor-vendor"
+            />
           </div>
           <div>
             <label className="block text-sm text-slate-500 mb-1">Currency</label>

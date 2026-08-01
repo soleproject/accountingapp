@@ -33,6 +33,7 @@ const GROUPS = [
       { to: "/recurring", label: "Recurring", icon: Repeat },
       { to: "/contacts?type=customer&view=statements", label: "Customer Statements", icon: MailCheck, matchPath: "__never__" },
       { to: "/contacts?type=customer", label: "Customers (contacts)", icon: UserCircle, matchPath: "/contacts" },
+      { to: "/contacts?type=vendor", label: "Vendors (contacts)", icon: Store, matchPath: "/contacts" },
     ],
   },
   {
