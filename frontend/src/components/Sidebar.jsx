@@ -28,11 +28,11 @@ const GROUPS = [
     icon: FileText,
     items: [
       { to: "/invoices", label: "Invoices", icon: FileText },
-      { to: "/payments", label: "Payments", icon: CreditCard, matchPath: "/payments" },
+      { to: "/payments?direction=in", label: "Payments", icon: CreditCard, matchPath: "/payments" },
       { to: "/items?usage=sales", label: "Items", icon: Package, matchPath: "/items" },
       { to: "/recurring", label: "Recurring", icon: Repeat },
       { to: "/contacts?type=customer&view=statements", label: "Customer Statements", icon: MailCheck, matchPath: "__never__" },
-      { to: "/contacts", label: "Contacts", icon: UserCircle, matchPath: "/contacts" },
+      { to: "/contacts?type=customer", label: "Customers", icon: UserCircle, matchPath: "/contacts" },
     ],
   },
   {
@@ -41,7 +41,9 @@ const GROUPS = [
     icon: ShoppingCart,
     items: [
       { to: "/bills", label: "Bills", icon: Receipt },
+      { to: "/payments?direction=out", label: "Payments", icon: CreditCard, matchPath: "/payments" },
       { to: "/items?usage=purchases", label: "Items", icon: Package, matchPath: "/items" },
+      { to: "/contacts?type=vendor", label: "Vendors", icon: Store, matchPath: "/contacts" },
     ],
   },
   {
@@ -98,11 +100,56 @@ const STANDALONE_BOTTOM = [
 
 // --- helpers ---------------------------------------------------------------
 
-const isItemActive = (loc, item) => {
+// Precompute: for each pathname served by the sidebar, how many
+// distinct items point to it? When >1, the sidebar behaves "sticky" —
+// it remembers which specific item the user last clicked so in-page
+// toggles (that change the query but not the pathname) don't jump
+// the highlight between groups.
+const ITEM_PATH_COUNTS = (() => {
+  const counts = {};
+  for (const g of GROUPS) {
+    for (const it of g.items) {
+      const p = it.matchPath || it.to.split("?")[0];
+      if (p === "__never__") continue;
+      counts[p] = (counts[p] || 0) + 1;
+    }
+  }
+  return counts;
+})();
+
+const STICKY_KEY = "sb_nav_sticky_item";
+const readSticky = () => {
+  try { return JSON.parse(localStorage.getItem(STICKY_KEY) || "{}"); }
+  catch { return {}; }
+};
+const writeSticky = (map) => {
+  localStorage.setItem(STICKY_KEY, JSON.stringify(map));
+};
+// Fired when a sidebar item is clicked so the storage listener below
+// picks it up in the same tab without waiting for a re-render.
+const STICKY_EVENT = "sb-nav-sticky-changed";
+const rememberSticky = (group, item) => {
+  const p = item.matchPath || item.to.split("?")[0];
+  if (!ITEM_PATH_COUNTS[p] || ITEM_PATH_COUNTS[p] < 2) return; // no ambiguity
+  const map = readSticky();
+  map[p] = { groupKey: group.key, label: item.label };
+  writeSticky(map);
+  window.dispatchEvent(new Event(STICKY_EVENT));
+};
+
+const isItemActive = (loc, item, sticky = {}) => {
   // Prefer explicit matchPath (used when the link carries query params).
   const p = item.matchPath || item.to.split("?")[0];
   const pathHit = loc.pathname === p || loc.pathname.startsWith(p + "/");
   if (!pathHit) return false;
+  // Sticky override — when the pathname has multiple sidebar entries,
+  // only the last-clicked one lights up (regardless of ?type= / ?direction=).
+  if (ITEM_PATH_COUNTS[p] > 1) {
+    const s = sticky[p];
+    if (s) return s.label === item.label;
+    // No sticky choice yet — fall back to query-matching so a fresh
+    // deep-link to `?type=customer` still highlights the right entry.
+  }
   // If the item's target URL specifies query params (e.g. ?type=customer
   // or ?direction=in), require the current URL's corresponding params
   // to match — otherwise multiple sub-items sharing a pathname collide.
@@ -119,8 +166,8 @@ const isItemActive = (loc, item) => {
   return true;
 };
 
-const isGroupActive = (loc, group) =>
-  group.items.some((it) => isItemActive(loc, it));
+const isGroupActive = (loc, group, sticky = {}) =>
+  group.items.some((it) => isItemActive(loc, it, sticky));
 
 export default function Sidebar({ collapsed, onToggle }) {
   const { branding } = useBranding();
@@ -130,6 +177,18 @@ export default function Sidebar({ collapsed, onToggle }) {
     : (logos.logo_light || logos.icon_light || branding?.logo_data_url);
   const { user } = useAuth();
   const loc = useLocation();
+  // Sticky item map: pathname -> {groupKey, label}. Updated whenever
+  // the user clicks a sidebar entry that shares a path with another.
+  const [sticky, setSticky] = useState(readSticky);
+  useEffect(() => {
+    const refresh = () => setSticky(readSticky());
+    window.addEventListener(STICKY_EVENT, refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener(STICKY_EVENT, refresh);
+      window.removeEventListener("storage", refresh);
+    };
+  }, []);
 
   // Persist per-group open/closed state across navigations. Auto-open the
   // group that contains the current route.
@@ -138,7 +197,7 @@ export default function Sidebar({ collapsed, onToggle }) {
     try { stored = JSON.parse(localStorage.getItem("sb_nav_open") || "{}"); } catch {}
     const merged = { ...stored };
     for (const g of GROUPS) {
-      if (isGroupActive(loc, g)) merged[g.key] = true;
+      if (isGroupActive(loc, g, sticky)) merged[g.key] = true;
       if (!(g.key in merged)) merged[g.key] = false;
     }
     return merged;
@@ -153,20 +212,21 @@ export default function Sidebar({ collapsed, onToggle }) {
       const next = { ...prev };
       let changed = false;
       for (const g of GROUPS) {
-        if (isGroupActive(loc, g) && !next[g.key]) { next[g.key] = true; changed = true; }
+        if (isGroupActive(loc, g, sticky) && !next[g.key]) { next[g.key] = true; changed = true; }
       }
       return changed ? next : prev;
     });
-  }, [loc.pathname, loc.search]);
+  }, [loc.pathname, loc.search, sticky]);
 
   const toggleGroup = (k) => setOpen((p) => ({ ...p, [k]: !p[k] }));
 
-  const Item = ({ item, indent = false }) => {
-    const active = isItemActive(loc, item);
+  const Item = ({ item, group, indent = false }) => {
+    const active = isItemActive(loc, item, sticky);
     const Icon = item.icon;
     return (
       <NavLink
         to={item.to}
+        onClick={() => { if (group) rememberSticky(group, item); }}
         data-testid={`${TID.navLink}-${item.label.replace(/\s+/g, "-").toLowerCase()}`}
         className={`nav-item flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
           active ? "nav-item-active" : "text-slate-700"
@@ -186,7 +246,7 @@ export default function Sidebar({ collapsed, onToggle }) {
         <button
           onClick={() => toggleGroup(group.key)}
           className={`w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-            isGroupActive(loc, group) ? "text-slate-900 font-medium" : "text-slate-700"
+            isGroupActive(loc, group, sticky) ? "text-slate-900 font-medium" : "text-slate-700"
           } hover:bg-slate-50`}
           data-testid={`${TID.navGroup}-${group.key}`}
           aria-expanded={opened}
@@ -204,7 +264,7 @@ export default function Sidebar({ collapsed, onToggle }) {
         {opened && !collapsed && (
           <div className="mt-0.5 space-y-0.5">
             {group.items.map((it) => (
-              <Item key={it.label} item={it} indent />
+              <Item key={it.label} item={it} group={group} indent />
             ))}
           </div>
         )}
