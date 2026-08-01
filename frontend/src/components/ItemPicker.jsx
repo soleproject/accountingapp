@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Search, X } from "lucide-react";
+import { ChevronDown, Search, X, Plus, Save } from "lucide-react";
+import { api } from "@/lib/api";
+import { toast } from "sonner";
+import { useCompany } from "@/lib/company";
 
 /**
  * Combobox for invoice line "Description" field. Lets users pick from the
@@ -14,9 +17,11 @@ import { ChevronDown, Search, X } from "lucide-react";
  *  - onChangeText: (text) => void — called when user types free-form
  *  - testId:     optional data-testid prefix
  */
-export default function ItemPicker({ items, value, onPickItem, onChangeText, testId }) {
+export default function ItemPicker({ items, value, onPickItem, onChangeText, onItemCreated, usage = "sales", testId }) {
+  const { currentId } = useCompany();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const [creating, setCreating] = useState(false);
   const wrapRef = useRef(null);
 
   const filtered = useMemo(() => {
@@ -89,8 +94,7 @@ export default function ItemPicker({ items, value, onPickItem, onChangeText, tes
           </div>
           {!filtered.length ? (
             <div className="px-3 py-4 text-xs text-slate-400 text-center">
-              No matching items.{" "}
-              <a href="/items" className="text-indigo-600 hover:underline">Manage catalog →</a>
+              No matching items.
             </div>
           ) : (
             <ul className="divide-y">
@@ -113,8 +117,92 @@ export default function ItemPicker({ items, value, onPickItem, onChangeText, tes
               ))}
             </ul>
           )}
+          <button
+            type="button"
+            onClick={() => { setCreating(true); setOpen(false); }}
+            className="w-full border-t px-3 py-2 text-xs text-indigo-600 hover:bg-indigo-50 inline-flex items-center gap-1.5"
+            data-testid={testId ? `${testId}-add-new` : "item-picker-add-new"}
+          >
+            <Plus size={12} /> Add new item
+            {q.trim() && <span className="text-slate-500">— "{q}"</span>}
+          </button>
         </div>
       )}
+      {creating && (
+        <CreateItemDialog
+          currentId={currentId}
+          defaultName={q}
+          usage={usage}
+          onClose={() => setCreating(false)}
+          onCreated={(it) => {
+            setCreating(false);
+            setQ("");
+            onItemCreated && onItemCreated(it);
+            onPickItem && onPickItem(it);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function CreateItemDialog({ currentId, defaultName, usage, onClose, onCreated }) {
+  const [name, setName] = useState(defaultName || "");
+  const [price, setPrice] = useState("");
+  const [description, setDescription] = useState("");
+  const [saving, setSaving] = useState(false);
+  const submit = async () => {
+    if (!name.trim()) { toast.error("Item name is required"); return; }
+    setSaving(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/items`, {
+        name: name.trim(),
+        description: description.trim(),
+        price: parseFloat(price) || 0,
+        usage,
+      });
+      toast.success(`Added ${name.trim()}`);
+      onCreated(r.data.item || r.data);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to create item");
+    } finally { setSaving(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4" data-testid="item-create-dialog">
+        <div className="flex items-center justify-between border-b pb-3">
+          <h3 className="font-heading font-semibold text-lg">Add new item</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Name <span className="text-red-500">*</span></label>
+            <input autoFocus value={name} onChange={(e) => setName(e.target.value)}
+                   className="w-full border rounded px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+                   data-testid="item-create-name" />
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Description</label>
+            <input value={description} onChange={(e) => setDescription(e.target.value)}
+                   className="w-full border rounded px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Price</label>
+            <input type="number" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)}
+                   placeholder="0.00"
+                   className="w-full border rounded px-3 py-2 text-sm font-mono-num text-right"
+                   data-testid="item-create-price" />
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-2 pt-3 border-t">
+          <button onClick={onClose} className="px-3 py-1.5 rounded-md text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
+          <button onClick={submit} disabled={saving || !name.trim()}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50"
+                  data-testid="item-create-submit">
+            <Save size={13} /> {saving ? "Saving…" : "Create item"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

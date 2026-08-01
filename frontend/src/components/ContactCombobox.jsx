@@ -30,15 +30,23 @@ export default function ContactCombobox({
   const rootRef = useRef(null);
 
   // Filter to matching type ("both" always shows up), then apply search.
-  const rows = useMemo(() => {
-    const scoped = contacts.filter(c => c.type === type || c.type === "both");
-    if (!q.trim()) return scoped;
-    const needle = q.toLowerCase();
-    return scoped.filter(c =>
-      (c.name || "").toLowerCase().includes(needle)
-      || (c.email || "").toLowerCase().includes(needle)
-      || (c.phone || "").toLowerCase().includes(needle));
+  const [primary, secondary] = useMemo(() => {
+    const q_l = q.trim().toLowerCase();
+    const match = (c) => !q_l
+      || (c.name || "").toLowerCase().includes(q_l)
+      || (c.email || "").toLowerCase().includes(q_l)
+      || (c.phone || "").toLowerCase().includes(q_l);
+    const prim = contacts.filter(c => (c.type === type || c.type === "both") && match(c));
+    // On the customer picker, we ALSO show vendors as a second group so
+    // the pro can pick either — but customers stay on top.
+    const secType = type === "customer" ? "vendor" : null;
+    const sec = secType
+      ? contacts.filter(c => c.type === secType && match(c))
+      : [];
+    return [prim, sec];
   }, [contacts, type, q]);
+  const rows = primary;
+  const secondaryRows = secondary;
 
   // Close on outside-click so the combobox behaves like a real menu.
   useEffect(() => {
@@ -80,31 +88,67 @@ export default function ContactCombobox({
             />
           </div>
           <div className="flex-1 overflow-y-auto">
-            {rows.length === 0 ? (
+            {rows.length === 0 && secondaryRows.length === 0 ? (
               <div className="px-3 py-4 text-center text-xs text-slate-400">
                 {q ? `No ${type}s match "${q}".` : `No ${type}s yet.`}
               </div>
             ) : (
-              <ul className="divide-y">
-                {rows.map(c => (
-                  <li key={c.id}>
-                    <button
-                      type="button"
-                      onClick={() => { onChange(c.id); setOpen(false); setQ(""); }}
-                      className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2 ${
-                        c.id === value ? "bg-emerald-50" : ""
-                      }`}
-                      data-testid={`${testId}-option-${c.id}`}
-                    >
-                      {c.id === value && <Check size={12} className="text-emerald-600" />}
-                      <span className="flex-1 truncate">
-                        <span className="text-slate-800">{c.name}</span>
-                        {c.email && <span className="text-[11px] text-slate-400 ml-2">{c.email}</span>}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              <>
+                {rows.length > 0 && (
+                  <>
+                    <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-slate-400 bg-slate-50 sticky top-0">
+                      {type === "customer" ? "Customers" : "Vendors"}
+                    </div>
+                    <ul className="divide-y">
+                      {rows.map(c => (
+                        <li key={c.id}>
+                          <button
+                            type="button"
+                            onClick={() => { onChange(c.id); setOpen(false); setQ(""); }}
+                            className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2 ${
+                              c.id === value ? "bg-emerald-50" : ""
+                            }`}
+                            data-testid={`${testId}-option-${c.id}`}
+                          >
+                            {c.id === value && <Check size={12} className="text-emerald-600" />}
+                            <span className="flex-1 truncate">
+                              <span className="text-slate-800">{c.name}</span>
+                              {c.email && <span className="text-[11px] text-slate-400 ml-2">{c.email}</span>}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+                {secondaryRows.length > 0 && (
+                  <>
+                    <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-slate-400 bg-slate-50 border-t sticky top-0">
+                      Vendors
+                    </div>
+                    <ul className="divide-y">
+                      {secondaryRows.map(c => (
+                        <li key={c.id}>
+                          <button
+                            type="button"
+                            onClick={() => { onChange(c.id); setOpen(false); setQ(""); }}
+                            className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2 ${
+                              c.id === value ? "bg-emerald-50" : ""
+                            }`}
+                            data-testid={`${testId}-option-${c.id}`}
+                          >
+                            {c.id === value && <Check size={12} className="text-emerald-600" />}
+                            <span className="flex-1 truncate">
+                              <span className="text-slate-800">{c.name}</span>
+                              {c.email && <span className="text-[11px] text-slate-400 ml-2">{c.email}</span>}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </>
             )}
           </div>
           <button

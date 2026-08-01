@@ -420,7 +420,7 @@ export default function InvoiceEditor() {
           />
           <EditForm
             {...{
-              contacts, setContacts, itemsCatalog, taxes, setTaxes,
+              contacts, setContacts, itemsCatalog, setItemsCatalog, taxes, setTaxes,
               contact, setContact,
               number, setNumber,
               issue, setIssue, due, setDue,
@@ -604,7 +604,7 @@ function BusinessHeaderCard({ company, title, setTitle, summary, setSummary, onL
 // Main invoice form — customer/meta + line items + INLINE totals + notes
 // ─────────────────────────────────────────────────────────────────────────────
 function EditForm({
-  contacts, setContacts, itemsCatalog, taxes, setTaxes,
+  contacts, setContacts, itemsCatalog, setItemsCatalog, taxes, setTaxes,
   contact, setContact,
   number, setNumber,
   issue, setIssue, due, setDue,
@@ -734,6 +734,7 @@ function EditForm({
                   <ItemPicker
                     items={itemsCatalog}
                     value={l.description}
+                    usage="sales"
                     onChangeText={(txt) => updLine(i, { description: txt })}
                     onPickItem={(it) => updLine(i, {
                       item_id: it.id, item_name: it.name,
@@ -743,6 +744,7 @@ function EditForm({
                       income_account_name: it.income_account_name || "",
                       category: it.income_account_name || "",
                     })}
+                    onItemCreated={(it) => setItemsCatalog && setItemsCatalog(prev => [...prev, it])}
                     testId={`invoice-editor-line-${i}`}
                   />
                 </div>
@@ -766,14 +768,9 @@ function EditForm({
                   data-testid={`invoice-editor-line-${i}-remove`}
                 ><Trash2 size={13} /></button>
               </div>
-              {/* Per-line "Edit income account | Tax [dropdown]" secondary row */}
+              {/* Per-line Tax selector — dropdown on the right */}
               <div className="grid grid-cols-12 gap-2 items-center mt-1 pl-1">
-                <div className="col-span-6">
-                  <span className="text-xs text-indigo-600 hover:underline cursor-default"
-                        title={l.income_account_name || "Set by picking an item"}>
-                    {l.income_account_name ? `Income · ${l.income_account_name}` : "Edit income account"}
-                  </span>
-                </div>
+                <div className="col-span-6" />
                 <div className="col-span-4 flex items-center justify-end gap-2">
                   <span className="text-xs text-slate-500">Tax</span>
                   <select
