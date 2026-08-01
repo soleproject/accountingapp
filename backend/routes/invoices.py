@@ -656,12 +656,37 @@ async def _drafts_for_overdue(cid: str) -> list[dict]:
             "customer_name": inv.get("contact_name") or "Customer",
             "invoice_ids": [], "invoice_numbers": [],
             "total_due": 0.0, "oldest_days": 0, "lines": [],
+            "last_followup_at": None,
         })
         g["invoice_ids"].append(inv["id"])
         g["invoice_numbers"].append(inv.get("number") or "")
         g["total_due"] += float(inv.get("balance_due") or 0)
         g["oldest_days"] = max(g["oldest_days"], inv["_days_overdue"])
         g["lines"].append(f"- Invoice {inv.get('number','?')}: ${float(inv.get('balance_due') or 0):.2f} · due {inv.get('due_date')} ({inv['_days_overdue']} days late)")
+        # Track most-recent follow-up across every invoice in the group.
+        lf = inv.get("last_followup_at")
+        if lf and (not g["last_followup_at"] or str(lf) > str(g["last_followup_at"])):
+            g["last_followup_at"] = lf
+
+    # Compute recency flag: was any invoice in this group chased in the last 7 days?
+    seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    for g in groups.values():
+        lf = g.get("last_followup_at")
+        days = None
+        recent = False
+        if lf:
+            try:
+                # Stored as ISO string; parse tolerantly.
+                lf_dt = datetime.fromisoformat(str(lf).replace("Z", "+00:00"))
+                if lf_dt.tzinfo is None:
+                    lf_dt = lf_dt.replace(tzinfo=timezone.utc)
+                delta = datetime.now(timezone.utc) - lf_dt
+                days = max(0, int(delta.total_seconds() // 86400))
+                recent = lf_dt >= seven_days_ago
+            except Exception:
+                pass
+        g["followup_days_ago"] = days
+        g["recently_followed_up"] = recent
 
     # Fill emails.
     for g in groups.values():
@@ -759,6 +784,15 @@ async def ai_followup_send_all(cid: str, payload: dict, user: dict = Depends(get
             )
             if resp.get("status") == "sent":
                 sent += 1
+                # Stamp every invoice we chased with the send time so the
+                # modal can warn on repeat clicks within 7 days.
+                inv_ids = d.get("invoice_ids") or []
+                if inv_ids:
+                    stamp = datetime.now(timezone.utc).isoformat()
+                    await db.invoices.update_many(
+                        {"company_id": cid, "id": {"$in": inv_ids}},
+                        {"$set": {"last_followup_at": stamp}},
+                    )
             else:
                 failed += 1
         except Exception:

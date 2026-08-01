@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, AlertTriangle, Pencil, Repeat, Check, Package, Sparkles, Send, Loader2, MailWarning } from "lucide-react";
+import { Plus, Trash2, X, AlertTriangle, Pencil, Repeat, Check, Package, Sparkles, Send, Loader2, MailWarning, Clock, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
@@ -173,7 +173,6 @@ export default function Invoices() {
             <tr>
               <th className="px-3 py-2 text-left">Number</th>
               <th className="px-3 py-2 text-left">Customer</th>
-              <th className="px-3 py-2 text-left">Issued</th>
               <th className="px-3 py-2 text-left">Due</th>
               <th className="px-3 py-2 text-right">Total</th>
               <th className="px-3 py-2 text-right">Balance</th>
@@ -211,7 +210,6 @@ export default function Invoices() {
                   )}
                 </td>
                 <td className="px-3 py-2">{inv.contact_name}</td>
-                <td className="px-3 py-2 font-mono-num text-slate-500">{fmtDate(inv.issue_date)}</td>
                 <td className="px-3 py-2 font-mono-num text-slate-500">{fmtDate(inv.due_date)}</td>
                 <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(inv.total)}</td>
                 <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(inv.balance_due)}</td>
@@ -230,7 +228,7 @@ export default function Invoices() {
             ))}
             {!filtered.length && (
               <tr>
-                <td colSpan={8} className="text-center py-8 text-slate-500">
+                <td colSpan={7} className="text-center py-8 text-slate-500">
                   {(outstanding || asOf || overdueOnly)
                     ? `No matching invoices${items.length ? ` (${items.length} total, none met the filter)` : ""}.`
                     : "No invoices."}
@@ -437,7 +435,14 @@ function InvoiceModal({ contacts, itemsCatalog, currentId, invoice, prefill, onC
  *   due within 30 days = the "current" bucket (not yet due, Net 30 default)
  */
 function ArAgingCard({ aging, navigate }) {
-  const [view, setView] = useState("aging"); // "aging" | "highlights"
+  const [view, setView] = useState(() => {
+    try { return localStorage.getItem("ar_aging_view") || "highlights"; }
+    catch { return "highlights"; }
+  });
+  const setViewPersist = (v) => {
+    setView(v);
+    try { localStorage.setItem("ar_aging_view", v); } catch {}
+  };
   const [aiOpen, setAiOpen] = useState(false);
   const { currentId } = useCompany();
   const overdue = ["1_30", "31_60", "61_90", "over_90"]
@@ -463,18 +468,18 @@ function ArAgingCard({ aging, navigate }) {
               {fmtMoney(atRisk)} at collection risk
             </div>
           )}
-          {/* Toggle */}
+          {/* Toggle — Highlights on the left (default), A/R Aging on the right */}
           <div className="inline-flex rounded-md border overflow-hidden text-xs bg-slate-50" data-testid="ar-aging-toggle">
             <button
-              onClick={() => setView("aging")}
-              className={`px-3 py-1.5 ${view === "aging" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-white"}`}
-              data-testid="ar-aging-toggle-aging"
-            >A/R Aging</button>
-            <button
-              onClick={() => setView("highlights")}
+              onClick={() => setViewPersist("highlights")}
               className={`px-3 py-1.5 ${view === "highlights" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-white"}`}
               data-testid="ar-aging-toggle-highlights"
             >Highlights</button>
+            <button
+              onClick={() => setViewPersist("aging")}
+              className={`px-3 py-1.5 ${view === "aging" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-white"}`}
+              data-testid="ar-aging-toggle-aging"
+            >A/R Aging</button>
           </div>
         </div>
       </div>
@@ -574,6 +579,7 @@ function AIFollowupModal({ currentId, onClose }) {
   const [expanded, setExpanded] = useState(0);         // idx currently expanded
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null);          // {sent, failed, skipped, total}
+  const [showFollowed, setShowFollowed] = useState(false); // collapsed by default
 
   useEffect(() => {
     let cancelled = false;
@@ -583,9 +589,13 @@ function AIFollowupModal({ currentId, onClose }) {
         if (cancelled) return;
         const list = r.data?.drafts || [];
         setDrafts(list);
-        // Default: pre-select everyone who has an email on file.
+        // Default: pre-select customers who have an email AND weren't
+        // chased in the last 7 days (prevents accidental double-nudge).
         const sel = {};
-        list.forEach((d, i) => { sel[i] = !!(d.to_email && d.to_email.includes("@")); });
+        list.forEach((d, i) => {
+          const hasEmail = !!(d.to_email && d.to_email.includes("@"));
+          sel[i] = hasEmail && !d.recently_followed_up;
+        });
         setSelected(sel);
       } catch (e) {
         toast.error(e.response?.data?.detail || "Could not draft follow-ups");
@@ -600,6 +610,95 @@ function AIFollowupModal({ currentId, onClose }) {
 
   const selectedCount = Object.values(selected).filter(Boolean).length;
   const missingEmailCount = drafts.filter(d => !d.to_email || !d.to_email.includes("@")).length;
+
+  // Split into fresh (never chased in last 7d) vs recently-followed-up.
+  const freshIdx = drafts.map((d, i) => i).filter(i => !drafts[i].recently_followed_up);
+  const recentIdx = drafts.map((d, i) => i).filter(i => drafts[i].recently_followed_up);
+
+  const renderRow = (i) => {
+    const d = drafts[i];
+    const hasEmail = d.to_email && d.to_email.includes("@");
+    const isOpen = expanded === i;
+    const recent = !!d.recently_followed_up;
+    return (
+      <div key={i} className={`${selected[i] ? "bg-white" : "bg-slate-50"} ${recent ? "border-l-4 border-l-amber-400" : ""}`} data-testid={`ai-followup-row-${i}`}>
+        <div className="px-5 py-3 flex items-center gap-3">
+          <input
+            type="checkbox"
+            checked={!!selected[i]}
+            onChange={(e) => setSelected(s => ({ ...s, [i]: e.target.checked }))}
+            disabled={!hasEmail}
+            className="h-4 w-4 accent-indigo-600 disabled:opacity-40"
+            data-testid={`ai-followup-select-${i}`}
+            title={hasEmail ? "" : "No email on file"}
+          />
+          <button
+            type="button"
+            className="flex-1 text-left"
+            onClick={() => setExpanded(isOpen ? -1 : i)}
+            data-testid={`ai-followup-expand-${i}`}
+          >
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-heading font-semibold text-slate-800">{d.customer_name}</span>
+              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-red-100 text-red-700">
+                {d.oldest_days}d late
+              </span>
+              {recent && (
+                <span
+                  className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200"
+                  data-testid={`ai-followup-recent-badge-${i}`}
+                  title="Chased recently — sending again may feel like spam"
+                >
+                  <Clock size={10} />
+                  {d.followup_days_ago === 0 ? "chased today" : `chased ${d.followup_days_ago}d ago`}
+                </span>
+              )}
+              <span className="font-mono-num text-slate-700 text-sm">{fmtMoney(d.total_due)}</span>
+              <span className="text-xs text-slate-500">
+                · {d.invoice_ids?.length || 0} invoice{(d.invoice_ids?.length || 0) > 1 ? "s" : ""}
+              </span>
+            </div>
+            <div className="text-xs text-slate-500 mt-0.5">
+              To: {hasEmail ? <span className="font-mono-num">{d.to_email}</span> : <span className="text-amber-700">no email on file</span>}
+            </div>
+          </button>
+        </div>
+        {isOpen && (
+          <div className="px-5 pb-4 space-y-2">
+            <div>
+              <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">To</label>
+              <input
+                value={d.to_email || ""}
+                onChange={(e) => upd(i, { to_email: e.target.value })}
+                placeholder="customer@example.com"
+                className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+                data-testid={`ai-followup-to-${i}`}
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Subject</label>
+              <input
+                value={d.subject || ""}
+                onChange={(e) => upd(i, { subject: e.target.value })}
+                className="w-full border rounded px-2 py-1.5 text-sm"
+                data-testid={`ai-followup-subject-${i}`}
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Body</label>
+              <textarea
+                value={d.body || ""}
+                onChange={(e) => upd(i, { body: e.target.value })}
+                rows={10}
+                className="w-full border rounded px-2 py-1.5 text-sm font-mono-num leading-relaxed"
+                data-testid={`ai-followup-body-${i}`}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const sendAll = async () => {
     const payload = drafts
@@ -650,6 +749,11 @@ function AIFollowupModal({ currentId, onClose }) {
               <div>
                 <span className="font-semibold text-slate-800">{drafts.length}</span> customer{drafts.length > 1 ? "s" : ""} with overdue balances ·{" "}
                 <span className="font-semibold text-indigo-700">{selectedCount}</span> selected
+                {recentIdx.length > 0 && (
+                  <span className="inline-flex items-center gap-1 ml-2 text-amber-700" data-testid="ai-followup-recent-count">
+                    <Clock size={11} /> {recentIdx.length} chased in last 7 days
+                  </span>
+                )}
                 {missingEmailCount > 0 && (
                   <span className="inline-flex items-center gap-1 ml-2 text-amber-700">
                     <MailWarning size={11} /> {missingEmailCount} missing email
@@ -658,9 +762,14 @@ function AIFollowupModal({ currentId, onClose }) {
               </div>
               <button
                 onClick={() => {
-                  const allOn = drafts.every((d, i) => selected[i]);
-                  const next = {};
-                  drafts.forEach((d, i) => { next[i] = allOn ? false : !!(d.to_email && d.to_email.includes("@")); });
+                  // Toggle only the "fresh" rows — recently-followed-up
+                  // stay untouched so the user has to opt into re-nudging.
+                  const allOn = freshIdx.every(i => selected[i]);
+                  const next = { ...selected };
+                  freshIdx.forEach(i => {
+                    const d = drafts[i];
+                    next[i] = allOn ? false : !!(d.to_email && d.to_email.includes("@"));
+                  });
                   setSelected(next);
                 }}
                 className="text-indigo-600 hover:underline"
@@ -669,78 +778,28 @@ function AIFollowupModal({ currentId, onClose }) {
             </div>
 
             <div className="flex-1 overflow-auto divide-y">
-              {drafts.map((d, i) => {
-                const hasEmail = d.to_email && d.to_email.includes("@");
-                const isOpen = expanded === i;
-                return (
-                  <div key={i} className={`${selected[i] ? "bg-white" : "bg-slate-50"}`} data-testid={`ai-followup-row-${i}`}>
-                    <div className="px-5 py-3 flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={!!selected[i]}
-                        onChange={(e) => setSelected(s => ({ ...s, [i]: e.target.checked }))}
-                        disabled={!hasEmail}
-                        className="h-4 w-4 accent-indigo-600 disabled:opacity-40"
-                        data-testid={`ai-followup-select-${i}`}
-                        title={hasEmail ? "" : "No email on file"}
-                      />
-                      <button
-                        type="button"
-                        className="flex-1 text-left"
-                        onClick={() => setExpanded(isOpen ? -1 : i)}
-                        data-testid={`ai-followup-expand-${i}`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="font-heading font-semibold text-slate-800">{d.customer_name}</span>
-                          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-red-100 text-red-700">
-                            {d.oldest_days}d late
-                          </span>
-                          <span className="font-mono-num text-slate-700 text-sm">{fmtMoney(d.total_due)}</span>
-                          <span className="text-xs text-slate-500">
-                            · {d.invoice_ids?.length || 0} invoice{(d.invoice_ids?.length || 0) > 1 ? "s" : ""}
-                          </span>
-                        </div>
-                        <div className="text-xs text-slate-500 mt-0.5">
-                          To: {hasEmail ? <span className="font-mono-num">{d.to_email}</span> : <span className="text-amber-700">no email on file</span>}
-                        </div>
-                      </button>
-                    </div>
-                    {isOpen && (
-                      <div className="px-5 pb-4 space-y-2">
-                        <div>
-                          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">To</label>
-                          <input
-                            value={d.to_email || ""}
-                            onChange={(e) => upd(i, { to_email: e.target.value })}
-                            placeholder="customer@example.com"
-                            className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
-                            data-testid={`ai-followup-to-${i}`}
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Subject</label>
-                          <input
-                            value={d.subject || ""}
-                            onChange={(e) => upd(i, { subject: e.target.value })}
-                            className="w-full border rounded px-2 py-1.5 text-sm"
-                            data-testid={`ai-followup-subject-${i}`}
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Body</label>
-                          <textarea
-                            value={d.body || ""}
-                            onChange={(e) => upd(i, { body: e.target.value })}
-                            rows={10}
-                            className="w-full border rounded px-2 py-1.5 text-sm font-mono-num leading-relaxed"
-                            data-testid={`ai-followup-body-${i}`}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+              {freshIdx.length === 0 && recentIdx.length > 0 && (
+                <div className="px-5 py-8 text-center text-sm text-slate-500" data-testid="ai-followup-all-chased">
+                  Every overdue customer has been chased in the last 7 days. Expand below to override.
+                </div>
+              )}
+              {freshIdx.map(i => renderRow(i))}
+              {recentIdx.length > 0 && (
+                <div className="bg-amber-50/40" data-testid="ai-followup-recent-section">
+                  <button
+                    type="button"
+                    onClick={() => setShowFollowed(v => !v)}
+                    className="w-full flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-amber-900 hover:bg-amber-50"
+                    data-testid="ai-followup-recent-toggle"
+                  >
+                    {showFollowed ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    <Clock size={12} />
+                    Recently followed up · {recentIdx.length}
+                    <span className="font-normal text-amber-700/80 ml-1">(chased in last 7 days — expand to re-nudge)</span>
+                  </button>
+                  {showFollowed && recentIdx.map(i => renderRow(i))}
+                </div>
+              )}
             </div>
 
             <div className="px-5 py-3 border-t bg-slate-50 flex items-center justify-between">

@@ -3376,3 +3376,42 @@ Every grant is written to `admin_audit_log` with kind=`superadmin_granted` (gran
 - AI Follow-up card click → modal loads → 2 GPT-drafted personalised reminder emails render with editable To/Subject/Body ✓
 - Backend curl round-trip confirmed real GPT-4o-mini output (166d late, 167d late invoices, 3-paragraph friendly-but-firm bodies) ✓
 
+
+---
+
+## Feb 2026 — Invoice list polish + AI Follow-up recency guard
+
+**Feature:** Trim the invoice table, make Highlights the sticky default, and warn the pro before double-nudging any customer already chased in the last 7 days.
+
+### 1) Removed "Issued" column
+- `/app/frontend/src/pages/Invoices.jsx` — dropped both the `<th>Issued</th>` header and its `<td>{fmtDate(inv.issue_date)}</td>` cell; `colSpan` for the empty-row placeholder updated from 8 → 7.
+
+### 2) Highlights = default view, persistent, moved to the left
+- `ArAgingCard`: initial `view` state now reads `localStorage.getItem("ar_aging_view")` falling back to `"highlights"` (was `"aging"`).
+- New `setViewPersist(v)` writes the choice back to localStorage so it sticks across sessions.
+- Toggle order flipped: **Highlights** now renders on the left (default), A/R Aging on the right.
+
+### 3) Recency guard on the AI Follow-up modal (last 7 days)
+**Backend** (`/app/backend/routes/invoices.py`):
+- Every invoice now carries a `last_followup_at` ISO timestamp — written by `send-all` on each successful dispatch (`db.invoices.update_many({id: $in: invoice_ids}, {$set: {last_followup_at: ...}})`).
+- `_drafts_for_overdue()` computes per-customer-group:
+  - `last_followup_at`: max timestamp across all invoices in the group
+  - `followup_days_ago`: integer days since last chase (or `None`)
+  - `recently_followed_up`: `True` if that timestamp is within the last 7 days
+
+**Frontend** (`/app/frontend/src/pages/Invoices.jsx` → `AIFollowupModal`):
+- Default-select logic no longer ticks `recently_followed_up` rows (`sel[i] = hasEmail && !d.recently_followed_up`).
+- Drafts partitioned into `freshIdx` and `recentIdx`.
+  - Fresh customers render at the top, expanded and editable as before.
+  - Recently-chased customers collapse into a bottom section: **"Recently followed up · N (chased in last 7 days — expand to re-nudge)"** — controlled by `showFollowed` state.
+- Each recent row gets:
+  - `border-l-4 border-l-amber-400` accent stripe
+  - Amber `CHASED Xd AGO` / `CHASED TODAY` badge with `Clock` icon
+- Summary bar surfaces the count: `1 chased in last 7 days`.
+- "Toggle all" now only affects fresh rows so the pro has to opt in to re-nudge.
+
+**Verified end-to-end:**
+- Curl: seeded `last_followup_at` (2 days ago on INV-2042, 12 days ago on INV-9999) → drafts endpoint correctly returns `recently_followed_up=True/days_ago=2` and `False/days_ago=12` ✓
+- Playwright screenshot: default view = Highlights, no "Issued" column in table headers ✓
+- Modal renders the fresh customer at the top, "Recently followed up · 1" collapsed section at the bottom that expands to reveal the amber-bordered row with `CHASED 2D AGO` badge and unchecked checkbox ✓
+
