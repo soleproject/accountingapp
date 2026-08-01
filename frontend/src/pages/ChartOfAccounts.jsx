@@ -320,6 +320,27 @@ export default function ChartOfAccounts() {
           >
             {showCodes ? <><EyeOff size={12} /> Hide codes</> : <><Eye size={12} /> Show codes</>}
           </button>
+          {/* Backfill sub-types — assign Wave-style detail_type to any
+              legacy accounts that don't have one yet. Idempotent. */}
+          <button
+            onClick={async () => {
+              if (!confirm("Assign Wave-style sub-types to all legacy accounts? Existing sub-types are preserved — this only fills in blanks.")) return;
+              try {
+                const r = await api.post(`/companies/${currentId}/accounts/backfill-detail-type`, {});
+                const d = r.data;
+                if (d.updated) toast.success(`Backfilled ${d.updated} account${d.updated === 1 ? "" : "s"} (${d.skipped_already_set} already had a sub-type)`);
+                else toast.info(`All ${d.skipped_already_set} accounts already carry a sub-type.`);
+                load();
+              } catch (e) {
+                toast.error(e.response?.data?.detail || "Backfill failed");
+              }
+            }}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+            title="One-shot: guess Wave-style sub-types for legacy accounts (idempotent)."
+            data-testid="coa-backfill-detail-type"
+          >
+            <Sparkles size={12} /> Backfill sub-types
+          </button>
           {/* Balance-column basis toggle — Smart auto-picks the right
               lens per account; the other three force a single view.  */}
           <select

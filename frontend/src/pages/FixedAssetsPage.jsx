@@ -98,9 +98,30 @@ export default function FixedAssetsPage() {
             </tr>
           </thead>
           <tbody>
-            {items.map((x) => (
-              <tr key={x.id} className="border-b hover:bg-slate-50">
-                <td className="px-3 py-2 font-medium">{x.name}</td>
+            {items.map((x) => {
+              const pendingSuspense = Number(x.pending_suspense_amount || 0);
+              const needsFunding = pendingSuspense > 0.01;
+              return (
+              <tr key={x.id} className={`border-b hover:bg-slate-50 ${needsFunding ? "bg-amber-50/40" : ""}`}>
+                <td className="px-3 py-2 font-medium">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span>{x.name}</span>
+                    {needsFunding && (
+                      <span
+                        className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200"
+                        data-testid={`asset-suspense-badge-${x.id}`}
+                        title={`$${pendingSuspense.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} sitting in Fixed Asset Suspense — allocate funding to clear it.`}
+                      >
+                        Needs Funding
+                      </span>
+                    )}
+                  </div>
+                  {needsFunding && (
+                    <div className="text-[10px] text-amber-700 mt-0.5">
+                      ${pendingSuspense.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} in Fixed Asset Suspense
+                    </div>
+                  )}
+                </td>
                 <td className="px-3 py-2 text-xs text-slate-500">
                   {formatAssetType(x.asset_type)}
                 </td>
@@ -136,7 +157,8 @@ export default function FixedAssetsPage() {
                   </button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
             {!items.length && !loading && (
               <tr>
                 <td colSpan={8} className="text-center py-8 text-slate-500">

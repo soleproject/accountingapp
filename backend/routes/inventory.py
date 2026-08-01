@@ -88,6 +88,133 @@ _make_crud("inventory_items", "inventory")
 # sub-accounts, posts an acquisition JE, and generates a monthly
 # depreciation schedule.
 _make_crud("loans", "loans")
+
+
+@router.post("/companies/{cid}/loans/{lid}/record-payment")
+async def loan_record_payment(cid: str, lid: str, payload: dict, user: dict = Depends(get_current_user)):
+    """Post a single amortization payment for this loan.
+
+    Splits the fixed monthly payment into interest (rose) + principal
+    (emerald) using the current outstanding balance, writes a journal
+    entry (DR Loan Payable + DR Interest Expense / CR Cash), and
+    increments the loan's `payments_made` counter. Idempotent per row —
+    calling this from a scheduler would still be correct.
+
+    Body: {
+      payment_date: "YYYY-MM-DD" (required),
+      cash_account_id: string   (required — pick which bank to draw from),
+      interest_account_id?: string   (optional — auto-resolves to
+                                      "Interest Expense" if missing),
+      amount?: number   (optional override — else computed from schedule)
+    }
+    """
+    await require_company(user, cid)
+    loan = await db.loans.find_one({"id": lid, "company_id": cid})
+    if not loan:
+        raise HTTPException(404, "Loan not found")
+    principal_start = float(loan.get("principal") or 0)
+    paid_so_far = int(loan.get("payments_made") or 0)
+    rate_pct = float(loan.get("rate") or 0)
+    term = int(loan.get("term_months") or 0)
+    if principal_start <= 0 or term <= 0:
+        raise HTTPException(400, "Loan is missing principal or term — set both before recording payments.")
+    if paid_so_far >= term:
+        raise HTTPException(400, "This loan is fully paid off.")
+
+    # Rebuild the amortization schedule up to the next unpaid row to
+    # find the exact interest/principal split. Deterministic — same
+    # inputs always produce the same numbers.
+    r = rate_pct / 100 / 12
+    monthly_pmt = principal_start / term if r == 0 else principal_start * (r / (1 - (1 + r) ** -term))
+    balance = principal_start
+    interest = 0.0
+    principal_component = 0.0
+    for i in range(paid_so_far + 1):
+        interest = balance * r
+        principal_component = monthly_pmt - interest
+        balance -= principal_component
+
+    payment_amount = float(payload.get("amount") or round(monthly_pmt, 2))
+    payment_date = payload.get("payment_date")
+    if not payment_date:
+        raise HTTPException(400, "payment_date is required (YYYY-MM-DD).")
+    cash_account_id = payload.get("cash_account_id")
+    if not cash_account_id:
+        raise HTTPException(400, "cash_account_id is required — pick which bank/cash account is paying.")
+    cash_acc = await db.accounts.find_one({"id": cash_account_id, "company_id": cid})
+    if not cash_acc:
+        raise HTTPException(400, "Cash account not found in this company.")
+    loan_account_id = loan.get("account_id")
+    if not loan_account_id:
+        raise HTTPException(400, "This loan has no linked CoA account. Create the loan via Chart of Accounts (Loan and Line of Credit sub-type).")
+    loan_acc = await db.accounts.find_one({"id": loan_account_id, "company_id": cid})
+    if not loan_acc:
+        raise HTTPException(400, "Linked loan account is missing from CoA.")
+
+    # Resolve or create Interest Expense account (code 6600 default).
+    interest_account_id = payload.get("interest_account_id")
+    if not interest_account_id:
+        ie = await db.accounts.find_one({
+            "company_id": cid,
+            "$or": [{"name": {"$regex": r"^interest\s+expense$", "$options": "i"}}, {"code": "6600"}],
+        })
+        if not ie:
+            ie_doc = {
+                "id": str(uuid.uuid4()), "company_id": cid,
+                "code": "6600", "name": "Interest Expense",
+                "type": "expense", "subtype": "Other Expense",
+                "detail_type": "other_expense",
+                "active": True, "balance": 0.0,
+                "created_at": now_iso(), "updated_at": now_iso(),
+            }
+            await db.accounts.insert_one(ie_doc)
+            ie = ie_doc
+        interest_account_id = ie["id"]
+
+    # Round the split so the components sum to the payment cents.
+    principal_amt = round(principal_component, 2)
+    interest_amt = round(interest, 2)
+    # Fix rounding drift on the last-payment cent.
+    total_computed = round(principal_amt + interest_amt, 2)
+    if abs(total_computed - payment_amount) < 0.02:
+        principal_amt = round(payment_amount - interest_amt, 2)
+
+    payment_num = paid_so_far + 1
+    je_doc = {
+        "id": str(uuid.uuid4()),
+        "company_id": cid,
+        "date": payment_date,
+        "memo": f"Loan payment #{payment_num}/{term} — {loan.get('lender', 'loan')}",
+        "source": "loan_payment",
+        "source_id": lid,
+        "lines": [
+            {"account_id": loan_account_id,     "debit": principal_amt, "credit": 0,             "memo": "Principal"},
+            {"account_id": interest_account_id, "debit": interest_amt,  "credit": 0,             "memo": "Interest"},
+            {"account_id": cash_account_id,     "debit": 0,             "credit": payment_amount, "memo": "Cash out"},
+        ],
+        "created_at": now_iso(),
+    }
+    await db.journal_entries.insert_one(je_doc)
+
+    # Advance counter + snapshot remaining balance for quick lookup.
+    await db.loans.update_one(
+        {"id": lid, "company_id": cid},
+        {"$set": {
+            "payments_made": payment_num,
+            "current_balance": round(max(0.0, balance), 2),
+            "last_payment_date": payment_date,
+            "updated_at": now_iso(),
+        }},
+    )
+    return {
+        "ok": True,
+        "je_id": je_doc["id"],
+        "payment_number": payment_num,
+        "principal": principal_amt,
+        "interest": interest_amt,
+        "cash_out": payment_amount,
+        "remaining_balance": round(max(0.0, balance), 2),
+    }
 _make_crud("tags", "tags")
 _make_crud("communications", "communications")
 _make_crud("connections", "connections")
@@ -108,7 +235,27 @@ async def list_asset_types():
 async def list_assets(cid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     docs = await db.assets.find({"company_id": cid}).to_list(1000)
-    return {"items": [coerce(d) for d in docs]}
+    # Look up the "Fixed Asset Suspense" account for this company. When
+    # an asset's funding lines still point at suspense, we surface a
+    # `pending_suspense_amount` so the register can badge the row —
+    # reminding the pro to allocate the funding after creating via CoA.
+    import asset_service
+    try:
+        suspense = await asset_service._ensure_fixed_asset_suspense(cid)
+        suspense_id = suspense.get("id")
+    except Exception:
+        suspense_id = None
+    out = []
+    for d in docs:
+        row = coerce(d)
+        offsets = row.get("offsets") or []
+        pending = sum(
+            float(o.get("amount") or 0) for o in offsets
+            if o.get("account_id") == suspense_id
+        ) if suspense_id else 0.0
+        row["pending_suspense_amount"] = round(pending, 2)
+        out.append(row)
+    return {"items": out}
 
 
 @router.post("/companies/{cid}/assets")

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
-import { Plus, ChevronDown, ChevronRight, Percent, Calendar, DollarSign, Trash2 } from "lucide-react";
+import { Plus, ChevronDown, ChevronRight, Percent, Calendar, DollarSign, Trash2, Download, Send } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -93,7 +93,7 @@ export default function LoansPage() {
                   {isOpen && (
                     <tr key={`${l.id}-schedule`} className="bg-slate-50/50" data-testid={`loan-amortization-${l.id}`}>
                       <td colSpan={7} className="p-4">
-                        <AmortizationPreview loan={l} />
+                        <AmortizationPreview loan={l} currentId={currentId} onPaymentRecorded={load} />
                       </td>
                     </tr>
                   )}
@@ -125,7 +125,28 @@ function calcMonthlyPayment(principal, ratePct, termMonths) {
   return P * (r / (1 - Math.pow(1 + r, -n)));
 }
 
-function AmortizationPreview({ loan }) {
+function AmortizationPreview({ loan, currentId, onPaymentRecorded }) {
+  const paidCount = Number(loan.payments_made || 0);
+  const [cashAccts, setCashAccts] = useState([]);
+  const [recording, setRecording] = useState(false);
+  const [showPmtForm, setShowPmtForm] = useState(false);
+  const [pmtDate, setPmtDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [pmtCashId, setPmtCashId] = useState("");
+
+  useEffect(() => {
+    if (!currentId) return;
+    api.get(`/companies/${currentId}/accounts`).then(r => {
+      const list = (r.data?.accounts || r.data?.items || []).filter(
+        a => a.type === "asset" && (
+          (a.detail_type === "cash_and_bank") ||
+          /cash|checking|savings|bank/i.test(a.name || "")
+        )
+      );
+      setCashAccts(list);
+      if (list[0] && !pmtCashId) setPmtCashId(list[0].id);
+    });
+  }, [currentId]);
+
   const rows = useMemo(() => {
     const P = Number(loan.principal || 0);
     const n = Number(loan.term_months || 0);
@@ -134,22 +155,57 @@ function AmortizationPreview({ loan }) {
     const pmt = calcMonthlyPayment(P, loan.rate, n);
     let balance = P;
     const arr = [];
-    // Show the first 6, a spacer, and the last 3 to keep the preview
-    // compact while still hinting at how the split evolves.
     for (let i = 1; i <= n; i++) {
       const interest = balance * r;
       const principal = pmt - interest;
       balance -= principal;
       arr.push({
-        num: i,
-        payment: pmt,
-        interest,
-        principal,
+        num: i, payment: pmt, interest, principal,
         balance: Math.max(0, balance),
       });
     }
     return arr;
   }, [loan.principal, loan.rate, loan.term_months]);
+
+  const downloadCsv = () => {
+    if (rows.length === 0) return;
+    const header = ["Payment #", "Payment", "Interest", "Principal", "Balance"];
+    const csv = [
+      [`Loan: ${loan.lender || ""}`],
+      [`Principal: ${loan.principal}`, `Rate: ${loan.rate}%`, `Term: ${loan.term_months} months`],
+      [],
+      header,
+      ...rows.map(r => [r.num, r.payment.toFixed(2), r.interest.toFixed(2), r.principal.toFixed(2), r.balance.toFixed(2)]),
+    ].map(cols => cols.map(c => String(c).includes(",") ? `"${c}"` : c).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `amortization-${(loan.lender || "loan").replace(/\s+/g, "-")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Amortization schedule downloaded");
+  };
+
+  const recordPayment = async () => {
+    if (!pmtCashId) { toast.error("Pick a cash account."); return; }
+    if (!pmtDate) { toast.error("Payment date is required."); return; }
+    setRecording(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/loans/${loan.id}/record-payment`, {
+        payment_date: pmtDate,
+        cash_account_id: pmtCashId,
+      });
+      const d = r.data;
+      toast.success(`Payment #${d.payment_number} posted · Interest ${fmtMoney(d.interest)} + Principal ${fmtMoney(d.principal)}`);
+      setShowPmtForm(false);
+      onPaymentRecorded?.();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Could not record payment");
+    } finally {
+      setRecording(false);
+    }
+  };
 
   if (rows.length === 0) {
     return (
@@ -169,23 +225,66 @@ function AmortizationPreview({ loan }) {
 
   const totalInterest = rows.reduce((s, r) => s + r.interest, 0);
   const totalPayments = rows.reduce((s, r) => s + r.payment, 0);
+  const nextPaymentNum = paidCount + 1;
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white" data-testid="loan-amortization-preview">
-      <div className="px-3 py-2 border-b bg-indigo-50/60 grid grid-cols-3 gap-3 text-[11px] text-slate-600">
+      <div className="px-3 py-2 border-b bg-indigo-50/60 grid grid-cols-4 gap-3 text-[11px] text-slate-600 items-end">
         <div>
           <div className="flex items-center gap-1"><Percent size={10} /> Rate</div>
           <div className="font-mono-num font-semibold text-slate-900">{Number(loan.rate || 0).toFixed(3)}% / yr</div>
         </div>
         <div>
           <div className="flex items-center gap-1"><Calendar size={10} /> Term</div>
-          <div className="font-mono-num font-semibold text-slate-900">{loan.term_months} months</div>
+          <div className="font-mono-num font-semibold text-slate-900">
+            {loan.term_months} months
+            {paidCount > 0 && <span className="text-emerald-700 ml-1">· {paidCount} paid</span>}
+          </div>
         </div>
         <div>
           <div className="flex items-center gap-1"><DollarSign size={10} /> Total Interest</div>
           <div className="font-mono-num font-semibold text-slate-900">{fmtMoney(totalInterest)}</div>
         </div>
+        <div className="flex items-center justify-end gap-2">
+          <button
+            onClick={downloadCsv}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-300 text-xs hover:bg-white"
+            data-testid={`loan-download-csv-${loan.id}`}
+            title="Download schedule as CSV"
+          ><Download size={11} /> CSV</button>
+          {paidCount < rows.length && (
+            <button
+              onClick={() => setShowPmtForm(v => !v)}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded bg-indigo-600 text-white text-xs hover:bg-indigo-500"
+              data-testid={`loan-record-pmt-${loan.id}`}
+            ><Send size={11} /> Record Payment #{nextPaymentNum}</button>
+          )}
+        </div>
       </div>
+      {showPmtForm && (
+        <div className="px-3 py-2 border-b bg-emerald-50/40 flex flex-wrap items-end gap-2 text-xs" data-testid={`loan-pmt-form-${loan.id}`}>
+          <div>
+            <label className="block text-[10px] text-slate-600 mb-0.5">Payment date</label>
+            <input type="date" value={pmtDate} onChange={(e) => setPmtDate(e.target.value)}
+                   className="border rounded px-2 py-1 text-xs font-mono-num" />
+          </div>
+          <div>
+            <label className="block text-[10px] text-slate-600 mb-0.5">Cash account</label>
+            <select value={pmtCashId} onChange={(e) => setPmtCashId(e.target.value)}
+                    className="border rounded px-2 py-1 text-xs bg-white min-w-[180px]"
+                    data-testid={`loan-pmt-cash-${loan.id}`}>
+              <option value="">— pick one —</option>
+              {cashAccts.map(a => <option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}
+            </select>
+          </div>
+          <button onClick={recordPayment} disabled={recording}
+                  className="px-3 py-1.5 rounded bg-slate-900 text-white text-xs disabled:opacity-50"
+                  data-testid={`loan-pmt-post-${loan.id}`}>
+            {recording ? "Posting…" : "Post Journal Entry"}
+          </button>
+          <button onClick={() => setShowPmtForm(false)} className="px-3 py-1.5 rounded border text-xs">Cancel</button>
+        </div>
+      )}
       <table className="w-full text-xs">
         <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500 border-b">
           <tr>
@@ -204,8 +303,11 @@ function AmortizationPreview({ loan }) {
               </td>
             </tr>
           ) : (
-            <tr key={r.num} className="border-b border-slate-100">
-              <td className="px-3 py-1.5 font-mono-num text-slate-500">{r.num}</td>
+            <tr key={r.num} className={`border-b border-slate-100 ${r.num <= paidCount ? "bg-emerald-50/40" : ""}`}>
+              <td className="px-3 py-1.5 font-mono-num text-slate-500">
+                {r.num}
+                {r.num <= paidCount && <span className="ml-1 text-[9px] text-emerald-700 uppercase font-semibold">paid</span>}
+              </td>
               <td className="px-3 py-1.5 text-right font-mono-num">{fmtMoney(r.payment)}</td>
               <td className="px-3 py-1.5 text-right font-mono-num text-rose-700">{fmtMoney(r.interest)}</td>
               <td className="px-3 py-1.5 text-right font-mono-num text-emerald-700">{fmtMoney(r.principal)}</td>

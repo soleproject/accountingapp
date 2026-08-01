@@ -302,6 +302,96 @@ async def merge_accounts(
             "target": inp.target_account_id}
 
 
+@router.post("/companies/{cid}/accounts/backfill-detail-type")
+async def backfill_detail_type(cid: str, user: dict = Depends(get_current_user)):
+    """One-shot inference pass — assign a Wave-style `detail_type` to
+    every legacy account that still has an empty one. Match rules are
+    heuristic (name + subtype substrings) and biased toward safer
+    "Other" buckets when unsure. Idempotent — re-running just skips
+    accounts that already carry a detail_type.
+    """
+    await require_company(user, cid)
+
+    # Substring → detail_type mapping, evaluated in order. First match
+    # wins so more-specific patterns MUST come before generic ones.
+    RULES: dict[str, list[tuple[list[str], str]]] = {
+        "asset": [
+            (["accumulated depreciation", "accumulated amortization", "amortization"], "depreciation_and_amortization"),
+            (["undeposited fund", "in transit", "clearing"], "money_in_transit"),
+            (["cash", "checking", "savings", "petty cash", "bank", "money market", "operating account"], "cash_and_bank"),
+            (["accounts receivable", "receivable", " a/r ", "a/r"], "expected_payments_from_customers"),
+            (["inventory", "stock on hand", "goods on hand", "raw material", "finished goods", "work in process"], "inventory"),
+            (["prepaid", "vendor deposit", "vendor prepayment"], "vendor_prepayments"),
+            (["equipment", "machinery", "vehicle", "furniture", "fixture", "computer", "building", "land", "leasehold", "fixed asset", "office equipment"], "property_plant_equipment"),
+        ],
+        "liability": [
+            (["credit card", "amex", "visa", "mastercard", "discover card"], "credit_card"),
+            (["mortgage", "loan payable", "note payable", "line of credit", "long-term debt", "long term debt", "term loan"], "loan_and_line_of_credit"),
+            (["sales tax", "gst payable", "vat payable", "hst payable"], "sales_tax_payable"),
+            (["accounts payable", "payable", " a/p ", "a/p"], "expected_payments_to_vendors"),
+            (["payroll liab", "payroll pay", "wages payable", "941", "futa", "suta", "state withholding"], "due_for_payroll"),
+            (["customer deposit", "deferred revenue", "prepaid revenue", "unearned revenue", "customer prepayment"], "customer_prepayments"),
+            (["owner", "shareholder", "member", "due to"], "due_to_owners"),
+        ],
+        "equity": [
+            (["retained earnings", "current period"], "retained_earnings"),
+            (["contribution", "draw", "distribution", "capital", "owner"], "owner_contribution_drawing"),
+        ],
+        "revenue": [
+            (["discount"], "discount"),
+            (["interest income", "other income", "misc income", "miscellaneous income"], "other_income"),
+        ],
+        "cogs": [
+            (["cost of goods", "cogs", "cost of sales", "direct material", "direct labor"], "cost_of_goods_sold"),
+        ],
+        "expense": [
+            (["cost of goods", "cogs", "cost of sales"], "cost_of_goods_sold"),
+            (["stripe fee", "paypal fee", "square fee", "processing fee", "merchant fee"], "payment_processing_fee"),
+            (["payroll expense", "wages", "salaries", "employee benefit"], "payroll_expense"),
+            (["interest expense", "depreciation expense", "amortization expense", "loss on"], "other_expense"),
+        ],
+    }
+    # Type-level fallbacks when no substring rule matches.
+    DEFAULT_FALLBACK: dict[str, str] = {
+        "asset":     "other_short_term_asset",
+        "liability": "other_short_term_liability",
+        "equity":    "other_equity",
+        "revenue":   "income",
+        "cogs":      "cost_of_goods_sold",
+        "expense":   "operating_expense",
+    }
+
+    updated_by_type: dict[str, int] = {}
+    skipped = 0
+    cursor = db.accounts.find({"company_id": cid})
+    async for a in cursor:
+        if (a.get("detail_type") or "").strip():
+            skipped += 1
+            continue
+        t = a.get("type") or "expense"
+        haystack = f"{a.get('name', '')} {a.get('subtype', '')}".lower()
+        detail = None
+        for patterns, dt in RULES.get(t, []):
+            if any(p in haystack for p in patterns):
+                detail = dt
+                break
+        if not detail:
+            detail = DEFAULT_FALLBACK.get(t, "other_short_term_asset")
+        await db.accounts.update_one(
+            {"_id": a["_id"]},
+            {"$set": {"detail_type": detail, "updated_at": now_iso()}},
+        )
+        updated_by_type[t] = updated_by_type.get(t, 0) + 1
+
+    total = sum(updated_by_type.values())
+    return {
+        "ok": True,
+        "updated": total,
+        "skipped_already_set": skipped,
+        "breakdown": updated_by_type,
+    }
+
+
 @router.post("/companies/{cid}/accounts")
 async def create_account(cid: str, inp: AccountCreate, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
