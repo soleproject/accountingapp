@@ -100,35 +100,30 @@ function PaymentModal({ currentId, contacts, invoices, bills, transactions = [],
   const [contact, setContact] = useState("");
   const [method, setMethod] = useState("check");
   const [sourceTxnId, setSourceTxnId] = useState("");
-  const [txnQuery, setTxnQuery] = useState("");
 
-  // Only surface unpaid/unlinked-ish transactions. Kind flips sign:
-  //   invoice-payment (money IN)  → positive amounts
-  //   bill-payment    (money OUT) → negative amounts
-  const filteredTxns = (transactions || [])
-    .filter(t => !t.linked_payment_id)
-    .filter(t => kind === "invoice" ? Number(t.amount) > 0 : Number(t.amount) < 0)
-    .filter(t => {
-      if (!txnQuery.trim()) return true;
-      const q = txnQuery.toLowerCase();
-      return (t.merchant || "").toLowerCase().includes(q)
-          || (t.description || "").toLowerCase().includes(q)
-          || (t.date || "").includes(q);
-    })
-    .slice(0, 100); // datalist perf cap
-
-  // Applying a txn auto-fills amount + date and stamps source_transaction_id.
-  const applyTxn = (tid) => {
-    setSourceTxnId(tid);
-    if (!tid) return;
-    const t = transactions.find(x => x.id === tid);
-    if (!t) return;
-    setAmount(String(Math.abs(Number(t.amount || 0))));
+  const applyTxn = (t) => {
+    if (!t) { setSourceTxnId(""); return; }
+    setSourceTxnId(t.id);
     setDate(t.date || date);
-    // Match a contact by exact name if we have one — friendlier for the user.
-    const c = contacts.find(x =>
-      (x.name || "").toLowerCase() === (t.merchant || "").toLowerCase());
-    if (c) setContact(c.id);
+    setAmount(String(Math.abs(Number(t.amount || 0))));
+    // Contact from txn if present, else exact-name match on merchant.
+    if (t.contact_id) {
+      setContact(t.contact_id);
+    } else if (t.merchant) {
+      const c = contacts.find(x => (x.name || "").toLowerCase() === (t.merchant || "").toLowerCase());
+      if (c) setContact(c.id);
+    }
+    // Infer method from txn keywords — bank imports usually stamp
+    // description strings like "ACH Debit", "Wire IN", "Check 4021".
+    const blob = `${t.description || ""} ${t.merchant || ""} ${t.memo || ""}`.toLowerCase();
+    const inferred =
+      /\bach\b|\bautopay|automated clearing/.test(blob) ? "ach"
+      : /\bwire\b/.test(blob) ? "wire"
+      : /\bcheck\b|\bchk\b/.test(blob) ? "check"
+      : /\bcard\b|visa|mastercard|amex|discover|\bpos\b/.test(blob) ? "credit_card"
+      : /\bcash\b/.test(blob) ? "cash"
+      : null;
+    if (inferred) setMethod(inferred);
   };
 
   const save = async () => {
@@ -154,42 +149,21 @@ function PaymentModal({ currentId, contacts, invoices, bills, transactions = [],
           <button onClick={() => { setKind("bill"); setSourceTxnId(""); }}
                   className={`flex-1 py-1.5 rounded ${kind === "bill" ? "bg-slate-900 text-white" : "border"}`}>For Bill</button>
         </div>
+
+        {/* Transaction picker — sits ABOVE the date so a match cascades
+            downstream field auto-fills. Custom dropdown, not native
+            <datalist>, so the option label is what the user sees. */}
+        <TransactionPicker
+          transactions={transactions}
+          kind={kind}
+          contacts={contacts}
+          selectedId={sourceTxnId}
+          onPick={applyTxn}
+        />
+
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-               className="w-full border rounded px-2 py-1.5 text-sm" data-testid="payment-modal-date" />
-
-        {/* Transaction picker — search + native <datalist> combo. */}
-        <div className="space-y-1">
-          <input
-            list="payment-txn-options"
-            value={txnQuery}
-            onChange={(e) => {
-              const v = e.target.value;
-              setTxnQuery(v);
-              // Datalist option "value" strings look like "<id>::<label>".
-              // Detect an actual pick vs freeform typing.
-              const picked = filteredTxns.find(t => `${t.id}::${_txnLabel(t)}` === v);
-              if (picked) applyTxn(picked.id);
-              else if (!v) setSourceTxnId("");
-            }}
-            placeholder={sourceTxnId ? "Transaction linked ✓ (type to change)" : "Search bank transaction (optional)…"}
-            className={`w-full border rounded px-2 py-1.5 text-sm ${sourceTxnId ? "border-emerald-400 bg-emerald-50" : ""}`}
-            data-testid="payment-modal-txn-search"
-          />
-          <datalist id="payment-txn-options">
-            {filteredTxns.map(t => (
-              <option key={t.id} value={`${t.id}::${_txnLabel(t)}`}>{_txnLabel(t)}</option>
-            ))}
-          </datalist>
-          {sourceTxnId && (
-            <button
-              type="button"
-              onClick={() => { setSourceTxnId(""); setTxnQuery(""); }}
-              className="text-[11px] text-slate-500 hover:underline"
-              data-testid="payment-modal-txn-clear"
-            >Clear linked transaction</button>
-          )}
-        </div>
-
+               className="w-full border rounded px-2 py-1.5 text-sm"
+               data-testid="payment-modal-date" />
         <input type="number" step="0.01" placeholder="Amount" value={amount}
                onChange={(e) => setAmount(e.target.value)}
                className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
@@ -204,8 +178,16 @@ function PaymentModal({ currentId, contacts, invoices, bills, transactions = [],
           <option value="">Link to {kind}…</option>
           {list.map(x => <option key={x.id} value={x.id}>{x.number} · {fmtMoney(x.balance_due || x.total)}</option>)}
         </select>
-        <input placeholder="Method" value={method} onChange={(e) => setMethod(e.target.value)}
-               className="w-full border rounded px-2 py-1.5 text-sm" />
+        <select value={method} onChange={(e) => setMethod(e.target.value)}
+                className="w-full border rounded px-2 py-1.5 text-sm bg-white">
+          <option value="check">Check</option>
+          <option value="ach">ACH Transfer</option>
+          <option value="credit_card">Credit card</option>
+          <option value="wire">Wire transfer</option>
+          <option value="cash">Cash</option>
+          <option value="bank_transfer">Bank transfer</option>
+          <option value="other">Other</option>
+        </select>
         <button data-testid={TID.saveBtn} onClick={save}
                 className="w-full py-2 rounded-md bg-slate-900 text-white text-sm">Save</button>
       </div>
@@ -213,8 +195,94 @@ function PaymentModal({ currentId, contacts, invoices, bills, transactions = [],
   );
 }
 
-function _txnLabel(t) {
-  const amt = Math.abs(Number(t.amount || 0)).toFixed(2);
-  const who = t.merchant || t.description || "—";
-  return `${t.date || ""} · ${who} · $${amt}`;
+/**
+ * TransactionPicker — searchable dropdown scoped to bank transactions
+ * matching the pane sign (money-in for invoices, money-out for bills).
+ * Rows show only date · amount · contact (or merchant fallback).
+ */
+function TransactionPicker({ transactions, kind, contacts, selectedId, onPick }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const contactName = (t) => t.contact_name
+    || (t.contact_id ? (contacts.find(c => c.id === t.contact_id)?.name || "") : "")
+    || t.merchant
+    || t.description
+    || "—";
+  const rows = (transactions || [])
+    .filter(t => !t.linked_payment_id || t.id === selectedId)
+    .filter(t => kind === "invoice" ? Number(t.amount) > 0 : Number(t.amount) < 0)
+    .filter(t => {
+      if (!q.trim()) return true;
+      const s = q.toLowerCase();
+      return (t.date || "").includes(s)
+          || String(Math.abs(Number(t.amount || 0))).includes(s)
+          || contactName(t).toLowerCase().includes(s);
+    })
+    .slice(0, 200);
+  const picked = transactions.find(t => t.id === selectedId);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className={`w-full flex items-center justify-between border rounded px-2 py-1.5 text-sm text-left ${
+          selectedId ? "border-emerald-400 bg-emerald-50" : "bg-white"
+        }`}
+        data-testid="payment-modal-txn-search"
+      >
+        <span className={selectedId ? "text-slate-800" : "text-slate-400"}>
+          {picked
+            ? `${picked.date} · $${Math.abs(Number(picked.amount || 0)).toFixed(2)} · ${contactName(picked)}`
+            : "Search bank transaction (optional)…"}
+        </span>
+        <span className="text-slate-400 text-xs">{open ? "▲" : "▼"}</span>
+      </button>
+      {selectedId && (
+        <button
+          type="button"
+          onClick={() => { onPick(null); setQ(""); }}
+          className="absolute right-8 top-1/2 -translate-y-1/2 text-[11px] text-slate-500 hover:underline"
+          data-testid="payment-modal-txn-clear"
+        >clear</button>
+      )}
+      {open && (
+        <div className="absolute z-10 top-full left-0 right-0 mt-1 border rounded-md bg-white shadow-lg max-h-72 overflow-y-auto">
+          <div className="p-1.5 border-b bg-slate-50 sticky top-0">
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Filter by date, amount, or contact…"
+              className="w-full border rounded px-2 py-1 text-xs"
+              data-testid="payment-modal-txn-filter"
+            />
+          </div>
+          {rows.length === 0 ? (
+            <div className="px-3 py-4 text-center text-xs text-slate-400">No matching transactions.</div>
+          ) : (
+            <ul className="divide-y">
+              {rows.map(t => (
+                <li key={t.id}>
+                  <button
+                    type="button"
+                    onClick={() => { onPick(t); setOpen(false); setQ(""); }}
+                    className={`w-full flex items-center gap-3 px-3 py-2 text-sm text-left hover:bg-slate-50 ${
+                      t.id === selectedId ? "bg-emerald-50" : ""
+                    }`}
+                    data-testid={`payment-modal-txn-option-${t.id}`}
+                  >
+                    <span className="text-slate-500 font-mono-num w-20 shrink-0">{t.date}</span>
+                    <span className={`font-mono-num w-20 shrink-0 text-right ${Number(t.amount) < 0 ? "text-red-600" : "text-emerald-700"}`}>
+                      ${Math.abs(Number(t.amount || 0)).toFixed(2)}
+                    </span>
+                    <span className="flex-1 truncate text-slate-700">{contactName(t)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
