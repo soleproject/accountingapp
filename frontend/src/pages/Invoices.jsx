@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, AlertTriangle, Pencil, Repeat, Check, Package } from "lucide-react";
+import { Plus, Trash2, X, AlertTriangle, Pencil, Repeat, Check, Package, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
@@ -134,54 +134,7 @@ export default function Invoices() {
       </div>
 
       {aging && aging.total > 0 && (
-        <div data-testid="ar-aging-widget" className="rounded-xl border bg-white p-5">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <div className="font-heading font-semibold">A/R Aging</div>
-              <div className="text-xs text-slate-500">
-                Outstanding receivables as of {aging.as_of} · <span className="font-mono-num font-semibold text-slate-800">{fmtMoney(aging.total)}</span> total
-              </div>
-            </div>
-            {(aging.buckets["61_90"] + aging.buckets["over_90"]) > 0 && (
-              <div className="text-xs px-2 py-1 rounded-md bg-red-50 border border-red-200 text-red-700 flex items-center gap-1">
-                <AlertTriangle size={12} />
-                {fmtMoney(aging.buckets["61_90"] + aging.buckets["over_90"])} at collection risk
-              </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-            {BUCKETS.map(b => {
-              const amt = aging.buckets[b.key] || 0;
-              const pct = aging.total ? (amt / aging.total) * 100 : 0;
-              return (
-                <div key={b.key} className={`rounded-lg border p-3 ${BG[b.color]}`}>
-                  <div className={`text-[10px] uppercase tracking-wider font-semibold ${TEXT[b.color]}`}>{b.label}</div>
-                  <div className={`font-mono-num text-lg font-semibold mt-0.5 ${TEXT[b.color]}`}>{fmtMoney(amt)}</div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">{b.desc}</div>
-                  <div className="mt-2 h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                    <div className={`h-full ${BAR[b.color]} transition-all`} style={{ width: `${pct}%` }} />
-                  </div>
-                  <div className={`text-[10px] mt-1 ${TEXT[b.color]}`}>{pct.toFixed(0)}% of A/R</div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Stacked visual bar */}
-          <div className="mt-4">
-            <div className="flex h-2.5 rounded-full overflow-hidden bg-slate-100">
-              {BUCKETS.map(b => {
-                const amt = aging.buckets[b.key] || 0;
-                const pct = aging.total ? (amt / aging.total) * 100 : 0;
-                if (pct === 0) return null;
-                return (
-                  <div key={b.key} className={BAR[b.color]} style={{ width: `${pct}%` }} title={`${b.label}: ${fmtMoney(amt)}`} />
-                );
-              })}
-            </div>
-          </div>
-        </div>
+        <ArAgingCard aging={aging} navigate={navigate} />
       )}
       <div className="rounded-xl border bg-white overflow-hidden">
         {(outstanding || asOf) && (
@@ -462,3 +415,128 @@ function InvoiceModal({ contacts, itemsCatalog, currentId, invoice, prefill, onC
     </div>
   );
 }
+
+
+/**
+ * A/R Aging card with a top-of-card toggle between:
+ *   • "A/R Aging"   — canonical 5-bucket view (Current / 1-30 / 31-60 / 61-90 / 90+)
+ *   • "Highlights"  — two glanceable cards (Overdue + Due within 30 days)
+ *                     plus a big AI Follow-up call-to-action.
+ *
+ * Bucket vocabulary:
+ *   overdue           = 1_30 + 31_60 + 61_90 + over_90
+ *   due within 30 days = the "current" bucket (not yet due, Net 30 default)
+ */
+function ArAgingCard({ aging, navigate }) {
+  const [view, setView] = useState("aging"); // "aging" | "highlights"
+  const overdue = ["1_30", "31_60", "61_90", "over_90"]
+    .reduce((s, k) => s + (aging.buckets[k] || 0), 0);
+  const dueSoon = aging.buckets.current || 0;
+  const atRisk = (aging.buckets["61_90"] || 0) + (aging.buckets["over_90"] || 0);
+
+  return (
+    <div data-testid="ar-aging-widget" className="rounded-xl border bg-white p-5">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
+        <div>
+          <div className="font-heading font-semibold">
+            {view === "aging" ? "A/R Aging" : "Highlights"}
+          </div>
+          <div className="text-xs text-slate-500">
+            As of {aging.as_of} · <span className="font-mono-num font-semibold text-slate-800">{fmtMoney(aging.total)}</span> outstanding
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          {atRisk > 0 && view === "aging" && (
+            <div className="text-xs px-2 py-1 rounded-md bg-red-50 border border-red-200 text-red-700 flex items-center gap-1">
+              <AlertTriangle size={12} />
+              {fmtMoney(atRisk)} at collection risk
+            </div>
+          )}
+          {/* Toggle */}
+          <div className="inline-flex rounded-md border overflow-hidden text-xs bg-slate-50" data-testid="ar-aging-toggle">
+            <button
+              onClick={() => setView("aging")}
+              className={`px-3 py-1.5 ${view === "aging" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-white"}`}
+              data-testid="ar-aging-toggle-aging"
+            >A/R Aging</button>
+            <button
+              onClick={() => setView("highlights")}
+              className={`px-3 py-1.5 ${view === "highlights" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-white"}`}
+              data-testid="ar-aging-toggle-highlights"
+            >Highlights</button>
+          </div>
+        </div>
+      </div>
+
+      {view === "aging" ? (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+            {BUCKETS.map(b => {
+              const amt = aging.buckets[b.key] || 0;
+              const pct = aging.total ? (amt / aging.total) * 100 : 0;
+              return (
+                <div key={b.key} className={`rounded-lg border p-3 ${BG[b.color]}`}>
+                  <div className={`text-[10px] uppercase tracking-wider font-semibold ${TEXT[b.color]}`}>{b.label}</div>
+                  <div className={`font-mono-num text-lg font-semibold mt-0.5 ${TEXT[b.color]}`}>{fmtMoney(amt)}</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">{b.desc}</div>
+                  <div className="mt-2 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                    <div className={`h-full ${BAR[b.color]} transition-all`} style={{ width: `${pct}%` }} />
+                  </div>
+                  <div className={`text-[10px] mt-1 ${TEXT[b.color]}`}>{pct.toFixed(0)}% of A/R</div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-4">
+            <div className="flex h-2.5 rounded-full overflow-hidden bg-slate-100">
+              {BUCKETS.map(b => {
+                const amt = aging.buckets[b.key] || 0;
+                const pct = aging.total ? (amt / aging.total) * 100 : 0;
+                if (pct === 0) return null;
+                return (
+                  <div key={b.key} className={BAR[b.color]} style={{ width: `${pct}%` }} title={`${b.label}: ${fmtMoney(amt)}`} />
+                );
+              })}
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3" data-testid="ar-highlights">
+          <div className="rounded-lg border-2 border-red-200 bg-red-50 p-4">
+            <div className="text-[11px] uppercase tracking-wider font-semibold text-red-700">Overdue</div>
+            <div className="font-mono-num text-2xl font-bold mt-1 text-red-700" data-testid="ar-highlights-overdue">
+              {fmtMoney(overdue)}
+            </div>
+            <div className="text-xs text-red-600/80 mt-1">Past-due invoices need attention.</div>
+          </div>
+          <div className="rounded-lg border-2 border-amber-200 bg-amber-50 p-4">
+            <div className="text-[11px] uppercase tracking-wider font-semibold text-amber-700">Due within 30 days</div>
+            <div className="font-mono-num text-2xl font-bold mt-1 text-amber-700" data-testid="ar-highlights-due-soon">
+              {fmtMoney(dueSoon)}
+            </div>
+            <div className="text-xs text-amber-700/80 mt-1">Not yet late — send a friendly nudge.</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              toast.info("AI Follow-up coming soon — will draft personalised chase emails for every overdue invoice.");
+            }}
+            className="rounded-lg border-2 border-indigo-400 bg-gradient-to-br from-indigo-600 to-indigo-700 p-4 text-white text-left shadow-md hover:shadow-lg hover:from-indigo-500 hover:to-indigo-600 transition"
+            data-testid="ar-highlights-ai-followup"
+          >
+            <div className="text-[11px] uppercase tracking-wider font-semibold text-indigo-100 inline-flex items-center gap-1.5">
+              <Sparkles size={12} /> AI Follow-up
+            </div>
+            <div className="text-lg font-bold mt-1">
+              {overdue > 0 ? `Draft ${overdue > 1 ? "chase emails" : "chase email"}` : "Prep next-run nudges"}
+            </div>
+            <div className="text-xs text-indigo-100/90 mt-1">
+              One-tap AI-drafted follow-ups for every overdue customer.
+            </div>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
