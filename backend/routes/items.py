@@ -8,6 +8,7 @@ still override at line-item time.
 from __future__ import annotations
 import io
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
@@ -570,6 +571,138 @@ def _statement_html(company_name: str, customer_name: str, start: str, end: str,
   </table>
   <p style="color:#64748B;font-size:12px;margin-top:24px;">Thank you for your business.</p>
 </body></html>"""
+
+
+@router.get("/companies/{cid}/customer-statements/preview")
+async def preview_customer_statement(
+    cid: str,
+    customer_id: str,
+    kind: str = "outstanding",  # outstanding | activity
+    user: dict = Depends(get_current_user),
+):
+    """Structured statement data for the Customer Statements page.
+
+    `kind`:
+      - outstanding: current open A/R with overdue vs not-yet-due split,
+        one row per unpaid invoice.
+      - activity:   full activity log (invoices + payments) with a
+                    running balance — matches Wave's Account activity.
+    """
+    await require_company(user, cid)
+    contact = await db.contacts.find_one({"id": customer_id, "company_id": cid})
+    if not contact:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    company = await db.companies.find_one({"id": cid}) or {}
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    inv_query = {"company_id": cid, "contact_id": customer_id, "status": {"$nin": ["void", "draft"]}}
+    all_invs = await db.invoices.find(inv_query).to_list(10000)
+
+    def paid_amount(inv):
+        return round(float(inv.get("total") or 0) - float(inv.get("balance_due") or 0), 2)
+
+    if kind == "outstanding":
+        rows = []
+        overdue = 0.0
+        not_yet_due = 0.0
+        for i in all_invs:
+            bal = float(i.get("balance_due") or 0)
+            if bal <= 0.01: continue
+            due = i.get("due_date") or ""
+            is_overdue = bool(due and str(due) < today)
+            if is_overdue: overdue += bal
+            else: not_yet_due += bal
+            rows.append({
+                "id": i.get("id"),
+                "number": i.get("number") or "",
+                "invoice_date": i.get("issue_date") or "",
+                "due_date": due,
+                "total": round(float(i.get("total") or 0), 2),
+                "paid": paid_amount(i),
+                "due": round(bal, 2),
+                "is_overdue": is_overdue,
+            })
+        rows.sort(key=lambda r: r.get("invoice_date") or "")
+        return {
+            "kind": "outstanding",
+            "as_of": today,
+            "customer": {
+                "id": contact.get("id"),
+                "name": contact.get("name") or "",
+                "email": contact.get("email") or "",
+                "address": contact.get("address") or "",
+            },
+            "company": {
+                "name": company.get("name") or "",
+                "address": company.get("address") or "",
+                "country": company.get("country") or "",
+                "logo_data_url": company.get("logo_data_url") or "",
+            },
+            "summary": {
+                "overdue": round(overdue, 2),
+                "not_yet_due": round(not_yet_due, 2),
+                "outstanding": round(overdue + not_yet_due, 2),
+            },
+            "rows": rows,
+        }
+
+    # kind == "activity" — full ledger with running balance.
+    payments = await db.payments.find({"company_id": cid, "contact_id": customer_id}).to_list(10000)
+    events = []
+    for i in all_invs:
+        events.append({
+            "date": i.get("issue_date") or "",
+            "kind": "invoice",
+            "description": f"Invoice {i.get('number') or ''}".strip(),
+            "invoice_id": i.get("id"),
+            "invoice_number": i.get("number") or "",
+            "debit": round(float(i.get("total") or 0), 2),
+            "credit": 0.0,
+        })
+    for p in payments:
+        inv_num = ""
+        if p.get("linked_invoice_id"):
+            m = next((x for x in all_invs if x.get("id") == p["linked_invoice_id"]), None)
+            if m: inv_num = m.get("number") or ""
+        events.append({
+            "date": p.get("date") or "",
+            "kind": "payment",
+            "description": f"Payment received — {p.get('method') or 'payment'}" + (f" · Invoice {inv_num}" if inv_num else ""),
+            "invoice_id": p.get("linked_invoice_id"),
+            "invoice_number": inv_num,
+            "debit": 0.0,
+            "credit": round(float(p.get("amount") or 0), 2),
+        })
+    events.sort(key=lambda e: (e.get("date") or "", 0 if e["kind"] == "invoice" else 1))
+    running = 0.0
+    for e in events:
+        running += e["debit"] - e["credit"]
+        e["balance"] = round(running, 2)
+
+    total_invoiced = round(sum(e["debit"] for e in events), 2)
+    total_paid = round(sum(e["credit"] for e in events), 2)
+    return {
+        "kind": "activity",
+        "as_of": today,
+        "customer": {
+            "id": contact.get("id"),
+            "name": contact.get("name") or "",
+            "email": contact.get("email") or "",
+            "address": contact.get("address") or "",
+        },
+        "company": {
+            "name": company.get("name") or "",
+            "address": company.get("address") or "",
+            "country": company.get("country") or "",
+            "logo_data_url": company.get("logo_data_url") or "",
+        },
+        "summary": {
+            "total_invoiced": total_invoiced,
+            "total_paid": total_paid,
+            "balance": round(total_invoiced - total_paid, 2),
+        },
+        "rows": events,
+    }
 
 
 @router.post("/companies/{cid}/customers/{customer_id}/send-statement")

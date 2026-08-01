@@ -35,6 +35,7 @@ import SalesReports from "@/pages/SalesReports";
 import Payments from "@/pages/Payments";
 import Receipts from "@/pages/Receipts";
 import Contacts from "@/pages/Contacts";
+import CustomerStatements from "@/pages/CustomerStatements";
 import Connections from "@/pages/Connections";
 import StatementImportDetail from "@/pages/StatementImportDetail";
 import CompanySettings from "@/pages/CompanySettings";
@@ -112,6 +113,7 @@ function App() {
               <Route path="/payments" element={<Payments />} />
               <Route path="/receipts" element={<Receipts />} />
               <Route path="/contacts" element={<Contacts />} />
+              <Route path="/customer-statements" element={<CustomerStatements />} />
               <Route path="/connections" element={<Connections />} />
               <Route path="/connections/imports/:importId" element={<StatementImportDetail />} />
               <Route path="/settings" element={<CompanySettings />} />

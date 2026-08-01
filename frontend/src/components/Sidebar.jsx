@@ -31,7 +31,7 @@ const GROUPS = [
       { to: "/payments?direction=in", label: "Payments", icon: CreditCard, matchPath: "/payments" },
       { to: "/items?usage=sales", label: "Items", icon: Package, matchPath: "/items" },
       { to: "/recurring", label: "Recurring", icon: Repeat },
-      { to: "/contacts?type=customer&view=statements", label: "Customer Statements", icon: MailCheck, matchPath: "__never__" },
+      { to: "/customer-statements", label: "Customer Statements", icon: MailCheck },
       { to: "/contacts?type=customer", label: "Customers", icon: UserCircle, matchPath: "/contacts" },
     ],
   },
