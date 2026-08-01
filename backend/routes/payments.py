@@ -98,6 +98,88 @@ async def create_payment(cid: str, inp: PaymentCreate, user: dict = Depends(get_
     return {"id": pid}
 
 
+@router.patch("/companies/{cid}/payments/{pid}")
+async def update_payment(cid: str, pid: str, payload: dict, user: dict = Depends(get_current_user)):
+    """Update an existing payment and keep every downstream balance
+    in sync.
+
+    Accepts partial ``payload`` — any subset of ``amount``, ``date``,
+    ``method``, ``memo``, ``contact_id``, ``contact_name``,
+    ``linked_invoice_id``, ``linked_bill_id``. When ``amount`` or the
+    link-ids change we:
+
+      1. reverse the OLD payment's impact on its OLD linked doc (via
+         the shared ``_reverse_payment_impact`` helper — adds the old
+         amount back to ``balance_due``, resets status).
+      2. write the new payment fields.
+      3. apply the NEW impact to the NEW linked doc (subtract new
+         amount from ``balance_due``, flip status paid/partial).
+
+    Only the changed fields are written; unchanged docs are left
+    alone.
+    """
+    await require_company(user, cid)
+    existing = await db.payments.find_one({"id": pid, "company_id": cid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    # Whitelist the fields the caller may touch — everything else stays.
+    allowed = {"amount", "date", "method", "memo", "contact_id",
+               "contact_name", "linked_invoice_id", "linked_bill_id"}
+    updates = {k: v for k, v in (payload or {}).items() if k in allowed}
+    if not updates:
+        return {"ok": True, "changed": False}
+
+    # Rate check + sanity on amount.
+    if "amount" in updates:
+        try:
+            updates["amount"] = float(updates["amount"] or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Amount must be a number")
+        if updates["amount"] < 0:
+            raise HTTPException(status_code=400, detail="Amount cannot be negative")
+
+    # Detect if the balance-affecting bits actually changed. If not,
+    # we can skip the cascade entirely.
+    balance_dirty = (
+        ("amount" in updates and float(updates["amount"]) != float(existing.get("amount") or 0))
+        or ("linked_invoice_id" in updates and updates["linked_invoice_id"] != existing.get("linked_invoice_id"))
+        or ("linked_bill_id" in updates and updates["linked_bill_id"] != existing.get("linked_bill_id"))
+    )
+
+    from link_cascade import _reverse_payment_impact
+    if balance_dirty and (existing.get("linked_invoice_id") or existing.get("linked_bill_id")):
+        # Step 1 — undo the old effect on the old linked doc.
+        await _reverse_payment_impact(cid, existing)
+
+    updates["updated_at"] = now_iso()
+    await db.payments.update_one({"id": pid, "company_id": cid}, {"$set": updates})
+
+    if balance_dirty:
+        # Step 2 — apply the new effect to the new linked doc.
+        new_amount = float(updates.get("amount", existing.get("amount") or 0))
+        new_inv = updates.get("linked_invoice_id", existing.get("linked_invoice_id"))
+        new_bill = updates.get("linked_bill_id", existing.get("linked_bill_id"))
+        if new_inv:
+            inv = await db.invoices.find_one({"id": new_inv, "company_id": cid})
+            if inv:
+                bal = float(inv.get("balance_due", inv.get("total", 0))) - new_amount
+                status = "paid" if bal <= 0.01 else "partial"
+                await db.invoices.update_one({"id": inv["id"]},
+                    {"$set": {"balance_due": round(bal, 2), "status": status,
+                              "updated_at": now_iso()}})
+        elif new_bill:
+            bill = await db.bills.find_one({"id": new_bill, "company_id": cid})
+            if bill:
+                bal = float(bill.get("balance_due", bill.get("total", 0))) - new_amount
+                status = "paid" if bal <= 0.01 else "partial"
+                await db.bills.update_one({"id": bill["id"]},
+                    {"$set": {"balance_due": round(bal, 2), "status": status,
+                              "updated_at": now_iso()}})
+    return {"ok": True, "changed": True, "balance_recalculated": balance_dirty}
+
+
+
 @router.delete("/companies/{cid}/payments/{pid}")
 async def delete_payment(cid: str, pid: str, user: dict = Depends(get_current_user)):
     """Delete a payment AND reverse its impact on any linked invoice/bill.

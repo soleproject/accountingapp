@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fmtMoney, api } from "@/lib/api";
-import { Plus } from "lucide-react";
+import { Plus, Pencil, X, Save, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { PaymentModal } from "@/pages/Payments";
 
 const METHOD_LABEL = {
@@ -23,6 +24,7 @@ const METHOD_LABEL = {
  */
 export default function PaymentHistoryBlock({ payments, original, kind = "invoice", docId, docLabel, contactId, currentId, onPaymentRecorded }) {
   const [openRecord, setOpenRecord] = useState(false);
+  const [editingPayment, setEditingPayment] = useState(null);
   const [ctx, setCtx] = useState({ contacts: [], invoices: [], bills: [], transactions: [] });
   // Lazy-load the ancillary data the modal needs — only fires when the
   // pro actually clicks Record Payment, so the editor's initial load
@@ -50,10 +52,10 @@ export default function PaymentHistoryBlock({ payments, original, kind = "invoic
     return () => { cancelled = true; };
   }, [openRecord, currentId]);
   const canRecord = !!(docId && currentId);
-  return renderBlock({ payments, original, kind, docId, docLabel, contactId, currentId, openRecord, setOpenRecord, ctx, canRecord, onPaymentRecorded });
+  return renderBlock({ payments, original, kind, docId, docLabel, contactId, currentId, openRecord, setOpenRecord, editingPayment, setEditingPayment, ctx, canRecord, onPaymentRecorded });
 }
 
-function renderBlock({ payments, original, kind, docId, docLabel, contactId, currentId, openRecord, setOpenRecord, ctx, canRecord, onPaymentRecorded }) {
+function renderBlock({ payments, original, kind, docId, docLabel, contactId, currentId, openRecord, setOpenRecord, editingPayment, setEditingPayment, ctx, canRecord, onPaymentRecorded }) {
   const hasPayments = payments && payments.length > 0;
   // Even when there are 0 payments we still render the header + record
   // button so pros can log the first payment. When payments==0 we
@@ -94,12 +96,25 @@ function renderBlock({ payments, original, kind, docId, docLabel, contactId, cur
               {payments.map((p) => {
                 const method = METHOD_LABEL[(p.method || "").toLowerCase()] || (p.method || "—");
                 return (
-                  <tr key={p.id}>
+                  <tr
+                    key={p.id}
+                    className="hover:bg-slate-50 cursor-pointer group"
+                    onClick={() => canRecord && setEditingPayment(p)}
+                    data-testid={`${kind}-editor-payment-row-${p.id}`}
+                    title={canRecord ? "Click to edit payment" : ""}
+                  >
                     <td className="py-2 pr-4 text-slate-700 font-mono-num">{p.date}</td>
                     <td className="py-2 pr-4 text-slate-700">{desc}</td>
                     <td className="py-2 pr-4 text-slate-700">{method}</td>
                     <td className="py-2 pr-4 text-slate-500">{p.memo || p.reference || "—"}</td>
-                    <td className="py-2 text-right font-mono-num text-slate-800">{fmtMoney(p.amount)}</td>
+                    <td className="py-2 text-right font-mono-num text-slate-800">
+                      <span className="inline-flex items-center gap-2">
+                        {fmtMoney(p.amount)}
+                        {canRecord && (
+                          <Pencil size={11} className="opacity-0 group-hover:opacity-60 text-slate-500" />
+                        )}
+                      </span>
+                    </td>
                   </tr>
                 );
               })}
@@ -165,6 +180,111 @@ function renderBlock({ payments, original, kind, docId, docLabel, contactId, cur
           }}
         />
       )}
+      {editingPayment && (
+        <EditPaymentDialog
+          payment={editingPayment}
+          currentId={currentId}
+          onClose={() => setEditingPayment(null)}
+          onSaved={() => { setEditingPayment(null); if (onPaymentRecorded) onPaymentRecorded(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * EditPaymentDialog — inline edit for a single payment. Supports
+ * amount/date/method/memo. Also exposes Delete so the pro can undo a
+ * mis-record from the same modal.
+ */
+function EditPaymentDialog({ payment, currentId, onClose, onSaved }) {
+  const [date, setDate] = useState(payment.date || "");
+  const [amount, setAmount] = useState(String(payment.amount ?? ""));
+  const [method, setMethod] = useState(payment.method || "check");
+  const [memo, setMemo] = useState(payment.memo || "");
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.patch(`/companies/${currentId}/payments/${payment.id}`, {
+        date, amount: parseFloat(amount), method, memo,
+      });
+      toast.success("Payment updated");
+      onSaved();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Update failed");
+    } finally { setSaving(false); }
+  };
+  const del = async () => {
+    if (!window.confirm("Delete this payment? The invoice balance will be restored.")) return;
+    setSaving(true);
+    try {
+      await api.delete(`/companies/${currentId}/payments/${payment.id}`);
+      toast.success("Payment deleted");
+      onSaved();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Delete failed");
+    } finally { setSaving(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-3" data-testid="payment-edit-dialog">
+        <div className="flex items-center justify-between border-b pb-3">
+          <h3 className="font-heading font-semibold text-lg">Edit payment</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Date</label>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+                   className="w-full border rounded px-2 py-1.5 text-sm"
+                   data-testid="payment-edit-date" />
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Amount</label>
+            <input type="number" step="0.01" value={amount}
+                   onChange={(e) => setAmount(e.target.value)}
+                   className="w-full border rounded px-2 py-1.5 text-sm font-mono-num text-right"
+                   data-testid="payment-edit-amount" />
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Method</label>
+            <select value={method} onChange={(e) => setMethod(e.target.value)}
+                    className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+                    data-testid="payment-edit-method">
+              <option value="check">Check</option>
+              <option value="ach">ACH Transfer</option>
+              <option value="credit_card">Credit card</option>
+              <option value="wire">Wire transfer</option>
+              <option value="cash">Cash</option>
+              <option value="bank_transfer">Bank transfer</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Reference / Memo</label>
+            <input value={memo} onChange={(e) => setMemo(e.target.value)}
+                   placeholder="e.g. ACH-78954"
+                   className="w-full border rounded px-2 py-1.5 text-sm"
+                   data-testid="payment-edit-memo" />
+          </div>
+        </div>
+        <div className="flex items-center justify-between pt-3 border-t">
+          <button onClick={del} disabled={saving}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+                  data-testid="payment-edit-delete">
+            <Trash2 size={13} /> Delete
+          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className="px-3 py-1.5 rounded-md text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
+            <button onClick={save} disabled={saving}
+                    className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50"
+                    data-testid="payment-edit-save">
+              <Save size={13} /> {saving ? "Saving…" : "Save changes"}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
