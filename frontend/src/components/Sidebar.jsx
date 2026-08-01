@@ -32,7 +32,7 @@ const GROUPS = [
       { to: "/items?usage=sales", label: "Items", icon: Package, matchPath: "/items" },
       { to: "/recurring", label: "Recurring", icon: Repeat },
       { to: "/contacts?type=customer&view=statements", label: "Customer Statements", icon: MailCheck, matchPath: "__never__" },
-      { to: "/contacts?type=customer", label: "Customers (contacts)", icon: UserCircle, matchPath: "/contacts" },
+      { to: "/contacts", label: "Contacts", icon: UserCircle, matchPath: "/contacts" },
     ],
   },
   {
@@ -41,7 +41,6 @@ const GROUPS = [
     icon: ShoppingCart,
     items: [
       { to: "/bills", label: "Bills", icon: Receipt },
-      { to: "/contacts?type=vendor", label: "Vendors (contacts)", icon: Store, matchPath: "/contacts" },
       { to: "/items?usage=purchases", label: "Items", icon: Package, matchPath: "/items" },
     ],
   },
