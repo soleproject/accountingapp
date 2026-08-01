@@ -46,6 +46,64 @@ const SUBTYPES_BY_TYPE = {
 
 const subtypesFor = (t) => SUBTYPES_BY_TYPE[t] || SUBTYPES_BY_TYPE.expense;
 
+// Wave-style tabs — each tab maps to one or more `type` values so
+// e.g. "Expenses" folds cogs + expense together (matching how Wave
+// treats direct costs and operating expenses under one banner).
+const COA_TABS = [
+  { key: "all",       label: "All",        types: ["asset", "liability", "equity", "revenue", "cogs", "expense"] },
+  { key: "asset",     label: "Assets",     types: ["asset"] },
+  { key: "liability", label: "Liabilities & Credit Cards", types: ["liability"] },
+  { key: "revenue",   label: "Income",     types: ["revenue"] },
+  { key: "expense",   label: "Expenses",   types: ["cogs", "expense"] },
+  { key: "equity",    label: "Equity",     types: ["equity"] },
+];
+// Ordered detail_type sections that show up as sub-headers within each
+// type card. Sub-types not in this list fall into an "Other" catch-all.
+const DETAIL_SECTIONS_BY_TYPE = {
+  asset: [
+    ["cash_and_bank",                 "Cash and Bank"],
+    ["money_in_transit",              "Money in Transit"],
+    ["expected_payments_from_customers", "Accounts Receivable"],
+    ["inventory",                     "Inventory"],
+    ["property_plant_equipment",      "Property, Plant & Equipment"],
+    ["depreciation_and_amortization", "Depreciation and Amortization"],
+    ["vendor_prepayments",            "Vendor Prepayments & Credits"],
+    ["other_short_term_asset",        "Other Short-Term Asset"],
+    ["other_long_term_asset",         "Other Long-Term Asset"],
+  ],
+  liability: [
+    ["credit_card",                   "Credit Card"],
+    ["loan_and_line_of_credit",       "Loan and Line of Credit"],
+    ["expected_payments_to_vendors",  "Accounts Payable"],
+    ["due_for_payroll",               "Due For Payroll"],
+    ["due_to_owners",                 "Due to Owners"],
+    ["customer_prepayments",          "Customer Prepayments & Credits"],
+    ["sales_tax_payable",             "Sales Tax Payable"],
+    ["other_short_term_liability",    "Other Short-Term Liability"],
+    ["other_long_term_liability",     "Other Long-Term Liability"],
+  ],
+  equity: [
+    ["owner_contribution_drawing",    "Owner Contribution & Drawing"],
+    ["retained_earnings",             "Retained Earnings"],
+    ["other_equity",                  "Other Equity"],
+  ],
+  revenue: [
+    ["income",                        "Income"],
+    ["discount",                      "Discount"],
+    ["other_income",                  "Other Income"],
+  ],
+  expense: [
+    ["operating_expense",             "Operating Expense"],
+    ["cost_of_goods_sold",            "Cost of Goods Sold"],
+    ["payment_processing_fee",        "Payment Processing Fee"],
+    ["payroll_expense",               "Payroll Expense"],
+    ["other_expense",                 "Other Expense"],
+  ],
+  cogs: [
+    ["cost_of_goods_sold",            "Cost of Goods Sold"],
+  ],
+};
+
 // Turn machine-y keys ("operating_expense", "cogs", "long_term_liability")
 // into human-friendly labels ("Operating Expense", "COGS", "Long Term Liability").
 // The raw values stay in the DB / API payloads — this only shapes what
@@ -112,6 +170,18 @@ export default function ChartOfAccounts() {
   // rev/exp and cumulative for asset/liab/equity; other values force
   // a single lens across every account.
   const [basis, setBasis] = useState("smart");
+  // Wave-style top tabs. `all` (default) preserves the classic
+  // one-page-many-sections view; the specific tabs filter down to one
+  // section at a time. Persisted in localStorage so the pro's last
+  // vantage point sticks across visits.
+  const [activeTab, setActiveTab] = useState(() => {
+    try { return localStorage.getItem("coa_active_tab") || "all"; }
+    catch { return "all"; }
+  });
+  const setTabPersist = (v) => {
+    setActiveTab(v);
+    try { localStorage.setItem("coa_active_tab", v); } catch {}
+  };
   // Duplicate detection — groups of same-type accounts with near-
   // identical names that the Pro likely wants to merge.
   const [dupeGroups, setDupeGroups] = useState([]);
@@ -206,6 +276,30 @@ export default function ChartOfAccounts() {
     }
     return { type: t, items: ordered };
   });
+
+  // Extracted so the tab-based renderer can call it inside sub-type
+  // section blocks without duplicating the huge <AccountRow/> prop list.
+  const renderRow = (a, g) => {
+    const b = balances[a.id];
+    const val = !b ? null : (a._depth ? b.balance : b.rollup);
+    return (
+      <AccountRow
+        key={a.id}
+        a={a}
+        allAccounts={accts}
+        currentId={currentId}
+        balance={val}
+        showCodes={showCodes}
+        onSaved={load}
+        onDeleted={load}
+        onMerge={(source) => setMergeState({ source })}
+        dragSourceId={dragSourceId}
+        onDragStart={(id) => setDragSourceId(id)}
+        onDragEnd={() => setDragSourceId(null)}
+        onReparent={reparent}
+      />
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -334,7 +428,35 @@ export default function ChartOfAccounts() {
         </div>
       )}
       <div className="space-y-4">
-        {grouped.map(g => (
+        {/* Wave-style tab bar */}
+        <div className="border-b border-slate-200 flex items-end gap-1 overflow-x-auto" data-testid="coa-tab-bar">
+          {COA_TABS.map(t => {
+            // Count matching accounts for the pill badge.
+            const count = accts.filter(a => t.types.includes(a.type)).length;
+            const active = activeTab === t.key;
+            return (
+              <button
+                key={t.key}
+                onClick={() => setTabPersist(t.key)}
+                className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm border-b-2 -mb-px transition whitespace-nowrap ${
+                  active
+                    ? "border-slate-900 text-slate-900 font-medium"
+                    : "border-transparent text-slate-500 hover:text-slate-800"
+                }`}
+                data-testid={`coa-tab-${t.key}`}
+              >
+                {t.label}
+                <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-mono-num ${
+                  active ? "bg-slate-900 text-white" : "bg-slate-200 text-slate-700"
+                }`}>{count}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {grouped
+          .filter(g => COA_TABS.find(t => t.key === activeTab)?.types.includes(g.type))
+          .map(g => (
           <div key={g.type} className="rounded-xl border bg-white overflow-hidden">
             <div className="px-4 py-2 bg-slate-50 border-b text-xs uppercase tracking-widest text-slate-600 font-semibold flex items-center justify-between">
               <span>{TYPE_LABEL[g.type] || g.type} · {g.items.length}</span>
@@ -346,30 +468,47 @@ export default function ChartOfAccounts() {
               </span>
             </div>
             <div>
-              {g.items.map(a => {
-                // Parents show the rolled-up balance (own + children).
-                // Children show only their direct balance so the eye can
-                // add them and see they equal the parent.
-                const b = balances[a.id];
-                const val = !b ? null : (a._depth ? b.balance : b.rollup);
-                return (
-                  <AccountRow
-                    key={a.id}
-                    a={a}
-                    allAccounts={accts}
-                    currentId={currentId}
-                    balance={val}
-                    showCodes={showCodes}
-                    onSaved={load}
-                    onDeleted={load}
-                    onMerge={(source) => setMergeState({ source })}
-                    dragSourceId={dragSourceId}
-                    onDragStart={(id) => setDragSourceId(id)}
-                    onDragEnd={() => setDragSourceId(null)}
-                    onReparent={reparent}
-                  />
-                );
-              })}
+              {(() => {
+                // Group items by detail_type for Wave-style sub-headers.
+                // Accounts without a detail_type still show up in an
+                // "Uncategorized" bucket so nothing silently vanishes.
+                const sections = DETAIL_SECTIONS_BY_TYPE[g.type] || [];
+                const byDetail = new Map();
+                for (const a of g.items) {
+                  const dt = (a.detail_type || "").trim() || "__uncategorized__";
+                  if (!byDetail.has(dt)) byDetail.set(dt, []);
+                  byDetail.get(dt).push(a);
+                }
+                const renderedKeys = new Set();
+                const blocks = [];
+                for (const [key, label] of sections) {
+                  const rows = byDetail.get(key);
+                  if (!rows || rows.length === 0) continue;
+                  renderedKeys.add(key);
+                  blocks.push({ key, label, rows });
+                }
+                // Any detail_types we don't recognize + the uncategorized bucket.
+                const leftovers = [];
+                for (const [k, v] of byDetail.entries()) {
+                  if (renderedKeys.has(k)) continue;
+                  leftovers.push(...v);
+                }
+                if (leftovers.length) blocks.push({ key: "__other__", label: "Other", rows: leftovers });
+
+                // Fallback — when no sub-sections apply (or detail_type
+                // was never set on legacy accounts), show a flat list.
+                if (blocks.length === 0 || (blocks.length === 1 && blocks[0].key === "__other__")) {
+                  return g.items.map(a => renderRow(a, g));
+                }
+                return blocks.map(b => (
+                  <div key={b.key} data-testid={`coa-detail-${g.type}-${b.key}`}>
+                    <div className="px-4 py-1.5 bg-slate-50/50 border-b border-slate-100 text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
+                      {b.label}
+                    </div>
+                    {b.rows.map(a => renderRow(a, g))}
+                  </div>
+                ));
+              })()}
             </div>
           </div>
         ))}

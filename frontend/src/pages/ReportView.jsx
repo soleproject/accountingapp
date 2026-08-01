@@ -655,8 +655,35 @@ function BalanceSheetBody({ data, onDrilldown }) {
  * plain rows.
  *
  * The row order coming from the backend is already parent → children,
- * so grouping is O(n) with a single pass.
+ * so grouping is O(n) with a single pass. When rows carry a
+ * `detail_type` (Wave-style sub-type like "cash_and_bank"), we ALSO
+ * insert a mini section header so the balance sheet reads like the
+ * Chart of Accounts.
  */
+const DETAIL_LABELS = {
+  cash_and_bank: "Cash and Bank",
+  money_in_transit: "Money in Transit",
+  expected_payments_from_customers: "Accounts Receivable",
+  inventory: "Inventory",
+  property_plant_equipment: "Property, Plant & Equipment",
+  depreciation_and_amortization: "Depreciation and Amortization",
+  vendor_prepayments: "Vendor Prepayments & Credits",
+  other_short_term_asset: "Other Short-Term Asset",
+  other_long_term_asset: "Other Long-Term Asset",
+  credit_card: "Credit Card",
+  loan_and_line_of_credit: "Loan and Line of Credit",
+  expected_payments_to_vendors: "Accounts Payable",
+  due_for_payroll: "Due For Payroll",
+  due_to_owners: "Due to Owners",
+  customer_prepayments: "Customer Prepayments & Credits",
+  sales_tax_payable: "Sales Tax Payable",
+  other_short_term_liability: "Other Short-Term Liability",
+  other_long_term_liability: "Other Long-Term Liability",
+  owner_contribution_drawing: "Owner Contribution & Drawing",
+  retained_earnings: "Retained Earnings",
+  other_equity: "Other Equity",
+};
+
 function RolledUpRows({ rows, onDrilldown }) {
   const [expanded, setExpanded] = React.useState({}); // {parent_code: true}
 
@@ -680,13 +707,29 @@ function RolledUpRows({ rows, onDrilldown }) {
 
   const toggle = (code) => setExpanded(x => ({ ...x, [code]: !x[code] }));
 
+  // Wave-style sub-type banding — only kicks in when the backend
+  // provides `detail_type` values. Legacy sections keep the flat look.
+  const hasAnyDetail = groups.some(g => g.parent.detail_type);
+  let currentDetail = "___INIT___";
+
   return (
     <>
-      {groups.map((g) => {
+      {groups.map((g, gi) => {
         const hasKids = g.children.length > 0;
         const isOpen = !!expanded[g.parent.code];
+        const dt = g.parent.detail_type || "";
+        const showDetailHeader = hasAnyDetail && dt !== currentDetail;
+        if (showDetailHeader) currentDetail = dt;
         return (
-          <React.Fragment key={`${g.parent.code}-${g.parent.parent_code || ""}`}>
+          <React.Fragment key={`${g.parent.code}-${g.parent.parent_code || ""}-${gi}`}>
+            {showDetailHeader && dt && (
+              <div
+                className="px-3 py-1 mt-2 text-[10px] uppercase tracking-widest font-semibold text-slate-500 border-b border-slate-100"
+                data-testid={`bs-detail-header-${dt}`}
+              >
+                {DETAIL_LABELS[dt] || dt.replace(/_/g, " ")}
+              </div>
+            )}
             <Row
               {...g.parent}
               onClick={onDrilldown}

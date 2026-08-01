@@ -279,7 +279,15 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
             children_of.setdefault(pid, []).append(a)
 
     def _row(a: dict, direct_amount: float, parent_code: str | None = None):
-        r = {"id": a["id"], "code": a["code"], "name": a["name"], "amount": round(direct_amount, 2)}
+        r = {
+            "id": a["id"], "code": a["code"], "name": a["name"],
+            "amount": round(direct_amount, 2),
+            # Carry the Wave-style granular sub-type through so the
+            # frontend can group balance-sheet sections into readable
+            # sub-headers (Cash and Bank, Property Plant & Equipment,
+            # Loan and Line of Credit, etc.).
+            "detail_type": (a.get("detail_type") or "").strip(),
+        }
         if parent_code:
             r["parent_code"] = parent_code
         return r

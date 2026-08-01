@@ -36,6 +36,7 @@ import Payments from "@/pages/Payments";
 import Receipts from "@/pages/Receipts";
 import Contacts from "@/pages/Contacts";
 import CustomerStatements from "@/pages/CustomerStatements";
+import LoansPage from "@/pages/LoansPage";
 import Connections from "@/pages/Connections";
 import StatementImportDetail from "@/pages/StatementImportDetail";
 import CompanySettings from "@/pages/CompanySettings";
@@ -133,10 +134,7 @@ function App() {
                 fields={[{k:"name",l:"Item Name"},{k:"sku",l:"SKU"},{k:"quantity",l:"Qty",t:"number"},{k:"unit_cost",l:"Unit Cost",t:"number"}]}
               />} />
               <Route path="/accounting/assets" element={<FixedAssetsPage />} />
-              <Route path="/accounting/loans" element={<GenericList
-                path="loans" title="Loans"
-                fields={[{k:"lender",l:"Lender"},{k:"principal",l:"Principal",t:"number"},{k:"rate",l:"Interest Rate %",t:"number"},{k:"term_months",l:"Term (months)",t:"number"}]}
-              />} />
+              <Route path="/accounting/loans" element={<LoansPage />} />
               <Route path="/accounting/tags" element={<GenericList
                 path="tags" title="Tags"
                 fields={[{k:"name",l:"Tag"},{k:"description",l:"Description"}]}
