@@ -613,3 +613,155 @@ async def bulk_import_taxes(cid: str, payload: dict, user: dict = Depends(get_cu
             })
             created += 1
     return {"created": created, "updated": updated, "skipped": skipped, "total_rows": len(rows)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AI Follow-up — draft chase emails per overdue customer, then Send-All
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _drafts_for_overdue(cid: str) -> list[dict]:
+    """Group every overdue invoice by customer and generate one chase
+    draft per customer. Returns a list of `{customer_id, customer_name,
+    to_email, invoice_ids, invoice_numbers, total_due, oldest_days,
+    subject, body}`.
+    """
+    from llm_client import LlmChat, UserMessage, TextDelta, StreamDone
+    today = datetime.now(timezone.utc).date()
+    company = await db.companies.find_one({"id": cid}) or {}
+    firm = company.get("name") or "your accountant"
+    docs = await db.invoices.find({"company_id": cid}).to_list(2000)
+    # Overdue = balance_due > 0 AND due_date < today
+    overdue = []
+    for d in docs:
+        bal = float(d.get("balance_due") or 0)
+        if bal <= 0.005:
+            continue
+        due = d.get("due_date") or ""
+        try:
+            due_d = datetime.strptime(due, "%Y-%m-%d").date()
+        except Exception:
+            continue
+        if due_d >= today:
+            continue
+        days = (today - due_d).days
+        overdue.append({**d, "_days_overdue": days})
+    if not overdue:
+        return []
+    # Group by contact_id (falls back to contact_name).
+    groups: dict[str, dict] = {}
+    for inv in overdue:
+        key = inv.get("contact_id") or f"name::{inv.get('contact_name') or 'Unknown'}"
+        g = groups.setdefault(key, {
+            "customer_id": inv.get("contact_id"),
+            "customer_name": inv.get("contact_name") or "Customer",
+            "invoice_ids": [], "invoice_numbers": [],
+            "total_due": 0.0, "oldest_days": 0, "lines": [],
+        })
+        g["invoice_ids"].append(inv["id"])
+        g["invoice_numbers"].append(inv.get("number") or "")
+        g["total_due"] += float(inv.get("balance_due") or 0)
+        g["oldest_days"] = max(g["oldest_days"], inv["_days_overdue"])
+        g["lines"].append(f"- Invoice {inv.get('number','?')}: ${float(inv.get('balance_due') or 0):.2f} · due {inv.get('due_date')} ({inv['_days_overdue']} days late)")
+
+    # Fill emails.
+    for g in groups.values():
+        email = ""
+        if g.get("customer_id"):
+            c = await db.contacts.find_one({"id": g["customer_id"], "company_id": cid})
+            email = (c or {}).get("email") or ""
+        g["to_email"] = email
+
+    drafts: list[dict] = []
+    for g in groups.values():
+        summary = "\n".join(g["lines"])
+        prompt = (
+            f"Write a short, polite follow-up email to a customer who has overdue invoices.\n"
+            f"Customer: {g['customer_name']}\n"
+            f"Total past due: ${g['total_due']:.2f}\n"
+            f"Oldest invoice is {g['oldest_days']} days late.\n"
+            f"Invoices:\n{summary}\n\n"
+            f"Sender: {firm}\n\n"
+            f"Tone: friendly-but-firm, respectful, direct. 3-5 short paragraphs. "
+            f"Include a clear ask to pay or reply with a payment ETA. "
+            f"Return ONLY the email body — NO subject line, NO greeting like 'Subject:'. "
+            f"Sign off with the sender name."
+        )
+        body_text = ""
+        try:
+            chat = LlmChat(session_id=f"followup-{cid}-{g.get('customer_id') or 'anon'}",
+                           system_message="You draft short, professional accounts-receivable follow-up emails.",
+                           feature="ai-followup")
+            async for ev in chat.stream_message(UserMessage(text=prompt)):
+                if isinstance(ev, TextDelta):
+                    body_text += ev.content
+                elif isinstance(ev, StreamDone):
+                    break
+        except Exception as e:
+            # Fallback to a deterministic template so the modal always
+            # has *something* to preview even if the LLM is offline.
+            body_text = (
+                f"Hi {g['customer_name']},\n\n"
+                f"Just checking in on {len(g['invoice_ids'])} invoice(s) totaling "
+                f"${g['total_due']:.2f} that are now past due. "
+                f"Could you let us know when we can expect payment or reply if there's an issue?\n\n"
+                f"{summary}\n\n"
+                f"Thanks,\n{firm}"
+            )
+        drafts.append({
+            **g,
+            "subject": f"Friendly reminder — invoice{'s' if len(g['invoice_ids']) > 1 else ''} past due",
+            "body": body_text.strip(),
+        })
+    return drafts
+
+
+@router.post("/companies/{cid}/invoices/ai-followup/drafts")
+async def ai_followup_drafts(cid: str, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    drafts = await _drafts_for_overdue(cid)
+    return {"drafts": drafts}
+
+
+@router.post("/companies/{cid}/invoices/ai-followup/send-all")
+async def ai_followup_send_all(cid: str, payload: dict, user: dict = Depends(get_current_user)):
+    """Dispatch a batch of edited drafts. Body: `{drafts: [{to_email,
+    subject, body, customer_id, invoice_ids}]}`. Skips rows without a
+    to_email and reports them in the response.
+    """
+    await require_company(user, cid)
+    drafts = (payload or {}).get("drafts") or []
+    if not isinstance(drafts, list):
+        raise HTTPException(status_code=400, detail="drafts must be a list")
+    from email_dispatcher import dispatch
+    sent = 0
+    failed = 0
+    skipped: list[dict] = []
+    for d in drafts:
+        to = (d.get("to_email") or "").strip()
+        if not to or "@" not in to:
+            skipped.append({"customer_name": d.get("customer_name"), "reason": "no email on file"})
+            continue
+        subj = d.get("subject") or "Invoice follow-up"
+        body_text = d.get("body") or ""
+        # Simple <br/> wrap for HTML rendering.
+        html = "<div style='font-family:system-ui,sans-serif;color:#0F172A;white-space:pre-wrap;'>" + body_text.replace("<", "&lt;").replace(">", "&gt;") + "</div>"
+        try:
+            resp = await dispatch(
+                kind="customer_statement",
+                to=to,
+                subject=subj,
+                html=html,
+                text=body_text,
+                initiating_user_id=user["id"],
+                company_id=cid,
+                contact_id=d.get("customer_id"),
+                related={"invoice_ids": d.get("invoice_ids") or []},
+            )
+            if resp.get("status") == "sent":
+                sent += 1
+            else:
+                failed += 1
+        except Exception:
+            failed += 1
+    return {"sent": sent, "failed": failed, "skipped": skipped, "total": len(drafts)}
+

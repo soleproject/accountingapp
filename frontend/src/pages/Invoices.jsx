@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, AlertTriangle, Pencil, Repeat, Check, Package, Sparkles } from "lucide-react";
+import { Plus, Trash2, X, AlertTriangle, Pencil, Repeat, Check, Package, Sparkles, Send, Loader2, MailWarning } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
@@ -68,21 +68,28 @@ export default function Invoices() {
   // (issue_date <= as_of AND balance_due > 0).
   const [params, setParams] = useSearchParams();
   const outstanding = params.get("outstanding") === "1";
+  const overdueOnly = params.get("overdue") === "1";
   const asOf = params.get("as_of") || "";
   const filtered = useMemo(() => {
-    if (!outstanding && !asOf) return items;
+    if (!outstanding && !asOf && !overdueOnly) return items;
+    const today = new Date().toISOString().slice(0, 10);
     return items.filter(inv => {
       if (outstanding && !(Number(inv.balance_due) > 0.005)) return false;
+      if (overdueOnly) {
+        if (!(Number(inv.balance_due) > 0.005)) return false;
+        const due = inv.due_date || "";
+        if (!due || due >= today) return false;
+      }
       if (asOf) {
         const d = inv.issue_date || inv.date || "";
         if (d && d > asOf) return false;
       }
       return true;
     });
-  }, [items, outstanding, asOf]);
+  }, [items, outstanding, asOf, overdueOnly]);
   const clearFilters = () => {
     const p = new URLSearchParams(params);
-    p.delete("outstanding"); p.delete("as_of");
+    p.delete("outstanding"); p.delete("as_of"); p.delete("overdue");
     setParams(p, { replace: true });
   };
   const load = async () => {
@@ -137,15 +144,17 @@ export default function Invoices() {
         <ArAgingCard aging={aging} navigate={navigate} />
       )}
       <div className="rounded-xl border bg-white overflow-hidden">
-        {(outstanding || asOf) && (
+        {(outstanding || asOf || overdueOnly) && (
           <div
             className="flex items-center justify-between px-3 py-2 bg-cyan-50 border-b border-cyan-100 text-xs text-cyan-900"
             data-testid="invoices-filter-chip"
           >
             <span>
               Showing{" "}
+              {overdueOnly && <b>overdue</b>}
+              {overdueOnly && outstanding && " · "}
               {outstanding && <b>outstanding</b>}
-              {outstanding && asOf && " "}
+              {(outstanding || overdueOnly) && asOf && " "}
               {asOf && <>as of <b className="font-mono-num">{asOf}</b></>}
               {" "}·{" "}
               <span className="font-mono-num">{filtered.length}</span> of {items.length}
@@ -222,7 +231,7 @@ export default function Invoices() {
             {!filtered.length && (
               <tr>
                 <td colSpan={8} className="text-center py-8 text-slate-500">
-                  {(outstanding || asOf)
+                  {(outstanding || asOf || overdueOnly)
                     ? `No matching invoices${items.length ? ` (${items.length} total, none met the filter)` : ""}.`
                     : "No invoices."}
                 </td>
@@ -429,6 +438,8 @@ function InvoiceModal({ contacts, itemsCatalog, currentId, invoice, prefill, onC
  */
 function ArAgingCard({ aging, navigate }) {
   const [view, setView] = useState("aging"); // "aging" | "highlights"
+  const [aiOpen, setAiOpen] = useState(false);
+  const { currentId } = useCompany();
   const overdue = ["1_30", "31_60", "61_90", "over_90"]
     .reduce((s, k) => s + (aging.buckets[k] || 0), 0);
   const dueSoon = aging.buckets.current || 0;
@@ -502,13 +513,18 @@ function ArAgingCard({ aging, navigate }) {
         </>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3" data-testid="ar-highlights">
-          <div className="rounded-lg border-2 border-red-200 bg-red-50 p-4">
-            <div className="text-[11px] uppercase tracking-wider font-semibold text-red-700">Overdue</div>
+          <button
+            type="button"
+            onClick={() => navigate("/invoices?overdue=1")}
+            className="text-left rounded-lg border-2 border-red-200 bg-red-50 p-4 hover:bg-red-100 transition"
+            data-testid="ar-highlights-overdue-card"
+          >
+            <div className="text-[11px] uppercase tracking-wider font-semibold text-red-700">Overdue · click to filter</div>
             <div className="font-mono-num text-2xl font-bold mt-1 text-red-700" data-testid="ar-highlights-overdue">
               {fmtMoney(overdue)}
             </div>
             <div className="text-xs text-red-600/80 mt-1">Past-due invoices need attention.</div>
-          </div>
+          </button>
           <div className="rounded-lg border-2 border-amber-200 bg-amber-50 p-4">
             <div className="text-[11px] uppercase tracking-wider font-semibold text-amber-700">Due within 30 days</div>
             <div className="font-mono-num text-2xl font-bold mt-1 text-amber-700" data-testid="ar-highlights-due-soon">
@@ -518,9 +534,7 @@ function ArAgingCard({ aging, navigate }) {
           </div>
           <button
             type="button"
-            onClick={() => {
-              toast.info("AI Follow-up coming soon — will draft personalised chase emails for every overdue invoice.");
-            }}
+            onClick={() => setAiOpen(true)}
             className="rounded-lg border-2 border-indigo-400 bg-gradient-to-br from-indigo-600 to-indigo-700 p-4 text-white text-left shadow-md hover:shadow-lg hover:from-indigo-500 hover:to-indigo-600 transition"
             data-testid="ar-highlights-ai-followup"
           >
@@ -536,6 +550,228 @@ function ArAgingCard({ aging, navigate }) {
           </button>
         </div>
       )}
+      {aiOpen && <AIFollowupModal currentId={currentId} onClose={() => setAiOpen(false)} />}
+    </div>
+  );
+}
+
+
+/**
+ * AIFollowupModal — one-tap AI-drafted chase emails for every overdue
+ * customer. Fetches per-customer drafts from
+ * `POST /companies/{cid}/invoices/ai-followup/drafts` (grouped by
+ * contact, one email per customer), lets the user preview/edit each
+ * subject + body, toggle which rows to send, then dispatches via
+ * `POST /companies/{cid}/invoices/ai-followup/send-all`.
+ *
+ * Skipped rows (no email on file, unchecked) are surfaced in the send
+ * summary so the pro can act on them.
+ */
+function AIFollowupModal({ currentId, onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [drafts, setDrafts] = useState([]);
+  const [selected, setSelected] = useState({});        // idx -> bool
+  const [expanded, setExpanded] = useState(0);         // idx currently expanded
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState(null);          // {sent, failed, skipped, total}
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.post(`/companies/${currentId}/invoices/ai-followup/drafts`, {});
+        if (cancelled) return;
+        const list = r.data?.drafts || [];
+        setDrafts(list);
+        // Default: pre-select everyone who has an email on file.
+        const sel = {};
+        list.forEach((d, i) => { sel[i] = !!(d.to_email && d.to_email.includes("@")); });
+        setSelected(sel);
+      } catch (e) {
+        toast.error(e.response?.data?.detail || "Could not draft follow-ups");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [currentId]);
+
+  const upd = (i, patch) => setDrafts(prev => prev.map((d, j) => j === i ? { ...d, ...patch } : d));
+
+  const selectedCount = Object.values(selected).filter(Boolean).length;
+  const missingEmailCount = drafts.filter(d => !d.to_email || !d.to_email.includes("@")).length;
+
+  const sendAll = async () => {
+    const payload = drafts
+      .map((d, i) => ({ ...d, __i: i }))
+      .filter(d => selected[d.__i])
+      .map(({ __i, ...d }) => d);
+    if (!payload.length) { toast.warning("Nothing to send — select at least one draft."); return; }
+    setSending(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/invoices/ai-followup/send-all`, { drafts: payload });
+      setResult(r.data);
+      const { sent = 0, failed = 0, skipped = [] } = r.data || {};
+      if (sent && !failed && !skipped.length) toast.success(`Sent ${sent} follow-up${sent > 1 ? "s" : ""}`);
+      else if (sent) toast.success(`Sent ${sent} · ${failed} failed · ${skipped.length} skipped`);
+      else toast.error("Nothing was sent — check email deliverability.");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Send failed");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" data-testid="ai-followup-modal">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[92vh] overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between px-5 py-3 border-b bg-gradient-to-r from-indigo-600 to-indigo-700 text-white">
+          <div className="flex items-center gap-2">
+            <Sparkles size={16} />
+            <h3 className="font-heading font-semibold">AI Follow-up · Drafted chase emails</h3>
+          </div>
+          <button onClick={onClose} data-testid="ai-followup-close" className="text-white/80 hover:text-white"><X size={18} /></button>
+        </div>
+
+        {loading ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 text-slate-500 py-16" data-testid="ai-followup-loading">
+            <Loader2 size={28} className="animate-spin text-indigo-500" />
+            <div className="text-sm">Drafting personalised emails for every overdue customer…</div>
+          </div>
+        ) : drafts.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-slate-500 py-16" data-testid="ai-followup-empty">
+            <Check size={28} className="text-emerald-500" />
+            <div className="font-heading font-semibold text-slate-800">All clear!</div>
+            <div className="text-sm">No overdue invoices to chase right now.</div>
+          </div>
+        ) : (
+          <>
+            <div className="px-5 py-2 border-b bg-slate-50 text-xs text-slate-600 flex items-center justify-between">
+              <div>
+                <span className="font-semibold text-slate-800">{drafts.length}</span> customer{drafts.length > 1 ? "s" : ""} with overdue balances ·{" "}
+                <span className="font-semibold text-indigo-700">{selectedCount}</span> selected
+                {missingEmailCount > 0 && (
+                  <span className="inline-flex items-center gap-1 ml-2 text-amber-700">
+                    <MailWarning size={11} /> {missingEmailCount} missing email
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => {
+                  const allOn = drafts.every((d, i) => selected[i]);
+                  const next = {};
+                  drafts.forEach((d, i) => { next[i] = allOn ? false : !!(d.to_email && d.to_email.includes("@")); });
+                  setSelected(next);
+                }}
+                className="text-indigo-600 hover:underline"
+                data-testid="ai-followup-toggle-all"
+              >Toggle all</button>
+            </div>
+
+            <div className="flex-1 overflow-auto divide-y">
+              {drafts.map((d, i) => {
+                const hasEmail = d.to_email && d.to_email.includes("@");
+                const isOpen = expanded === i;
+                return (
+                  <div key={i} className={`${selected[i] ? "bg-white" : "bg-slate-50"}`} data-testid={`ai-followup-row-${i}`}>
+                    <div className="px-5 py-3 flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={!!selected[i]}
+                        onChange={(e) => setSelected(s => ({ ...s, [i]: e.target.checked }))}
+                        disabled={!hasEmail}
+                        className="h-4 w-4 accent-indigo-600 disabled:opacity-40"
+                        data-testid={`ai-followup-select-${i}`}
+                        title={hasEmail ? "" : "No email on file"}
+                      />
+                      <button
+                        type="button"
+                        className="flex-1 text-left"
+                        onClick={() => setExpanded(isOpen ? -1 : i)}
+                        data-testid={`ai-followup-expand-${i}`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-heading font-semibold text-slate-800">{d.customer_name}</span>
+                          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-red-100 text-red-700">
+                            {d.oldest_days}d late
+                          </span>
+                          <span className="font-mono-num text-slate-700 text-sm">{fmtMoney(d.total_due)}</span>
+                          <span className="text-xs text-slate-500">
+                            · {d.invoice_ids?.length || 0} invoice{(d.invoice_ids?.length || 0) > 1 ? "s" : ""}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-500 mt-0.5">
+                          To: {hasEmail ? <span className="font-mono-num">{d.to_email}</span> : <span className="text-amber-700">no email on file</span>}
+                        </div>
+                      </button>
+                    </div>
+                    {isOpen && (
+                      <div className="px-5 pb-4 space-y-2">
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">To</label>
+                          <input
+                            value={d.to_email || ""}
+                            onChange={(e) => upd(i, { to_email: e.target.value })}
+                            placeholder="customer@example.com"
+                            className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+                            data-testid={`ai-followup-to-${i}`}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Subject</label>
+                          <input
+                            value={d.subject || ""}
+                            onChange={(e) => upd(i, { subject: e.target.value })}
+                            className="w-full border rounded px-2 py-1.5 text-sm"
+                            data-testid={`ai-followup-subject-${i}`}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Body</label>
+                          <textarea
+                            value={d.body || ""}
+                            onChange={(e) => upd(i, { body: e.target.value })}
+                            rows={10}
+                            className="w-full border rounded px-2 py-1.5 text-sm font-mono-num leading-relaxed"
+                            data-testid={`ai-followup-body-${i}`}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="px-5 py-3 border-t bg-slate-50 flex items-center justify-between">
+              <div className="text-xs text-slate-500">
+                {result ? (
+                  <span data-testid="ai-followup-result">
+                    <b className="text-emerald-700">{result.sent} sent</b>
+                    {result.failed > 0 && <span className="text-red-700"> · {result.failed} failed</span>}
+                    {result.skipped?.length > 0 && <span className="text-amber-700"> · {result.skipped.length} skipped</span>}
+                  </span>
+                ) : (
+                  <span>Emails send via your firm's connected inbox.</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={onClose} className="px-3 py-1.5 rounded-md border text-sm text-slate-600 hover:bg-white" data-testid="ai-followup-cancel">
+                  Close
+                </button>
+                <button
+                  onClick={sendAll}
+                  disabled={sending || selectedCount === 0}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-indigo-600 text-white text-sm hover:bg-indigo-500 disabled:opacity-50"
+                  data-testid="ai-followup-send-all"
+                >
+                  {sending ? <><Loader2 size={13} className="animate-spin" /> Sending…</> : <><Send size={13} /> Send {selectedCount || ""} follow-up{selectedCount === 1 ? "" : "s"}</>}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

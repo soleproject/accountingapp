@@ -3355,3 +3355,24 @@ Every grant is written to `admin_audit_log` with kind=`superadmin_granted` (gran
 - `/app/frontend/src/components/TeamPanel.jsx` (`listUrl` appends companyId when set)
 - `/app/frontend/src/pages/ProTeam.jsx` (subscribes to `useCompany`, passes companyId + adds dynamic copy)
 
+
+---
+
+## Feb 2026 — AI Follow-up modal + Overdue filter chip (P0)
+
+**Feature:** Wire the "AI Follow-up" CTA on the A/R Highlights card to draft personalised chase emails per overdue customer, and turn the "Overdue" card into a one-click table filter.
+
+**Backend** (`/app/backend/routes/invoices.py`):
+- `_drafts_for_overdue(cid)` groups overdue invoices by contact_id, calls GPT-4o-mini via `LlmChat(feature="ai-followup")` to draft each body, and falls back to a deterministic template if the LLM errors. Attaches customer email from `contacts` collection.
+- `POST /companies/{cid}/invoices/ai-followup/drafts` returns `{drafts: [...]}` (one per customer).
+- `POST /companies/{cid}/invoices/ai-followup/send-all` dispatches edited drafts via `email_dispatcher`, skipping rows without a valid email, returning `{sent, failed, skipped[], total}`.
+
+**Frontend** (`/app/frontend/src/pages/Invoices.jsx`):
+- `AIFollowupModal` — fetches drafts, shows loading state, renders one collapsible row per customer with checkbox, To/Subject/Body editors, "Toggle all", missing-email badge, and Send button. Result summary shows sent/failed/skipped counts.
+- `overdueOnly` URL param (`?overdue=1`) — set by clicking `ar-highlights-overdue-card`, filters the client-side table to rows with `balance_due > 0 AND due_date < today`. Filter chip and "Clear filters" work for the overdue param alongside existing outstanding/as_of filters.
+
+**Verified via screenshot:**
+- Highlights toggle → Overdue card click → URL `?overdue=1` → chip "Showing **overdue** · 2 of 11" → table filtered to 2 rows ✓
+- AI Follow-up card click → modal loads → 2 GPT-drafted personalised reminder emails render with editable To/Subject/Body ✓
+- Backend curl round-trip confirmed real GPT-4o-mini output (166d late, 167d late invoices, 3-paragraph friendly-but-firm bodies) ✓
+
