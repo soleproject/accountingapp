@@ -103,7 +103,17 @@ const STANDALONE_BOTTOM = [
 const isItemActive = (loc, item) => {
   // Prefer explicit matchPath (used when the link carries query params).
   const p = item.matchPath || item.to.split("?")[0];
-  return loc.pathname === p || loc.pathname.startsWith(p + "/");
+  const pathHit = loc.pathname === p || loc.pathname.startsWith(p + "/");
+  if (!pathHit) return false;
+  // If the item's target URL specifies a `type=` query (e.g. Customers
+  // vs Vendors both live under /contacts), require the current URL's
+  // `type` to match — otherwise both groups' sub-items collide.
+  const targetType = new URLSearchParams((item.to.split("?")[1] || "")).get("type");
+  if (targetType) {
+    const currentType = new URLSearchParams(loc.search || "").get("type");
+    if (currentType && currentType !== targetType) return false;
+  }
+  return true;
 };
 
 const isGroupActive = (loc, group) =>
@@ -144,7 +154,7 @@ export default function Sidebar({ collapsed, onToggle }) {
       }
       return changed ? next : prev;
     });
-  }, [loc.pathname]);
+  }, [loc.pathname, loc.search]);
 
   const toggleGroup = (k) => setOpen((p) => ({ ...p, [k]: !p[k] }));
 
