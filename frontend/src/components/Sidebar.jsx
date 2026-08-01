@@ -28,7 +28,7 @@ const GROUPS = [
     icon: FileText,
     items: [
       { to: "/invoices", label: "Invoices", icon: FileText },
-      { to: "/payments?direction=in", label: "Payments", icon: CreditCard, matchPath: "/payments" },
+      { to: "/payments", label: "Payments", icon: CreditCard, matchPath: "/payments" },
       { to: "/items?usage=sales", label: "Items", icon: Package, matchPath: "/items" },
       { to: "/recurring", label: "Recurring", icon: Repeat },
       { to: "/contacts?type=customer&view=statements", label: "Customer Statements", icon: MailCheck, matchPath: "__never__" },
@@ -42,7 +42,6 @@ const GROUPS = [
     items: [
       { to: "/bills", label: "Bills", icon: Receipt },
       { to: "/contacts?type=vendor", label: "Vendors (contacts)", icon: Store, matchPath: "/contacts" },
-      { to: "/payments?direction=out", label: "Payments", icon: CreditCard, matchPath: "/payments" },
       { to: "/items?usage=purchases", label: "Items", icon: Package, matchPath: "/items" },
     ],
   },
