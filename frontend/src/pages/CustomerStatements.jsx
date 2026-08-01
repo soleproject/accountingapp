@@ -222,8 +222,7 @@ function StatementPreview({ preview }) {
             </div>
           )}
           <div className="text-sm leading-tight">
-            <div className="font-heading font-semibold text-slate-900">{company.name}</div>
-            {company.address && <div className="text-slate-500 whitespace-pre-line text-xs mt-0.5">{company.address}</div>}
+            {company.address && <div className="text-slate-500 whitespace-pre-line text-xs">{company.address}</div>}
             {company.country && <div className="text-slate-500 text-xs">{company.country}</div>}
           </div>
         </div>
