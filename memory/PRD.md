@@ -3415,3 +3415,41 @@ Every grant is written to `admin_audit_log` with kind=`superadmin_granted` (gran
 - Playwright screenshot: default view = Highlights, no "Issued" column in table headers ✓
 - Modal renders the fresh customer at the top, "Recently followed up · 1" collapsed section at the bottom that expands to reveal the amber-bordered row with `CHASED 2D AGO` badge and unchecked checkbox ✓
 
+
+---
+
+## Feb 2026 — Per-invoice Follow-up History timeline
+
+**Feature:** Give pros an audit-ready timeline of every AI-drafted chase email sent for an invoice so they can prove they've been chasing before writing anything off.
+
+### Backend (`/app/backend/routes/invoices.py`)
+- `POST /companies/{cid}/invoices/ai-followup/send-all` now appends a `followup_history` entry to every invoice it successfully chased. Entry shape:
+  ```
+  {
+    id, sent_at (ISO UTC), to_email, subject, body,
+    sent_by_user_id, sent_by_user_name, channel: "email"
+  }
+  ```
+  Written via `$push: {followup_history: entry}` in the same `update_many` that stamps `last_followup_at`, so both the recency guard and the audit trail stay in sync.
+- New endpoint `GET /companies/{cid}/invoices/{iid}/followup-history` returns `{invoice_id, invoice_number, last_followup_at, count, history[]}` — history is sorted newest-first so the pro's eye lands on the most recent chase immediately.
+
+### Frontend
+- **New component** `/app/frontend/src/components/FollowupHistoryBlock.jsx`:
+  - Auto-loads history from the new GET endpoint. Silently renders nothing if the history is empty (avoids visual noise on invoices that have never been chased).
+  - Header: mail icon + `N chase emails sent · latest X days ago`.
+  - Vertical timeline (indigo dots on a border-left) with one card per entry showing subject, recipient email, sender name, absolute timestamp (`Jul 30, 2026, 2:37 AM`), and relative time (`2 days ago`).
+  - Click any row to expand the full email body in a soft-indigo panel — preserves whitespace via `pre-wrap` so the pro sees exactly what the customer received.
+- **Wired into** `/app/frontend/src/pages/InvoiceEditor.jsx` — rendered directly after `PaymentHistoryBlock` when in edit mode.
+
+### Verified end-to-end
+- Backend: seeded 3 history entries on INV-2042 (2d, 14d, 30d ago). `GET /followup-history` returns `count=3` with newest-first ordering ✓
+- Playwright screenshot on `/invoices/{id}/edit`:
+  - Header renders `3 chase emails sent · latest 2 days ago` ✓
+  - 3 timeline entries render with correct subjects, recipients, sender = "Michael Chen", and matching relative-time badges ✓
+  - Clicking the top row expands the full body ("Hi TEST_dupctx, Just a gentle follow-up on invoice INV-2042…") in the indigo panel ✓
+
+### Files touched
+- `/app/backend/routes/invoices.py` — GET endpoint added, `send-all` push-history logic added
+- `/app/frontend/src/components/FollowupHistoryBlock.jsx` — new component
+- `/app/frontend/src/pages/InvoiceEditor.jsx` — import + render in edit mode
+

@@ -246,6 +246,30 @@ async def get_invoice(cid: str, iid: str, user: dict = Depends(get_current_user)
     return {"invoice": coerce(inv)}
 
 
+@router.get("/companies/{cid}/invoices/{iid}/followup-history")
+async def get_followup_history(cid: str, iid: str, user: dict = Depends(get_current_user)):
+    """Timeline of every AI Follow-up email successfully sent for this
+    invoice. Newest first so the pro can eyeball the most recent chase
+    without scrolling."""
+    await require_company(user, cid)
+    inv = await db.invoices.find_one(
+        {"id": iid, "company_id": cid},
+        {"followup_history": 1, "last_followup_at": 1, "number": 1},
+    )
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    history = list(inv.get("followup_history") or [])
+    history.sort(key=lambda e: str(e.get("sent_at") or ""), reverse=True)
+    return {
+        "invoice_id": iid,
+        "invoice_number": inv.get("number"),
+        "last_followup_at": inv.get("last_followup_at"),
+        "count": len(history),
+        "history": history,
+    }
+
+
+
 @router.post("/companies/{cid}/invoices")
 async def create_invoice(cid: str, inp: InvoiceCreate, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
@@ -785,13 +809,27 @@ async def ai_followup_send_all(cid: str, payload: dict, user: dict = Depends(get
             if resp.get("status") == "sent":
                 sent += 1
                 # Stamp every invoice we chased with the send time so the
-                # modal can warn on repeat clicks within 7 days.
+                # modal can warn on repeat clicks within 7 days, and
+                # append a history entry so pros can prove the chase.
                 inv_ids = d.get("invoice_ids") or []
                 if inv_ids:
                     stamp = datetime.now(timezone.utc).isoformat()
+                    entry = {
+                        "id": uuid.uuid4().hex,
+                        "sent_at": stamp,
+                        "to_email": to,
+                        "subject": subj,
+                        "body": body_text,
+                        "sent_by_user_id": user.get("id"),
+                        "sent_by_user_name": user.get("name") or user.get("email") or "",
+                        "channel": "email",
+                    }
                     await db.invoices.update_many(
                         {"company_id": cid, "id": {"$in": inv_ids}},
-                        {"$set": {"last_followup_at": stamp}},
+                        {
+                            "$set": {"last_followup_at": stamp},
+                            "$push": {"followup_history": entry},
+                        },
                     )
             else:
                 failed += 1

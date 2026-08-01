@@ -10,6 +10,7 @@ import {
 import ItemPicker from "@/components/ItemPicker";
 import ContactCombobox from "@/components/ContactCombobox";
 import PaymentHistoryBlock from "@/components/PaymentHistoryBlock";
+import FollowupHistoryBlock from "@/components/FollowupHistoryBlock";
 
 const TERMS_OPTIONS = [
   { label: "Due on receipt", days: 0 },
@@ -903,6 +904,14 @@ function EditForm({
           contactId={contact}
           currentId={currentId}
           onPaymentRecorded={reloadPayments}
+        />
+      )}
+
+      {editMode && (
+        <FollowupHistoryBlock
+          currentId={currentId}
+          docId={docId}
+          docLabel={number}
         />
       )}
 
