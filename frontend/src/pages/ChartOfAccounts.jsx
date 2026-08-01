@@ -1077,11 +1077,72 @@ function SuggestCoAModal({ currentId, onClose }) {
   );
 }
 
+// Wave-style granular sub-types grouped by parent Type. The `key` is
+// stored in the account's `detail_type` field; the modal reveals extra
+// fields when a Fixed Asset or Loan sub-type is picked.
+const DETAIL_TYPES = {
+  asset: [
+    { key: "cash_and_bank",                 label: "Cash and Bank" },
+    { key: "money_in_transit",              label: "Money in Transit" },
+    { key: "expected_payments_from_customers", label: "Accounts Receivable" },
+    { key: "inventory",                     label: "Inventory" },
+    { key: "property_plant_equipment",      label: "Property, Plant & Equipment" },
+    { key: "depreciation_and_amortization", label: "Depreciation and Amortization" },
+    { key: "vendor_prepayments",            label: "Vendor Prepayments & Credits" },
+    { key: "other_short_term_asset",        label: "Other Short-Term Asset" },
+    { key: "other_long_term_asset",         label: "Other Long-Term Asset" },
+  ],
+  liability: [
+    { key: "credit_card",                   label: "Credit Card" },
+    { key: "loan_and_line_of_credit",       label: "Loan and Line of Credit" },
+    { key: "expected_payments_to_vendors",  label: "Accounts Payable" },
+    { key: "due_for_payroll",               label: "Due For Payroll" },
+    { key: "due_to_owners",                 label: "Due to Owners" },
+    { key: "customer_prepayments",          label: "Customer Prepayments & Credits" },
+    { key: "sales_tax_payable",             label: "Sales Tax Payable" },
+    { key: "other_short_term_liability",    label: "Other Short-Term Liability" },
+    { key: "other_long_term_liability",     label: "Other Long-Term Liability" },
+  ],
+  equity: [
+    { key: "owner_contribution_drawing",    label: "Owner Contribution & Drawing" },
+    { key: "retained_earnings",             label: "Retained Earnings" },
+    { key: "other_equity",                  label: "Other Equity" },
+  ],
+  revenue: [
+    { key: "income",                        label: "Income" },
+    { key: "discount",                      label: "Discount" },
+    { key: "other_income",                  label: "Other Income" },
+  ],
+  expense: [
+    { key: "operating_expense",             label: "Operating Expense" },
+    { key: "cost_of_goods_sold",            label: "Cost of Goods Sold" },
+    { key: "payment_processing_fee",        label: "Payment Processing Fee" },
+    { key: "payroll_expense",               label: "Payroll Expense" },
+    { key: "other_expense",                 label: "Other Expense" },
+  ],
+};
+
+const ASSET_TYPE_OPTIONS = [
+  { key: "equipment",  label: "Equipment (5 yr life)" },
+  { key: "furniture",  label: "Furniture & Fixtures (7 yr)" },
+  { key: "vehicle",    label: "Vehicle (5 yr)" },
+  { key: "computer",   label: "Computer Hardware (5 yr)" },
+  { key: "building",   label: "Building (39 yr)" },
+  { key: "land",       label: "Land (non-depreciable)" },
+  { key: "leasehold",  label: "Leasehold Improvement (15 yr)" },
+  { key: "other",      label: "Other" },
+];
+
 function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onClose }) {
   const p = prefill || {};
   const [code, setCode] = useState(p.code || "");
   const [name, setName] = useState(p.name || "");
   const [type, setType] = useState(TYPES.includes(p.type) ? p.type : "expense");
+  const detailsForType = (t) => DETAIL_TYPES[t === "revenue" ? "revenue" : t] || [];
+  const [detailType, setDetailType] = useState(() => {
+    const list = detailsForType(TYPES.includes(p.type) ? p.type : "expense");
+    return list[0]?.key || "";
+  });
   const [subtype, setSubtype] = useState(
     p.subtype && subtypesFor(TYPES.includes(p.type) ? p.type : "expense").includes(p.subtype)
       ? p.subtype
@@ -1090,6 +1151,23 @@ function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onCl
   // Sub-account parent — prefilled if the caller passed one (used by
   // some AI actions that spawn nested accounts directly).
   const [parentId, setParentId] = useState(p.parent_account_id || "");
+
+  // Fixed asset extras — only sent when detailType === property_plant_equipment
+  const [cost, setCost] = useState("");
+  const [purchaseDate, setPurchaseDate] = useState("");
+  const [assetTypeKey, setAssetTypeKey] = useState("equipment");
+  const [lifeYears, setLifeYears] = useState("");
+  const [salvage, setSalvage] = useState("");
+
+  // Loan extras — only sent when detailType === loan_and_line_of_credit
+  const [lender, setLender] = useState("");
+  const [principal, setPrincipal] = useState("");
+  const [rate, setRate] = useState("");
+  const [termMonths, setTermMonths] = useState("");
+  const [startDate, setStartDate] = useState("");
+
+  const isFixedAsset = type === "asset" && detailType === "property_plant_equipment";
+  const isLoan = type === "liability" && detailType === "loan_and_line_of_credit";
 
   const eligibleParents = (allAccounts || [])
     .filter((row) => row.type === type && !row.parent_account_id)
@@ -1107,30 +1185,65 @@ function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onCl
       }
     }
     if (!name.trim()) { toast.error("Name is required."); return; }
-    await api.post(`/companies/${currentId}/accounts`, {
+    if (isFixedAsset) {
+      if (!cost || Number(cost) <= 0) { toast.error("Cost is required."); return; }
+      if (!purchaseDate) { toast.error("Purchase date is required."); return; }
+    }
+    if (isLoan) {
+      if (!principal || Number(principal) <= 0) { toast.error("Principal is required."); return; }
+    }
+    const payload = {
       code: effectiveCode, name: name.trim(), type, subtype,
+      detail_type: detailType,
       parent_account_id: parentId || null,
-    });
-    toast.success("Account created"); onClose();
+    };
+    if (isFixedAsset) {
+      Object.assign(payload, {
+        cost: Number(cost),
+        purchase_date: purchaseDate,
+        asset_type: assetTypeKey,
+        useful_life_years: lifeYears ? Number(lifeYears) : null,
+        salvage_value: salvage ? Number(salvage) : 0,
+      });
+    }
+    if (isLoan) {
+      Object.assign(payload, {
+        lender: (lender || name).trim(),
+        principal: Number(principal),
+        rate: rate ? Number(rate) : null,
+        term_months: termMonths ? Number(termMonths) : null,
+        start_date: startDate || null,
+      });
+    }
+    const r = await api.post(`/companies/${currentId}/accounts`, payload);
+    const se = r.data?.side_effect;
+    if (se?.kind === "fixed_asset" && se.error) toast.warning(`Account saved. Fixed Asset skipped: ${se.error}`);
+    else if (se?.kind === "fixed_asset") toast.success("Account + Fixed Asset created");
+    else if (se?.kind === "loan") toast.success("Account + Loan created");
+    else toast.success("Account created");
+    onClose();
   };
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-3">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-3 max-h-[92vh] overflow-y-auto">
         <h3 className="font-heading font-semibold">New Account</h3>
         {showCodes && (
           <input placeholder="Code (e.g. 6250)" value={code} onChange={(e) => setCode(e.target.value)}
-                 className="w-full border rounded px-3 py-2 text-sm font-mono-num" />
+                 className="w-full border rounded px-3 py-2 text-sm font-mono-num" data-testid="coa-create-code" />
         )}
         <input placeholder="Account name" value={name} onChange={(e) => setName(e.target.value)}
-               className="w-full border rounded px-3 py-2 text-sm" />
+               className="w-full border rounded px-3 py-2 text-sm" data-testid="coa-create-name" />
         <select
           value={type}
+          data-testid="coa-create-type"
           onChange={(e) => {
             const nextType = e.target.value;
             setType(nextType);
             if (!subtypesFor(nextType).includes(subtype)) {
               setSubtype(subtypesFor(nextType)[0]);
             }
+            const list = detailsForType(nextType);
+            setDetailType(list[0]?.key || "");
             // Drop the parent if the new type invalidates it — sub-accounts
             // must live under a parent of the same type.
             if (parentId) {
@@ -1142,15 +1255,115 @@ function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onCl
         >
           {TYPES.map(t => <option key={t} value={t}>{prettyLabel(t)}</option>)}
         </select>
-        <select
-          value={subtype}
-          onChange={(e) => setSubtype(e.target.value)}
-          className="w-full border rounded px-3 py-2 text-sm"
-        >
-          {subtypesFor(type).map(s => (
-            <option key={s} value={s}>{prettyLabel(s)}</option>
-          ))}
-        </select>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Sub-type</label>
+          <select
+            value={detailType}
+            onChange={(e) => setDetailType(e.target.value)}
+            className="w-full border rounded px-3 py-2 text-sm bg-white"
+            data-testid="coa-create-detail-type"
+          >
+            {detailsForType(type).map(dt => (
+              <option key={dt.key} value={dt.key}>{dt.label}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Conditional fields — Fixed Asset flow */}
+        {isFixedAsset && (
+          <div className="rounded-lg bg-indigo-50/60 border border-indigo-100 px-3 py-3 space-y-2" data-testid="coa-fixed-asset-fields">
+            <div className="text-[11px] text-indigo-800 font-semibold uppercase tracking-wide">Fixed Asset details</div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[10px] text-slate-600 mb-0.5">Cost</label>
+                <input type="number" step="0.01" value={cost} onChange={(e) => setCost(e.target.value)}
+                       placeholder="0.00"
+                       className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+                       data-testid="coa-fa-cost" />
+              </div>
+              <div>
+                <label className="block text-[10px] text-slate-600 mb-0.5">Purchase date</label>
+                <input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)}
+                       className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+                       data-testid="coa-fa-date" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-[10px] text-slate-600 mb-0.5">Asset type</label>
+              <select value={assetTypeKey} onChange={(e) => setAssetTypeKey(e.target.value)}
+                      className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+                      data-testid="coa-fa-type">
+                {ASSET_TYPE_OPTIONS.map(at => (
+                  <option key={at.key} value={at.key}>{at.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[10px] text-slate-600 mb-0.5">Life (yrs) — override</label>
+                <input type="number" value={lifeYears} onChange={(e) => setLifeYears(e.target.value)}
+                       placeholder="auto"
+                       className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+                       data-testid="coa-fa-life" />
+              </div>
+              <div>
+                <label className="block text-[10px] text-slate-600 mb-0.5">Salvage value</label>
+                <input type="number" step="0.01" value={salvage} onChange={(e) => setSalvage(e.target.value)}
+                       placeholder="0.00"
+                       className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+                       data-testid="coa-fa-salvage" />
+              </div>
+            </div>
+            <div className="text-[10px] text-slate-500">
+              We'll auto-post the acquisition entry and build the depreciation schedule. Funding can be allocated later on the Assets page.
+            </div>
+          </div>
+        )}
+
+        {/* Conditional fields — Loan flow */}
+        {isLoan && (
+          <div className="rounded-lg bg-indigo-50/60 border border-indigo-100 px-3 py-3 space-y-2" data-testid="coa-loan-fields">
+            <div className="text-[11px] text-indigo-800 font-semibold uppercase tracking-wide">Loan details</div>
+            <input placeholder="Lender (e.g. Wells Fargo)" value={lender} onChange={(e) => setLender(e.target.value)}
+                   className="w-full border rounded px-2 py-1.5 text-sm"
+                   data-testid="coa-loan-lender" />
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[10px] text-slate-600 mb-0.5">Principal</label>
+                <input type="number" step="0.01" value={principal} onChange={(e) => setPrincipal(e.target.value)}
+                       placeholder="0.00"
+                       className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+                       data-testid="coa-loan-principal" />
+              </div>
+              <div>
+                <label className="block text-[10px] text-slate-600 mb-0.5">Rate %</label>
+                <input type="number" step="0.001" value={rate} onChange={(e) => setRate(e.target.value)}
+                       placeholder="0.000"
+                       className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+                       data-testid="coa-loan-rate" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[10px] text-slate-600 mb-0.5">Term (months)</label>
+                <input type="number" value={termMonths} onChange={(e) => setTermMonths(e.target.value)}
+                       placeholder="60"
+                       className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+                       data-testid="coa-loan-term" />
+              </div>
+              <div>
+                <label className="block text-[10px] text-slate-600 mb-0.5">Start date</label>
+                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
+                       className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+                       data-testid="coa-loan-start" />
+              </div>
+            </div>
+            <div className="text-[10px] text-slate-500">
+              We'll add this to the Loans register so the amortization schedule tracks alongside the CoA balance.
+            </div>
+          </div>
+        )}
+
         <div>
           <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">
             Sub-account of (optional)

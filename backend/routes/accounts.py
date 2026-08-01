@@ -308,7 +308,9 @@ async def create_account(cid: str, inp: AccountCreate, user: dict = Depends(get_
     aid = str(uuid.uuid4()); now = now_iso()
     doc = {
         "id": aid, "company_id": cid, "code": inp.code, "name": inp.name,
-        "type": inp.type, "subtype": inp.subtype, "active": True, "balance": 0.0,
+        "type": inp.type, "subtype": inp.subtype,
+        "detail_type": (inp.detail_type or "").strip(),
+        "active": True, "balance": 0.0,
         "created_at": now, "updated_at": now,
     }
     # Sub-account link — validate the parent belongs to the same company
@@ -325,7 +327,53 @@ async def create_account(cid: str, inp: AccountCreate, user: dict = Depends(get_
             raise HTTPException(400, "Parent must be a top-level account (only one level of nesting).")
         doc["parent_account_id"] = inp.parent_account_id
     await db.accounts.insert_one(doc)
-    return {"id": aid}
+
+    # ── Side effect 1: Fixed Asset ────────────────────────────────────
+    # When the user picked "Property, Plant & Equipment" AND provided cost
+    # + purchase date, spawn a Fixed Asset record (with acquisition JE +
+    # depreciation schedule) so the Assets register mirrors the CoA.
+    side_effect = None
+    if (inp.detail_type == "property_plant_equipment"
+            and inp.cost and inp.cost > 0 and inp.purchase_date):
+        try:
+            from asset_service import create_fixed_asset
+            fa = await create_fixed_asset(cid, {
+                "name": inp.name,
+                "cost": float(inp.cost),
+                "purchase_date": inp.purchase_date,
+                "asset_type": inp.asset_type or "other",
+                "useful_life_years": inp.useful_life_years,
+                "salvage_value": float(inp.salvage_value or 0),
+                # No offsets provided from CoA modal → asset_service will
+                # book to Fixed Asset Suspense; user can allocate later.
+            })
+            side_effect = {"kind": "fixed_asset", "asset_id": fa.get("asset", {}).get("id")}
+        except Exception as e:
+            # Don't fail the account creation; surface the sub-create
+            # error so the frontend can toast it.
+            side_effect = {"kind": "fixed_asset", "error": str(e)}
+
+    # ── Side effect 2: Loan ───────────────────────────────────────────
+    # When the user picked "Loan and Line of Credit" AND provided the
+    # loan metadata, spawn the Loans register row.
+    elif (inp.detail_type == "loan_and_line_of_credit"
+            and (inp.lender or inp.principal)):
+        loan_doc = {
+            "id": str(uuid.uuid4()),
+            "company_id": cid,
+            "account_id": aid,
+            "lender": (inp.lender or inp.name or "").strip(),
+            "principal": float(inp.principal or 0),
+            "rate": float(inp.rate) if inp.rate is not None else None,
+            "term_months": int(inp.term_months) if inp.term_months is not None else None,
+            "start_date": inp.start_date or None,
+            "created_at": now, "updated_at": now,
+            "source": "coa_modal",
+        }
+        await db.loans.insert_one(loan_doc)
+        side_effect = {"kind": "loan", "loan_id": loan_doc["id"]}
+
+    return {"id": aid, "side_effect": side_effect}
 
 
 # Idempotent "get-or-create" used by AI-driven flows (voice: "create a Transfer

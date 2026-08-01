@@ -147,9 +147,30 @@ class AccountCreate(BaseModel):
     name: str
     type: str
     subtype: str = ""
+    # Wave-style granular sub-type (e.g. "cash_and_bank",
+    # "property_plant_equipment", "loan_and_line_of_credit"). Drives the
+    # CoA sub-section grouping and the modal's conditional extra fields.
+    detail_type: Optional[str] = ""
     # Optional parent for sub-account grouping (e.g. Utilities → Electric,
     # Phone, Water, Gas). One level deep only — enforced client-side.
     parent_account_id: Optional[str] = None
+    # ── Fixed Asset auto-create fields ────────────────────────────────
+    # When detail_type == "property_plant_equipment" AND these are set,
+    # we call asset_service.create_fixed_asset() to spawn the register
+    # row + acquisition JE + depreciation schedule alongside the CoA row.
+    cost: Optional[float] = None
+    purchase_date: Optional[str] = None       # ISO YYYY-MM-DD
+    useful_life_years: Optional[float] = None
+    salvage_value: Optional[float] = None
+    asset_type: Optional[str] = None          # key from ASSET_TYPES
+    # ── Loan auto-create fields ───────────────────────────────────────
+    # When detail_type == "loan_and_line_of_credit" AND these are set,
+    # we spawn the linked loans row so the Loans page mirrors the CoA.
+    lender: Optional[str] = None
+    principal: Optional[float] = None
+    rate: Optional[float] = None
+    term_months: Optional[int] = None
+    start_date: Optional[str] = None
 
 
 class JECreate(BaseModel):
