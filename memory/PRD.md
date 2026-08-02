@@ -3479,3 +3479,30 @@ Every grant is written to `admin_audit_log` with kind=`superadmin_granted` (gran
 - Tab bar: `['Edit', 'Preview', 'Follow-up history\n3']` — badge renders `3` for INV-2042 which has 3 seeded entries ✓
 - Clicking the tab loads the timeline (3 entries), expanding entry-0 reveals the full body pane ✓
 
+
+---
+
+## Feb 2026 — Tier 2 Inventory Module (COMPLETE, 5 phases)
+
+**Change:** Full weighted-average inventory bookkeeping across items, bills, invoices, adjustments, and reports. Tier 2 spec: weighted-avg only, starts from today (no retroactive backfill), warn-but-allow negative QOH, atomic delta-based reversal.
+
+### Files added / touched
+- **`/app/backend/inventory_service.py`** — new engine. `apply_bill_inventory`, `apply_invoice_inventory`, `apply_adjustment`, `compute_valuation`, `list_movements`, `_reverse_bill_hooks`, `_reverse_invoice_hooks`. Delta-based reversal so intervening adjustments survive.
+- **`/app/backend/routes/items.py`** — `ItemIn`/`ItemPatch` extended with `track_inventory`, `quantity_on_hand`, `cost_basis`, `inventory_account_id`, `cogs_account_id`, `low_stock_threshold`. Backfills account names on create.
+- **`/app/backend/routes/bills.py`** — create/update/delete wired to inventory_service. Hooks stored on `bill.inventory_hooks` for idempotent re-save.
+- **`/app/backend/routes/invoices.py`** — create/update/delete wired. Response includes `inventory_warnings` when a sale would push QOH negative.
+- **`/app/backend/routes/inventory.py`** — new endpoints: `POST /companies/{cid}/inventory-management/adjustments`, `GET /valuation`, `GET /movements`.
+- **`/app/frontend/src/pages/InventoryPage.jsx`** — new tabbed page (Valuation / Movements / Adjustments) with AdjustmentModal (delta or absolute set + reason dropdown).
+- **`/app/frontend/src/pages/Items.jsx`** — modal now has inventory sub-form (toggle, opening QOH/cost, account pickers, low-stock threshold) with auto-picked defaults when only one account matches.
+- **`/app/frontend/src/App.js`** — route `/inventory-management → InventoryPage`.
+- **`/app/frontend/src/components/Sidebar.jsx`** — "Inventory" link under Accounting group (between Loans and Tags).
+- **`/app/frontend/src/pages/Reports.jsx`** — Inventory Valuation tile added.
+
+### Accounting design (agreed w/ user)
+- Bill JE: `DR Inventory / CR line.expense_account_id` — the CR against the same expense account intentionally offsets both cash-based expense recognition on later payment AND the accrual A/P adjustment in reports._open_ar_ap → net P&L effect from inventory purchases is $0 until sold.
+- Invoice JE: `DR COGS / CR Inventory` at the item's current weighted-avg cost.
+- Adjustments: DR/CR against Inventory + auto-created "Inventory Adjustments" expense account (detail_type=`inventory_adjustment`).
+- Movements audit trail in new `inventory_movements` collection.
+
+### Verified
+- All 9 pytest cases in `/app/backend/tests/test_inventory_tier2.py` PASS. Frontend fully validated: Items modal reveal, /inventory-management page (all 3 tabs), sidebar link, adjustment modal.
