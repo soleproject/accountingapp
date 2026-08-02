@@ -17,6 +17,18 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Draggable Insights panel + Recharts visualisations
+
+**Frontend** (`components/InsightsChatWidget.jsx`)
+- **Draggable panel** — the header is now a drag handle (`cursor-move`, grip icon). Grab and drop anywhere on the viewport; position persists to `localStorage` (`insights_chat_pos_v1`). Double-click the header to reset to the default bottom-right position. Auto-clamps back on window resize so the panel never strands off-screen.
+- **Recharts visualisations** on every chart card (kept alongside the existing text summaries per user request):
+  - `income_statement` → indigo Revenue vs rose Expense bar chart with data labels + big Net Income callout (green/red based on sign)
+  - `balance_sheet` → tri-color donut of Assets / Liabilities / Equity + legend
+  - `ar_aging` / `ap_aging` → horizontal bar of top 6 outstanding customers/vendors with money labels
+  - `inventory_valuation` → total-value hero + horizontal bar of top 5 items by value
+  - `reorder_alerts` → stacked horizontal bar showing threshold (grey track) vs on-hand (amber warn)
+- **Auth fix** — SSE stream fetch was pulling from the wrong localStorage key (`token` vs the app's `axiom_token`), causing 401s. Fixed to check `axiom_token` first with fallbacks.
+
 ### Feb 2026 — Insights launcher moved into Sidebar + CPA-firm Marketing PDF variant
 
 **Frontend**

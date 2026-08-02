@@ -1,16 +1,16 @@
 /**
- * InsightsChatWidget — a QBO-Intuit-Intelligence-style floating AI
- * companion. Small pill at bottom-right by default; click it and it
- * expands into a side sheet that can further grow to embed a live
- * chart.
+ * InsightsChatWidget — a QBO-Intuit-Intelligence-style AI companion.
+ *
+ * Triggered by any launcher that dispatches the global `insights:open`
+ * event (currently the sidebar button just above the user profile).
+ * The panel itself is draggable — grab the header and drop it anywhere
+ * on the viewport. Position persists to localStorage.
  *
  * INTENTIONALLY SEPARATE from `AiPanel` (the big right-edge cockpit).
- * • Uses its own endpoint: `/companies/{cid}/ai/insights/ask`
+ * • Uses its own endpoint: `/companies/{cid}/ai/insights/ask/stream`
  * • Uses its own conversation memory (session-scoped, sessionStorage)
- * • Auto-hides when the AiPanel is open (checks `--ai-panel-width`)
- *   so the two never fight for the same pixels.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
@@ -19,7 +19,12 @@ import { toast } from "sonner";
 import {
   Sparkles, Send, X, ChevronDown, ChevronUp, ArrowUpRight,
   Loader2, MessageSquare, BarChart3, Mic, MicOff, AlertCircle,
+  GripHorizontal,
 } from "lucide-react";
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, ReferenceLine, LabelList,
+} from "recharts";
 
 const STARTER_PROMPTS = [
   "How's my profit doing this quarter?",
@@ -29,13 +34,29 @@ const STARTER_PROMPTS = [
 ];
 
 const SESSION_KEY = "insights_chat_session";
+const POS_KEY = "insights_chat_pos_v1";
+
+// ── Palette for charts (matches the app's indigo/fuchsia gradient) ─
+const C = {
+  revenue: "#4F46E5",   // indigo-600
+  expense: "#F43F5E",   // rose-500
+  positive: "#10B981",  // emerald-500
+  negative: "#F43F5E",
+  assets: "#4F46E5",
+  liab:   "#F59E0B",    // amber-500
+  equity: "#D946EF",    // fuchsia-500
+  bar:    "#6366F1",
+  warn:   "#F59E0B",
+  track:  "#E2E8F0",
+};
+
 
 export default function InsightsChatWidget() {
   const { currentId } = useCompany();
   const location = useLocation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState([]);   // {role, text, chart_id?, chart_title?, chart_data?, quick_actions?}
+  const [messages, setMessages] = useState([]);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [aiPanelWidth, setAiPanelWidth] = useState(0);
@@ -46,13 +67,99 @@ export default function InsightsChatWidget() {
   }, []);
   const listRef = useRef(null);
 
-  // ── Cost cap awareness ────────────────────────────────────────────
-  // Per-company monthly ceiling stored in localStorage (v1); backend
-  // meters actual spend and returns 'ok' | 'warn' (≥80%) | 'block'.
-  const monthlyCap = Number(localStorage.getItem("insights_monthly_cap") || 0);
-  const [budget, setBudget] = useState(null);   // {status, spent, cap, ...}
+  // ── Draggable positioning ────────────────────────────────────────
+  // `pos` = {left, top} in pixels once the user has dragged; null →
+  // default bottom-right (right of the AiPanel if it's open). Persisted
+  // so the panel opens where you last placed it.
+  const [pos, setPos] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(POS_KEY) || "null"); }
+    catch { return null; }
+  });
+  const panelRef = useRef(null);
+  const dragRef = useRef({ active: false, startX: 0, startY: 0, baseLeft: 0, baseTop: 0 });
 
-  // ── Voice input (Web Speech API — no external deps) ───────────────
+  const startDrag = (e) => {
+    if (!panelRef.current) return;
+    // Only respond to primary button
+    if (e.button !== 0) return;
+    const rect = panelRef.current.getBoundingClientRect();
+    dragRef.current = {
+      active: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      baseLeft: rect.left,
+      baseTop: rect.top,
+    };
+    // Keep text selection from happening mid-drag
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    const onMove = (e) => {
+      const d = dragRef.current;
+      if (!d.active || !panelRef.current) return;
+      const dx = e.clientX - d.startX;
+      const dy = e.clientY - d.startY;
+      const rect = panelRef.current.getBoundingClientRect();
+      // Clamp so at least 40px of the header stays on-screen
+      const maxLeft = window.innerWidth - 40;
+      const maxTop  = window.innerHeight - 40;
+      const nextLeft = Math.min(Math.max(-rect.width + 80, d.baseLeft + dx), maxLeft);
+      const nextTop  = Math.min(Math.max(0, d.baseTop + dy), maxTop);
+      setPos({ left: nextLeft, top: nextTop });
+    };
+    const onUp = () => {
+      if (!dragRef.current.active) return;
+      dragRef.current.active = false;
+      try {
+        // Persist whatever left/top ended up in state via the closure.
+        // We rely on React batching — read from localStorage in the
+        // next tick is unreliable, so grab from panelRef instead.
+        if (panelRef.current) {
+          const r = panelRef.current.getBoundingClientRect();
+          localStorage.setItem(POS_KEY, JSON.stringify({ left: r.left, top: r.top }));
+        }
+      } catch {}
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+
+  // When the viewport shrinks (browser resize), pull the panel back on
+  // screen instead of stranding it off the edge.
+  useEffect(() => {
+    const onResize = () => {
+      if (!pos || !panelRef.current) return;
+      const r = panelRef.current.getBoundingClientRect();
+      const maxLeft = window.innerWidth - Math.min(r.width, 120);
+      const maxTop  = window.innerHeight - 40;
+      if (pos.left > maxLeft || pos.top > maxTop) {
+        const next = {
+          left: Math.min(pos.left, Math.max(0, maxLeft)),
+          top:  Math.min(pos.top,  Math.max(0, maxTop)),
+        };
+        setPos(next);
+        localStorage.setItem(POS_KEY, JSON.stringify(next));
+      }
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [pos]);
+
+  const resetPosition = () => {
+    setPos(null);
+    localStorage.removeItem(POS_KEY);
+  };
+
+  // ── Cost cap awareness ────────────────────────────────────────────
+  const monthlyCap = Number(localStorage.getItem("insights_monthly_cap") || 0);
+  const [budget, setBudget] = useState(null);
+
+  // ── Voice input ───────────────────────────────────────────────────
   const [listening, setListening] = useState(false);
   const recogRef = useRef(null);
   const voiceSupported = typeof window !== "undefined"
@@ -73,24 +180,19 @@ export default function InsightsChatWidget() {
     recogRef.current = r; setListening(true);
   };
 
-  // Open the panel when the sidebar (or any other launcher) fires a
-  // global `insights:open` event. Lets us keep this component as the
-  // single source of truth for the panel while allowing multiple entry
-  // points across the app.
+  // Global open trigger — sidebar (or anywhere else) fires this.
   useEffect(() => {
     const onOpen = () => setOpen(true);
     window.addEventListener("insights:open", onOpen);
     return () => window.removeEventListener("insights:open", onOpen);
   }, []);
 
-  // Track how many pixels the right-edge AiPanel is currently
-  // consuming so we can slide the pill left instead of hiding it.
-  // AiPanel exposes `body[data-ai-panel-open="1"]` when expanded; the
-  // saved width lives in `--ai-panel-width`.
+  // Track how much horizontal room the right-edge AiPanel is eating so
+  // the DEFAULT (undragged) position slides left to avoid overlap.
   useEffect(() => {
     const check = () => {
-      const open = document.body.getAttribute("data-ai-panel-open") === "1";
-      if (!open) { setAiPanelWidth(0); return; }
+      const openAi = document.body.getAttribute("data-ai-panel-open") === "1";
+      if (!openAi) { setAiPanelWidth(0); return; }
       const w = getComputedStyle(document.documentElement)
         .getPropertyValue("--ai-panel-width").trim();
       setAiPanelWidth(parseInt(w, 10) || 0);
@@ -104,8 +206,6 @@ export default function InsightsChatWidget() {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [messages, busy]);
 
-  // Fetch current budget once on mount so the warning banner reflects
-  // reality even before the first ask of the session.
   useEffect(() => {
     if (!currentId) return;
     api.get(`/companies/${currentId}/ai/insights/budget`,
@@ -120,11 +220,11 @@ export default function InsightsChatWidget() {
     setMessages(m => [...m, { role: "user", text: question }]);
     setQ("");
     setBusy(true);
-    // Insert an empty assistant bubble we'll stream into.
     const assistantIdx = messages.length + 1;
     setMessages(m => [...m, { role: "assistant", text: "", streaming: true }]);
     try {
-      const authToken = localStorage.getItem("token")
+      const authToken = localStorage.getItem("axiom_token")
+        || localStorage.getItem("token")
         || sessionStorage.getItem("token") || "";
       const apiBase = process.env.REACT_APP_BACKEND_URL || "";
       const resp = await fetch(
@@ -167,7 +267,6 @@ export default function InsightsChatWidget() {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += dec.decode(value, { stream: true });
-        // Split on \n\n boundaries — that's the SSE event delimiter.
         let idx;
         while ((idx = buffer.indexOf("\n\n")) !== -1) {
           const frame = buffer.slice(0, idx);
@@ -205,7 +304,6 @@ export default function InsightsChatWidget() {
               copy[assistantIdx] = { ...copy[assistantIdx], streaming: false };
               return copy;
             });
-            // Refresh budget so the warning banner tracks after each ask.
             api.get(`/companies/${currentId}/ai/insights/budget`,
                     { params: monthlyCap > 0 ? { monthly_cap: monthlyCap } : {} })
               .then(r => setBudget(r.data)).catch(() => {});
@@ -234,46 +332,66 @@ export default function InsightsChatWidget() {
     location.reload && location.reload();
   };
 
-  // Never render on the login page / when there's no company selected.
   if (!currentId) return null;
 
-  // Slide the pill LEFT of the expanded AiPanel edge (+16px gap) so
-  // they never overlap. When AiPanel is collapsed the offset is 0 and
-  // the pill sits in its natural bottom-right home.
-  const rightOffset = aiPanelWidth > 0 ? aiPanelWidth + 24 : 24;
+  // Default (undragged) position — slide left of AiPanel when it's open.
+  const defaultRightOffset = aiPanelWidth > 0 ? aiPanelWidth + 24 : 24;
+  const defaultBottom = aiPanelWidth > 0 ? 84 : 24;
+
+  // Size: taller when a chart is showing.
+  const hasChart = messages.some(m => m.chart_data);
+  const sizeCls = hasChart
+    ? "w-[min(720px,calc(100vw-3rem))] h-[min(680px,calc(100vh-3rem))]"
+    : "w-[min(420px,calc(100vw-3rem))] h-[min(560px,calc(100vh-3rem))]";
+
+  const positionStyle = pos
+    ? { left: `${pos.left}px`, top: `${pos.top}px`, right: "auto", bottom: "auto" }
+    : { right: `${defaultRightOffset}px`, bottom: `${defaultBottom}px` };
 
   return (
     <>
       {open && (
         <div
+          ref={panelRef}
           data-testid="insights-chat-panel"
-          style={{ right: `${rightOffset}px`, bottom: aiPanelWidth > 0 ? "84px" : "24px" }}
-          className={`fixed z-40 bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col ${
-            messages.some(m => m.chart_data)
-              ? "w-[min(720px,calc(100vw-3rem))] h-[min(680px,calc(100vh-3rem))]"
-              : "w-[min(420px,calc(100vw-3rem))] h-[min(560px,calc(100vh-3rem))]"
-          } transition-[width,height,right,bottom] duration-200`}
+          style={positionStyle}
+          className={`fixed z-40 bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col ${sizeCls} transition-[width,height] duration-200`}
         >
-          <header className="flex items-center gap-2 px-4 py-3 border-b bg-gradient-to-br from-indigo-50 to-fuchsia-50 rounded-t-2xl">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-600 to-fuchsia-600 grid place-items-center text-white">
+          <header
+            onMouseDown={startDrag}
+            onDoubleClick={resetPosition}
+            data-testid="insights-chat-drag-handle"
+            title="Drag to move · double-click to reset position"
+            className="flex items-center gap-2 px-4 py-3 border-b bg-gradient-to-br from-indigo-50 to-fuchsia-50 rounded-t-2xl cursor-move select-none"
+          >
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-600 to-fuchsia-600 grid place-items-center text-white shrink-0">
               <Sparkles size={14} />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-slate-800">Insights</div>
+              <div className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
+                Insights
+                <GripHorizontal size={12} className="text-slate-400" />
+              </div>
               <div className="text-[10px] text-slate-500 truncate">
                 Ask about any report or number
               </div>
             </div>
             {messages.length > 0 && (
-              <button onClick={hardReset}
-                      data-testid="insights-chat-reset"
-                      className="text-[11px] text-slate-500 hover:text-slate-800 px-2 py-1 rounded hover:bg-white/60">
+              <button
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={hardReset}
+                data-testid="insights-chat-reset"
+                className="text-[11px] text-slate-500 hover:text-slate-800 px-2 py-1 rounded hover:bg-white/60"
+              >
                 New chat
               </button>
             )}
-            <button onClick={() => setOpen(false)}
-                    data-testid="insights-chat-close"
-                    className="p-1 rounded hover:bg-white/60">
+            <button
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => setOpen(false)}
+              data-testid="insights-chat-close"
+              className="p-1 rounded hover:bg-white/60"
+            >
               <X size={14} />
             </button>
           </header>
@@ -398,8 +516,11 @@ function MessageBubble({ msg, navigate }) {
             </span>
           </button>
           {chartOpen && (
-            <div className="p-3">
-              <ChartRenderer chartId={msg.chart_id} data={msg.chart_data} />
+            <div className="p-3 space-y-3">
+              <ChartVisual chartId={msg.chart_id} data={msg.chart_data} />
+              <div className="pt-2 border-t border-slate-100">
+                <ChartRenderer chartId={msg.chart_id} data={msg.chart_data} />
+              </div>
             </div>
           )}
         </div>
@@ -424,9 +545,201 @@ function MessageBubble({ msg, navigate }) {
 }
 
 
-/** Minimalist renderer for the 6 registered charts. Doesn't try to be a
- *  full report — just gives the user a readable summary of the actual
- *  numbers, which is 95% of what QBO's chat does too. */
+// ── Recharts visualisations ──────────────────────────────────────────
+//
+// Each chart id has a tailored view that best surfaces the story. We
+// keep them tight (200-220px tall) so they don't blow out the panel.
+
+const compactMoney = (v) => {
+  const n = Number(v || 0);
+  const abs = Math.abs(n);
+  if (abs >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
+  if (abs >= 1e3) return `$${(n / 1e3).toFixed(1)}k`;
+  return `$${n.toFixed(0)}`;
+};
+
+
+function ChartVisual({ chartId, data }) {
+  if (!data) return null;
+
+  if (chartId === "income_statement") {
+    const rev = Number(data.total_revenue || 0);
+    const exp = Number(data.total_expense || 0);
+    const net = Number(data.net_income || 0);
+    const chartData = [
+      { name: "Revenue",  value: rev,  fill: C.revenue },
+      { name: "Expenses", value: exp,  fill: C.expense },
+    ];
+    return (
+      <div data-testid="insights-chart-visual-income_statement" className="space-y-2">
+        <div className="flex items-baseline justify-between">
+          <div className="text-[11px] uppercase tracking-wider text-slate-500">Net Income</div>
+          <div className={`text-xl font-semibold font-mono-num ${net >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+            {fmtMoney(net)}
+          </div>
+        </div>
+        <div style={{ width: "100%", height: 180 }}>
+          <ResponsiveContainer>
+            <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <XAxis dataKey="name" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis tickFormatter={compactMoney} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={48} />
+              <Tooltip formatter={(v) => fmtMoney(v)} cursor={{ fill: "#F1F5F9" }}
+                       contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+              <Bar dataKey="value" radius={[8, 8, 0, 0]}>
+                {chartData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                <LabelList dataKey="value" position="top" formatter={compactMoney}
+                           style={{ fontSize: 10, fill: "#334155" }} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    );
+  }
+
+  if (chartId === "balance_sheet") {
+    const a = Number(data.total_assets || 0);
+    const l = Number(data.total_liabilities || 0);
+    const e = Number(data.total_equity || 0);
+    const pieData = [
+      { name: "Assets", value: Math.abs(a), fill: C.assets },
+      { name: "Liabilities", value: Math.abs(l), fill: C.liab },
+      { name: "Equity", value: Math.abs(e), fill: C.equity },
+    ].filter(d => d.value > 0);
+    return (
+      <div data-testid="insights-chart-visual-balance_sheet" style={{ width: "100%", height: 200 }}>
+        <ResponsiveContainer>
+          <PieChart>
+            <Pie
+              data={pieData}
+              dataKey="value"
+              nameKey="name"
+              innerRadius={50}
+              outerRadius={80}
+              paddingAngle={2}
+              stroke="#fff"
+              strokeWidth={2}
+            >
+              {pieData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+            </Pie>
+            <Tooltip formatter={(v) => fmtMoney(v)}
+                     contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="flex justify-center gap-3 text-[10px] text-slate-600 -mt-2">
+          {pieData.map((d) => (
+            <div key={d.name} className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-sm" style={{ background: d.fill }} />
+              {d.name}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (chartId === "ar_aging" || chartId === "ap_aging") {
+    const rows = (data.rows || [])
+      .map(r => ({
+        name: r.contact_name || r.customer_name || r.vendor_name || "Unknown",
+        value: Number(r.total_open ?? r.total ?? 0),
+        oldest: r.oldest_days || 0,
+      }))
+      .filter(r => r.value)
+      .slice(0, 6);
+    if (!rows.length) {
+      return <div className="text-xs text-slate-400 italic py-4 text-center">Nothing outstanding — nice.</div>;
+    }
+    return (
+      <div data-testid={`insights-chart-visual-${chartId}`} style={{ width: "100%", height: Math.max(150, rows.length * 30 + 40) }}>
+        <ResponsiveContainer>
+          <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 40, left: 0, bottom: 0 }}>
+            <XAxis type="number" tickFormatter={compactMoney} tick={{ fontSize: 10 }}
+                   axisLine={false} tickLine={false} />
+            <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }}
+                   axisLine={false} tickLine={false} width={110} />
+            <Tooltip formatter={(v) => fmtMoney(v)} cursor={{ fill: "#F1F5F9" }}
+                     contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+            <Bar dataKey="value" radius={[0, 6, 6, 0]}
+                 fill={chartId === "ar_aging" ? C.revenue : C.liab}>
+              <LabelList dataKey="value" position="right" formatter={compactMoney}
+                         style={{ fontSize: 10, fill: "#334155" }} />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  if (chartId === "inventory_valuation") {
+    const rows = (data.rows || [])
+      .map(r => ({ name: r.name, value: Number(r.value || 0), qoh: r.qoh }))
+      .filter(r => r.value)
+      .slice(0, 5);
+    return (
+      <div data-testid="insights-chart-visual-inventory_valuation" className="space-y-2">
+        <div className="flex items-baseline justify-between">
+          <div className="text-[11px] uppercase tracking-wider text-slate-500">Total on hand</div>
+          <div className="text-xl font-semibold font-mono-num text-indigo-700">
+            {fmtMoney(data.total_value)}
+          </div>
+        </div>
+        {rows.length > 0 && (
+          <div style={{ width: "100%", height: Math.max(140, rows.length * 30 + 30) }}>
+            <ResponsiveContainer>
+              <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 40, left: 0, bottom: 0 }}>
+                <XAxis type="number" tickFormatter={compactMoney} tick={{ fontSize: 10 }}
+                       axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }}
+                       axisLine={false} tickLine={false} width={110} />
+                <Tooltip formatter={(v) => fmtMoney(v)} cursor={{ fill: "#F1F5F9" }}
+                         contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+                <Bar dataKey="value" fill={C.assets} radius={[0, 6, 6, 0]}>
+                  <LabelList dataKey="value" position="right" formatter={compactMoney}
+                             style={{ fontSize: 10, fill: "#334155" }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (chartId === "reorder_alerts") {
+    const rows = (data.rows || [])
+      .map(r => ({ name: r.name, qoh: Number(r.qoh || 0), threshold: Number(r.threshold || 0) }))
+      .slice(0, 8);
+    if (!rows.length) {
+      return <div className="text-xs text-slate-400 italic py-4 text-center">Nothing to reorder — you're stocked.</div>;
+    }
+    return (
+      <div data-testid="insights-chart-visual-reorder_alerts"
+           style={{ width: "100%", height: Math.max(150, rows.length * 30 + 30) }}>
+        <ResponsiveContainer>
+          <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 40, left: 0, bottom: 0 }}>
+            <XAxis type="number" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+            <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }}
+                   axisLine={false} tickLine={false} width={110} />
+            <Tooltip cursor={{ fill: "#F1F5F9" }}
+                     contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+            <Bar dataKey="threshold" fill={C.track} radius={[0, 6, 6, 0]} name="Threshold" />
+            <Bar dataKey="qoh" fill={C.warn} radius={[0, 6, 6, 0]} name="On hand">
+              <LabelList dataKey="qoh" position="right"
+                         style={{ fontSize: 10, fill: "#334155" }} />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+
+/** Text-summary renderer — stays under each visual as a numeric
+ *  reference so users get both the graph and the actual numbers. */
 function ChartRenderer({ chartId, data }) {
   if (!data) return <div className="text-xs text-slate-400 italic">No data.</div>;
   if (chartId === "income_statement") {
