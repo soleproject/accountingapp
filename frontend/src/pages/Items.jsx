@@ -5,12 +5,14 @@ import { useCompany } from "@/lib/company";
 import { Plus, Trash2, X, Loader2, Pencil, Package, Check, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 import ItemImportModal from "@/components/ItemImportModal";
+import SearchableAccountPicker from "@/components/SearchableAccountPicker";
 
 export default function Items() {
   const { currentId } = useCompany();
   const [sp] = useSearchParams();
   const initialUsage = (["all", "sales", "purchases", "both"].includes(sp.get("usage")) ? sp.get("usage") : "all");
   const [items, setItems] = useState([]);
+  const [allAccounts, setAllAccounts] = useState([]);
   const [revenueAccts, setRevenueAccts] = useState([]);
   const [expenseAccts, setExpenseAccts] = useState([]);
   // Filtered asset accounts eligible for the Inventory dropdown (Wave
@@ -41,6 +43,7 @@ export default function Items() {
       ]);
       setItems(it.data.items || []);
       const all = ac.data.accounts || [];
+      setAllAccounts(all);
       // The codebase uses "revenue" (some legacy seeds use "income").
       setRevenueAccts(all.filter(a => a.type === "revenue" || a.type === "income"));
       setExpenseAccts(all.filter(a => a.type === "expense" || a.type === "cogs"));
@@ -239,10 +242,12 @@ export default function Items() {
         <ItemModal
           currentId={currentId}
           item={editing}
+          allAccounts={allAccounts}
           revenueAccts={revenueAccts}
           expenseAccts={expenseAccts}
           inventoryAccts={inventoryAccts}
           cogsAccts={cogsAccts}
+          reloadAccounts={load}
           onClose={() => { setCreating(false); setEditing(null); load(); }}
         />
       )}
@@ -256,7 +261,7 @@ export default function Items() {
   );
 }
 
-function ItemModal({ currentId, item, revenueAccts, expenseAccts, inventoryAccts = [], cogsAccts = [], onClose }) {
+function ItemModal({ currentId, item, allAccounts = [], revenueAccts, expenseAccts, inventoryAccts = [], cogsAccts = [], reloadAccounts, onClose }) {
   const edit = !!item;
   const [name, setName] = useState(item?.name || "");
   const [description, setDescription] = useState(item?.description || "");
@@ -396,22 +401,34 @@ function ItemModal({ currentId, item, revenueAccts, expenseAccts, inventoryAccts
         </div>
         <div>
           <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Income account · sales</label>
-          <select value={accountId} onChange={(e) => setAccountId(e.target.value)}
-                  className="w-full border rounded px-2 py-1.5 text-sm bg-white"
-                  data-testid="item-account">
-            <option value="">— Pick income account —</option>
-            {revenueAccts.map(a => <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>)}
-          </select>
+          <SearchableAccountPicker
+            value={accountId}
+            onChange={setAccountId}
+            accounts={revenueAccts}
+            allAccounts={allAccounts}
+            placeholder="— Pick income account —"
+            kindLabel="income"
+            newDefaults={{ type: "revenue", detail_type: "operating_revenue", subtype: "Operating Revenue" }}
+            currentId={currentId}
+            onCreated={() => reloadAccounts && reloadAccounts()}
+            testId="item-account"
+          />
           <p className="text-[10px] text-slate-400 mt-1">Used on invoice lines — rolls up on Sales by Category and the Income Statement.</p>
         </div>
         <div>
           <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Expense account · purchases <span className="text-slate-400 normal-case">(optional)</span></label>
-          <select value={expenseAccountId} onChange={(e) => setExpenseAccountId(e.target.value)}
-                  className="w-full border rounded px-2 py-1.5 text-sm bg-white"
-                  data-testid="item-expense-account">
-            <option value="">— Pick expense account —</option>
-            {expenseAccts.map(a => <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>)}
-          </select>
+          <SearchableAccountPicker
+            value={expenseAccountId}
+            onChange={setExpenseAccountId}
+            accounts={expenseAccts}
+            allAccounts={allAccounts}
+            placeholder="— Pick expense account —"
+            kindLabel="expense"
+            newDefaults={{ type: "expense", detail_type: "operating_expense", subtype: "Operating Expense" }}
+            currentId={currentId}
+            onCreated={() => reloadAccounts && reloadAccounts()}
+            testId="item-expense-account"
+          />
           <p className="text-[10px] text-slate-400 mt-1">Used on bill lines when you buy this product/service.</p>
         </div>
         <div className="grid grid-cols-2 gap-2">
@@ -467,29 +484,41 @@ function ItemModal({ currentId, item, revenueAccts, expenseAccts, inventoryAccts
               </div>
               <div>
                 <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Inventory asset account</label>
-                <select value={inventoryAccountId} onChange={(e) => setInventoryAccountId(e.target.value)}
-                        className="w-full border rounded px-2 py-1.5 text-sm bg-white"
-                        data-testid="item-inventory-account">
-                  <option value="">— Pick inventory asset account —</option>
-                  {inventoryAccts.map(a => <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>)}
-                </select>
+                <SearchableAccountPicker
+                  value={inventoryAccountId}
+                  onChange={setInventoryAccountId}
+                  accounts={inventoryAccts}
+                  allAccounts={allAccounts}
+                  placeholder="— Pick inventory asset account —"
+                  kindLabel="inventory"
+                  newDefaults={{ type: "asset", detail_type: "inventory", subtype: "Current Asset" }}
+                  currentId={currentId}
+                  onCreated={() => reloadAccounts && reloadAccounts()}
+                  testId="item-inventory-account"
+                />
                 {!inventoryAccts.length && (
                   <p className="text-[10px] text-amber-700 mt-1">
-                    No account with sub-type “Inventory” yet — create one in Chart of Accounts (Assets → Inventory).
+                    No account with sub-type “Inventory” yet — use <b>Add new inventory account</b> above.
                   </p>
                 )}
               </div>
               <div>
                 <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">COGS account</label>
-                <select value={cogsAccountId} onChange={(e) => setCogsAccountId(e.target.value)}
-                        className="w-full border rounded px-2 py-1.5 text-sm bg-white"
-                        data-testid="item-cogs-account">
-                  <option value="">— Pick COGS account —</option>
-                  {cogsAccts.map(a => <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>)}
-                </select>
+                <SearchableAccountPicker
+                  value={cogsAccountId}
+                  onChange={setCogsAccountId}
+                  accounts={cogsAccts}
+                  allAccounts={allAccounts}
+                  placeholder="— Pick COGS account —"
+                  kindLabel="COGS"
+                  newDefaults={{ type: "expense", detail_type: "cost_of_goods_sold", subtype: "Cost of Goods Sold" }}
+                  currentId={currentId}
+                  onCreated={() => reloadAccounts && reloadAccounts()}
+                  testId="item-cogs-account"
+                />
                 {!cogsAccts.length && (
                   <p className="text-[10px] text-amber-700 mt-1">
-                    No account with sub-type “Cost of goods sold” yet — create one in Chart of Accounts.
+                    No account with sub-type “Cost of goods sold” yet — use <b>Add new COGS account</b> above.
                   </p>
                 )}
               </div>
