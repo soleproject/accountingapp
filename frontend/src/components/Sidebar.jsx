@@ -351,6 +351,30 @@ export default function Sidebar({ collapsed, onToggle }) {
         {STANDALONE_BOTTOM.map((it) => <Item key={it.label} item={it} />)}
       </nav>
 
+      {/* Insights Chat launcher — sits directly above user info so it's
+          always one click away without cluttering the bottom-right of
+          the app. Fires the same global event the widget itself listens
+          for so we keep a single source of truth for the panel. */}
+      <div className={`px-2 ${collapsed ? "pb-2" : "pb-1"}`}>
+        <button
+          onClick={() => window.dispatchEvent(new Event("insights:open"))}
+          data-testid="sidebar-insights-chat-btn"
+          title="Ask about my data"
+          className={`w-full flex items-center gap-2 rounded-lg border border-indigo-200 bg-gradient-to-br from-indigo-50 to-fuchsia-50 hover:from-indigo-100 hover:to-fuchsia-100 transition-colors ${
+            collapsed ? "justify-center p-2" : "px-3 py-2"
+          }`}
+        >
+          <span className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-600 to-fuchsia-600 grid place-items-center text-white shrink-0">
+            <Sparkles size={12} />
+          </span>
+          {!collapsed && (
+            <span className="text-xs font-medium text-indigo-900 truncate">
+              Ask about my data
+            </span>
+          )}
+        </button>
+      </div>
+
       {!collapsed && (
         <div className="p-3 border-t text-[11px] text-slate-500">
           <div className="font-heading font-semibold text-slate-700">{user?.name}</div>

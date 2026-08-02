@@ -17,6 +17,19 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Insights launcher moved into Sidebar + CPA-firm Marketing PDF variant
+
+**Frontend**
+- Removed the floating bottom-right "Ask about my data" pill from `InsightsChatWidget.jsx`. The widget now listens for a global `insights:open` event so any launcher in the app can open it.
+- Added a persistent "✨ Ask about my data" button in `components/Sidebar.jsx` — pinned directly above the user profile block. Dispatches `insights:open` to trigger the widget. Collapsed sidebar collapses the button to just the sparkle icon.
+
+**Backend**
+- `routes/marketing_pdf.py` — added a `?variant=cpa` query param to `GET /api/marketing/comparison-pdf`. The CPA variant swaps the highlights, parity, gaps, pricing table, and bottom line to lean into white-label branding, per-client Stripe billing, ProAdvisor / Xero Partner comparisons, Karbon / Ignition stack replacement, and firm economics (firm platform fee + client seat cost rows).
+- Default variant (SMB pitch) unchanged.
+- Verified: both variants return valid PDFs (`%PDF-1.4`) via curl — default 8080 bytes / cpa 10089 bytes. Automated content review confirmed all firm-specific sections present with no layout clipping.
+
+
+
 ### Feb 2026 — Sidebar re-org + Tax Library + Bill Editor parity
 
 **Frontend**

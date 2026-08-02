@@ -73,6 +73,16 @@ export default function InsightsChatWidget() {
     recogRef.current = r; setListening(true);
   };
 
+  // Open the panel when the sidebar (or any other launcher) fires a
+  // global `insights:open` event. Lets us keep this component as the
+  // single source of truth for the panel while allowing multiple entry
+  // points across the app.
+  useEffect(() => {
+    const onOpen = () => setOpen(true);
+    window.addEventListener("insights:open", onOpen);
+    return () => window.removeEventListener("insights:open", onOpen);
+  }, []);
+
   // Track how many pixels the right-edge AiPanel is currently
   // consuming so we can slide the pill left instead of hiding it.
   // AiPanel exposes `body[data-ai-panel-open="1"]` when expanded; the
@@ -234,19 +244,6 @@ export default function InsightsChatWidget() {
 
   return (
     <>
-      {!open && (
-        <button
-          onClick={() => setOpen(true)}
-          data-testid="insights-chat-launcher"
-          style={{ right: `${rightOffset}px`, bottom: aiPanelWidth > 0 ? "84px" : "24px" }}
-          className="fixed z-40 pl-3 pr-4 py-2.5 rounded-full bg-gradient-to-br from-indigo-600 to-fuchsia-600 text-white shadow-xl hover:shadow-2xl hover:scale-[1.02] transition-all inline-flex items-center gap-2"
-          title="Ask about your reports"
-        >
-          <Sparkles size={14} />
-          <span className="text-sm font-medium">Ask about my data</span>
-        </button>
-      )}
-
       {open && (
         <div
           data-testid="insights-chat-panel"
