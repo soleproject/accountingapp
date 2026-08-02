@@ -349,3 +349,67 @@ async def delete_asset(cid: str, aid: str, user: dict = Depends(get_current_user
     return result
 
 
+# ═══════════════════ Inventory Management (Tier 2) ═══════════════════
+# Weighted-average product/service inventory. The item catalog lives in
+# routes/items.py; this section wraps the ledger side-effects: manual
+# adjustments, valuation snapshots, and per-item movement history.
+
+class InventoryAdjustmentIn(BaseModel):
+    item_id: str
+    reason: str                    # shrinkage|damage|recount|opening|other
+    new_qoh: Optional[float] = None    # absolute set
+    qty_delta: Optional[float] = None  # relative delta (used only if new_qoh is None)
+    new_cost_basis: Optional[float] = None
+    memo: Optional[str] = ""
+
+
+@router.post("/companies/{cid}/inventory-management/adjustments")
+async def create_inventory_adjustment(
+    cid: str, inp: InventoryAdjustmentIn,
+    user: dict = Depends(get_current_user),
+):
+    """Post a manual inventory adjustment (shrinkage, damage, recount,
+    opening, other). Writes a movement row + posts a balancing JE
+    against the "Inventory Adjustments" expense account (auto-created
+    on first use). Callers pass EITHER `new_qoh` (absolute set) or
+    `qty_delta` (relative)."""
+    await require_company(user, cid)
+    if inp.new_qoh is None and inp.qty_delta is None:
+        raise HTTPException(status_code=400, detail="Pass either new_qoh or qty_delta.")
+    try:
+        import inventory_service
+        result = await inventory_service.apply_adjustment(
+            cid=cid, item_id=inp.item_id,
+            new_qoh=inp.new_qoh, qty_delta=inp.qty_delta,
+            new_cost_basis=inp.new_cost_basis,
+            reason=inp.reason, memo=inp.memo or "",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, **result}
+
+
+@router.get("/companies/{cid}/inventory-management/valuation")
+async def inventory_valuation(cid: str, user: dict = Depends(get_current_user)):
+    """Snapshot of every tracked item — QOH, avg cost, total value, low-
+    stock flag. The Inventory Valuation report renders this."""
+    await require_company(user, cid)
+    import inventory_service
+    return await inventory_service.compute_valuation(cid)
+
+
+@router.get("/companies/{cid}/inventory-management/movements")
+async def inventory_movements(
+    cid: str,
+    item_id: Optional[str] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """Chronological audit trail of purchases / sales / adjustments for
+    inventory items. Optionally filter by item_id + date range."""
+    await require_company(user, cid)
+    import inventory_service
+    return await inventory_service.list_movements(cid, item_id, start, end)
+
+

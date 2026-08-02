@@ -31,6 +31,7 @@ import BillEditor from "@/pages/BillEditor";
 import TaxLibrary from "@/pages/TaxLibrary";
 import Recurring from "@/pages/Recurring";
 import Items from "@/pages/Items";
+import InventoryPage from "@/pages/InventoryPage";
 import SalesReports from "@/pages/SalesReports";
 import Payments from "@/pages/Payments";
 import Receipts from "@/pages/Receipts";
@@ -110,6 +111,7 @@ function App() {
               <Route path="/bills/:id/edit" element={<BillEditor />} />
               <Route path="/recurring" element={<Recurring />} />
               <Route path="/items" element={<Items />} />
+              <Route path="/inventory-management" element={<InventoryPage />} />
               <Route path="/sales-reports" element={<SalesReports />} />
               <Route path="/payments" element={<Payments />} />
               <Route path="/receipts" element={<Receipts />} />

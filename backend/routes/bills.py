@@ -137,6 +137,20 @@ async def create_bill(cid: str, inp: BillCreate, user: dict = Depends(get_curren
         "created_at": now, "updated_at": now,
     }
     await db.bills.insert_one(doc)
+    # Inventory hooks — post JEs & update item QOH/cost for tracked lines.
+    try:
+        from inventory_service import apply_bill_inventory
+        hooks = await apply_bill_inventory(cid, doc)
+        if hooks:
+            await db.bills.update_one({"id": bid, "company_id": cid},
+                                      {"$set": {"inventory_hooks": hooks,
+                                                "updated_at": now_iso()}})
+            doc["inventory_hooks"] = hooks
+    except Exception as e:
+        # Never let inventory bookkeeping block the bill save — surface
+        # the error into the doc so the UI can prompt the user.
+        await db.bills.update_one({"id": bid, "company_id": cid},
+                                  {"$set": {"inventory_error": str(e)}})
     return {"id": bid, "bill": coerce(doc)}
 
 
@@ -177,6 +191,20 @@ async def update_bill(cid: str, bid: str, payload: dict, user: dict = Depends(ge
             number_conflict = True
     payload["updated_at"] = now_iso()
     await db.bills.update_one({"id": bid, "company_id": cid}, {"$set": payload})
+    # Re-run inventory hooks on any save so QOH & JEs stay in sync with
+    # the latest lines. Reads the freshest doc, then persists the new
+    # hook records back onto it.
+    try:
+        from inventory_service import apply_bill_inventory
+        fresh = await db.bills.find_one({"id": bid, "company_id": cid})
+        if fresh:
+            hooks = await apply_bill_inventory(cid, fresh)
+            await db.bills.update_one({"id": bid, "company_id": cid},
+                                      {"$set": {"inventory_hooks": hooks,
+                                                "updated_at": now_iso()}})
+    except Exception as e:
+        await db.bills.update_one({"id": bid, "company_id": cid},
+                                  {"$set": {"inventory_error": str(e)}})
     return {"ok": True, "number_conflict": number_conflict}
 
 
@@ -184,6 +212,15 @@ async def update_bill(cid: str, bid: str, payload: dict, user: dict = Depends(ge
 async def delete_bill(cid: str, bid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     from link_cascade import cascade_on_doc_delete
+    # Reverse inventory hooks before wiping the doc — items get restored
+    # to their pre-bill QOH and the JEs get removed.
+    try:
+        from inventory_service import _reverse_bill_hooks
+        existing = await db.bills.find_one({"id": bid, "company_id": cid})
+        if existing:
+            await _reverse_bill_hooks(cid, existing)
+    except Exception:
+        pass
     cascade = await cascade_on_doc_delete(cid, "bill", bid)
     await db.bills.delete_one({"id": bid, "company_id": cid})
     return {"ok": True, **cascade}

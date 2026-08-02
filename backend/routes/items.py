@@ -36,6 +36,18 @@ class ItemIn(BaseModel):
     price: float = 0.0
     active: bool = True
     sku: Optional[str] = None
+    # ── Inventory (weighted-average) tracking ─────────────────────────
+    # When True, bills using this item DR the Inventory asset instead of
+    # the item's expense account, invoices auto-post a COGS JE at the
+    # current weighted-avg cost, and QOH updates atomically on save.
+    track_inventory: bool = False
+    quantity_on_hand: float = 0.0
+    cost_basis: float = 0.0                   # weighted-average unit cost
+    inventory_account_id: Optional[str] = None
+    inventory_account_name: Optional[str] = ""
+    cogs_account_id: Optional[str] = None
+    cogs_account_name: Optional[str] = ""
+    low_stock_threshold: Optional[float] = None
 
 
 class ItemPatch(BaseModel):
@@ -50,6 +62,14 @@ class ItemPatch(BaseModel):
     price: Optional[float] = None
     active: Optional[bool] = None
     sku: Optional[str] = None
+    track_inventory: Optional[bool] = None
+    quantity_on_hand: Optional[float] = None
+    cost_basis: Optional[float] = None
+    inventory_account_id: Optional[str] = None
+    inventory_account_name: Optional[str] = None
+    cogs_account_id: Optional[str] = None
+    cogs_account_name: Optional[str] = None
+    low_stock_threshold: Optional[float] = None
 
 
 _USAGE_VALUES = ("sales", "purchases", "both")
@@ -112,6 +132,16 @@ async def create_item(cid: str, inp: ItemIn, user: dict = Depends(get_current_us
         acc = await db.accounts.find_one({"company_id": cid, "id": inp.expense_account_id})
         if acc:
             exp_name = acc.get("name") or ""
+    inv_name = inp.inventory_account_name or ""
+    if inp.inventory_account_id and not inv_name:
+        acc = await db.accounts.find_one({"company_id": cid, "id": inp.inventory_account_id})
+        if acc:
+            inv_name = acc.get("name") or ""
+    cogs_name = inp.cogs_account_name or ""
+    if inp.cogs_account_id and not cogs_name:
+        acc = await db.accounts.find_one({"company_id": cid, "id": inp.cogs_account_id})
+        if acc:
+            cogs_name = acc.get("name") or ""
     doc = {
         "id": str(uuid.uuid4()),
         "company_id": cid,
@@ -126,6 +156,16 @@ async def create_item(cid: str, inp: ItemIn, user: dict = Depends(get_current_us
         "price": float(inp.price or 0),
         "active": bool(inp.active),
         "sku": inp.sku,
+        # Inventory fields — only meaningful when track_inventory=True,
+        # but stored on every doc for consistent projection.
+        "track_inventory": bool(inp.track_inventory),
+        "quantity_on_hand": float(inp.quantity_on_hand or 0),
+        "cost_basis": float(inp.cost_basis or 0),
+        "inventory_account_id": inp.inventory_account_id,
+        "inventory_account_name": inv_name,
+        "cogs_account_id": inp.cogs_account_id,
+        "cogs_account_name": cogs_name,
+        "low_stock_threshold": inp.low_stock_threshold,
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }

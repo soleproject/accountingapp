@@ -64,6 +64,7 @@ const GROUPS = [
       { to: "/accounting/chart-of-accounts", label: "Chart of Accounts", icon: ListTree },
       { to: "/accounting/assets", label: "Assets", icon: Building2 },
       { to: "/accounting/loans", label: "Loans", icon: Wallet },
+      { to: "/inventory-management", label: "Inventory", icon: Boxes, matchPath: "/inventory-management" },
       { to: "/accounting/tags", label: "Tags", icon: Tags },
       { to: "/accounting/reconciliation", label: "Reconciliation", icon: CheckCheck },
       { to: "/accounting/journal-entries", label: "Journal Entries", icon: BookOpen },

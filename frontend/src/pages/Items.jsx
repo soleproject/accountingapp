@@ -13,6 +13,11 @@ export default function Items() {
   const [items, setItems] = useState([]);
   const [revenueAccts, setRevenueAccts] = useState([]);
   const [expenseAccts, setExpenseAccts] = useState([]);
+  // Filtered asset accounts eligible for the Inventory dropdown (Wave
+  // sub-type = inventory) and expense accounts eligible for the COGS
+  // dropdown (sub-type = cost_of_goods_sold).
+  const [inventoryAccts, setInventoryAccts] = useState([]);
+  const [cogsAccts, setCogsAccts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(null);
   const [creating, setCreating] = useState(false);
@@ -39,6 +44,8 @@ export default function Items() {
       // The codebase uses "revenue" (some legacy seeds use "income").
       setRevenueAccts(all.filter(a => a.type === "revenue" || a.type === "income"));
       setExpenseAccts(all.filter(a => a.type === "expense" || a.type === "cogs"));
+      setInventoryAccts(all.filter(a => a.type === "asset" && a.detail_type === "inventory"));
+      setCogsAccts(all.filter(a => (a.type === "cogs" || a.type === "expense") && a.detail_type === "cost_of_goods_sold"));
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, [currentId]);
@@ -136,6 +143,7 @@ export default function Items() {
               <th className="px-3 py-2 text-left">Type</th>
               <th className="px-3 py-2 text-left">Used on</th>
               <th className="px-3 py-2 text-left">Accounts</th>
+              <th className="px-3 py-2 text-right">Inventory</th>
               <th className="px-3 py-2 text-right">Price</th>
               <th className="px-3 py-2 text-center">Active</th>
               <th></th>
@@ -143,7 +151,7 @@ export default function Items() {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={8} className="text-center py-8 text-slate-400"><Loader2 className="inline animate-spin" size={16} /></td></tr>
+              <tr><td colSpan={9} className="text-center py-8 text-slate-400"><Loader2 className="inline animate-spin" size={16} /></td></tr>
             )}
             {!loading && visible.map(it => {
               const u = it.usage || "sales";
@@ -175,6 +183,31 @@ export default function Items() {
                   )}
                   {!it.income_account_name && !it.expense_account_name && <span className="text-slate-400">—</span>}
                 </td>
+                <td className="px-3 py-2 text-right text-xs" data-testid={`item-inventory-${it.id}`}>
+                  {it.track_inventory ? (() => {
+                    const qoh = Number(it.quantity_on_hand || 0);
+                    const cost = Number(it.cost_basis || 0);
+                    const value = qoh * cost;
+                    const low = it.low_stock_threshold != null && qoh <= Number(it.low_stock_threshold);
+                    return (
+                      <div className={low ? "text-amber-800" : "text-slate-700"}>
+                        <div className="font-mono-num">
+                          <span className="font-semibold">{qoh}</span>
+                          <span className="text-slate-400 mx-1">·</span>
+                          <span className="text-slate-500">{fmtMoney(cost)}</span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-mono-num">
+                          Value {fmtMoney(value)}
+                          {low && (
+                            <span className="ml-1 uppercase text-[9px] tracking-wider px-1 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200" data-testid={`item-lowstock-${it.id}`}>
+                              Low
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })() : <span className="text-slate-300">—</span>}
+                </td>
                 <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(it.price)}</td>
                 <td className="px-3 py-2 text-center">
                   <button
@@ -192,7 +225,7 @@ export default function Items() {
               </tr>
             );})}
             {!loading && !visible.length && (
-              <tr><td colSpan={8} className="text-center py-10 text-slate-500 text-sm">
+              <tr><td colSpan={9} className="text-center py-10 text-slate-500 text-sm">
                 {usageFilter === "all"
                   ? <>No items yet. Click <b>New item</b> to add your first product or service.</>
                   : <>No items in this view — try switching to <b>All</b>.</>}
@@ -208,6 +241,8 @@ export default function Items() {
           item={editing}
           revenueAccts={revenueAccts}
           expenseAccts={expenseAccts}
+          inventoryAccts={inventoryAccts}
+          cogsAccts={cogsAccts}
           onClose={() => { setCreating(false); setEditing(null); load(); }}
         />
       )}
@@ -221,7 +256,7 @@ export default function Items() {
   );
 }
 
-function ItemModal({ currentId, item, revenueAccts, expenseAccts, onClose }) {
+function ItemModal({ currentId, item, revenueAccts, expenseAccts, inventoryAccts = [], cogsAccts = [], onClose }) {
   const edit = !!item;
   const [name, setName] = useState(item?.name || "");
   const [description, setDescription] = useState(item?.description || "");
@@ -233,12 +268,37 @@ function ItemModal({ currentId, item, revenueAccts, expenseAccts, onClose }) {
   const [sku, setSku] = useState(item?.sku || "");
   const [active, setActive] = useState(item?.active !== false);
   const [busy, setBusy] = useState(false);
+  // ── Inventory tracking state ──────────────────────────────────────
+  const [trackInventory, setTrackInventory] = useState(!!item?.track_inventory);
+  const [qoh, setQoh] = useState(item?.quantity_on_hand ?? 0);
+  const [costBasis, setCostBasis] = useState(item?.cost_basis ?? 0);
+  const [inventoryAccountId, setInventoryAccountId] = useState(item?.inventory_account_id || "");
+  const [cogsAccountId, setCogsAccountId] = useState(item?.cogs_account_id || "");
+  const [lowStockThreshold, setLowStockThreshold] = useState(
+    item?.low_stock_threshold != null ? item.low_stock_threshold : ""
+  );
+  // Auto-pick the default Inventory / COGS accounts when the user
+  // enables tracking for the first time and only one option exists.
+  useEffect(() => {
+    if (trackInventory && !inventoryAccountId && inventoryAccts.length === 1) {
+      setInventoryAccountId(inventoryAccts[0].id);
+    }
+    if (trackInventory && !cogsAccountId && cogsAccts.length === 1) {
+      setCogsAccountId(cogsAccts[0].id);
+    }
+  }, [trackInventory, inventoryAccts, cogsAccts, inventoryAccountId, cogsAccountId]);
   const save = async () => {
     if (!name.trim()) { toast.error("Name is required"); return; }
+    if (trackInventory) {
+      if (!inventoryAccountId) { toast.error("Pick an Inventory asset account."); return; }
+      if (!cogsAccountId) { toast.error("Pick a Cost of Goods Sold account."); return; }
+    }
     setBusy(true);
     try {
       const inc = revenueAccts.find(a => a.id === accountId);
       const exp = expenseAccts.find(a => a.id === expenseAccountId);
+      const invA = inventoryAccts.find(a => a.id === inventoryAccountId);
+      const cogsA = cogsAccts.find(a => a.id === cogsAccountId);
       const body = {
         name: name.trim(),
         description,
@@ -251,6 +311,15 @@ function ItemModal({ currentId, item, revenueAccts, expenseAccts, onClose }) {
         price: Number(price) || 0,
         sku: sku || null,
         active,
+        // Inventory bundle — only meaningful when track_inventory is on.
+        track_inventory: !!trackInventory,
+        quantity_on_hand: trackInventory ? (Number(qoh) || 0) : (item?.quantity_on_hand ?? 0),
+        cost_basis: trackInventory ? (Number(costBasis) || 0) : (item?.cost_basis ?? 0),
+        inventory_account_id: trackInventory ? (inventoryAccountId || null) : null,
+        inventory_account_name: trackInventory ? (invA?.name || "") : "",
+        cogs_account_id: trackInventory ? (cogsAccountId || null) : null,
+        cogs_account_name: trackInventory ? (cogsA?.name || "") : "",
+        low_stock_threshold: trackInventory && lowStockThreshold !== "" ? Number(lowStockThreshold) : null,
       };
       if (edit) {
         await api.patch(`/companies/${currentId}/items/${item.id}`, body);
@@ -266,7 +335,7 @@ function ItemModal({ currentId, item, revenueAccts, expenseAccts, onClose }) {
   };
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-5 space-y-3" data-testid="item-modal">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-5 space-y-3 max-h-[92vh] overflow-y-auto" data-testid="item-modal">
         <div className="flex items-center justify-between">
           <h3 className="font-heading font-semibold inline-flex items-center gap-2"><Package size={16} /> {edit ? "Edit item" : "New item"}</h3>
           <button onClick={onClose}><X size={16} /></button>
@@ -359,6 +428,81 @@ function ItemModal({ currentId, item, revenueAccts, expenseAccts, onClose }) {
               Active
             </label>
           </div>
+        </div>
+        {/* ── Inventory tracking (Tier 2, Weighted Average) ─────────────────── */}
+        <div className="rounded-lg border bg-slate-50/60 px-3 py-2.5 space-y-2">
+          <label className="inline-flex items-center gap-2 text-xs text-slate-700 select-none">
+            <input type="checkbox" checked={trackInventory}
+                   onChange={(e) => setTrackInventory(e.target.checked)}
+                   data-testid="item-track-inventory" />
+            <span className="font-medium">Track inventory (weighted average)</span>
+          </label>
+          <p className="text-[10px] text-slate-500 -mt-1">
+            When enabled, buying this on a bill will DR your Inventory asset and selling it on
+            an invoice will auto-post COGS at the current average cost. Starts from today —
+            historical bills/invoices are not backfilled.
+          </p>
+          {trackInventory && (
+            <div className="space-y-2 pt-1">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Opening quantity on hand</label>
+                  <input type="number" step="1" value={qoh}
+                         onChange={(e) => setQoh(e.target.value)}
+                         disabled={edit && !!item?.track_inventory}
+                         className="w-full border rounded px-2 py-1.5 text-sm font-mono-num disabled:bg-slate-100 disabled:text-slate-500"
+                         data-testid="item-qoh" />
+                  {edit && !!item?.track_inventory && (
+                    <p className="text-[10px] text-slate-400 mt-1">Locked once tracking is on — use an Adjustment to change.</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Opening avg cost / unit</label>
+                  <input type="number" step="0.01" value={costBasis}
+                         onChange={(e) => setCostBasis(e.target.value)}
+                         disabled={edit && !!item?.track_inventory}
+                         className="w-full border rounded px-2 py-1.5 text-sm font-mono-num disabled:bg-slate-100 disabled:text-slate-500"
+                         data-testid="item-cost-basis" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Inventory asset account</label>
+                <select value={inventoryAccountId} onChange={(e) => setInventoryAccountId(e.target.value)}
+                        className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+                        data-testid="item-inventory-account">
+                  <option value="">— Pick inventory asset account —</option>
+                  {inventoryAccts.map(a => <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>)}
+                </select>
+                {!inventoryAccts.length && (
+                  <p className="text-[10px] text-amber-700 mt-1">
+                    No account with sub-type “Inventory” yet — create one in Chart of Accounts (Assets → Inventory).
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">COGS account</label>
+                <select value={cogsAccountId} onChange={(e) => setCogsAccountId(e.target.value)}
+                        className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+                        data-testid="item-cogs-account">
+                  <option value="">— Pick COGS account —</option>
+                  {cogsAccts.map(a => <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>)}
+                </select>
+                {!cogsAccts.length && (
+                  <p className="text-[10px] text-amber-700 mt-1">
+                    No account with sub-type “Cost of goods sold” yet — create one in Chart of Accounts.
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Low-stock threshold (optional)</label>
+                <input type="number" step="1" value={lowStockThreshold}
+                       onChange={(e) => setLowStockThreshold(e.target.value)}
+                       placeholder="Warn when QOH falls to this level"
+                       className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+                       data-testid="item-low-stock" />
+              </div>
+            </div>
+          )}
         </div>
         <button onClick={save} disabled={busy}
                 data-testid="item-save"

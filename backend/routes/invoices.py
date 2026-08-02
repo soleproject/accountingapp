@@ -297,7 +297,20 @@ async def create_invoice(cid: str, inp: InvoiceCreate, user: dict = Depends(get_
         "created_at": now, "updated_at": now,
     }
     await db.invoices.insert_one(doc)
-    return {"id": iid, "invoice": coerce(doc)}
+    # Inventory hooks — decrement QOH & post COGS JE for tracked lines.
+    warnings: list[str] = []
+    try:
+        from inventory_service import apply_invoice_inventory
+        hooks, warnings = await apply_invoice_inventory(cid, doc)
+        if hooks:
+            await db.invoices.update_one({"id": iid, "company_id": cid},
+                                         {"$set": {"inventory_hooks": hooks,
+                                                   "updated_at": now_iso()}})
+            doc["inventory_hooks"] = hooks
+    except Exception as e:
+        await db.invoices.update_one({"id": iid, "company_id": cid},
+                                     {"$set": {"inventory_error": str(e)}})
+    return {"id": iid, "invoice": coerce(doc), "inventory_warnings": warnings}
 
 
 @router.patch("/companies/{cid}/invoices/{iid}")
@@ -347,13 +360,34 @@ async def update_invoice(cid: str, iid: str, payload: dict, user: dict = Depends
             number_conflict = True
     payload["updated_at"] = now_iso()
     await db.invoices.update_one({"id": iid, "company_id": cid}, {"$set": payload})
-    return {"ok": True, "number_conflict": number_conflict}
+    # Re-run inventory hooks so QOH & COGS JE mirror the latest lines.
+    warnings: list[str] = []
+    try:
+        from inventory_service import apply_invoice_inventory
+        fresh = await db.invoices.find_one({"id": iid, "company_id": cid})
+        if fresh:
+            hooks, warnings = await apply_invoice_inventory(cid, fresh)
+            await db.invoices.update_one({"id": iid, "company_id": cid},
+                                         {"$set": {"inventory_hooks": hooks,
+                                                   "updated_at": now_iso()}})
+    except Exception as e:
+        await db.invoices.update_one({"id": iid, "company_id": cid},
+                                     {"$set": {"inventory_error": str(e)}})
+    return {"ok": True, "number_conflict": number_conflict, "inventory_warnings": warnings}
 
 
 @router.delete("/companies/{cid}/invoices/{iid}")
 async def delete_invoice(cid: str, iid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     from link_cascade import cascade_on_doc_delete
+    # Restore QOH & remove COGS JEs before wiping the invoice.
+    try:
+        from inventory_service import _reverse_invoice_hooks
+        existing = await db.invoices.find_one({"id": iid, "company_id": cid})
+        if existing:
+            await _reverse_invoice_hooks(cid, existing)
+    except Exception:
+        pass
     cascade = await cascade_on_doc_delete(cid, "invoice", iid)
     await db.invoices.delete_one({"id": iid, "company_id": cid})
     return {"ok": True, **cascade}
