@@ -41,6 +41,14 @@ async def _reverse_payment_impact(cid: str, payment: dict) -> None:
             st = "open" if bal >= total - 0.01 else "partial"
             await db.bills.update_one({"id": bill_id},
                 {"$set": {"balance_due": bal, "status": st, "updated_at": now_iso()}})
+            # Inventory bill → the payment posted an A/P relief JE
+            # that needs to be reversed so A/P re-appears on the BS.
+            if bill.get("inventory_hooks"):
+                try:
+                    from inventory_service import reverse_bill_payment_relief
+                    await reverse_bill_payment_relief(cid, bill_id)
+                except Exception:
+                    pass
 
 
 async def cascade_on_doc_delete(cid: str, kind: str, doc_id: str) -> dict:

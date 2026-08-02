@@ -397,9 +397,13 @@ async def inventory_valuation(cid: str, user: dict = Depends(get_current_user)):
     import inventory_service
     # Self-heal — any legacy tracked items without an opening JE get
     # one posted here so the Balance Sheet catches up on the next load.
+    # Also rewrite any legacy bill-inventory JEs that still credit an
+    # expense account (old scheme) to credit A/P (new scheme) so the
+    # Income Statement stops showing phantom -expense lines.
     try:
         await inventory_service.backfill_opening_balances(cid)
-    except Exception:  # never let backfill block the report
+        await inventory_service.heal_bill_inventory_jes(cid)
+    except Exception:  # never let a heal block the report
         pass
     return await inventory_service.compute_valuation(cid)
 

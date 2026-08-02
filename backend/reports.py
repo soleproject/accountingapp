@@ -119,6 +119,29 @@ async def _open_ar_ap(company_id: str, as_of: str, start: str | None = None):
     ar_billed_in_period = 0.0
     ap_billed_in_period = 0.0
 
+    # Inventory-tracked bill lines already sit on the balance sheet
+    # via `DR Inventory / CR A/P` journal entries posted by
+    # `inventory_service.apply_bill_inventory`. Counting them AGAIN in
+    # ap_billed_in_period / ap_end would double-book the same $ against
+    # A/P (once from the JE, once from this helper) and drop a phantom
+    # -expense into the Income Statement. We total the inventory
+    # portion per-bill here and subtract it from the accrual figures
+    # below.
+    inv_bill_portion: dict[str, float] = {}
+    async for je in db.journal_entries.find({
+        "company_id": company_id, "source": "bill_inventory",
+        "ref_kind": "bill",
+    }):
+        rid = je.get("ref_id")
+        if not rid:
+            continue
+        # Sum credits to A/P for this bill (belt-and-braces if
+        # `inventory_portion` isn't stored on older JEs).
+        portion = float(je.get("inventory_portion") or 0.0)
+        if not portion:
+            portion = sum(float(l.get("credit") or 0) for l in (je.get("lines") or []))
+        inv_bill_portion[rid] = inv_bill_portion.get(rid, 0.0) + portion
+
     def _in_period(d: str) -> bool:
         if not start:
             return False
@@ -151,12 +174,21 @@ async def _open_ar_ap(company_id: str, as_of: str, start: str | None = None):
         issue = b.get("issue_date") or ""
         total = float(b.get("total", 0) or 0)
         bal = float(b.get("balance_due", 0) or 0)
+        # Inventory-tracked portion already booked as A/P via JE — pull
+        # it out of every accrual figure so we don't count it twice.
+        inv_portion = float(inv_bill_portion.get(b.get("id"), 0.0))
+        # ap_end/ap_start use balance_due, not total; scale the inv
+        # portion by the paid-ratio so a partly-paid bill still nets
+        # right (e.g. 50% paid → only 50% of the JE-booked A/P is still
+        # open, rest is already relieved by the payment txn).
+        open_ratio = (bal / total) if total > 0.005 else 0.0
+        open_inv_portion = inv_portion * open_ratio
         if issue and issue <= as_of and bal > 0.005:
-            ap_end += bal
+            ap_end += max(bal - open_inv_portion, 0.0)
         if prev_end and issue and issue <= prev_end and bal > 0.005:
-            ap_start += bal
+            ap_start += max(bal - open_inv_portion, 0.0)
         if _in_period(issue):
-            ap_billed_in_period += total
+            ap_billed_in_period += max(total - inv_portion, 0.0)
 
     return {
         "ar_end": round(ar_end, 2), "ap_end": round(ap_end, 2),

@@ -83,6 +83,17 @@ async def create_payment(cid: str, inp: PaymentCreate, user: dict = Depends(get_
             status = "paid" if bal <= 0.01 else "partial"
             await db.bills.update_one({"id": bill["id"]},
                 {"$set": {"balance_due": round(bal, 2), "status": status}})
+            # Inventory-tracked bills need an A/P relief JE so the
+            # bill's inventory JE doesn't leave A/P lingering after
+            # payment.
+            if bill.get("inventory_hooks"):
+                try:
+                    from inventory_service import relieve_ap_on_bill_payment
+                    await relieve_ap_on_bill_payment(cid, bill["id"],
+                                                    float(inp.amount),
+                                                    inp.source_transaction_id)
+                except Exception:
+                    pass
     # Stamp the reverse-link back on the source transaction so
     # cascade-on-transaction-delete knows to reverse this payment.
     if inp.source_transaction_id:

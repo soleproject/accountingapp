@@ -48,6 +48,39 @@ MOVEMENT_TYPES = {
 
 # ── Item helpers ─────────────────────────────────────────────────────
 
+async def _ensure_accounts_payable(cid: str) -> Optional[dict]:
+    """Locate (or auto-create) the standard "Accounts Payable" account
+    so the bill-side inventory JE credits A/P — matching the way
+    QuickBooks / Xero handle purchases-of-goods. Returns None only if
+    the DB is in a broken state (which callers treat as "skip JE, just
+    update QOH").
+    """
+    for query in (
+        {"company_id": cid, "detail_type": "accounts_payable"},
+        {"company_id": cid, "detail_type": "expected_payments_to_vendors"},
+        {"company_id": cid, "type": "liability", "code": "2000"},
+        {"company_id": cid, "type": "liability",
+         "name": {"$regex": r"^accounts payable$", "$options": "i"}},
+    ):
+        acct = await db.accounts.find_one(query)
+        if acct:
+            return acct
+    # Nothing found — mint one so the JE always has a home.
+    doc = {
+        "id": str(uuid.uuid4()),
+        "company_id": cid,
+        "type": "liability",
+        "subtype": "Current Liability",
+        "detail_type": "accounts_payable",
+        "name": "Accounts Payable",
+        "code": "2000",
+        "active": True,
+        "created_at": now_iso(), "updated_at": now_iso(),
+    }
+    await db.accounts.insert_one(doc)
+    return doc
+
+
 async def get_tracked_item(cid: str, item_id: str) -> Optional[dict]:
     """Return the item if it exists AND is currently inventory-tracked.
     Callers use this to decide whether a line-item triggers inventory
@@ -201,14 +234,18 @@ async def apply_bill_inventory(cid: str, bill: dict) -> list[dict]:
         new_qoh = pre_qoh + qty
         new_cost = round(total_val / (base_qoh + qty), 4) if (base_qoh + qty) > 0 else unit_cost
 
-        # Post JE: DR Inventory / CR line expense (cancels expense
-        # recognition — see module docstring).
-        cr_acct_id = li.get("expense_account_id") or it.get("expense_account_id")
-        cr_acct_name = li.get("expense_account_name") or it.get("expense_account_name") or ""
+        # Post JE: DR Inventory / CR Accounts Payable. This keeps the
+        # inventory purchase entirely on the balance sheet — no reliance
+        # on the payment transaction hitting the right expense account,
+        # no phantom -expense line if the bill is paid in the same
+        # period. The accrual helper (_open_ar_ap) subtracts the same
+        # amount from ap_billed_in_period so the bill's A/P side isn't
+        # double-counted with this JE.
+        ap = await _ensure_accounts_payable(cid)
+        cr_acct_id = ap["id"] if ap else None
+        cr_acct_name = ap.get("name") if ap else "Accounts Payable"
         if not cr_acct_id:
-            # No expense account = can't post a balanced JE. Skip but
-            # still update QOH so QOH stays consistent with what the
-            # user sees on the bill.
+            # Very unusual — no A/P + no fallback. Skip JE, still update QOH.
             await db.items.update_one(
                 {"id": it["id"], "company_id": cid},
                 {"$set": {"quantity_on_hand": new_qoh, "cost_basis": new_cost,
@@ -217,7 +254,7 @@ async def apply_bill_inventory(cid: str, bill: dict) -> list[dict]:
             await _record_movement(
                 cid, it["id"], "purchase", qty, unit_cost,
                 ref={"kind": "bill", "id": bill.get("id"), "number": bill.get("number")},
-                memo="No expense account on line — no JE posted",
+                memo="No A/P account resolvable — no JE posted",
             )
             new_hooks.append({
                 "item_id": it["id"], "qty": qty, "unit_cost": unit_cost,
@@ -232,6 +269,10 @@ async def apply_bill_inventory(cid: str, bill: dict) -> list[dict]:
             "memo": f"Inventory receipt · {it.get('name') or ''} · Bill {bill.get('number') or ''}".strip(" ·"),
             "source": SOURCE_BILL,
             "ref_kind": "bill", "ref_id": bill.get("id"),
+            # Store the inventory-line portion so the accrual helper
+            # can exclude it from ap_billed_in_period / ap_end without
+            # having to re-derive it from the bill on every report.
+            "inventory_portion": round(amt, 2),
             "lines": [
                 {"account_id": it["inventory_account_id"],
                  "account_name": it.get("inventory_account_name") or "Inventory",
@@ -240,7 +281,7 @@ async def apply_bill_inventory(cid: str, bill: dict) -> list[dict]:
                 {"account_id": cr_acct_id,
                  "account_name": cr_acct_name,
                  "debit": 0.0, "credit": round(amt, 2),
-                 "description": "Offset expense recognition (inventory)"},
+                 "description": f"A/P for {qty} × {it.get('name') or 'item'} (inventory)"},
             ],
             "created_at": now_iso(), "updated_at": now_iso(),
         })
@@ -617,6 +658,151 @@ async def backfill_opening_balances(cid: str) -> dict:
         else:
             skipped += 1
     return {"posted": posted, "skipped": skipped, "total": len(tracked)}
+
+
+async def heal_bill_inventory_jes(cid: str) -> dict:
+    """Fix legacy bill-inventory JEs that credited the line's expense
+    account (old scheme) instead of Accounts Payable (new scheme).
+
+    The old scheme created a phantom -expense line whenever a bill was
+    paid inside the same period the JE was booked. Rewriting the CR
+    side to A/P eliminates the phantom while keeping the inventory
+    asset intact. Idempotent — JEs already crediting A/P are skipped.
+    """
+    ap = await _ensure_accounts_payable(cid)
+    if not ap:
+        return {"scanned": 0, "healed": 0}
+    scanned = healed = 0
+    async for je in db.journal_entries.find({
+        "company_id": cid, "source": SOURCE_BILL,
+    }):
+        scanned += 1
+        lines = je.get("lines") or []
+        if not lines or len(lines) != 2:
+            continue
+        cr_line = next((l for l in lines if float(l.get("credit") or 0) > 0), None)
+        if not cr_line:
+            continue
+        # Already correct → skip.
+        if cr_line.get("account_id") == ap["id"]:
+            continue
+        cr_line["account_id"] = ap["id"]
+        cr_line["account_name"] = ap.get("name") or "Accounts Payable"
+        cr_line["description"] = "A/P for inventory receipt (healed)"
+        # Also stamp inventory_portion for the accrual helper.
+        inv_portion = float(cr_line.get("credit") or 0)
+        await db.journal_entries.update_one(
+            {"id": je["id"], "company_id": cid},
+            {"$set": {"lines": lines,
+                      "inventory_portion": inv_portion,
+                      "updated_at": now_iso()}},
+        )
+        healed += 1
+    return {"scanned": scanned, "healed": healed}
+
+
+async def relieve_ap_on_bill_payment(cid: str, bill_id: str, amount: float,
+                                    source_txn_id: Optional[str] = None) -> Optional[str]:
+    """When a payment is recorded against a bill that carries inventory
+    JEs (which credited A/P at bill-save time), we need to DR A/P
+    right back so the paid portion doesn't linger as a phantom
+    liability on the balance sheet.
+
+    The offsetting CR goes to the *payment transaction's* category
+    account — that neutralises the transaction's own DR to that same
+    account (which is how bank txns book expense recognition today).
+    Net effect after everything settles:
+      · Bank ↓ by payment amount     (from bank txn)
+      · Inventory ↑ by bill amount   (from bill JE)
+      · A/P net $0                   (bill JE + this JE cancel)
+      · Expense net $0               (txn + this JE cancel)
+
+    Returns the JE id or None if no relief was posted (bill has no
+    inventory hooks, no A/P account resolvable, etc.).
+    """
+    bill = await db.bills.find_one({"id": bill_id, "company_id": cid})
+    if not bill or not bill.get("inventory_hooks"):
+        return None
+    if amount <= 0.005:
+        return None
+
+    ap = await _ensure_accounts_payable(cid)
+    if not ap:
+        return None
+
+    # Choose the CR side: the linked txn's category (preferred) — this
+    # cancels the txn's own expense debit. If no txn, fall back to the
+    # inventory JE's original expense account (grabbed from the first
+    # hook's item).
+    cr_acct_id = None
+    cr_acct_name = ""
+    txn_date = None
+    if source_txn_id:
+        txn = await db.transactions.find_one({"id": source_txn_id, "company_id": cid})
+        if txn:
+            txn_date = txn.get("date")
+            if txn.get("category_account_id"):
+                cr_acct_id = txn["category_account_id"]
+                cr_acct_name = txn.get("category_account_name") or ""
+    if not cr_acct_id:
+        # Fallback: item's expense account.
+        first_hook = (bill.get("inventory_hooks") or [None])[0]
+        if first_hook and first_hook.get("item_id"):
+            it = await db.items.find_one({"id": first_hook["item_id"], "company_id": cid})
+            if it:
+                cr_acct_id = it.get("expense_account_id")
+                cr_acct_name = it.get("expense_account_name") or ""
+    if not cr_acct_id:
+        # Last resort — an Opening Balance Equity absorbs the credit so
+        # books stay in balance (bookkeeper can reclassify).
+        equity = await _ensure_opening_balance_equity(cid)
+        cr_acct_id = equity["id"]
+        cr_acct_name = equity.get("name") or "Opening Balance Equity"
+
+    # Payment relief amount is capped at the bill's original inventory
+    # portion so partial payments only relieve their pro-rata share.
+    inv_portion = sum(float(h.get("qty", 0)) * float(h.get("unit_cost", 0))
+                      for h in (bill.get("inventory_hooks") or []))
+    total = float(bill.get("total") or 0)
+    ratio = min(1.0, (amount / total) if total > 0.005 else 1.0)
+    relief_amt = round(inv_portion * ratio, 2)
+    if relief_amt <= 0.005:
+        return None
+
+    je_id = str(uuid.uuid4())
+    await db.journal_entries.insert_one({
+        "id": je_id, "company_id": cid,
+        # Date the relief on the txn's own date so it lands inside the
+        # same reporting period as the bank payment — otherwise the IS
+        # for that period sees the txn's expense debit but not our CR
+        # offset, printing a phantom expense line.
+        "date": txn_date or now_iso()[:10],
+        "memo": f"Inventory bill payment relief · Bill {bill.get('number') or ''}".strip(" ·"),
+        "source": "bill_payment_inventory",
+        "ref_kind": "bill", "ref_id": bill_id,
+        "inventory_portion": relief_amt,
+        "lines": [
+            {"account_id": ap["id"], "account_name": ap.get("name") or "Accounts Payable",
+             "debit": relief_amt, "credit": 0.0,
+             "description": f"Relieve A/P for inventory bill payment"},
+            {"account_id": cr_acct_id, "account_name": cr_acct_name,
+             "debit": 0.0, "credit": relief_amt,
+             "description": "Cancel expense recognition on inventory payment"},
+        ],
+        "created_at": now_iso(), "updated_at": now_iso(),
+    })
+    return je_id
+
+
+async def reverse_bill_payment_relief(cid: str, bill_id: str,
+                                      source_txn_id: Optional[str] = None) -> int:
+    """Delete any payment-relief JEs tied to this bill (and, if given,
+    only for the specific source transaction). Used when a payment /
+    transaction is deleted so the A/P re-appears correctly."""
+    q = {"company_id": cid, "source": "bill_payment_inventory",
+         "ref_kind": "bill", "ref_id": bill_id}
+    res = await db.journal_entries.delete_many(q)
+    return res.deleted_count
 
 
 # ── Reports helpers ──────────────────────────────────────────────────

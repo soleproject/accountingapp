@@ -1370,6 +1370,13 @@ async def link_transaction(
                 st = "open" if bal >= float(bill.get("total") or 0) - 0.01 else "partial"
                 await _db.bills.update_one({"id": bill["id"]},
                     {"$set": {"balance_due": round(bal, 2), "status": st}})
+                # Inventory bill → reverse the A/P relief JE.
+                if bill.get("inventory_hooks"):
+                    try:
+                        from inventory_service import reverse_bill_payment_relief
+                        await reverse_bill_payment_relief(cid, bill["id"])
+                    except Exception:
+                        pass
         await _db.payments.delete_one({"id": payment_id_to_delete})
 
     # If the txn had an auto-payment and the link is now cleared or
@@ -1425,6 +1432,16 @@ async def link_transaction(
                         status = "paid" if bal <= 0.01 else "partial"
                         await _db.bills.update_one({"id": target_id},
                             {"$set": {"balance_due": round(bal, 2), "status": status}})
+                        # Inventory bills → post an A/P relief JE so
+                        # the bill's inventory JE doesn't leave A/P
+                        # lingering on the balance sheet after the
+                        # payment.
+                        if doc.get("inventory_hooks"):
+                            try:
+                                from inventory_service import relieve_ap_on_bill_payment
+                                await relieve_ap_on_bill_payment(cid, target_id, pay_amt, tid)
+                            except Exception:
+                                pass
                     upd["linked_payment_id"] = pid
 
     await db.transactions.update_one({"id": tid, "company_id": cid}, {"$set": upd})
