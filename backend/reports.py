@@ -186,7 +186,10 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
         rows: list[dict] = []
         top_level = [a for a in accts
                      if a["type"] == section_type and not a.get("parent_account_id")]
-        top_level.sort(key=lambda x: x["code"])
+        # Sort by (detail_type, code) so accounts sharing a Wave-style
+        # sub-type end up contiguous — required for the grouped
+        # renderer to emit clean sub-type banners in the PDF.
+        top_level.sort(key=lambda x: ((x.get("detail_type") or "zzz").lower(), (x.get("code") or "")))
         for a in top_level:
             direct = _display_amount(a, by.get(a["id"], 0.0))
             kids = sorted(children_of.get(a["id"], []), key=lambda x: x["code"])
@@ -201,6 +204,7 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
                 kids_rows.append({
                     "id": k["id"], "code": k["code"], "name": k["name"],
                     "amount": round(kd, 2), "parent_code": a["code"],
+                    "detail_type": (k.get("detail_type") or "").strip(),
                 })
                 kids_total += kd
             rolled = direct + kids_total
@@ -213,6 +217,7 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
             rows.append({
                 "id": a["id"], "code": a["code"], "name": a["name"],
                 "amount": round(rolled, 2),
+                "detail_type": (a.get("detail_type") or "").strip(),
             })
             rows.extend(kids_rows)
         return rows
@@ -299,7 +304,10 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
         # Sort parents (top-level accounts of this type) by code.
         top_level = [a for a in accts
                      if a["type"] == section_type and not a.get("parent_account_id")]
-        top_level.sort(key=lambda x: x["code"])
+        # Sort by (detail_type, code) so accounts sharing a Wave-style
+        # sub-type end up contiguous — required for the grouped
+        # renderer to emit clean sub-type banners in the PDF.
+        top_level.sort(key=lambda x: ((x.get("detail_type") or "zzz").lower(), (x.get("code") or "")))
         for a in top_level:
             direct = _display_amount(a, by.get(a["id"], 0.0))
             kids = sorted(children_of.get(a["id"], []), key=lambda x: x["code"])
@@ -882,10 +890,10 @@ def build_income_statement_pdf(data: dict) -> bytes:
         Paragraph(f"For the period {data['period_start']} to {data['period_end']} &middot; {data['basis'].title()} Basis", s["SubTitle"]),
         Spacer(1, 12),
         Paragraph("REVENUE", s["Section"]),
-        _money_table(data["revenue"], "Total Revenue", data["total_revenue"]),
+        _money_table_grouped(data["revenue"], "Total Revenue", data["total_revenue"]),
         Spacer(1, 8),
         Paragraph("OPERATING EXPENSES", s["Section"]),
-        _money_table(data["expenses"], "Total Expenses", data["total_expense"]),
+        _money_table_grouped(data["expenses"], "Total Expenses", data["total_expense"]),
         Spacer(1, 12),
         _money_table([], "NET INCOME", data["net_income"]),
     ]
