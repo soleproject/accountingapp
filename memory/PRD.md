@@ -17,6 +17,22 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Monthly Income Trend chart + Firm-level Insights cost alerts
+
+**Backend**
+- `routes/insights_chat.py` — new `_fetch_income_trend` fetcher + registered `income_trend` chart. Loops `compute_income_statement` over N months (default 12, cap 3-24) and returns `{months:[{month,label,revenue,expense,net}], total_revenue, total_expense, total_net}`. LLM prompt updated so multi-month / trend / "year" style questions prefer this over the flat Income Statement.
+- `routes/pro.py` — three new endpoints:
+  - `GET /api/pro/insights-cost-alerts/config` — reads firm's `insights_alert_threshold_usd`
+  - `PATCH /api/pro/insights-cost-alerts/config` — sets threshold (0 disables)
+  - `GET /api/pro/insights-cost-alerts` — returns `{period, threshold_usd, clients_over:[{id,name,spent,over_by}]}` for the current calendar month. Superadmin sees all companies; Pro sees only their active memberships.
+
+**Frontend**
+- `components/InsightsChatWidget.jsx` — new `ChartVisual` case for `income_trend`: Recharts `ComposedChart` with dual Revenue/Expense bars + Net Income line overlay + zero reference line + legend. Numeric summary below now surfaces Best / Worst month alongside totals. Starter prompt swapped from "this quarter" to "this year" to nudge users toward the new trend chart.
+- `pages/ProClients.jsx` — new `InsightsCostAlertTile` mounts right below `FirmAttentionTile`:
+  - Disabled threshold → compact "Set threshold" configure chip
+  - Threshold set, no offenders → thin green "all clear" strip w/ inline threshold editor
+  - At least one offender → LOUD rose warning tile w/ pulsing icon, per-client rows (spent, over by), "Open books" jump-link, expand/hide, edit threshold inline
+
 ### Feb 2026 — Draggable Insights panel + Recharts visualisations
 
 **Frontend** (`components/InsightsChatWidget.jsx`)

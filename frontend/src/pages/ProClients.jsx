@@ -223,6 +223,8 @@ export default function ProClients() {
         onToggle={() => setShowOnlyAction(v => !v)}
       />
 
+      <InsightsCostAlertTile onOpenClient={(cid) => switchCompany(cid)} />
+
       {/* Search + view-toggle row. Search filters on company name,
           business type, owner name, and owner email — everything a
           Pro would type when hunting for a specific client. Layout
@@ -720,6 +722,197 @@ function FirmStat({ label, value = 0, icon: Icon, tone }) {
     </div>
   );
 }
+
+/**
+ * InsightsCostAlertTile — surfaces clients whose current-month Insights
+ * spend has crossed the firm's configured threshold. Silent when the
+ * threshold is 0 (feature disabled) OR when nobody is over.
+ *
+ * The tile inlines a "Set threshold" button so the firm can adjust the
+ * value without leaving the page. Threshold persists per-Pro-user on
+ * the backend (`insights_alert_threshold_usd` on the user doc).
+ */
+function InsightsCostAlertTile({ onOpenClient }) {
+  const [threshold, setThreshold] = useState(0);
+  const [data, setData] = useState(null);
+  const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  const load = async () => {
+    try {
+      const cfg = await api.get("/pro/insights-cost-alerts/config");
+      const t = Number(cfg.data?.threshold_usd || 0);
+      setThreshold(t);
+      const list = await api.get("/pro/insights-cost-alerts", { params: { threshold_usd: t } });
+      setData(list.data);
+    } catch (e) { /* silent — this tile is non-critical */ }
+  };
+  useEffect(() => { load(); }, []);
+
+  const saveThreshold = async () => {
+    const v = Math.max(0, Number(draft) || 0);
+    try {
+      await api.patch("/pro/insights-cost-alerts/config", { threshold_usd: v });
+      setThreshold(v);
+      setEditing(false);
+      toast.success(v > 0 ? `Alert set for clients spending ≥ $${v.toFixed(2)}/mo` : "Cost alerts disabled");
+      await load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't save threshold");
+    }
+  };
+
+  // Compact "configure" chip when threshold hasn't been set. Keeps
+  // the feature discoverable without shouting for attention.
+  if (threshold <= 0) {
+    return (
+      <div className="rounded-xl border border-slate-200 bg-white/60 px-4 py-2 flex flex-wrap items-center gap-3"
+           data-testid="insights-cost-alert-tile-disabled">
+        <Sparkles size={14} className="text-indigo-500" />
+        <div className="text-xs text-slate-600 flex-1 min-w-0">
+          Set a monthly Insights-spend alert so you know when a client is burning through their AI budget.
+        </div>
+        {editing ? (
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">$</span>
+            <input
+              type="number" min="0" step="0.50" autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") saveThreshold(); if (e.key === "Escape") setEditing(false); }}
+              data-testid="insights-cost-alert-threshold-input"
+              className="w-24 text-xs px-2 py-1 rounded border border-slate-300"
+              placeholder="5.00"
+            />
+            <button onClick={saveThreshold} data-testid="insights-cost-alert-threshold-save"
+                    className="text-xs px-2.5 py-1 rounded bg-slate-900 text-white hover:bg-slate-800">Save</button>
+            <button onClick={() => setEditing(false)}
+                    className="text-xs px-2 py-1 text-slate-500 hover:text-slate-800">Cancel</button>
+          </div>
+        ) : (
+          <button
+            onClick={() => { setDraft("5"); setEditing(true); }}
+            data-testid="insights-cost-alert-configure-btn"
+            className="text-xs px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-slate-700"
+          >
+            Set threshold
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  const over = data?.clients_over || [];
+  // Threshold is set but nobody is over — show a compact "all clear" strip.
+  if (!over.length) {
+    return (
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-2 flex items-center gap-3"
+           data-testid="insights-cost-alert-tile-clear">
+        <CheckCircle2 size={14} className="text-emerald-600" />
+        <div className="text-xs text-emerald-900 flex-1">
+          All clients under your ${threshold.toFixed(2)}/mo Insights alert threshold this month.
+        </div>
+        <button
+          onClick={() => { setDraft(String(threshold)); setEditing(true); }}
+          className="text-xs text-emerald-800 hover:text-emerald-950 underline"
+        >
+          Change threshold
+        </button>
+        {editing && (
+          <ThresholdEditor draft={draft} setDraft={setDraft}
+                           onSave={saveThreshold} onCancel={() => setEditing(false)} />
+        )}
+      </div>
+    );
+  }
+
+  // At least one client is over → LOUD warning tile.
+  return (
+    <div className="rounded-xl border border-rose-200 bg-gradient-to-r from-rose-50 to-white overflow-hidden shadow-sm"
+         data-testid="insights-cost-alert-tile">
+      <div className="px-5 py-3 flex flex-wrap items-center gap-3">
+        <div className="w-9 h-9 rounded-full bg-rose-100 grid place-items-center animate-pulse">
+          <AlertTriangle size={16} className="text-rose-700" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-heading font-semibold text-rose-900">
+            <span data-testid="insights-cost-alert-count">{over.length}</span> client{over.length === 1 ? "" : "s"} over your Insights budget alert
+          </h3>
+          <div className="text-xs text-rose-800/80 mt-0.5">
+            Threshold: <b>${threshold.toFixed(2)}/mo</b> · Period: {data.period}
+          </div>
+        </div>
+        <button
+          onClick={() => setExpanded(v => !v)}
+          data-testid="insights-cost-alert-expand-btn"
+          className="text-xs px-3 py-1.5 rounded-md border border-rose-300 bg-white hover:bg-rose-50 text-rose-800"
+        >
+          {expanded ? "Hide list" : "Show list"}
+        </button>
+        <button
+          onClick={() => { setDraft(String(threshold)); setEditing(true); }}
+          className="text-xs px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-slate-700"
+        >
+          Edit threshold
+        </button>
+      </div>
+      {editing && (
+        <div className="px-5 pb-3">
+          <ThresholdEditor draft={draft} setDraft={setDraft}
+                           onSave={saveThreshold} onCancel={() => setEditing(false)} />
+        </div>
+      )}
+      {expanded && (
+        <div className="border-t border-rose-100 divide-y divide-rose-50 bg-white">
+          {over.map((c) => (
+            <div key={c.id} className="px-5 py-2.5 flex items-center gap-3"
+                 data-testid={`insights-cost-alert-row-${c.id}`}>
+              <div className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-slate-900 truncate">{c.name}</div>
+                <div className="text-[11px] text-slate-500">
+                  Spent <b className="font-mono-num text-slate-800">${c.spent.toFixed(2)}</b>
+                  {" · "}Over by <b className="font-mono-num text-rose-700">${c.over_by.toFixed(2)}</b>
+                </div>
+              </div>
+              <button
+                onClick={() => onOpenClient && onOpenClient(c.id)}
+                className="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-50 text-slate-700"
+                data-testid={`insights-cost-alert-open-${c.id}`}
+              >
+                Open books
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ThresholdEditor({ draft, setDraft, onSave, onCancel }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-xs text-slate-500">$</span>
+      <input
+        type="number" min="0" step="0.50" autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") onSave(); if (e.key === "Escape") onCancel(); }}
+        data-testid="insights-cost-alert-threshold-input"
+        className="w-28 text-xs px-2 py-1 rounded border border-slate-300"
+        placeholder="5.00"
+      />
+      <button onClick={onSave} data-testid="insights-cost-alert-threshold-save"
+              className="text-xs px-2.5 py-1 rounded bg-slate-900 text-white hover:bg-slate-800">Save</button>
+      <button onClick={onCancel}
+              className="text-xs px-2 py-1 text-slate-500 hover:text-slate-800">Cancel</button>
+    </div>
+  );
+}
+
+
 
 function ClientActionSummary({ c }) {
   const chips = [];

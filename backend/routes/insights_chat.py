@@ -79,6 +79,75 @@ async def _fetch_reorder_alerts(cid: str, params: dict) -> dict:
     return await inventory_service.compute_reorder_alerts(cid)
 
 
+async def _fetch_income_trend(cid: str, params: dict) -> dict:
+    """Monthly revenue / expense / net income series for a trailing
+    window. Great for 'how's my year looking', 'am I trending up',
+    'when did I stop being profitable'. Defaults to the trailing 12
+    months from today; caller can override via `months` (int, 3-24) or
+    an explicit start/end range.
+    """
+    from reports import compute_income_statement
+    from calendar import monthrange
+    from datetime import date as _d
+
+    basis = params.get("basis") or "accrual"
+    months_n = int(params.get("months") or 12)
+    months_n = max(3, min(24, months_n))
+
+    today = _d.today()
+    # If caller supplied an explicit end, honour it; otherwise use today.
+    end_iso = params.get("end") or today.isoformat()
+    try:
+        end_d = _d.fromisoformat(end_iso)
+    except ValueError:
+        end_d = today
+
+    # Build a list of (year, month) pairs anchored on end_d walking
+    # backwards `months_n` full months.
+    pairs: list[tuple[int, int]] = []
+    y, m = end_d.year, end_d.month
+    for _ in range(months_n):
+        pairs.append((y, m))
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+    pairs.reverse()
+
+    series: list[dict] = []
+    total_rev = 0.0
+    total_exp = 0.0
+    for (yy, mm) in pairs:
+        m_start = _d(yy, mm, 1).isoformat()
+        m_end = _d(yy, mm, monthrange(yy, mm)[1]).isoformat()
+        try:
+            row = await compute_income_statement(cid, start=m_start, end=m_end, basis=basis)
+        except Exception:  # noqa: BLE001
+            row = {"total_revenue": 0.0, "total_expense": 0.0, "net_income": 0.0}
+        rev = float(row.get("total_revenue") or 0)
+        exp = float(row.get("total_expense") or 0)
+        net = float(row.get("net_income") or (rev - exp))
+        total_rev += rev
+        total_exp += exp
+        series.append({
+            "month": f"{yy}-{mm:02d}",
+            "label": _d(yy, mm, 1).strftime("%b %y"),
+            "revenue": round(rev, 2),
+            "expense": round(exp, 2),
+            "net": round(net, 2),
+        })
+
+    return {
+        "basis": basis,
+        "months": series,
+        "period_start": series[0]["month"] if series else None,
+        "period_end": series[-1]["month"] if series else None,
+        "total_revenue": round(total_rev, 2),
+        "total_expense": round(total_exp, 2),
+        "total_net": round(total_rev - total_exp, 2),
+    }
+
+
 CHART_REGISTRY: dict[str, dict] = {
     "income_statement": {
         "title": "Income Statement",
@@ -115,6 +184,12 @@ CHART_REGISTRY: dict[str, dict] = {
         "description": "Inventory items at or below their low-stock threshold. Great for 'what do I need to buy', 'am I running low on anything'.",
         "params_hint": "(no params)",
         "fetcher": _fetch_reorder_alerts,
+    },
+    "income_trend": {
+        "title": "Monthly Income Trend",
+        "description": "Revenue, expense, and net-income line/bar trend over the trailing N months. Great for 'how's my year looking', 'am I trending up', 'when did I stop being profitable', 'this year vs last year'. Prefer this over the flat Income Statement whenever the user asks about a TREND, YEAR, or MULTI-MONTH view.",
+        "params_hint": "months (int 3-24, default 12), basis ('accrual'|'cash'), end (YYYY-MM-DD, optional)",
+        "fetcher": _fetch_income_trend,
     },
 }
 

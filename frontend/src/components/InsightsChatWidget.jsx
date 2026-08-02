@@ -24,10 +24,11 @@ import {
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, ReferenceLine, LabelList,
+  ComposedChart, Line, CartesianGrid, Legend,
 } from "recharts";
 
 const STARTER_PROMPTS = [
-  "How's my profit doing this quarter?",
+  "How's my profit trending this year?",
   "Who owes me money right now?",
   "What's my inventory worth?",
   "What do I need to reorder?",
@@ -562,6 +563,51 @@ const compactMoney = (v) => {
 function ChartVisual({ chartId, data }) {
   if (!data) return null;
 
+  if (chartId === "income_trend") {
+    const rows = (data.months || []).map(m => ({
+      label: m.label || m.month,
+      Revenue: Number(m.revenue || 0),
+      Expenses: Number(m.expense || 0),
+      Net: Number(m.net || 0),
+    }));
+    if (!rows.length) {
+      return <div className="text-xs text-slate-400 italic py-4 text-center">No trend data yet.</div>;
+    }
+    const netTotal = Number(data.total_net || 0);
+    return (
+      <div data-testid="insights-chart-visual-income_trend" className="space-y-2">
+        <div className="flex items-baseline justify-between">
+          <div className="text-[11px] uppercase tracking-wider text-slate-500">
+            Net income · trailing {rows.length}mo
+          </div>
+          <div className={`text-xl font-semibold font-mono-num ${netTotal >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+            {fmtMoney(netTotal)}
+          </div>
+        </div>
+        <div style={{ width: "100%", height: 220 }}>
+          <ResponsiveContainer>
+            <ComposedChart data={rows} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+              <CartesianGrid stroke="#F1F5F9" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} axisLine={false} tickLine={false}
+                     interval={rows.length > 12 ? 1 : 0} />
+              <YAxis tickFormatter={compactMoney} tick={{ fontSize: 10 }}
+                     axisLine={false} tickLine={false} width={48} />
+              <Tooltip formatter={(v) => fmtMoney(v)} cursor={{ fill: "#F8FAFC" }}
+                       contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+              <Legend wrapperStyle={{ fontSize: 10 }} iconSize={10} />
+              <ReferenceLine y={0} stroke="#CBD5E1" strokeDasharray="2 2" />
+              <Bar dataKey="Revenue"  fill={C.revenue} radius={[4, 4, 0, 0]} barSize={12} />
+              <Bar dataKey="Expenses" fill={C.expense} radius={[4, 4, 0, 0]} barSize={12} />
+              <Line type="monotone" dataKey="Net" stroke={C.positive}
+                    strokeWidth={2.5} dot={{ r: 3, fill: C.positive }}
+                    activeDot={{ r: 5 }} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    );
+  }
+
   if (chartId === "income_statement") {
     const rev = Number(data.total_revenue || 0);
     const exp = Number(data.total_expense || 0);
@@ -742,6 +788,29 @@ function ChartVisual({ chartId, data }) {
  *  reference so users get both the graph and the actual numbers. */
 function ChartRenderer({ chartId, data }) {
   if (!data) return <div className="text-xs text-slate-400 italic">No data.</div>;
+  if (chartId === "income_trend") {
+    const rows = data.months || [];
+    const bestNet = rows.reduce((b, r) => (r.net > (b?.net ?? -Infinity) ? r : b), null);
+    const worstNet = rows.reduce((b, r) => (r.net < (b?.net ?? Infinity) ? r : b), null);
+    return (
+      <div className="space-y-1.5 text-xs">
+        <Row label="Total revenue"  value={data.total_revenue} bold accent="indigo" />
+        <Row label="Total expenses" value={data.total_expense} bold />
+        <div className="border-t pt-1.5 mt-1.5">
+          <Row label="Net income"   value={data.total_net}
+               bold accent={(data.total_net || 0) >= 0 ? "emerald" : "rose"} />
+        </div>
+        {bestNet && (
+          <Row label={`Best month · ${bestNet.label || bestNet.month}`}
+               value={bestNet.net} small accent="emerald" />
+        )}
+        {worstNet && worstNet !== bestNet && (
+          <Row label={`Worst month · ${worstNet.label || worstNet.month}`}
+               value={worstNet.net} small accent={worstNet.net < 0 ? "rose" : undefined} />
+        )}
+      </div>
+    );
+  }
   if (chartId === "income_statement") {
     return (
       <div className="space-y-1.5 text-xs">

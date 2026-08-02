@@ -983,3 +983,106 @@ async def pro_mark_all_alerts_read(
 ):
     n = await mark_all_read(user["id"])
     return {"ok": True, "marked": n}
+
+
+# ── Insights cost alerts (per-firm threshold, per-client watch) ──────
+#
+# The firm sets a monthly spend threshold (in USD) on their profile;
+# any client whose current-month Insights spend crosses the threshold
+# is surfaced as a warning tile on the Pro's Clients page so the firm
+# can proactively raise the client's cap or investigate runaway usage
+# before the client hits their own hard block.
+
+class InsightsCostAlertConfigIn(BaseModel):
+    threshold_usd: float = Field(ge=0, le=10000)
+
+
+def _current_period() -> str:
+    from datetime import date as _d
+    return _d.today().strftime("%Y-%m")
+
+
+@router.get("/pro/insights-cost-alerts/config")
+async def get_insights_cost_alert_config(
+    user: dict = Depends(require_role("pro", "superadmin")),
+):
+    """Return the firm's per-client Insights-spend threshold. `0` means
+    the alert tile is disabled (no threshold set)."""
+    doc = await db.users.find_one({"id": user["id"]}, {"insights_alert_threshold_usd": 1}) or {}
+    return {"threshold_usd": float(doc.get("insights_alert_threshold_usd") or 0)}
+
+
+@router.patch("/pro/insights-cost-alerts/config")
+async def patch_insights_cost_alert_config(
+    inp: InsightsCostAlertConfigIn,
+    user: dict = Depends(require_role("pro", "superadmin")),
+):
+    """Save the firm's per-client Insights-spend threshold. Set to 0 to
+    disable the warning tile entirely."""
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"insights_alert_threshold_usd": float(inp.threshold_usd),
+                  "updated_at": now_iso()}},
+    )
+    return {"threshold_usd": float(inp.threshold_usd)}
+
+
+@router.get("/pro/insights-cost-alerts")
+async def list_insights_cost_alerts(
+    threshold_usd: Optional[float] = Query(None, ge=0, le=10000),
+    user: dict = Depends(require_role("pro", "superadmin")),
+):
+    """Return every client whose current-month Insights spend meets or
+    exceeds the firm's configured threshold.
+
+    Response:
+      {
+        "period": "YYYY-MM",
+        "threshold_usd": 5.0,
+        "clients_over": [
+          {"id", "name", "spent", "over_by"},
+          ...
+        ]
+      }
+    """
+    # Resolve threshold: query override → firm's saved setting → 0.
+    if threshold_usd is None:
+        cfg = await db.users.find_one({"id": user["id"]}, {"insights_alert_threshold_usd": 1}) or {}
+        threshold = float(cfg.get("insights_alert_threshold_usd") or 0)
+    else:
+        threshold = float(threshold_usd)
+
+    period = _current_period()
+
+    # Pro sees only their assigned clients; superadmin sees everyone.
+    if user["role"] == "superadmin":
+        companies = await db.companies.find(
+            {}, {"id": 1, "name": 1, "insights_spend": 1}
+        ).to_list(2000)
+    else:
+        ms = await db.memberships.find({
+            "user_id": user["id"], "role": "pro",
+            "$or": [{"archived_at": {"$exists": False}}, {"archived_at": None}],
+        }).to_list(2000)
+        cids = [m["company_id"] for m in ms]
+        if not cids:
+            return {"period": period, "threshold_usd": threshold, "clients_over": []}
+        companies = await db.companies.find(
+            {"id": {"$in": cids}}, {"id": 1, "name": 1, "insights_spend": 1}
+        ).to_list(2000)
+
+    rows: list[dict] = []
+    for c in companies:
+        spend_map = c.get("insights_spend") or {}
+        spent = float(spend_map.get(period) or 0)
+        # A threshold of 0 means "alerts disabled" — never flag anyone.
+        if threshold > 0 and spent >= threshold:
+            rows.append({
+                "id": c["id"],
+                "name": c.get("name") or "(unnamed)",
+                "spent": round(spent, 4),
+                "over_by": round(spent - threshold, 4),
+            })
+
+    rows.sort(key=lambda r: r["spent"], reverse=True)
+    return {"period": period, "threshold_usd": threshold, "clients_over": rows}
