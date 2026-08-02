@@ -303,12 +303,14 @@ async def merge_accounts(
 
 
 @router.post("/companies/{cid}/accounts/backfill-detail-type")
-async def backfill_detail_type(cid: str, user: dict = Depends(get_current_user)):
+async def backfill_detail_type(cid: str, force: bool = False, user: dict = Depends(get_current_user)):
     """One-shot inference pass — assign a Wave-style `detail_type` to
     every legacy account that still has an empty one. Match rules are
     heuristic (name + subtype substrings) and biased toward safer
     "Other" buckets when unsure. Idempotent — re-running just skips
-    accounts that already carry a detail_type.
+    accounts that already carry a detail_type UNLESS `?force=1` is set,
+    in which case even set values are recomputed (useful to fix
+    mislabeled sub-types).
     """
     await require_company(user, cid)
 
@@ -365,7 +367,8 @@ async def backfill_detail_type(cid: str, user: dict = Depends(get_current_user))
     skipped = 0
     cursor = db.accounts.find({"company_id": cid})
     async for a in cursor:
-        if (a.get("detail_type") or "").strip():
+        current = (a.get("detail_type") or "").strip()
+        if current and not force:
             skipped += 1
             continue
         t = a.get("type") or "expense"
@@ -377,6 +380,9 @@ async def backfill_detail_type(cid: str, user: dict = Depends(get_current_user))
                 break
         if not detail:
             detail = DEFAULT_FALLBACK.get(t, "other_short_term_asset")
+        if current == detail:
+            skipped += 1
+            continue
         await db.accounts.update_one(
             {"_id": a["_id"]},
             {"$set": {"detail_type": detail, "updated_at": now_iso()}},

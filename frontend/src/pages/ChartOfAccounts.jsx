@@ -324,7 +324,12 @@ export default function ChartOfAccounts() {
               legacy accounts that don't have one yet. Idempotent. */}
           <button
             onClick={async () => {
-              if (!confirm("Assign Wave-style sub-types to all legacy accounts? Existing sub-types are preserved — this only fills in blanks.")) return;
+              const force = confirm(
+                "Backfill Wave-style sub-types for every account?\n\n" +
+                "• Click OK to only fill in accounts missing a sub-type (safe).\n" +
+                "• Click Cancel then Shift+Click this button to force re-classify EVERY account (fixes mislabeled ones)."
+              );
+              if (!force) return;
               try {
                 const r = await api.post(`/companies/${currentId}/accounts/backfill-detail-type`, {});
                 const d = r.data;
@@ -333,6 +338,22 @@ export default function ChartOfAccounts() {
                 load();
               } catch (e) {
                 toast.error(e.response?.data?.detail || "Backfill failed");
+              }
+            }}
+            onKeyDown={() => {}}
+            onMouseDown={async (e) => {
+              // Shift+Click = force re-classify EVERY account, even
+              // ones that already carry a detail_type (fixes mislabeled).
+              if (!e.shiftKey) return;
+              e.preventDefault();
+              if (!confirm("Force re-classify every account? Existing sub-types will be overwritten with the best guess based on the account name.")) return;
+              try {
+                const r = await api.post(`/companies/${currentId}/accounts/backfill-detail-type?force=1`, {});
+                const d = r.data;
+                toast.success(`Re-classified ${d.updated} account${d.updated === 1 ? "" : "s"} (${d.skipped_already_set} unchanged)`);
+                load();
+              } catch (err) {
+                toast.error(err.response?.data?.detail || "Re-classify failed");
               }
             }}
             className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
@@ -1299,10 +1320,61 @@ function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onCl
   const [name, setName] = useState(p.name || "");
   const [type, setType] = useState(TYPES.includes(p.type) ? p.type : "expense");
   const detailsForType = (t) => DETAIL_TYPES[t === "revenue" ? "revenue" : t] || [];
+  // Client-side sibling of the backend backfill rules — best guess of
+  // detail_type from an account name so the sub-type dropdown auto-
+  // aligns as the user types. Kept intentionally in sync with the
+  // patterns in /accounts/backfill-detail-type on the server.
+  const inferDetailFromName = (n, t) => {
+    const s = (n || "").toLowerCase();
+    if (!s.trim()) return null;
+    const rules = {
+      asset: [
+        [["accumulated depreciation", "accumulated amortization", "amortization"], "depreciation_and_amortization"],
+        [["undeposited fund", "in transit", "clearing"], "money_in_transit"],
+        [["cash", "checking", "savings", "petty cash", "bank", "money market", "operating account"], "cash_and_bank"],
+        [["receivable", "a/r"], "expected_payments_from_customers"],
+        [["inventory", "stock on hand", "goods on hand", "raw material", "finished goods", "work in process"], "inventory"],
+        [["prepaid", "vendor deposit", "vendor prepayment"], "vendor_prepayments"],
+        [["equipment", "machinery", "vehicle", "furniture", "fixture", "computer", "building", "land", "leasehold", "fixed asset", "office equipment"], "property_plant_equipment"],
+      ],
+      liability: [
+        [["credit card", "amex", "visa", "mastercard", "discover"], "credit_card"],
+        [["mortgage", "loan", "note payable", "line of credit", "long-term debt", "long term debt"], "loan_and_line_of_credit"],
+        [["sales tax", "gst payable", "vat payable", "hst payable"], "sales_tax_payable"],
+        [["payable", "a/p"], "expected_payments_to_vendors"],
+        [["payroll", "wages payable"], "due_for_payroll"],
+        [["customer deposit", "deferred revenue", "prepaid revenue", "unearned revenue"], "customer_prepayments"],
+        [["owner", "shareholder", "member", "due to"], "due_to_owners"],
+      ],
+      equity: [
+        [["retained"], "retained_earnings"],
+        [["contribution", "draw", "distribution", "capital", "owner"], "owner_contribution_drawing"],
+      ],
+      revenue: [
+        [["discount"], "discount"],
+        [["interest income", "other income", "misc income", "miscellaneous income"], "other_income"],
+      ],
+      expense: [
+        [["cost of goods", "cogs", "cost of sales"], "cost_of_goods_sold"],
+        [["stripe fee", "paypal fee", "square fee", "processing fee", "merchant fee"], "payment_processing_fee"],
+        [["payroll expense", "wages", "salaries", "employee benefit"], "payroll_expense"],
+        [["interest expense", "depreciation expense", "amortization expense", "loss on"], "other_expense"],
+      ],
+    };
+    for (const [patterns, dt] of (rules[t] || [])) {
+      if (patterns.some(p => s.includes(p))) return dt;
+    }
+    return null;
+  };
   const [detailType, setDetailType] = useState(() => {
-    const list = detailsForType(TYPES.includes(p.type) ? p.type : "expense");
-    return list[0]?.key || "";
+    const initialType = TYPES.includes(p.type) ? p.type : "expense";
+    return inferDetailFromName(p.name || "", initialType)
+      || detailsForType(initialType)[0]?.key
+      || "";
   });
+  // Once the user manually picks a sub-type, stop auto-changing it as
+  // they keep typing the name.
+  const [userTouchedDetail, setUserTouchedDetail] = useState(false);
   const [subtype, setSubtype] = useState(
     p.subtype && subtypesFor(TYPES.includes(p.type) ? p.type : "expense").includes(p.subtype)
       ? p.subtype
@@ -1391,7 +1463,14 @@ function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onCl
           <input placeholder="Code (e.g. 6250)" value={code} onChange={(e) => setCode(e.target.value)}
                  className="w-full border rounded px-3 py-2 text-sm font-mono-num" data-testid="coa-create-code" />
         )}
-        <input placeholder="Account name" value={name} onChange={(e) => setName(e.target.value)}
+        <input placeholder="Account name" value={name} onChange={(e) => {
+          const nextName = e.target.value;
+          setName(nextName);
+          if (!userTouchedDetail) {
+            const guessed = inferDetailFromName(nextName, type);
+            if (guessed) setDetailType(guessed);
+          }
+        }}
                className="w-full border rounded px-3 py-2 text-sm" data-testid="coa-create-name" />
         <select
           value={type}
@@ -1403,7 +1482,8 @@ function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onCl
               setSubtype(subtypesFor(nextType)[0]);
             }
             const list = detailsForType(nextType);
-            setDetailType(list[0]?.key || "");
+            const guessed = !userTouchedDetail ? inferDetailFromName(name, nextType) : null;
+            setDetailType(guessed || list[0]?.key || "");
             // Drop the parent if the new type invalidates it — sub-accounts
             // must live under a parent of the same type.
             if (parentId) {
@@ -1419,7 +1499,7 @@ function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onCl
           <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Sub-type</label>
           <select
             value={detailType}
-            onChange={(e) => setDetailType(e.target.value)}
+            onChange={(e) => { setDetailType(e.target.value); setUserTouchedDetail(true); }}
             className="w-full border rounded px-3 py-2 text-sm bg-white"
             data-testid="coa-create-detail-type"
           >
