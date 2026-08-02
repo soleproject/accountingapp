@@ -170,6 +170,14 @@ async def create_item(cid: str, inp: ItemIn, user: dict = Depends(get_current_us
         "updated_at": now_iso(),
     }
     await db.items.insert_one(doc)
+    # Post an opening-balance JE so the BS picks up the current stock.
+    try:
+        from inventory_service import sync_opening_balance
+        await sync_opening_balance(cid, doc)
+        # Re-read to pick up opening_je_id.
+        doc = await db.items.find_one({"id": doc["id"], "company_id": cid}) or doc
+    except Exception:
+        pass
     return {"item": coerce(doc)}
 
 
@@ -199,12 +207,32 @@ async def update_item(cid: str, iid: str, patch: ItemPatch, user: dict = Depends
     upd["updated_at"] = now_iso()
     await db.items.update_one({"id": iid, "company_id": cid}, {"$set": upd})
     doc = await db.items.find_one({"id": iid, "company_id": cid})
+    # Re-sync opening-balance JE if any inventory-affecting field changed.
+    try:
+        from inventory_service import sync_opening_balance
+        if doc and any(k in upd for k in
+                       ("track_inventory", "quantity_on_hand", "cost_basis",
+                        "inventory_account_id", "name")):
+            await sync_opening_balance(cid, doc)
+            doc = await db.items.find_one({"id": iid, "company_id": cid})
+    except Exception:
+        pass
     return {"item": coerce(doc) if doc else None}
 
 
 @router.delete("/companies/{cid}/items/{iid}")
 async def delete_item(cid: str, iid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
+    # Reverse the opening-balance JE (if any) so the BS drops back to
+    # zero — otherwise the credit sits orphaned in Opening Balance
+    # Equity forever.
+    try:
+        from inventory_service import clear_opening_balance
+        existing = await db.items.find_one({"id": iid, "company_id": cid})
+        if existing:
+            await clear_opening_balance(cid, existing)
+    except Exception:
+        pass
     await db.items.delete_one({"id": iid, "company_id": cid})
     return {"ok": True}
 

@@ -395,6 +395,12 @@ async def inventory_valuation(cid: str, user: dict = Depends(get_current_user)):
     stock flag. The Inventory Valuation report renders this."""
     await require_company(user, cid)
     import inventory_service
+    # Self-heal — any legacy tracked items without an opening JE get
+    # one posted here so the Balance Sheet catches up on the next load.
+    try:
+        await inventory_service.backfill_opening_balances(cid)
+    except Exception:  # never let backfill block the report
+        pass
     return await inventory_service.compute_valuation(cid)
 
 
@@ -434,5 +440,15 @@ async def inventory_reorder_alerts(cid: str, user: dict = Depends(get_current_us
     await require_company(user, cid)
     import inventory_service
     return await inventory_service.compute_reorder_alerts(cid)
+
+
+@router.post("/companies/{cid}/inventory-management/backfill-opening")
+async def inventory_backfill_opening(cid: str, user: dict = Depends(get_current_user)):
+    """Post opening-balance JEs for every tracked item that pre-dates
+    the opening-JE feature. Idempotent — items that already carry an
+    `opening_je_id` are skipped."""
+    await require_company(user, cid)
+    import inventory_service
+    return await inventory_service.backfill_opening_balances(cid)
 
 

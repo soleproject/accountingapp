@@ -35,6 +35,7 @@ from db import db, now_iso, coerce
 SOURCE_BILL = "bill_inventory"
 SOURCE_INVOICE_COGS = "invoice_cogs"
 SOURCE_ADJUSTMENT = "inventory_adjustment"
+SOURCE_OPENING = "inventory_opening"
 
 MOVEMENT_TYPES = {
     "purchase":   "Bill received",
@@ -466,6 +467,156 @@ async def apply_adjustment(
         "post": {"qoh": target_qoh, "cost_basis": target_cost},
         "delta": delta,
     }
+
+
+# ── Opening balances (item-level onboarding) ────────────────────────
+
+async def _ensure_opening_balance_equity(cid: str) -> dict:
+    """Get/create the "Opening Balance Equity" clearing account that
+    absorbs the credit side of every opening-balance JE. Standard QBO/
+    Xero pattern — a bookkeeper later reclassifies this into Retained
+    Earnings or partner capital during the close of the migration
+    period. Idempotent."""
+    acct = await db.accounts.find_one({
+        "company_id": cid,
+        "type": "equity",
+        "detail_type": "opening_balance_equity",
+    })
+    if acct:
+        return acct
+    # Fallback: exact name match (older seeds sometimes carry the
+    # account without a detail_type flag).
+    acct = await db.accounts.find_one({
+        "company_id": cid,
+        "type": "equity",
+        "name": {"$regex": r"^opening balance equity$", "$options": "i"},
+    })
+    if acct:
+        # Backfill the detail_type for future lookups.
+        await db.accounts.update_one({"id": acct["id"]},
+            {"$set": {"detail_type": "opening_balance_equity", "updated_at": now_iso()}})
+        return acct
+    doc = {
+        "id": str(uuid.uuid4()),
+        "company_id": cid,
+        "type": "equity",
+        "subtype": "Equity",
+        "detail_type": "opening_balance_equity",
+        "name": "Opening Balance Equity",
+        "code": None,
+        "active": True,
+        "created_at": now_iso(), "updated_at": now_iso(),
+    }
+    await db.accounts.insert_one(doc)
+    return doc
+
+
+async def sync_opening_balance(cid: str, item: dict) -> Optional[str]:
+    """Post / update / delete the item's opening-balance JE so the BS
+    reflects the initial stock the user typed into the Items modal.
+
+    The opening JE is a ONE-TIME entry using the QOH & cost captured at
+    the moment tracking was turned on. Subsequent purchases / sales /
+    adjustments post their own JEs — mixing them with a live
+    `qoh * cost_basis` snapshot here would double-count.
+
+    We snapshot the opening values onto the item as
+    `opening_qty_snapshot` + `opening_cost_snapshot` on first sync,
+    and re-use them on every future call. Idempotent.
+    """
+    prev_je_id = item.get("opening_je_id")
+    inv_acct = item.get("inventory_account_id")
+
+    if not item.get("track_inventory") or not inv_acct:
+        # Tracking is off — remove any stale opening JE.
+        if prev_je_id:
+            await db.journal_entries.delete_one({"id": prev_je_id, "company_id": cid})
+            await db.items.update_one({"id": item["id"], "company_id": cid},
+                {"$unset": {"opening_je_id": "", "opening_qty_snapshot": "",
+                            "opening_cost_snapshot": ""}})
+        return None
+
+    # First-time snapshot: capture what the user typed at item-create.
+    snap_qty = item.get("opening_qty_snapshot")
+    snap_cost = item.get("opening_cost_snapshot")
+    if snap_qty is None or snap_cost is None:
+        snap_qty = float(item.get("quantity_on_hand") or 0)
+        snap_cost = float(item.get("cost_basis") or 0)
+        await db.items.update_one({"id": item["id"], "company_id": cid},
+            {"$set": {"opening_qty_snapshot": snap_qty,
+                      "opening_cost_snapshot": snap_cost,
+                      "updated_at": now_iso()}})
+
+    value = round(float(snap_qty) * float(snap_cost), 2)
+    if value < 0.005:
+        if prev_je_id:
+            await db.journal_entries.delete_one({"id": prev_je_id, "company_id": cid})
+            await db.items.update_one({"id": item["id"], "company_id": cid},
+                                      {"$unset": {"opening_je_id": ""}})
+        return None
+
+    equity = await _ensure_opening_balance_equity(cid)
+    lines = [
+        {"account_id": inv_acct,
+         "account_name": item.get("inventory_account_name") or "Inventory",
+         "debit": value, "credit": 0.0,
+         "description": f"Opening inventory · {item.get('name') or 'item'}"},
+        {"account_id": equity["id"],
+         "account_name": equity.get("name") or "Opening Balance Equity",
+         "debit": 0.0, "credit": value,
+         "description": f"Opening balance offset · {item.get('name') or 'item'}"},
+    ]
+    memo = f"Opening inventory balance · {item.get('name') or ''}".strip(" ·")
+    if prev_je_id:
+        existing = await db.journal_entries.find_one({"id": prev_je_id, "company_id": cid})
+        if existing:
+            await db.journal_entries.update_one(
+                {"id": prev_je_id, "company_id": cid},
+                {"$set": {"lines": lines, "memo": memo,
+                          "updated_at": now_iso()}},
+            )
+            return prev_je_id
+
+    je_id = str(uuid.uuid4())
+    await db.journal_entries.insert_one({
+        "id": je_id, "company_id": cid,
+        "date": (item.get("created_at") or now_iso())[:10],
+        "memo": memo,
+        "source": SOURCE_OPENING,
+        "ref_kind": "item", "ref_id": item["id"],
+        "lines": lines,
+        "created_at": now_iso(), "updated_at": now_iso(),
+    })
+    await db.items.update_one({"id": item["id"], "company_id": cid},
+                              {"$set": {"opening_je_id": je_id,
+                                        "updated_at": now_iso()}})
+    return je_id
+
+
+async def clear_opening_balance(cid: str, item: dict) -> None:
+    """Delete an item's opening-balance JE (used on item delete)."""
+    je_id = item.get("opening_je_id")
+    if je_id:
+        await db.journal_entries.delete_one({"id": je_id, "company_id": cid})
+
+
+async def backfill_opening_balances(cid: str) -> dict:
+    """One-shot repair — walk every tracked item in a company and post
+    an opening-balance JE for any that don't already have one. Used to
+    heal legacy items created before the opening-JE feature landed.
+    Returns a small diagnostic dict for the caller to surface."""
+    tracked = await db.items.find({"company_id": cid, "track_inventory": True}).to_list(5000)
+    posted, skipped = 0, 0
+    for it in tracked:
+        if it.get("opening_je_id"):
+            skipped += 1
+            continue
+        je = await sync_opening_balance(cid, it)
+        if je:
+            posted += 1
+        else:
+            skipped += 1
+    return {"posted": posted, "skipped": skipped, "total": len(tracked)}
 
 
 # ── Reports helpers ──────────────────────────────────────────────────
