@@ -383,6 +383,28 @@ export default function ReportView() {
     navigate(`/reports/account-detail?${parts.join("&")}`);
   };
 
+  // Sub-type banner drill-down: aggregates every account in the
+  // clicked sub-type and navigates to Account Detail with a
+  // comma-separated `account` list. Backend fans out the query across
+  // all IDs so the view shows every matching JE in one place.
+  const goToSubtypeDetail = (detailKey, accountIds) => {
+    if (!accountIds || accountIds.length === 0) return;
+    try {
+      const scroller = document.querySelector("main");
+      const y = scroller ? scroller.scrollTop : (window.scrollY || 0);
+      sessionStorage.setItem("reportReturnUrl",
+        `/reports/${kind}${window.location.search || ""}`);
+      sessionStorage.setItem("reportReturnLabel", "Balance Sheet");
+      sessionStorage.setItem("reportScrollY", String(y));
+    } catch { /* private mode / quota — fine to ignore */ }
+    const parts = [`account=${accountIds.join(",")}`];
+    if (end) parts.push(`end=${encodeURIComponent(end)}`);
+    if (kind === "income-statement") {
+      if (start) parts.push(`start=${encodeURIComponent(start)}`);
+    }
+    navigate(`/reports/account-detail?${parts.join("&")}`);
+  };
+
   // Restore source-report scroll position on return from Account Detail.
   useEffect(() => {
     if (!(kind === "balance-sheet" || kind === "income-statement" || kind === "cash-flow") || !data) return;
@@ -535,7 +557,7 @@ export default function ReportView() {
             <IncomeStatementBody data={data} onDrilldown={goToAccountDetail} />
           )}
           {kind === "balance-sheet" && Array.isArray(data.assets) && (
-            <BalanceSheetBody data={data} onDrilldown={goToAccountDetail} />
+            <BalanceSheetBody data={data} onDrilldown={goToAccountDetail} onDrilldownGroup={goToSubtypeDetail} />
           )}
           {kind === "account-detail" && Array.isArray(data.rows) && data.account !== undefined && (
             <AccountDetailBody
@@ -627,17 +649,17 @@ function IncomeStatementBody({ data, onDrilldown }) {
   );
 }
 
-function BalanceSheetBody({ data, onDrilldown }) {
+function BalanceSheetBody({ data, onDrilldown, onDrilldownGroup }) {
   return (
     <div className="text-sm">
       <Section title="Assets" />
-      <RolledUpRows rows={data.assets} onDrilldown={onDrilldown} />
+      <RolledUpRows rows={data.assets} onDrilldown={onDrilldown} onDrilldownGroup={onDrilldownGroup} />
       <Row code="" name="Total Assets" amount={data.total_assets} bold />
       <Section title="Liabilities" />
-      <RolledUpRows rows={data.liabilities} onDrilldown={onDrilldown} />
+      <RolledUpRows rows={data.liabilities} onDrilldown={onDrilldown} onDrilldownGroup={onDrilldownGroup} />
       <Row code="" name="Total Liabilities" amount={data.total_liabilities} bold />
       <Section title="Equity" />
-      <RolledUpRows rows={data.equity} onDrilldown={onDrilldown} />
+      <RolledUpRows rows={data.equity} onDrilldown={onDrilldown} onDrilldownGroup={onDrilldownGroup} />
       <Row code="" name="Total Equity" amount={data.total_equity} bold />
       <div className="mt-4 grid grid-cols-12 gap-2 px-3 py-2 border-t-2 border-slate-800 bg-slate-50 rounded">
         <div className="col-span-9 font-heading font-bold uppercase text-sm">Total Liabilities &amp; Equity</div>
@@ -684,7 +706,7 @@ const DETAIL_LABELS = {
   other_equity: "Other Equity",
 };
 
-function RolledUpRows({ rows, onDrilldown }) {
+function RolledUpRows({ rows, onDrilldown, onDrilldownGroup }) {
   const [expanded, setExpanded] = React.useState({}); // {parent_code: true}
 
   // Group into [{parent, children[]}, ...] preserving original order.
@@ -723,12 +745,22 @@ function RolledUpRows({ rows, onDrilldown }) {
         return (
           <React.Fragment key={`${g.parent.code}-${g.parent.parent_code || ""}-${gi}`}>
             {showDetailHeader && dt && (
-              <div
-                className="px-3 py-1 mt-2 text-[10px] uppercase tracking-widest font-semibold text-slate-500 border-b border-slate-100"
+              <button
+                type="button"
+                onClick={() => {
+                  // Collect every row (parent + orphan) whose detail_type
+                  // matches this banner so drill-down covers the entire
+                  // sub-section, not just the header's account.
+                  const ids = rows.filter(r => (r.detail_type || "") === dt).map(r => r.id).filter(Boolean);
+                  onDrilldownGroup?.(dt, ids);
+                }}
+                className="w-full text-left px-3 py-1 mt-2 text-[10px] uppercase tracking-widest font-semibold text-slate-500 border-b border-slate-100 hover:bg-indigo-50/60 hover:text-indigo-700 transition"
                 data-testid={`bs-detail-header-${dt}`}
+                title={`Drill down: see transactions for every account under ${DETAIL_LABELS[dt] || dt.replace(/_/g, " ")}`}
               >
                 {DETAIL_LABELS[dt] || dt.replace(/_/g, " ")}
-              </div>
+                <span className="ml-1 text-slate-400 normal-case font-normal">→ view all</span>
+              </button>
             )}
             <Row
               {...g.parent}

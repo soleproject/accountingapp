@@ -48,6 +48,69 @@ from deps import (
     categorize_and_insert, sync_and_import,
 )
 
+
+# Wave-style `detail_type` inference rules — shared between the
+# /accounts/backfill-detail-type endpoint and the CoA import commit
+# pass so imported spreadsheets don't land in "unclassified".
+_DT_RULES: dict[str, list[tuple[list[str], str]]] = {
+    "asset": [
+        (["accumulated depreciation", "accumulated amortization", "amortization"], "depreciation_and_amortization"),
+        (["undeposited fund", "in transit", "clearing"], "money_in_transit"),
+        (["cash", "checking", "savings", "petty cash", "bank", "money market", "operating account"], "cash_and_bank"),
+        (["accounts receivable", "receivable", " a/r ", "a/r"], "expected_payments_from_customers"),
+        (["inventory", "stock on hand", "goods on hand", "raw material", "finished goods", "work in process"], "inventory"),
+        (["prepaid", "vendor deposit", "vendor prepayment"], "vendor_prepayments"),
+        (["equipment", "machinery", "vehicle", "furniture", "fixture", "computer", "building", "land", "leasehold", "fixed asset", "office equipment"], "property_plant_equipment"),
+    ],
+    "liability": [
+        (["credit card", "amex", "visa", "mastercard", "discover card"], "credit_card"),
+        (["mortgage", "loan payable", "note payable", "line of credit", "long-term debt", "long term debt", "term loan"], "loan_and_line_of_credit"),
+        (["sales tax", "gst payable", "vat payable", "hst payable"], "sales_tax_payable"),
+        (["accounts payable", "payable", " a/p ", "a/p"], "expected_payments_to_vendors"),
+        (["payroll liab", "payroll pay", "wages payable", "941", "futa", "suta", "state withholding"], "due_for_payroll"),
+        (["customer deposit", "deferred revenue", "prepaid revenue", "unearned revenue", "customer prepayment"], "customer_prepayments"),
+        (["owner", "shareholder", "member", "due to"], "due_to_owners"),
+    ],
+    "equity": [
+        (["retained earnings", "current period"], "retained_earnings"),
+        (["contribution", "draw", "distribution", "capital", "owner"], "owner_contribution_drawing"),
+    ],
+    "revenue": [
+        (["discount"], "discount"),
+        (["interest income", "other income", "misc income", "miscellaneous income"], "other_income"),
+    ],
+    "cogs": [
+        (["cost of goods", "cogs", "cost of sales", "direct material", "direct labor"], "cost_of_goods_sold"),
+    ],
+    "expense": [
+        (["cost of goods", "cogs", "cost of sales"], "cost_of_goods_sold"),
+        (["stripe fee", "paypal fee", "square fee", "processing fee", "merchant fee"], "payment_processing_fee"),
+        (["payroll expense", "wages", "salaries", "employee benefit"], "payroll_expense"),
+        (["interest expense", "depreciation expense", "amortization expense", "loss on"], "other_expense"),
+    ],
+}
+_DT_DEFAULT: dict[str, str] = {
+    "asset":     "other_short_term_asset",
+    "liability": "other_short_term_liability",
+    "equity":    "other_equity",
+    "revenue":   "income",
+    "cogs":      "cost_of_goods_sold",
+    "expense":   "operating_expense",
+}
+
+
+def _infer_detail_type(acct_type: str, name: str, subtype: str = "") -> str:
+    """Best-guess Wave-style detail_type from account type + name + subtype.
+    Same rules as the backfill endpoint — kept here so the CoA CSV
+    import can classify rows before they're inserted."""
+    t = (acct_type or "expense").lower()
+    haystack = f"{name or ''} {subtype or ''}".lower()
+    for patterns, dt in _DT_RULES.get(t, []):
+        if any(p in haystack for p in patterns):
+            return dt
+    return _DT_DEFAULT.get(t, "other_short_term_asset")
+
+
 router = APIRouter(prefix="/api")
 
 
@@ -314,55 +377,6 @@ async def backfill_detail_type(cid: str, force: bool = False, user: dict = Depen
     """
     await require_company(user, cid)
 
-    # Substring → detail_type mapping, evaluated in order. First match
-    # wins so more-specific patterns MUST come before generic ones.
-    RULES: dict[str, list[tuple[list[str], str]]] = {
-        "asset": [
-            (["accumulated depreciation", "accumulated amortization", "amortization"], "depreciation_and_amortization"),
-            (["undeposited fund", "in transit", "clearing"], "money_in_transit"),
-            (["cash", "checking", "savings", "petty cash", "bank", "money market", "operating account"], "cash_and_bank"),
-            (["accounts receivable", "receivable", " a/r ", "a/r"], "expected_payments_from_customers"),
-            (["inventory", "stock on hand", "goods on hand", "raw material", "finished goods", "work in process"], "inventory"),
-            (["prepaid", "vendor deposit", "vendor prepayment"], "vendor_prepayments"),
-            (["equipment", "machinery", "vehicle", "furniture", "fixture", "computer", "building", "land", "leasehold", "fixed asset", "office equipment"], "property_plant_equipment"),
-        ],
-        "liability": [
-            (["credit card", "amex", "visa", "mastercard", "discover card"], "credit_card"),
-            (["mortgage", "loan payable", "note payable", "line of credit", "long-term debt", "long term debt", "term loan"], "loan_and_line_of_credit"),
-            (["sales tax", "gst payable", "vat payable", "hst payable"], "sales_tax_payable"),
-            (["accounts payable", "payable", " a/p ", "a/p"], "expected_payments_to_vendors"),
-            (["payroll liab", "payroll pay", "wages payable", "941", "futa", "suta", "state withholding"], "due_for_payroll"),
-            (["customer deposit", "deferred revenue", "prepaid revenue", "unearned revenue", "customer prepayment"], "customer_prepayments"),
-            (["owner", "shareholder", "member", "due to"], "due_to_owners"),
-        ],
-        "equity": [
-            (["retained earnings", "current period"], "retained_earnings"),
-            (["contribution", "draw", "distribution", "capital", "owner"], "owner_contribution_drawing"),
-        ],
-        "revenue": [
-            (["discount"], "discount"),
-            (["interest income", "other income", "misc income", "miscellaneous income"], "other_income"),
-        ],
-        "cogs": [
-            (["cost of goods", "cogs", "cost of sales", "direct material", "direct labor"], "cost_of_goods_sold"),
-        ],
-        "expense": [
-            (["cost of goods", "cogs", "cost of sales"], "cost_of_goods_sold"),
-            (["stripe fee", "paypal fee", "square fee", "processing fee", "merchant fee"], "payment_processing_fee"),
-            (["payroll expense", "wages", "salaries", "employee benefit"], "payroll_expense"),
-            (["interest expense", "depreciation expense", "amortization expense", "loss on"], "other_expense"),
-        ],
-    }
-    # Type-level fallbacks when no substring rule matches.
-    DEFAULT_FALLBACK: dict[str, str] = {
-        "asset":     "other_short_term_asset",
-        "liability": "other_short_term_liability",
-        "equity":    "other_equity",
-        "revenue":   "income",
-        "cogs":      "cost_of_goods_sold",
-        "expense":   "operating_expense",
-    }
-
     updated_by_type: dict[str, int] = {}
     skipped = 0
     cursor = db.accounts.find({"company_id": cid})
@@ -372,14 +386,7 @@ async def backfill_detail_type(cid: str, force: bool = False, user: dict = Depen
             skipped += 1
             continue
         t = a.get("type") or "expense"
-        haystack = f"{a.get('name', '')} {a.get('subtype', '')}".lower()
-        detail = None
-        for patterns, dt in RULES.get(t, []):
-            if any(p in haystack for p in patterns):
-                detail = dt
-                break
-        if not detail:
-            detail = DEFAULT_FALLBACK.get(t, "other_short_term_asset")
+        detail = _infer_detail_type(t, a.get("name", ""), a.get("subtype", ""))
         if current == detail:
             skipped += 1
             continue
@@ -1214,6 +1221,7 @@ async def accounts_import_commit(
             match = by_name.get(name.lower())
         passes.append({
             "name": name, "code": code, "type": type_, "subtype": subtype,
+            "detail_type": (a.get("detail_type") or "").strip(),
             "parent_code": (a.get("parent_code") or "").strip(),
             "match": match,
         })
@@ -1257,6 +1265,11 @@ async def accounts_import_commit(
             "name": p["name"],
             "type": p["type"],
             "subtype": p["subtype"],
+            # Best-guess Wave-style sub-type so imported CSVs skip the
+            # unclassified bucket. Explicit `detail_type` on the row
+            # (from the AI classifier or a hand-edited spreadsheet)
+            # wins over the heuristic.
+            "detail_type": (p.get("detail_type") or _infer_detail_type(p["type"], p["name"], p["subtype"])),
             "active": True,
             "updated_at": now,
         }

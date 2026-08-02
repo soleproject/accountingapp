@@ -1095,14 +1095,38 @@ async def compute_account_detail(company_id: str, account_id: str,
                                  min_amount: float | None = None,
                                  max_amount: float | None = None):
     company = await db.companies.find_one({"id": company_id})
-    account = await db.accounts.find_one({"id": account_id, "company_id": company_id})
-    if not account:
+    # Support both single-account drill (from CoA row click) and
+    # sub-type drill (from Balance Sheet banner click). When multiple
+    # comma-separated account IDs come in, we aggregate transactions
+    # across all of them so pros can eyeball an entire sub-type (e.g.
+    # every Cash and Bank movement) in one view.
+    account_ids = [x for x in (account_id or "").split(",") if x.strip()]
+    if not account_ids:
         return {
             "company_name": company["name"] if company else "",
             "account": None, "rows": [], "count": 0, "sum_amount": 0.0, "balance": 0.0,
         }
+    account_docs = await db.accounts.find(
+        {"id": {"$in": account_ids}, "company_id": company_id}
+    ).to_list(500)
+    if not account_docs:
+        return {
+            "company_name": company["name"] if company else "",
+            "account": None, "rows": [], "count": 0, "sum_amount": 0.0, "balance": 0.0,
+        }
+    is_multi = len(account_docs) > 1
+    # Present the aggregated account as a synthetic "account" so the
+    # frontend header shows something meaningful ("Cash and Bank · 3
+    # accounts" rather than a single row's name).
+    if is_multi:
+        agg_name = f"{len(account_docs)} accounts · " + ", ".join(a.get("name", "") for a in account_docs[:3])
+        if len(account_docs) > 3:
+            agg_name += f" +{len(account_docs) - 3} more"
+        account = {"id": ",".join(a["id"] for a in account_docs), "name": agg_name, "code": "", "type": account_docs[0].get("type")}
+    else:
+        account = account_docs[0]
 
-    mongo_q: dict = {"company_id": company_id, "category_account_id": account_id}
+    mongo_q: dict = {"company_id": company_id, "category_account_id": {"$in": [a["id"] for a in account_docs]}}
     if start:
         mongo_q.setdefault("date", {})["$gte"] = start
     if end:
