@@ -12,11 +12,12 @@ from io import BytesIO
 
 from fastapi import APIRouter
 from fastapi.responses import Response
-from reportlab.lib.pagesizes import LETTER
+from reportlab.lib.pagesizes import LETTER, landscape
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak,
+    BaseDocTemplate, PageTemplate, Frame,
+    Paragraph, Spacer, Table, TableStyle, PageBreak, NextPageTemplate,
 )
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_LEFT
@@ -103,11 +104,26 @@ def _styles():
 
 def build_comparison_pdf(company_name: str = "SmartBooks Software") -> bytes:
     buf = BytesIO()
-    doc = SimpleDocTemplate(
-        buf, pagesize=LETTER,
-        leftMargin=0.55 * inch, rightMargin=0.55 * inch,
-        topMargin=0.55 * inch, bottomMargin=0.5 * inch,
+    # Two page templates on one document — portrait for pages 1-2, then
+    # landscape for the wider pricing table on page 3 that kept clipping
+    # in portrait mode.
+    portrait_size = LETTER
+    landscape_size = landscape(LETTER)
+    portrait_frame = Frame(
+        0.55 * inch, 0.5 * inch,
+        portrait_size[0] - 1.1 * inch, portrait_size[1] - 1.05 * inch,
+        showBoundary=0,
     )
+    landscape_frame = Frame(
+        0.55 * inch, 0.5 * inch,
+        landscape_size[0] - 1.1 * inch, landscape_size[1] - 1.05 * inch,
+        showBoundary=0,
+    )
+    doc = BaseDocTemplate(buf, pagesize=portrait_size)
+    doc.addPageTemplates([
+        PageTemplate(id="portrait", frames=[portrait_frame], pagesize=portrait_size),
+        PageTemplate(id="landscape", frames=[landscape_frame], pagesize=landscape_size),
+    ])
     s = _styles()
     story = []
 
@@ -188,6 +204,8 @@ def build_comparison_pdf(company_name: str = "SmartBooks Software") -> bytes:
         ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#CBD5E1")),
     ]))
     story.append(gap_t)
+    # Switch to landscape for the wider pricing story + bottom line.
+    story.append(NextPageTemplate("landscape"))
     story.append(PageBreak())
 
     # ── Pricing story ───────────────────────────────────────────
@@ -208,7 +226,7 @@ def build_comparison_pdf(company_name: str = "SmartBooks Software") -> bytes:
                    "Advanced ($235/mo) only",
                    "Basic AI only; Xero Analytics Plus $10/mo extra"],
     ]
-    pt = Table(price_rows, colWidths=[1.3 * inch, 1.9 * inch, 2.2 * inch, 2.0 * inch])
+    pt = Table(price_rows, colWidths=[1.6 * inch, 2.6 * inch, 3.0 * inch, 2.8 * inch])
     pt.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#312E81")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
