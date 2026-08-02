@@ -104,6 +104,17 @@ const DETAIL_SECTIONS_BY_TYPE = {
   ],
 };
 
+// Reverse lookup: detail_type key -> human label. Built once from
+// DETAIL_SECTIONS_BY_TYPE so the CoA rows and the Balance Sheet can
+// display the same labels the user sees in the create modal.
+const DETAIL_TYPE_LABEL = (() => {
+  const out = {};
+  for (const list of Object.values(DETAIL_SECTIONS_BY_TYPE)) {
+    for (const [k, l] of list) out[k] = l;
+  }
+  return out;
+})();
+
 // Turn machine-y keys ("operating_expense", "cogs", "long_term_liability")
 // into human-friendly labels ("Operating Expense", "COGS", "Long Term Liability").
 // The raw values stay in the DB / API payloads — this only shapes what
@@ -899,7 +910,7 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
         {a._depth ? <span className="opacity-40">↳</span> : null}
         {showCodes ? a.code : null}
       </div>
-      <div className={`${showCodes ? "col-span-5" : "col-span-6"} text-sm ${a._depth ? "pl-4 text-slate-700" : "font-medium"}`}>
+      <div className={`${showCodes ? "col-span-4" : "col-span-6"} text-sm ${a._depth ? "pl-4 text-slate-700" : "font-medium"}`}>
         {a.name}
         {a.created_by_ai && a.parent_account_id && (
           <span className="ml-2 text-[10px] uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
@@ -907,9 +918,25 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
           </span>
         )}
       </div>
-      <div className="col-span-2 text-xs text-slate-500">{prettyLabel(a.subtype)}</div>
+      {showCodes && (
+        <div
+          className="col-span-3 text-xs text-slate-500"
+          data-testid={`coa-subtype-${a.id}`}
+          title={a.detail_type ? `Sub-type: ${DETAIL_TYPE_LABEL[a.detail_type] || a.detail_type}` : "No sub-type set — edit this row to classify."}
+        >
+          {a.detail_type ? (
+            <span className="inline-flex items-center rounded bg-slate-100 text-slate-700 px-1.5 py-0.5 text-[10px] font-medium">
+              {DETAIL_TYPE_LABEL[a.detail_type] || prettyLabel(a.detail_type)}
+            </span>
+          ) : a.subtype ? (
+            <span className="text-slate-400 italic">{prettyLabel(a.subtype)}</span>
+          ) : (
+            <span className="text-amber-600 italic">unclassified</span>
+          )}
+        </div>
+      )}
       <div
-        className={`col-span-2 text-right font-mono-num text-[13px] ${balance == null || Math.abs(Number(balance)) < 0.005 ? "text-slate-300" : "text-slate-800"}`}
+        className={`${showCodes ? "col-span-2" : "col-span-4"} text-right font-mono-num text-[13px] ${balance == null || Math.abs(Number(balance)) < 0.005 ? "text-slate-300" : "text-slate-800"}`}
         data-testid={`coa-balance-${a.id}`}
         title={
           ["revenue", "expense", "cogs"].includes(a.type)
