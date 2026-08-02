@@ -219,10 +219,22 @@ async def resolve_or_create_bank_account(
         "company_id": company_id, "type": kind_type, "active": True,
     }).to_list(1000)
 
-    # 1) Last-4 substring match on the account name (most specific).
+    # 1) Last-4 substring match on the account name OR on the last4
+    # column (populated once account_number persistence landed).
     if last4:
         for a in existing:
-            if last4 in (a.get("name") or ""):
+            if last4 in (a.get("name") or "") or last4 == (a.get("last4") or ""):
+                # If the incoming caller has a fuller account_number and
+                # the existing row is missing one, backfill it (still
+                # encrypted).
+                if account_number and not a.get("account_number"):
+                    from crypto_service import encrypt as _enc
+                    await db.accounts.update_one(
+                        {"id": a["id"]},
+                        {"$set": {"account_number": _enc(account_number),
+                                  "last4": last4,
+                                  "updated_at": now_iso()}},
+                    )
                 return {
                     "account_id": a["id"], "account_name": a["name"],
                     "account_code": a["code"], "matched": True,
@@ -272,6 +284,11 @@ async def resolve_or_create_bank_account(
         company_id, _base_detail_from_type(account_type), is_liability,
     )
     now = now_iso()
+    # `account_number` is AES-256 encrypted per `crypto_service`
+    # (SENSITIVE_FIELDS["accounts"]) — the un-encrypted `last4` stays
+    # plaintext because reconciliation/statement matching queries it,
+    # and last-4 is not sensitive on its own.
+    from crypto_service import encrypt as _enc
     await db.accounts.insert_one({
         "id": account_id,
         "company_id": company_id,
@@ -285,6 +302,11 @@ async def resolve_or_create_bank_account(
         "created_by_ai": True,
         "system_generated": True,
         "source": source,
+        # Bank-identity fields — encrypted at rest, decrypted only when
+        # explicitly needed (rare: exports, audit binders, admin views).
+        "account_number": _enc(account_number) if account_number else None,
+        "last4": last4,
+        "bank_name": bank_name,
         "created_at": now,
         "updated_at": now,
     })
