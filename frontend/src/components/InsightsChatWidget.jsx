@@ -14,10 +14,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { getRegisteredChartIds } from "@/hooks/useRegisterChart";
 import { toast } from "sonner";
 import {
   Sparkles, Send, X, ChevronDown, ChevronUp, ArrowUpRight,
-  Loader2, MessageSquare, BarChart3,
+  Loader2, MessageSquare, BarChart3, Mic, MicOff, AlertCircle,
 } from "lucide-react";
 
 const STARTER_PROMPTS = [
@@ -45,6 +46,33 @@ export default function InsightsChatWidget() {
   }, []);
   const listRef = useRef(null);
 
+  // ── Cost cap awareness ────────────────────────────────────────────
+  // Per-company monthly ceiling stored in localStorage (v1); backend
+  // meters actual spend and returns 'ok' | 'warn' (≥80%) | 'block'.
+  const monthlyCap = Number(localStorage.getItem("insights_monthly_cap") || 0);
+  const [budget, setBudget] = useState(null);   // {status, spent, cap, ...}
+
+  // ── Voice input (Web Speech API — no external deps) ───────────────
+  const [listening, setListening] = useState(false);
+  const recogRef = useRef(null);
+  const voiceSupported = typeof window !== "undefined"
+    && ("webkitSpeechRecognition" in window || "SpeechRecognition" in window);
+  const toggleMic = () => {
+    if (!voiceSupported) { toast.info("Voice input isn't supported in this browser."); return; }
+    if (listening) { recogRef.current?.stop(); setListening(false); return; }
+    const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const r = new Ctor();
+    r.lang = "en-US"; r.interimResults = true; r.continuous = false;
+    r.onresult = (ev) => {
+      const parts = Array.from(ev.results).map(r => r[0].transcript).join(" ");
+      setQ(parts.trim());
+    };
+    r.onend = () => setListening(false);
+    r.onerror = () => setListening(false);
+    r.start();
+    recogRef.current = r; setListening(true);
+  };
+
   // Hide the pill while the big right-edge AiPanel is open — the two
   // chats have very different jobs, but they should never overlap.
   useEffect(() => {
@@ -62,32 +90,127 @@ export default function InsightsChatWidget() {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [messages, busy]);
 
+  // Fetch current budget once on mount so the warning banner reflects
+  // reality even before the first ask of the session.
+  useEffect(() => {
+    if (!currentId) return;
+    api.get(`/companies/${currentId}/ai/insights/budget`,
+            { params: monthlyCap > 0 ? { monthly_cap: monthlyCap } : {} })
+      .then(r => setBudget(r.data))
+      .catch(() => {});
+  }, [currentId, monthlyCap]);
+
   const ask = async (text) => {
     const question = (text ?? q).trim();
     if (!question || !currentId) return;
     setMessages(m => [...m, { role: "user", text: question }]);
     setQ("");
     setBusy(true);
+    // Insert an empty assistant bubble we'll stream into.
+    const assistantIdx = messages.length + 1;
+    setMessages(m => [...m, { role: "assistant", text: "", streaming: true }]);
     try {
-      const r = await api.post(`/companies/${currentId}/ai/insights/ask`, {
-        question,
-        session_id: sessionId,
-        page: location.pathname,
-      });
-      setMessages(m => [...m, {
-        role: "assistant",
-        text: r.data.answer,
-        chart_id: r.data.chart_id,
-        chart_title: r.data.chart_title,
-        chart_data: r.data.chart_data,
-        quick_actions: r.data.quick_actions || [],
-      }]);
+      const authToken = localStorage.getItem("token")
+        || sessionStorage.getItem("token") || "";
+      const apiBase = process.env.REACT_APP_BACKEND_URL || "";
+      const resp = await fetch(
+        `${apiBase}/api/companies/${currentId}/ai/insights/ask/stream`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${authToken}`,
+          },
+          body: JSON.stringify({
+            question,
+            session_id: sessionId,
+            page: location.pathname,
+            page_charts: getRegisteredChartIds(),
+            monthly_cap_usd: monthlyCap || null,
+          }),
+        }
+      );
+      if (resp.status === 402) {
+        const err = await resp.json().catch(() => ({}));
+        setMessages(m => {
+          const copy = [...m];
+          copy[assistantIdx] = {
+            role: "assistant",
+            text: err?.detail?.message
+              || "Monthly Insights budget reached — raise the cap in Settings.",
+            streaming: false,
+            capBlocked: true,
+          };
+          return copy;
+        });
+        return;
+      }
+      if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`);
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += dec.decode(value, { stream: true });
+        // Split on \n\n boundaries — that's the SSE event delimiter.
+        let idx;
+        while ((idx = buffer.indexOf("\n\n")) !== -1) {
+          const frame = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          const lines = frame.split("\n");
+          let evName = "message"; let dataStr = "";
+          for (const line of lines) {
+            if (line.startsWith("event: ")) evName = line.slice(7).trim();
+            else if (line.startsWith("data: ")) dataStr += line.slice(6);
+          }
+          if (!dataStr) continue;
+          let data; try { data = JSON.parse(dataStr); } catch { continue; }
+          if (evName === "text_delta") {
+            setMessages(m => {
+              const copy = [...m];
+              const b = copy[assistantIdx];
+              copy[assistantIdx] = { ...b, text: (b?.text || "") + (data.content || "") };
+              return copy;
+            });
+          } else if (evName === "chart") {
+            setMessages(m => {
+              const copy = [...m];
+              copy[assistantIdx] = {
+                ...copy[assistantIdx],
+                chart_id: data.chart_id,
+                chart_title: data.chart_title,
+                chart_data: data.chart_data,
+                quick_actions: data.quick_actions || [],
+              };
+              return copy;
+            });
+          } else if (evName === "done") {
+            setMessages(m => {
+              const copy = [...m];
+              copy[assistantIdx] = { ...copy[assistantIdx], streaming: false };
+              return copy;
+            });
+            // Refresh budget so the warning banner tracks after each ask.
+            api.get(`/companies/${currentId}/ai/insights/budget`,
+                    { params: monthlyCap > 0 ? { monthly_cap: monthlyCap } : {} })
+              .then(r => setBudget(r.data)).catch(() => {});
+          } else if (evName === "error") {
+            throw new Error(data.message || "stream error");
+          }
+        }
+      }
     } catch (e) {
-      toast.error(e.response?.data?.detail || "AI is temporarily unavailable");
-      setMessages(m => [...m, {
-        role: "assistant",
-        text: "Sorry — I couldn't reach the insights service. Please try again in a moment.",
-      }]);
+      toast.error(e.message || "AI is temporarily unavailable");
+      setMessages(m => {
+        const copy = [...m];
+        copy[assistantIdx] = {
+          role: "assistant",
+          text: "Sorry — I couldn't reach the insights service. Please try again in a moment.",
+          streaming: false,
+        };
+        return copy;
+      });
     } finally { setBusy(false); }
   };
 
@@ -149,6 +272,24 @@ export default function InsightsChatWidget() {
           </header>
 
           <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+            {budget?.status === "warn" && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 flex items-start gap-2" data-testid="insights-budget-warn">
+                <AlertCircle size={12} className="mt-0.5 text-amber-700 shrink-0" />
+                <div>
+                  You're at ${budget.spent?.toFixed(2)} of your ${budget.cap?.toFixed(2)} monthly Insights budget.
+                  <button
+                    onClick={() => {
+                      const v = prompt("New monthly cap (USD, 0 for unlimited):", String(monthlyCap || ""));
+                      if (v != null) {
+                        localStorage.setItem("insights_monthly_cap", String(Math.max(0, Number(v) || 0)));
+                        location.reload();
+                      }
+                    }}
+                    className="ml-1 underline text-amber-800 hover:text-amber-900"
+                  >Adjust</button>
+                </div>
+              </div>
+            )}
             {!messages.length && (
               <div className="space-y-3" data-testid="insights-chat-starter">
                 <div className="text-sm text-slate-700 leading-relaxed">
@@ -189,10 +330,20 @@ export default function InsightsChatWidget() {
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(); } }}
-                placeholder="Ask about a report, number, or trend…"
+                placeholder={listening ? "Listening…" : "Ask about a report, number, or trend…"}
                 data-testid="insights-chat-input"
                 className="flex-1 text-sm bg-slate-50 border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-300"
               />
+              {voiceSupported && (
+                <button
+                  onClick={toggleMic}
+                  data-testid="insights-chat-mic"
+                  title={listening ? "Stop listening" : "Speak your question"}
+                  className={`p-2 rounded-lg border ${listening ? "bg-rose-500 text-white border-rose-500 animate-pulse" : "bg-white hover:bg-slate-50 text-slate-600"}`}
+                >
+                  {listening ? <MicOff size={13} /> : <Mic size={13} />}
+                </button>
+              )}
               <button
                 onClick={() => ask()}
                 disabled={busy || !q.trim()}
@@ -225,6 +376,7 @@ function MessageBubble({ msg, navigate }) {
     <div className="space-y-2">
       <div className="max-w-[85%] rounded-2xl rounded-tl-sm bg-slate-100 text-slate-800 px-3 py-2 text-sm whitespace-pre-wrap">
         {msg.text}
+        {msg.streaming && <span className="ml-0.5 inline-block w-1.5 h-3.5 bg-slate-500 align-middle animate-pulse" />}
       </div>
       {msg.chart_data && (
         <div className="border rounded-xl bg-white overflow-hidden" data-testid={`insights-chart-${msg.chart_id}`}>

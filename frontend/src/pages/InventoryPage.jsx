@@ -8,6 +8,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { useRegisterChart } from "@/hooks/useRegisterChart";
 import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { Boxes, Loader2, X, ArrowUpDown, Sliders, BarChart3, Download, Printer } from "lucide-react";
@@ -27,6 +28,11 @@ export default function InventoryPage() {
   const initialTab = ["valuation", "movements", "adjustments"].includes(sp.get("tab"))
     ? sp.get("tab") : "valuation";
   const [tab, setTab] = useState(initialTab);
+  // Advertise both inventory charts to the Insights widget so
+  // "tell me about my inventory" / "what needs reordering" get top-of-
+  // list treatment from the LLM's chart picker.
+  useRegisterChart({ id: "inventory_valuation", title: "Inventory Valuation" });
+  useRegisterChart({ id: "reorder_alerts", title: "Reorder Alerts" });
   useEffect(() => { setSp({ tab }, { replace: true }); }, [tab]);  // eslint-disable-line
   return (
     <div className="space-y-4" data-testid="inventory-page">
