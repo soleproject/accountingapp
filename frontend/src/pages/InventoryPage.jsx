@@ -10,7 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
-import { Boxes, Loader2, X, ArrowUpDown, Sliders, BarChart3, Download } from "lucide-react";
+import { Boxes, Loader2, X, ArrowUpDown, Sliders, BarChart3, Download, Printer } from "lucide-react";
 import { toast } from "sonner";
 
 const REASONS = [
@@ -100,6 +100,19 @@ function ValuationView({ currentId }) {
     a.click(); URL.revokeObjectURL(url);
   };
 
+  const openPdf = async () => {
+    try {
+      const r = await api.get(`/companies/${currentId}/inventory-management/valuation/pdf`,
+                              { responseType: "blob" });
+      const url = URL.createObjectURL(r.data);
+      window.open(url, "_blank");
+      // Give the browser a moment to hand off before revoking.
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Could not open PDF");
+    }
+  };
+
   return (
     <div className="rounded-xl border bg-white overflow-hidden" data-testid="inventory-valuation">
       <div className="flex items-center justify-between px-4 py-2 border-b bg-slate-50">
@@ -107,11 +120,18 @@ function ValuationView({ currentId }) {
           {rows.length} tracked {rows.length === 1 ? "item" : "items"} · total value{" "}
           <b className="text-slate-800 font-mono-num" data-testid="inventory-total-value">{fmtMoney(total)}</b>
         </div>
-        <button onClick={exportCsv}
-                data-testid="inventory-export-csv"
-                className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border bg-white hover:bg-slate-50">
-          <Download size={12} /> Export CSV
-        </button>
+        <div className="inline-flex items-center gap-2">
+          <button onClick={openPdf}
+                  data-testid="inventory-export-pdf"
+                  className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border bg-white hover:bg-slate-50">
+            <Printer size={12} /> Print / PDF
+          </button>
+          <button onClick={exportCsv}
+                  data-testid="inventory-export-csv"
+                  className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border bg-white hover:bg-slate-50">
+            <Download size={12} /> Export CSV
+          </button>
+        </div>
       </div>
       <table className="w-full text-sm">
         <thead className="bg-slate-50 text-xs uppercase text-slate-500 border-b">

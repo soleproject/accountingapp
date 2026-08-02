@@ -518,3 +518,110 @@ async def list_movements(cid: str, item_id: Optional[str] = None,
             q.pop("created_at")
     docs = await db.inventory_movements.find(q).sort("created_at", -1).to_list(5000)
     return {"rows": [coerce(d) for d in docs], "count": len(docs)}
+
+
+# ── PDF export (month-end audit binders) ─────────────────────────────
+
+async def build_valuation_pdf(cid: str) -> bytes:
+    """Print-friendly Inventory Valuation snapshot — same visual family
+    as the Balance Sheet / Income Statement PDFs so it slots into an
+    audit binder without formatting drift."""
+    from io import BytesIO
+    from datetime import date
+    from reportlab.lib.pagesizes import LETTER
+    from reportlab.lib import colors
+    from reportlab.lib.units import inch
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reports import _pdf_styles
+
+    company = await db.companies.find_one({"id": cid})
+    company_name = (company or {}).get("name") or "Inventory Valuation"
+    data = await compute_valuation(cid)
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=LETTER, leftMargin=0.6 * inch, rightMargin=0.6 * inch,
+                            topMargin=0.6 * inch, bottomMargin=0.6 * inch)
+    s = _pdf_styles()
+    story = [
+        Paragraph(company_name, s["Title2"]),
+        Paragraph("INVENTORY VALUATION", s["SubTitle"]),
+        Paragraph(f"As of {date.today().isoformat()} · Weighted-average costing", s["SubTitle"]),
+        Spacer(1, 12),
+    ]
+
+    header = ["Item", "SKU", "Qty on hand", "Avg cost", "Value", "Account"]
+    rows = [header]
+    for r in data["rows"]:
+        name = r["name"] + ("  ⚠ LOW" if r.get("low_stock") else "")
+        rows.append([
+            name,
+            r.get("sku") or "—",
+            f"{r['qoh']:,g}",
+            f"${r['cost_basis']:,.4f}",
+            f"${r['value']:,.2f}",
+            (r.get("inventory_account_name") or "—")[:26],
+        ])
+    rows.append(["", "", "", "TOTAL", f"${data['total_value']:,.2f}", ""])
+
+    if len(rows) == 1:
+        story.append(Paragraph("No inventory-tracked items to report.", s["SubTitle"]))
+    else:
+        t = Table(rows, colWidths=[2.1 * inch, 0.9 * inch, 0.9 * inch, 1.0 * inch, 1.1 * inch, 1.3 * inch])
+        t.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F1F5F9")),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("ALIGN", (2, 1), (4, -1), "RIGHT"),
+            ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("LINEABOVE", (0, -1), (-1, -1), 0.5, colors.HexColor("#0F172A")),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        story.append(t)
+
+    low_stock_count = sum(1 for r in data["rows"] if r.get("low_stock"))
+    if low_stock_count:
+        story.append(Spacer(1, 12))
+        story.append(Paragraph(
+            f"⚠ {low_stock_count} item{'s' if low_stock_count != 1 else ''} at or below low-stock threshold.",
+            s["SubTitle"],
+        ))
+    story.append(Spacer(1, 10))
+    story.append(Paragraph(
+        f"Total inventory value: <b>${data['total_value']:,.2f}</b> across {data['item_count']} tracked items.",
+        s["SubTitle"],
+    ))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
+# ── Reorder alerts ───────────────────────────────────────────────────
+
+async def compute_reorder_alerts(cid: str) -> dict:
+    """Every tracked item at or below its low-stock threshold. Powers
+    the Dashboard "Reorder Alerts" tile and the one-click Draft PO
+    action."""
+    docs = await db.items.find({
+        "company_id": cid, "track_inventory": True,
+        "low_stock_threshold": {"$ne": None},
+    }).to_list(2000)
+    rows = []
+    for it in docs:
+        qoh = float(it.get("quantity_on_hand") or 0)
+        threshold = float(it.get("low_stock_threshold") or 0)
+        if qoh > threshold:
+            continue
+        rows.append({
+            "item_id": it["id"],
+            "name": it.get("name") or "",
+            "sku": it.get("sku") or "",
+            "qoh": round(qoh, 4),
+            "threshold": round(threshold, 4),
+            "cost_basis": round(float(it.get("cost_basis") or 0), 4),
+            "suggested_reorder": max(1, round(threshold * 2 - qoh)),
+            "expense_account_id": it.get("expense_account_id") or it.get("inventory_account_id"),
+            "expense_account_name": it.get("expense_account_name") or it.get("inventory_account_name") or "",
+        })
+    rows.sort(key=lambda r: (r["qoh"] - r["threshold"], r["name"]))  # worst first
+    return {"rows": rows, "count": len(rows)}

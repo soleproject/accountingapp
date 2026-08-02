@@ -413,3 +413,26 @@ async def inventory_movements(
     return await inventory_service.list_movements(cid, item_id, start, end)
 
 
+@router.get("/companies/{cid}/inventory-management/valuation/pdf")
+async def inventory_valuation_pdf(cid: str, user: dict = Depends(get_current_user)):
+    """Print-friendly Inventory Valuation PDF for month-end audit binders."""
+    await require_company(user, cid)
+    from datetime import date as _date
+    import inventory_service
+    pdf = await inventory_service.build_valuation_pdf(cid)
+    filename = f"inventory-valuation-{_date.today().isoformat()}.pdf"
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+@router.get("/companies/{cid}/inventory-management/reorder-alerts")
+async def inventory_reorder_alerts(cid: str, user: dict = Depends(get_current_user)):
+    """Every tracked item at or below its low-stock threshold — powers
+    the Dashboard reorder tile and one-click Draft PO action."""
+    await require_company(user, cid)
+    import inventory_service
+    return await inventory_service.compute_reorder_alerts(cid)
+
+

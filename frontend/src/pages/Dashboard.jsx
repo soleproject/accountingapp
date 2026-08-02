@@ -60,6 +60,7 @@ import FirstConnectWelcome from "@/components/FirstConnectWelcome";
 import FirmAtAGlance from "@/components/FirmAtAGlance";
 import BusinessOverview from "@/components/BusinessOverview";
 import DashboardTodos from "@/components/DashboardTodos";
+import ReorderAlertsTile from "@/components/ReorderAlertsTile";
 import WelcomeModal, { hasSeenWelcome, markWelcomeSeen, ReplayWelcomeButton } from "@/components/WelcomeModal";
 import PostOnboardingTour, { hasSeenPostOnboarding, markPostOnboardingSeen } from "@/components/PostOnboardingTour";
 import { LayoutGrid, Sparkle, Grid3x3 } from "lucide-react";
@@ -346,6 +347,8 @@ export default function Dashboard() {
       </div>
 
       <DashboardTodos todos={todos} />
+
+      <ReorderAlertsTile currentId={currentId} />
 
       {viewMode === "firm" ? (
         <FirmAtAGlance userName={user?.name || user?.email} />
