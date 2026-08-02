@@ -22,6 +22,7 @@ from routes.reconciliation import router as reconciliation_router  # noqa: F401
 from routes.month_close import router as month_close_router  # noqa: F401
 from routes.inventory import router as inventory_router  # noqa: F401
 from routes.chat import router as chat_router  # noqa: F401
+from routes.insights_chat import router as insights_chat_router  # noqa: F401
 from routes.anomaly import router as anomaly_router  # noqa: F401
 from routes.communications import router as communications_router  # noqa: F401
 from routes.invites import router as invites_router  # noqa: F401
@@ -54,6 +55,7 @@ ALL_ROUTERS = [
     month_close_router,
     inventory_router,
     chat_router,
+    insights_chat_router,
     anomaly_router,
     communications_router,
     invites_router,

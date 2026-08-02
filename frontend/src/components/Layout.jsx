@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Outlet, Link } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import AiPanel from "./AiPanel";
+import InsightsChatWidget from "./InsightsChatWidget";
 import BillingLockedModal from "./BillingLockedModal";
 import ProAlertsBell from "./ProAlertsBell";
 import ImpersonatePill from "./ImpersonateBanner";
@@ -398,6 +399,7 @@ export default function Layout() {
         </div>
 
         <AiPanel collapsed={aiCollapsed} onToggle={() => setAiCollapsed(!aiCollapsed)} />
+        <InsightsChatWidget />
         <BillingLockedModal />
         <Toaster position="bottom-right" />
       </div>
