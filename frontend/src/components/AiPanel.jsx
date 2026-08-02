@@ -364,6 +364,13 @@ export default function AiPanel({ collapsed, onToggle }) {
     // (e.g. the Plaid-Link overlay carve-out) can leave room for us.
     document.documentElement.style.setProperty("--ai-panel-width", `${panelWidth}px`);
   }, [panelWidth]);
+  // Publish an explicit "expanded" flag on the body so peers (e.g.
+  // InsightsChatWidget) can distinguish "panel exists but tucked away"
+  // from "panel is actually eating pixels on the right edge".
+  useEffect(() => {
+    document.body.setAttribute("data-ai-panel-open", collapsed ? "0" : "1");
+    return () => document.body.removeAttribute("data-ai-panel-open");
+  }, [collapsed]);
   const resizingRef = useRef(false);
   useEffect(() => {
     if (!resizingRef.current) return;

@@ -38,7 +38,7 @@ export default function InsightsChatWidget() {
   const [messages, setMessages] = useState([]);   // {role, text, chart_id?, chart_title?, chart_data?, quick_actions?}
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
-  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiPanelWidth, setAiPanelWidth] = useState(0);
   const sessionId = useMemo(() => {
     let s = sessionStorage.getItem(SESSION_KEY);
     if (!s) { s = crypto.randomUUID(); sessionStorage.setItem(SESSION_KEY, s); }
@@ -73,16 +73,20 @@ export default function InsightsChatWidget() {
     recogRef.current = r; setListening(true);
   };
 
-  // Hide the pill while the big right-edge AiPanel is open — the two
-  // chats have very different jobs, but they should never overlap.
+  // Track how many pixels the right-edge AiPanel is currently
+  // consuming so we can slide the pill left instead of hiding it.
+  // AiPanel exposes `body[data-ai-panel-open="1"]` when expanded; the
+  // saved width lives in `--ai-panel-width`.
   useEffect(() => {
     const check = () => {
+      const open = document.body.getAttribute("data-ai-panel-open") === "1";
+      if (!open) { setAiPanelWidth(0); return; }
       const w = getComputedStyle(document.documentElement)
         .getPropertyValue("--ai-panel-width").trim();
-      setAiPanelOpen(!!w && parseInt(w, 10) > 0);
+      setAiPanelWidth(parseInt(w, 10) || 0);
     };
     check();
-    const t = setInterval(check, 800);
+    const t = setInterval(check, 500);
     return () => clearInterval(t);
   }, []);
 
@@ -222,7 +226,11 @@ export default function InsightsChatWidget() {
 
   // Never render on the login page / when there's no company selected.
   if (!currentId) return null;
-  if (aiPanelOpen && !open) return null;
+
+  // Slide the pill LEFT of the expanded AiPanel edge (+16px gap) so
+  // they never overlap. When AiPanel is collapsed the offset is 0 and
+  // the pill sits in its natural bottom-right home.
+  const rightOffset = aiPanelWidth > 0 ? aiPanelWidth + 24 : 24;
 
   return (
     <>
@@ -230,7 +238,8 @@ export default function InsightsChatWidget() {
         <button
           onClick={() => setOpen(true)}
           data-testid="insights-chat-launcher"
-          className="fixed bottom-6 right-6 z-40 pl-3 pr-4 py-2.5 rounded-full bg-gradient-to-br from-indigo-600 to-fuchsia-600 text-white shadow-xl hover:shadow-2xl hover:scale-[1.02] transition-all inline-flex items-center gap-2"
+          style={{ right: `${rightOffset}px`, bottom: aiPanelWidth > 0 ? "84px" : "24px" }}
+          className="fixed z-40 pl-3 pr-4 py-2.5 rounded-full bg-gradient-to-br from-indigo-600 to-fuchsia-600 text-white shadow-xl hover:shadow-2xl hover:scale-[1.02] transition-all inline-flex items-center gap-2"
           title="Ask about your reports"
         >
           <Sparkles size={14} />
@@ -241,11 +250,12 @@ export default function InsightsChatWidget() {
       {open && (
         <div
           data-testid="insights-chat-panel"
-          className={`fixed bottom-6 right-6 z-40 bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col ${
+          style={{ right: `${rightOffset}px`, bottom: aiPanelWidth > 0 ? "84px" : "24px" }}
+          className={`fixed z-40 bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col ${
             messages.some(m => m.chart_data)
               ? "w-[min(720px,calc(100vw-3rem))] h-[min(680px,calc(100vh-3rem))]"
               : "w-[min(420px,calc(100vw-3rem))] h-[min(560px,calc(100vh-3rem))]"
-          } transition-[width,height] duration-200`}
+          } transition-[width,height,right,bottom] duration-200`}
         >
           <header className="flex items-center gap-2 px-4 py-3 border-b bg-gradient-to-br from-indigo-50 to-fuchsia-50 rounded-t-2xl">
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-600 to-fuchsia-600 grid place-items-center text-white">
