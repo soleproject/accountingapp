@@ -142,8 +142,11 @@ async def create_bill(cid: str, inp: BillCreate, user: dict = Depends(get_curren
         from inventory_service import apply_bill_inventory
         hooks = await apply_bill_inventory(cid, doc)
         if hooks:
+            # `apply_bill_inventory` may have back-stamped item_id onto
+            # lines that matched by name — persist those too.
             await db.bills.update_one({"id": bid, "company_id": cid},
                                       {"$set": {"inventory_hooks": hooks,
+                                                "line_items": doc.get("line_items") or [],
                                                 "updated_at": now_iso()}})
             doc["inventory_hooks"] = hooks
     except Exception as e:
@@ -201,6 +204,7 @@ async def update_bill(cid: str, bid: str, payload: dict, user: dict = Depends(ge
             hooks = await apply_bill_inventory(cid, fresh)
             await db.bills.update_one({"id": bid, "company_id": cid},
                                       {"$set": {"inventory_hooks": hooks,
+                                                "line_items": fresh.get("line_items") or [],
                                                 "updated_at": now_iso()}})
     except Exception as e:
         await db.bills.update_one({"id": bid, "company_id": cid},

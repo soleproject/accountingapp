@@ -303,8 +303,10 @@ async def create_invoice(cid: str, inp: InvoiceCreate, user: dict = Depends(get_
         from inventory_service import apply_invoice_inventory
         hooks, warnings = await apply_invoice_inventory(cid, doc)
         if hooks:
+            # Persist any back-stamped item_ids alongside the hooks.
             await db.invoices.update_one({"id": iid, "company_id": cid},
                                          {"$set": {"inventory_hooks": hooks,
+                                                   "line_items": doc.get("line_items") or [],
                                                    "updated_at": now_iso()}})
             doc["inventory_hooks"] = hooks
     except Exception as e:
@@ -369,6 +371,7 @@ async def update_invoice(cid: str, iid: str, payload: dict, user: dict = Depends
             hooks, warnings = await apply_invoice_inventory(cid, fresh)
             await db.invoices.update_one({"id": iid, "company_id": cid},
                                          {"$set": {"inventory_hooks": hooks,
+                                                   "line_items": fresh.get("line_items") or [],
                                                    "updated_at": now_iso()}})
     except Exception as e:
         await db.invoices.update_one({"id": iid, "company_id": cid},

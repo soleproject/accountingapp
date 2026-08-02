@@ -60,6 +60,31 @@ async def get_tracked_item(cid: str, item_id: str) -> Optional[dict]:
     return it
 
 
+async def _resolve_line_item(cid: str, li: dict) -> Optional[dict]:
+    """Resolve a line-item dict to a *tracked* item doc — either by the
+    explicit `item_id` (preferred) or by an exact case-insensitive
+    match against `item_name` / `description`. The name fallback exists
+    because ItemPicker only stamps `item_id` when the user clicks a
+    dropdown option; users who type a description that matches an
+    existing item name would otherwise silently skip inventory
+    bookkeeping.
+    """
+    if li.get("item_id"):
+        return await get_tracked_item(cid, li["item_id"])
+    label = ((li.get("item_name") or li.get("description") or "").strip())
+    if not label:
+        return None
+    # Case-insensitive name match, only for tracked items.
+    return await db.items.find_one({
+        "company_id": cid, "track_inventory": True,
+        "name": {"$regex": f"^{_regex_escape(label)}$", "$options": "i"},
+    })
+
+
+def _regex_escape(s: str) -> str:
+    return "".join("\\" + ch if ch in r".*+?^$()[]{}|\\" else ch for ch in s)
+
+
 async def _record_movement(
     cid: str, item_id: str, kind: str, qty_delta: float, unit_cost: float,
     ref: dict, memo: str = "",
@@ -153,10 +178,12 @@ async def apply_bill_inventory(cid: str, bill: dict) -> list[dict]:
 
     new_hooks: list[dict] = []
     for li in (bill.get("line_items") or []):
-        item_id = li.get("item_id")
-        it = await get_tracked_item(cid, item_id)
+        it = await _resolve_line_item(cid, li)
         if not it:
             continue
+        # Stamp item_id back onto the line so future edits keep the link.
+        li["item_id"] = it["id"]
+        li["item_name"] = it.get("name") or li.get("item_name") or ""
         qty = float(li.get("quantity") or 0)
         amt = float(li.get("amount") or 0)
         if qty <= 0 or amt <= 0:
@@ -279,10 +306,12 @@ async def apply_invoice_inventory(cid: str, invoice: dict) -> tuple[list[dict], 
 
     new_hooks: list[dict] = []
     for li in (invoice.get("line_items") or []):
-        item_id = li.get("item_id")
-        it = await get_tracked_item(cid, item_id)
+        it = await _resolve_line_item(cid, li)
         if not it:
             continue
+        # Stamp item_id back so subsequent edits stay linked.
+        li["item_id"] = it["id"]
+        li["item_name"] = it.get("name") or li.get("item_name") or ""
         qty = float(li.get("quantity") or 0)
         if qty <= 0:
             continue

@@ -107,7 +107,14 @@ export default function ItemPicker({ items, value, onPickItem, onChangeText, onI
                     data-testid={testId ? `${testId}-opt-${it.id}` : undefined}
                   >
                     <div className="min-w-0">
-                      <div className="text-sm font-medium text-slate-800 truncate">{it.name}</div>
+                      <div className="text-sm font-medium text-slate-800 truncate inline-flex items-center gap-1.5">
+                        {it.name}
+                        {it.track_inventory && (
+                          <span className="text-[9px] uppercase tracking-wider px-1 py-0.5 rounded bg-sky-100 text-sky-800 border border-sky-200" title={`Tracked · QOH ${it.quantity_on_hand ?? 0}`}>
+                            Stock {it.quantity_on_hand ?? 0}
+                          </span>
+                        )}
+                      </div>
                       {it.description && <div className="text-xs text-slate-500 truncate">{it.description}</div>}
                       {it.income_account_name && <div className="text-[10px] text-slate-400 mt-0.5">{it.income_account_name}</div>}
                     </div>
