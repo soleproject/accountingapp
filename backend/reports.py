@@ -799,6 +799,78 @@ def _money_table(rows, totals_label, totals_amount):
     return t
 
 
+# ── Balance-sheet-specific renderer: injects Wave-style sub-type
+# banner rows (Cash and Bank, Property Plant & Equipment, Loan and
+# Line of Credit, etc.) before each contiguous run of accounts that
+# share a `detail_type`. Falls back to the flat `_money_table` look
+# when nothing in the section carries a detail_type.
+_DETAIL_PDF_LABELS = {
+    "cash_and_bank": "Cash and Bank",
+    "money_in_transit": "Money in Transit",
+    "expected_payments_from_customers": "Accounts Receivable",
+    "inventory": "Inventory",
+    "property_plant_equipment": "Property, Plant & Equipment",
+    "depreciation_and_amortization": "Depreciation and Amortization",
+    "vendor_prepayments": "Vendor Prepayments & Credits",
+    "other_short_term_asset": "Other Short-Term Asset",
+    "other_long_term_asset": "Other Long-Term Asset",
+    "credit_card": "Credit Card",
+    "loan_and_line_of_credit": "Loan and Line of Credit",
+    "expected_payments_to_vendors": "Accounts Payable",
+    "due_for_payroll": "Due For Payroll",
+    "due_to_owners": "Due to Owners",
+    "customer_prepayments": "Customer Prepayments & Credits",
+    "sales_tax_payable": "Sales Tax Payable",
+    "other_short_term_liability": "Other Short-Term Liability",
+    "other_long_term_liability": "Other Long-Term Liability",
+    "owner_contribution_drawing": "Owner Contribution & Drawing",
+    "retained_earnings": "Retained Earnings",
+    "other_equity": "Other Equity",
+}
+
+
+def _money_table_grouped(rows, totals_label, totals_amount):
+    has_any_detail = any(r.get("detail_type") for r in rows)
+    if not has_any_detail:
+        return _money_table(rows, totals_label, totals_amount)
+
+    data: list[list] = []
+    banner_indices: list[int] = []  # row indices where a banner sits
+    current_detail = "___INIT___"
+    for r in rows:
+        dt = (r.get("detail_type") or "").strip()
+        if dt != current_detail:
+            current_detail = dt
+            if dt:
+                data.append(["", _DETAIL_PDF_LABELS.get(dt, dt.replace("_", " ").title()), ""])
+                banner_indices.append(len(data) - 1)
+        data.append([r.get("code", ""), r["name"], f"${r['amount']:,.2f}"])
+    data.append(["", totals_label, f"${totals_amount:,.2f}"])
+
+    t = Table(data, colWidths=[0.9 * inch, 4.2 * inch, 1.4 * inch])
+    style_cmds = [
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("LINEABOVE", (0, -1), (-1, -1), 0.5, colors.HexColor("#0F172A")),
+        ("ALIGN", (2, 0), (2, -1), "RIGHT"),
+        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#52525B")),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+    ]
+    for i in banner_indices:
+        style_cmds.extend([
+            ("FONTNAME", (0, i), (-1, i), "Helvetica-Bold"),
+            ("FONTSIZE", (0, i), (-1, i), 7.5),
+            ("TEXTCOLOR", (0, i), (-1, i), colors.HexColor("#64748B")),
+            ("BACKGROUND", (0, i), (-1, i), colors.HexColor("#F8FAFC")),
+            ("TOPPADDING", (0, i), (-1, i), 6),
+            ("BOTTOMPADDING", (0, i), (-1, i), 3),
+        ])
+    t.setStyle(TableStyle(style_cmds))
+    return t
+
+
 def build_income_statement_pdf(data: dict) -> bytes:
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=LETTER, leftMargin=0.6 * inch, rightMargin=0.6 * inch,
@@ -832,13 +904,13 @@ def build_balance_sheet_pdf(data: dict) -> bytes:
         Paragraph(f"As of {data['as_of']} &middot; {data['basis'].title()} Basis", s["SubTitle"]),
         Spacer(1, 12),
         Paragraph("ASSETS", s["Section"]),
-        _money_table(data["assets"], "Total Assets", data["total_assets"]),
+        _money_table_grouped(data["assets"], "Total Assets", data["total_assets"]),
         Spacer(1, 8),
         Paragraph("LIABILITIES", s["Section"]),
-        _money_table(data["liabilities"], "Total Liabilities", data["total_liabilities"]),
+        _money_table_grouped(data["liabilities"], "Total Liabilities", data["total_liabilities"]),
         Spacer(1, 8),
         Paragraph("EQUITY", s["Section"]),
-        _money_table(data["equity"], "Total Equity", data["total_equity"]),
+        _money_table_grouped(data["equity"], "Total Equity", data["total_equity"]),
         Spacer(1, 12),
         _money_table([], "TOTAL LIABILITIES & EQUITY", data["total_liabilities_equity"]),
     ]
