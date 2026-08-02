@@ -64,8 +64,9 @@ async def list_companies(user: dict = Depends(get_current_user)):
     owner_ids = list({d.get("owner_user_id") for d in docs if d.get("owner_user_id")})
     owners = {u["id"]: u for u in await db.users.find({"id": {"$in": owner_ids}}).to_list(1000)}
     enriched = []
+    from crypto_service import decrypt_doc
     for d in docs:
-        row = coerce(d)
+        row = coerce(decrypt_doc("companies", d))
         owner = owners.get(d.get("owner_user_id"))
         row["owner_name"] = (owner or {}).get("name")
         row["owner_email"] = (owner or {}).get("email")
@@ -322,11 +323,20 @@ async def update_company(cid: str, patch: dict, user: dict = Depends(get_current
     if not updates:
         raise HTTPException(400, "No editable fields provided")
     updates["updated_at"] = now_iso()
+    # Encrypt any sensitive fields (`tax_id`, `ein`) before hitting Mongo.
+    from crypto_service import encrypt as _enc
+    if "tax_id" in updates and updates["tax_id"]:
+        updates["tax_id"] = _enc(updates["tax_id"])
+    if "ein" in updates and updates["ein"]:
+        updates["ein"] = _enc(updates["ein"])
     r = await db.companies.update_one({"id": cid}, {"$set": updates})
     if r.matched_count == 0:
         raise HTTPException(404, "Company not found")
     doc = await db.companies.find_one({"id": cid})
-    return coerce(doc)
+    # Return decrypted view — sensitive fields are stored ciphered but
+    # the caller (settings page) expects plaintext to render in the UI.
+    from crypto_service import decrypt_doc
+    return coerce(decrypt_doc("companies", doc))
 
 
 @router.delete("/companies/{cid}")

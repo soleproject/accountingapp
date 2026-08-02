@@ -205,7 +205,7 @@ async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool,
     await _emit("downloading", 0, None)
 
     cursor = item.get("cursor") if not reset_cursor else None
-    synced = plaid_service.sync_transactions(item["access_token"], cursor)
+    synced = plaid_service.sync_transactions(plaid_service.token_from_item(item), cursor)
     await db.plaid_items.update_one({"id": item["id"]}, {"$set": {
         "cursor": synced["next_cursor"], "updated_at": now_iso(),
     }})

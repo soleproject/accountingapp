@@ -76,7 +76,8 @@ def build_document_pdf(*, kind: str, doc: dict, company: dict | None = None,
         v = company.get(field)
         if v: identity_bits.append(str(v))
     if company.get("tax_id"):
-        identity_bits.append(f"Tax ID: {company['tax_id']}")
+        from crypto_service import decrypt as _dec
+        identity_bits.append(f"Tax ID: {_dec(company['tax_id'])}")
     identity_html = "<br/>".join(identity_bits)
     identity_p = Paragraph(f"<font size='9' color='#0F172A'>{identity_html}</font>",
                            styles["Normal"])

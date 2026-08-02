@@ -559,7 +559,7 @@ async def plaid_backfill_history_token(cid: str, user: dict = Depends(get_curren
             user_id=f"{user['id']}::{cid}",
             client_name="Axiom Ledger",
             webhook_url=webhook_url,
-            access_token_for_update=item["access_token"],
+            access_token_for_update=plaid_service.token_from_item(item),
         )
     except Exception as e:
         raise HTTPException(502, f"Plaid error: {e}")
@@ -589,11 +589,12 @@ async def plaid_exchange(cid: str, payload: dict, user: dict = Depends(get_curre
     now = now_iso()
     # Upsert on item_id — same Plaid item re-linked updates in place, a
     # NEW institution insert a fresh doc.
+    from crypto_service import encrypt as _enc
     await db.plaid_items.update_one(
         {"company_id": cid, "item_id": ex["item_id"]},
         {"$set": {
             "id": str(uuid.uuid4()), "company_id": cid, "user_id": user["id"],
-            "item_id": ex["item_id"], "access_token": ex["access_token"],
+            "item_id": ex["item_id"], "access_token": _enc(ex["access_token"]),
             "cursor": None, "accounts": accounts,
             "institution_name": institution_name,
             "created_at": now, "updated_at": now,
@@ -769,7 +770,7 @@ async def plaid_repair_collided_mappings(cid: str, user: dict = Depends(get_curr
 
     # Fetch Plaid accounts once so we can re-resolve.
     try:
-        plaid_accts = plaid_service.get_accounts(item["access_token"])
+        plaid_accts = plaid_service.get_accounts(plaid_service.token_from_item(item))
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"Couldn't fetch Plaid accounts: {e}")
     inst_name = item.get("institution_name")

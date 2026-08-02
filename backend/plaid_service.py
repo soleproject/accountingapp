@@ -30,6 +30,20 @@ _config = plaid.Configuration(
 _client = plaid_api.PlaidApi(plaid.ApiClient(_config))
 
 
+def token_from_item(item: dict | None) -> str | None:
+    """Return the decrypted Plaid access token from a `plaid_items` doc.
+    Callers pass a raw Mongo doc (potentially with an `enc_v1:` cipher
+    on `access_token`); we return the plaintext token ready to hand to
+    the Plaid SDK. Safe on None / missing key."""
+    if not item:
+        return None
+    tok = item.get("access_token")
+    if not tok:
+        return None
+    from crypto_service import decrypt
+    return decrypt(tok)
+
+
 def create_link_token(user_id: str, client_name: str = "SmartBooks", webhook_url: str | None = None,
                       access_token_for_update: str | None = None) -> str:
     """Create a Plaid Link token. When `access_token_for_update` is provided,

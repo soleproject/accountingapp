@@ -430,7 +430,7 @@ async def _apply_sync_balance_snapshot(item: dict, synced_accounts: list[dict]) 
     if not synced_accounts:
         # Free fallback: /accounts/get (not the paid /accounts/balance/get).
         try:
-            synced_accounts = plaid_service.get_accounts_balance_snapshot(item["access_token"])
+            synced_accounts = plaid_service.get_accounts_balance_snapshot(plaid_service.token_from_item(item))
         except Exception:  # noqa: BLE001 — never let a snapshot fetch break sync
             synced_accounts = []
     if not synced_accounts:
@@ -461,7 +461,7 @@ async def sync_plaid_history_for_account(
     with merchant grouping + contact resolution, and insert survivors.
     """
     try:
-        synced = plaid_service.sync_transactions(item["access_token"], None)
+        synced = plaid_service.sync_transactions(plaid_service.token_from_item(item), None)
     except Exception as e:  # noqa: BLE001
         raise RuntimeError(f"Plaid sync error: {e}") from e
 

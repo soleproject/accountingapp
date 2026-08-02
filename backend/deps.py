@@ -228,7 +228,7 @@ async def sync_and_import(cid: str, item: dict, selected_account_ids: list[str] 
     import plaid_connect
     from ai_service import categorize_transaction as _cat
     try:
-        synced = plaid_service.sync_transactions(item["access_token"], item.get("cursor"))
+        synced = plaid_service.sync_transactions(plaid_service.token_from_item(item), item.get("cursor"))
     except Exception:
         return 0
     await db.plaid_items.update_one({"id": item["id"]}, {"$set": {
