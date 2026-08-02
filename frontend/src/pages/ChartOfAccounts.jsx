@@ -1321,61 +1321,7 @@ function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onCl
   const [name, setName] = useState(p.name || "");
   const [type, setType] = useState(TYPES.includes(p.type) ? p.type : "expense");
   const detailsForType = (t) => DETAIL_TYPES[t === "revenue" ? "revenue" : t] || [];
-  // Client-side sibling of the backend backfill rules — best guess of
-  // detail_type from an account name so the sub-type dropdown auto-
-  // aligns as the user types. Kept intentionally in sync with the
-  // patterns in /accounts/backfill-detail-type on the server.
-  const inferDetailFromName = (n, t) => {
-    const s = (n || "").toLowerCase();
-    if (!s.trim()) return null;
-    const rules = {
-      asset: [
-        [["accumulated depreciation", "accumulated amortization", "amortization"], "depreciation_and_amortization"],
-        [["undeposited fund", "in transit", "clearing"], "money_in_transit"],
-        [["cash", "checking", "savings", "petty cash", "bank", "money market", "operating account"], "cash_and_bank"],
-        [["receivable", "a/r"], "expected_payments_from_customers"],
-        [["inventory", "stock on hand", "goods on hand", "raw material", "finished goods", "work in process"], "inventory"],
-        [["prepaid", "vendor deposit", "vendor prepayment"], "vendor_prepayments"],
-        [["equipment", "machinery", "vehicle", "furniture", "fixture", "computer", "building", "land", "leasehold", "fixed asset", "office equipment"], "property_plant_equipment"],
-      ],
-      liability: [
-        [["credit card", "amex", "visa", "mastercard", "discover"], "credit_card"],
-        [["mortgage", "loan", "note payable", "line of credit", "long-term debt", "long term debt"], "loan_and_line_of_credit"],
-        [["sales tax", "gst payable", "vat payable", "hst payable"], "sales_tax_payable"],
-        [["payable", "a/p"], "expected_payments_to_vendors"],
-        [["payroll", "wages payable"], "due_for_payroll"],
-        [["customer deposit", "deferred revenue", "prepaid revenue", "unearned revenue"], "customer_prepayments"],
-        [["owner", "shareholder", "member", "due to"], "due_to_owners"],
-      ],
-      equity: [
-        [["retained"], "retained_earnings"],
-        [["contribution", "draw", "distribution", "capital", "owner"], "owner_contribution_drawing"],
-      ],
-      revenue: [
-        [["discount"], "discount"],
-        [["interest income", "other income", "misc income", "miscellaneous income"], "other_income"],
-      ],
-      expense: [
-        [["cost of goods", "cogs", "cost of sales"], "cost_of_goods_sold"],
-        [["stripe fee", "paypal fee", "square fee", "processing fee", "merchant fee"], "payment_processing_fee"],
-        [["payroll expense", "wages", "salaries", "employee benefit"], "payroll_expense"],
-        [["interest expense", "depreciation expense", "amortization expense", "loss on"], "other_expense"],
-      ],
-    };
-    for (const [patterns, dt] of (rules[t] || [])) {
-      if (patterns.some(p => s.includes(p))) return dt;
-    }
-    return null;
-  };
-  const [detailType, setDetailType] = useState(() => {
-    // Only pre-fill a detail_type when the caller explicitly provided
-    // one (e.g. AI-generated CoA suggestions). For manual entry we
-    // leave it blank so nothing sneaks in behind the user's back.
-    return p.detail_type || "";
-  });
-  // Once the user manually picks a sub-type, stop auto-changing it as
-  // they keep typing the name.
-  const [userTouchedDetail, setUserTouchedDetail] = useState(false);
+  const [detailType, setDetailType] = useState(p.detail_type || "");
   const [subtype, setSubtype] = useState(
     p.subtype && subtypesFor(TYPES.includes(p.type) ? p.type : "expense").includes(p.subtype)
       ? p.subtype
@@ -1418,6 +1364,7 @@ function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onCl
       }
     }
     if (!name.trim()) { toast.error("Name is required."); return; }
+    if (!detailType) { toast.error("Pick a sub-type — required for correct reporting."); return; }
     if (isFixedAsset) {
       if (!cost || Number(cost) <= 0) { toast.error("Cost is required."); return; }
       if (!purchaseDate) { toast.error("Purchase date is required."); return; }
@@ -1476,13 +1423,10 @@ function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onCl
               setSubtype(subtypesFor(nextType)[0]);
             }
             const list = detailsForType(nextType);
-            // On type switch, only re-guess if the user hasn't picked
-            // one AND the current value is invalid for the new type.
+            // On type switch, blank the sub-type if it's no longer
+            // valid for the new type — user must re-pick.
             const stillValid = list.some(d => d.key === detailType);
-            if (!stillValid) {
-              const guessed = !userTouchedDetail ? inferDetailFromName(name, nextType) : null;
-              setDetailType(guessed || "");
-            }
+            if (!stillValid) setDetailType("");
             // Drop the parent if the new type invalidates it — sub-accounts
             // must live under a parent of the same type.
             if (parentId) {
@@ -1495,31 +1439,21 @@ function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onCl
           {TYPES.map(t => <option key={t} value={t}>{prettyLabel(t)}</option>)}
         </select>
         <div>
-          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Sub-type <span className="text-slate-400 normal-case font-normal">· optional</span></label>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+            Sub-type <span className="text-rose-500">*</span>
+          </label>
           <select
             value={detailType}
-            onChange={(e) => { setDetailType(e.target.value); setUserTouchedDetail(true); }}
-            className="w-full border rounded px-3 py-2 text-sm bg-white"
+            onChange={(e) => setDetailType(e.target.value)}
+            className={`w-full border rounded px-3 py-2 text-sm bg-white ${detailType ? "" : "text-slate-400"} ${detailType ? "border-slate-300" : "border-slate-300"}`}
             data-testid="coa-create-detail-type"
+            required
           >
-            <option value="">— None (unclassified) —</option>
+            <option value="" disabled>Select a sub-type…</option>
             {detailsForType(type).map(dt => (
-              <option key={dt.key} value={dt.key}>{dt.label}</option>
+              <option key={dt.key} value={dt.key} className="text-slate-900">{dt.label}</option>
             ))}
           </select>
-          {!detailType && name.trim() && (() => {
-            const guess = inferDetailFromName(name, type);
-            if (!guess) return null;
-            const guessLabel = detailsForType(type).find(d => d.key === guess)?.label;
-            return (
-              <button
-                type="button"
-                onClick={() => { setDetailType(guess); setUserTouchedDetail(true); }}
-                className="mt-1 text-[11px] text-indigo-600 hover:underline"
-                data-testid="coa-create-detail-suggestion"
-              >Suggestion: use "{guessLabel}"?</button>
-            );
-          })()}
         </div>
 
         {/* Conditional fields — Fixed Asset flow */}
@@ -1641,7 +1575,12 @@ function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onCl
           )}
         </div>
         <div className="flex gap-2">
-          <button data-testid={TID.saveBtn} onClick={save} className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm">Save</button>
+          <button
+            data-testid={TID.saveBtn}
+            onClick={save}
+            disabled={!name.trim() || !detailType}
+            className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+          >Save</button>
           <button data-testid={TID.cancelBtn} onClick={onClose} className="flex-1 py-2 rounded-md border text-sm">Cancel</button>
         </div>
       </div>
