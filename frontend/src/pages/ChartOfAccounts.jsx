@@ -512,44 +512,45 @@ export default function ChartOfAccounts() {
             <div>
               {(() => {
                 // Group items by detail_type for Wave-style sub-headers.
-                // Accounts without a detail_type still show up in an
-                // "Uncategorized" bucket so nothing silently vanishes.
+                // Only render sub-type headers when the section is
+                // mostly classified (≥50% carry detail_type) — otherwise
+                // legacy books look like an "OTHER" dumping ground.
                 const sections = DETAIL_SECTIONS_BY_TYPE[g.type] || [];
+                const classified = g.items.filter(a => (a.detail_type || "").trim()).length;
+                const classifiedShare = g.items.length ? classified / g.items.length : 0;
+                if (classifiedShare < 0.5 || sections.length === 0) {
+                  return g.items.map(a => renderRow(a, g));
+                }
                 const byDetail = new Map();
                 for (const a of g.items) {
-                  const dt = (a.detail_type || "").trim() || "__uncategorized__";
-                  if (!byDetail.has(dt)) byDetail.set(dt, []);
-                  byDetail.get(dt).push(a);
+                  const dt = (a.detail_type || "").trim();
+                  const key = dt || "__unset__";
+                  if (!byDetail.has(key)) byDetail.set(key, []);
+                  byDetail.get(key).push(a);
                 }
-                const renderedKeys = new Set();
                 const blocks = [];
                 for (const [key, label] of sections) {
                   const rows = byDetail.get(key);
                   if (!rows || rows.length === 0) continue;
-                  renderedKeys.add(key);
                   blocks.push({ key, label, rows });
                 }
-                // Any detail_types we don't recognize + the uncategorized bucket.
-                const leftovers = [];
-                for (const [k, v] of byDetail.entries()) {
-                  if (renderedKeys.has(k)) continue;
-                  leftovers.push(...v);
-                }
-                if (leftovers.length) blocks.push({ key: "__other__", label: "Other", rows: leftovers });
-
-                // Fallback — when no sub-sections apply (or detail_type
-                // was never set on legacy accounts), show a flat list.
-                if (blocks.length === 0 || (blocks.length === 1 && blocks[0].key === "__other__")) {
-                  return g.items.map(a => renderRow(a, g));
-                }
-                return blocks.map(b => (
-                  <div key={b.key} data-testid={`coa-detail-${g.type}-${b.key}`}>
-                    <div className="px-4 py-1.5 bg-slate-50/50 border-b border-slate-100 text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
-                      {b.label}
-                    </div>
-                    {b.rows.map(a => renderRow(a, g))}
-                  </div>
-                ));
+                // Un-classified accounts render inline AFTER the known
+                // sections without their own banner — mirrors how Wave
+                // handles accounts that were imported without metadata.
+                const unset = byDetail.get("__unset__") || [];
+                return (
+                  <>
+                    {blocks.map(b => (
+                      <div key={b.key} data-testid={`coa-detail-${g.type}-${b.key}`}>
+                        <div className="px-4 py-1.5 bg-slate-50/50 border-b border-slate-100 text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
+                          {b.label}
+                        </div>
+                        {b.rows.map(a => renderRow(a, g))}
+                      </div>
+                    ))}
+                    {unset.map(a => renderRow(a, g))}
+                  </>
+                );
               })()}
             </div>
           </div>
@@ -1367,10 +1368,10 @@ function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onCl
     return null;
   };
   const [detailType, setDetailType] = useState(() => {
-    const initialType = TYPES.includes(p.type) ? p.type : "expense";
-    return inferDetailFromName(p.name || "", initialType)
-      || detailsForType(initialType)[0]?.key
-      || "";
+    // Only pre-fill a detail_type when the caller explicitly provided
+    // one (e.g. AI-generated CoA suggestions). For manual entry we
+    // leave it blank so nothing sneaks in behind the user's back.
+    return p.detail_type || "";
   });
   // Once the user manually picks a sub-type, stop auto-changing it as
   // they keep typing the name.
@@ -1463,14 +1464,7 @@ function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onCl
           <input placeholder="Code (e.g. 6250)" value={code} onChange={(e) => setCode(e.target.value)}
                  className="w-full border rounded px-3 py-2 text-sm font-mono-num" data-testid="coa-create-code" />
         )}
-        <input placeholder="Account name" value={name} onChange={(e) => {
-          const nextName = e.target.value;
-          setName(nextName);
-          if (!userTouchedDetail) {
-            const guessed = inferDetailFromName(nextName, type);
-            if (guessed) setDetailType(guessed);
-          }
-        }}
+        <input placeholder="Account name" value={name} onChange={(e) => setName(e.target.value)}
                className="w-full border rounded px-3 py-2 text-sm" data-testid="coa-create-name" />
         <select
           value={type}
@@ -1482,8 +1476,13 @@ function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onCl
               setSubtype(subtypesFor(nextType)[0]);
             }
             const list = detailsForType(nextType);
-            const guessed = !userTouchedDetail ? inferDetailFromName(name, nextType) : null;
-            setDetailType(guessed || list[0]?.key || "");
+            // On type switch, only re-guess if the user hasn't picked
+            // one AND the current value is invalid for the new type.
+            const stillValid = list.some(d => d.key === detailType);
+            if (!stillValid) {
+              const guessed = !userTouchedDetail ? inferDetailFromName(name, nextType) : null;
+              setDetailType(guessed || "");
+            }
             // Drop the parent if the new type invalidates it — sub-accounts
             // must live under a parent of the same type.
             if (parentId) {
@@ -1496,17 +1495,31 @@ function CreateAccount({ currentId, prefill, allAccounts, showCodes = true, onCl
           {TYPES.map(t => <option key={t} value={t}>{prettyLabel(t)}</option>)}
         </select>
         <div>
-          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Sub-type</label>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Sub-type <span className="text-slate-400 normal-case font-normal">· optional</span></label>
           <select
             value={detailType}
             onChange={(e) => { setDetailType(e.target.value); setUserTouchedDetail(true); }}
             className="w-full border rounded px-3 py-2 text-sm bg-white"
             data-testid="coa-create-detail-type"
           >
+            <option value="">— None (unclassified) —</option>
             {detailsForType(type).map(dt => (
               <option key={dt.key} value={dt.key}>{dt.label}</option>
             ))}
           </select>
+          {!detailType && name.trim() && (() => {
+            const guess = inferDetailFromName(name, type);
+            if (!guess) return null;
+            const guessLabel = detailsForType(type).find(d => d.key === guess)?.label;
+            return (
+              <button
+                type="button"
+                onClick={() => { setDetailType(guess); setUserTouchedDetail(true); }}
+                className="mt-1 text-[11px] text-indigo-600 hover:underline"
+                data-testid="coa-create-detail-suggestion"
+              >Suggestion: use "{guessLabel}"?</button>
+            );
+          })()}
         </div>
 
         {/* Conditional fields — Fixed Asset flow */}
