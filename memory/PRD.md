@@ -3687,3 +3687,42 @@ Every grant is written to `admin_audit_log` with kind=`superadmin_granted` (gran
 
 ### Verified
 - All 9 pytest cases in `/app/backend/tests/test_inventory_tier2.py` PASS. Frontend fully validated: Items modal reveal, /inventory-management page (all 3 tabs), sidebar link, adjustment modal.
+
+
+---
+
+## 2026-02 — Railway 3-Node Replica Set Migration Plan (documentation only)
+
+### Status
+- **BLOCKED on user backup-restore drill** before any prod Mongo touch.
+- Full plan committed to `/app/memory/RAILWAY_REPLICA_SET_MIGRATION.md`.
+
+### User answers received (2026-02)
+- Railway plan: **Pro** (24 vCPU / 24 GB per-replica ceiling — confirmed from screenshots).
+- HA choice: **c — Full 3-node RS**. Agent counter-recommends **PSS (Primary-Secondary-Secondary)** over PSA for durable `w:majority`.
+- Downtime tolerance: **c — 15–30 min window OK**.
+- Backup situation: **unknown → agent to advise**. User must run restore drill and report RTO.
+
+### Cost estimate delivered
+- PSS self-managed on Railway: **~$135/mo** (3× mongo:8.0 + volumes).
+- Atlas M10 alternative: **~$57/mo** managed with PITR (Appendix A).
+
+### Worker calibration decision
+- Now (pre-migration, single node): `--workers 4` + `MONGO_MAX_POOL_SIZE=100`.
+- Post-migration (3-node PSS with 24 vCPU headroom): `--workers 8` + `MONGO_MAX_POOL_SIZE=75`.
+
+### What lands in code AFTER migration succeeds (queued)
+1. Thread `session=` through `POST /bills`, `POST /assets`, `POST /opening-balance`, `POST /bill-payments`, wrap in `ledger_transaction()`.
+2. Wrap contact upsert in `try/except DuplicateKeyError → find existing → return 200`.
+3. Remove one-shot warning from `db.py::_probe_txn_support` once real RS is confirmed.
+4. Add integration test `test_ledger_atomicity.py` with force-fail rollback assertion.
+5. Route `/api/admin/ledger-integrity` via `readPreference=secondaryPreferred`.
+
+### User owes before we execute
+- [ ] Backup restore drill RTO measured
+- [ ] Maintenance window scheduled
+- [ ] Confirm PSS vs PSA (agent recommends PSS)
+- [ ] Set `MONGO_MAX_POOL_SIZE=100` on Railway accountingapp Variables
+- [ ] Approve `--workers 4` today, `--workers 8` post-migration
+- [ ] Confirm cost path: self-managed ~$135/mo OR Atlas M10 ~$57/mo
+
