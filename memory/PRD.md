@@ -17,6 +17,35 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Plaid webhook async: retry + DLQ (job_queue hardening)
+
+Correction from earlier audit: the webhook was already returning 200 immediately and enqueuing via `asyncio.create_task` — I mis-read the flow in the initial audit. Real gap was that failing tasks had no retry, no DLQ, no ops surface.
+
+**`job_queue.py`**:
+- Added `attempts`, `max_attempts`, `first_failed_at`, `last_error`, `next_retry_at` to every `sync_jobs` row.
+- `_run_wrapped` now increments `attempts` atomically BEFORE running the task (so a crash before completion still counts) and catches uncaught exceptions.
+- On failure: if `attempts < max_attempts`, transition to `status="retry_scheduled"` with `next_retry_at = now + backoff` and fire an `asyncio.call_later` to re-execute. Backoff curve `[1, 2, 4, 8, 16]` minutes (front-loaded — 90% of Plaid failures are transient rate-limit / item-state blips).
+- After `MAX_ATTEMPTS` (default 5, env-tunable): status transitions to `"dlq"`, `finished_at` set, `next_retry_at` cleared. Job requires one-click retry.
+- `reconcile_stuck_jobs()` now returns a dict and also rehydrates `retry_scheduled` rows on pod restart — schedules `call_later` for the remaining delay (past-due retries fire immediately). Fixes the "half-scheduled retry lost to pod restart" gap.
+- `retry_dlq_job(job_id)` — one-click retry that resets attempts to 0, clears the retry timer, re-enqueues. Idempotent.
+- Two new indexes on `sync_jobs`: `(status, first_failed_at DESC)` for the DLQ query, `(status, next_retry_at ASC)` for the reconcile scan.
+
+**`routes/admin.py`**:
+- `GET /api/admin/jobs/dlq?kind=&limit=` — lists DLQ + retry_scheduled jobs newest-first, joined with company_name, error snippet truncated to 500 chars, counts by status. Both statuses show together so ops can see what's queued for retry vs given up on.
+- `POST /api/admin/jobs/{job_id}/retry` — one-click retry gated on superadmin role.
+
+**Tests**: `tests/test_job_retry_dlq.py` — 4/4 pass under `pytest-xdist`. Backoff monkey-patched to 0s so tests run in <2s.
+- Flaky task (2 fails then success) → 3 attempts → completed
+- Always-failing task → exactly 3 attempts → status=dlq, additional wait doesn't change state
+- DLQ retry resets counter + re-executes (goes back to dlq after 3 more fails, proving counter reset)
+- `reconcile_stuck_jobs` re-arms a past-due `retry_scheduled` row (pod-restart simulation)
+
+**Combined suite**: 13/13 passing (`test_ledger_hardening` + `test_job_retry_dlq`).
+
+**Known limits / next work**:
+- Tasks still run in the API pod (`asyncio.create_task`, not a separate worker process). At 3k tenants during nightly Plaid refresh, the API pod's event loop still shares CPU with sync work. Separate worker process (Arq / RQ / Celery) is the next architecture step — deferred until we have real numbers from the load test.
+- The retry timer is in-process. If a pod dies during the backoff window, `reconcile_stuck_jobs` rehydrates on the next start — but if the pod stays down past the retry window, the retry lands late by however long the outage was. Acceptable trade-off vs the complexity of a distributed scheduler.
+
 ### Feb 2026 — JE writer unification + soft cap + hardening tests
 
 **Every JE write now goes through one helper** (`db.insert_je`):

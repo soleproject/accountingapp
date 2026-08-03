@@ -523,6 +523,60 @@ async def admin_apply_default_ai_cap(
     }
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Background-job DLQ visibility (Feb 2026)
+# ──────────────────────────────────────────────────────────────────────
+# Failed background jobs (Plaid sync, contact backfill, receipt OCR)
+# now retry with exponential backoff up to MAX_ATTEMPTS, then land in
+# `status="dlq"`. These endpoints let ops see what's stuck and retry
+# individual rows without a deploy.
+
+@router.get("/admin/jobs/dlq")
+async def admin_jobs_dlq(
+    kind: Optional[str] = Query(None, description="Filter by job kind (e.g. plaid_manual_sync)"),
+    limit: int = Query(100, ge=1, le=500),
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Every job in the dead-letter queue, newest first. Also includes
+    `retry_scheduled` rows so ops can see what's in-flight for retry."""
+    q: dict = {"status": {"$in": ["dlq", "retry_scheduled"]}}
+    if kind:
+        q["kind"] = kind
+    rows = await db.sync_jobs.find(q).sort("first_failed_at", -1).limit(limit).to_list(limit)
+    # Company-name join for the UI (single find_all in one shot).
+    cids = list({r.get("company_id") for r in rows if r.get("company_id")})
+    company_names = {}
+    if cids:
+        async for c in db.companies.find({"id": {"$in": cids}}, {"id": 1, "name": 1}):
+            company_names[c["id"]] = c.get("name")
+    out = []
+    for r in rows:
+        r.pop("_id", None)
+        r["company_name"] = company_names.get(r.get("company_id"))
+        # Truncate error trace so the JSON payload stays reasonable.
+        err = r.get("last_error") or r.get("error") or ""
+        r["last_error_snippet"] = (err[:500] + " ...[truncated]") if len(err) > 500 else err
+        out.append(r)
+    counts = {"dlq": 0, "retry_scheduled": 0}
+    for r in rows:
+        counts[r.get("status", "dlq")] = counts.get(r.get("status", "dlq"), 0) + 1
+    return {"counts": counts, "rows": out}
+
+
+@router.post("/admin/jobs/{job_id}/retry")
+async def admin_retry_dlq_job(
+    job_id: str,
+    user: dict = Depends(require_role("superadmin")),
+):
+    """One-click retry — resets attempts to 0 and re-enqueues.
+    Idempotent. Only works on `dlq` or `failed` rows."""
+    from job_queue import retry_dlq_job as _retry
+    result = await _retry(job_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("reason") or "retry failed")
+    return result
+
+
 @router.get("/admin/ledger-integrity")
 async def admin_ledger_integrity(
     user: dict = Depends(require_role("superadmin")),
