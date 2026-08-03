@@ -9,7 +9,7 @@ import uuid
 from datetime import date, timedelta, datetime, timezone
 from typing import Optional
 
-from db import db, now_iso
+from db import db, now_iso, insert_je
 import plaid_service
 
 
@@ -211,7 +211,7 @@ async def post_opening_balance_je(
              "description": memo},
         ]
     je_id = str(uuid.uuid4())
-    await db.journal_entries.insert_one({
+    await insert_je({
         "id": je_id, "company_id": cid,
         "date": as_of,
         "memo": memo,

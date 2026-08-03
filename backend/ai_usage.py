@@ -267,19 +267,29 @@ class AiSpendCapExceeded(Exception):
 
 
 async def check_spend_cap(company_id: Optional[str]) -> None:
-    """Pre-flight cap check called by every LLM entry point. Reads the
-    company's `ai_spend_cap_cents` (0 or unset = unlimited) and compares
-    it to the current-month running total. Cheap — single indexed
-    company doc read. Raises `AiSpendCapExceeded` when over.
+    """Pre-flight cap check called by every LLM entry point.
 
-    `company_id=None` is treated as unlimited so platform-level jobs
-    (e.g. superadmin ad-hoc queries) don't get blocked.
+    Feb 2026 — this is intentionally a SOFT cap, not a hard 402. A
+    paying customer mid-close hitting a "AI unavailable" wall is a
+    churn risk. Instead:
+      • Under 80% of cap → no-op, silent
+      • 80-99% of cap    → log a WARNING (so the admin dashboard's
+        ai-spend page + Sentry pick it up), but LLM call proceeds
+      • ≥100% of cap     → log ERROR + increment a counter on the
+        company doc (`ai_spend_over_cap_events`) so ops has an
+        audit trail. Still allows the call — only a company doc
+        with `ai_spend_hard_block: true` will raise
+        AiSpendCapExceeded and 402 the request.
+
+    Superadmin can flip `ai_spend_hard_block` per-company from the
+    admin UI when they see a runaway offender. Default is off.
     """
     if not company_id:
         return
     doc = await db.companies.find_one(
         {"id": company_id},
-        {"ai_spend_cap_cents": 1, "ai_spend": 1, "insights_spend": 1},
+        {"ai_spend_cap_cents": 1, "ai_spend": 1, "insights_spend": 1,
+         "ai_spend_hard_block": 1, "name": 1},
     )
     if not doc:
         return
@@ -288,11 +298,42 @@ async def check_spend_cap(company_id: Optional[str]) -> None:
         return  # unlimited
     period = _period_key()
     spent = float((doc.get("ai_spend") or {}).get(period) or 0)
-    # Legacy `insights_spend` (Feb 2026 pre-unification) — additive, not
-    # replacement. Keeps the cap honest for the transition month.
     spent += float((doc.get("insights_spend") or {}).get(period) or 0)
-    if spent >= cap:
-        raise AiSpendCapExceeded(company_id, spent, cap)
+    if spent < 0.8 * cap:
+        return
+
+    ratio = spent / cap
+    over = ratio >= 1.0
+    hard = bool(doc.get("ai_spend_hard_block"))
+    name = doc.get("name") or company_id
+
+    if over:
+        # Latch a running counter so admins can see WHICH companies
+        # crossed the line and how many events happened after.
+        try:
+            await db.companies.update_one(
+                {"id": company_id},
+                {
+                    "$inc": {f"ai_spend_over_cap_events.{period}": 1},
+                    "$set": {f"ai_spend_over_cap_first_at.{period}": now_iso()
+                             if not (doc.get("ai_spend_over_cap_first_at") or {}).get(period)
+                             else (doc.get("ai_spend_over_cap_first_at") or {})[period],
+                             "updated_at": now_iso()},
+                },
+            )
+        except Exception:
+            logger.exception("failed to latch over-cap counter for %s", company_id)
+        logger.error(
+            "AI_SPEND OVER CAP: company=%s (%s) spent=$%.2f cap=$%.2f (%.0f%%) hard_block=%s",
+            company_id, name, spent / 100, cap / 100, ratio * 100, hard,
+        )
+        if hard:
+            raise AiSpendCapExceeded(company_id, spent, cap)
+    else:
+        logger.warning(
+            "AI_SPEND 80%%+ threshold: company=%s (%s) spent=$%.2f cap=$%.2f (%.0f%%)",
+            company_id, name, spent / 100, cap / 100, ratio * 100,
+        )
 
 
 # ---------------------------------------------------------------------------

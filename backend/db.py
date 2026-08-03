@@ -83,16 +83,28 @@ _txn_supported: Optional[bool] = None  # tri-state: None=unknown, True/False
 
 
 async def _probe_txn_support() -> bool:
-    """One-time probe: try starting a transaction against an unused
-    session and see whether the driver rejects with 'Transaction
-    numbers are only allowed on a replica set'. Cached per process."""
+    """One-time probe: try running a trivial write inside a transaction
+    and see whether the driver rejects with 'Transaction numbers are
+    only allowed on a replica set'. Cached per process.
+
+    IMPORTANT: an empty transaction commits fine even on single-node
+    mongod, so we MUST include a real write to catch non-replica-set
+    deploys correctly. The write goes to a scratch collection and is
+    aborted, never persisting.
+    """
     global _txn_supported
     if _txn_supported is not None:
         return _txn_supported
     try:
         async with await _client.start_session() as s:
             async with s.start_transaction():
-                pass
+                # Real write inside — this is what actually surfaces the
+                # 'Transaction numbers are only allowed on a replica set'
+                # error on non-replica-set mongo. Abort before commit so
+                # nothing lands on disk.
+                await db._axiom_txn_probe.insert_one({"probe": 1}, session=s)
+                raise _ProbeAbort()  # abort the transaction cleanly
+    except _ProbeAbort:
         _txn_supported = True
     except Exception as e:  # noqa: BLE001
         _txn_supported = False
@@ -103,6 +115,12 @@ async def _probe_txn_support() -> bool:
             "your Mongo is a replica set.", e,
         )
     return _txn_supported
+
+
+class _ProbeAbort(Exception):
+    """Sentinel used by `_probe_txn_support` to cleanly abort the
+    probe transaction without triggering the fallback path."""
+    pass
 
 
 @asynccontextmanager
@@ -125,6 +143,61 @@ async def ledger_transaction():
     async with await _client.start_session() as session:
         async with session.start_transaction():
             yield session
+
+
+# ---------------------------------------------------------------------------
+# insert_je — the ONE writer every JE call site should use
+# ---------------------------------------------------------------------------
+#
+# Feb 2026 — historically, JE writers (inventory_service, asset_service,
+# opening_balance_service, plaid_connect) each inserted their own doc
+# and skipped the header `total_debit` / `total_credit` fields. Reports
+# read from `lines[]` directly so it hasn't hit balance-sheet math, but
+# any code reading the header saw 0 and got the wrong answer. This
+# helper closes that gap and gives every JE writer a single choke point
+# where cross-cutting concerns (audit fields, session propagation for
+# transactions) land in one place.
+
+import uuid as _uuid  # noqa: E402
+
+
+async def insert_je(doc: dict, *, session=None) -> str:
+    """Insert a journal_entries document with correctly computed header
+    totals. Every JE writer in the app should route through here.
+
+    Guarantees applied to `doc`:
+      • `id` set if missing (uuid4)
+      • `created_at` / `updated_at` set if missing
+      • `total_debit` / `total_credit` recomputed from `lines[]` — this
+        is the fix for the latent zero-header bug found by the Feb 2026
+        ledger integrity check. Any values the caller pre-set are
+        overwritten so lines and header can never disagree.
+
+    Pass `session=` when running inside `ledger_transaction()` so the
+    JE write joins the atomic scope. Callers outside a transaction pass
+    `session=None` (the default), which Motor treats as a no-op.
+
+    Returns the JE `id` so the caller can stamp it back on the parent
+    (bill.je_id, invoice.je_id, etc.) inside the same transaction.
+    """
+    lines = doc.get("lines") or []
+    d = round(sum(float(l.get("debit") or 0) for l in lines), 2)
+    c = round(sum(float(l.get("credit") or 0) for l in lines), 2)
+    if abs(d - c) > 0.005:
+        # Cardinal double-entry violation — refuse to write rather than
+        # let a bad JE land silently. The single-doc atomicity of insert
+        # doesn't matter if the doc itself is broken.
+        raise ValueError(
+            f"JE would be unbalanced: debits={d} credits={c} diff={round(d-c,4)}"
+        )
+    doc.setdefault("id", str(_uuid.uuid4()))
+    now = now_iso()
+    doc.setdefault("created_at", now)
+    doc["updated_at"] = now
+    doc["total_debit"] = d
+    doc["total_credit"] = c
+    await db.journal_entries.insert_one(doc, session=session)
+    return doc["id"]
 
 
 

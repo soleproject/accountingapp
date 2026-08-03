@@ -442,6 +442,87 @@ async def admin_ai_spend_backfill(
     return await backfill_ai_spend_counters()
 
 
+class AiCapOverrideIn(BaseModel):
+    """One-click override — used from the admin UI to raise/lower a
+    specific company's cap without a deploy. Cap is stored in CENTS on
+    the company doc so it can be shown to the user in dollars without
+    float rounding drift."""
+    cap_usd: float = Field(ge=0, le=10000, description="Monthly cap in dollars. 0 = unlimited.")
+    hard_block: bool = Field(default=False, description="If true, calls over the cap 402. Default: soft (warn but allow).")
+
+
+@router.patch("/admin/ai-spend/companies/{cid}/cap")
+async def admin_set_company_ai_cap(
+    cid: str, inp: AiCapOverrideIn,
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Set (or clear) a single company's monthly AI cap. Takes effect
+    immediately — the next LLM call re-reads the doc.
+
+    `hard_block=false` (default) → soft cap: over-cap events are
+    logged & counted on `ai_spend_over_cap_events`, but calls still
+    succeed. Use this for the default policy the user asked for.
+
+    `hard_block=true` → 402 Payment Required on the next call over
+    cap. Reserved for known-abusive tenants and monthly-close
+    override cases.
+    """
+    cap_cents = float(inp.cap_usd) * 100.0
+    res = await db.companies.update_one(
+        {"id": cid},
+        {"$set": {
+            "ai_spend_cap_cents": cap_cents,
+            "ai_spend_hard_block": bool(inp.hard_block),
+            "ai_spend_cap_updated_by": user["id"],
+            "ai_spend_cap_updated_at": now_iso(),
+            "updated_at": now_iso(),
+        }},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Company not found")
+    return {
+        "company_id": cid,
+        "cap_usd": inp.cap_usd,
+        "cap_cents": cap_cents,
+        "hard_block": bool(inp.hard_block),
+    }
+
+
+class AiCapDefaultIn(BaseModel):
+    default_cap_usd: float = Field(ge=0, le=10000)
+
+
+@router.post("/admin/ai-spend/default-cap/apply-to-all-uncapped")
+async def admin_apply_default_ai_cap(
+    inp: AiCapDefaultIn,
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Apply a default AI-spend cap (in USD) to every company that
+    doesn't already have one set. Idempotent — never lowers an existing
+    cap, never touches hard_block. Use this once at rollout to seed the
+    platform-wide default; per-company overrides go through
+    `admin_set_company_ai_cap`.
+    """
+    cap_cents = float(inp.default_cap_usd) * 100.0
+    res = await db.companies.update_many(
+        {"$or": [
+            {"ai_spend_cap_cents": {"$exists": False}},
+            {"ai_spend_cap_cents": 0},
+            {"ai_spend_cap_cents": None},
+        ]},
+        {"$set": {
+            "ai_spend_cap_cents": cap_cents,
+            "ai_spend_cap_default_source": user["id"],
+            "ai_spend_cap_updated_at": now_iso(),
+            "updated_at": now_iso(),
+        }},
+    )
+    return {
+        "companies_updated": res.modified_count,
+        "default_cap_usd": inp.default_cap_usd,
+    }
+
+
 @router.get("/admin/ledger-integrity")
 async def admin_ledger_integrity(
     user: dict = Depends(require_role("superadmin")),

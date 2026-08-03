@@ -28,7 +28,7 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
-from db import db, now_iso, coerce
+from db import db, now_iso, coerce, insert_je
 
 
 # ── Constants ────────────────────────────────────────────────────────
@@ -263,7 +263,7 @@ async def apply_bill_inventory(cid: str, bill: dict) -> list[dict]:
             continue
 
         je_id = str(uuid.uuid4())
-        await db.journal_entries.insert_one({
+        await insert_je({
             "id": je_id, "company_id": cid,
             "date": bill.get("issue_date") or now_iso()[:10],
             "memo": f"Inventory receipt · {it.get('name') or ''} · Bill {bill.get('number') or ''}".strip(" ·"),
@@ -371,7 +371,7 @@ async def apply_invoice_inventory(cid: str, invoice: dict) -> tuple[list[dict], 
         je_id: Optional[str] = None
         if cogs_amt > 0 and it.get("inventory_account_id") and it.get("cogs_account_id"):
             je_id = str(uuid.uuid4())
-            await db.journal_entries.insert_one({
+            await insert_je({
                 "id": je_id, "company_id": cid,
                 "date": invoice.get("issue_date") or now_iso()[:10],
                 "memo": f"COGS · {it.get('name') or ''} · Invoice {invoice.get('number') or ''}".strip(" ·"),
@@ -477,7 +477,7 @@ async def apply_adjustment(
                 {"account_id": it["inventory_account_id"], "account_name": it.get("inventory_account_name") or "Inventory",
                  "debit": 0.0, "credit": abs(value_delta), "description": memo or reason},
             ]
-        await db.journal_entries.insert_one({
+        await insert_je({
             "id": je_id, "company_id": cid,
             "date": now_iso()[:10],
             "memo": f"Inventory adjustment ({reason}) · {it.get('name') or ''}".strip(" ·"),
@@ -619,7 +619,7 @@ async def sync_opening_balance(cid: str, item: dict) -> Optional[str]:
             return prev_je_id
 
     je_id = str(uuid.uuid4())
-    await db.journal_entries.insert_one({
+    await insert_je({
         "id": je_id, "company_id": cid,
         "date": (item.get("created_at") or now_iso())[:10],
         "memo": memo,
@@ -770,7 +770,7 @@ async def relieve_ap_on_bill_payment(cid: str, bill_id: str, amount: float,
         return None
 
     je_id = str(uuid.uuid4())
-    await db.journal_entries.insert_one({
+    await insert_je({
         "id": je_id, "company_id": cid,
         # Date the relief on the txn's own date so it lands inside the
         # same reporting period as the bank payment — otherwise the IS

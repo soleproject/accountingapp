@@ -17,6 +17,30 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — JE writer unification + soft cap + hardening tests
+
+**Every JE write now goes through one helper** (`db.insert_je`):
+- Computes header `total_debit` / `total_credit` from `lines[]` before insert — fixes the latent zero-header bug found on 6 preview JEs. Backfilled those 6 records so integrity endpoint reports clean.
+- Refuses to write an unbalanced JE (raises `ValueError`) — cardinal double-entry invariant enforced at the write layer, not just in reports.
+- Accepts `session=` for transactional wrapping.
+- Migrated 8 call sites: `inventory_service.py` ×5, `asset_service.py` ×1, `opening_balance_service.py` ×1, `plaid_connect.py` ×1. Now the only place `db.journal_entries.insert_one` remains is inside `insert_je` itself.
+
+**LLM cap is soft** — was hard 402 before:
+- `check_spend_cap` now: silent < 80%, WARN log 80–99%, ERROR log + latches `ai_spend_over_cap_events` counter at 100%+ but STILL ALLOWS the call. Only a company doc with `ai_spend_hard_block: true` raises `AiSpendCapExceeded` / 402. Ops flips the flag on runaway tenants.
+- One-click override: `PATCH /api/admin/ai-spend/companies/{cid}/cap` — sets `cap_usd` and `hard_block` on a single company; no deploy.
+- Platform default: `POST /api/admin/ai-spend/default-cap/apply-to-all-uncapped {default_cap_usd: 5}` — never lowers an existing cap. Applied $5/mo default to 15 preview companies as a smoke test.
+
+**Transaction helper improved**: `_probe_txn_support` now actually writes a doc inside the probe transaction before aborting, so single-node mongod is correctly detected (was returning true-positive on empty commits). Verified in test suite.
+
+**New test file** `tests/test_ledger_hardening.py` — 9 tests, all green:
+- `insert_je` computes/overrides header totals; refuses unbalanced writes
+- `ledger_transaction()` yields a session/None both safe to pass to Motor
+- Soft cap: silent < 80%, warns at 90%, latches counter at 120%, hard-block raises, cap=0 unlimited, `company_id=None` no-op
+
+**Orphan-payment verdict**: TEST_dup is a test company (created 2026-07-21, name literally `"TEST_dup"`). 3 orphans came from direct-DB/non-endpoint operations — 2 point at the same missing invoice (impossible via cascade). Current `cascade_on_doc_delete` code is correct — deletes payments first, then invoice. No live-company risk. Will wrap the cascade in `ledger_transaction()` next time invoices/bills are touched.
+
+**Still to wrap (next pass)**: `POST /companies/{cid}/bills` (inventory apply path), `POST /companies/{cid}/assets`, `POST /companies/{cid}/opening-balance/{aid}` — top-level HTTP handlers wrapped in `ledger_transaction()` with `session=` threaded through the 3-5 helper layers each. Payment path is already done.
+
 ### Feb 2026 — Safety hardening (login rate limit + LLM cost hole + JE integrity)
 
 **Login rate limit** (`infra.py`, `routes/auth.py`, `routes/invites.py`):

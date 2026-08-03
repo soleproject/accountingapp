@@ -35,7 +35,7 @@ import uuid
 from datetime import date, timedelta
 from typing import Any
 
-from db import db, now_iso
+from db import db, now_iso, insert_je
 import plaid_connect
 
 # Distinct source string so we can tell auto-managed JEs apart from
@@ -202,7 +202,7 @@ async def _upsert_auto_je(
         return existing["id"]
 
     je_id = str(uuid.uuid4())
-    await db.journal_entries.insert_one({
+    await insert_je({
         "id": je_id, "company_id": cid,
         "date": as_of, "memo": memo, "lines": lines,
         "source": AUTO_SOURCE,

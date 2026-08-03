@@ -37,7 +37,7 @@ import re
 from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
 
-from db import db, now_iso
+from db import db, now_iso, insert_je
 from plaid_connect import _ensure_account, ensure_opening_balance_equity
 from deps import is_period_closed
 
@@ -251,7 +251,7 @@ async def _post_je(
     lines: list[dict], auto_generated: bool = True,
 ) -> str:
     je_id = str(uuid.uuid4())
-    await db.journal_entries.insert_one({
+    await insert_je({
         "id": je_id, "company_id": cid,
         "date": date_iso, "memo": memo, "lines": lines,
         "source": source, "asset_id": asset_id,
