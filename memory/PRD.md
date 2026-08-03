@@ -3854,3 +3854,29 @@ Railway → `accountingapp` service:
 This gives 8 workers × 75 pool = 600 concurrent DB sockets, well under
 Atlas M10's 1500 limit, with more Python heap for concurrent report queries.
 
+
+
+---
+
+## 2026-02-03 (late night) — Restaurant Vertical Plan Locked ✅ (planning only, no code)
+
+### Confirmed scope
+- **Positioning**: Restaurant365-competitor for SMB (1–10 locations). $150–350/location/mo.
+- **Architecture**: `vertical` field + feature flags on existing platform. 80% code reuse. Base accounting product unchanged for existing users.
+- **POS integrations (in order)**: Square (weeks 3–4) → Clover (weeks 8–9) → Toast (weeks 10–12; partner app filed Day 1).
+- **Multi-location scope**: Independent 1–3 location + small groups up to ~10. NOT enterprise 100+ chains.
+- **Timeline**: 10–12 weeks solo-builder + AI to public beta.
+- **Greenfield acquisition** — no existing customers to migrate.
+- **Team**: solo (Michael + agent). Need beta operators lined up in weeks 5–7.
+
+### Documents
+- `/app/memory/RESTAURANT_VERTICAL_ROADMAP.md` — full 12-section roadmap (source of truth)
+
+### Parallel actions user needs to start Day 1
+- File Toast Partner Application (2–4 week approval)
+- Sign up Square + Clover developer accounts (self-serve)
+- Line up 3–5 restaurant beta operators for weeks 5–8
+
+### Next session kickoff
+Full prompt in `RESTAURANT_VERTICAL_ROADMAP.md` §12. Starts with Week 1–2 foundation work: vertical field, locations collection, feature flag scaffold, multi-location report scoping, onboarding wizard branch. All additive to existing base product.
+
