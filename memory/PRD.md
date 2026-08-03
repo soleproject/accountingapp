@@ -3726,3 +3726,57 @@ Every grant is written to `admin_audit_log` with kind=`superadmin_granted` (gran
 - [ ] Approve `--workers 4` today, `--workers 8` post-migration
 - [ ] Confirm cost path: self-managed ~$135/mo OR Atlas M10 ~$57/mo
 
+
+
+---
+
+## 2026-02-03 — MIGRATED TO ATLAS M10 ✅ (DONE, LIVE)
+
+### What happened
+User walked through the full runbook end-to-end. Migration completed in ~90 min, with ~1 min of API downtime during the `MONGO_URL` flip.
+
+### Key discoveries during migration
+- **Prod had ZERO backups configured on Railway Mongo before this session.** Fixed by setting up daily 03:00 UTC snapshots with 30-day retention as a safety net before migrating.
+- **`DB_NAME` = `axiom_prod`** (not `axiom` as previously assumed).
+- **Actual prod data is tiny** — 28.3 MB across 51 collections, 47,726 total docs.
+- **Contacts collection has 7,157 docs across 8 companies** — highly suggests DuplicateKeyError race from unfixed P3 issue is causing contact bloat. Dedup pass queued.
+
+### Migration path taken
+1. Signed up MongoDB Atlas → created M10 cluster `Accountingapp` in AWS us-west-1 (matches Railway) with Cloud Backups Enabled.
+2. Set IP allowlist to `0.0.0.0/0` (Railway has dynamic egress IPs).
+3. Created DB user `michael_db_user`.
+4. `mongodump --db=axiom_prod --archive=/tmp/prod.gz --gzip` from Railway Mongo Console → 5.8 MB archive in 1 sec.
+5. `mongorestore --uri="mongodb+srv://..." --archive=/tmp/prod.gz --gzip` → 47,726 docs restored, 0 failures in ~30 sec.
+6. Verified Atlas counts match Railway baseline exactly (all 10 spot-checked collections + total object count).
+7. Flipped `MONGO_URL` env var on Railway `accountingapp` service → auto-redeploy → live on Atlas.
+8. Confirmed live traffic on Atlas: 28.4 R/s, 0.5 W/s, 68 connections, spike visible at cutover moment.
+
+### Post-migration state
+- **Live prod**: Atlas M10 replica set (3 nodes), MongoDB 8.0.29, us-west-1, Continuous Cloud Backup + PITR.
+- **Railway MongoDB**: still running as hot rollback. Scheduled for deletion after 48h Atlas stability.
+- **Cost delta**: +$65/mo Atlas, -$40/mo Railway Mongo (once deleted) = net +$25/mo for enterprise-grade managed DB with PITR, transactions, and true HA.
+- **`MONGO_MAX_POOL_SIZE=100`** set on `accountingapp` Variables.
+
+### Immediate follow-ups (user's plate)
+- Smoke test live app flows (login, transactions, reports, AI features)
+- Rotate Atlas password (was in chat during migration)
+- Delete Railway MongoDB service after 48h clean run
+
+### Code work now UNBLOCKED (agent's plate, no downtime required)
+1. Thread `session=` through `POST /bills`, `POST /assets`, `POST /opening-balance`, `POST /bill-payments`. Wrap in `ledger_transaction()`. Atomicity now actually works.
+2. Wrap contact upsert in `try/except DuplicateKeyError → find existing → return 200` (fixes P3 recurring 500s, root cause of contact bloat).
+3. Remove single-node fallback warning from `db.py::_probe_txn_support` (no longer relevant).
+4. Bump `uvicorn --workers 4` → `--workers 8` with `MONGO_MAX_POOL_SIZE=75` (more concurrency now that pool is Atlas-backed).
+5. Write `test_ledger_atomicity.py` — force-fail rollback assertion.
+6. Contact dedup script — collapse the 7,157 duplicated contacts back to expected count.
+
+### Files touched
+- `/app/memory/RAILWAY_REPLICA_SET_MIGRATION.md` — original plan, now historical reference.
+- `/app/memory/PRD.md` — this entry.
+- **No code changes made in this session** — pure infrastructure migration.
+
+### Verified
+- Atlas count parity: 8 companies, 11 JEs, 15 users, 11200 txns, 13 invoices, 3 bills, 421 accts, 7157 contacts, 6 items, 4 payments (matches Railway exactly).
+- Total docs: 47,726 (Railway) = 47,726 (Atlas). Zero data loss.
+- Live traffic confirmed on Atlas Metrics dashboard (R 28.4/s, W 0.5/s, 68 conns at 12:03 PM cutover).
+
