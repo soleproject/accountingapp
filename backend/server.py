@@ -123,6 +123,40 @@ async def startup():
         name="company_bill_status_date",
     )
     await db.memberships.create_index([("user_id", 1), ("company_id", 1)])
+
+    # ── (Feb 2026) `id` unique indexes on every application-primary-key
+    # collection. Audited via count-of-duplicates before landing; safe
+    # to create as unique. Mongo 4.2+ builds these online without a
+    # collection lock, so no downtime risk on live traffic. Wrapped in
+    # try/except so a single failure (e.g. someone hand-added a dupe
+    # after this ships) doesn't crash startup for the whole app.
+    _ID_INDEX_COLLECTIONS = [
+        "companies", "users", "accounts", "transactions", "invoices",
+        "bills", "contacts", "items", "assets", "loans",
+        "journal_entries", "payments", "receipts", "memberships",
+        "enterprises", "recurring_templates",
+        "inventory_movements", "reconciliations", "plaid_items",
+        "bank_accounts", "onboarding_sessions", "insights_sessions",
+    ]
+    for _coll in _ID_INDEX_COLLECTIONS:
+        try:
+            await db[_coll].create_index(
+                "id", unique=True,
+                # `sparse` guards against legacy rows that pre-date the
+                # id column — they simply don't participate in the
+                # uniqueness constraint instead of blocking the build.
+                sparse=True,
+                name="id_uniq",
+            )
+        except Exception as e:  # noqa: BLE001
+            # We log-and-continue rather than crashing; ops sees the
+            # error and can hand-fix. Blocking startup on an index issue
+            # is a worse failure mode than serving without it.
+            import logging as _l
+            _l.getLogger("axiom.app").error(
+                "failed to create %s.id unique index: %s", _coll, e,
+            )
+
     # One-time backfill (Feb 2026) — elevate global role for any user
     # who has an active `role=pro` membership but is still flagged
     # `role=client` globally. Prior invites of *pre-existing* client

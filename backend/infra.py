@@ -241,6 +241,12 @@ def get_cache():
       2. Any failure OR unset var → `ReportCache` (in-process TTLCache).
 
     Memoized so we don't reconnect on every request.
+
+    Falling back to the in-process cache is a *silent correctness bug* the
+    moment we run more than one worker — worker A invalidates, worker B
+    keeps serving stale reports. So the fallback path here logs at ERROR
+    (not WARNING) and pings Sentry as a breadcrumb, and `get_cache_backend`
+    below lets a health probe surface the state without guessing from logs.
     """
     global _cache_singleton
     if _cache_singleton is not None:
@@ -265,16 +271,93 @@ def get_cache():
                 max_connections=20,
             )
             _cache_singleton = RedisReportCache(async_client)
-            app_log.info("cache backend=redis", extra={"route": "startup"})
+            app_log.info("cache backend=redis url=%s", _redact_url(redis_url),
+                         extra={"route": "startup", "cache_backend": "redis"})
             return _cache_singleton
         except Exception as e:  # noqa: BLE001
-            app_log.warning(
-                f"redis unreachable ({e}) — cache falling back to in-process",
-                extra={"route": "startup"},
+            # ERROR (not warning) — in a multi-worker deploy this means
+            # every worker has its own private cache and invalidations
+            # will silently miss. That's a data-freshness bug in an
+            # accounting product, not a warning.
+            app_log.error(
+                "REDIS UNAVAILABLE — falling back to in-process cache. "
+                "This is UNSAFE for multi-worker deploys (stale reports). "
+                "Provision REDIS_URL or set workers=1. Error: %s", e,
+                extra={"route": "startup", "cache_backend": "memory",
+                       "fallback_reason": str(e)[:200]},
             )
+            try:
+                import sentry_sdk  # type: ignore
+                sentry_sdk.capture_message(
+                    "cache fallback to in-process (redis unavailable)",
+                    level="error",
+                )
+            except Exception:  # noqa: BLE001
+                pass
     _cache_singleton = ReportCache()
-    app_log.info("cache backend=memory", extra={"route": "startup"})
+    app_log.info("cache backend=memory",
+                 extra={"route": "startup", "cache_backend": "memory"})
     return _cache_singleton
+
+
+def _redact_url(u: str) -> str:
+    """Strip password from a redis:// URL for safe logging."""
+    try:
+        from urllib.parse import urlparse, urlunparse
+        p = urlparse(u)
+        if p.password:
+            netloc = f"{p.username or ''}:***@{p.hostname or ''}"
+            if p.port:
+                netloc += f":{p.port}"
+            return urlunparse(p._replace(netloc=netloc))
+        return u
+    except Exception:  # noqa: BLE001
+        return "redis://***"
+
+
+def get_cache_backend() -> str:
+    """Return the string name of the active cache backend ('redis' or
+    'memory'). Lazy — will trigger backend selection on first call."""
+    c = get_cache()
+    return "redis" if isinstance(c, RedisReportCache) else "memory"
+
+
+async def cache_health() -> dict:
+    """Structured health-check for the cache backend. Safe to call from
+    an unauthenticated `/api/health/cache` probe. Returns:
+
+      {
+        "backend": "redis" | "memory",
+        "ok": bool,
+        "ping_ms": float | None,
+        "safe_for_multi_worker": bool,
+      }
+
+    `safe_for_multi_worker` is `false` for the in-process backend — that
+    is the single most important thing this endpoint tells you.
+    """
+    import time as _t
+    c = get_cache()
+    backend = get_cache_backend()
+    ping_ms: float | None = None
+    ok = True
+    if backend == "redis":
+        try:
+            t0 = _t.perf_counter()
+            await c._r.ping()  # type: ignore[attr-defined]
+            ping_ms = round((_t.perf_counter() - t0) * 1000, 2)
+        except Exception as e:  # noqa: BLE001
+            ok = False
+            ping_ms = None
+            app_log.error("cache health ping failed: %s", e,
+                          extra={"route": "health"})
+    return {
+        "backend": backend,
+        "ok": ok,
+        "ping_ms": ping_ms,
+        "safe_for_multi_worker": backend == "redis",
+        "redis_url_set": bool(os.environ.get("REDIS_URL", "").strip()),
+    }
 
 
 async def _check_and_maybe_downgrade(client) -> None:

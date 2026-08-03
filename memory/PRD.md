@@ -17,6 +17,26 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Scale-hardening pass (before-500 tier)
+
+Approved subset of the scalability audit landed. **No `_signed_balances` rewrite yet** — that's gated behind load-test measurement.
+
+**Redis + cache backend introspection** (`infra.py`, `routes/health_probes.py`):
+- Fallback path now logs at **ERROR** with an explicit "UNSAFE for multi-worker" message + Sentry breadcrumb (was WARNING).
+- New `get_cache_backend()` + `cache_health()` helpers in `infra.py`.
+- New endpoint `GET /api/health/cache` → returns `{ backend, ok, ping_ms, safe_for_multi_worker, redis_url_set }`. Wire to alerting on `safe_for_multi_worker=false`.
+- New endpoint `GET /api/health/multi-worker-round-trip` → proves write → cache-hit → invalidate → recompute round-trips through the active backend. Includes a `caveat` field that explicitly notes the in-process backend's guarantee is worker-local only.
+- Verified: killed Redis → fallback fires with ERROR log + `safe_for_multi_worker: false`; restored Redis → `backend: redis`, `ping_ms ≈ 0.7`. Verified 4-worker cross-process invalidation is green.
+
+**`id` unique indexes on 22 collections** (`server.py`):
+- Pre-flight audit confirmed zero duplicate `id` values across all populated collections. Safe to land as unique.
+- Added `id_uniq` (unique, sparse, background) to: companies, users, accounts, transactions, invoices, bills, contacts, items, assets, loans, journal_entries, payments, receipts, memberships, enterprises, recurring_templates, inventory_movements, reconciliations, plaid_items, bank_accounts, onboarding_sessions, insights_sessions. `sync_jobs` already had one.
+- Idempotent; log-and-continue on failure so a bad row doesn't block startup.
+
+**Uvicorn workers — NOT landed in preview**
+- `/etc/supervisor/conf.d/supervisord.conf` is `# READONLY FILE, DO NOT EDIT`. Preview pod is Emergent-managed. Multi-worker validation ran via a temporary 4-worker uvicorn on port 8002; cache invalidation confirmed green across all 4 workers.
+- Production change deferred to the deployment repo (Docker CMD / Helm / Railway config outside this pod).
+
 ### Feb 2026 — Darker floating shadow + monthly trend variants (18 charts total)
 
 **Frontend polish** (`components/InsightsChatWidget.jsx`):
