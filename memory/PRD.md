@@ -17,6 +17,32 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Insights AI full report coverage (8 new charts)
+
+Expanded the Insights chart registry from 7 → **15 chart types** so "Ask about my data" now covers every core report and business dimension. Each new chart has a backend fetcher, LLM registry entry, Recharts visual, AND text-summary renderer:
+
+**Backend** (`routes/insights_chat.py`):
+- `cash_flow` → wraps existing `compute_cash_flow` (Operating / Investing / Financing / Net Change)
+- `invoices_by_status` → aggregates `db.invoices` by status (draft/sent/partial/paid/overdue/void); auto-escalates past-due `sent` invoices to `overdue`. Returns count + total invoiced + open balance per bucket.
+- `bills_by_status` → same shape for `db.bills`
+- `top_customers_revenue` → groups posted invoices by contact_id in a period, ranks by revenue. Limit 3-25 (default 10). Excludes void.
+- `top_vendors_spend` → same for bills
+- `expense_by_category` → GL expense accounts ranked by period balance (top 15) using `_signed_balances` + `_display_amount`
+- `fixed_assets_summary` → walks `db.assets`, computes accumulated depreciation from `monthly_depreciation × months_elapsed` (capped at `cost - salvage`), returns book value per asset + totals
+- `loans_summary` → walks `db.loans` joined with linked liability account balance (via `_signed_balances`) for current outstanding
+
+**Frontend** (`components/InsightsChatWidget.jsx`):
+- Cash Flow → 4-bar chart (Operating/Investing/Financing/Net Change) with signed colors + zero reference line
+- Invoices/Bills by Status → vertical bar per status, count labels on top, color-coded by status (overdue=rose, draft=slate, paid=emerald, partial=amber)
+- Top Customers / Vendors → horizontal bar of top N by revenue/spend, doc-count in subtext
+- Expenses by Category → horizontal bar of top 10 GL expense accounts by amount
+- Fixed Assets → stacked horizontal bar per asset showing Book value + Depreciated portion
+- Loans → grouped horizontal bar per loan showing Original principal (grey) + Current balance (rose)
+- Text summaries under every chart with totals, sub-rows, and per-item detail
+- Starter prompts updated to nudge users into the new coverage: "cash flow this quarter", "which invoices are overdue", "top customers this year"
+
+**Verified live** on Bright Beans Coffee Co.: cash_flow rendered with Operating -$2,115.78 · Net Change -$2,115.78; invoices_by_status showed 3 overdue; top_customers_revenue showed 3 customers / $5,525 total; expense_by_category YTD showed $59,713.06 with top categories Supplies & Materials / Legal & Professional / Rent.
+
 ### Feb 2026 — Monthly Income Trend chart + Firm-level Insights cost alerts
 
 **Backend**

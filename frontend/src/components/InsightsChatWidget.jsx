@@ -29,9 +29,9 @@ import {
 
 const STARTER_PROMPTS = [
   "How's my profit trending this year?",
-  "Who owes me money right now?",
-  "What's my inventory worth?",
-  "What do I need to reorder?",
+  "What's my cash flow this quarter?",
+  "Which invoices are overdue?",
+  "Who are my top customers this year?",
 ];
 
 const SESSION_KEY = "insights_chat_session";
@@ -780,6 +780,236 @@ function ChartVisual({ chartId, data }) {
     );
   }
 
+  if (chartId === "cash_flow") {
+    const rows = [
+      { name: "Operating",  value: Number(data.operating  || 0), fill: C.revenue },
+      { name: "Investing",  value: Number(data.investing  || 0), fill: C.liab },
+      { name: "Financing",  value: Number(data.financing  || 0), fill: C.equity },
+      { name: "Net change", value: Number(data.net_change || 0), fill: (data.net_change || 0) >= 0 ? C.positive : C.negative },
+    ];
+    return (
+      <div data-testid="insights-chart-visual-cash_flow" className="space-y-2">
+        <div className="flex items-baseline justify-between">
+          <div className="text-[11px] uppercase tracking-wider text-slate-500">Net change in cash</div>
+          <div className={`text-xl font-semibold font-mono-num ${(data.net_change||0) >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+            {fmtMoney(data.net_change)}
+          </div>
+        </div>
+        <div style={{ width: "100%", height: 200 }}>
+          <ResponsiveContainer>
+            <BarChart data={rows} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+              <XAxis dataKey="name" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis tickFormatter={compactMoney} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={48} />
+              <Tooltip formatter={(v) => fmtMoney(v)} cursor={{ fill: "#F1F5F9" }}
+                       contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+              <ReferenceLine y={0} stroke="#CBD5E1" strokeDasharray="2 2" />
+              <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                {rows.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                <LabelList dataKey="value" position="top" formatter={compactMoney}
+                           style={{ fontSize: 10, fill: "#334155" }} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    );
+  }
+
+  if (chartId === "invoices_by_status" || chartId === "bills_by_status") {
+    const rows = (data.rows || []).map(r => ({
+      name: r.status.charAt(0).toUpperCase() + r.status.slice(1),
+      status: r.status,
+      count: Number(r.count || 0),
+      value: Number(r.balance_open || r.total || 0),
+    }));
+    if (!rows.length) {
+      return <div className="text-xs text-slate-400 italic py-4 text-center">No {chartId === "invoices_by_status" ? "invoices" : "bills"} yet.</div>;
+    }
+    const statusColor = (s) => ({
+      overdue: C.negative, sent: C.revenue, received: C.revenue,
+      partial: C.warn, draft: "#94A3B8", paid: C.positive, void: "#CBD5E1",
+    }[s] || C.bar);
+    return (
+      <div data-testid={`insights-chart-visual-${chartId}`} className="space-y-2">
+        <div className="flex items-baseline justify-between">
+          <div className="text-[11px] uppercase tracking-wider text-slate-500">Open balance</div>
+          <div className="text-xl font-semibold font-mono-num text-rose-700">
+            {fmtMoney(data.total_open)}
+          </div>
+        </div>
+        <div style={{ width: "100%", height: 200 }}>
+          <ResponsiveContainer>
+            <BarChart data={rows} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+              <XAxis dataKey="name" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis tickFormatter={compactMoney} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={48} />
+              <Tooltip formatter={(v) => fmtMoney(v)} cursor={{ fill: "#F1F5F9" }}
+                       contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+              <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                {rows.map((d, i) => <Cell key={i} fill={statusColor(d.status)} />)}
+                <LabelList dataKey="count" position="top"
+                           style={{ fontSize: 10, fill: "#334155" }} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    );
+  }
+
+  if (chartId === "top_customers_revenue" || chartId === "top_vendors_spend") {
+    const keyField = chartId === "top_customers_revenue" ? "revenue" : "spend";
+    const rows = (data.rows || []).map(r => ({
+      name: r.name,
+      value: Number(r[keyField] || 0),
+      docs: r.invoice_count ?? r.bill_count ?? 0,
+    })).filter(r => r.value);
+    if (!rows.length) {
+      return <div className="text-xs text-slate-400 italic py-4 text-center">No activity in this period.</div>;
+    }
+    return (
+      <div data-testid={`insights-chart-visual-${chartId}`} className="space-y-2">
+        <div className="flex items-baseline justify-between">
+          <div className="text-[11px] uppercase tracking-wider text-slate-500">
+            Top {rows.length} · {chartId === "top_customers_revenue" ? "revenue" : "spend"}
+          </div>
+          <div className="text-xl font-semibold font-mono-num text-indigo-700">
+            {fmtMoney(chartId === "top_customers_revenue" ? data.total_revenue : data.total_spend)}
+          </div>
+        </div>
+        <div style={{ width: "100%", height: Math.max(160, rows.length * 28 + 30) }}>
+          <ResponsiveContainer>
+            <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 46, left: 0, bottom: 0 }}>
+              <XAxis type="number" tickFormatter={compactMoney} tick={{ fontSize: 10 }}
+                     axisLine={false} tickLine={false} />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }}
+                     axisLine={false} tickLine={false} width={130} />
+              <Tooltip formatter={(v) => fmtMoney(v)} cursor={{ fill: "#F1F5F9" }}
+                       contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+              <Bar dataKey="value"
+                   fill={chartId === "top_customers_revenue" ? C.revenue : C.expense}
+                   radius={[0, 6, 6, 0]}>
+                <LabelList dataKey="value" position="right" formatter={compactMoney}
+                           style={{ fontSize: 10, fill: "#334155" }} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    );
+  }
+
+  if (chartId === "expense_by_category") {
+    const rows = (data.rows || []).slice(0, 10).map(r => ({
+      name: r.name, value: Number(r.amount || 0),
+    })).filter(r => r.value);
+    if (!rows.length) {
+      return <div className="text-xs text-slate-400 italic py-4 text-center">No expenses in this period.</div>;
+    }
+    return (
+      <div data-testid="insights-chart-visual-expense_by_category" className="space-y-2">
+        <div className="flex items-baseline justify-between">
+          <div className="text-[11px] uppercase tracking-wider text-slate-500">Total expenses</div>
+          <div className="text-xl font-semibold font-mono-num text-rose-700">
+            {fmtMoney(data.total)}
+          </div>
+        </div>
+        <div style={{ width: "100%", height: Math.max(180, rows.length * 26 + 30) }}>
+          <ResponsiveContainer>
+            <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 46, left: 0, bottom: 0 }}>
+              <XAxis type="number" tickFormatter={compactMoney} tick={{ fontSize: 10 }}
+                     axisLine={false} tickLine={false} />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }}
+                     axisLine={false} tickLine={false} width={140} />
+              <Tooltip formatter={(v) => fmtMoney(v)} cursor={{ fill: "#F1F5F9" }}
+                       contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+              <Bar dataKey="value" fill={C.expense} radius={[0, 6, 6, 0]}>
+                <LabelList dataKey="value" position="right" formatter={compactMoney}
+                           style={{ fontSize: 10, fill: "#334155" }} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    );
+  }
+
+  if (chartId === "fixed_assets_summary") {
+    if (!(data.rows || []).length) {
+      return <div className="text-xs text-slate-400 italic py-4 text-center">No fixed assets on the books yet.</div>;
+    }
+    // Stacked bar: book value vs accumulated depreciation per asset
+    const rows = (data.rows || []).slice(0, 8).map(r => ({
+      name: r.name,
+      "Book value":   Number(r.book_value || 0),
+      "Depreciated":  Number(r.accumulated_depreciation || 0),
+    }));
+    return (
+      <div data-testid="insights-chart-visual-fixed_assets_summary" className="space-y-2">
+        <div className="flex items-baseline justify-between">
+          <div className="text-[11px] uppercase tracking-wider text-slate-500">Total book value · {data.asset_count} asset{data.asset_count === 1 ? "" : "s"}</div>
+          <div className="text-xl font-semibold font-mono-num text-indigo-700">
+            {fmtMoney(data.total_book_value)}
+          </div>
+        </div>
+        <div style={{ width: "100%", height: Math.max(180, rows.length * 32 + 30) }}>
+          <ResponsiveContainer>
+            <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 40, left: 0, bottom: 0 }}
+                      stackOffset="sign">
+              <XAxis type="number" tickFormatter={compactMoney} tick={{ fontSize: 10 }}
+                     axisLine={false} tickLine={false} />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }}
+                     axisLine={false} tickLine={false} width={130} />
+              <Tooltip formatter={(v) => fmtMoney(v)} cursor={{ fill: "#F1F5F9" }}
+                       contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+              <Legend wrapperStyle={{ fontSize: 10 }} iconSize={10} />
+              <Bar dataKey="Book value"  stackId="a" fill={C.assets}   radius={[0, 0, 0, 0]} />
+              <Bar dataKey="Depreciated" stackId="a" fill={C.track}    radius={[0, 6, 6, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    );
+  }
+
+  if (chartId === "loans_summary") {
+    if (!(data.rows || []).length) {
+      return <div className="text-xs text-slate-400 italic py-4 text-center">No loans on the books.</div>;
+    }
+    const rows = (data.rows || []).slice(0, 8).map(r => ({
+      name: r.lender,
+      "Current balance": Number(r.current_balance || 0),
+      "Original principal": Number(r.principal || 0),
+    }));
+    return (
+      <div data-testid="insights-chart-visual-loans_summary" className="space-y-2">
+        <div className="flex items-baseline justify-between">
+          <div className="text-[11px] uppercase tracking-wider text-slate-500">Total outstanding · {data.loan_count} loan{data.loan_count === 1 ? "" : "s"}</div>
+          <div className="text-xl font-semibold font-mono-num text-rose-700">
+            {fmtMoney(data.total_current_balance)}
+          </div>
+        </div>
+        <div style={{ width: "100%", height: Math.max(160, rows.length * 32 + 30) }}>
+          <ResponsiveContainer>
+            <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 40, left: 0, bottom: 0 }}>
+              <XAxis type="number" tickFormatter={compactMoney} tick={{ fontSize: 10 }}
+                     axisLine={false} tickLine={false} />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }}
+                     axisLine={false} tickLine={false} width={110} />
+              <Tooltip formatter={(v) => fmtMoney(v)} cursor={{ fill: "#F1F5F9" }}
+                       contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+              <Legend wrapperStyle={{ fontSize: 10 }} iconSize={10} />
+              <Bar dataKey="Original principal" fill={C.track} radius={[0, 6, 6, 0]} />
+              <Bar dataKey="Current balance" fill={C.expense} radius={[0, 6, 6, 0]}>
+                <LabelList dataKey="Current balance" position="right" formatter={compactMoney}
+                           style={{ fontSize: 10, fill: "#334155" }} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    );
+  }
+
   return null;
 }
 
@@ -886,6 +1116,126 @@ function ChartRenderer({ chartId, data }) {
               {r.qoh} / {r.threshold}
             </span>
           </div>
+        ))}
+      </div>
+    );
+  }
+  if (chartId === "cash_flow") {
+    return (
+      <div className="space-y-1.5 text-xs">
+        <Row label="Operating"  value={data.operating}  bold accent="indigo" />
+        <Row label="Investing"  value={data.investing}  bold />
+        <Row label="Financing"  value={data.financing}  bold accent="fuchsia" />
+        <div className="border-t pt-1.5 mt-1.5">
+          <Row label="Net change in cash" value={data.net_change} bold
+               accent={(data.net_change || 0) >= 0 ? "emerald" : "rose"} />
+        </div>
+        {(data.operating_rows || []).length > 0 && (
+          <details className="pt-1">
+            <summary className="cursor-pointer text-slate-500 hover:text-slate-800 text-[11px]">Top operating movers</summary>
+            <div className="pl-3 pt-1 space-y-0.5">
+              {(data.operating_rows || []).slice(0, 6).map((r, i) => (
+                <Row key={i} label={r.name} value={r.amount} small />
+              ))}
+            </div>
+          </details>
+        )}
+      </div>
+    );
+  }
+  if (chartId === "invoices_by_status" || chartId === "bills_by_status") {
+    const isInv = chartId === "invoices_by_status";
+    return (
+      <div className="space-y-1 text-xs">
+        <Row label={isInv ? "Total invoiced" : "Total billed"}
+             value={isInv ? data.total_invoiced : data.total_billed} bold accent="indigo" />
+        <Row label="Total open" value={data.total_open} bold accent="rose" />
+        <div className="text-slate-500 py-1">
+          {data.total_count} {isInv ? "invoice" : "bill"}{data.total_count === 1 ? "" : "s"} across {data.rows?.length || 0} status{data.rows?.length === 1 ? "" : "es"}
+        </div>
+        {(data.rows || []).map((r) => (
+          <div key={r.status} className="flex items-baseline justify-between gap-2 py-0.5">
+            <div className="flex-1 min-w-0">
+              <div className="capitalize text-slate-700">{r.status}</div>
+              <div className="text-[10px] text-slate-400">
+                {r.count} · {fmtMoney(r.total)} invoiced
+              </div>
+            </div>
+            <div className="font-mono-num text-slate-800 whitespace-nowrap">
+              {fmtMoney(r.balance_open)} open
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (chartId === "top_customers_revenue" || chartId === "top_vendors_spend") {
+    const rows = data.rows || [];
+    const isCust = chartId === "top_customers_revenue";
+    const key = isCust ? "revenue" : "spend";
+    const docKey = isCust ? "invoice_count" : "bill_count";
+    return (
+      <div className="space-y-1 text-xs">
+        <Row label={isCust ? "Total revenue (top " + rows.length + ")" : "Total spend (top " + rows.length + ")"}
+             value={isCust ? data.total_revenue : data.total_spend}
+             bold accent={isCust ? "emerald" : "rose"} />
+        <div className="text-slate-500 py-1">
+          Period: {data.period_start} → {data.period_end}
+        </div>
+        {rows.map((r, i) => (
+          <Row key={i} label={r.name} value={r[key]} small
+               subtext={`${r[docKey]} ${isCust ? "invoice" : "bill"}${r[docKey] === 1 ? "" : "s"}`
+                        + (r.balance_open ? ` · ${fmtMoney(r.balance_open)} open` : "")} />
+        ))}
+      </div>
+    );
+  }
+  if (chartId === "expense_by_category") {
+    const rows = data.rows || [];
+    return (
+      <div className="space-y-1 text-xs">
+        <Row label="Total expenses" value={data.total} bold accent="rose" />
+        <div className="text-slate-500 py-1">
+          Period: {data.period_start} → {data.period_end}
+        </div>
+        {rows.slice(0, 10).map((r) => (
+          <Row key={r.id} label={r.name} value={r.amount} small
+               subtext={r.detail_type || undefined} />
+        ))}
+      </div>
+    );
+  }
+  if (chartId === "fixed_assets_summary") {
+    const rows = data.rows || [];
+    return (
+      <div className="space-y-1.5 text-xs">
+        <Row label="Total cost"                value={data.total_cost} bold />
+        <Row label="Accumulated depreciation"  value={data.total_accumulated_depreciation} bold accent="rose" />
+        <div className="border-t pt-1.5 mt-1.5">
+          <Row label="Total book value"        value={data.total_book_value} bold accent="indigo" />
+        </div>
+        <div className="text-slate-500 py-1">{data.asset_count} asset{data.asset_count === 1 ? "" : "s"}</div>
+        {rows.slice(0, 5).map((r) => (
+          <Row key={r.id} label={r.name} value={r.book_value} small
+               subtext={`Cost ${fmtMoney(r.cost)} · Depr. ${fmtMoney(r.accumulated_depreciation)}`} />
+        ))}
+      </div>
+    );
+  }
+  if (chartId === "loans_summary") {
+    const rows = data.rows || [];
+    return (
+      <div className="space-y-1.5 text-xs">
+        <Row label="Original principal (all)"    value={data.total_principal} bold />
+        <Row label="Current outstanding balance" value={data.total_current_balance} bold accent="rose" />
+        <div className="text-slate-500 py-1">{data.loan_count} loan{data.loan_count === 1 ? "" : "s"}</div>
+        {rows.slice(0, 6).map((r) => (
+          <Row key={r.id} label={r.lender} value={r.current_balance} small
+               subtext={
+                 (r.rate != null ? `${(Number(r.rate) * 100).toFixed(2)}% · ` : "")
+                 + (r.term_months ? `${r.term_months}mo term · ` : "")
+                 + `Orig ${fmtMoney(r.principal)}`
+               } />
         ))}
       </div>
     );

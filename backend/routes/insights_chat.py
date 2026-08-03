@@ -148,6 +148,257 @@ async def _fetch_income_trend(cid: str, params: dict) -> dict:
     }
 
 
+async def _fetch_cash_flow(cid: str, params: dict) -> dict:
+    """Statement of Cash Flows (Operating / Investing / Financing) for a
+    period. Uses the existing `compute_cash_flow` engine, so results
+    match the Reports > Cash Flow page one-to-one.
+    """
+    from reports import compute_cash_flow
+    start = params.get("start") or _default_period_start()
+    end = params.get("end") or _today()
+    return await compute_cash_flow(cid, start=start, end=end)
+
+
+async def _fetch_invoices_by_status(cid: str, params: dict) -> dict:
+    """Invoices bucketed by status (draft / sent / partial / paid /
+    overdue / void). Returns per-bucket count, total invoiced, and
+    total outstanding balance."""
+    docs = await db.invoices.find({"company_id": cid}).to_list(20000)
+    today_iso = _today()
+    buckets: dict[str, dict] = {}
+    for d in docs:
+        st = (d.get("status") or "draft").lower()
+        # Escalate 'sent' to 'overdue' when past due and still open, so
+        # the aging story matches what the invoices list shows.
+        bal = float(d.get("balance_due") or 0)
+        due = d.get("due_date") or ""
+        if st == "sent" and bal > 0.005 and due and due < today_iso:
+            st = "overdue"
+        row = buckets.setdefault(st, {"status": st, "count": 0, "total": 0.0, "balance_open": 0.0})
+        row["count"] += 1
+        row["total"] += float(d.get("total") or 0)
+        row["balance_open"] += bal
+    rows = [
+        {**v, "total": round(v["total"], 2), "balance_open": round(v["balance_open"], 2)}
+        for v in buckets.values()
+    ]
+    STATUS_ORDER = {"overdue": 0, "sent": 1, "partial": 2, "draft": 3, "paid": 4, "void": 5}
+    rows.sort(key=lambda r: STATUS_ORDER.get(r["status"], 99))
+    return {
+        "rows": rows,
+        "total_count": sum(r["count"] for r in rows),
+        "total_invoiced": round(sum(r["total"] for r in rows), 2),
+        "total_open": round(sum(r["balance_open"] for r in rows), 2),
+    }
+
+
+async def _fetch_bills_by_status(cid: str, params: dict) -> dict:
+    """Bills bucketed by status (same shape as invoices_by_status)."""
+    docs = await db.bills.find({"company_id": cid}).to_list(20000)
+    today_iso = _today()
+    buckets: dict[str, dict] = {}
+    for d in docs:
+        st = (d.get("status") or "draft").lower()
+        bal = float(d.get("balance_due") or 0)
+        due = d.get("due_date") or ""
+        if st in ("received", "sent") and bal > 0.005 and due and due < today_iso:
+            st = "overdue"
+        row = buckets.setdefault(st, {"status": st, "count": 0, "total": 0.0, "balance_open": 0.0})
+        row["count"] += 1
+        row["total"] += float(d.get("total") or 0)
+        row["balance_open"] += bal
+    rows = [
+        {**v, "total": round(v["total"], 2), "balance_open": round(v["balance_open"], 2)}
+        for v in buckets.values()
+    ]
+    STATUS_ORDER = {"overdue": 0, "received": 1, "sent": 1, "partial": 2, "draft": 3, "paid": 4, "void": 5}
+    rows.sort(key=lambda r: STATUS_ORDER.get(r["status"], 99))
+    return {
+        "rows": rows,
+        "total_count": sum(r["count"] for r in rows),
+        "total_billed": round(sum(r["total"] for r in rows), 2),
+        "total_open": round(sum(r["balance_open"] for r in rows), 2),
+    }
+
+
+async def _fetch_top_customers_revenue(cid: str, params: dict) -> dict:
+    """Top N customers by invoiced revenue in a date range (default
+    trailing 90 days). Excludes voided invoices."""
+    start = params.get("start") or _default_period_start()
+    end = params.get("end") or _today()
+    n = max(3, min(int(params.get("limit") or 10), 25))
+    docs = await db.invoices.find({
+        "company_id": cid,
+        "issue_date": {"$gte": start, "$lte": end},
+        "status": {"$ne": "void"},
+    }).to_list(20000)
+    agg: dict[str, dict] = {}
+    for d in docs:
+        key = d.get("contact_id") or f"__nc__:{d.get('contact_name') or 'Unknown'}"
+        name = d.get("contact_name") or "Unknown"
+        row = agg.setdefault(key, {"contact_id": d.get("contact_id"),
+                                    "name": name, "revenue": 0.0,
+                                    "invoice_count": 0, "balance_open": 0.0})
+        row["revenue"] += float(d.get("total") or 0)
+        row["balance_open"] += float(d.get("balance_due") or 0)
+        row["invoice_count"] += 1
+    rows = sorted(agg.values(), key=lambda r: r["revenue"], reverse=True)[:n]
+    for r in rows:
+        r["revenue"] = round(r["revenue"], 2)
+        r["balance_open"] = round(r["balance_open"], 2)
+    return {
+        "rows": rows,
+        "period_start": start,
+        "period_end": end,
+        "total_revenue": round(sum(r["revenue"] for r in rows), 2),
+    }
+
+
+async def _fetch_top_vendors_spend(cid: str, params: dict) -> dict:
+    """Top N vendors by billed spend in a date range."""
+    start = params.get("start") or _default_period_start()
+    end = params.get("end") or _today()
+    n = max(3, min(int(params.get("limit") or 10), 25))
+    docs = await db.bills.find({
+        "company_id": cid,
+        "issue_date": {"$gte": start, "$lte": end},
+        "status": {"$ne": "void"},
+    }).to_list(20000)
+    agg: dict[str, dict] = {}
+    for d in docs:
+        key = d.get("contact_id") or f"__nc__:{d.get('contact_name') or 'Unknown'}"
+        name = d.get("contact_name") or "Unknown"
+        row = agg.setdefault(key, {"contact_id": d.get("contact_id"),
+                                    "name": name, "spend": 0.0,
+                                    "bill_count": 0, "balance_open": 0.0})
+        row["spend"] += float(d.get("total") or 0)
+        row["balance_open"] += float(d.get("balance_due") or 0)
+        row["bill_count"] += 1
+    rows = sorted(agg.values(), key=lambda r: r["spend"], reverse=True)[:n]
+    for r in rows:
+        r["spend"] = round(r["spend"], 2)
+        r["balance_open"] = round(r["balance_open"], 2)
+    return {
+        "rows": rows,
+        "period_start": start,
+        "period_end": end,
+        "total_spend": round(sum(r["spend"] for r in rows), 2),
+    }
+
+
+async def _fetch_expense_by_category(cid: str, params: dict) -> dict:
+    """Expense breakdown by GL account (top 15) over a period. Great
+    for 'where did my money go', 'what's my biggest expense'."""
+    from reports import _signed_balances, _display_amount
+    start = params.get("start") or _default_period_start()
+    end = params.get("end") or _today()
+    accts = await db.accounts.find({"company_id": cid, "type": "expense"}).to_list(2000)
+    by = await _signed_balances(cid, start, end)
+    rows = []
+    for a in accts:
+        amt = _display_amount(a, by.get(a["id"], 0.0))
+        if abs(amt) < 0.01:
+            continue
+        rows.append({
+            "id": a["id"], "name": a["name"], "code": a.get("code", ""),
+            "detail_type": (a.get("detail_type") or "").strip(),
+            "amount": round(amt, 2),
+        })
+    rows.sort(key=lambda r: r["amount"], reverse=True)
+    return {
+        "rows": rows[:15],
+        "period_start": start,
+        "period_end": end,
+        "total": round(sum(r["amount"] for r in rows), 2),
+    }
+
+
+async def _fetch_fixed_assets_summary(cid: str, params: dict) -> dict:
+    """Fixed-asset register with cost, accumulated depreciation, and
+    current book value. Computes accumulated depreciation from months
+    elapsed × monthly_depreciation (capped at depreciable base)."""
+    from datetime import date as _d
+    docs = await db.assets.find({"company_id": cid}).to_list(2000)
+    today = _d.today()
+    rows = []
+    total_cost = 0.0
+    total_accum = 0.0
+    for a in docs:
+        cost = float(a.get("cost") or 0)
+        salvage = float(a.get("salvage_value") or 0)
+        monthly = float(a.get("monthly_depreciation") or 0)
+        pd_ = a.get("purchase_date")
+        months_elapsed = 0
+        if pd_:
+            try:
+                pd_d = _d.fromisoformat(str(pd_)[:10])
+                months_elapsed = max(0, (today.year - pd_d.year) * 12 + (today.month - pd_d.month))
+            except Exception:
+                pass
+        depreciable_base = max(cost - salvage, 0)
+        accum = min(monthly * months_elapsed, depreciable_base)
+        book = round(cost - accum, 2)
+        rows.append({
+            "id": a["id"], "name": a.get("name") or "(unnamed)",
+            "asset_type": a.get("asset_type") or "",
+            "cost": round(cost, 2),
+            "salvage_value": round(salvage, 2),
+            "purchase_date": pd_,
+            "monthly_depreciation": round(monthly, 2),
+            "accumulated_depreciation": round(accum, 2),
+            "book_value": book,
+        })
+        total_cost += cost
+        total_accum += accum
+    rows.sort(key=lambda r: r["book_value"], reverse=True)
+    return {
+        "rows": rows,
+        "asset_count": len(rows),
+        "total_cost": round(total_cost, 2),
+        "total_accumulated_depreciation": round(total_accum, 2),
+        "total_book_value": round(total_cost - total_accum, 2),
+    }
+
+
+async def _fetch_loans_summary(cid: str, params: dict) -> dict:
+    """Loan register with original principal, current balance (from
+    linked liability account), rate, and term. Current balance uses
+    signed ledger balance and takes the absolute value since liability
+    normal balance is credit."""
+    from reports import _signed_balances
+    docs = await db.loans.find({"company_id": cid}).to_list(2000)
+    if not docs:
+        return {"rows": [], "loan_count": 0,
+                "total_principal": 0.0, "total_current_balance": 0.0}
+    by = await _signed_balances(cid, start=None, end=_today(), include_pre_period=True)
+    rows = []
+    total_principal = 0.0
+    total_balance = 0.0
+    for l in docs:
+        aid = l.get("account_id")
+        raw = float(by.get(aid, 0) or 0)
+        current = abs(raw)
+        principal = float(l.get("principal") or 0)
+        rows.append({
+            "id": l.get("id"),
+            "lender": l.get("lender") or "(unnamed)",
+            "principal": round(principal, 2),
+            "current_balance": round(current, 2),
+            "rate": l.get("rate"),
+            "term_months": l.get("term_months"),
+            "start_date": l.get("start_date"),
+        })
+        total_principal += principal
+        total_balance += current
+    rows.sort(key=lambda r: r["current_balance"], reverse=True)
+    return {
+        "rows": rows,
+        "loan_count": len(rows),
+        "total_principal": round(total_principal, 2),
+        "total_current_balance": round(total_balance, 2),
+    }
+
+
 CHART_REGISTRY: dict[str, dict] = {
     "income_statement": {
         "title": "Income Statement",
@@ -190,6 +441,54 @@ CHART_REGISTRY: dict[str, dict] = {
         "description": "Revenue, expense, and net-income line/bar trend over the trailing N months. Great for 'how's my year looking', 'am I trending up', 'when did I stop being profitable', 'this year vs last year'. Prefer this over the flat Income Statement whenever the user asks about a TREND, YEAR, or MULTI-MONTH view.",
         "params_hint": "months (int 3-24, default 12), basis ('accrual'|'cash'), end (YYYY-MM-DD, optional)",
         "fetcher": _fetch_income_trend,
+    },
+    "cash_flow": {
+        "title": "Statement of Cash Flows",
+        "description": "Operating / Investing / Financing cash movement plus net change in cash for a period. Great for 'am I generating cash', 'where is my cash going', 'why is my bank balance falling while I'm profitable'.",
+        "params_hint": "start (YYYY-MM-DD), end (YYYY-MM-DD)",
+        "fetcher": _fetch_cash_flow,
+    },
+    "invoices_by_status": {
+        "title": "Invoices by Status",
+        "description": "Count and dollar totals of every invoice bucketed by status (overdue, sent, partial, draft, paid, void). Great for 'how many overdue invoices', 'what's in draft', 'invoice pipeline'.",
+        "params_hint": "(no params)",
+        "fetcher": _fetch_invoices_by_status,
+    },
+    "bills_by_status": {
+        "title": "Bills by Status",
+        "description": "Count and dollar totals of every bill bucketed by status (overdue, received, partial, draft, paid). Great for 'how many bills to pay', 'bill pipeline', 'what's overdue to vendors'.",
+        "params_hint": "(no params)",
+        "fetcher": _fetch_bills_by_status,
+    },
+    "top_customers_revenue": {
+        "title": "Top Customers by Revenue",
+        "description": "Ranking of customers by invoiced revenue in a period. Great for 'who are my best customers', 'top 10 customers this year', 'who's my biggest client'.",
+        "params_hint": "start (YYYY-MM-DD), end (YYYY-MM-DD), limit (3-25, default 10)",
+        "fetcher": _fetch_top_customers_revenue,
+    },
+    "top_vendors_spend": {
+        "title": "Top Vendors by Spend",
+        "description": "Ranking of vendors by billed spend in a period. Great for 'where am I spending the most', 'top vendors', 'who do I pay the most'.",
+        "params_hint": "start (YYYY-MM-DD), end (YYYY-MM-DD), limit (3-25, default 10)",
+        "fetcher": _fetch_top_vendors_spend,
+    },
+    "expense_by_category": {
+        "title": "Expenses by Category",
+        "description": "Expense breakdown by GL account (top 15) over a period. Great for 'where did my money go', 'what's my biggest expense category', 'break down my costs'.",
+        "params_hint": "start (YYYY-MM-DD), end (YYYY-MM-DD)",
+        "fetcher": _fetch_expense_by_category,
+    },
+    "fixed_assets_summary": {
+        "title": "Fixed Assets Register",
+        "description": "Every fixed asset with cost, accumulated depreciation, and current book value. Great for 'what assets do I own', 'how depreciated are my assets', 'total book value of my equipment'.",
+        "params_hint": "(no params)",
+        "fetcher": _fetch_fixed_assets_summary,
+    },
+    "loans_summary": {
+        "title": "Loans Summary",
+        "description": "Every loan with original principal, current outstanding balance, interest rate, and term. Great for 'how much do I owe on loans', 'what's my debt', 'loan payoff'.",
+        "params_hint": "(no params)",
+        "fetcher": _fetch_loans_summary,
     },
 }
 
