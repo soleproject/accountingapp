@@ -3780,3 +3780,77 @@ User walked through the full runbook end-to-end. Migration completed in ~90 min,
 - Total docs: 47,726 (Railway) = 47,726 (Atlas). Zero data loss.
 - Live traffic confirmed on Atlas Metrics dashboard (R 28.4/s, W 0.5/s, 68 conns at 12:03 PM cutover).
 
+
+
+---
+
+## 2026-02-03 (evening) — Sprint 1 partial: Contact race fix + Dedup script ✅
+
+### Delivered
+1. **Contact race fix** — `POST /api/companies/{cid}/contacts` and
+   `POST /api/companies/{cid}/contacts/import/commit` now catch
+   `DuplicateKeyError`, look up the winner, and return the same id
+   (manual create) or perform an update (import). Stops all 500s from
+   concurrent inserts of the same normalized name.
+
+2. **Contact dedup script** — `/app/backend/tests/dedupe_contacts.py`
+   Standalone CLI with `--apply` and `--company=<cid>` flags. Groups
+   contacts by (company_id, normalized_name), picks oldest as keeper,
+   repoints FKs across 9 collections (transactions, invoices, bills,
+   payments, receipts, communications, contact_learning_cache,
+   rule_candidates, rules), then deletes losers. Dry-run by default.
+
+3. **Pytest coverage** — 6/6 passing:
+   - `tests/test_contact_race_fix.py` (3 tests: manual race, import race, normalized collision)
+   - `tests/test_dedupe_contacts.py` (3 tests: grouping, apply, empty-key skip)
+
+4. **Shared test loop helper** — `/app/backend/tests/_shared_loop.py`.
+   Multiple test modules were creating their own event loops → motor
+   client (bound at import time in `db.py`) errored "attached to a
+   different loop" on the second module. Single shared loop fixes this
+   for any future async test file — just `from tests._shared_loop import run`.
+
+### To use the dedup script on Atlas prod
+```bash
+# Dry run — see what would happen (no changes)
+cd /app/backend && python -m tests.dedupe_contacts
+
+# Or per-company staged rollout
+python -m tests.dedupe_contacts --company=<cid>
+
+# LIVE (after reviewing the dry run)
+python -m tests.dedupe_contacts --apply
+```
+Take an Atlas snapshot before `--apply` (Atlas → Backup → Take Snapshot).
+The 7,157-contact bloat should collapse to a realistic per-company count.
+
+### Files touched
+- `/app/backend/routes/contacts.py` — added `DuplicateKeyError` import;
+  wrapped `create_contact` and `contacts_import_commit` inserts in
+  race-safe try/except.
+- `/app/backend/tests/dedupe_contacts.py` — NEW
+- `/app/backend/tests/test_contact_race_fix.py` — NEW
+- `/app/backend/tests/test_dedupe_contacts.py` — NEW
+- `/app/backend/tests/_shared_loop.py` — NEW (shared test utility)
+
+### Sprint 1 items still queued for next session
+- **Ledger transaction wrappers** on Bills / Assets / Opening-Balance /
+  Bill-Payments. Deferred because it requires threading `session=` through
+  the entire 965-line `inventory_service.py` including `apply_bill_inventory`,
+  `_ensure_accounts_payable`, `_record_movement`, `_reverse_bill_hooks`,
+  `insert_je`. Missing a `session=` anywhere = write escapes the transaction
+  silently. Wants dedicated focus session.
+- **Worker bump** `--workers 4 → 8` with `MONGO_MAX_POOL_SIZE=75`. Just a
+  Railway config change — see Instructions below.
+- **Remove single-node fallback warning** from `db.py::_probe_txn_support`
+  (no longer relevant with Atlas replica set).
+
+### Railway config change (user's plate, 2 min)
+Railway → `accountingapp` service:
+- Variables tab: change `MONGO_MAX_POOL_SIZE` from `100` → `75`
+- Settings → Start Command: update to `uvicorn server:app --workers 8 --host 0.0.0.0 --port $PORT`
+- Save → auto-redeploys → ~30s of API 502s
+
+This gives 8 workers × 75 pool = 600 concurrent DB sockets, well under
+Atlas M10's 1500 limit, with more Python heap for concurrent report queries.
+
