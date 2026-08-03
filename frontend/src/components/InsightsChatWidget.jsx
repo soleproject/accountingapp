@@ -355,8 +355,14 @@ export default function InsightsChatWidget() {
         <div
           ref={panelRef}
           data-testid="insights-chat-panel"
-          style={positionStyle}
-          className={`fixed z-40 bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col ${sizeCls} transition-[width,height] duration-200`}
+          className={`fixed z-40 bg-white rounded-2xl border border-slate-200/80 flex flex-col ${sizeCls} transition-[width,height] duration-200`}
+          // Chunkier, moodier shadow than Tailwind's shadow-2xl so the
+          // panel reads as a distinctly elevated layer over dense
+          // dashboard content (multi-stop for depth, not just blur).
+          style={{
+            ...positionStyle,
+            boxShadow: "0 30px 60px -12px rgba(15, 23, 42, 0.55), 0 18px 36px -18px rgba(15, 23, 42, 0.45), 0 2px 6px rgba(15, 23, 42, 0.18)",
+          }}
         >
           <header
             onMouseDown={startDrag}
@@ -1010,6 +1016,152 @@ function ChartVisual({ chartId, data }) {
     );
   }
 
+  if (chartId === "ar_aging_trend") {
+    const rows = (data.months || []).map(m => ({
+      label: m.label,
+      Current: Number(m.current || 0),
+      "1-30d": Number(m.d1_30 || 0),
+      "31-60d": Number(m.d31_60 || 0),
+      "61-90d": Number(m.d61_90 || 0),
+      "90d+": Number(m.d90p || 0),
+      total: Number(m.total_open || 0),
+    }));
+    if (!rows.length) {
+      return <div className="text-xs text-slate-400 italic py-4 text-center">No A/R history yet.</div>;
+    }
+    const latest = rows[rows.length - 1]?.total || 0;
+    const first = rows[0]?.total || 0;
+    const delta = latest - first;
+    // Aging bucket colors — worsen from green → amber → rose as bucket ages.
+    const BKT = {
+      "Current": "#10B981", "1-30d": "#84CC16", "31-60d": "#F59E0B",
+      "61-90d": "#F97316", "90d+":  "#EF4444",
+    };
+    return (
+      <div data-testid="insights-chart-visual-ar_aging_trend" className="space-y-2">
+        <div className="flex items-baseline justify-between">
+          <div className="text-[11px] uppercase tracking-wider text-slate-500">
+            Latest A/R · {rows.length}mo window
+          </div>
+          <div className="text-right">
+            <div className="text-xl font-semibold font-mono-num text-indigo-700">{fmtMoney(latest)}</div>
+            <div className={`text-[10px] font-mono-num ${delta >= 0 ? "text-rose-600" : "text-emerald-600"}`}>
+              {delta >= 0 ? "▲" : "▼"} {fmtMoney(Math.abs(delta))} vs {rows[0]?.label}
+            </div>
+          </div>
+        </div>
+        <div style={{ width: "100%", height: 230 }}>
+          <ResponsiveContainer>
+            <BarChart data={rows} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+              <CartesianGrid stroke="#F1F5F9" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} axisLine={false} tickLine={false}
+                     interval={rows.length > 12 ? 1 : 0} />
+              <YAxis tickFormatter={compactMoney} tick={{ fontSize: 10 }}
+                     axisLine={false} tickLine={false} width={48} />
+              <Tooltip formatter={(v) => fmtMoney(v)} cursor={{ fill: "#F8FAFC" }}
+                       contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+              <Legend wrapperStyle={{ fontSize: 9 }} iconSize={8} />
+              {["Current","1-30d","31-60d","61-90d","90d+"].map((k, i, arr) => (
+                <Bar key={k} dataKey={k} stackId="a" fill={BKT[k]}
+                     radius={i === arr.length - 1 ? [4, 4, 0, 0] : 0} />
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    );
+  }
+
+  if (chartId === "expense_trend") {
+    const months = data.months || [];
+    const cats = data.categories || [];
+    if (!months.length || !cats.length) {
+      return <div className="text-xs text-slate-400 italic py-4 text-center">No expense history in this window.</div>;
+    }
+    // Distinct palette for stacked areas. Loop if more categories than
+    // colors (rare — we cap top_n at 8 in backend).
+    const PALETTE = ["#4F46E5", "#F43F5E", "#F59E0B", "#10B981", "#8B5CF6", "#0EA5E9", "#D946EF", "#EAB308"];
+    const OTHER_COLOR = "#94A3B8";
+    return (
+      <div data-testid="insights-chart-visual-expense_trend" className="space-y-2">
+        <div className="flex items-baseline justify-between">
+          <div className="text-[11px] uppercase tracking-wider text-slate-500">
+            Total spend · {months.length}mo window
+          </div>
+          <div className="text-xl font-semibold font-mono-num text-rose-700">
+            {fmtMoney(data.total)}
+          </div>
+        </div>
+        <div style={{ width: "100%", height: 240 }}>
+          <ResponsiveContainer>
+            <BarChart data={months} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+              <CartesianGrid stroke="#F1F5F9" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} axisLine={false} tickLine={false}
+                     interval={months.length > 12 ? 1 : 0} />
+              <YAxis tickFormatter={compactMoney} tick={{ fontSize: 10 }}
+                     axisLine={false} tickLine={false} width={48} />
+              <Tooltip formatter={(v) => fmtMoney(v)} cursor={{ fill: "#F8FAFC" }}
+                       contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+              <Legend wrapperStyle={{ fontSize: 9 }} iconSize={8} />
+              {cats.map((cat, i, arr) => (
+                <Bar key={cat} dataKey={cat} stackId="a"
+                     fill={cat === "Other" ? OTHER_COLOR : PALETTE[i % PALETTE.length]}
+                     radius={i === arr.length - 1 ? [4, 4, 0, 0] : 0} />
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    );
+  }
+
+  if (chartId === "cash_flow_trend") {
+    // cash_out is stored negative — flip to positive for visual comparison
+    // but keep the net line signed.
+    const rows = (data.months || []).map(m => ({
+      label: m.label,
+      "Cash in":  Number(m.cash_in || 0),
+      "Cash out": Math.abs(Number(m.cash_out || 0)),
+      Net: Number(m.net || 0),
+    }));
+    if (!rows.length) {
+      return <div className="text-xs text-slate-400 italic py-4 text-center">No cash movement in this window.</div>;
+    }
+    const netTotal = Number(data.total_net || 0);
+    return (
+      <div data-testid="insights-chart-visual-cash_flow_trend" className="space-y-2">
+        <div className="flex items-baseline justify-between">
+          <div className="text-[11px] uppercase tracking-wider text-slate-500">
+            Net cash · {rows.length}mo
+          </div>
+          <div className={`text-xl font-semibold font-mono-num ${netTotal >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+            {fmtMoney(netTotal)}
+          </div>
+        </div>
+        <div style={{ width: "100%", height: 230 }}>
+          <ResponsiveContainer>
+            <ComposedChart data={rows} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+              <CartesianGrid stroke="#F1F5F9" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} axisLine={false} tickLine={false}
+                     interval={rows.length > 12 ? 1 : 0} />
+              <YAxis tickFormatter={compactMoney} tick={{ fontSize: 10 }}
+                     axisLine={false} tickLine={false} width={48} />
+              <Tooltip formatter={(v) => fmtMoney(v)} cursor={{ fill: "#F8FAFC" }}
+                       contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+              <Legend wrapperStyle={{ fontSize: 10 }} iconSize={10} />
+              <ReferenceLine y={0} stroke="#CBD5E1" strokeDasharray="2 2" />
+              <Bar dataKey="Cash in"  fill={C.positive} radius={[4, 4, 0, 0]} barSize={12} />
+              <Bar dataKey="Cash out" fill={C.expense}  radius={[4, 4, 0, 0]} barSize={12} />
+              <Line type="monotone" dataKey="Net" stroke={C.revenue}
+                    strokeWidth={2.5} dot={{ r: 3, fill: C.revenue }}
+                    activeDot={{ r: 5 }} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    );
+  }
+
   return null;
 }
 
@@ -1237,6 +1389,75 @@ function ChartRenderer({ chartId, data }) {
                  + `Orig ${fmtMoney(r.principal)}`
                } />
         ))}
+      </div>
+    );
+  }
+  if (chartId === "ar_aging_trend") {
+    const months = data.months || [];
+    const latest = months[months.length - 1] || {};
+    const first = months[0] || {};
+    const delta = Number(latest.total_open || 0) - Number(first.total_open || 0);
+    return (
+      <div className="space-y-1.5 text-xs">
+        <Row label={`Latest · ${latest.label || ""}`} value={latest.total_open} bold accent="indigo" />
+        <Row label={`Earliest · ${first.label || ""}`} value={first.total_open} bold />
+        <Row label="Change" value={delta} bold accent={delta >= 0 ? "rose" : "emerald"} />
+        <details className="pt-1">
+          <summary className="cursor-pointer text-slate-500 hover:text-slate-800 text-[11px]">Bucket breakdown (latest)</summary>
+          <div className="pl-3 pt-1 space-y-0.5">
+            <Row label="Current"  value={latest.current} small accent="emerald" />
+            <Row label="1-30d"    value={latest.d1_30}   small />
+            <Row label="31-60d"   value={latest.d31_60}  small accent="rose" />
+            <Row label="61-90d"   value={latest.d61_90}  small accent="rose" />
+            <Row label="90d+"     value={latest.d90p}    small accent="rose" />
+          </div>
+        </details>
+      </div>
+    );
+  }
+  if (chartId === "expense_trend") {
+    const months = data.months || [];
+    const cats = data.categories || [];
+    // Compute per-category totals across the window for a mini ranked list.
+    const catTotals = cats.map(c => ({
+      name: c,
+      total: months.reduce((s, m) => s + Number(m[c] || 0), 0),
+    })).filter(c => c.total > 0).sort((a, b) => b.total - a.total);
+    const latest = months[months.length - 1] || {};
+    return (
+      <div className="space-y-1.5 text-xs">
+        <Row label={`Total · ${months.length}mo`} value={data.total} bold accent="rose" />
+        <Row label={`Latest month · ${latest.label || ""}`} value={latest.total} bold />
+        <div className="text-slate-500 py-1">Top categories over window</div>
+        {catTotals.slice(0, 6).map(c => (
+          <Row key={c.name} label={c.name} value={c.total} small />
+        ))}
+      </div>
+    );
+  }
+  if (chartId === "cash_flow_trend") {
+    const months = data.months || [];
+    const latest = months[months.length - 1] || {};
+    // Best/worst net months for quick insight.
+    const bestNet = months.reduce((b, m) => (m.net > (b?.net ?? -Infinity) ? m : b), null);
+    const worstNet = months.reduce((b, m) => (m.net < (b?.net ?? Infinity) ? m : b), null);
+    return (
+      <div className="space-y-1.5 text-xs">
+        <Row label={`Cash in · ${months.length}mo`}  value={data.total_in}  bold accent="emerald" />
+        <Row label={`Cash out · ${months.length}mo`} value={data.total_out} bold accent="rose" />
+        <div className="border-t pt-1.5 mt-1.5">
+          <Row label="Net movement" value={data.total_net} bold
+               accent={(data.total_net || 0) >= 0 ? "emerald" : "rose"} />
+        </div>
+        <Row label={`Latest month · ${latest.label || ""}`} value={latest.net} small
+             accent={(latest.net || 0) >= 0 ? "emerald" : "rose"} />
+        {bestNet && (
+          <Row label={`Best · ${bestNet.label}`}   value={bestNet.net}  small accent="emerald" />
+        )}
+        {worstNet && worstNet !== bestNet && (
+          <Row label={`Worst · ${worstNet.label}`} value={worstNet.net} small
+               accent={(worstNet.net || 0) < 0 ? "rose" : undefined} />
+        )}
       </div>
     );
   }

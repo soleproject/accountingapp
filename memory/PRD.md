@@ -17,6 +17,26 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Darker floating shadow + monthly trend variants (18 charts total)
+
+**Frontend polish** (`components/InsightsChatWidget.jsx`):
+- Replaced Tailwind `shadow-2xl` with a moodier custom multi-stop shadow (`rgba(15,23,42,0.55) 0 30px 60px -12px` + two additional stops for depth). Panel now reads as a distinctly elevated layer over dense dashboard content.
+
+**New backend fetchers** (`routes/insights_chat.py`):
+- `ar_aging_trend` → month-end A/R totals + bucket breakdown (current / 1-30 / 31-60 / 61-90 / 90+) for trailing N months. Answers "is my collection getting worse/better".
+- `expense_trend` → top-N expense categories tracked month-by-month (categories rank stable across the window; leftovers roll into "Other"). Answers "how has my spending moved by category".
+- `cash_flow_trend` → monthly cash-in (positive posted amounts) vs cash-out (negative) + net line for trailing N months. Answers "am I burning cash / cash runway".
+
+**New Recharts visuals**:
+- A/R aging trend → 5-color stacked bar (green→amber→rose as buckets age) + latest vs earliest delta callout
+- Expense trend → color-cycled stacked bar with rank-stable categories + legend
+- Cash-in vs cash-out → dual bars + net line ComposedChart with best/worst month callouts
+
+**Verified live** on Bright Beans Coffee Co. (Aug 2026):
+- A/R aging trend: A/R went from all-current $5,525 (Sep 25) → $4,650 in 31-60d + $875 in 61-90d (Aug 26) — clear collection degradation
+- Expense trend: 12-month window / 5 categories + Other = $59,713 total
+- Cash flow trend: $85,941 in − $66,956 out = $18,985 net; best month Jul 26 (+$21k), worst May 26 (-$11.5k)
+
 ### Feb 2026 — Insights AI full report coverage (8 new charts)
 
 Expanded the Insights chart registry from 7 → **15 chart types** so "Ask about my data" now covers every core report and business dimension. Each new chart has a backend fetcher, LLM registry entry, Recharts visual, AND text-summary renderer:

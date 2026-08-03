@@ -399,6 +399,171 @@ async def _fetch_loans_summary(cid: str, params: dict) -> dict:
     }
 
 
+def _month_end_pairs(months_n: int) -> list[tuple[int, int]]:
+    """Walk `months_n` full months back from today and return the
+    (year, month) pairs in ASC order. Used by every trend fetcher."""
+    from datetime import date as _d
+    today = _d.today()
+    y, m = today.year, today.month
+    pairs = []
+    for _ in range(months_n):
+        pairs.append((y, m))
+        m -= 1
+        if m == 0:
+            m = 12; y -= 1
+    pairs.reverse()
+    return pairs
+
+
+async def _fetch_ar_aging_trend(cid: str, params: dict) -> dict:
+    """Total outstanding A/R at each month-end for the trailing N
+    months (default 12, clamped 3-24). Also breaks each snapshot into
+    aging buckets (current/1-30/31-60/61-90/90+) so the widget can
+    highlight overdue accumulation over time.
+    """
+    from reports import compute_ar_aging
+    from calendar import monthrange
+    from datetime import date as _d
+    months_n = max(3, min(int(params.get("months") or 12), 24))
+    pairs = _month_end_pairs(months_n)
+    series: list[dict] = []
+    for (yy, mm) in pairs:
+        as_of = _d(yy, mm, monthrange(yy, mm)[1]).isoformat()
+        try:
+            snap = await compute_ar_aging(cid, as_of=as_of)
+        except Exception:  # noqa: BLE001
+            snap = {"buckets": {}, "total": 0}
+        b = snap.get("buckets") or {}
+        series.append({
+            "month": f"{yy}-{mm:02d}",
+            "label": _d(yy, mm, 1).strftime("%b %y"),
+            "total_open": round(float(snap.get("total") or 0), 2),
+            "current": round(float(b.get("current") or 0), 2),
+            "d1_30":   round(float(b.get("1_30")    or 0), 2),
+            "d31_60":  round(float(b.get("31_60")   or 0), 2),
+            "d61_90":  round(float(b.get("61_90")   or 0), 2),
+            "d90p":    round(float(b.get("over_90") or 0), 2),
+        })
+    return {"months": series, "period_start": series[0]["month"] if series else None,
+            "period_end": series[-1]["month"] if series else None}
+
+
+async def _fetch_expense_trend(cid: str, params: dict) -> dict:
+    """Monthly expense totals for the top N categories (default top 5)
+    over the trailing M months (default 12). Returns both a per-category
+    monthly series (for stacked area / grouped bar rendering) and the
+    grand total per month. Categories not in the top-N are collapsed
+    into an 'Other' bucket so the total still ties to the P&L.
+    """
+    from reports import _signed_balances, _display_amount
+    from calendar import monthrange
+    from datetime import date as _d
+    months_n = max(3, min(int(params.get("months") or 12), 24))
+    top_n = max(3, min(int(params.get("top_n") or 5), 8))
+    pairs = _month_end_pairs(months_n)
+    exp_accts = await db.accounts.find({"company_id": cid, "type": "expense"}).to_list(2000)
+
+    # First pass — figure out the top-N categories by TOTAL spend across
+    # the whole window so the monthly series is stable and readable.
+    range_start = _d(pairs[0][0], pairs[0][1], 1).isoformat()
+    range_end = _d(pairs[-1][0], pairs[-1][1], monthrange(pairs[-1][0], pairs[-1][1])[1]).isoformat()
+    totals_by_id: dict[str, float] = {}
+    total_bal = await _signed_balances(cid, range_start, range_end)
+    for a in exp_accts:
+        v = _display_amount(a, total_bal.get(a["id"], 0.0))
+        if abs(v) >= 0.01:
+            totals_by_id[a["id"]] = v
+    ranked = sorted(exp_accts, key=lambda a: totals_by_id.get(a["id"], 0.0), reverse=True)
+    top_ids = [a["id"] for a in ranked[:top_n] if totals_by_id.get(a["id"], 0.0) > 0]
+    top_names = [next(a["name"] for a in exp_accts if a["id"] == aid) for aid in top_ids]
+    top_map = {aid: nm for aid, nm in zip(top_ids, top_names)}
+
+    # Second pass — walk each month and bucket into top-N + Other.
+    series: list[dict] = []
+    for (yy, mm) in pairs:
+        m_start = _d(yy, mm, 1).isoformat()
+        m_end = _d(yy, mm, monthrange(yy, mm)[1]).isoformat()
+        try:
+            by = await _signed_balances(cid, m_start, m_end)
+        except Exception:  # noqa: BLE001
+            by = {}
+        row: dict = {"month": f"{yy}-{mm:02d}", "label": _d(yy, mm, 1).strftime("%b %y"),
+                     "total": 0.0}
+        other = 0.0
+        for a in exp_accts:
+            v = _display_amount(a, by.get(a["id"], 0.0))
+            if abs(v) < 0.005:
+                continue
+            if a["id"] in top_map:
+                row[top_map[a["id"]]] = round(v, 2)
+                row["total"] += v
+            else:
+                other += v
+                row["total"] += v
+        if other > 0.005:
+            row["Other"] = round(other, 2)
+        row["total"] = round(row["total"], 2)
+        # Ensure every top-N key is present (0 if no activity that month)
+        # so the chart series don't shift colors between months.
+        for nm in top_names:
+            row.setdefault(nm, 0.0)
+        series.append(row)
+
+    return {
+        "months": series,
+        "categories": top_names + (["Other"] if any("Other" in s for s in series) else []),
+        "period_start": series[0]["month"] if series else None,
+        "period_end": series[-1]["month"] if series else None,
+        "total": round(sum(s["total"] for s in series), 2),
+    }
+
+
+async def _fetch_cash_flow_trend(cid: str, params: dict) -> dict:
+    """Monthly cash-in vs cash-out series over the trailing N months
+    (default 12). Cash-in = sum of positive posted-transaction amounts,
+    cash-out = sum of negative amounts. `net` = in + out (out is
+    negative). Great for 'am I burning cash', 'when do I collect vs
+    spend', 'cash runway'."""
+    from calendar import monthrange
+    from datetime import date as _d
+    months_n = max(3, min(int(params.get("months") or 12), 24))
+    pairs = _month_end_pairs(months_n)
+    series: list[dict] = []
+    for (yy, mm) in pairs:
+        m_start = _d(yy, mm, 1).isoformat()
+        m_end = _d(yy, mm, monthrange(yy, mm)[1]).isoformat()
+        txns = await db.transactions.find({
+            "company_id": cid, "posted": True,
+            "date": {"$gte": m_start, "$lte": m_end},
+        }).to_list(50000)
+        cash_in = 0.0
+        cash_out = 0.0
+        for t in txns:
+            amt = float(t.get("amount") or 0)
+            if amt >= 0:
+                cash_in += amt
+            else:
+                cash_out += amt
+        net = cash_in + cash_out
+        series.append({
+            "month": f"{yy}-{mm:02d}",
+            "label": _d(yy, mm, 1).strftime("%b %y"),
+            "cash_in":  round(cash_in, 2),
+            "cash_out": round(cash_out, 2),   # negative
+            "net":      round(net, 2),
+        })
+    total_in  = round(sum(s["cash_in"]  for s in series), 2)
+    total_out = round(sum(s["cash_out"] for s in series), 2)
+    return {
+        "months": series,
+        "period_start": series[0]["month"] if series else None,
+        "period_end":   series[-1]["month"] if series else None,
+        "total_in":  total_in,
+        "total_out": total_out,
+        "total_net": round(total_in + total_out, 2),
+    }
+
+
 CHART_REGISTRY: dict[str, dict] = {
     "income_statement": {
         "title": "Income Statement",
@@ -489,6 +654,24 @@ CHART_REGISTRY: dict[str, dict] = {
         "description": "Every loan with original principal, current outstanding balance, interest rate, and term. Great for 'how much do I owe on loans', 'what's my debt', 'loan payoff'.",
         "params_hint": "(no params)",
         "fetcher": _fetch_loans_summary,
+    },
+    "ar_aging_trend": {
+        "title": "A/R Aging — Monthly Trend",
+        "description": "Total outstanding A/R plus aging-bucket breakdown at each month-end for the trailing N months. Great for 'is my A/R getting worse', 'trend of overdue receivables', 'how has collection performance changed'. Prefer this over the flat `ar_aging` snapshot whenever the user asks about a TREND, MOVEMENT, or GETTING BETTER/WORSE.",
+        "params_hint": "months (int 3-24, default 12)",
+        "fetcher": _fetch_ar_aging_trend,
+    },
+    "expense_trend": {
+        "title": "Expense Categories — Monthly Trend",
+        "description": "Top N expense categories tracked month-by-month over the trailing M months (stacked). Great for 'how is my spending trending', 'when did rent spike', 'category-level spend over time', 'is my marketing spend going up'. Prefer over `expense_by_category` (which is a single-period snapshot) whenever the user asks about MOVEMENT, TREND, or MONTHS.",
+        "params_hint": "months (int 3-24, default 12), top_n (3-8, default 5)",
+        "fetcher": _fetch_expense_trend,
+    },
+    "cash_flow_trend": {
+        "title": "Cash-In vs Cash-Out — Monthly Trend",
+        "description": "Monthly cash-in (positive posted amounts) vs cash-out (negative) plus net cash movement for the trailing N months. Great for 'am I burning cash', 'when do I collect vs spend most', 'cash runway trend', 'monthly cash swing'. Prefer over `cash_flow` (which is a single-period statement) whenever the user asks about MONTHS, TREND, or MOVEMENT of cash.",
+        "params_hint": "months (int 3-24, default 12)",
+        "fetcher": _fetch_cash_flow_trend,
     },
 }
 
