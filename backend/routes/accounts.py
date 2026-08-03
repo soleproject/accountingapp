@@ -934,6 +934,7 @@ async def accounts_import_ai_classify(
         session_id=session_id,
         system_message=system,
         feature="ai-coa-classify",
+        company_id=cid,
     ).with_model(
         os.environ.get("LLM_PROVIDER", "openai"),
         os.environ.get("LLM_MODEL", "gpt-4o-mini"),

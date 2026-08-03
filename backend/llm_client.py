@@ -86,7 +86,9 @@ def _anthropic():
 # Chat object
 # ---------------------------------------------------------------------------
 class LlmChat:
-    def __init__(self, api_key: str = "", session_id: str = "", system_message: str = "", feature: str = "ai-unknown"):
+    def __init__(self, api_key: str = "", session_id: str = "",
+                 system_message: str = "", feature: str = "ai-unknown",
+                 company_id: str = ""):
         # api_key is accepted for signature-compat with the old
         # emergentintegrations call — we use env-based keys instead so
         # the same code works on any host.
@@ -97,6 +99,45 @@ class LlmChat:
         # Feature label used by ai_usage cost tracker — every call site
         # sets this to a stable kebab-case verb (e.g. "ai-categorize").
         self.feature = feature or "ai-unknown"
+        # Company scope for spend attribution + cap enforcement. Empty
+        # string means "platform-level, don't attribute" — legal for
+        # superadmin ad-hoc jobs, but every user-triggered call site
+        # MUST pass this so the counter and cap check work.
+        self.company_id = company_id or ""
+
+    async def _preflight_cap_check(self) -> None:
+        """Pre-flight per-company spend cap. Raises AiSpendCapExceeded
+        if the company is at or above its monthly LLM budget. Called
+        automatically before every stream/send. Cheap: one indexed doc
+        read, ~1 ms.
+
+        Resolution order for the company scope:
+          1. Explicit `LlmChat(company_id=...)` from the caller
+          2. Request-scoped ContextVar set by `deps.require_company` /
+             `job_queue` — so every user-triggered LLM call is covered
+             even if the LlmChat construction site doesn't pass it.
+        """
+        cid = self.company_id
+        if not cid:
+            try:
+                from ai_usage import _ctx_company_id
+                cid = _ctx_company_id() or ""
+                self.company_id = cid  # cache so _record_usage attributes too
+            except Exception:
+                pass
+        if not cid:
+            return
+        try:
+            from ai_usage import check_spend_cap
+            await check_spend_cap(cid)
+        except Exception:
+            # Only re-raise the cap-exceeded case; genuine bugs in the
+            # check must not take down user-facing LLM calls.
+            from ai_usage import AiSpendCapExceeded
+            import sys
+            exc = sys.exc_info()[1]
+            if isinstance(exc, AiSpendCapExceeded):
+                raise
 
     def with_model(self, provider: str, model: str) -> "LlmChat":
         # Legacy calls pass ("anthropic", "claude-sonnet-4-5-…"). We honor
@@ -120,6 +161,7 @@ class LlmChat:
         # It is prepended before the new user message so multi-turn
         # conversations keep state (e.g. AI Fixed Asset flow remembering
         # $350k / May 15 / $100k down across follow-up messages).
+        await self._preflight_cap_check()
         provider = self._resolve_provider()
         if provider == "anthropic":
             async for ev in self._stream_anthropic(msg.text, history):
@@ -193,6 +235,7 @@ class LlmChat:
     # Non-streaming — returns the full assistant reply as a str
     # ------------------------------------------------------------------
     async def send_message(self, msg: UserMessage) -> str:
+        await self._preflight_cap_check()
         provider = self._resolve_provider()
         if provider == "anthropic":
             client = _anthropic()
@@ -248,6 +291,7 @@ class LlmChat:
                 model=self.model,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
+                company_id=self.company_id or None,
             )
         except Exception:
             import logging

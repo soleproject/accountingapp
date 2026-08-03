@@ -779,11 +779,23 @@ def _current_period() -> str:
 
 async def _cap_status(cid: str, monthly_cap: Optional[float]) -> tuple[str, dict]:
     """Return (status, meta) where status ∈ ok|warn|block. Meta carries
-    the spend + cap for surfacing to the client."""
+    the spend + cap for surfacing to the client.
+
+    Feb 2026 — reads from the UNIFIED counter `companies.ai_spend` (all
+    features) with the legacy `companies.insights_spend` added on top so
+    caps calibrated pre-unification stay accurate through the transition
+    month. Fields are dollars (cost_cents / 100).
+    """
     period = _current_period()
-    doc = await db.companies.find_one({"id": cid}, {"insights_spend": 1}) or {}
-    spend_map = doc.get("insights_spend") or {}
-    spent = float(spend_map.get(period) or 0)
+    doc = await db.companies.find_one(
+        {"id": cid}, {"ai_spend": 1, "insights_spend": 1},
+    ) or {}
+    # Both fields are cost_cents (float). Convert to USD dollars for the
+    # user-facing 'spent' number so the existing frontend cap-config UI
+    # (which speaks USD) keeps working unchanged.
+    ai_cents = float((doc.get("ai_spend") or {}).get(period) or 0)
+    legacy_cents = float((doc.get("insights_spend") or {}).get(period) or 0)
+    spent = (ai_cents + legacy_cents) / 100.0
     cap = float(monthly_cap or 0)  # 0 → unlimited
     status = "ok"
     if cap > 0:
@@ -796,11 +808,12 @@ async def _cap_status(cid: str, monthly_cap: Optional[float]) -> tuple[str, dict
 
 
 async def _bump_spend(cid: str) -> None:
-    await db.companies.update_one(
-        {"id": cid},
-        {"$inc": {f"insights_spend.{_current_period()}": _COST_PER_CALL},
-         "$set": {"updated_at": now_iso()}},
-    )
+    # Kept as a no-op — spend is now incremented at the LLM wrapper
+    # (ai_usage._increment_company_spend) using real per-call cost from
+    # token counts, not the flat _COST_PER_CALL estimate. Left in the
+    # code so existing SSE call sites can call it without error until
+    # they're migrated to remove the call entirely.
+    return None
 
 
 class QuickAction(BaseModel):
@@ -863,6 +876,7 @@ async def insights_ask(cid: str, inp: InsightsAskIn,
         session_id="insights-" + session_id,
         system_message=_system_prompt(),
         feature="insights-chat",
+        company_id=cid,
     ).with_model(MODEL_PROVIDER, MODEL_NAME)
     try:
         raw = await chat.send_message(UserMessage(text=user_msg))
@@ -1023,6 +1037,7 @@ async def insights_ask_stream(cid: str, inp: InsightsAskIn,
         session_id="insights-" + session_id,
         system_message=_system_prompt(),
         feature="insights-chat",
+        company_id=cid,
     ).with_model(MODEL_PROVIDER, MODEL_NAME)
 
     async def event_gen():

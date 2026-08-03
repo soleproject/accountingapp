@@ -776,7 +776,8 @@ async def _drafts_for_overdue(cid: str) -> list[dict]:
         try:
             chat = LlmChat(session_id=f"followup-{cid}-{g.get('customer_id') or 'anon'}",
                            system_message="You draft short, professional accounts-receivable follow-up emails.",
-                           feature="ai-followup")
+                           feature="ai-followup",
+                           company_id=cid)
             async for ev in chat.stream_message(UserMessage(text=prompt)):
                 if isinstance(ev, TextDelta):
                     body_text += ev.content

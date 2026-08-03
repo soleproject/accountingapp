@@ -147,12 +147,14 @@ ASSISTANT_SYSTEM = (
 )
 
 
-def _new_chat(system: str, session_id: str, model_name: str = MODEL_NAME, feature: str = "ai-unknown") -> LlmChat:
+def _new_chat(system: str, session_id: str, model_name: str = MODEL_NAME,
+              feature: str = "ai-unknown", company_id: str = "") -> LlmChat:
     return LlmChat(
         api_key="",  # unused — llm_client reads OPENAI_API_KEY / ANTHROPIC_API_KEY from env
         session_id=session_id,
         system_message=system,
         feature=feature,
+        company_id=company_id,
     ).with_model(MODEL_PROVIDER, model_name)
 
 

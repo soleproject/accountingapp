@@ -115,9 +115,24 @@ async def record_llm(
 ) -> float:
     """Record one LLM call. Returns the cost in cents so the caller can
     log it inline if they want. Never raises — a broken recorder must
-    never take down a user-facing AI request."""
+    never take down a user-facing AI request.
+
+    Feb 2026 — this is the single choke point for per-company spend
+    tracking. Every LLM call (Insights, categorizer, onboarding, follow-
+    up emails, cleanup copilot, AiPanel chat) lands here. We do THREE
+    writes per event, all fire-and-forget so cost tracking never blocks
+    the user-facing response:
+
+      1. Detailed event → `ai_usage_events` (unchanged)
+      2. Per-company period counter → `companies.ai_spend.{YYYY-MM}` via
+         atomic $inc. This is what the cap-check reads at O(1).
+      3. Daily rollup → `ai_spend_daily` upsert keyed by
+         (company_id, day, feature). Used by admin reports so we don't
+         have to $match+$group over `ai_usage_events` every time.
+    """
     try:
         cost = _price_llm(model, input_tokens or 0, output_tokens or 0)
+        cid = company_id or _ctx_company_id()
         doc = {
             "id": str(uuid.uuid4()),
             "feature": feature,
@@ -131,10 +146,13 @@ async def record_llm(
             "unit": "token",
             "cost_cents": cost,
             "user_id": user_id or _ctx_user_id(),
-            "company_id": company_id or _ctx_company_id(),
+            "company_id": cid,
             "ts": now_iso(),
         }
         await db.ai_usage_events.insert_one(doc)
+        # Unified per-company period counter + daily rollup.
+        if cid and cost > 0:
+            await _increment_company_spend(cid, feature, cost)
         return cost
     except Exception:
         logger.exception("ai_usage.record_llm failed for %s / %s", feature, model)
@@ -157,6 +175,7 @@ async def record_service(
     try:
         rate = unit_price_usd if unit_price_usd is not None else SERVICE_UNIT_PRICE_USD.get(service, 0.0)
         cost = quantity * rate * 100  # → cents
+        cid = company_id or _ctx_company_id()
         doc = {
             "id": str(uuid.uuid4()),
             "feature": feature,
@@ -166,14 +185,114 @@ async def record_service(
             "unit_price_usd": float(rate),
             "cost_cents": float(cost),
             "user_id": user_id or _ctx_user_id(),
-            "company_id": company_id or _ctx_company_id(),
+            "company_id": cid,
             "ts": now_iso(),
         }
         await db.ai_usage_events.insert_one(doc)
+        if cid and cost > 0:
+            await _increment_company_spend(cid, feature, cost)
         return cost
     except Exception:
         logger.exception("ai_usage.record_service failed for %s / %s", feature, service)
         return 0.0
+
+
+# ---------------------------------------------------------------------------
+# Per-company spend accumulator + cap check
+# ---------------------------------------------------------------------------
+#
+# Design choice: two write targets per event so the two dominant reads
+# stay O(1):
+#   • "Is company X over budget for this month?" → single field lookup on
+#     `companies.ai_spend.{YYYY-MM}`.
+#   • "Who spent what across every feature by day?" → indexed query on
+#     `ai_spend_daily(company_id, day)`.
+#
+# We accept the ~2× write amplification vs a single event insert because
+# LLM calls are already ~500ms — the extra ~2ms of write cost is noise.
+
+def _period_key(now: Optional[datetime] = None) -> str:
+    n = now or datetime.now(timezone.utc)
+    return n.strftime("%Y-%m")
+
+
+def _day_key(now: Optional[datetime] = None) -> str:
+    n = now or datetime.now(timezone.utc)
+    return n.strftime("%Y-%m-%d")
+
+
+async def _increment_company_spend(
+    company_id: str, feature: str, cost_cents: float,
+) -> None:
+    """Atomically bump the per-company period counter AND daily rollup.
+    Fire-and-forget — logs and swallows on failure so a broken counter
+    never fails the LLM call itself."""
+    try:
+        period = _period_key()
+        await db.companies.update_one(
+            {"id": company_id},
+            {"$inc": {f"ai_spend.{period}": float(cost_cents)}},
+        )
+        await db.ai_spend_daily.update_one(
+            {"company_id": company_id, "day": _day_key(), "feature": feature},
+            {
+                "$inc": {"cost_cents": float(cost_cents), "events": 1},
+                "$setOnInsert": {"created_at": now_iso()},
+                "$set": {"updated_at": now_iso()},
+            },
+            upsert=True,
+        )
+    except Exception:
+        logger.exception(
+            "_increment_company_spend failed for cid=%s feature=%s cost=%s",
+            company_id, feature, cost_cents,
+        )
+
+
+class AiSpendCapExceeded(Exception):
+    """Raised by ``check_spend_cap`` when the company's monthly AI
+    spend is at or above their configured cap. The caller (LlmChat, the
+    Insights SSE handler, the categorizer) should translate this into a
+    402 Payment Required so the user sees a real 'raise your cap or
+    wait' message rather than a generic 500.
+    """
+    def __init__(self, company_id: str, spent_cents: float, cap_cents: float):
+        self.company_id = company_id
+        self.spent_cents = spent_cents
+        self.cap_cents = cap_cents
+        super().__init__(
+            f"AI spend cap reached for company {company_id}: "
+            f"${spent_cents / 100:.2f} / ${cap_cents / 100:.2f} this month"
+        )
+
+
+async def check_spend_cap(company_id: Optional[str]) -> None:
+    """Pre-flight cap check called by every LLM entry point. Reads the
+    company's `ai_spend_cap_cents` (0 or unset = unlimited) and compares
+    it to the current-month running total. Cheap — single indexed
+    company doc read. Raises `AiSpendCapExceeded` when over.
+
+    `company_id=None` is treated as unlimited so platform-level jobs
+    (e.g. superadmin ad-hoc queries) don't get blocked.
+    """
+    if not company_id:
+        return
+    doc = await db.companies.find_one(
+        {"id": company_id},
+        {"ai_spend_cap_cents": 1, "ai_spend": 1, "insights_spend": 1},
+    )
+    if not doc:
+        return
+    cap = float(doc.get("ai_spend_cap_cents") or 0)
+    if cap <= 0:
+        return  # unlimited
+    period = _period_key()
+    spent = float((doc.get("ai_spend") or {}).get(period) or 0)
+    # Legacy `insights_spend` (Feb 2026 pre-unification) — additive, not
+    # replacement. Keeps the cap honest for the transition month.
+    spent += float((doc.get("insights_spend") or {}).get(period) or 0)
+    if spent >= cap:
+        raise AiSpendCapExceeded(company_id, spent, cap)
 
 
 # ---------------------------------------------------------------------------
@@ -310,3 +429,88 @@ async def ensure_indexes() -> None:
     await db.ai_usage_events.create_index([("ts", -1)])
     await db.ai_usage_events.create_index([("service", 1), ("ts", -1)])
     await db.ai_usage_events.create_index([("feature", 1), ("ts", -1)])
+    # Per-company / per-user analytics + admin AI-spend report reads.
+    await db.ai_usage_events.create_index([("company_id", 1), ("ts", -1)])
+    await db.ai_usage_events.create_index([("user_id", 1), ("ts", -1)])
+    # Daily rollup: unique on (company_id, day, feature) so upserts
+    # from `_increment_company_spend` are atomic per feature per day.
+    await db.ai_spend_daily.create_index(
+        [("company_id", 1), ("day", -1), ("feature", 1)],
+        unique=True, name="ai_spend_daily_uniq",
+    )
+    await db.ai_spend_daily.create_index([("day", -1)])
+
+
+async def backfill_ai_spend_counters() -> dict:
+    """One-shot backfill (Feb 2026) — sum every existing `ai_usage_events`
+    row into `companies.ai_spend.{YYYY-MM}` and `ai_spend_daily` so the
+    counters reflect ALL historical AI activity, not just events written
+    after the unification landed. Idempotent: rebuilds counters from
+    scratch on every call so re-running is safe.
+
+    Returns a dict with `{companies_touched, events_scanned, daily_rows}`
+    the caller can surface to ops as a sanity check.
+    """
+    # Wipe the two derived data stores. The source of truth is
+    # `ai_usage_events` — as long as that's untouched we can always
+    # rebuild these two views.
+    await db.ai_spend_daily.delete_many({})
+    await db.companies.update_many(
+        {}, {"$unset": {"ai_spend": ""}},
+    )
+
+    company_period_totals: dict[tuple[str, str], float] = {}
+    daily_totals: dict[tuple[str, str, str], dict] = {}
+    n_events = 0
+    async for ev in db.ai_usage_events.find({}, {
+        "company_id": 1, "cost_cents": 1, "feature": 1, "ts": 1,
+    }):
+        n_events += 1
+        cid = ev.get("company_id")
+        cost = float(ev.get("cost_cents") or 0)
+        ts = ev.get("ts") or ""
+        if not cid or not ts or cost <= 0:
+            continue
+        period = ts[:7]      # "YYYY-MM"
+        day = ts[:10]        # "YYYY-MM-DD"
+        feat = ev.get("feature") or "ai-unknown"
+        company_period_totals[(cid, period)] = (
+            company_period_totals.get((cid, period), 0.0) + cost
+        )
+        row = daily_totals.setdefault((cid, day, feat),
+                                       {"cost_cents": 0.0, "events": 0})
+        row["cost_cents"] += cost
+        row["events"] += 1
+
+    # Bulk-write the results back.
+    from pymongo import UpdateOne
+    if company_period_totals:
+        per_company: dict[str, dict] = {}
+        for (cid, period), cost in company_period_totals.items():
+            per_company.setdefault(cid, {})[f"ai_spend.{period}"] = cost
+        ops = [
+            UpdateOne({"id": cid}, {"$set": fields})
+            for cid, fields in per_company.items()
+        ]
+        if ops:
+            await db.companies.bulk_write(ops, ordered=False)
+
+    daily_ops = []
+    for (cid, day, feat), agg in daily_totals.items():
+        daily_ops.append(UpdateOne(
+            {"company_id": cid, "day": day, "feature": feat},
+            {
+                "$set": {"cost_cents": agg["cost_cents"], "events": agg["events"],
+                         "updated_at": now_iso()},
+                "$setOnInsert": {"created_at": now_iso()},
+            },
+            upsert=True,
+        ))
+    if daily_ops:
+        await db.ai_spend_daily.bulk_write(daily_ops, ordered=False)
+
+    return {
+        "companies_touched": len(company_period_totals),
+        "events_scanned": n_events,
+        "daily_rows": len(daily_totals),
+    }

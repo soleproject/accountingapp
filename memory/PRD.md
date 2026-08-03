@@ -17,6 +17,27 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Safety hardening (login rate limit + LLM cost hole + JE integrity)
+
+**Login rate limit** (`infra.py`, `routes/auth.py`, `routes/invites.py`):
+- Global slowapi `key_func` swapped: JWT-authenticated calls now bucket by `user_id`, unauthenticated by IP. A firm behind one NAT no longer shares a bucket.
+- Rate-limited endpoints: `/auth/login` (5/min), `/auth/signup` (5/min), `/auth/change-password` (5/min), `/auth/password-set/{token}` (5/min), `/auth/forgot-password` (3/min), `/companies/{cid}/invites` + `/pro/invites` + `/admin/invites` (10/min each). Verified 6th login → 429; 4th forgot → 429; legit login on fresh IP → 200. Removed `from __future__ import annotations` from `auth.py` (slowapi × FastAPI 0.110 body-detection interaction).
+
+**LLM cost tracking — hole closed** (`ai_usage.py`, `llm_client.py`, `routes/insights_chat.py`, `routes/admin.py`):
+- Every LLM call now increments the unified counter `companies.ai_spend.{YYYY-MM}` (cost cents) via `_increment_company_spend` in `record_llm` / `record_service`. Daily rollup `ai_spend_daily(company_id, day, feature)` upserted in the same call — used by the admin report so hot reads stay O(1).
+- `LlmChat` gained `company_id` kwarg + `_preflight_cap_check` — every stream/send now runs `check_spend_cap` before hitting OpenAI/Anthropic. Cap read is one indexed doc lookup. Falls back to `_ctx_company_id()` ContextVar so untouched call sites still get the check.
+- Migrated explicit `company_id` on 4 call sites (`insights_chat.py` x2, `invoices.py` follow-up, `accounts.py` COA-classify); `ai_service.py`, `contacts.py` PDF import, and `categorizer` covered by the ContextVar fallback.
+- New endpoints: `GET /api/admin/ai-spend/by-company?period=YYYY-MM&revenue_per_seat_usd=X` — every company's spend ranked, top features, share-of-revenue %. `POST /api/admin/ai-spend/backfill` — idempotent rebuild from `ai_usage_events`.
+- New indexes on `ai_usage_events`: `(company_id, ts DESC)`, `(user_id, ts DESC)`. New collection `ai_spend_daily` with unique `(company_id, day, feature)`.
+- **Preview snapshot** (2026-08 current month, tiny dataset): Bright Beans $0.0078 (23 insights events); TEST_dup $0.0054 (21 insights + 20 followups). Total across active co's $0.0132.
+
+**Multi-doc ledger writes — atomicity + integrity check** (`db.py`, `routes/payments.py`, `routes/admin.py`):
+- New `ledger_transaction()` async context manager in `db.py`. Probes for replica-set support once per process, uses `session.start_transaction()` on Atlas, falls back to yielding `None` on non-replica-set Mongo (with a loud WARNING log). Callers thread `session=_s` through every Mongo op.
+- `POST /companies/{cid}/payments` now wraps the four writes (`payments.insert` + `invoices/bills.update balance_due` + `transactions.update linked_payment_id`) in one transaction.
+- New `GET /api/admin/ledger-integrity` scans: JE line-sum vs stated totals, invoice/bill impossible balances, orphan payments (linked doc missing, or balance untouched despite payment).
+- Preview scan found: 0 unbalanced JEs (line sums tie), 6 JEs with the header-total-vs-line-sum bug (latent, reports read from lines), 3 orphan payments in `TEST_dup` (cascade-on-delete gap, separate issue).
+- **Still to wrap** (next pass): `inventory_service.py` bill-receive + JE, `asset_service.py` fixed-asset funding + JE, `opening_balance_service.py`, reconciliation `clear` batches, loan payment records, Plaid history import.
+
 ### Feb 2026 — Scale-hardening pass (before-500 tier)
 
 Approved subset of the scalability audit landed. **No `_signed_balances` rewrite yet** — that's gated behind load-test measurement.

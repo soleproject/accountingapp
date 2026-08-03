@@ -62,50 +62,79 @@ async def list_payments(cid: str, user: dict = Depends(get_current_user)):
 
 @router.post("/companies/{cid}/payments")
 async def create_payment(cid: str, inp: PaymentCreate, user: dict = Depends(get_current_user)):
+    """Record a customer payment (against an invoice) or a vendor
+    payment (against a bill). This is a multi-doc write — payment row +
+    invoice/bill.balance_due update + (for inventory bills) an A/P
+    relief JE + reverse-link stamp on the source transaction. All four
+    writes MUST land together or none of them do; otherwise you get the
+    class of bug where a payment shows in the ledger but the invoice
+    still says "unpaid". Wrapped in `ledger_transaction()`.
+    """
     await require_company(user, cid)
+    from db import ledger_transaction
     pid = str(uuid.uuid4()); now = now_iso()
-    await db.payments.insert_one({
-        "id": pid, "company_id": cid, **inp.model_dump(),
-        "created_at": now, "updated_at": now,
-    })
-    # If linked to invoice/bill, reduce balance_due
-    if inp.linked_invoice_id:
-        inv = await db.invoices.find_one({"id": inp.linked_invoice_id, "company_id": cid})
-        if inv:
-            bal = float(inv.get("balance_due", inv.get("total", 0))) - float(inp.amount)
-            status = "paid" if bal <= 0.01 else "partial"
-            await db.invoices.update_one({"id": inv["id"]},
-                {"$set": {"balance_due": round(bal, 2), "status": status}})
-    if inp.linked_bill_id:
-        bill = await db.bills.find_one({"id": inp.linked_bill_id, "company_id": cid})
-        if bill:
-            bal = float(bill.get("balance_due", bill.get("total", 0))) - float(inp.amount)
-            status = "paid" if bal <= 0.01 else "partial"
-            await db.bills.update_one({"id": bill["id"]},
-                {"$set": {"balance_due": round(bal, 2), "status": status}})
-            # Inventory-tracked bills need an A/P relief JE so the
-            # bill's inventory JE doesn't leave A/P lingering after
-            # payment.
-            if bill.get("inventory_hooks"):
-                try:
-                    from inventory_service import relieve_ap_on_bill_payment
-                    await relieve_ap_on_bill_payment(cid, bill["id"],
-                                                    float(inp.amount),
-                                                    inp.source_transaction_id)
-                except Exception:
-                    pass
-    # Stamp the reverse-link back on the source transaction so
-    # cascade-on-transaction-delete knows to reverse this payment.
-    if inp.source_transaction_id:
-        await db.transactions.update_one(
-            {"id": inp.source_transaction_id, "company_id": cid},
-            {"$set": {
-                "linked_payment_id": pid,
-                "linked_invoice_id": inp.linked_invoice_id,
-                "linked_bill_id": inp.linked_bill_id,
-                "updated_at": now,
-            }},
-        )
+
+    async with ledger_transaction() as _s:
+        await db.payments.insert_one({
+            "id": pid, "company_id": cid, **inp.model_dump(),
+            "created_at": now, "updated_at": now,
+        }, session=_s)
+        # If linked to invoice/bill, reduce balance_due
+        if inp.linked_invoice_id:
+            inv = await db.invoices.find_one(
+                {"id": inp.linked_invoice_id, "company_id": cid},
+                session=_s,
+            )
+            if inv:
+                bal = float(inv.get("balance_due", inv.get("total", 0))) - float(inp.amount)
+                status = "paid" if bal <= 0.01 else "partial"
+                await db.invoices.update_one(
+                    {"id": inv["id"]},
+                    {"$set": {"balance_due": round(bal, 2), "status": status}},
+                    session=_s,
+                )
+        if inp.linked_bill_id:
+            bill = await db.bills.find_one(
+                {"id": inp.linked_bill_id, "company_id": cid},
+                session=_s,
+            )
+            if bill:
+                bal = float(bill.get("balance_due", bill.get("total", 0))) - float(inp.amount)
+                status = "paid" if bal <= 0.01 else "partial"
+                await db.bills.update_one(
+                    {"id": bill["id"]},
+                    {"$set": {"balance_due": round(bal, 2), "status": status}},
+                    session=_s,
+                )
+                # Inventory-tracked bills need an A/P relief JE so the
+                # bill's inventory JE doesn't leave A/P lingering after
+                # payment. We deliberately don't pass the session into
+                # `relieve_ap_on_bill_payment` yet — that helper doesn't
+                # accept one today, and re-plumbing it is out of scope
+                # for this pass. Follow-up: thread session through
+                # inventory_service so this call joins the same
+                # transaction.
+                if bill.get("inventory_hooks"):
+                    try:
+                        from inventory_service import relieve_ap_on_bill_payment
+                        await relieve_ap_on_bill_payment(cid, bill["id"],
+                                                        float(inp.amount),
+                                                        inp.source_transaction_id)
+                    except Exception:
+                        pass
+        # Stamp the reverse-link back on the source transaction so
+        # cascade-on-transaction-delete knows to reverse this payment.
+        if inp.source_transaction_id:
+            await db.transactions.update_one(
+                {"id": inp.source_transaction_id, "company_id": cid},
+                {"$set": {
+                    "linked_payment_id": pid,
+                    "linked_invoice_id": inp.linked_invoice_id,
+                    "linked_bill_id": inp.linked_bill_id,
+                    "updated_at": now,
+                }},
+                session=_s,
+            )
     return {"id": pid}
 
 

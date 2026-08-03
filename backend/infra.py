@@ -33,10 +33,37 @@ from slowapi.util import get_remote_address
 # ---------------------------------------------------------------------------
 
 _STORAGE_URI = os.environ.get("REDIS_URL") or "memory://"
+
+
+def _rate_limit_key(request) -> str:
+    """Rate-limit bucket key: authenticated calls get their own bucket
+    keyed by user_id (so a firm behind one NAT with 50 accountants each
+    gets their own budget), unauthenticated calls fall back to source
+    IP (so brute-forcers can't share a bucket with legit users).
+
+    Never raises — if the token is missing/expired/malformed we just
+    drop through to the IP path.
+    """
+    try:
+        auth = request.headers.get("authorization", "")
+        if auth.startswith("Bearer "):
+            import jwt as _jwt  # local import to keep infra import cost low
+            token = auth[7:].strip()
+            secret = os.environ.get("JWT_SECRET", "dev-secret")
+            payload = _jwt.decode(token, secret, algorithms=["HS256"],
+                                  options={"verify_exp": False})
+            uid = payload.get("user_id")
+            if uid:
+                return f"u:{uid}"
+    except Exception:  # noqa: BLE001
+        pass
+    return f"ip:{get_remote_address(request)}"
+
+
 limiter = Limiter(
-    key_func=get_remote_address,
+    key_func=_rate_limit_key,
     storage_uri=_STORAGE_URI,
-    default_limits=["600/minute"],  # global safety net (10 rps per IP)
+    default_limits=["600/minute"],  # global safety net (10 rps per bucket)
 )
 
 

@@ -3,7 +3,6 @@
 Auto-extracted from server.py during the Feb 2026 modularization refactor.
 Behaviour is intentionally identical to the pre-split codebase.
 """
-from __future__ import annotations
 import os
 import re
 import uuid
@@ -11,9 +10,9 @@ import json
 import random
 import asyncio
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Any, List
+from typing import Optional, Any, List, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, Body
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
@@ -22,6 +21,8 @@ from auth import (
     hash_password, verify_password, create_token,
     get_current_user, require_role,
 )
+from infra import limiter
+from fastapi import Request
 from ai_service import (
     categorize_transaction, chat_stream, suggest_chart_of_accounts,
     onboarding_interview_questions, onboarding_interview_synthesize,
@@ -81,7 +82,8 @@ async def _clear_login_failures(email: str) -> None:
 # ----------------------- Auth endpoints -----------------------
 
 @router.post("/auth/login")
-async def login(inp: LoginIn):
+@limiter.limit("5/minute")
+async def login(request: Request, inp: Annotated[LoginIn, Body()]):
     email = inp.email.lower()
 
     # Locked-out branch. Surface the wait time (in minutes, rounded up)
@@ -118,7 +120,8 @@ async def login(inp: LoginIn):
 
 
 @router.post("/auth/signup")
-async def signup(inp: SignupIn):
+@limiter.limit("5/minute")
+async def signup(request: Request, inp: Annotated[SignupIn, Body()]):
     # Roles a self-service signup is allowed to mint. `pro` accounts can
     # be created through the public form (they'll get an empty firm
     # scope until they add clients); `affiliate` accounts are the new
@@ -468,7 +471,8 @@ class ChangePasswordIn(BaseModel):
 
 
 @router.post("/auth/change-password")
-async def change_password(inp: ChangePasswordIn, user: dict = Depends(get_current_user)):
+@limiter.limit("5/minute")
+async def change_password(request: Request, inp: Annotated[ChangePasswordIn, Body()], user: dict = Depends(get_current_user)):
     """Verify the current password, then rotate to the new one. Bcrypt hash
     is stored on the user doc as ``password`` (keeps the schema in sync
     with the rest of auth). Existing JWTs are left valid on purpose — the
@@ -546,7 +550,8 @@ class PasswordSetIn(BaseModel):
 
 
 @router.post("/auth/password-set/{token}")
-async def password_set_redeem(token: str, inp: PasswordSetIn):
+@limiter.limit("5/minute")
+async def password_set_redeem(request: Request, token: str, inp: Annotated[PasswordSetIn, Body()]):
     """Public — redeem the magic-link token, set the password, and issue
     a JWT so the client is logged in immediately. Single-use: the token
     is marked ``used`` before the JWT is returned, and any concurrent
@@ -620,7 +625,8 @@ async def _record_forgot_password_attempt(email: str) -> None:
 
 
 @router.post("/auth/forgot-password")
-async def forgot_password(inp: ForgotPasswordIn):
+@limiter.limit("3/minute")
+async def forgot_password(request: Request, inp: Annotated[ForgotPasswordIn, Body()]):
     email = str(inp.email).lower()
     # Rate-limit hit → silent no-op (still 200). Never reveals whether
     # the address is registered *or* whether it's rate-limited.

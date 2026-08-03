@@ -173,7 +173,6 @@ async def admin_usage(
     """
     from ai_usage import get_summary, SERVICE_UNIT_PRICE_USD
     summary = await get_summary(range_key=range, category=category)
-
     # Live Plaid item count → synthetic "plaid-linked-item-monthly" row.
     plaid_active = await db.plaid_items.count_documents({"revoked_at": None}) \
         if await db.plaid_items.count_documents({}) else 0
@@ -336,6 +335,203 @@ class EnterprisePatch(BaseModel):
     free_user_allotment: Optional[int] = Field(default=None, ge=0, le=10_000)
     default_product: Optional[str] = None
     default_discount: Optional[bool] = None
+
+
+# ──────────────────────────────────────────────────────────────────────
+# AI Spend — per-company reporting + one-shot backfill
+# ──────────────────────────────────────────────────────────────────────
+# The counter on `companies.ai_spend.{YYYY-MM}` is written by every LLM
+# call now (Feb 2026 unification). These endpoints let ops see the
+# picture without shelling into the database.
+
+@router.get("/admin/ai-spend/by-company")
+async def admin_ai_spend_by_company(
+    period: Optional[str] = Query(None, description="YYYY-MM; defaults to current UTC month"),
+    revenue_per_seat_usd: float = Query(75.0, ge=0, description="Used to compute AI-cost-as-share-of-revenue"),
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Every company's LLM spend for a period, ranked worst-first.
+
+    For each company returns:
+      - spent_usd (this period, all features)
+      - cap_usd (0 = unlimited)
+      - % of revenue eaten (spent / revenue_per_seat_usd)
+      - top 3 features driving the spend (from ai_spend_daily)
+      - status: over_cap | warn (>=80%) | ok
+    """
+    from datetime import datetime as _dt, timezone as _tz
+    p = period or _dt.now(_tz.utc).strftime("%Y-%m")
+
+    # 1) Grab the current-period counter for every company.
+    companies = await db.companies.find(
+        {}, {"id": 1, "name": 1, "ai_spend": 1, "insights_spend": 1,
+             "ai_spend_cap_cents": 1},
+    ).to_list(20000)
+
+    # 2) Aggregate top features per company from ai_spend_daily (or fall
+    #    back to ai_usage_events if the daily rollup is empty for a co).
+    day_prefix = p  # YYYY-MM matches YYYY-MM-DD prefix on `day`
+    top_features_pipeline = [
+        {"$match": {"day": {"$regex": f"^{day_prefix}"}}},
+        {"$group": {
+            "_id": {"company_id": "$company_id", "feature": "$feature"},
+            "cost_cents": {"$sum": "$cost_cents"},
+            "events": {"$sum": "$events"},
+        }},
+        {"$sort": {"cost_cents": -1}},
+    ]
+    features_by_company: dict[str, list] = {}
+    async for r in db.ai_spend_daily.aggregate(top_features_pipeline):
+        cid = r["_id"]["company_id"]
+        features_by_company.setdefault(cid, []).append({
+            "feature": r["_id"]["feature"],
+            "cost_usd": round(r["cost_cents"] / 100.0, 4),
+            "events": r["events"],
+        })
+
+    rows = []
+    for c in companies:
+        ai_cents = float((c.get("ai_spend") or {}).get(p) or 0)
+        legacy = float((c.get("insights_spend") or {}).get(p) or 0)
+        spent_cents = ai_cents + legacy
+        if spent_cents <= 0 and not features_by_company.get(c["id"]):
+            continue  # skip companies with zero AI activity
+        cap_cents = float(c.get("ai_spend_cap_cents") or 0)
+        share = (spent_cents / 100.0) / revenue_per_seat_usd \
+            if revenue_per_seat_usd > 0 else 0.0
+        status = "ok"
+        if cap_cents > 0:
+            if spent_cents >= cap_cents:
+                status = "over_cap"
+            elif spent_cents >= 0.8 * cap_cents:
+                status = "warn"
+        rows.append({
+            "company_id": c["id"],
+            "name": c.get("name") or "(unnamed)",
+            "spent_usd": round(spent_cents / 100.0, 4),
+            "cap_usd": round(cap_cents / 100.0, 2),
+            "share_of_revenue": round(share, 4),
+            "share_of_revenue_pct": round(share * 100, 2),
+            "top_features": features_by_company.get(c["id"], [])[:3],
+            "status": status,
+        })
+
+    rows.sort(key=lambda r: r["spent_usd"], reverse=True)
+    return {
+        "period": p,
+        "revenue_per_seat_usd": revenue_per_seat_usd,
+        "companies_with_activity": len(rows),
+        "total_spent_usd": round(sum(r["spent_usd"] for r in rows), 4),
+        "average_spent_usd_per_active": round(
+            sum(r["spent_usd"] for r in rows) / max(len(rows), 1), 4,
+        ),
+        "worst_offender": rows[0] if rows else None,
+        "rows": rows,
+    }
+
+
+@router.post("/admin/ai-spend/backfill")
+async def admin_ai_spend_backfill(
+    user: dict = Depends(require_role("superadmin")),
+):
+    """One-shot backfill — rebuilds `companies.ai_spend` + `ai_spend_daily`
+    from every event in `ai_usage_events`. Idempotent — clears both
+    derived stores first, then rebuilds. Safe to call anytime the
+    counters drift or after schema changes."""
+    from ai_usage import backfill_ai_spend_counters
+    return await backfill_ai_spend_counters()
+
+
+@router.get("/admin/ledger-integrity")
+async def admin_ledger_integrity(
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Detect ledger corruption from partial multi-doc writes.
+
+    Four checks — all run against live data. If any return non-zero
+    counts, ops has real work to do:
+
+      A. JE line sums don't tie (debits != credits) — cardinal double
+         entry violation.
+      B. JE doc-level `total_debit` / `total_credit` disagree with line
+         sums — latent reporting bug, doesn't hit balance-sheet math
+         today but any code path reading the header field is wrong.
+      C. Invoices / Bills with impossible `balance_due` (negative, or
+         > total) — points to partial writes during payment apply.
+      D. Payments where the linked invoice/bill status still says
+         'sent' / 'received' with a positive balance despite a payment
+         landing — the payment insert succeeded but the balance update
+         didn't.
+    """
+    unbalanced = []
+    stated_wrong_ct = 0
+    async for j in db.journal_entries.find({}):
+        lines = j.get("lines") or []
+        d_lines = round(sum(float(l.get("debit") or 0) for l in lines), 2)
+        c_lines = round(sum(float(l.get("credit") or 0) for l in lines), 2)
+        d_stated = float(j.get("total_debit") or 0)
+        c_stated = float(j.get("total_credit") or 0)
+        if abs(d_lines - c_lines) > 0.005:
+            unbalanced.append({
+                "id": j.get("id"), "company_id": j.get("company_id"),
+                "date": j.get("date"), "debit": d_lines, "credit": c_lines,
+                "diff": round(d_lines - c_lines, 4),
+                "memo": (j.get("memo") or "")[:80],
+            })
+        if abs(d_lines - d_stated) > 0.005 or abs(c_lines - c_stated) > 0.005:
+            stated_wrong_ct += 1
+
+    bad_inv = await db.invoices.count_documents({
+        "$expr": {"$or": [
+            {"$lt": ["$balance_due", -0.005]},
+            {"$gt": [{"$subtract": ["$balance_due", "$total"]}, 0.005]},
+        ]},
+    })
+    bad_bill = await db.bills.count_documents({
+        "$expr": {"$or": [
+            {"$lt": ["$balance_due", -0.005]},
+            {"$gt": [{"$subtract": ["$balance_due", "$total"]}, 0.005]},
+        ]},
+    })
+
+    # D — payments landed but the linked doc's status/balance_due still
+    # says unpaid. Sample the 200 most recent payments.
+    orphan_payments = []
+    async for p in db.payments.find({}).sort("created_at", -1).limit(200):
+        cid = p.get("company_id"); amt = float(p.get("amount") or 0)
+        for coll, fk in (("invoices", "linked_invoice_id"), ("bills", "linked_bill_id")):
+            ref = p.get(fk)
+            if not ref:
+                continue
+            doc = await db[coll].find_one({"id": ref, "company_id": cid})
+            if not doc:
+                orphan_payments.append({
+                    "payment_id": p["id"], "company_id": cid,
+                    "kind": coll[:-1], "missing_ref": ref,
+                })
+                continue
+            # If balance_due still equals the total AND amount > 0, the
+            # balance update never applied.
+            if abs(float(doc.get("balance_due") or 0) - float(doc.get("total") or 0)) < 0.005 \
+               and amt > 0.005 and (doc.get("status") in ("sent", "received", "draft", None)):
+                orphan_payments.append({
+                    "payment_id": p["id"], "company_id": cid,
+                    "kind": coll[:-1], "ref": ref,
+                    "reason": "payment landed but linked doc's balance untouched",
+                })
+
+    return {
+        "unbalanced_jes": unbalanced,
+        "unbalanced_je_count": len(unbalanced),
+        "stated_totals_mismatch_count": stated_wrong_ct,
+        "invoices_impossible_balance": bad_inv,
+        "bills_impossible_balance": bad_bill,
+        "orphan_payments": orphan_payments,
+        "orphan_payment_count": len(orphan_payments),
+        "clean": (len(unbalanced) == 0 and bad_inv == 0 and bad_bill == 0
+                  and len(orphan_payments) == 0),
+    }
+
 
 
 class EnterpriseCreate(BaseModel):

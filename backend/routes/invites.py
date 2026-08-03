@@ -28,13 +28,14 @@ from __future__ import annotations
 import secrets
 import uuid
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Literal
+from typing import Optional, Literal, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Body
 from pydantic import BaseModel, EmailStr, Field
 
 from db import db, now_iso, coerce
 from auth import get_current_user, require_role, hash_password
+from infra import limiter
 
 router = APIRouter(prefix="/api")
 
@@ -158,8 +159,10 @@ async def _send_invite_email(*, invite: dict, inviter: dict, company_names: list
 # ==========================================================================
 
 @router.post("/companies/{cid}/invites")
+@limiter.limit("10/minute")
 async def create_company_invite(
-    cid: str, inp: CompanyInviteIn,
+    request: Request,
+    cid: str, inp: Annotated[CompanyInviteIn, Body()],
     user: dict = Depends(get_current_user),
 ):
     """Client-owner (or Pro/superadmin managing that company) invites a
@@ -185,8 +188,10 @@ async def create_company_invite(
 
 
 @router.post("/pro/invites")
+@limiter.limit("10/minute")
 async def create_pro_invite(
-    inp: ProInviteIn, user: dict = Depends(require_role("pro", "superadmin")),
+    request: Request,
+    inp: Annotated[ProInviteIn, Body()], user: dict = Depends(require_role("pro", "superadmin")),
 ):
     """Pro invites another firm-staff user with role=pro. Only the client
     companies where the *inviter* has a pro-membership can be granted."""
@@ -216,8 +221,10 @@ async def create_pro_invite(
 
 
 @router.post("/admin/invites")
+@limiter.limit("10/minute")
 async def create_admin_invite(
-    inp: AdminInviteIn, user: dict = Depends(require_role("superadmin")),
+    request: Request,
+    inp: Annotated[AdminInviteIn, Body()], user: dict = Depends(require_role("superadmin")),
 ):
     """Superadmin invites another superadmin OR bootstraps a new Pro account."""
     invite = await _create_invite(
