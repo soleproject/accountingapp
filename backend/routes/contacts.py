@@ -16,6 +16,7 @@ from typing import Optional, Any, List
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, EmailStr, Field
+from pymongo.errors import DuplicateKeyError
 
 from db import db, now_iso, coerce
 from auth import (
@@ -123,11 +124,25 @@ async def create_contact(cid: str, inp: ContactCreate, user: dict = Depends(get_
     # Without this key set, every second manual contact creation in a given
     # company would fail with a duplicate-null-key error.
     from contact_resolver import normalize_contact_name  # local import to avoid cycle
-    payload["normalized_name"] = normalize_contact_name(payload.get("name"))
-    await db.contacts.insert_one({
-        "id": xid, "company_id": cid, **payload,
-        "created_at": now, "updated_at": now,
-    })
+    key = normalize_contact_name(payload.get("name"))
+    payload["normalized_name"] = key
+    # Race-safe upsert: two clients POSTing the same contact name simultaneously
+    # previously produced a 500 (E11000 duplicate key). Now we catch that
+    # collision, look up the existing doc, and return it — the caller sees
+    # the same shape and their intent ("give me a contact by this name") is
+    # honoured. This also handles the "click Create twice" UX pattern.
+    try:
+        await db.contacts.insert_one({
+            "id": xid, "company_id": cid, **payload,
+            "created_at": now, "updated_at": now,
+        })
+    except DuplicateKeyError:
+        existing = await db.contacts.find_one({"company_id": cid, "normalized_name": key})
+        if existing:
+            xid = existing.get("id") or xid
+        else:
+            # Extremely unlikely — unique key fired but no doc matches. Re-raise.
+            raise
     try:
         from infra import get_cache
         await get_cache().ainvalidate(cid)
@@ -864,8 +879,33 @@ async def contacts_import_commit(
         else:
             payload["id"] = str(uuid.uuid4())
             payload["created_at"] = now
-            await db.contacts.insert_one(payload)
-            created_ids.append(payload["id"])
+            # Race-safe: two concurrent imports of the same CSV, OR a Plaid sync
+            # inserting the same contact between our find_one and insert_one,
+            # previously raised E11000 and 500'd the import. Now we treat the
+            # race as "someone else won → treat as an update against the
+            # winner" so the import stays atomic per-row.
+            try:
+                await db.contacts.insert_one(payload)
+                created_ids.append(payload["id"])
+            except DuplicateKeyError:
+                winner = await db.contacts.find_one(
+                    {"company_id": cid, "normalized_name": key},
+                )
+                if winner:
+                    prev = {k: v for k, v in winner.items() if k != "_id"}
+                    # Build a fresh $set that omits identity/immutable fields —
+                    # note that motor's insert_one populates `_id` on `payload`
+                    # as a side effect, so filter `_id` explicitly too.
+                    update_payload = {k: v for k, v in payload.items()
+                                      if k not in ("id", "_id", "created_at")}
+                    await db.contacts.update_one(
+                        {"id": winner["id"], "company_id": cid},
+                        {"$set": update_payload},
+                    )
+                    updated_snapshots.append({"id": winner["id"], "prev": prev})
+                else:
+                    # Duplicate key fired but no matching doc — shouldn't happen
+                    raise
     # Write the batch log (only when something happened — a fully-
     # skipped import doesn't deserve a rollback row).
     log_id: Optional[str] = None

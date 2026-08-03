@@ -3726,3 +3726,131 @@ Every grant is written to `admin_audit_log` with kind=`superadmin_granted` (gran
 - [ ] Approve `--workers 4` today, `--workers 8` post-migration
 - [ ] Confirm cost path: self-managed ~$135/mo OR Atlas M10 ~$57/mo
 
+
+
+---
+
+## 2026-02-03 — MIGRATED TO ATLAS M10 ✅ (DONE, LIVE)
+
+### What happened
+User walked through the full runbook end-to-end. Migration completed in ~90 min, with ~1 min of API downtime during the `MONGO_URL` flip.
+
+### Key discoveries during migration
+- **Prod had ZERO backups configured on Railway Mongo before this session.** Fixed by setting up daily 03:00 UTC snapshots with 30-day retention as a safety net before migrating.
+- **`DB_NAME` = `axiom_prod`** (not `axiom` as previously assumed).
+- **Actual prod data is tiny** — 28.3 MB across 51 collections, 47,726 total docs.
+- **Contacts collection has 7,157 docs across 8 companies** — highly suggests DuplicateKeyError race from unfixed P3 issue is causing contact bloat. Dedup pass queued.
+
+### Migration path taken
+1. Signed up MongoDB Atlas → created M10 cluster `Accountingapp` in AWS us-west-1 (matches Railway) with Cloud Backups Enabled.
+2. Set IP allowlist to `0.0.0.0/0` (Railway has dynamic egress IPs).
+3. Created DB user `michael_db_user`.
+4. `mongodump --db=axiom_prod --archive=/tmp/prod.gz --gzip` from Railway Mongo Console → 5.8 MB archive in 1 sec.
+5. `mongorestore --uri="mongodb+srv://..." --archive=/tmp/prod.gz --gzip` → 47,726 docs restored, 0 failures in ~30 sec.
+6. Verified Atlas counts match Railway baseline exactly (all 10 spot-checked collections + total object count).
+7. Flipped `MONGO_URL` env var on Railway `accountingapp` service → auto-redeploy → live on Atlas.
+8. Confirmed live traffic on Atlas: 28.4 R/s, 0.5 W/s, 68 connections, spike visible at cutover moment.
+
+### Post-migration state
+- **Live prod**: Atlas M10 replica set (3 nodes), MongoDB 8.0.29, us-west-1, Continuous Cloud Backup + PITR.
+- **Railway MongoDB**: still running as hot rollback. Scheduled for deletion after 48h Atlas stability.
+- **Cost delta**: +$65/mo Atlas, -$40/mo Railway Mongo (once deleted) = net +$25/mo for enterprise-grade managed DB with PITR, transactions, and true HA.
+- **`MONGO_MAX_POOL_SIZE=100`** set on `accountingapp` Variables.
+
+### Immediate follow-ups (user's plate)
+- Smoke test live app flows (login, transactions, reports, AI features)
+- Rotate Atlas password (was in chat during migration)
+- Delete Railway MongoDB service after 48h clean run
+
+### Code work now UNBLOCKED (agent's plate, no downtime required)
+1. Thread `session=` through `POST /bills`, `POST /assets`, `POST /opening-balance`, `POST /bill-payments`. Wrap in `ledger_transaction()`. Atomicity now actually works.
+2. Wrap contact upsert in `try/except DuplicateKeyError → find existing → return 200` (fixes P3 recurring 500s, root cause of contact bloat).
+3. Remove single-node fallback warning from `db.py::_probe_txn_support` (no longer relevant).
+4. Bump `uvicorn --workers 4` → `--workers 8` with `MONGO_MAX_POOL_SIZE=75` (more concurrency now that pool is Atlas-backed).
+5. Write `test_ledger_atomicity.py` — force-fail rollback assertion.
+6. Contact dedup script — collapse the 7,157 duplicated contacts back to expected count.
+
+### Files touched
+- `/app/memory/RAILWAY_REPLICA_SET_MIGRATION.md` — original plan, now historical reference.
+- `/app/memory/PRD.md` — this entry.
+- **No code changes made in this session** — pure infrastructure migration.
+
+### Verified
+- Atlas count parity: 8 companies, 11 JEs, 15 users, 11200 txns, 13 invoices, 3 bills, 421 accts, 7157 contacts, 6 items, 4 payments (matches Railway exactly).
+- Total docs: 47,726 (Railway) = 47,726 (Atlas). Zero data loss.
+- Live traffic confirmed on Atlas Metrics dashboard (R 28.4/s, W 0.5/s, 68 conns at 12:03 PM cutover).
+
+
+
+---
+
+## 2026-02-03 (evening) — Sprint 1 partial: Contact race fix + Dedup script ✅
+
+### Delivered
+1. **Contact race fix** — `POST /api/companies/{cid}/contacts` and
+   `POST /api/companies/{cid}/contacts/import/commit` now catch
+   `DuplicateKeyError`, look up the winner, and return the same id
+   (manual create) or perform an update (import). Stops all 500s from
+   concurrent inserts of the same normalized name.
+
+2. **Contact dedup script** — `/app/backend/tests/dedupe_contacts.py`
+   Standalone CLI with `--apply` and `--company=<cid>` flags. Groups
+   contacts by (company_id, normalized_name), picks oldest as keeper,
+   repoints FKs across 9 collections (transactions, invoices, bills,
+   payments, receipts, communications, contact_learning_cache,
+   rule_candidates, rules), then deletes losers. Dry-run by default.
+
+3. **Pytest coverage** — 6/6 passing:
+   - `tests/test_contact_race_fix.py` (3 tests: manual race, import race, normalized collision)
+   - `tests/test_dedupe_contacts.py` (3 tests: grouping, apply, empty-key skip)
+
+4. **Shared test loop helper** — `/app/backend/tests/_shared_loop.py`.
+   Multiple test modules were creating their own event loops → motor
+   client (bound at import time in `db.py`) errored "attached to a
+   different loop" on the second module. Single shared loop fixes this
+   for any future async test file — just `from tests._shared_loop import run`.
+
+### To use the dedup script on Atlas prod
+```bash
+# Dry run — see what would happen (no changes)
+cd /app/backend && python -m tests.dedupe_contacts
+
+# Or per-company staged rollout
+python -m tests.dedupe_contacts --company=<cid>
+
+# LIVE (after reviewing the dry run)
+python -m tests.dedupe_contacts --apply
+```
+Take an Atlas snapshot before `--apply` (Atlas → Backup → Take Snapshot).
+The 7,157-contact bloat should collapse to a realistic per-company count.
+
+### Files touched
+- `/app/backend/routes/contacts.py` — added `DuplicateKeyError` import;
+  wrapped `create_contact` and `contacts_import_commit` inserts in
+  race-safe try/except.
+- `/app/backend/tests/dedupe_contacts.py` — NEW
+- `/app/backend/tests/test_contact_race_fix.py` — NEW
+- `/app/backend/tests/test_dedupe_contacts.py` — NEW
+- `/app/backend/tests/_shared_loop.py` — NEW (shared test utility)
+
+### Sprint 1 items still queued for next session
+- **Ledger transaction wrappers** on Bills / Assets / Opening-Balance /
+  Bill-Payments. Deferred because it requires threading `session=` through
+  the entire 965-line `inventory_service.py` including `apply_bill_inventory`,
+  `_ensure_accounts_payable`, `_record_movement`, `_reverse_bill_hooks`,
+  `insert_je`. Missing a `session=` anywhere = write escapes the transaction
+  silently. Wants dedicated focus session.
+- **Worker bump** `--workers 4 → 8` with `MONGO_MAX_POOL_SIZE=75`. Just a
+  Railway config change — see Instructions below.
+- **Remove single-node fallback warning** from `db.py::_probe_txn_support`
+  (no longer relevant with Atlas replica set).
+
+### Railway config change (user's plate, 2 min)
+Railway → `accountingapp` service:
+- Variables tab: change `MONGO_MAX_POOL_SIZE` from `100` → `75`
+- Settings → Start Command: update to `uvicorn server:app --workers 8 --host 0.0.0.0 --port $PORT`
+- Save → auto-redeploys → ~30s of API 502s
+
+This gives 8 workers × 75 pool = 600 concurrent DB sockets, well under
+Atlas M10's 1500 limit, with more Python heap for concurrent report queries.
+
