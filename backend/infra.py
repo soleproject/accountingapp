@@ -30,6 +30,14 @@ from slowapi.util import get_remote_address
 # Rate limiter — slowapi. In-memory store (fine for single pod). Point at
 # REDIS_URL for multi-pod deployments; slowapi picks it up automatically when
 # passed as `storage_uri`.
+#
+# CRITICAL: if `REDIS_URL` is set but Redis is unreachable at request time,
+# slowapi lets the ConnectionError bubble up and 500s the endpoint — which
+# turned every /auth/login into an Internal Server Error the one time our
+# Redis service went down. Wrap slowapi in a fail-open guard so a Redis
+# outage never brings auth down. Brute-force protection has a Mongo-backed
+# second layer (`auth_rate_limits` in routes/auth.py) so we're not defenceless
+# if Redis stops rate-limiting for a few minutes.
 # ---------------------------------------------------------------------------
 
 _STORAGE_URI = os.environ.get("REDIS_URL") or "memory://"
@@ -64,6 +72,12 @@ limiter = Limiter(
     key_func=_rate_limit_key,
     storage_uri=_STORAGE_URI,
     default_limits=["600/minute"],  # global safety net (10 rps per bucket)
+    # `swallow_errors=True` makes slowapi fail-open on any storage-backend
+    # error (Redis down, connection timeout, EVALSHA missing script, etc.).
+    # Requests pass through un-rate-limited rather than 500-ing. The auth
+    # brute-force layer in routes/auth.py (Mongo-backed) still enforces
+    # per-email lockout, so we're not fully defenceless if Redis dies.
+    swallow_errors=True,
 )
 
 
