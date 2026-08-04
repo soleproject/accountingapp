@@ -40,7 +40,33 @@ from slowapi.util import get_remote_address
 # if Redis stops rate-limiting for a few minutes.
 # ---------------------------------------------------------------------------
 
-_STORAGE_URI = os.environ.get("REDIS_URL") or "memory://"
+def _probe_redis(url: str, timeout: float = 0.3) -> bool:
+    """Synchronous best-effort TCP probe. Falls back to memory:// if Redis
+    is unreachable at boot so slowapi doesn't crash requests with a stale
+    connection that keeps failing (swallow_errors leaves request.state
+    without view_rate_limit → AttributeError inside async_wrapper).
+    """
+    try:
+        from urllib.parse import urlparse
+        import socket
+        p = urlparse(url)
+        host = p.hostname or "127.0.0.1"
+        port = p.port or 6379
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+_REDIS_URL = os.environ.get("REDIS_URL")
+if _REDIS_URL and _probe_redis(_REDIS_URL):
+    _STORAGE_URI = _REDIS_URL
+else:
+    if _REDIS_URL:
+        logging.getLogger("infra").warning(
+            "REDIS_URL set but unreachable at boot — falling back to in-memory rate limiter"
+        )
+    _STORAGE_URI = "memory://"
 
 
 def _rate_limit_key(request) -> str:
@@ -423,6 +449,15 @@ def init_infra(app: FastAPI) -> None:
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):
+        # Pre-seed slowapi's per-request rate-limit state. If the storage
+        # backend errors and `swallow_errors=True` catches it, slowapi's
+        # async_wrapper still tries to read this attribute for the response
+        # headers, which raises AttributeError → 500. Seed it to None so
+        # the header-injection path becomes a no-op instead of exploding.
+        try:
+            request.state.view_rate_limit = None
+        except Exception:  # noqa: BLE001
+            pass
         rid = request.headers.get("x-request-id") or str(uuid.uuid4())
         start = time.perf_counter()
         try:
