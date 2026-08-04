@@ -228,6 +228,17 @@ async def upload_statement(
     except Exception:  # noqa: BLE001
         pass
 
+    # -------- Auto-classify contact types from txn direction ---------
+    # Freshly created contacts (from this statement upload) land with
+    # `type: None`. Now that transactions have posted with `contact_id`
+    # set, we can infer type from sign of amount so Customers/Vendors
+    # pages populate automatically. Best-effort — never fail the upload.
+    try:
+        from contact_resolver import reclassify_contact_types
+        await reclassify_contact_types(cid, respect_manual=True)
+    except Exception:  # noqa: BLE001
+        pass
+
     return {
         "import_id": import_id,
         "status": "completed",

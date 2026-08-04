@@ -593,3 +593,113 @@ def _cache_upsert_op(company_id: str, signature: str,
         },
         upsert=True,
     )
+
+
+
+# ---------------------------------------------------------------------------
+# Auto-classify contact type from transaction direction (Feb 2026)
+#
+# Contacts created by Plaid syncs / Veryfi statement uploads / AI categorizer
+# land with `type: None` on purpose — we don't know at the moment of creation
+# whether the counterparty is a customer or a vendor. That's a real gap:
+# users would connect Plaid, see 8,000 contacts, then find Customers / Vendors
+# pages both empty because everyone was null.
+#
+# This function looks at every transaction referencing a given contact_id and
+# infers `type` from the sign of the amount:
+#   • all amounts > 0  (money in)   → "customer"
+#   • all amounts < 0  (money out)  → "vendor"
+#   • mix of signs                  → "both" (frontend already surfaces
+#                                     these on BOTH the Customers and
+#                                     Vendors pages)
+#   • no transactions found          → leave as-is (still user-taggable)
+#
+# `respect_manual` (default True) skips contacts where a human has already
+# set `type` to something intentional (i.e. not None and not our own
+# auto-inferred value). That way this can safely re-run after every Plaid
+# sync without ever stomping a manual tag.
+# ---------------------------------------------------------------------------
+
+async def reclassify_contact_types(
+    company_id: str,
+    respect_manual: bool = True,
+    contact_ids: list[str] | None = None,
+) -> dict:
+    """Classify every (or a specific set of) contact into customer / vendor / both
+    based on the direction of transactions that reference them.
+
+    Returns a summary dict:
+      {
+        "scanned":   N,   # contacts considered
+        "updated":   N,   # contacts whose type actually changed
+        "customer":  N,   # contacts newly marked customer
+        "vendor":    N,
+        "both":      N,
+        "skipped":   N,   # already had a manual type (respect_manual)
+        "no_txn":    N,   # no transactions referencing this contact yet
+      }
+    """
+    match: dict = {"company_id": company_id}
+    if contact_ids is not None:
+        match["id"] = {"$in": list(contact_ids)}
+    if respect_manual:
+        # Only touch contacts that are un-typed OR were previously
+        # auto-classified by this same routine (marked via
+        # `type_source: "auto"`). Manual tags survive intact.
+        match["$or"] = [
+            {"type": None},
+            {"type": {"$exists": False}},
+            {"type_source": "auto"},
+        ]
+
+    summary = {"scanned": 0, "updated": 0, "customer": 0, "vendor": 0,
+               "both": 0, "skipped": 0, "no_txn": 0}
+    now = now_iso()
+
+    async for contact in db.contacts.find(match):
+        summary["scanned"] += 1
+        cid = contact["id"]
+
+        # Aggregate this contact's transactions into a signs bucket.
+        # $facet gives us both sums in one round-trip. `amount > 0`
+        # signals customer inflow, `amount < 0` signals vendor outflow.
+        pipeline = [
+            {"$match": {"company_id": company_id, "contact_id": cid}},
+            {"$facet": {
+                "in":  [{"$match": {"amount": {"$gt": 0}}}, {"$count": "n"}],
+                "out": [{"$match": {"amount": {"$lt": 0}}}, {"$count": "n"}],
+            }},
+        ]
+        agg = await db.transactions.aggregate(pipeline).to_list(1)
+        row = agg[0] if agg else {"in": [], "out": []}
+        n_in = (row.get("in") or [{}])[0].get("n", 0) if row.get("in") else 0
+        n_out = (row.get("out") or [{}])[0].get("n", 0) if row.get("out") else 0
+
+        if n_in == 0 and n_out == 0:
+            summary["no_txn"] += 1
+            continue
+
+        if n_in > 0 and n_out > 0:
+            new_type = "both"
+        elif n_in > 0:
+            new_type = "customer"
+        else:
+            new_type = "vendor"
+
+        # Skip write if the value hasn't changed.
+        if contact.get("type") == new_type:
+            summary[new_type] += 1
+            continue
+
+        await db.contacts.update_one(
+            {"id": cid, "company_id": company_id},
+            {"$set": {
+                "type": new_type,
+                "type_source": "auto",       # tag as auto so future manual
+                "updated_at": now,           # edits by the user can be
+            }},                              # respected on re-runs
+        )
+        summary["updated"] += 1
+        summary[new_type] += 1
+
+    return summary

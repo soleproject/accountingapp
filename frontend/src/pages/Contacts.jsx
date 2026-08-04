@@ -332,6 +332,28 @@ export default function Contacts() {
             </button>
           )}
           <button
+            onClick={async () => {
+              try {
+                const r = await api.post(`/companies/${currentId}/contacts/reclassify`);
+                const s = r.data || {};
+                toast.success(
+                  `Auto-classified ${s.updated} contacts — ` +
+                  `${s.customer} customer${s.customer === 1 ? "" : "s"}, ` +
+                  `${s.vendor} vendor${s.vendor === 1 ? "" : "s"}, ` +
+                  `${s.both} both`
+                );
+                await load();
+              } catch (err) {
+                toast.error(err.response?.data?.detail || "Auto-classify failed");
+              }
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-emerald-300 bg-emerald-50 text-emerald-800 text-xs hover:bg-emerald-100"
+            data-testid="contacts-auto-classify-btn"
+            title="Detect customer/vendor/both from transaction direction. Manual tags are preserved."
+          >
+            <Sparkles size={13} /> Auto-classify
+          </button>
+          <button
             onClick={() => setImportOpen(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-indigo-300 bg-indigo-50 text-indigo-800 text-xs hover:bg-indigo-100"
             data-testid="contacts-import-btn"
