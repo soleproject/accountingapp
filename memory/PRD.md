@@ -3880,3 +3880,40 @@ Atlas M10's 1500 limit, with more Python heap for concurrent report queries.
 ### Next session kickoff
 Full prompt in `RESTAURANT_VERTICAL_ROADMAP.md` §12. Starts with Week 1–2 foundation work: vertical field, locations collection, feature flag scaffold, multi-location report scoping, onboarding wizard branch. All additive to existing base product.
 
+
+
+
+---
+
+## 2026-02-03 (very late) — Hotfix: slowapi Redis outage 500'd all logins 🚨
+
+### Symptom
+User reported "Demo login failed" on prod. Direct `curl POST /api/auth/login` returned HTTP 500 "Internal Server Error" with no JSON body. Every login attempt affected.
+
+### Root cause
+`/app/backend/infra.py::limiter` was configured with `storage_uri=REDIS_URL` but Redis was unreachable (Connection refused on 127.0.0.1:6379). slowapi's default behavior on storage-backend errors is to **let the ConnectionError bubble up**, which took down every rate-limited endpoint — including `/api/auth/login`.
+
+Stack trace pinpointed:
+```
+slowapi/extension.py __evaluate_limits → limits/storage/redis.py incr →
+redis.exceptions.ConnectionError: Error 111 connecting to 127.0.0.1:6379
+```
+
+### Fix
+Added `swallow_errors=True` to the `Limiter()` constructor. Now if Redis is down / unreachable / times out, slowapi silently skips the rate-limit check and the request passes through. The Mongo-backed brute-force layer in `routes/auth.py::_login_failures_recent` still enforces per-email lockout.
+
+### Verified
+Local test with Redis down:
+- Before fix: `POST /api/auth/login` with wrong password → HTTP 500 (crash)
+- After fix: `POST /api/auth/login` with wrong password → HTTP 401 (correct rejection)
+
+### Files touched
+- `/app/backend/infra.py` — added `swallow_errors=True` + comment explaining why
+
+### User's immediate action (unblock)
+- Delete `REDIS_URL` env var from Railway `accountingapp` → memory:// fallback → login works in 60s
+
+### User's follow-up (harden)
+- Push this infra.py fix via Save-to-GitHub → PR merge → Railway auto-deploy
+- Investigate why Redis went down (or if it was ever really up on Railway)
+- If wanting proper multi-worker rate limiting: sign up Upstash (free tier) → paste URL back into `REDIS_URL`
