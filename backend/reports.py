@@ -1166,7 +1166,32 @@ async def compute_account_detail(company_id: str, account_id: str,
     else:
         account = account_docs[0]
 
-    mongo_q: dict = {"company_id": company_id, "category_account_id": {"$in": [a["id"] for a in account_docs]}}
+    # The Account Detail page has two personalities depending on what you
+    # click on the Balance Sheet or Income Statement:
+    #
+    #   • Bank / Cash / Credit-Card row  → you want to see MOVEMENTS through
+    #     that account (deposits + withdrawals). Those rows carry the account
+    #     in `account_id`, not `category_account_id`.
+    #
+    #   • Expense / Revenue / Liability payment row → you want to see
+    #     transactions categorised AS that account. Those rows carry it in
+    #     `category_account_id`.
+    #
+    # Previously the query only matched `category_account_id`, which meant
+    # clicking any bank/cash row showed "No transactions" even though the
+    # Balance Sheet clearly displayed a non-zero balance. Now we match on
+    # either side so every account type drills correctly. Duplicate hits
+    # (a transaction that references the same account on both sides — e.g.
+    # an internal transfer) collapse naturally because Mongo returns each
+    # doc once.
+    acct_id_list = [a["id"] for a in account_docs]
+    mongo_q: dict = {
+        "company_id": company_id,
+        "$or": [
+            {"category_account_id": {"$in": acct_id_list}},
+            {"account_id": {"$in": acct_id_list}},
+        ],
+    }
     if start:
         mongo_q.setdefault("date", {})["$gte"] = start
     if end:
