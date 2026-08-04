@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
@@ -25,6 +25,7 @@ export default function JournalEntries() {
   useEffect(() => { load(); }, [currentId]);
 
   const [params] = useSearchParams();
+  const navigate = useNavigate();
   useEffect(() => {
     const hl = params.get("highlight");
     if (!hl || !entries.length) return;
@@ -44,6 +45,24 @@ export default function JournalEntries() {
 
   return (
     <div className="space-y-4">
+      {params.get("from") === "gl" && (
+        <nav
+          aria-label="Breadcrumb"
+          data-testid="je-gl-breadcrumb"
+          className="text-sm text-slate-500 flex items-center gap-2"
+        >
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            className="hover:text-slate-900 hover:underline"
+            data-testid="je-gl-back-link"
+          >
+            ← General Ledger
+          </button>
+          <span aria-hidden="true">/</span>
+          <span className="text-slate-900 font-medium">Journal Entry</span>
+        </nav>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-heading text-3xl font-bold tracking-tight">Journal Entries</h1>

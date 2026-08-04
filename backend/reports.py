@@ -569,7 +569,7 @@ async def compute_general_ledger(company_id: str, start: str, end: str):
             "entries": rows,
             "total": rows[-1]["balance"] if rows else round(opening_disp, 2),
         })
-    sections.sort(key=lambda s: s["code"])
+    sections.sort(key=lambda s: s["code"] or "")
     return {
         "company_name": company["name"] if company else "",
         "period_start": start, "period_end": end, "sections": sections,
