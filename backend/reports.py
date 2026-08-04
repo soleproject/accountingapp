@@ -1171,25 +1171,34 @@ async def compute_account_detail(company_id: str, account_id: str,
     #
     #   • Bank / Cash / Credit-Card row  → you want to see MOVEMENTS through
     #     that account (deposits + withdrawals). Those rows carry the account
-    #     in `account_id`, not `category_account_id`.
+    #     in `bank_account_id` (Plaid/manual imports) or `account_id` (legacy).
     #
     #   • Expense / Revenue / Liability payment row → you want to see
     #     transactions categorised AS that account. Those rows carry it in
-    #     `category_account_id`.
+    #     `category_account_id` (or inside `splits[].category_account_id`).
     #
-    # Previously the query only matched `category_account_id`, which meant
-    # clicking any bank/cash row showed "No transactions" even though the
-    # Balance Sheet clearly displayed a non-zero balance. Now we match on
-    # either side so every account type drills correctly. Duplicate hits
-    # (a transaction that references the same account on both sides — e.g.
-    # an internal transfer) collapse naturally because Mongo returns each
-    # doc once.
+    # Previously the query only matched `category_account_id` + `account_id`,
+    # so any bank/asset account whose transactions posted via `bank_account_id`
+    # (the standard field used by `_signed_balances` for the BS balance) came
+    # back empty even though the Balance Sheet clearly showed a non-zero
+    # balance. Now we match on all three fields plus the splits array so
+    # every account type drills correctly. Duplicate hits (a transaction that
+    # references the same account on both sides — e.g. an internal transfer)
+    # collapse naturally because Mongo returns each doc once.
     acct_id_list = [a["id"] for a in account_docs]
+    # Match `_signed_balances`: only count `posted=True` transactions so the
+    # drill-down running balance ties to the Balance Sheet / Income Statement
+    # figure the user clicked on. Unposted (needs-review) rows are excluded
+    # because they aren't in the BS balance either.
     mongo_q: dict = {
         "company_id": company_id,
+        "posted": True,
         "$or": [
             {"category_account_id": {"$in": acct_id_list}},
             {"account_id": {"$in": acct_id_list}},
+            {"bank_account_id": {"$in": acct_id_list}},
+            {"splits.category_account_id": {"$in": acct_id_list}},
+            {"splits.account_id": {"$in": acct_id_list}},
         ],
     }
     if start:
@@ -1224,25 +1233,113 @@ async def compute_account_detail(company_id: str, account_id: str,
 
     filtered = [t for t in txns if _match(t)]
 
-    running = 0.0
-    rows: list[dict] = []
+    acct_id_set = set(acct_id_list)
+
+    # Also pull JE lines that hit this account — `_signed_balances` includes
+    # them in the Balance Sheet figure, so the drill-down needs to as well
+    # (opening balances, transfers, manual/adjusting JEs, GL import, etc.).
+    je_q: dict = {"company_id": company_id, "lines.account_id": {"$in": acct_id_list}}
+    je_date_filter: dict = {}
+    if start:
+        je_date_filter["$gte"] = start
+    if end:
+        je_date_filter["$lte"] = end
+    if je_date_filter:
+        je_q["date"] = je_date_filter
+    jes = await db.journal_entries.find(je_q).to_list(5000)
+
+    je_rows: list[dict] = []
+    for j in jes:
+        for line in j.get("lines", []):
+            if line.get("account_id") not in acct_id_set:
+                continue
+            d = float(line.get("debit", 0) or 0)
+            c = float(line.get("credit", 0) or 0)
+            memo = line.get("description") or line.get("memo") or j.get("memo") or j.get("reference") or "Journal Entry"
+            if needle and needle not in memo.lower():
+                continue
+            amt = d - c  # signed raw ledger amount (debit +, credit -)
+            if min_amount is not None and abs(amt) < float(min_amount) - 0.001:
+                continue
+            if max_amount is not None and abs(amt) > float(max_amount) + 0.001:
+                continue
+            je_rows.append({
+                "id": j.get("id"),
+                "je_id": j.get("id"),
+                "date": j.get("date"),
+                "merchant": memo,
+                "description": memo,
+                "contact_name": "",
+                "amount": round(amt, 2),
+                # Raw delta already carries the right sign for the ledger; same
+                # convention as `_signed_balances` (debit +, credit −).
+                "_je_delta": amt,
+                "source": "JE",
+            })
+
+    # Delta convention:
+    #   • For a bank/asset account row → the account is on the `bank_account_id`
+    #     side, so the movement equals the transaction amount directly
+    #     (deposit +$100 raises the balance by $100).
+    #   • For a category row (expense/revenue/liability/equity) → the account
+    #     is on the `category_account_id` (or `splits[]`) side, so the
+    #     movement is `-amount` (an expense transaction of -$100 raises the
+    #     expense balance by $100).
+    #   • For split lines that reference the account, use the split's own
+    #     amount with the same sign flip.
+
+    def _row_delta(t: dict) -> float:
+        amt = float(t.get("amount") or 0.0)
+        # Bank-side match?
+        if (t.get("bank_account_id") in acct_id_set) or (t.get("account_id") in acct_id_set):
+            return amt
+        # Split-line match?
+        for s in (t.get("splits") or []):
+            sid = s.get("category_account_id") or s.get("account_id")
+            if sid in acct_id_set:
+                return -float(s.get("amount") or 0.0)
+        # Category-side match (default).
+        return -amt
+
+    # Merge txn rows + JE rows, sort oldest → newest so the running balance
+    # accumulates in ledger order.
+    all_rows: list[dict] = []
     for t in filtered:
-        # Liability / equity / revenue accounts have credit-normal balances,
-        # so an outflow (negative amount) *raises* the balance. We use
-        # `-amount` as the ledger delta to match the balance-sheet display.
-        delta = -1 * (t.get("amount") or 0.0)
-        running += delta
-        rows.append({
+        delta = _row_delta(t)
+        all_rows.append({
             "id": t.get("id"),
             "date": t.get("date"),
             "merchant": t.get("merchant") or t.get("contact_name") or t.get("description"),
             "description": t.get("description"),
             "contact_name": t.get("contact_name") or "",
             "amount": round(t.get("amount") or 0.0, 2),
-            "delta": round(delta, 2),
-            "running": round(running, 2),
+            "_delta": delta,
             "needs_review": bool(t.get("needs_review")),
+            "source": "Txn",
         })
+    for jr in je_rows:
+        all_rows.append({
+            "id": jr["id"],
+            "je_id": jr["je_id"],
+            "date": jr["date"],
+            "merchant": jr["merchant"],
+            "description": jr["description"],
+            "contact_name": jr["contact_name"],
+            "amount": jr["amount"],
+            "_delta": jr["_je_delta"],
+            "needs_review": False,
+            "source": "JE",
+        })
+    all_rows.sort(key=lambda r: (r.get("date") or "", r.get("id") or ""))
+
+    running = 0.0
+    rows: list[dict] = []
+    for r in all_rows:
+        delta = float(r.pop("_delta"))
+        running += delta
+        r["delta"] = round(delta, 2)
+        r["running"] = round(running, 2)
+        rows.append(r)
     # Newest → oldest for display.
     rows.reverse()
 
@@ -1254,7 +1351,7 @@ async def compute_account_detail(company_id: str, account_id: str,
         },
         "rows": rows,
         "count": len(rows),
-        "sum_amount": round(sum(t.get("amount") or 0.0 for t in filtered), 2),
+        "sum_amount": round(sum(r.get("amount") or 0.0 for r in rows), 2),
         "balance": round(running, 2),
         "period_start": start,
         "period_end": end,

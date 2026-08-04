@@ -17,6 +17,15 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Balance Sheet asset drill-down now ties to the BS balance
+
+**Backend** (`reports.py::compute_account_detail`)
+- Bank/asset accounts on the Balance Sheet previously drilled into an empty Account Detail page ("No transactions have posted to this account") even though the row clearly showed a non-zero balance. Root cause: `_signed_balances` (source of BS numbers) reads `transactions.bank_account_id` for the bank side, but the drill-down query was matching only `account_id` + `category_account_id` — so a bank account whose movements landed on `bank_account_id` (the standard field used by Plaid + manual imports) came back empty.
+- Extended the `$or` match to include `bank_account_id`, `splits.category_account_id`, and `splits.account_id`. Added `posted: True` to align with the Balance Sheet's filter so the drill-down running balance matches to the penny.
+- Rewrote the per-row delta computation to sign-correct based on which side the account is on: bank-side matches take the transaction amount directly (+$100 deposit → +$100 balance), category-side and split matches use `-amount` (as before). Prior code always used `-amount` and would have shown the wrong sign for bank rows.
+- Merged in matching `journal_entries.lines[]` (`account_id ∈ acct_id_list`) alongside transaction rows so opening balances, transfers, adjusting JEs, and GL-imported history show up in the drill-down. Rows are re-sorted oldest→newest before running-balance accumulation.
+- **Verified live**: Bright Beans `1010 · Business Checking` — BS says $18,078.17 → Account Detail returns 171 txns / balance $18,078.17. Regression check on expense side: `6000 · Meals` YTD returns -$3,013.31 which matches Income Statement.
+
 ### Feb 2026 — Payments source-link + GL "Open source" open the actual transaction + breadcrumb
 
 **Frontend** (`pages/ReportView.jsx`, `pages/Transactions.jsx`, `pages/JournalEntries.jsx`, `pages/Payments.jsx`)
