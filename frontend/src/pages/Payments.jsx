@@ -161,7 +161,7 @@ export default function Payments() {
                   <div className="inline-flex items-center gap-1">
                     {p.source_transaction_id && (
                       <Link
-                        to={`/accounting/transactions?open=${p.source_transaction_id}`}
+                        to={`/accounting/transactions?open=${p.source_transaction_id}&from=payments`}
                         data-testid={`payment-source-txn-${p.id}`}
                         title="View originating transaction"
                         className="p-1 rounded hover:bg-indigo-100 text-indigo-600"

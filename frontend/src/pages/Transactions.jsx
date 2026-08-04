@@ -900,19 +900,19 @@ export default function Transactions() {
       <Step2Tour open={step2TourOpen} onDone={closeStep2Tour} />
       <Step3BTour open={step3bTourOpen} onDone={closeStep3BTour} />
       <MonthCloseBreadcrumb />
-      {params.get("from") === "gl" && (
+      {(params.get("from") === "gl" || params.get("from") === "payments") && (
         <nav
           aria-label="Breadcrumb"
-          data-testid="transactions-gl-breadcrumb"
+          data-testid="transactions-source-breadcrumb"
           className="text-sm text-slate-500 flex items-center gap-2"
         >
           <button
             type="button"
             onClick={() => navigate(-1)}
             className="hover:text-slate-900 hover:underline"
-            data-testid="transactions-gl-back-link"
+            data-testid="transactions-source-back-link"
           >
-            ← General Ledger
+            ← {params.get("from") === "payments" ? "Payments" : "General Ledger"}
           </button>
           <span aria-hidden="true">/</span>
           <span className="text-slate-900 font-medium">Transaction</span>
