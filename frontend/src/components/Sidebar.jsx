@@ -150,6 +150,18 @@ const isItemActive = (loc, item, sticky = {}, groupKey = null) => {
   const p = item.matchPath || item.to.split("?")[0];
   const pathHit = loc.pathname === p || loc.pathname.startsWith(p + "/");
   if (!pathHit) return false;
+
+  // Special case for query-param-scoped items (Customers, Vendors, etc.):
+  // when the CURRENT URL has zero relevant query params, ONLY the item
+  // whose `to` also has zero query params (i.e. the "all" landing view)
+  // should light up. This prevents the "click sidebar Contacts → sidebar
+  // still shows Customers highlighted" bug where sticky state from a
+  // prior Customers visit would latch onto the plain `/contacts` URL.
+  const targetHasQuery = (item.to.split("?")[1] || "").length > 0;
+  const currentHasQuery = (loc.search || "").length > 0;
+  if (!currentHasQuery && targetHasQuery) return false;
+  if (!currentHasQuery && !targetHasQuery) return true;
+
   // Sticky override — when the pathname has multiple sidebar entries,
   // only the last-clicked one lights up (regardless of ?type= / ?direction=).
   // Match by BOTH groupKey and label because sibling groups may share
