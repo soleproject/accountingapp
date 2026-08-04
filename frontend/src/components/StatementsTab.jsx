@@ -139,23 +139,7 @@ export default function StatementsTab({ companyId, bare = false }) {
       toast.error(`Too large (>25 MB): ${oversized.map(f => f.name).join(", ")}`);
       return;
     }
-    // Throttle to 2 concurrent uploads. Firing ALL at once (previously
-    // `for (const f of arr) uploadOne(f)` without await) overwhelmed both
-    // our backend workers AND Veryfi's per-partner concurrency limit,
-    // causing spurious "Network Error" toasts on ~half the files. Two
-    // concurrent uploads keeps the pipeline warm without hitting either
-    // ceiling — the remaining files queue up behind the first two.
-    (async () => {
-      const queue = [...arr];
-      const CONCURRENCY = 2;
-      const workers = Array.from({ length: CONCURRENCY }, async () => {
-        while (queue.length) {
-          const f = queue.shift();
-          if (f) await uploadOne(f);
-        }
-      });
-      await Promise.all(workers);
-    })();
+    for (const f of arr) uploadOne(f);
   };
 
   const clearCompleted = () => {
