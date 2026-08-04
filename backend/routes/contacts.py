@@ -1009,3 +1009,31 @@ async def contacts_import_undo(
     except Exception:  # noqa: BLE001
         pass
     return {"ok": True, "deleted": deleted, "restored": restored}
+
+
+
+@router.post("/companies/{cid}/contacts/reclassify")
+async def contacts_reclassify(
+    cid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Auto-classify every contact's `type` from the direction of transactions
+    that reference it (money-in → customer, money-out → vendor, mixed → both).
+
+    Only touches contacts that are un-typed OR were previously auto-classified
+    by this same routine (marked via `type_source: "auto"`). Manual tags set
+    by the user are always preserved.
+
+    Wired in as a manual "Auto-classify all" button on the Contacts page for
+    now; will also be triggered automatically after Plaid sync completions
+    and Veryfi statement uploads in a follow-up so it feels magical instead
+    of user-initiated.
+    """
+    await require_company(user, cid)
+    from contact_resolver import reclassify_contact_types
+    summary = await reclassify_contact_types(cid, respect_manual=True)
+    try:
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+    return summary

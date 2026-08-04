@@ -280,4 +280,13 @@ async def sync_and_import(cid: str, item: dict, selected_account_ids: list[str] 
 
     if imported:
         await log_ai(cid, "webhook_sync", imported)
+        # Auto-classify any freshly-created contacts based on the direction
+        # of transactions we just inserted. Best-effort — never fail the
+        # sync because classification failed. Runs after transactions land
+        # so `contact_id → amount sign` is queryable.
+        try:
+            from contact_resolver import reclassify_contact_types
+            await reclassify_contact_types(cid, respect_manual=True)
+        except Exception:  # noqa: BLE001
+            pass
     return imported
