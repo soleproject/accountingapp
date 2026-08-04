@@ -90,6 +90,13 @@ const AFTER_PURCHASES = [
 // Between banking and accounting:
 const AFTER_BANKING = [
   { to: "/reports", label: "Reports", icon: BarChart3 },
+  // Consolidated Contacts entry — the Customers / Vendors items under
+  // Sales & Purchases filter by `?type=`, but auto-imported contacts
+  // (Plaid syncs, Veryfi statement uploads) land with `type: null`
+  // pending manual tagging, which made them invisible to those filtered
+  // views. This "All contacts" landing sits between Reports and
+  // Accounting so users can find every contact regardless of type.
+  { to: "/contacts", label: "Contacts", icon: Users, matchPath: "/contacts" },
 ];
 // After accounting group:
 const STANDALONE_BOTTOM = [
