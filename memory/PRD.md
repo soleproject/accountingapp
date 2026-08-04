@@ -17,6 +17,17 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Payments source-link + GL "Open source" open the actual transaction + breadcrumb
+
+**Frontend** (`pages/ReportView.jsx`, `pages/Transactions.jsx`, `pages/JournalEntries.jsx`, `pages/Payments.jsx`)
+- General Ledger source chip (`Txn`) previously navigated to `/accounting/transactions?highlight=<tid>` — which only scrolled and flashed the row. Users had to hunt through pagination and open the transaction manually. Changed to `?open=<tid>&from=gl` so the Edit Transaction modal opens automatically on the exact source transaction.
+- Payments page Link icon (`payment-source-txn-*`) now appends `&from=payments` so the same modal-open behavior fires with a `← Payments / Transaction` breadcrumb.
+- Split chip still uses `?highlight=<tid>&open=split&from=gl` (opens the split editor as before). JE chip uses `?highlight=<je_id>&from=gl`.
+- Added a shared breadcrumb component (`transactions-source-breadcrumb`) at the top of the Transactions page that flips its label between "General Ledger" and "Payments" based on `?from=`. Journal Entries page has a matching breadcrumb for `?from=gl` on JE chips. Back-link fires `navigate(-1)` and returns the user to the exact source page + scroll position.
+
+**Backend** (`reports.py`)
+- Hardened `compute_general_ledger` — `sections.sort(key=lambda s: s["code"] or "")` — one account without a `code` (`None`) was crashing the whole GL response with `TypeError: '<' not supported between instances of 'NoneType' and 'str'`.
+
 ### Feb 2026 — Contact drill-down white-screen fix + Redis-fallback hardening
 
 **Frontend** (`pages/Contacts.jsx`)

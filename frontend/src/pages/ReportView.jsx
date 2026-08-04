@@ -816,8 +816,9 @@ function GeneralLedgerBody({ data }) {
     JE:    "bg-amber-100 text-amber-800 hover:bg-amber-200",
   };
   const goToSource = (e) => {
-    if (e.source === "JE") nav(`/accounting/journal-entries?highlight=${e.je_id || ""}`);
-    else nav(`/accounting/transactions?highlight=${e.txn_id || ""}${e.source === "Split" ? "&open=split" : ""}`);
+    if (e.source === "JE") nav(`/accounting/journal-entries?highlight=${e.je_id || ""}&from=gl`);
+    else if (e.source === "Split") nav(`/accounting/transactions?highlight=${e.txn_id || ""}&open=split&from=gl`);
+    else nav(`/accounting/transactions?open=${e.txn_id || ""}&from=gl`);
   };
   return (
     <div className="text-sm space-y-4">
