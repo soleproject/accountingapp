@@ -301,12 +301,12 @@ export default function Contacts() {
           onClose={() => navigate(backHref)}
           onEdit={() => setModal({ mode: "edit", contact: detailContact })}
         />
-        {modal.mode === "edit" && (
+        {modal?.mode === "edit" && (
           <ContactModal
             currentId={currentId}
             mode="edit"
             contact={modal.contact}
-            onClose={(reload) => { setModal({ mode: null, contact: null }); if (reload) load(); }}
+            onClose={(reload) => { setModal(null); if (reload) load(); }}
           />
         )}
       </div>

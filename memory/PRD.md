@@ -17,6 +17,16 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Contact drill-down white-screen fix + Redis-fallback hardening
+
+**Frontend** (`pages/Contacts.jsx`)
+- Fixed white screen on `/contacts/:contactId` drill-down. Root cause: the detail-page render block accessed `modal.mode` while `modal` state initial value was `null` → `Cannot read properties of null (reading 'mode')` → the whole page unmounted. Changed to `modal?.mode === "edit"` and the modal close handler to `setModal(null)`.
+- Verified live via Playwright: drill-down lands on full-page detail with breadcrumb; `← Customers` back-link works; Edit button opens the edit modal without crashing.
+
+**Backend** (`infra.py`)
+- Boot-time TCP probe of `REDIS_URL` — falls back to `memory://` storage when Redis is unreachable, avoiding the slowapi failure mode where `swallow_errors=True` catches the storage error but leaves `request.state.view_rate_limit` unset, blowing up `async_wrapper` with `AttributeError` on every rate-limited endpoint.
+- Pre-seed `request.state.view_rate_limit = None` in `request_context` middleware as defense-in-depth for the case where Redis dies mid-flight in production.
+
 ### Feb 2026 — Plaid webhook async: retry + DLQ (job_queue hardening)
 
 Correction from earlier audit: the webhook was already returning 200 immediately and enqueuing via `asyncio.create_task` — I mis-read the flow in the initial audit. Real gap was that failing tasks had no retry, no DLQ, no ops surface.
