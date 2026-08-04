@@ -3917,3 +3917,56 @@ Local test with Redis down:
 - Push this infra.py fix via Save-to-GitHub → PR merge → Railway auto-deploy
 - Investigate why Redis went down (or if it was ever really up on Railway)
 - If wanting proper multi-worker rate limiting: sign up Upstash (free tier) → paste URL back into `REDIS_URL`
+
+
+---
+
+## 2026-02-03 (very late) — Hotfix #2: Thread exhaustion from --workers 8 🚨
+
+### Symptom
+After merging Sprint 1 PR + the --workers 8 change to production, `POST /api/auth/login` returned HTTP 500 "Internal Server Error" on every attempt. Users could not log in.
+
+### Root cause (found via Railway Deploy Logs)
+`RuntimeError: can't start new thread` — the container ran out of OS threads. Traceback path:
+
+```
+routes/ai_ops.py::_compute_attention
+  → asyncio.gather(*[_stale(a) for a in bank_accts])   # unbounded fan-out
+  → routes/ai_ops.py::_stale
+  → db.transactions.count_documents(...)               # Motor async → threadpool
+  → motor/frameworks/asyncio/__init__.py::run_on_executor
+  → concurrent/futures/thread.py::_adjust_thread_count
+  → threading.Thread(target=...).start()
+  → RuntimeError: can't start new thread
+```
+
+The multiplier that broke us: 8 uvicorn workers × Motor's per-worker executor × unbounded `asyncio.gather()` on N bank accounts × MONGO_MAX_POOL_SIZE=100 sockets = OS thread ceiling hit on Railway container.
+
+### Fix
+Rolled back `backend/railway.json` start command:
+- Old: `uvicorn server:app --host 0.0.0.0 --port ${PORT} --workers 8`
+- New: `uvicorn server:app --host 0.0.0.0 --port ${PORT} --workers 4`
+
+Verified: login endpoint returns HTTP 200 with valid credentials post-rollback.
+
+### The earlier "Redis is down" diagnosis was WRONG for prod
+Local dev container had a stale Redis connection attempt that showed a Redis ConnectionError, but PROD had no Redis service and no REDIS_URL env var. The `swallow_errors=True` fix to `infra.py` (`Limiter`) is still worth landing as defence-in-depth but was NOT the root cause of the prod 500. Real cause was thread exhaustion, not Redis.
+
+### Queued longer-term fixes (next session)
+1. **Bound `asyncio.gather` in ai_ops.py** with `asyncio.Semaphore(10)` so we don't fan out unbounded across all bank accounts.
+2. **Audit every `asyncio.gather(*[...])` in the codebase** for similar unbounded fan-outs. Grep target: `grep -rn "asyncio.gather" backend/`.
+3. **Move heavy async work to `job_queue.py`** — attention/insights computation should not race with request threads.
+4. **Then re-try `--workers 8`** with fan-out patterns bounded.
+5. **`infra.py::Limiter(swallow_errors=True)` fix** — already applied locally, needs to be pushed via Save-to-GitHub → PR merge.
+
+### Files touched this session
+- `backend/railway.json` — rolled back to `--workers 4` (committed direct to main via GitHub UI)
+- `backend/infra.py` — added `swallow_errors=True` to slowapi Limiter (local only, needs push)
+- `memory/PRD.md` — this entry
+
+### Handoff notes for next session
+- Prod is on `--workers 4` — this is the "safe" setting. Don't bump to 8 again until fan-out patterns are bounded.
+- `infra.py` change is in local /app but NOT pushed to GitHub. Needs Save-to-GitHub → Create Branch & Push → PR merge to land in prod.
+- No new database changes, no schema migration required.
+- Sprint 1 code (contact race fix + dedup script) IS live in prod — only the workers-8 change was rolled back.
+
