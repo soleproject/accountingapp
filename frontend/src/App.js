@@ -116,6 +116,7 @@ function App() {
               <Route path="/payments" element={<Payments />} />
               <Route path="/receipts" element={<Receipts />} />
               <Route path="/contacts" element={<Contacts />} />
+              <Route path="/contacts/:contactId" element={<Contacts />} />
               <Route path="/customer-statements" element={<CustomerStatements />} />
               <Route path="/connections" element={<Connections />} />
               <Route path="/connections/imports/:importId" element={<StatementImportDetail />} />

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useParams, useNavigate, Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
@@ -26,15 +26,31 @@ const fmtDate = (iso) => {
 export default function Contacts() {
   const { currentId } = useCompany();
   const [sp, setSp] = useSearchParams();
+  const { contactId: urlContactId } = useParams();
+  const navigate = useNavigate();
   // ?type=customer|vendor filter driven by sidebar links or the on-page
   // toggle. Missing / "both" / "all" all mean "show everything".
   const urlType = sp.get("type");
   const typeFilter = urlType === "customer" || urlType === "vendor" ? urlType : "all";
+  // `from` breadcrumb source — passed when the user came from Customers
+  // or Vendors, so the detail page can offer a working back link.
+  const fromParam = sp.get("from") || (typeFilter === "customer" ? "customers"
+                                       : typeFilter === "vendor" ? "vendors" : "contacts");
   const setTypeFilter = (v) => {
     const next = new URLSearchParams(sp);
     if (v === "customer" || v === "vendor") next.set("type", v);
     else next.delete("type");
     setSp(next, { replace: true });
+  };
+  // Open the transaction detail as a full-page route (`/contacts/:id`)
+  // instead of the previous right-side drawer. Preserves the source
+  // (customers | vendors | contacts) so breadcrumbs on the detail page
+  // point back to wherever the user came from.
+  const openContact = (c) => {
+    const source = typeFilter === "customer" ? "customers"
+                  : typeFilter === "vendor" ? "vendors"
+                  : "contacts";
+    navigate(`/contacts/${c.id}?from=${source}`);
   };
   const [query, setQuery] = useState("");
   const [items, setItems] = useState([]);
@@ -57,6 +73,18 @@ export default function Contacts() {
     setSelected(new Set());
   };
   useEffect(() => { load(); }, [currentId]);
+
+  // When the URL is `/contacts/:contactId`, look up the contact from the
+  // loaded list and open the detail as a full-page report (breadcrumb at
+  // the top links back to whichever list the user came from). Falling
+  // back to a stub {id} object if the list hasn't loaded yet lets the
+  // report drawer trigger its own transaction fetch immediately —
+  // the visible name populates once `items` finishes loading.
+  const detailContact = useMemo(() => {
+    if (!urlContactId) return null;
+    const found = items.find(c => c.id === urlContactId);
+    return found || { id: urlContactId, name: "Loading…" };
+  }, [urlContactId, items]);
 
   // Voice/AI-driven modal opener. When the AI panel dispatches an
   // axiom:create event with kind='contact', open the create modal with any
@@ -156,7 +184,7 @@ export default function Contacts() {
           <tr
             key={c.id}
             onClick={() => view === "analytics"
-              ? setReportContact(c)
+              ? openContact(c)
               : setModal({ mode: "edit", contact: c })}
             data-testid={`contact-row-${c.id}`}
             className="border-b hover:bg-slate-50 cursor-pointer"
@@ -242,6 +270,48 @@ export default function Contacts() {
       </tbody>
     </table>
   );
+
+  // ─── Detail (full-page) — /contacts/:contactId ─────────────────────
+  // When the URL carries a contactId we short-circuit the list view and
+  // render the transaction report drawer as a page instead. Breadcrumbs
+  // at the top of the page link back to the source (Customers/Vendors/
+  // Contacts) the user came from.
+  if (detailContact) {
+    const backLabel = fromParam === "customers" ? "Customers"
+                    : fromParam === "vendors" ? "Vendors"
+                    : "Contacts";
+    const backHref = fromParam === "customers" ? "/contacts?type=customer"
+                    : fromParam === "vendors" ? "/contacts?type=vendor"
+                    : "/contacts";
+    return (
+      <div className="space-y-4">
+        <nav aria-label="Breadcrumb" className="text-sm text-slate-500 flex items-center gap-2"
+             data-testid="contact-detail-breadcrumb">
+          <Link to={backHref} className="hover:text-slate-900 hover:underline"
+                data-testid="contact-detail-back-link">← {backLabel}</Link>
+          <span aria-hidden="true">/</span>
+          <span className="text-slate-900 font-medium truncate max-w-[40ch]">
+            {detailContact.name || detailContact.id}
+          </span>
+        </nav>
+        <ContactReportDrawer
+          currentId={currentId}
+          contact={detailContact}
+          embedded={true}
+          onClose={() => navigate(backHref)}
+          onEdit={() => setModal({ mode: "edit", contact: detailContact })}
+        />
+        {modal.mode === "edit" && (
+          <ContactModal
+            currentId={currentId}
+            mode="edit"
+            contact={modal.contact}
+            onClose={(reload) => { setModal({ mode: null, contact: null }); if (reload) load(); }}
+          />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -678,7 +748,7 @@ function MergeModal({ currentId, contacts, onClose }) {
 }
 
 
-function ContactReportDrawer({ currentId, contact, onClose, onEdit }) {
+function ContactReportDrawer({ currentId, contact, onClose, onEdit, embedded = false }) {
   const [txns, setTxns] = useState(null);
   const [total, setTotal] = useState(0);
   const [filter, setFilter] = useState("ytd"); // "ytd" | "all"
@@ -788,9 +858,16 @@ function ContactReportDrawer({ currentId, contact, onClose, onEdit }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex" data-testid="contact-report-drawer">
-      <div className="flex-1 bg-black/40" onClick={onClose} />
-      <div className="w-full max-w-3xl h-full bg-white shadow-2xl flex flex-col">
+    <div
+      className={embedded
+        ? "flex flex-col rounded-lg border border-slate-200 bg-white shadow-sm"
+        : "fixed inset-0 z-50 flex"}
+      data-testid="contact-report-drawer"
+    >
+      {!embedded && <div className="flex-1 bg-black/40" onClick={onClose} />}
+      <div className={embedded
+        ? "w-full flex flex-col"
+        : "w-full max-w-3xl h-full bg-white shadow-2xl flex flex-col"}>
         {/* Header */}
         <div className="px-5 py-4 border-b flex items-start justify-between gap-3">
           <div className="min-w-0">
