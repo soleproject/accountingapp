@@ -17,6 +17,12 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Import Statements gets its own focused page
+
+**Frontend** (`pages/Connections.jsx`)
+- Sidebar's "Import Statements" entry already routed to `/connections?view=imports`, but that URL was rendering the full Connections page (Connect Accounts tab + Plaid feeds + Statements tab). Now `?view=imports` renders a focused page with only the Load-Account-Statements experience: H1 flips to "Import Statements", subtitle to "Upload bank-statement PDFs and let Veryfi OCR pull the transactions", and no tab bar / Plaid controls appear.
+- Regular `/connections` URL still shows both tabs (Connect Accounts + Load account statements) for backward compatibility.
+
 ### Feb 2026 — Balance Sheet asset drill-down now ties to the BS balance
 
 **Backend** (`reports.py::compute_account_detail`)

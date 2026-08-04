@@ -12,9 +12,14 @@ import { Link2, CheckCircle2, ChevronDown, ChevronRight, PlugZap, CircleDashed, 
 export default function Connections() {
   const { currentId } = useCompany();
   const [searchParams] = useSearchParams();
+  // `?view=imports` renders the Import Statements page — a focused
+  // Load-Account-Statements experience without the Connect Accounts tab
+  // or Plaid controls. Sidebar links use this to give Import Statements a
+  // dedicated URL/entry-point separate from Connections.
+  const importsOnly = searchParams.get("view") === "imports";
   // Allow the voice-command router (and any deep-link email) to jump
   // straight to a specific tab via ``?tab=statements`` or ``?tab=plaid``.
-  const initialTab = searchParams.get("tab") === "statements" ? "statements" : "plaid";
+  const initialTab = (importsOnly || searchParams.get("tab") === "statements") ? "statements" : "plaid";
   const [accounts, setAccounts] = useState([]);
   const [busy, setBusy] = useState(false);
   const [imported, setImported] = useState(0);
@@ -145,12 +150,19 @@ export default function Connections() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="font-heading text-3xl font-bold tracking-tight">Connections</h1>
+        <h1 className="font-heading text-3xl font-bold tracking-tight" data-testid="connections-page-title">
+          {importsOnly ? "Import Statements" : "Connections"}
+        </h1>
         <p className="text-slate-500 text-sm mt-1">
-          Connect real bank accounts via Plaid, or upload bank-statement PDFs for Veryfi OCR.
+          {importsOnly
+            ? "Upload bank-statement PDFs and let Veryfi OCR pull the transactions."
+            : "Connect real bank accounts via Plaid, or upload bank-statement PDFs for Veryfi OCR."}
         </p>
       </div>
 
+      {importsOnly ? (
+        <StatementsTab companyId={currentId} />
+      ) : (
       <Tabs defaultValue={initialTab} className="space-y-4">
         <TabsList className="h-10 bg-slate-100 p-1 rounded-lg">
           <TabsTrigger value="plaid" data-testid="connections-tab-plaid"
@@ -238,6 +250,7 @@ export default function Connections() {
           <StatementsTab companyId={currentId} />
         </TabsContent>
       </Tabs>
+      )}
     </div>
   );
 }
