@@ -26,8 +26,12 @@ export default function StatementsTab({ companyId, bare = false }) {
   const loadAssets = useCallback(async () => {
     try {
       const r = await api.get(`/companies/${companyId}/accounts`);
+      // Include BOTH assets (bank/cash) and liabilities (credit cards,
+      // loans, LOCs) — a statement upload may target either side. UI
+      // groups them so the user sees "Bank accounts" and "Credit / Loans"
+      // in separate optgroups.
       const list = (r.data.accounts || r.data || []).filter(a =>
-        (a.type === "asset") && a.active !== false,
+        (a.type === "asset" || a.type === "liability") && a.active !== false,
       );
       setAccounts(list);
     } catch { /* ignore */ }
@@ -69,7 +73,19 @@ export default function StatementsTab({ companyId, bare = false }) {
     try {
       const fd = new FormData();
       fd.append("file", file);
-      if (accountId && accountId !== "auto") fd.append("account_id", accountId);
+      // `accountId` is either "auto" | "auto-asset" | "auto-liability"
+      // (which drive the resolver via `account_kind_hint`) or a real
+      // account UUID (which pins to that exact CoA row and skips
+      // auto-detect entirely). The three "auto-" values are internal to
+      // the UI — the backend only cares about the hint string after the
+      // dash.
+      if (accountId && !accountId.startsWith("auto")) {
+        fd.append("account_id", accountId);
+      } else if (accountId === "auto-asset") {
+        fd.append("account_kind_hint", "asset");
+      } else if (accountId === "auto-liability") {
+        fd.append("account_kind_hint", "liability");
+      }
       const r = await api.post(
         `/companies/${companyId}/statements/upload`, fd,
         { headers: { "Content-Type": "multipart/form-data" }, timeout: 180_000 },
@@ -203,14 +219,31 @@ export default function StatementsTab({ companyId, bare = false }) {
               data-testid="stmt-account-select"
               value={accountId}
               onChange={(e) => setAccountId(e.target.value)}
-              className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm min-w-[240px]"
+              className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm min-w-[280px]"
             >
-              <option value="auto">Auto-detect from statement</option>
-              {accounts.map(a => (
-                <option key={a.id} value={a.id}>
-                  {a.code} · {a.name}
-                </option>
-              ))}
+              <optgroup label="Auto-detect">
+                <option value="auto">Auto-detect from statement</option>
+                <option value="auto-asset">This is a bank / cash account</option>
+                <option value="auto-liability">This is a credit card or loan</option>
+              </optgroup>
+              {accounts.some(a => a.type === "asset") && (
+                <optgroup label="Bank accounts">
+                  {accounts.filter(a => a.type === "asset").map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.code} · {a.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {accounts.some(a => a.type === "liability") && (
+                <optgroup label="Credit cards & loans">
+                  {accounts.filter(a => a.type === "liability").map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.code} · {a.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </label>
         </div>

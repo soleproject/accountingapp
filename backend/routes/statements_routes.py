@@ -63,6 +63,10 @@ async def statements_upload(
     cid: str,
     file: UploadFile = File(...),
     account_id: str | None = Form(None),
+    # UI override — "asset" | "liability" | "auto"/None (default auto).
+    # Used when the user knows the statement is a credit card / loan
+    # / LOC and Veryfi's OCR may return an ambiguous `account_type`.
+    account_kind_hint: str | None = Form(None),
     user: dict = Depends(get_current_user),
 ):
     await require_company(user, cid)
@@ -71,6 +75,7 @@ async def statements_upload(
         cid, file, account_id or None,
         categorize_fn=categorize_transaction,
         is_period_closed_fn=is_period_closed,
+        account_kind_hint=account_kind_hint,
     )
 
 

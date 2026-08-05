@@ -43,9 +43,16 @@ async def upload_statement(
     account_id: str | None,
     categorize_fn,
     is_period_closed_fn,
+    account_kind_hint: str | None = None,
 ) -> dict:
     """Handle a bank-statement upload end-to-end. Called from server.py
     inside its route decorator so we inherit auth + rate limiting.
+
+    ``account_kind_hint`` is passed through to
+    :func:`statement_account_resolver.resolve_statement_account` when the
+    user picks a specific "Bank / Credit-card or loan" option in the UI.
+    Ignored when ``account_id`` is supplied (the user picked a specific
+    CoA row already).
     """
     file_bytes = await file.read()
     if not file_bytes:
@@ -102,7 +109,7 @@ async def upload_statement(
         }
     else:
         resolved = await statement_account_resolver.resolve_statement_account(
-            cid, veryfi_data,
+            cid, veryfi_data, account_kind_hint=account_kind_hint,
         )
 
     lines = veryfi_service.extract_transactions(veryfi_data)
