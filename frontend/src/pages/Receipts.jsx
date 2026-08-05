@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, fmtMoney, fmtDate } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, Paperclip, Loader2, FileText } from "lucide-react";
+import { Plus, Trash2, X, Paperclip, Loader2, FileText, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Receipts() {
@@ -11,6 +11,7 @@ export default function Receipts() {
   const [accts, setAccts] = useState([]);
   const [contacts, setContacts] = useState([]);
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState(null); // receipt object being edited
   const load = async () => {
     if (!currentId) return;
     const [r, a, c] = await Promise.all([
@@ -70,7 +71,17 @@ export default function Receipts() {
                     ) : <span className="text-slate-300 text-xs">—</span>}
                   </td>
                   <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(r.amount)}</td>
-                  <td className="px-3 py-2 text-right"><button onClick={() => del(r.id)} className="text-red-500 p-1"><Trash2 size={13} /></button></td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">
+                    <button
+                      onClick={() => setEditing(r)}
+                      className="text-slate-500 hover:text-slate-800 p-1"
+                      title="Edit"
+                      data-testid={`receipt-edit-${r.id}`}
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button onClick={() => del(r.id)} className="text-red-500 p-1" title="Delete"><Trash2 size={13} /></button>
+                  </td>
                 </tr>
               );
             })}
@@ -79,18 +90,24 @@ export default function Receipts() {
         </table>
       </div>
       {creating && <RecModal currentId={currentId} accts={accts} contacts={contacts} onClose={() => { setCreating(false); load(); }} />}
+      {editing && <RecModal currentId={currentId} accts={accts} contacts={contacts} initial={editing} onClose={() => { setEditing(null); load(); }} />}
     </div>
   );
 }
 
-function RecModal({ currentId, accts, contacts, onClose }) {
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [contactId, setContactId] = useState("");
-  const [amount, setAmount] = useState("");
-  const [cat, setCat] = useState("");
-  const [payAcct, setPayAcct] = useState("");
-  const [notes, setNotes] = useState("");
-  const [attachment, setAttachment] = useState(null); // {data_url, filename, size}
+function RecModal({ currentId, accts, contacts, initial, onClose }) {
+  const isEdit = !!initial;
+  const [date, setDate] = useState(initial?.date || new Date().toISOString().slice(0, 10));
+  const [contactId, setContactId] = useState(initial?.contact_id || "");
+  const [amount, setAmount] = useState(initial?.amount != null ? String(initial.amount) : "");
+  const [cat, setCat] = useState(initial?.category_account_id || "");
+  const [payAcct, setPayAcct] = useState(initial?.payment_account_id || "");
+  const [notes, setNotes] = useState(initial?.notes || "");
+  const [attachment, setAttachment] = useState(
+    initial?.attachment_data_url
+      ? { data_url: initial.attachment_data_url, filename: initial.attachment_filename || "receipt", size: 0 }
+      : null
+  );
   const [busy, setBusy] = useState(false);
   const [addingVendor, setAddingVendor] = useState(false);
   const [newVendorName, setNewVendorName] = useState("");
@@ -159,7 +176,7 @@ function RecModal({ currentId, accts, contacts, onClose }) {
     if (!c || !amount) { toast.error("Vendor and amount are required."); return; }
     setBusy(true);
     try {
-      await api.post(`/companies/${currentId}/receipts`, {
+      const payload = {
         date,
         merchant: c.name,
         contact_id: c.id,
@@ -170,8 +187,14 @@ function RecModal({ currentId, accts, contacts, onClose }) {
         notes,
         attachment_data_url: attachment?.data_url || null,
         attachment_filename: attachment?.filename || null,
-      });
-      toast.success("Receipt saved");
+      };
+      if (isEdit) {
+        await api.patch(`/companies/${currentId}/receipts/${initial.id}`, payload);
+        toast.success("Receipt updated");
+      } else {
+        await api.post(`/companies/${currentId}/receipts`, payload);
+        toast.success("Receipt saved");
+      }
       onClose();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Save failed");
@@ -182,7 +205,7 @@ function RecModal({ currentId, accts, contacts, onClose }) {
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="font-heading font-semibold">New Receipt</h3>
+          <h3 className="font-heading font-semibold">{isEdit ? "Edit Receipt" : "New Receipt"}</h3>
           <button onClick={onClose}><X size={16} /></button>
         </div>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border rounded px-2 py-1.5 text-sm" />
@@ -313,7 +336,7 @@ function RecModal({ currentId, accts, contacts, onClose }) {
           className="w-full py-2 rounded-md bg-slate-900 text-white text-sm inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
         >
           {busy && <Loader2 size={13} className="animate-spin" />}
-          Save receipt
+          {isEdit ? "Update receipt" : "Save receipt"}
         </button>
       </div>
     </div>
