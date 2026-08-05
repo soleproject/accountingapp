@@ -17,6 +17,16 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Send-welcome toggle on New Client modal
+
+**Backend** (`models.py`, `routes/pro.py`)
+- Added `send_welcome_email: bool = True` to `NewClientIn`. When `False`, `POST /pro/clients` skips the entire welcome-email dispatch block and returns `email_status: "skipped_by_pro"` (with `email_kind: null`). Defaults to `True` so historical behaviour is unchanged.
+- Verified end-to-end via curl: `send_welcome_email=false` → response `email_status: "skipped_by_pro"`; default (`true`) → response attempts the send (`email_kind: "client_welcome"`).
+
+**Frontend** (`pages/ProClients.jsx`)
+- New checkbox toggle in the New Client modal ("Send the client a welcome / password-set email now") sitting between the CoA info block and the Billing section. Defaults ON; helper text swaps between "On — the client will get their sign-in email as soon as you click Create." and "Off — no email will be sent. You can send it later from the client row."
+- Toast copy now handles the new `skipped_by_pro` status ("welcome email skipped per your toggle — click 'Re-send welcome' on the client row anytime to send it.") and treats it as a success (green toast, not red).
+
 ### Feb 2026 — Import Statements gets its own focused page
 
 **Frontend** (`pages/Connections.jsx`)

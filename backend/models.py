@@ -258,3 +258,9 @@ class NewClientIn(BaseModel):
     billing_payer: Optional[str] = None
     billing_product: Optional[str] = None
     billing_discount: Optional[bool] = None
+    # Enterprise/pro can suppress the welcome / password-set email at
+    # create time. Defaults to True so historical behaviour is preserved
+    # (client gets the same welcome email as before). When False, no
+    # welcome email is sent and the response reports `email_status =
+    # "skipped_by_pro"` so the toast copy reflects the choice.
+    send_welcome_email: bool = True

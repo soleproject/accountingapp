@@ -1081,6 +1081,10 @@ function NewClientModal({ onClose, onCreated }) {
     billing_payer: "client_email",
     billing_product: "simple_start",
     billing_discount: false,
+    // Default ON — matches historical behaviour (welcome email always sent).
+    // Enterprise/pro can flip off to skip the client email at create time
+    // and re-send later via the row-level "resend welcome" action.
+    send_welcome_email: true,
   });
   const [busy, setBusy] = useState(false);
   const [existingEmail, setExistingEmail] = useState(false);
@@ -1143,18 +1147,19 @@ function NewClientModal({ onClose, onCreated }) {
       const emailOk = status === "sent";
       const emailNote =
         status === "sent" ? "we've emailed them the good news."
+        : status === "skipped_by_pro" ? "welcome email skipped per your toggle — click \"Re-send welcome\" on the client row anytime to send it."
         : status === "skipped_pref_off" ? "email skipped — your welcome-email preference is off. Toggle it back on under Settings → Notifications if you meant to send."
         : status === "skipped_no_email" ? "no email on file, so nothing was sent."
         : `email FAILED to send${err ? ` (${err.slice(0,140)})` : ""} — check Communications for details.`;
       if (r.data.reused_existing_user) {
-        (emailOk ? toast.success : toast.error)(
+        (emailOk || status === "skipped_by_pro" ? toast.success : toast.error)(
           `${form.company_name} added to ${form.client_email}'s existing login. They now own ${r.data.owner_company_count} companies — ${emailNote}`,
-          { duration: emailOk ? 7000 : 12000 },
+          { duration: (emailOk || status === "skipped_by_pro") ? 7000 : 12000 },
         );
       } else {
-        (emailOk ? toast.success : toast.error)(
+        (emailOk || status === "skipped_by_pro" ? toast.success : toast.error)(
           `Client "${form.client_name}" created — ${emailNote.replace(/^we've emailed them the good news\.$/, `they'll get a "Set your password" email at ${form.client_email}.`)}`,
-          { duration: emailOk ? 7000 : 12000 },
+          { duration: (emailOk || status === "skipped_by_pro") ? 7000 : 12000 },
         );
       }
       // Phase C — if the accountant chose to enter the client's card
@@ -1260,6 +1265,35 @@ function NewClientModal({ onClose, onCreated }) {
               ? "This client already has a login. They'll see the new company in the top-left dropdown after their next sign-in."
               : (<>A GAAP-compliant Chart of Accounts is seeded automatically. We'll email <b>{form.client_email || "the client"}</b> a "Set your password" link — no need to share a temporary password.</>)}
           </div>
+
+          {/* Welcome-email toggle. Defaults ON (client gets the same email as
+              before). Toggle OFF lets an enterprise user quietly provision a
+              client without notifying them — useful when the pro is setting
+              up the books ahead of a kickoff call or the client will be
+              invited later out-of-band. Can be re-sent later via the
+              "Re-send welcome" pencil on each client row. */}
+          <label
+            className="flex items-start gap-3 p-3 rounded-lg border border-slate-200 bg-slate-50 cursor-pointer hover:bg-slate-100 transition"
+            data-testid="new-client-send-welcome-toggle-label"
+          >
+            <input
+              type="checkbox"
+              checked={form.send_welcome_email}
+              onChange={(e) => update("send_welcome_email", e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+              data-testid="new-client-send-welcome-toggle"
+            />
+            <div className="text-xs leading-relaxed">
+              <div className="font-medium text-slate-800">
+                Send the client a welcome / password-set email now
+              </div>
+              <div className="text-slate-500 mt-0.5">
+                {form.send_welcome_email
+                  ? "On — the client will get their sign-in email as soon as you click Create."
+                  : "Off — no email will be sent. You can send it later from the client row."}
+              </div>
+            </div>
+          </label>
 
           {/* -------------------- Billing (Phase B) --------------------
               Payer + product + discount pickers. The "Free Enterprise
