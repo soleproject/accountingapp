@@ -169,8 +169,12 @@ export default function StatementsTab({ companyId, bare = false }) {
     }
     // Otherwise raise the confirmation modal — preseed to the current
     // dropdown value so a user who set "credit card or loan" up top sees
-    // that pre-selected in the modal and can just hit Start.
-    setModalChoice(accountId || "auto");
+    // that pre-selected in the modal and can just hit Start. The plain
+    // "auto" default falls back to asset since we removed the "let AI
+    // decide" option from the modal (the user must make an explicit
+    // choice here to prevent misfires).
+    const preseed = accountId === "auto-liability" ? "auto-liability" : "auto-asset";
+    setModalChoice(preseed);
     setPending({ files: arr });
   };
 
@@ -407,7 +411,6 @@ export default function StatementsTab({ companyId, bare = false }) {
               {[
                 { v: "auto-asset",     label: "Bank / Cash account",       hint: "Checking, Savings, Money Market — an ASSET" },
                 { v: "auto-liability", label: "Credit Card / Loan / LOC",  hint: "Any account that represents money you OWE — a LIABILITY" },
-                { v: "auto",           label: "Let AI decide (auto-detect)", hint: "Only pick this if you're not sure — misfires can pollute the ledger" },
               ].map(o => (
                 <label
                   key={o.v}
