@@ -26,6 +26,7 @@
  *   disabled?: boolean
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { ChevronDown, Plus, Search, Loader2, X } from "lucide-react";
@@ -73,8 +74,15 @@ export default function SearchableAccountPicker({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  // Menu is rendered with `position: fixed` so it can escape any parent
+  // `overflow: hidden` (bill/invoice tables, modal cards, etc.). We track
+  // the trigger's bounding rect and re-measure on scroll/resize while
+  // the menu is open.
+  const [menuRect, setMenuRect] = useState(null);
   const inputRef = useRef(null);
   const rootRef = useRef(null);
+  const menuRef = useRef(null);
+  const triggerRef = useRef(null);
 
   const selected = useMemo(
     () => accounts.find(a => a.id === value) || allAccounts.find(a => a.id === value) || null,
@@ -91,17 +99,42 @@ export default function SearchableAccountPicker({
     });
   }, [accounts, query]);
 
-  // Close on outside click.
+  // Close on outside click. The menu is portaled to document.body so it
+  // lives OUTSIDE rootRef — check both refs before closing so clicks
+  // inside the menu (option selection, search box, add-new) don't
+  // dismiss it immediately.
   useEffect(() => {
     if (!open) return;
     const onDoc = (e) => {
-      if (rootRef.current && !rootRef.current.contains(e.target)) {
+      const inRoot = rootRef.current && rootRef.current.contains(e.target);
+      const inMenu = menuRef.current && menuRef.current.contains(e.target);
+      if (!inRoot && !inMenu) {
         setOpen(false);
         setQuery("");
       }
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  // Measure the trigger + track its position while the menu is open so
+  // the fixed-position menu stays glued to the button through scroll,
+  // resize, and layout shifts.
+  useEffect(() => {
+    if (!open) { setMenuRect(null); return; }
+    const measure = () => {
+      const el = triggerRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setMenuRect({ left: r.left, top: r.bottom + 4, width: r.width });
+    };
+    measure();
+    window.addEventListener("scroll", measure, true);
+    window.addEventListener("resize", measure);
+    return () => {
+      window.removeEventListener("scroll", measure, true);
+      window.removeEventListener("resize", measure);
+    };
   }, [open]);
 
   // Focus the search input when opening.
@@ -118,6 +151,7 @@ export default function SearchableAccountPicker({
   return (
     <div className="relative" ref={rootRef}>
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
         onClick={() => setOpen(o => !o)}
@@ -130,9 +164,11 @@ export default function SearchableAccountPicker({
         <ChevronDown size={14} className="text-slate-400 shrink-0" />
       </button>
 
-      {open && (
+      {open && menuRect && createPortal(
         <div
-          className="absolute z-30 mt-1 w-full bg-white border rounded-lg shadow-xl overflow-hidden"
+          ref={menuRef}
+          className="fixed z-[80] bg-white border rounded-lg shadow-xl overflow-hidden"
+          style={{ left: menuRect.left, top: menuRect.top, width: menuRect.width, minWidth: 260 }}
           data-testid={`${testId}-menu`}
         >
           <div className="flex items-center gap-1.5 px-2 py-1.5 border-b bg-slate-50">
@@ -173,7 +209,8 @@ export default function SearchableAccountPicker({
           >
             <Plus size={12} /> Add new {kindLabel} account
           </button>
-        </div>
+        </div>,
+        document.body
       )}
 
       {showCreate && (
