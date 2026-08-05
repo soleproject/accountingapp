@@ -193,14 +193,20 @@ async def upload_statement(
                 sb_v = float(starting_balance_v) if starting_balance_v is not None else None
             except (TypeError, ValueError):
                 sb_v = None
-            # Only override when Veryfi's value is missing OR disagrees by
-            # more than a small tolerance ($0.02) — trust the OCR when it
-            # already agrees with the math, so audit trails stay clean.
-            if sb_v is None or abs(sb_v - computed_opening) > 0.02:
+            # Per Veryfi's docs, `beginning_balance` is the correct field
+            # for credit-card statements (previous statement's ending) —
+            # this override only kicks in on real OCR imprecision. Tolerate
+            # up to $5 of drift as normal OCR noise; only override on
+            # larger disagreements (e.g. Veryfi swapped new/previous), and
+            # always log both values so we can tune the threshold from
+            # production telemetry.
+            if sb_v is None or abs(sb_v - computed_opening) > 5.00:
                 logging.getLogger(__name__).info(
                     "Statements: overriding starting_balance for liability "
-                    "account %s from %r → %r (ending=%.2f, movement=%.2f)",
+                    "account %s from %r → %r (ending=%.2f, movement=%.2f, "
+                    "veryfi_beginning=%r)",
                     bank_account_id, sb_v, computed_opening, eb, movement,
+                    stmt_fields.get("starting_balance"),
                 )
                 starting_balance_v = computed_opening
         except (TypeError, ValueError):
@@ -568,33 +574,41 @@ async def _categorize_and_insert_veryfi_lines(
 
     inserted: list[dict] = []
     # A positive amount on a liability account means "money came IN to the
-    # card / loan" — i.e. a paydown or refund/rebate. The ledger MUST see
-    # these movements to tie to the statement balance (that was the AmEx
-    # test bug: leaving them un-posted overstated the card by the exact
-    # $ of payments). So we POST them against the AmEx directly and route
-    # the OTHER side to Opening Balance Equity as a temporary holding —
-    # `needs_review=True` so the reconciliation queue lights up and the
-    # user can reassign the source (e.g. Chase Checking) once matched.
+    # card / loan" — i.e. a paydown or refund/rebate. Veryfi's schema does
+    # NOT return the source-bank account for a credit-card payment (there's
+    # simply no such field), so we can't auto-link the offsetting side. We
+    # POST the paydown against the card directly (so its balance ties to
+    # the statement) and route the OTHER side to a dedicated per-company
+    # `Credit Card Payment Clearing` (1150) asset row — the same pattern
+    # QuickBooks / Xero / Sage use for this exact scenario.
+    #
+    # Why NOT Opening Balance Equity: OBE semantically means "opening
+    # balances carried forward from before we started tracking." Using it
+    # for in-period paydowns pollutes the account, mixes real openings with
+    # to-do items, and is flagged as an anti-pattern in most audits. A
+    # dedicated Clearing row keeps the review queue crisp — any non-zero
+    # balance IS the to-do list.
+    #
     # Asset accounts are unaffected; positive amounts on Checking still
     # follow the normal deposit / revenue path.
     bank_is_liability = bank_acct.get("type") == "liability"
-    obe_row = None
+    clearing_row = None
     if bank_is_liability and any((c.get("amount") or 0.0) > 0 for c in candidates):
         import plaid_connect
-        obe_row = await plaid_connect.ensure_opening_balance_equity(cid)
+        clearing_row = await plaid_connect.ensure_cc_payment_clearing(cid)
 
     for cand in candidates:
-        if bank_is_liability and (cand.get("amount") or 0.0) > 0 and obe_row:
+        if bank_is_liability and (cand.get("amount") or 0.0) > 0 and clearing_row:
             post = {
-                "category_account_id":   obe_row["id"],
-                "category_account_code": obe_row.get("code"),
-                "category_account_name": obe_row.get("name"),
+                "category_account_id":   clearing_row["id"],
+                "category_account_code": clearing_row.get("code"),
+                "category_account_name": clearing_row.get("name"),
                 "ai_confidence": 0.0,
                 "ai_reasoning": (
                     "Payment or credit received on a liability account — "
-                    "temporarily parked against Opening Balance Equity. "
+                    "temporarily parked in Credit Card Payment Clearing. "
                     "Please reclassify to the source bank / asset account "
-                    "(e.g. checking) when reconciling."
+                    "(e.g. checking) once you import that statement."
                 ),
                 "needs_review": True,
                 # POST it — the ledger MUST tie to the statement.
