@@ -84,6 +84,11 @@ def test_liability_charge_only_period():
 
 
 # --- Fix 3: paydown guard fires only on (liability + amount > 0) --------------
+# Guard behaviour changed: paydowns are now POSTED against the card with
+# `category_account_id = Opening Balance Equity` (so the card balance ties
+# to the statement) rather than left unposted. `needs_review=True` so the
+# reconciliation queue prompts the user to reassign the credit side to the
+# source bank / asset once matched.
 
 def _guarded(bank_type: str, amount: float) -> bool:
     """Mirror the guard in `statements._categorize_and_insert_veryfi_lines`."""
@@ -108,3 +113,25 @@ def test_guard_skipped_on_liability_charge():
 
 def test_guard_skipped_on_asset_withdrawal():
     assert _guarded("asset", -50.00) is False
+
+
+# --- P0: cardholder-subtotal filter -------------------------------------------
+# Veryfi occasionally emits per-cardholder rollup rows for multi-user
+# credit-card statements (Amex Blue Business Cash, Chase Ink, etc.). Those
+# are subtotals, not real transactions — importing them double-counts the
+# ledger by the exact sum of all their underlying charges.
+
+def test_cardholder_subtotal_filter():
+    from veryfi_service import _is_cardholder_subtotal
+    # Should suppress — these are the exact rows the Amex test dropped
+    assert _is_cardholder_subtotal("APRIL MCINTOSH 0-31004")
+    assert _is_cardholder_subtotal("PAUL LABOUNTY JR 0-31020")
+    assert _is_cardholder_subtotal("PAUL N LABOUNTY SR 0-31046")
+    assert _is_cardholder_subtotal("MCINTOSH 0-31004")
+
+    # Real charges must pass through (never match)
+    assert not _is_cardholder_subtotal("BEST BUY SPRINGFIELD MO 888BESTBUY")
+    assert not _is_cardholder_subtotal("APRIL MCINTOSH MOBILE PAYMENT - THANK YOU")
+    assert not _is_cardholder_subtotal("AMAZON MARKETPLACE NA PA AMZN.COM/BILL WA")
+    assert not _is_cardholder_subtotal("STARBUCKS STORE 6307 SPRINGFIELD MO")
+    assert not _is_cardholder_subtotal("")
