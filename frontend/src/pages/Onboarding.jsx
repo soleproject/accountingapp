@@ -860,10 +860,11 @@ export default function Onboarding() {
             </div>
             <div>
               <label className="text-xs uppercase text-slate-500">Reporting basis</label>
-              <div className="mt-1 inline-flex rounded-md border">
+              <div className="mt-1 inline-flex rounded-md border" data-testid="onboarding-basis-picker">
                 {["accrual", "cash"].map(b => (
                   <button key={b} onClick={() => setAns("basis", b)}
-                          className={`px-3 py-1.5 text-sm ${(answers.basis || "accrual") === b ? "bg-slate-900 text-white" : ""}`}>
+                          data-testid={`onboarding-basis-${b}`}
+                          className={`px-3 py-1.5 text-sm ${(answers.basis || current?.reporting_basis || "accrual") === b ? "bg-slate-900 text-white" : ""}`}>
                     {b[0].toUpperCase() + b.slice(1)}
                   </button>
                 ))}

@@ -344,7 +344,23 @@ export default function ReportView() {
   const urlQ = searchParams.get("q");
   const urlMinAmount = searchParams.get("min_amount");
   const urlMaxAmount = searchParams.get("max_amount");
-  const [basis, setBasis] = useState(urlBasis === "cash" || urlBasis === "accrual" ? urlBasis : "accrual");
+  const [basis, setBasis] = useState(
+    urlBasis === "cash" || urlBasis === "accrual"
+      ? urlBasis
+      // Fall back to the company's saved reporting basis so a Cash-basis
+      // firm doesn't have to flip the toggle on every report load. Still
+      // defaults to Accrual when the field isn't set (older company docs).
+      : (current?.reporting_basis === "cash" ? "cash" : "accrual")
+  );
+  // If `current` loads AFTER the initial render (common — useCompany fetches
+  // asynchronously) sync the basis once so the picker doesn't stay stuck on
+  // the accrual default. Only fires when the URL doesn't override.
+  useEffect(() => {
+    if (urlBasis === "cash" || urlBasis === "accrual") return;
+    const desired = current?.reporting_basis === "cash" ? "cash" : "accrual";
+    setBasis(desired);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.reporting_basis]);
   const [start, setStart] = useState(urlStart || startYtd());
   const [end, setEnd] = useState(urlEnd || today());
   const [data, setData] = useState(null);
