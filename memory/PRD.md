@@ -17,6 +17,14 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Chart of Accounts row drill-down
+
+**Frontend** (`pages/ChartOfAccounts.jsx`, `pages/ReportView.jsx`)
+- Every CoA row's **name** and **balance** are now clickable — they navigate to `/reports/account-detail?account=<id>&from=coa`, the same drill-down page used from the Balance Sheet and Income Statement. Users see every transaction and JE line that adds up to the row's displayed balance, with running-balance walk and the standard Move / Filter / Search / Export toolbar.
+- `ReportView` breadcrumb now checks the `?from=coa` URL param first (overrides the sessionStorage-cached "return to BS" label). Back-link reads `← Chart of Accounts` and returns to `/accounting/chart-of-accounts`.
+- Hover state: name and balance cells underline in indigo on hover with a tooltip explaining what a click does.
+- **Verified live via Playwright**: 48 name-link + 48 balance-link buttons detected on Bright Beans' CoA; clicking `-$213.45` on `1010 · Business Checking` → lands on `/reports/account-detail?...&from=coa` with breadcrumb showing "← Chart of Accounts / 1010 · Business Checking" and full ledger of 4 txns summing to $-213.45.
+
 ### Feb 2026 — Statement period boundary fix (Veryfi "Next Closing Date" bug)
 
 **Backend** (`statements.py::upload_statement`)

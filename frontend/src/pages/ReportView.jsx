@@ -49,12 +49,21 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
     setSearchParams(next, { replace: true });
   };
 
-  // Breadcrumb back to the source report (Balance Sheet or Income
-  // Statement) — restores the exact scroll position saved when the
-  // user clicked into this account. Falls back to Balance Sheet if
-  // the sessionStorage packet is missing (older bookmark, hard reload).
-  const returnLabel = sessionStorage.getItem("reportReturnLabel") || "Balance Sheet";
+  // Breadcrumb back to the source report (Balance Sheet, Income
+  // Statement, or Chart of Accounts) — restores the exact scroll position
+  // saved when the user clicked into this account. `?from=coa` on the URL
+  // wins over the sessionStorage packet so a direct link from CoA never
+  // shows the wrong label from a stale BS/IS state.
+  const fromParam = searchParams.get("from");
+  const fromCoA = fromParam === "coa";
+  const returnLabel = fromCoA
+    ? "Chart of Accounts"
+    : (sessionStorage.getItem("reportReturnLabel") || "Balance Sheet");
   const goBackToBalanceSheet = () => {
+    if (fromCoA) {
+      navigate("/accounting/chart-of-accounts");
+      return;
+    }
     const returnUrl = sessionStorage.getItem("reportReturnUrl")
       || sessionStorage.getItem("bsReturnUrl")
       || "/reports/balance-sheet";
