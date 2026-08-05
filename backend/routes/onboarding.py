@@ -71,6 +71,23 @@ async def update_onboarding(cid: str, inp: OnboardingUpdate, user: dict = Depend
     upd = {k: v for k, v in inp.model_dump(exclude_unset=True).items() if v is not None}
     upd["updated_at"] = now_iso()
     await db.onboarding_state.update_one({"company_id": cid}, {"$set": upd}, upsert=True)
+    # Propagate the business-profile answers (basis / business type / description)
+    # onto the company doc so downstream defaults (Reports basis toggle, Dashboard
+    # KPI copy, Company Settings) reflect whatever the user picked here. Kept
+    # narrow — we only sync fields the business-profile step owns, so any AI
+    # extraction can't blow away unrelated company data.
+    answers = (inp.answers or {}) if isinstance(inp.answers, dict) else {}
+    company_sync: dict = {}
+    basis = answers.get("basis") or answers.get("accounting_method")
+    if basis in ("accrual", "cash"):
+        company_sync["reporting_basis"] = basis
+    if isinstance(answers.get("business_type"), str) and answers["business_type"].strip():
+        company_sync["business_type"] = answers["business_type"].strip()
+    if isinstance(answers.get("business_description"), str) and answers["business_description"].strip():
+        company_sync["business_description"] = answers["business_description"].strip()
+    if company_sync:
+        company_sync["updated_at"] = now_iso()
+        await db.companies.update_one({"id": cid}, {"$set": company_sync})
     if inp.complete:
         await db.companies.update_one({"id": cid}, {"$set": {"onboarding_complete": True}})
     return {"ok": True}

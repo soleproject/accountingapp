@@ -17,6 +17,17 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Reporting basis is persistent across the platform
+
+**Backend** (`routes/onboarding.py`)
+- `PATCH /companies/{cid}/onboarding` now propagates the business-profile answers (`basis`, `business_type`, `business_description`) onto the `companies` doc so downstream defaults reflect the user's picks. Kept narrow — only the three business-profile fields sync so AI extraction can't blow away unrelated company data.
+
+**Frontend** (`pages/ReportView.jsx`, `pages/Onboarding.jsx`)
+- Report basis toggle now defaults to `current.reporting_basis` (rather than always "accrual"). Falls back to accrual when the field is missing (older docs). URL param `?basis=` still wins over the company default so voice-commands / deep-links keep working.
+- Added a `useEffect` that re-syncs `basis` when `current` finishes its async fetch — the picker no longer stays stuck on accrual just because `useCompany()` hadn't resolved on first render.
+- Onboarding step 1 (business profile) reporting-basis picker now defaults to `current?.reporting_basis` so a client seeded with cash by their pro doesn't have to flip the toggle back during their own onboarding.
+- **Verified live**: Setting Bright Beans' `reporting_basis` to `"cash"` → the Balance Sheet loads with the "Cash" tab active and subtitle "As of ... · cash basis" — no user action required.
+
 ### Feb 2026 — Contacts Import default type mirrors page filter
 
 **Frontend** (`pages/Contacts.jsx`)
