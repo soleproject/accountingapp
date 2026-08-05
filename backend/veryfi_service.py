@@ -4,7 +4,52 @@ import os
 import io
 import re
 import httpx
+from datetime import date as _date, timedelta
 from typing import Any
+
+
+def _parse_iso_date(s: str | None) -> _date | None:
+    """Parse a 'YYYY-MM-DD' (or longer) string into a date. None on failure."""
+    if not s:
+        return None
+    try:
+        return _date.fromisoformat(str(s)[:10])
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _correct_year_wrap(txn_dates: list[str], closing_date: _date | None) -> list[str]:
+    """Fix Veryfi's year-assignment bug on statements that span a year boundary.
+
+    Symptom: for a credit-card statement covering e.g. Dec 26, 2025 → Jan 25,
+    2026, Veryfi sometimes stamps ALL transactions with the closing year
+    (2026), producing "2026-12-25" for December charges that are really from
+    2025. Since a real statement can never contain a transaction dated
+    substantially AFTER its closing date, any txn_date > closing_date + 30
+    day buffer must be from the prior year and gets rolled back by 12
+    months.
+
+    A 30-day buffer (rather than a few days) ensures we ONLY correct the
+    year-wrap symptom and never touch legitimate post-close pending dates,
+    which settle within a week at most.
+    """
+    if not closing_date:
+        return txn_dates
+    cutoff = closing_date + timedelta(days=30)
+    corrected: list[str] = []
+    for ds in txn_dates:
+        d = _parse_iso_date(ds)
+        if d and d > cutoff:
+            try:
+                d = d.replace(year=d.year - 1)
+                corrected.append(d.isoformat())
+                continue
+            except ValueError:
+                # Feb 29 on a non-leap prior year — rare on statements
+                corrected.append(ds)
+                continue
+        corrected.append(ds)
+    return corrected
 
 # Matches "PERSON NAME 0-31004" rows Veryfi emits for multi-cardholder
 # credit-card statements (Amex, Chase Ink, Cap One Spark). These are
@@ -179,4 +224,19 @@ def extract_transactions(veryfi_data: dict) -> list[dict]:
                         or (desc.split()[0] if desc else "Vendor"),
             "amount": round(amt, 2),
         })
+
+    # -------- Year-wrap correction --------
+    # Veryfi occasionally stamps every txn on a cross-year statement with
+    # the closing year (e.g. Dec 25, 2025 → "2026-12-25"). Roll any date
+    # that lands AFTER the statement closing date back one year. See
+    # `_correct_year_wrap` docstring for the safety argument.
+    closing_date = _parse_iso_date(
+        veryfi_data.get("statement_date")
+        or veryfi_data.get("period_end_date")
+        or veryfi_data.get("end_date")
+    )
+    if closing_date and result:
+        fixed = _correct_year_wrap([r["date"] for r in result], closing_date)
+        for r, new_d in zip(result, fixed):
+            r["date"] = new_d
     return result

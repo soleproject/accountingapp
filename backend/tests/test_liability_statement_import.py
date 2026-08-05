@@ -204,3 +204,74 @@ def test_period_all_missing_falls_back_to_txn_boundaries():
     )
     # No card_number and description doesn't match subtotal pattern → NOT filtered
     assert not _is_cardholder_subtotal("APRIL MCINTOSH", card_number=None)
+
+
+
+# --- Fix 5: cross-year Dec→Jan statement year-wrap correction ----------------
+
+def test_year_wrap_correction_rolls_december_back():
+    """A Jan-2026 closing statement with a December txn Veryfi stamped as
+    2026-12-25 must be rolled back to 2025-12-25 (statements can never
+    contain post-closing txns)."""
+    from datetime import date
+    from veryfi_service import _correct_year_wrap
+    closing = date(2026, 1, 25)
+    dates = ["2026-01-25", "2026-01-23", "2026-12-31", "2026-12-25"]
+    out = _correct_year_wrap(dates, closing)
+    assert out == ["2026-01-25", "2026-01-23", "2025-12-31", "2025-12-25"]
+
+
+def test_year_wrap_correction_leaves_intra_period_dates_alone():
+    """A mid-year monthly statement (no cross-year wrap) must be unchanged."""
+    from datetime import date
+    from veryfi_service import _correct_year_wrap
+    closing = date(2026, 6, 25)
+    dates = ["2026-06-25", "2026-06-01", "2026-05-27"]
+    out = _correct_year_wrap(dates, closing)
+    assert out == dates
+
+
+def test_year_wrap_correction_uses_grace_window():
+    """Post-close pending dates within a 30-day grace window must NOT wrap;
+    only far-future dates (year-wrap symptom) get shifted."""
+    from datetime import date
+    from veryfi_service import _correct_year_wrap
+    closing = date(2026, 1, 25)
+    # 1-day and 6-day post-close (pending) stay
+    out = _correct_year_wrap(["2026-01-26", "2026-01-31"], closing)
+    assert out == ["2026-01-26", "2026-01-31"]
+    # 60+ days into the future → year-wrap
+    out2 = _correct_year_wrap(["2026-04-01"], closing)
+    assert out2 == ["2025-04-01"]
+
+
+def test_extract_transactions_applies_year_wrap_when_closing_present():
+    """End-to-end: a mocked Veryfi payload with a Jan-2026 closing date and
+    Dec-2026 txns must emit Dec-2025 dates."""
+    from veryfi_service import extract_transactions
+    payload = {
+        "statement_date": "2026-01-25",
+        "period_start_date": "2026-01-01",
+        "period_end_date": "2026-12-31",  # Veryfi bug
+        "transactions": [
+            {"date": "2026-01-23", "description": "Price Cutter", "amount": -383.98},
+            {"date": "2026-12-25", "description": "Kindle Unltd", "amount": -11.99},
+            {"date": "2026-12-31", "description": "Ulta", "amount": -177.02},
+        ],
+    }
+    out = extract_transactions(payload)
+    dates = sorted(r["date"] for r in out)
+    assert dates == ["2025-12-25", "2025-12-31", "2026-01-23"]
+
+
+def test_extract_transactions_noop_when_no_closing_date():
+    """If Veryfi omits every closing/end date we cannot infer the cutoff,
+    so the extractor must leave dates untouched (fail-safe)."""
+    from veryfi_service import extract_transactions
+    payload = {
+        "transactions": [
+            {"date": "2026-12-25", "description": "X", "amount": -1.00},
+        ],
+    }
+    out = extract_transactions(payload)
+    assert out[0]["date"] == "2026-12-25"
