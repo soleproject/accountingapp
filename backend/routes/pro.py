@@ -274,7 +274,13 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
     email_status = "skipped_no_email"
     email_error: Optional[str] = None
     email_kind: Optional[str] = None
-    try:
+    if not inp.send_welcome_email:
+        # Enterprise/pro opted out of the welcome email at create time.
+        # We still return 200 + the created company; the pro can send the
+        # welcome later via `POST /pro/clients/{cid}/resend-welcome`.
+        email_status = "skipped_by_pro"
+    else:
+      try:
         from email_dispatcher import dispatch, public_base_url
         import email_templates as _tmpl
         from routes.auth import mint_password_set_token
@@ -351,7 +357,7 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
             )
             email_status = result.get("status", "failed")
             email_error = result.get("error")
-    except Exception as _exc:  # noqa: BLE001 — email failure never blocks client creation
+      except Exception as _exc:  # noqa: BLE001 — email failure never blocks client creation
         import logging as _lg
         _lg.getLogger(__name__).exception("Welcome email failed (client create still succeeded)")
         email_status = "failed"
