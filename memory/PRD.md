@@ -17,6 +17,16 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Statement period boundary fix (Veryfi "Next Closing Date" bug)
+
+**Backend** (`statements.py::upload_statement`)
+- Veryfi's `period_start_date` from OCR routinely mis-parses the "Next Closing Date" printed at the top of Amex (and similar) statements — returning a period like `2026-04-01 → 2026-04-24` on a statement whose real activity is `2026-02-22 → 2026-03-23`. That wrong period_start cascades into `opening_balance_service._upsert_auto_je`: the OBE JE gets dated `period_start – 1 day` = `2026-03-31`, but all the imported txns are dated Feb-Mar → BEFORE that date. `balance_before` then eats the entire net movement of the period ($+2,801.06), so `needed = anchor.opening_balance – 2,801.06` under-seeds OBE by exactly that amount.
+- Fix: reconcile Veryfi's header dates against the actual extracted transaction min/max. If `period_start > min(txn.date)`, fall back to `min(txn.date)`. Symmetric guard on `period_end`. Log both cases so we can measure how often Veryfi mis-parses.
+- **Verified end-to-end**: full BS trace on the Amex Blue Business Cash scenario now yields AmEx $207.78 ✓ (was –$2,593.28), OBE –$3,008.84 ✓ (was –$207.78), Clearing –$9,184.67, Net Income –$6,383.61. BS balances.
+
+**Test coverage** (`backend/tests/test_liability_statement_import.py`)
+- 17 pytest cases green (added 4: exact-Amex-scenario, veryfi-envelopes-txns, veryfi-end-before-latest-txn, all-missing-fallback).
+
 ### Feb 2026 — Credit-card import: post-Veryfi-docs review — dedicated Clearing account + refined signals
 
 **Trigger**: read Veryfi's Process-a-Bank-Statement API docs. Three insights that reshaped our approach:

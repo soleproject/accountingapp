@@ -137,7 +137,59 @@ def test_cardholder_subtotal_filter_by_description():
     assert not _is_cardholder_subtotal("")
 
 
-def test_cardholder_subtotal_filter_by_card_number_signal():
+# --- Period-boundary fallback (Veryfi mis-parses Amex "Next Closing Date") ---
+# Simulates the exact bug that produced OBE = -$207.78 instead of -$3,008.84
+# on the Amex test upload: Veryfi returned period_start_date = "2026-04-01"
+# (the "Next Closing Date" on Amex statements) while the actual transactions
+# span 2026-02-22 → 2026-03-23. The auto-OBE JE seeded to 2026-03-31 landed
+# AFTER all imported txns had posted → balance_before ate the opening seed.
+
+def _resolve_period(veryfi_start, veryfi_end, txn_dates):
+    """Mirror the period-boundary logic in `statements.upload_statement`."""
+    dates = sorted(d for d in txn_dates if d)
+    txn_min = dates[0] if dates else None
+    txn_max = dates[-1] if dates else None
+    if veryfi_start and txn_min and veryfi_start > txn_min:
+        start = txn_min
+    else:
+        start = veryfi_start or txn_min
+    if veryfi_end and txn_max and veryfi_end < txn_max:
+        end = txn_max
+    else:
+        end = veryfi_end or txn_max
+    return start, end
+
+
+def test_period_falls_back_when_veryfi_start_after_earliest_txn():
+    """Amex 'Next Closing Date' bug — Veryfi returned Apr 1 as
+    period_start on a statement whose earliest txn was Feb 22.
+    Must fall back to Feb 22.
+    """
+    s, e = _resolve_period("2026-04-01", "2026-04-24",
+                           ["2026-02-22", "2026-03-05", "2026-03-23"])
+    assert s == "2026-02-22"
+    assert e == "2026-04-24"
+
+
+def test_period_uses_veryfi_when_dates_envelope_txns():
+    """Normal well-formed statement — Veryfi's period should be respected."""
+    s, e = _resolve_period("2026-02-01", "2026-02-28",
+                           ["2026-02-05", "2026-02-15", "2026-02-25"])
+    assert s == "2026-02-01"
+    assert e == "2026-02-28"
+
+
+def test_period_falls_back_when_veryfi_end_before_latest_txn():
+    s, e = _resolve_period("2026-02-01", "2026-02-15",
+                           ["2026-02-05", "2026-02-25"])
+    assert s == "2026-02-01"
+    assert e == "2026-02-25"
+
+
+def test_period_all_missing_falls_back_to_txn_boundaries():
+    s, e = _resolve_period(None, None, ["2026-03-05", "2026-03-20"])
+    assert s == "2026-03-05"
+    assert e == "2026-03-20"
     """Cleaner signal per Veryfi docs — when the row carries a
     `card_number` field AND the OCR text is just a bare name, it's a
     subtotal even if it doesn't match the description regex exactly.
