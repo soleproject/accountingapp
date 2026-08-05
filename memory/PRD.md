@@ -17,6 +17,25 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Credit-card statement import: 3 P0 accounting fixes
+
+Applies to **every** credit-card / LOC / loan / HELOC / mortgage import — no issuer-specific logic.
+
+**Fix 1 — Naming default reflects account type** (`statement_account_resolver.py`)
+- `_base_detail_from_type` gained an `is_liability` param. When Veryfi returns an ambiguous / empty `account_type` (Amex reports marketing card names like "Blue Business Cash" instead of a category), the default now flips to `"Credit Card"` if we know we're posting to a liability, keeps `"Checking"` for assets. This ends the "American Express Checking …1004" mis-labelling.
+- All three callers (`_build_account_name`, fuzzy-match block, no-match creation block) thread `is_liability` through.
+
+**Fix 2 — Opening balance is derived from ledger math on liabilities** (`statements.py`)
+- Veryfi's `beginning_balance` field is reliable for bank statements (asset side untouched) but different credit-card issuers put different figures in that slot. Rather than guess which field is correct per issuer, when the account is a liability AND we have both `ending_balance` and a non-empty transaction list, we now compute `opening = ending + Σ(txn amounts)` (the identity that ties to the running-balance walk on a credit-normal account) and override the persisted `starting_balance` when it disagrees with the OCR value by > $0.02. Logs the override so audits stay clean.
+- Regression proof: the exact Amex Blue Business Cash statement (prev $3,008.84, txn Σ +$2,801.06, new $207.78) → computed opening $3,008.84.
+
+**Fix 3 — Paydown guard: liability + amount > 0 → skip AI, flag for review** (`statements.py`)
+- The categorizer previously bucketed positive-amount transactions on a liability account as revenue → the AmEx test upload produced $8,759 of phantom "Uncategorized Income". New guard: when `bank_acct.type == "liability"` AND `amount > 0`, we skip AI categorization entirely and insert the row with `posted=False`, `needs_review=True`, and a clear prompt ("Payment received on a liability account — please pick the source bank / asset account before posting."). Ledger balance stays clean until the user matches the paydown to its source bank; no revenue is ever invented.
+- **Asset accounts are untouched** — the guard's early return only fires for `type == "liability" AND amount > 0`, so a positive amount on Checking still flows through the normal deposit/revenue path.
+
+**Test coverage** (`backend/tests/test_liability_statement_import.py`)
+- 12 pytest cases green: naming defaults (5), opening-balance identity for both liability & asset formulas including paydown-only / charge-only edges (4), guard fires-vs-skipped matrix across (asset|liability) × (deposit|withdrawal) (3).
+
 ### Feb 2026 — Statement import: liability detection widened + UI override
 
 **Backend** (`statement_account_resolver.py`, `statements.py`, `routes/statements_routes.py`)
