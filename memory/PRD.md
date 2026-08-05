@@ -19,11 +19,13 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ### Feb 2026 — Bill Editor: searchable category picker + liability accounts + add-new
 
-**Frontend** (`pages/BillEditor.jsx`)
+**Frontend** (`pages/BillEditor.jsx`, `components/SearchableAccountPicker.jsx`)
 - Replaced the raw `<select>` "Expense Category" dropdown with the shared `SearchableAccountPicker` (already used by Items + Invoice lines). Free typing filters by code or name; there's a `+ Add new expense account` button that opens the same QuickCreate modal the rest of the app uses.
 - **Liability accounts now selectable on bill lines** — the account filter includes `type in {"expense", "liability"}` (was expense-only). Pros can now book a bill directly against Loans Payable / Credit Card Payable / Sales Tax Payable etc., and the eventual payment closes out A/P and reduces the liability in one motion (no manual JE needed).
 - Sort order preserved: 2000-range liabilities float above 6000-range expenses in the dropdown. Newly-created accounts fold into both `allAccounts` and `expenseAccounts` state immediately so the next line picks up on them without a page reload.
-- **Verified live via Playwright**: Bills → New → Expense Category dropdown shows `2500 Loans Payable`, `2100 Credit Card Payable`, `2200 Sales Tax Payable`, `5900 Depreciation Expense`, etc.; searching "loan" filters to `2500 Loans Payable`; `+ Add new expense account` button renders at the bottom of the menu.
+- **Portal-rendered menu** — the picker's popover now renders into `document.body` via `createPortal` with `position: fixed` and a `getBoundingClientRect`-driven position that re-measures on scroll and resize. The menu can now escape any ancestor `overflow: hidden` (bill/invoice cards, modal tables) so long option lists remain fully visible instead of being clipped by the parent container. Outside-click handler tracks both the trigger and menu refs so option selection still registers correctly.
+- **Above/below auto-flip** — measure() now checks `spaceBelow = window.innerHeight - r.bottom` and, if less than 220px with more room above, anchors the menu to CSS `bottom` (relative to the trigger's top) instead of `top`. The list-scroll region also gets a computed `maxHeight` so the popover never exceeds the space it has. Verified via applied styles: normal case yields `{top: 609px, bottom: ''}`, short-viewport case yields `{top: '', bottom: 53px}` — the flip fires correctly.
+- **Verified live via Playwright**: menu now has `document.body` as its parent, bounding box extends outside the bill card, clicking an option still closes the menu and updates the trigger label.
 
 ### Feb 2026 — Reporting basis is persistent across the platform
 
