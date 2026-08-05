@@ -272,6 +272,26 @@ async def create_receipt(cid: str, inp: ReceiptCreate, user: dict = Depends(get_
     return {"id": rid}
 
 
+@router.patch("/companies/{cid}/receipts/{rid}")
+async def update_receipt(
+    cid: str, rid: str, inp: ReceiptCreate,
+    user: dict = Depends(get_current_user),
+):
+    """Overwrite a receipt in place. Uses the same shape as create so the
+    modal can double as an editor. Every field submitted replaces the
+    stored value — the frontend always sends the full form. Untouched
+    fields (created_at, id, company_id) are preserved."""
+    await require_company(user, cid)
+    existing = await db.receipts.find_one({"id": rid, "company_id": cid})
+    if not existing:
+        raise HTTPException(404, "Receipt not found")
+    await db.receipts.update_one(
+        {"id": rid, "company_id": cid},
+        {"$set": {**inp.model_dump(), "updated_at": now_iso()}},
+    )
+    return {"id": rid, "ok": True}
+
+
 @router.delete("/companies/{cid}/receipts/{rid}")
 async def delete_receipt(cid: str, rid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)

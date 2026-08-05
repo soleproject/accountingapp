@@ -16,6 +16,17 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - **Auth**: JWT (bcrypt), role-based access (superadmin / pro / client), multi-tenant memberships
 
 
+### Feb 2026 — Receipts are now editable
+
+**Problem**: Receipts were create-only. To fix a typo or wrong amount you had to delete + re-enter, losing the attachment.
+
+**Fix**
+- **Backend** (`routes/payments.py`): new `PATCH /companies/{cid}/receipts/{rid}` reusing the same `ReceiptCreate` shape as create (frontend always sends the full form). 404 on missing.
+- **Frontend** (`pages/Receipts.jsx`): pencil icon per row opens the same modal in edit mode. Modal accepts an `initial` prop, prefills every field (date, vendor, amount, paid-from, category, notes, attachment preview), swaps heading to "Edit Receipt" and button to "Update receipt", and PATCHes instead of POSTing. Create path unchanged.
+
+**Verified**: curl-tested create → patch → get on preview backend; verified value round-trips correctly and 404s for missing IDs.
+
+
 ### Feb 2026 — Duplicate-account detector: exclude Uncategorized buckets
 
 **Problem**: `6999 Uncategorized Expense` and `9999 Uncategorized Income` were being flagged as a duplicate group on the Chart of Accounts page. They're seeded on purpose by `categorizer.ensure_uncategorized_accounts` (expense catch-all vs income catch-all) and merging them would collapse the AI review queue into a single unusable bucket.
