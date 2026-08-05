@@ -21,6 +21,7 @@ Auto-promote flow (Rocketsuite-style):
      the detail view.
 """
 from __future__ import annotations
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -159,6 +160,52 @@ async def upload_statement(
     imported = inserted_count
     await log_ai_event(cid, "veryfi_ocr", imported)
 
+    # -------- Coherence-check the opening balance (liability-side only) --------
+    # Veryfi's `beginning_balance` field is reliable for bank/checking
+    # statements (asset side — leave that path untouched), but on credit-
+    # card / loan statements different issuers put different figures in
+    # that slot: some return the previous statement's ending balance
+    # (what we want), others return the current statement's new balance
+    # (what we DON'T want — that's already the closing figure).
+    #
+    # Correct opening balance can always be derived from the identity the
+    # OBE JE + running balance walks the account through. For a LIABILITY
+    # (credit-normal), where `amount>0 = paydown` and `amount<0 = charge`,
+    # the identity is:
+    #
+    #   ending_owed  =  opening_owed  -  Σ(txn amounts)     (net paydown
+    #                                    reduces what's owed)
+    #   ⇒  opening_owed  =  ending_owed  +  Σ(txn amounts)
+    #
+    # For an ASSET the identity is `opening = ending - Σ` — but that path
+    # is left untouched here (asset statements currently work correctly).
+    stmt_fields = statement_account_resolver._statement_fields(veryfi_data)
+    ending_balance_v = stmt_fields.get("ending_balance")
+    starting_balance_v = resolved.get("starting_balance")
+    is_liability_acct = bank_acct.get("type") == "liability"
+    if is_liability_acct and ending_balance_v is not None and lines:
+        try:
+            eb = float(ending_balance_v)
+            movement = round(sum(float(ln.get("amount") or 0.0) for ln in lines), 2)
+            # Liability-specific sign: opening_owed = ending_owed + Σ(amt).
+            computed_opening = round(eb + movement, 2)
+            try:
+                sb_v = float(starting_balance_v) if starting_balance_v is not None else None
+            except (TypeError, ValueError):
+                sb_v = None
+            # Only override when Veryfi's value is missing OR disagrees by
+            # more than a small tolerance ($0.02) — trust the OCR when it
+            # already agrees with the math, so audit trails stay clean.
+            if sb_v is None or abs(sb_v - computed_opening) > 0.02:
+                logging.getLogger(__name__).info(
+                    "Statements: overriding starting_balance for liability "
+                    "account %s from %r → %r (ending=%.2f, movement=%.2f)",
+                    bank_account_id, sb_v, computed_opening, eb, movement,
+                )
+                starting_balance_v = computed_opening
+        except (TypeError, ValueError):
+            pass
+
     # -------- Finalize the import row FIRST --------
     # The auto-OBE helper's `_earliest_statement_anchor` filters on
     # `status: "completed"`, so the row for THIS upload must be flipped
@@ -182,9 +229,8 @@ async def upload_statement(
             "account_matched": resolved["matched"],
             "bank_name": resolved.get("bank_name"),
             "last4": resolved.get("last4"),
-            "starting_balance": resolved.get("starting_balance"),
-            "ending_balance": statement_account_resolver
-                ._statement_fields(veryfi_data).get("ending_balance"),
+            "starting_balance": starting_balance_v,
+            "ending_balance": ending_balance_v,
             "veryfi_document_id": (
                 str(veryfi_data.get("id")) if veryfi_data.get("id") else None
             ),
@@ -521,7 +567,59 @@ async def _categorize_and_insert_veryfi_lines(
     from liability_subaccounts import maybe_route_to_liability_subaccount
 
     inserted: list[dict] = []
+    # A positive amount on a liability account means "money came IN to the
+    # card / loan" — i.e. a paydown from some source bank. We DON'T know
+    # which bank was the source (checking? owner's personal card? another
+    # company account?), so booking it to a category via the standard
+    # revenue/expense AI would either invent phantom income (Uncategorized
+    # Income) or wrong-side an expense. Instead we short-circuit: flag
+    # `needs_review`, leave `posted=False` so the ledger balance stays
+    # clean (only the correct side of the txn — the liability — is known
+    # today), and prompt the user to pick the source when they reconcile.
+    # Asset-side statements are untouched; a positive on Checking is
+    # still a deposit / revenue and follows the existing path.
+    bank_is_liability = bank_acct.get("type") == "liability"
+
     for cand in candidates:
+        if bank_is_liability and (cand.get("amount") or 0.0) > 0:
+            post = {
+                "category_account_id":   uncat_inc["id"],
+                "category_account_code": uncat_inc["code"],
+                "category_account_name": uncat_inc["name"],
+                "ai_confidence": 0.0,
+                "ai_reasoning": (
+                    "Payment received on a liability account — please pick "
+                    "the source bank / asset account before posting."
+                ),
+                "needs_review": True,
+                # Leave un-posted so this line doesn't decrease the card
+                # balance yet (only the transfer TO it does, once matched).
+                "posted": False,
+                "ai_source": "liability_paydown_guard",
+            }
+            r = {"cache_hit": False}
+            inserted.append({
+                "id": str(uuid.uuid4()), "company_id": cid, "date": cand["date"],
+                "description": cand["description"], "merchant": cand["merchant"],
+                "amount": cand["amount"],
+                "bank_account_id": bank_acct["id"],
+                "bank_account_name": bank_acct["name"],
+                "contact_id":     cand.get("contact_id"),
+                "contact_name":   cand.get("contact_name"),
+                "contact_source": cand.get("contact_source"),
+                "pfc_detailed": None, "pfc_primary": None,
+                "pfc_classification": (cand.get("pfc_resolved") or {}).get("classification"),
+                **post,
+                "human_reviewed": False,
+                "source": "veryfi",
+                "statement_import_id": import_id,
+                "splits": [], "linked_invoice_id": None,
+                "linked_bill_id": None, "linked_payment_id": None, "tags": [],
+                "cache_hit": False,
+                "created_at": now, "updated_at": now,
+            })
+            continue
+
         pfc_res = pfc_results.get(id(cand))
         if pfc_res:
             post = {

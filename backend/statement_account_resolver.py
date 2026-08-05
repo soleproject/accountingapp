@@ -77,7 +77,7 @@ def _normalize(s: str | None) -> str:
     return re.sub(r"[^a-z0-9]", "", s.lower())
 
 
-def _base_detail_from_type(t: str | None) -> str:
+def _base_detail_from_type(t: str | None, is_liability: bool = False) -> str:
     v = (t or "").lower()
     if "saving" in v:
         return "Savings"
@@ -95,7 +95,14 @@ def _base_detail_from_type(t: str | None) -> str:
         return "Loan"
     if "credit" in v:
         return "Credit Card"
-    return "Checking"
+    # When Veryfi returns an ambiguous / empty `account_type` (common on
+    # business credit cards where they report the marketing card name like
+    # "Blue Business Cash" instead of a category) we default to a name
+    # that matches the account TYPE we're about to book against. Asset →
+    # "Checking" (existing behaviour), liability → "Credit Card". Without
+    # this, credit-card imports were mis-labelled "Amex Checking …1004"
+    # even though they were correctly typed as `liability` in the CoA.
+    return "Credit Card" if is_liability else "Checking"
 
 
 async def _pick_parent_account(company_id: str, detail: str, is_liability: bool) -> str | None:
@@ -128,11 +135,14 @@ async def _pick_parent_account(company_id: str, detail: str, is_liability: bool)
     return None
 
 
-def _build_account_name(bank: str | None, acct_type: str | None, last4: str | None) -> str:
+def _build_account_name(
+    bank: str | None, acct_type: str | None, last4: str | None,
+    is_liability: bool = False,
+) -> str:
     parts: list[str] = []
     if bank:
         parts.append(bank.strip())
-    parts.append(_base_detail_from_type(acct_type))
+    parts.append(_base_detail_from_type(acct_type, is_liability=is_liability))
     if last4:
         parts.append(f"···{last4}")
     return " ".join(p for p in parts if p) or "Bank Account"
@@ -294,7 +304,7 @@ async def resolve_or_create_bank_account(
     # Checking ···9917 was being merged into the first ···6084 row).
     if bank_name and not last4:
         bank_norm = _normalize(bank_name)
-        detail = _base_detail_from_type(account_type).lower()
+        detail = _base_detail_from_type(account_type, is_liability=is_liability).lower()
         detail_norm = _normalize(detail)
         candidates = [
             a for a in existing
@@ -313,14 +323,16 @@ async def resolve_or_create_bank_account(
 
     # 3) No match — create a new account. Assets number from 1010,
     # liabilities from 2100 (credit-card land).
-    name = _build_account_name(bank_name, account_type, last4)
+    name = _build_account_name(bank_name, account_type, last4, is_liability=is_liability)
     code = await _next_account_code(company_id, 2100 if is_liability else 1010)
     account_id = str(uuid.uuid4())
     subtype = ("current_liability" if is_liability
                else ("Bank" if BANK_KEYWORDS.search(name)
                      else "current_asset"))
     parent_id = await _pick_parent_account(
-        company_id, _base_detail_from_type(account_type), is_liability,
+        company_id,
+        _base_detail_from_type(account_type, is_liability=is_liability),
+        is_liability,
     )
     now = now_iso()
     # `account_number` is AES-256 encrypted per `crypto_service`
