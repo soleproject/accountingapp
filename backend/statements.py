@@ -568,33 +568,37 @@ async def _categorize_and_insert_veryfi_lines(
 
     inserted: list[dict] = []
     # A positive amount on a liability account means "money came IN to the
-    # card / loan" — i.e. a paydown from some source bank. We DON'T know
-    # which bank was the source (checking? owner's personal card? another
-    # company account?), so booking it to a category via the standard
-    # revenue/expense AI would either invent phantom income (Uncategorized
-    # Income) or wrong-side an expense. Instead we short-circuit: flag
-    # `needs_review`, leave `posted=False` so the ledger balance stays
-    # clean (only the correct side of the txn — the liability — is known
-    # today), and prompt the user to pick the source when they reconcile.
-    # Asset-side statements are untouched; a positive on Checking is
-    # still a deposit / revenue and follows the existing path.
+    # card / loan" — i.e. a paydown or refund/rebate. The ledger MUST see
+    # these movements to tie to the statement balance (that was the AmEx
+    # test bug: leaving them un-posted overstated the card by the exact
+    # $ of payments). So we POST them against the AmEx directly and route
+    # the OTHER side to Opening Balance Equity as a temporary holding —
+    # `needs_review=True` so the reconciliation queue lights up and the
+    # user can reassign the source (e.g. Chase Checking) once matched.
+    # Asset accounts are unaffected; positive amounts on Checking still
+    # follow the normal deposit / revenue path.
     bank_is_liability = bank_acct.get("type") == "liability"
+    obe_row = None
+    if bank_is_liability and any((c.get("amount") or 0.0) > 0 for c in candidates):
+        import plaid_connect
+        obe_row = await plaid_connect.ensure_opening_balance_equity(cid)
 
     for cand in candidates:
-        if bank_is_liability and (cand.get("amount") or 0.0) > 0:
+        if bank_is_liability and (cand.get("amount") or 0.0) > 0 and obe_row:
             post = {
-                "category_account_id":   uncat_inc["id"],
-                "category_account_code": uncat_inc["code"],
-                "category_account_name": uncat_inc["name"],
+                "category_account_id":   obe_row["id"],
+                "category_account_code": obe_row.get("code"),
+                "category_account_name": obe_row.get("name"),
                 "ai_confidence": 0.0,
                 "ai_reasoning": (
-                    "Payment received on a liability account — please pick "
-                    "the source bank / asset account before posting."
+                    "Payment or credit received on a liability account — "
+                    "temporarily parked against Opening Balance Equity. "
+                    "Please reclassify to the source bank / asset account "
+                    "(e.g. checking) when reconciling."
                 ),
                 "needs_review": True,
-                # Leave un-posted so this line doesn't decrease the card
-                # balance yet (only the transfer TO it does, once matched).
-                "posted": False,
+                # POST it — the ledger MUST tie to the statement.
+                "posted": True,
                 "ai_source": "liability_paydown_guard",
             }
             r = {"cache_hit": False}

@@ -17,7 +17,22 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 — Credit-card statement import: 3 P0 accounting fixes
+### Feb 2026 — Credit-card import: cardholder-subtotal filter + paydown-to-OBE (revises earlier Fix 3)
+
+**P0.1 — Cardholder subtotal filter** (`veryfi_service.py`)
+- Veryfi occasionally emits per-cardholder rollup rows on multi-user credit-card statements (Amex Blue Business Cash, Chase Ink, Cap One Spark). Rows like `APRIL MCINTOSH 0-31004`, `PAUL LABOUNTY JR 0-31020` are subtotals, not real transactions — importing them double-counts the ledger by the exact sum of the underlying charges.
+- New `_is_cardholder_subtotal(desc)` regex-matches the pattern `<CAPS name tokens> [SR|JR|II|III|IV]? <card ending>` (Amex format `0-31XXX`, extensible). Filter runs inside `extract_transactions._add_from_txn_shape` before the row is emitted.
+- **Verified**: the 4 exact phantom rows the AmEx test surfaced (accounting for the ~$6.4k overstatement) are now dropped. Real charges (`BEST BUY SPRINGFIELD MO 888BESTBUY`), payments (`APRIL MCINTOSH MOBILE PAYMENT - THANK YOU`), rebates and refunds all pass through unchanged.
+
+**P0.2 — Redo of Fix 3: paydowns POST against the card with OBE offset** (`statements.py`)
+- Prior Fix 3 left liability paydowns un-posted → card balance overstated because the payments never reduced it. Corrected approach: paydowns POST directly against the AmEx (`bank_account_id=AmEx, amount=+X`) with `category_account_id = Opening Balance Equity` and `needs_review=True`. Ledger balance ties to the statement immediately; OBE accumulates the unmatched credits until the user reclassifies each row to a real source bank via the review queue.
+- Ledger math verified with the exact Amex Blue Business Cash statement (prev $3,008.84 → new $207.78, charges $6,383.61, credits $9,184.67): AmEx settles at $207.78 ✓, OBE at +$6,175.83, Net Income at –$6,383.61, BS balances.
+- **Asset accounts untouched**: guard only fires on `bank_acct.type == "liability" AND amount > 0`. Checking deposits, asset withdrawals, and liability charges all bypass the guard.
+
+**Test coverage** (`backend/tests/test_liability_statement_import.py`)
+- 13 pytest cases green (was 12, added `test_cardholder_subtotal_filter`).
+
+### Feb 2026 — Credit-card statement import: 3 P0 accounting fixes (superseded by above)
 
 Applies to **every** credit-card / LOC / loan / HELOC / mortgage import — no issuer-specific logic.
 

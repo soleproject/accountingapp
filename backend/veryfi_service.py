@@ -2,8 +2,27 @@
 from __future__ import annotations
 import os
 import io
+import re
 import httpx
 from typing import Any
+
+# Matches "PERSON NAME 0-31004" rows Veryfi emits for multi-cardholder
+# credit-card statements (Amex, Chase Ink, Cap One Spark). These are
+# per-cardholder subtotal rows — NOT real transactions. If they land in
+# the ledger the balance is double-counted by the exact sum of the
+# underlying charges (each individual charge is *also* extracted). Real
+# merchant transactions always carry a location, terminal id, or Amex
+# reference number that breaks this bare-name-plus-card-ending shape.
+_CARDHOLDER_SUBTOTAL_RE = re.compile(
+    r"^([A-Z]+ )+"                     # 1+ ALL-CAPS name tokens (incl. single-letter middle initials like "N")
+    r"(?:JR|SR|II|III|IV )?"           # optional generational suffix
+    r"[0-9]-3[0-9]{4}\s*$",            # card ending code (Amex: 0-31XXX)
+    re.IGNORECASE,
+)
+
+
+def _is_cardholder_subtotal(desc: str) -> bool:
+    return bool(desc and _CARDHOLDER_SUBTOTAL_RE.match(desc.strip()))
 
 VERYFI_BASE = "https://api.veryfi.com"
 BANK_STMT_PATH = "/api/v8/partner/bank-statements/"
@@ -86,6 +105,9 @@ def extract_transactions(veryfi_data: dict) -> list[dict]:
             return
         # Collapse Veryfi's `text` field which sometimes has tabs + newlines
         clean = " ".join(desc.split())
+        # Drop cardholder-subtotal rows (see `_CARDHOLDER_SUBTOTAL_RE` docstring).
+        if _is_cardholder_subtotal(clean):
+            return
         # Bank-statement rows have no separate "vendor" field — the full
         # cleaned memo IS the best merchant string we have. Previously we
         # took only the first token (e.g. "COSTCO WHSE #0646 SPARKS NV"
