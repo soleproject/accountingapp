@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import PaymentHistoryBlock from "@/components/PaymentHistoryBlock";
 import ContactCombobox from "@/components/ContactCombobox";
+import SearchableAccountPicker from "@/components/SearchableAccountPicker";
 
 const TERMS_OPTIONS = [
   { label: "Due on receipt", days: 0 },
@@ -40,6 +41,9 @@ export default function BillEditor() {
   const [contacts, setContacts] = useState([]);
   const [itemsCatalog, setItemsCatalog] = useState([]);
   const [expenseAccounts, setExpenseAccounts] = useState([]);
+  // Full CoA — needed by SearchableAccountPicker so QuickCreate can
+  // compute the next unused account code within the target GAAP range.
+  const [allAccounts, setAllAccounts] = useState([]);
   const [taxes, setTaxes] = useState([]);
   const [taxModalLineIdx, setTaxModalLineIdx] = useState(null);
 
@@ -80,10 +84,20 @@ export default function BillEditor() {
         setContacts(c.data.contacts || []);
         setItemsCatalog(it.data.items || []);
         setTaxes(tx.data.taxes || []);
-        // Expense-type accounts only, sorted by numeric code so 6000s
-        // (SG&A) appear before 8000s (other expenses) etc.
-        const accs = (ac.data.accounts || [])
-          .filter(a => (a.type || "").toLowerCase() === "expense")
+        // Bill lines can post to either an EXPENSE account (typical
+        // operating cost) or a LIABILITY account (paying down a loan,
+        // credit card, or accrued balance the vendor bills you for).
+        // Both share the same picker so a bill from a lender still
+        // routes the payment straight against the liability instead
+        // of forcing a manual JE. Sorted by numeric code so 2000-range
+        // liabilities appear above 6000-range expenses in the dropdown.
+        const rawAccounts = ac.data.accounts || [];
+        setAllAccounts(rawAccounts);
+        const accs = rawAccounts
+          .filter(a => {
+            const t = (a.type || "").toLowerCase();
+            return t === "expense" || t === "liability";
+          })
           .sort((x, y) => String(x.code || "").localeCompare(String(y.code || "")));
         setExpenseAccounts(accs);
         if (editMode) {
@@ -374,6 +388,7 @@ export default function BillEditor() {
           <EditForm
             {...{
               contacts, setContacts, itemsCatalog, taxes, setTaxes, expenseAccounts,
+              setExpenseAccounts, allAccounts, setAllAccounts, currentId,
               contact, setContact,
               number, setNumber,
               issue, setIssue, due, setDue,
@@ -480,6 +495,7 @@ const TERMS_LABEL_TO_DAYS = {
 
 function EditForm({
   contacts, setContacts, itemsCatalog, taxes, setTaxes, expenseAccounts,
+  setExpenseAccounts, allAccounts, setAllAccounts, currentId,
   contact, setContact,
   number, setNumber,
   issue, setIssue, due, setDue,
@@ -492,7 +508,6 @@ function EditForm({
   notes, setNotes, internalNotes, setInternalNotes,
   attachments, onAttach, removeAttachment,
   totals,
-  currentId,
   taxModalLineIdx, setTaxModalLineIdx,
   applyTaxToAllLines,
   payments = [],
@@ -691,19 +706,28 @@ function EditForm({
                       </select>
                     </td>
                     <td className="px-2 py-1.5">
-                      <select
-                        value={l.expense_account_id || ""}
-                        onChange={(e) => applyExpenseToLine(i, e.target.value)}
-                        className={`w-full border rounded px-2 py-1 text-sm bg-white ${missingCat ? "border-red-300" : ""}`}
-                        data-testid={`bill-editor-line-${i}-category`}
-                      >
-                        <option value="">Choose…</option>
-                        {expenseAccounts.map(a => (
-                          <option key={a.id} value={a.id}>
-                            {a.code ? `${a.code} · ` : ""}{a.name}
-                          </option>
-                        ))}
-                      </select>
+                      <SearchableAccountPicker
+                        value={l.expense_account_id || null}
+                        onChange={(id) => applyExpenseToLine(i, id)}
+                        accounts={expenseAccounts}
+                        allAccounts={allAccounts}
+                        placeholder="Choose category…"
+                        kindLabel="expense"
+                        newDefaults={{ type: "expense" }}
+                        currentId={currentId}
+                        onCreated={(acct) => {
+                          // Fold the freshly-created account into both lists so
+                          // it shows up immediately on the next line without a
+                          // page reload. Same sort as the initial load.
+                          setAllAccounts(prev => [...prev, acct]);
+                          setExpenseAccounts(prev => {
+                            const next = [...prev, acct];
+                            next.sort((x, y) => String(x.code || "").localeCompare(String(y.code || "")));
+                            return next;
+                          });
+                        }}
+                        testId={`bill-editor-line-${i}-category`}
+                      />
                     </td>
                     <td className="px-2 py-1.5">
                       <input
