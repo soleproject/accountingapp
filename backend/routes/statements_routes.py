@@ -109,3 +109,22 @@ async def statements_delete(
     return await statements.delete_import(cid, import_id, cascade=cascade)
 
 
+@router.post("/companies/{cid}/statements/imports/{import_id}/reprocess")
+async def statements_reprocess(
+    cid: str, import_id: str,
+    account_kind_hint: str | None = Form(None),
+    user: dict = Depends(get_current_user),
+):
+    """Re-run the resolver + categorization for an existing import using
+    the user-provided kind hint. Used to fix an initial auto-detect
+    misfire without re-uploading the PDF.
+    """
+    await require_company(user, cid)
+    import statements
+    return await statements.reprocess_import(
+        cid, import_id, account_kind_hint,
+        categorize_fn=categorize_transaction,
+        is_period_closed_fn=is_period_closed,
+    )
+
+

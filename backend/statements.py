@@ -732,3 +732,136 @@ async def _categorize_and_insert_veryfi_lines(
             await log_ai_event(cid, "flag_review", flagged_count)
 
     return len(inserted), skipped_closed
+
+
+async def reprocess_import(
+    cid: str,
+    import_id: str,
+    account_kind_hint: str | None,
+    *,
+    categorize_fn,
+    is_period_closed_fn,
+) -> dict:
+    """Re-run the CoA-resolver + txn-insertion for an already-completed
+    import, this time with the user-provided `account_kind_hint`
+    ("asset" | "liability" | "auto").
+
+    Used by the Uploads-table "Reprocess" button when the initial
+    auto-detect misfired (e.g. an Amex Business card mis-classified as
+    Checking). We keep the cached Veryfi payload so we don't burn another
+    OCR call — just delete the current txns, clean up any auto-created
+    CoA row that has no other references, then re-run the resolver +
+    insertion loop with the corrected hint.
+
+    Returns counts of what was deleted / reinserted so the UI can show a
+    "cleaned up 123 txns, re-imported as Credit Card" toast.
+    """
+    doc = await db.statement_imports.find_one({"id": import_id, "company_id": cid})
+    if not doc:
+        raise HTTPException(404, "Import not found")
+    veryfi_data = doc.get("veryfi_raw")
+    if not veryfi_data:
+        raise HTTPException(
+            400,
+            "This import doesn't have its OCR payload cached — reprocess "
+            "requires the raw Veryfi response, which was only added to new "
+            "imports recently. Please delete and re-upload the file.",
+        )
+
+    prior_account_id = doc.get("account_id")
+    prior_import_id = import_id
+
+    # 1) Cascade-delete the reconciliation + txns from this import BEFORE
+    #    we re-run so `_signed_balances` doesn't count them against the
+    #    resolver's re-decision.
+    try:
+        from reconciliation_engine import delete_reconciliation_for_statement_import
+        await delete_reconciliation_for_statement_import(cid, prior_import_id)
+    except Exception:  # noqa: BLE001
+        pass
+    await db.transactions.delete_many({
+        "company_id": cid, "statement_import_id": prior_import_id,
+    })
+
+    # 2) If the prior auto-created CoA row is now orphaned (no other
+    #    imports, no journal entries, no manual txns), remove it — this
+    #    is what turns "Amex Checking" into a phantom that clutters the
+    #    CoA forever otherwise.
+    coa_row_deleted = None
+    if prior_account_id:
+        acct = await db.accounts.find_one({"id": prior_account_id, "company_id": cid})
+        was_auto = bool(acct and (acct.get("created_by_ai") or acct.get("source") in
+                                  ("veryfi_statement", "plaid_link")))
+        if was_auto:
+            other_txn = await db.transactions.count_documents({
+                "company_id": cid, "bank_account_id": prior_account_id,
+            })
+            other_txn2 = await db.transactions.count_documents({
+                "company_id": cid, "category_account_id": prior_account_id,
+            })
+            other_je = await db.journal_entries.count_documents({
+                "company_id": cid, "lines.account_id": prior_account_id,
+            })
+            other_imports = await db.statement_imports.count_documents({
+                "company_id": cid, "account_id": prior_account_id,
+                "id": {"$ne": prior_import_id},
+            })
+            if other_txn + other_txn2 + other_je + other_imports == 0:
+                await db.accounts.delete_one({"id": prior_account_id})
+                coa_row_deleted = f"{acct.get('code')} {acct.get('name')}"
+
+    # 3) Flip the import row back to "processing" and re-run the resolver
+    #    with the new hint. Same code path the initial upload uses.
+    await db.statement_imports.update_one(
+        {"id": prior_import_id},
+        {"$set": {"status": "processing", "account_id": None, "account_name": None,
+                  "updated_at": now_iso()}},
+    )
+
+    resolved = await statement_account_resolver.resolve_statement_account(
+        cid, veryfi_data, account_kind_hint=account_kind_hint,
+    )
+    bank_account_id = resolved["account_id"]
+    bank_acct = await db.accounts.find_one({"id": bank_account_id})
+
+    # 4) Re-run the categorize+insert loop on the cached candidates.
+    lines = veryfi_service.extract_transactions(veryfi_data)
+    imported, skipped_closed = await _categorize_and_insert_veryfi_lines(
+        cid, lines, bank_acct, prior_import_id,
+        categorize_fn=categorize_fn,
+        is_period_closed_fn=is_period_closed_fn,
+    )
+
+    # 5) Finalize the import row — mirror the same update the initial
+    #    upload does so the Uploads table shows the corrected metadata.
+    await db.statement_imports.update_one(
+        {"id": prior_import_id},
+        {"$set": {
+            "status": "completed",
+            "transaction_count": imported,
+            "skipped_closed": skipped_closed,
+            "account_id": bank_account_id,
+            "account_name": bank_acct["name"],
+            "account_code": bank_acct["code"],
+            "account_matched": resolved["matched"],
+            "reprocessed_at": now_iso(),
+            "reprocess_hint": account_kind_hint,
+            "updated_at": now_iso(),
+        }},
+    )
+
+    # 6) Re-anchor the OBE JE for the freshly-linked account.
+    try:
+        import opening_balance_service as obs
+        await obs.ensure_opening_balance_for_account(cid, bank_account_id)
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {
+        "import_id": prior_import_id,
+        "reinserted": imported,
+        "coa_row_deleted": coa_row_deleted,
+        "new_account_id": bank_account_id,
+        "new_account_name": bank_acct["name"],
+        "new_account_type": bank_acct.get("type"),
+    }

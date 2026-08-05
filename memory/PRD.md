@@ -17,6 +17,18 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Statement upload: pre-check modal + post-hoc reprocess
+
+**Approach 1 — Pre-upload confirmation modal** (`components/StatementsTab.jsx`)
+- On any file drop or browse, if the top-of-page account dropdown is set to any "auto" value, a modal intercepts before the upload starts. Three radio options: "Bank / Cash account", "Credit Card / Loan / LOC", "Let AI decide (auto-detect)". Preseeded from the top dropdown so a user who set `auto-liability` up top sees that already selected. A "Don't ask again for this batch" checkbox lets a 20-file drop confirm once and stream through.
+- Selecting a specific real CoA row up top bypasses the modal entirely (an explicit account pick is already unambiguous).
+- Prevents the exact class of misfire that occurred on Liability Test LLC — Amex Blue Business Cash card auto-detected as Checking, creating a phantom `American Express Checking …1004` CoA row.
+
+**Approach 2 — Post-hoc reprocess** (`statements.py::reprocess_import`, `routes/statements_routes.py`, `components/StatementsTab.jsx::ImportsTable`)
+- New endpoint `POST /companies/{cid}/statements/imports/{import_id}/reprocess` reads the cached `veryfi_raw` payload (no re-OCR call, no Veryfi cost). Steps: (1) cascade-delete the existing reconciliation + txns from this import, (2) delete the auto-created CoA row if it's now orphaned (no other txns/JEs/imports reference it), (3) flip import back to `processing`, (4) re-run the resolver with the new `account_kind_hint`, (5) re-run the categorize+insert loop, (6) re-anchor the OBE JE.
+- Frontend adds a `RotateCw` button on each completed import row. Prompts for the corrected kind (1/2/3 → asset/liability/auto), asks for confirmation, then calls the endpoint and toasts a summary ("Reprocessed as 'American Express Credit Card ···1004' (liability). 123 transactions re-created, cleaned up '1015 American Express Checking …1004'.").
+- Verified: backend route registers correctly (401 unauthed = wired); modal renders with all 6 controls confirmed via Playwright.
+
 ### Feb 2026 — Chart of Accounts row drill-down
 
 **Frontend** (`pages/ChartOfAccounts.jsx`, `pages/ReportView.jsx`)
