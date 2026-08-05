@@ -259,6 +259,13 @@ async def find_duplicate_accounts(cid: str, user: dict = Depends(get_current_use
         key = _normalize_account_name(a.get("name") or "")
         if not key:
             continue
+        # Skip system "Uncategorized" buckets — 6999 Uncategorized Expense,
+        # 9999 Uncategorized Income, and any other Uncategorized-* row are
+        # intentional catch-alls seeded by `categorizer.ensure_uncategorized_accounts`.
+        # Merging them would collapse the AI review queue into a single
+        # unusable pot. They coexist on purpose.
+        if key == "uncategorized":
+            continue
         buckets.setdefault((a.get("type") or "", key), []).append({
             "id": a["id"],
             "code": a.get("code"),

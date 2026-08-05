@@ -16,6 +16,17 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - **Auth**: JWT (bcrypt), role-based access (superadmin / pro / client), multi-tenant memberships
 
 
+### Feb 2026 — Duplicate-account detector: exclude Uncategorized buckets
+
+**Problem**: `6999 Uncategorized Expense` and `9999 Uncategorized Income` were being flagged as a duplicate group on the Chart of Accounts page. They're seeded on purpose by `categorizer.ensure_uncategorized_accounts` (expense catch-all vs income catch-all) and merging them would collapse the AI review queue into a single unusable bucket.
+
+**Fix (`routes/accounts.py::find_duplicate_accounts`)**
+- After the normalized key is computed, skip any account whose key equals the literal `"uncategorized"`. Every variant we've seen (`Uncategorized Expense`, `Uncategorized Income`, `UNCATEGORIZED EXPENSE`, extra whitespace) normalizes to that single key so the guard catches all of them.
+- Non-uncategorized names (`Uncategorized Rent`, `Meals`, etc.) still normalize to distinct keys, so legitimate duplicate detection is unaffected — verified against a synthetic Chart of Accounts where "Meals" x3 still flagged while 6999/9999 no longer did.
+
+**Tests**: `tests/test_duplicate_accounts_filter.py` — 2 unit tests (all uncategorized variants collapse to the same key; non-uncategorized names remain distinct).
+
+
 ### Feb 2026 — Cross-year statement year-wrap correction (Dec→Jan bug)
 
 **Problem**: On a credit-card statement covering Dec 26, 2025 → Jan 25, 2026, Veryfi's OCR stamps every transaction with the closing year (2026), producing dates like `2026-12-25` for what are really Dec 2025 charges. Downstream, the statement's period range balloons to `2026-01-01 → 2026-12-31` and the GL shows December transactions eleven months in the future.
