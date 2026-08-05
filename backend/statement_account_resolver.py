@@ -28,7 +28,38 @@ from typing import Any
 from db import db, now_iso
 
 
-BANK_KEYWORDS = re.compile(r"bank|cash|checking|savings|credit", re.IGNORECASE)
+BANK_KEYWORDS = re.compile(r"bank|cash|checking|savings|credit|loan|mortgage|heloc|line[- ]of[- ]credit|note[- ]payable", re.IGNORECASE)
+
+
+# Any of these substrings in `account_type` / `bank_name` / statement title
+# means the statement belongs on the LIABILITY side of the balance sheet
+# (credit card, line of credit, term loan, mortgage, HELOC, note payable).
+# Widened from a lone "credit" check so business LOCs, SBA loans, and
+# mortgage/HELOC statements auto-book to a 2100-range CoA row instead of
+# silently landing under Cash & Bank at 1010.
+LIABILITY_HINT_RE = re.compile(
+    r"credit[\s_-]?card"
+    r"|credit[\s_-]?line"
+    r"|line[\s_-]?of[\s_-]?credit"
+    r"|\bloc\b"
+    r"|\bloan\b"
+    r"|mortgage"
+    r"|heloc"
+    r"|note[\s_-]?payable"
+    r"|\bcredit\b",  # keep the original bare "credit" as a fallback
+    re.IGNORECASE,
+)
+
+
+def _looks_liability(*hints: str | None) -> bool:
+    """True when any provided string looks like a credit-card / loan
+    / line-of-credit / mortgage statement. Used by both auto-detect and
+    the fuzzy fallback when Veryfi returns an empty `account_type`.
+    """
+    for h in hints:
+        if h and LIABILITY_HINT_RE.search(h):
+            return True
+    return False
 
 
 def _last4(s: str | None) -> str | None:
@@ -54,6 +85,14 @@ def _base_detail_from_type(t: str | None) -> str:
         return "Money Market"
     if "cd" in v or "certificate" in v:
         return "CD"
+    if "heloc" in v:
+        return "HELOC"
+    if "mortgage" in v:
+        return "Mortgage"
+    if "line" in v and "credit" in v:
+        return "Line of Credit"
+    if "loan" in v:
+        return "Loan"
     if "credit" in v:
         return "Credit Card"
     return "Checking"
@@ -320,14 +359,33 @@ async def resolve_or_create_bank_account(
 
 async def resolve_statement_account(
     company_id: str, veryfi_doc: dict,
+    account_kind_hint: str | None = None,
 ) -> dict:
     """Veryfi-facing wrapper — pulls fields from the OCR doc, then delegates
     to `resolve_or_create_bank_account` for the actual match/create logic
     (shared with Plaid).
+
+    ``account_kind_hint`` is an optional user override sent from the
+    Import Statements UI when the user knows the statement type ahead of
+    OCR (e.g. Veryfi frequently returns an empty ``account_type`` for
+    community-bank LOCs and SBA loans, which would otherwise fall through
+    to the asset default). Accepted values:
+
+    * ``"liability"`` — force liability branch (creates in 2100-range).
+    * ``"asset"``     — force asset branch (creates in 1010-range).
+    * ``None`` / ``"auto"`` — auto-detect from Veryfi fields (default).
     """
     fields = _statement_fields(veryfi_doc)
-    acct_type = (fields.get("account_type") or "").lower()
-    is_liability = "credit" in acct_type
+    hint = (account_kind_hint or "").lower().strip() or "auto"
+    if hint == "liability":
+        is_liability = True
+    elif hint == "asset":
+        is_liability = False
+    else:
+        # Auto-detect: widened net covers credit cards, LOCs, term loans,
+        # mortgages, and HELOCs — falling back to bank_name when Veryfi
+        # left `account_type` blank.
+        is_liability = _looks_liability(fields.get("account_type"), fields.get("bank_name"))
     return await resolve_or_create_bank_account(
         company_id,
         bank_name=fields["bank_name"],

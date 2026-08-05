@@ -17,6 +17,22 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Statement import: liability detection widened + UI override
+
+**Backend** (`statement_account_resolver.py`, `statements.py`, `routes/statements_routes.py`)
+- Widened `resolve_statement_account` from a lone `"credit" in account_type` check to a full regex net covering credit cards, lines of credit / LOCs, term loans, mortgages, HELOCs, and notes payable. Also falls back to `bank_name` when Veryfi returns an empty `account_type` (common for community-bank LOCs and SBA loan statements).
+- Extended `_base_detail_from_type` to name new auto-created accounts appropriately: `HELOC`, `Mortgage`, `Line of Credit`, `Loan`, `Credit Card`, `Savings`, `Checking`.
+- Threaded a new `account_kind_hint` parameter ("asset" | "liability" | "auto") from the upload route → `upload_statement` → `resolve_statement_account`. When the user explicitly says the statement is a credit card or loan, we skip the OCR-string sniffing and force the liability branch (creates the CoA row from the 2100 range with `subtype = "current_liability"`).
+- 12/12 unit-level assertions pass on `_looks_liability` (Credit Card, CREDIT_CARD_STATEMENT, Line of Credit, Business LOC, SBA Loan, Mortgage Statement, HELOC, Note Payable → True; Checking, Savings, empty, None → False).
+
+**Frontend** (`components/StatementsTab.jsx`)
+- Import Statements dropdown reworked into three optgroups:
+  1. **Auto-detect** — `Auto-detect from statement`, `This is a bank / cash account`, `This is a credit card or loan`.
+  2. **Bank accounts** — all existing `type=asset` CoA rows.
+  3. **Credit cards & loans** — all existing `type=liability` CoA rows (previously only assets were listed, so pros couldn't pin a statement to their existing Credit Card Payable / Loans Payable rows).
+- Upload payload now sends `account_kind_hint=asset|liability` when the corresponding auto- option is picked. Selecting an existing CoA row (from either group) still pins to that specific account and skips auto-detect entirely.
+- **Verified via Playwright**: dropdown enumerates all three optgroups correctly; `auto`, `auto-asset`, `auto-liability` values populate; existing liability accounts (2000/2100/2200/2500) appear in the Credit cards & loans group.
+
 ### Feb 2026 — Bill Editor: searchable category picker + liability accounts + add-new
 
 **Frontend** (`pages/BillEditor.jsx`, `components/SearchableAccountPicker.jsx`)
