@@ -17,7 +17,28 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
-### Feb 2026 — Credit-card import: cardholder-subtotal filter + paydown-to-OBE (revises earlier Fix 3)
+### Feb 2026 — Credit-card import: post-Veryfi-docs review — dedicated Clearing account + refined signals
+
+**Trigger**: read Veryfi's Process-a-Bank-Statement API docs. Three insights that reshaped our approach:
+1. Payments/charges use separate `credit_amount` / `debit_amount` fields — our extractor already handles both.
+2. Veryfi returns NO source-account info for credit-card payments (the statement doesn't know which bank paid it). So some holding account is mathematically unavoidable.
+3. Each transaction has a `card_number` field — cleaner signal for multi-cardholder subtotal detection than a description regex.
+
+**Change 1 — Dedicated `Credit Card Payment Clearing` (1150) account** (`plaid_connect.py::ensure_cc_payment_clearing`, `statements.py`)
+- Replaces the earlier OBE-routing approach. Auto-provisioned per-company (same helper pattern as `ensure_opening_balance_equity`). Sits at 1150 in the CoA between Undeposited Funds (1100) and A/R (1200).
+- Every professional accounting system (QBO, Xero, Sage, NetSuite) uses a dedicated clearing/suspense pattern for unmatched credit-card paydowns — routing them through OBE is an audit anti-pattern that pollutes the opening-balance meaning.
+- BS math verified end-to-end for the Amex test case: AmEx $207.78 ✓, OBE $–3,008.84 (opening seed only, clean), Clearing $–9,184.67 (unmatched paydowns), Net Income $–6,383.61. BS balances.
+
+**Change 2 — Refined cardholder-subtotal filter using `card_number` signal** (`veryfi_service.py`)
+- Added a second signal to `_is_cardholder_subtotal`: when the row carries a populated `card_number` field AND the description text is essentially just a cardholder name (only ALL-CAPS letters + spaces, no digits/dollar signs/lowercase), it's dropped. Keeps the description-regex as a fallback for older Veryfi responses that don't split `card_number` into its own field.
+
+**Change 3 — Loosened Fix 2 override threshold from $0.02 to $5.00** (`statements.py`)
+- Veryfi's docs confirm `beginning_balance` IS the correct field for credit cards (previous statement's ending). Small OCR imprecision (<$5) shouldn't trigger a full override. Now the override only fires when Veryfi appears to have populated the wrong field entirely, and logs both the Veryfi value AND the computed value on trigger for production telemetry.
+
+**Test coverage** (`backend/tests/test_liability_statement_import.py`)
+- 14 pytest cases green (added `test_cardholder_subtotal_filter_by_card_number_signal`).
+
+### Feb 2026 — Credit-card import: cardholder-subtotal filter + paydown-to-OBE (superseded above)
 
 **P0.1 — Cardholder subtotal filter** (`veryfi_service.py`)
 - Veryfi occasionally emits per-cardholder rollup rows on multi-user credit-card statements (Amex Blue Business Cash, Chase Ink, Cap One Spark). Rows like `APRIL MCINTOSH 0-31004`, `PAUL LABOUNTY JR 0-31020` are subtotals, not real transactions — importing them double-counts the ledger by the exact sum of the underlying charges.

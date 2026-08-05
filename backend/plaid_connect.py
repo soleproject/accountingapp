@@ -60,6 +60,26 @@ async def ensure_opening_balance_equity(cid: str) -> dict:
     return await _ensure_account(cid, "3050", "Opening Balance Equity", "equity", "equity")
 
 
+async def ensure_cc_payment_clearing(cid: str) -> dict:
+    """1150 Credit Card Payment Clearing — auto-created per company on
+    first use.
+
+    Holds the offsetting side of unmatched credit-card paydown transactions
+    (positive amounts on a liability account whose source bank is unknown
+    at import time — Veryfi's statement schema returns no source-account
+    info for payments, so we can't auto-link them). When the user later
+    imports the source bank's statement and matches the transfer, the
+    clearing row's `category_account_id` flips from this account to the
+    real bank, zeroing this account out.
+
+    Sits at 1150 (between Undeposited Funds 1100 and A/R 1200) so it
+    lives next to other short-term holding assets in the CoA.
+    """
+    return await _ensure_account(
+        cid, "1150", "Credit Card Payment Clearing", "asset", "current_asset",
+    )
+
+
 def resolve_ledger_for_plaid(plaid_account: dict) -> tuple[str, str, str, str]:
     """Return (code, name, type, subtype) for the ledger account that should back
     a given Plaid account. Falls back to a generic Other Bank Account (1090) when

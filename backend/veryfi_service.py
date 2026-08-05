@@ -21,8 +21,37 @@ _CARDHOLDER_SUBTOTAL_RE = re.compile(
 )
 
 
-def _is_cardholder_subtotal(desc: str) -> bool:
-    return bool(desc and _CARDHOLDER_SUBTOTAL_RE.match(desc.strip()))
+def _is_cardholder_subtotal(desc: str, *, card_number: str | None = None) -> bool:
+    """True when a Veryfi row is a per-cardholder rollup rather than a real
+    transaction. Two signals are checked (either sufficient):
+
+      1. `card_number` is populated on the row AND the description text
+         contains no dollar sign, no comma-separated amount, and no
+         obvious merchant/city token — i.e. the OCR pulled only the
+         cardholder's name next to their card ending. This is the
+         cleanest signal per Veryfi's docs (`card_number` is a per-
+         transaction field intended to distinguish authorized users on
+         multi-cardholder cards).
+
+      2. Description alone matches the "NAME 0-31XXX" bare-cardholder
+         pattern. Kept as a fallback for older responses where the OCR
+         didn't split `card_number` into its own field.
+    """
+    if not desc:
+        return False
+    text = desc.strip()
+    # Signal 1 — populated card_number AND essentially just a name in the OCR text.
+    if card_number:
+        # A real charge line always carries either a $ sign, a decimal
+        # amount separator, digits (store #, phone), OR any lowercase
+        # letters. If the OCR returned only ALL-CAPS letters + spaces (no
+        # digits, no punctuation, no lowercase), it's a cardholder
+        # subtotal row with the merchant column empty.
+        stripped = text.strip()
+        if stripped and not re.search(r"[\d\$\.,]|[a-z]", stripped):
+            return True
+    # Signal 2 — description-based fallback (works even when card_number is empty).
+    return bool(_CARDHOLDER_SUBTOTAL_RE.match(text))
 
 VERYFI_BASE = "https://api.veryfi.com"
 BANK_STMT_PATH = "/api/v8/partner/bank-statements/"
@@ -105,8 +134,10 @@ def extract_transactions(veryfi_data: dict) -> list[dict]:
             return
         # Collapse Veryfi's `text` field which sometimes has tabs + newlines
         clean = " ".join(desc.split())
-        # Drop cardholder-subtotal rows (see `_CARDHOLDER_SUBTOTAL_RE` docstring).
-        if _is_cardholder_subtotal(clean):
+        # Drop cardholder-subtotal rows using both the description regex
+        # and Veryfi's per-transaction `card_number` signal (see docstring
+        # on `_is_cardholder_subtotal` for the two-signal logic).
+        if _is_cardholder_subtotal(clean, card_number=t.get("card_number")):
             return
         # Bank-statement rows have no separate "vendor" field — the full
         # cleaned memo IS the best merchant string we have. Previously we

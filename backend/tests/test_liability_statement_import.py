@@ -121,7 +121,7 @@ def test_guard_skipped_on_asset_withdrawal():
 # are subtotals, not real transactions — importing them double-counts the
 # ledger by the exact sum of all their underlying charges.
 
-def test_cardholder_subtotal_filter():
+def test_cardholder_subtotal_filter_by_description():
     from veryfi_service import _is_cardholder_subtotal
     # Should suppress — these are the exact rows the Amex test dropped
     assert _is_cardholder_subtotal("APRIL MCINTOSH 0-31004")
@@ -135,3 +135,20 @@ def test_cardholder_subtotal_filter():
     assert not _is_cardholder_subtotal("AMAZON MARKETPLACE NA PA AMZN.COM/BILL WA")
     assert not _is_cardholder_subtotal("STARBUCKS STORE 6307 SPRINGFIELD MO")
     assert not _is_cardholder_subtotal("")
+
+
+def test_cardholder_subtotal_filter_by_card_number_signal():
+    """Cleaner signal per Veryfi docs — when the row carries a
+    `card_number` field AND the OCR text is just a bare name, it's a
+    subtotal even if it doesn't match the description regex exactly.
+    """
+    from veryfi_service import _is_cardholder_subtotal
+    # card_number populated + name-only description → filtered
+    assert _is_cardholder_subtotal("APRIL MCINTOSH", card_number="···31004")
+    assert _is_cardholder_subtotal("PAUL LABOUNTY JR", card_number="0-31020")
+    # card_number populated but description IS a real merchant → NOT filtered
+    assert not _is_cardholder_subtotal(
+        "STARBUCKS STORE 6307 SPRINGFIELD MO", card_number="0-31020",
+    )
+    # No card_number and description doesn't match subtotal pattern → NOT filtered
+    assert not _is_cardholder_subtotal("APRIL MCINTOSH", card_number=None)
