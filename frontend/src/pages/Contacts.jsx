@@ -546,6 +546,7 @@ export default function Contacts() {
       {importOpen && (
         <ImportContactsModal
           currentId={currentId}
+          initialDefaultType={typeFilter === "vendor" ? "vendor" : "customer"}
           onClose={(reload) => { setImportOpen(false); if (reload) load(); }}
         />
       )}
@@ -1103,10 +1104,10 @@ function SumTile({ label, value, tone }) {
  *   type/email/etc. or uncheck rows they don't want, then POST to
  *   ``/contacts/import/commit``.
  */
-function ImportContactsModal({ currentId, onClose }) {
+function ImportContactsModal({ currentId, onClose, initialDefaultType = "customer" }) {
   const [step, setStep] = useState("upload"); // upload | review | done
   const [busy, setBusy] = useState(false);
-  const [defaultType, setDefaultType] = useState("customer");
+  const [defaultType, setDefaultType] = useState(initialDefaultType);
   const [preview, setPreview] = useState(null); // {source, filename, contacts[], raw_rows, detected_headers, auto_mapping, known_fields}
   const [mapping, setMapping] = useState({});   // {colIndex: canonical | ""}
   const [rows, setRows] = useState([]);         // editable copy of preview.contacts

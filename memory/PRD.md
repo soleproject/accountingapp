@@ -17,6 +17,11 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Contacts Import default type mirrors page filter
+
+**Frontend** (`pages/Contacts.jsx`)
+- `ImportContactsModal` gained an `initialDefaultType` prop. The parent page now passes `"vendor"` when the URL is `?type=vendor` and `"customer"` otherwise, so opening Import from the Vendors page pre-selects "Vendor" (instead of always defaulting to Customer). Unfiltered `/contacts` still defaults to Customer as before.
+
 ### Feb 2026 — Send-welcome toggle on New Client modal
 
 **Backend** (`models.py`, `routes/pro.py`)
