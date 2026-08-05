@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
@@ -596,6 +597,7 @@ export default function ChartOfAccounts() {
 
 function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSaved, onDeleted, onMerge,
                      dragSourceId, onDragStart, onDragEnd, onReparent }) {
+  const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [code, setCode] = useState(a.code);
@@ -910,14 +912,20 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
         {a._depth ? <span className="opacity-40">↳</span> : null}
         {showCodes ? a.code : null}
       </div>
-      <div className={`${showCodes ? "col-span-4" : "col-span-6"} text-sm ${a._depth ? "pl-4 text-slate-700" : "font-medium"}`}>
+      <button
+        type="button"
+        onClick={() => navigate(`/reports/account-detail?account=${a.id}&from=coa`)}
+        className={`${a._depth ? "pl-4 text-slate-700" : "font-medium"} ${showCodes ? "col-span-4" : "col-span-6"} text-sm text-left hover:underline hover:text-indigo-700 transition-colors`}
+        data-testid={`coa-name-link-${a.id}`}
+        title="View transactions & journal entries for this account"
+      >
         {a.name}
         {a.created_by_ai && a.parent_account_id && (
           <span className="ml-2 text-[10px] uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
             auto
           </span>
         )}
-      </div>
+      </button>
       {showCodes && (
         <div
           className="col-span-3 text-xs text-slate-500"
@@ -935,17 +943,19 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
           )}
         </div>
       )}
-      <div
-        className={`${showCodes ? "col-span-2" : "col-span-4"} text-right font-mono-num text-[13px] ${balance == null || Math.abs(Number(balance)) < 0.005 ? "text-slate-300" : "text-slate-800"}`}
+      <button
+        type="button"
+        onClick={() => navigate(`/reports/account-detail?account=${a.id}&from=coa`)}
+        className={`${showCodes ? "col-span-2" : "col-span-4"} text-right font-mono-num text-[13px] hover:underline hover:text-indigo-700 transition-colors ${balance == null || Math.abs(Number(balance)) < 0.005 ? "text-slate-300" : "text-slate-800"}`}
         data-testid={`coa-balance-${a.id}`}
         title={
           ["revenue", "expense", "cogs"].includes(a.type)
-            ? "Year-to-date balance"
-            : "Current cumulative balance"
+            ? "Year-to-date balance — click to see the transactions that add up to this"
+            : "Current cumulative balance — click to see the transactions that add up to this"
         }
       >
         {fmtMoney(balance)}
-      </div>
+      </button>
       <div className="col-span-1 flex items-center justify-end gap-1">
         <button
           onClick={startEdit}
