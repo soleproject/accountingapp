@@ -22,6 +22,12 @@ export default function StatementsTab({ companyId, bare = false }) {
   const [loading, setLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef(null);
+  // Pre-upload confirmation modal state. `pending` holds the files the
+  // user just dropped/browsed. `skipModal` sticks their per-batch choice
+  // so a 20-statement drop from the same account doesn't ask 20 times.
+  const [pending, setPending] = useState(null); // { files: File[], defaultChoice: string }
+  const [modalChoice, setModalChoice] = useState("auto");
+  const [skipModal, setSkipModal] = useState(false);
 
   const loadAssets = useCallback(async () => {
     try {
@@ -53,10 +59,14 @@ export default function StatementsTab({ companyId, bare = false }) {
     loadImports();
   }, [companyId, loadAssets, loadImports]);
 
-  const uploadOne = async (file, tempId = null) => {
+  const uploadOne = async (file, tempId = null, kindHintOverride = null) => {
     // Reused for both first-time upload and retry — passing an existing
     // tempId flips the row back to "processing" instead of creating a new
     // one so ordering and any prior error state are preserved.
+    // `kindHintOverride` (from the pre-upload modal) forces the resolver
+    // to the specified account_kind_hint regardless of the top-of-page
+    // dropdown value — used when the user confirms per-file that "this
+    // is a credit card" or "this is a bank account".
     const id = tempId || `${file.name}::${Date.now()}::${Math.random()}`;
     if (tempId) {
       setUploading(u => u.map(x => x.tempId === tempId
@@ -73,17 +83,13 @@ export default function StatementsTab({ companyId, bare = false }) {
     try {
       const fd = new FormData();
       fd.append("file", file);
-      // `accountId` is either "auto" | "auto-asset" | "auto-liability"
-      // (which drive the resolver via `account_kind_hint`) or a real
-      // account UUID (which pins to that exact CoA row and skips
-      // auto-detect entirely). The three "auto-" values are internal to
-      // the UI — the backend only cares about the hint string after the
-      // dash.
-      if (accountId && !accountId.startsWith("auto")) {
-        fd.append("account_id", accountId);
-      } else if (accountId === "auto-asset") {
+      // Precedence: per-file modal override > top-of-page dropdown.
+      const effectiveAccountId = kindHintOverride ?? accountId;
+      if (effectiveAccountId && !String(effectiveAccountId).startsWith("auto")) {
+        fd.append("account_id", effectiveAccountId);
+      } else if (effectiveAccountId === "auto-asset") {
         fd.append("account_kind_hint", "asset");
-      } else if (accountId === "auto-liability") {
+      } else if (effectiveAccountId === "auto-liability") {
         fd.append("account_kind_hint", "liability");
       }
       const r = await api.post(
@@ -155,18 +161,30 @@ export default function StatementsTab({ companyId, bare = false }) {
       toast.error(`Too large (>25 MB): ${oversized.map(f => f.name).join(", ")}`);
       return;
     }
-    // Throttle to 2 concurrent uploads. Firing ALL at once overwhelmed
-    // both our backend workers AND Veryfi's per-partner concurrency
-    // limit, causing spurious "Network Error" toasts on ~half the files.
-    // Two concurrent uploads keeps the pipeline warm without hitting
-    // either ceiling — the remaining files queue up behind the first two.
+    // If the user pinned a real account via the top-of-page dropdown OR
+    // ticked "don't ask again for this batch", skip the modal.
+    if ((accountId && !String(accountId).startsWith("auto")) || skipModal) {
+      startUploads(arr, accountId);
+      return;
+    }
+    // Otherwise raise the confirmation modal — preseed to the current
+    // dropdown value so a user who set "credit card or loan" up top sees
+    // that pre-selected in the modal and can just hit Start.
+    setModalChoice(accountId || "auto");
+    setPending({ files: arr });
+  };
+
+  // Actually kicks off the throttled upload workers. Extracted so both
+  // the direct-path (pinned account / skipModal) and the modal-confirmed
+  // path can share the exact same throttling logic.
+  const startUploads = (arr, hint) => {
     (async () => {
       const queue = [...arr];
       const CONCURRENCY = 2;
       const workers = Array.from({ length: CONCURRENCY }, async () => {
         while (queue.length) {
           const f = queue.shift();
-          if (f) await uploadOne(f);
+          if (f) await uploadOne(f, null, hint);
         }
       });
       await Promise.all(workers);
@@ -188,6 +206,48 @@ export default function StatementsTab({ companyId, bare = false }) {
       loadImports();
     } catch (e) {
       toast.error(`Delete failed: ${e.response?.data?.detail || e.message}`);
+    }
+  };
+
+  const reprocessImport = async (row) => {
+    // Prompt for the corrected hint. Uses window.prompt to keep the
+    // implementation dependency-free — the pre-upload modal is where the
+    // primary "pick the account type" UX lives; this is the escape hatch
+    // for after-the-fact fixes.
+    const choice = window.prompt(
+      `Reprocess "${row.filename}" as which type?\n\n` +
+      `  1  = Bank / Cash account (asset)\n` +
+      `  2  = Credit Card / Loan / LOC (liability)\n` +
+      `  3  = Let AI decide (auto-detect)\n\n` +
+      `This will delete the current ${row.transaction_count ?? 0} transactions ` +
+      `and re-run the resolver.`,
+      "2",
+    );
+    const map = { "1": "asset", "2": "liability", "3": "auto" };
+    const hint = map[String(choice || "").trim()];
+    if (!hint) return;
+    if (!confirm(
+      `Really reprocess ${row.filename}? All ${row.transaction_count ?? 0} ` +
+      `transactions from this import will be deleted and re-created against ` +
+      `the ${hint === "liability" ? "liability" : hint === "asset" ? "asset" : "auto-detected"} branch.`,
+    )) return;
+    const fd = new FormData();
+    fd.append("account_kind_hint", hint);
+    try {
+      const r = await api.post(
+        `/companies/${companyId}/statements/imports/${row.id}/reprocess`,
+        fd, { headers: { "Content-Type": "multipart/form-data" } },
+      );
+      const d = r.data || {};
+      toast.success(
+        `Reprocessed as "${d.new_account_name}" (${d.new_account_type}). ` +
+        `${d.reinserted} transactions re-created` +
+        (d.coa_row_deleted ? `, cleaned up "${d.coa_row_deleted}".` : "."),
+        { duration: 8000 },
+      );
+      loadImports();
+    } catch (e) {
+      toast.error(`Reprocess failed: ${e.response?.data?.detail || e.message}`);
     }
   };
 
@@ -319,7 +379,91 @@ export default function StatementsTab({ companyId, bare = false }) {
         rows={imports}
         onOpen={(id) => navigate(`/connections/imports/${id}`)}
         onDelete={onDeleteImport}
+        onReprocess={reprocessImport}
       />
+
+      {pending && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          data-testid="stmt-precheck-modal"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50"
+          onClick={() => setPending(null)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl w-[520px] max-w-[90vw] p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-sm text-slate-500 mb-1">
+              About to import <b>{pending.files.length}</b>{" "}
+              file{pending.files.length === 1 ? "" : "s"}
+            </div>
+            <h3 className="text-lg font-semibold mb-1">What kind of statement is this?</h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Picking correctly here prevents the OCR from creating a wrong-type
+              account (e.g. an Amex card mistakenly booked as Checking).
+            </p>
+            <div className="space-y-2">
+              {[
+                { v: "auto-asset",     label: "Bank / Cash account",       hint: "Checking, Savings, Money Market — an ASSET" },
+                { v: "auto-liability", label: "Credit Card / Loan / LOC",  hint: "Any account that represents money you OWE — a LIABILITY" },
+                { v: "auto",           label: "Let AI decide (auto-detect)", hint: "Only pick this if you're not sure — misfires can pollute the ledger" },
+              ].map(o => (
+                <label
+                  key={o.v}
+                  data-testid={`stmt-precheck-opt-${o.v}`}
+                  className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition ${modalChoice === o.v ? "border-indigo-500 bg-indigo-50" : "border-slate-200 hover:bg-slate-50"}`}
+                >
+                  <input
+                    type="radio"
+                    name="stmt-kind"
+                    value={o.v}
+                    checked={modalChoice === o.v}
+                    onChange={() => setModalChoice(o.v)}
+                    className="mt-0.5"
+                  />
+                  <div className="text-sm leading-snug">
+                    <div className="font-medium text-slate-800">{o.label}</div>
+                    <div className="text-xs text-slate-500 mt-0.5">{o.hint}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+            <label className="flex items-center gap-2 mt-4 text-xs text-slate-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={skipModal}
+                onChange={(e) => setSkipModal(e.target.checked)}
+                data-testid="stmt-precheck-skip-toggle"
+              />
+              Don't ask again for this batch (uses this choice for every file)
+            </label>
+            <div className="flex justify-end gap-2 mt-5">
+              <button
+                type="button"
+                onClick={() => { setPending(null); setSkipModal(false); }}
+                className="px-3 py-1.5 text-sm rounded-md border border-slate-300 hover:bg-slate-50"
+                data-testid="stmt-precheck-cancel"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const files = pending.files;
+                  const choice = modalChoice;
+                  setPending(null);
+                  startUploads(files, choice);
+                }}
+                className="px-4 py-1.5 text-sm rounded-md bg-slate-900 text-white hover:bg-slate-800"
+                data-testid="stmt-precheck-confirm"
+              >
+                Start processing
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -393,7 +537,7 @@ function UploadRow({ entry, onOpen, onRetry, onDismiss }) {
   );
 }
 
-function ImportsTable({ loading, rows, onOpen, onDelete }) {
+function ImportsTable({ loading, rows, onOpen, onDelete, onReprocess }) {
   return (
     <div className="rounded-xl border bg-white overflow-hidden">
       <table className="w-full text-sm">
@@ -447,6 +591,16 @@ function ImportsTable({ loading, rows, onOpen, onDelete }) {
                 <StatusPill status={r.status} />
               </td>
               <td className="px-4 py-2 text-right">
+                {r.status === "completed" && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onReprocess(r); }}
+                    className="text-slate-400 hover:text-indigo-600 mr-1"
+                    title="Reprocess with a corrected account-type hint"
+                    data-testid={`stmt-import-reprocess-${r.id}`}
+                  >
+                    <RotateCw size={14} />
+                  </button>
+                )}
                 <button
                   onClick={(e) => { e.stopPropagation(); onDelete(r.id, r.filename, r.transaction_count); }}
                   className="text-slate-400 hover:text-red-600"
