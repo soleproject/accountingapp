@@ -119,14 +119,32 @@ export default function SearchableAccountPicker({
 
   // Measure the trigger + track its position while the menu is open so
   // the fixed-position menu stays glued to the button through scroll,
-  // resize, and layout shifts.
+  // resize, and layout shifts. Flip upward when there isn't enough room
+  // below (viewport bottom close to the trigger) so the search box and
+  // first options are never offscreen on short screens.
   useEffect(() => {
     if (!open) { setMenuRect(null); return; }
+    // Approximate menu height: search bar (~34px) + up to 8 options
+    // (28px each) + add-new button (~34px) + padding. Clamped so tall
+    // menus don't shove themselves onto the trigger.
+    const MENU_MAX_H = 340;
     const measure = () => {
       const el = triggerRef.current;
       if (!el) return;
       const r = el.getBoundingClientRect();
-      setMenuRect({ left: r.left, top: r.bottom + 4, width: r.width });
+      const spaceBelow = window.innerHeight - r.bottom;
+      const spaceAbove = r.top;
+      const openUp = spaceBelow < 220 && spaceAbove > spaceBelow;
+      setMenuRect({
+        left: r.left,
+        // 4px gap on both sides; when flipping up we anchor to the
+        // trigger's TOP and use `bottom` positioning instead.
+        top: openUp ? undefined : r.bottom + 4,
+        bottom: openUp ? window.innerHeight - r.top + 4 : undefined,
+        width: r.width,
+        // Cap the popover so it can't exceed the space it has.
+        maxHeight: Math.min(MENU_MAX_H, openUp ? spaceAbove - 8 : spaceBelow - 8),
+      });
     };
     measure();
     window.addEventListener("scroll", measure, true);
@@ -167,11 +185,18 @@ export default function SearchableAccountPicker({
       {open && menuRect && createPortal(
         <div
           ref={menuRef}
-          className="fixed z-[80] bg-white border rounded-lg shadow-xl overflow-hidden"
-          style={{ left: menuRect.left, top: menuRect.top, width: menuRect.width, minWidth: 260 }}
+          className="fixed z-[80] bg-white border rounded-lg shadow-xl overflow-hidden flex flex-col"
+          style={{
+            left: menuRect.left,
+            top: menuRect.top,
+            bottom: menuRect.bottom,
+            width: menuRect.width,
+            minWidth: 260,
+            maxHeight: menuRect.maxHeight,
+          }}
           data-testid={`${testId}-menu`}
         >
-          <div className="flex items-center gap-1.5 px-2 py-1.5 border-b bg-slate-50">
+          <div className="flex items-center gap-1.5 px-2 py-1.5 border-b bg-slate-50 shrink-0">
             <Search size={13} className="text-slate-400 shrink-0" />
             <input
               ref={inputRef}
@@ -182,7 +207,7 @@ export default function SearchableAccountPicker({
               data-testid={`${testId}-search`}
             />
           </div>
-          <div className="max-h-56 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto min-h-0">
             {filtered.length === 0 && (
               <div className="px-3 py-3 text-xs text-slate-400 text-center">
                 No matches. Try a different search or add a new one below.
@@ -205,7 +230,7 @@ export default function SearchableAccountPicker({
             type="button"
             onClick={() => setShowCreate(true)}
             data-testid={`${testId}-add-new`}
-            className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border-t"
+            className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border-t shrink-0"
           >
             <Plus size={12} /> Add new {kindLabel} account
           </button>
