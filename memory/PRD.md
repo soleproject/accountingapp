@@ -17,6 +17,14 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 
 ## What's been implemented (Feb 2026)
 
+### Feb 2026 — Bill Editor: searchable category picker + liability accounts + add-new
+
+**Frontend** (`pages/BillEditor.jsx`)
+- Replaced the raw `<select>` "Expense Category" dropdown with the shared `SearchableAccountPicker` (already used by Items + Invoice lines). Free typing filters by code or name; there's a `+ Add new expense account` button that opens the same QuickCreate modal the rest of the app uses.
+- **Liability accounts now selectable on bill lines** — the account filter includes `type in {"expense", "liability"}` (was expense-only). Pros can now book a bill directly against Loans Payable / Credit Card Payable / Sales Tax Payable etc., and the eventual payment closes out A/P and reduces the liability in one motion (no manual JE needed).
+- Sort order preserved: 2000-range liabilities float above 6000-range expenses in the dropdown. Newly-created accounts fold into both `allAccounts` and `expenseAccounts` state immediately so the next line picks up on them without a page reload.
+- **Verified live via Playwright**: Bills → New → Expense Category dropdown shows `2500 Loans Payable`, `2100 Credit Card Payable`, `2200 Sales Tax Payable`, `5900 Depreciation Expense`, etc.; searching "loan" filters to `2500 Loans Payable`; `+ Add new expense account` button renders at the bottom of the menu.
+
 ### Feb 2026 — Reporting basis is persistent across the platform
 
 **Backend** (`routes/onboarding.py`)
