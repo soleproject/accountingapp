@@ -116,14 +116,46 @@ async def upload_statement(
     lines = veryfi_service.extract_transactions(veryfi_data)
 
     # -------- Period extraction --------
+    # Veryfi's `period_start_date` / `period_end_date` come from OCR on the
+    # statement header, and on multi-page credit-card statements (esp.
+    # Amex) it often mis-reads the "Next Closing Date" as the current
+    # period start — producing a range like Apr 1 → Apr 24 on a Feb-Mar
+    # statement. That mis-parse cascades into the auto-OBE JE (which uses
+    # `period_start - 1 day` as its `as_of`), causing the OBE seed to be
+    # posted AFTER the imported txns and yielding a wildly wrong opening.
+    #
+    # Ground truth: the actual transactions ARE the period. If Veryfi's
+    # header dates don't envelope the extracted transaction dates, we
+    # override them with the extracted min/max. This is safe because a
+    # legitimate statement always has every txn within its period.
     dates = sorted([ln["date"] for ln in lines if ln.get("date")])
-    period_start = (veryfi_data.get("period_start_date")
-                    or veryfi_data.get("start_date")
-                    or (dates[0] if dates else None))
-    period_end = (veryfi_data.get("period_end_date")
+    txn_min = dates[0] if dates else None
+    txn_max = dates[-1] if dates else None
+    veryfi_start = veryfi_data.get("period_start_date") or veryfi_data.get("start_date")
+    veryfi_end = (veryfi_data.get("period_end_date")
                   or veryfi_data.get("end_date")
-                  or veryfi_data.get("statement_date")
-                  or (dates[-1] if dates else None))
+                  or veryfi_data.get("statement_date"))
+    # Prefer Veryfi's dates when they envelope the transactions, otherwise
+    # fall back to the extracted boundaries. If either is missing, use the
+    # transaction-derived one directly.
+    if veryfi_start and txn_min and veryfi_start > txn_min:
+        logging.getLogger(__name__).info(
+            "Statements: Veryfi period_start %s > earliest txn %s — "
+            "falling back to txn-derived period_start",
+            veryfi_start, txn_min,
+        )
+        period_start = txn_min
+    else:
+        period_start = veryfi_start or txn_min
+    if veryfi_end and txn_max and veryfi_end < txn_max:
+        logging.getLogger(__name__).info(
+            "Statements: Veryfi period_end %s < latest txn %s — "
+            "falling back to txn-derived period_end",
+            veryfi_end, txn_max,
+        )
+        period_end = txn_max
+    else:
+        period_end = veryfi_end or txn_max
 
     # -------- Dedupe against higher-priority sources (Plaid) --------
     bank_account_id = resolved["account_id"]
