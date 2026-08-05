@@ -15,6 +15,25 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - **AI**: Claude Sonnet 4.5 via Emergent Universal Key (categorization, chat, industry-specific CoA)
 - **Auth**: JWT (bcrypt), role-based access (superadmin / pro / client), multi-tenant memberships
 
+
+### Feb 2026 — Cross-year statement year-wrap correction (Dec→Jan bug)
+
+**Problem**: On a credit-card statement covering Dec 26, 2025 → Jan 25, 2026, Veryfi's OCR stamps every transaction with the closing year (2026), producing dates like `2026-12-25` for what are really Dec 2025 charges. Downstream, the statement's period range balloons to `2026-01-01 → 2026-12-31` and the GL shows December transactions eleven months in the future.
+
+**Fix (`veryfi_service.py::_correct_year_wrap`)**
+- New helper runs on every `extract_transactions()` call. Derives a closing date from `statement_date` / `period_end_date` / `end_date`. For each txn date > closing_date + 30 day grace, subtracts one year. 30-day buffer (vs. a few days) guarantees we ONLY correct year-wrap symptoms and never touch legitimate post-close pending dates.
+- Safety argument: a real statement can never contain a transaction dated a month AFTER its closing.
+
+**Fix (`statements.py::upload_statement` + `reprocess_import`)**
+- Sanity-check Veryfi's period range: if `period_end - period_start > 45 days`, discard those boundaries and re-derive from the (now year-corrected) txn min/max. Prevents the pathological `Jan 1 → Dec 31 same year` range from bleeding into the UI and OBE anchoring.
+- `reprocess_import` now also recomputes `period_start` / `period_end` on the import row so hitting "Reprocess" fixes the displayed range too.
+
+**Reprocess signature bug (`statements.py::reprocess_import`)**
+- The reprocess path was calling `_categorize_and_insert_veryfi_lines(cid, lines, bank_acct, prior_import_id, …)` — the 4th arg should have been `coa` (a list of accounts), and `accts` + `import_id=` were missing entirely. Fixed by building `_coa`/`_accts` fresh from the DB and reshaping `lines` into the same candidate dicts the upload path emits.
+
+**Tests**: 5 new regression tests in `tests/test_liability_statement_import.py` (grace window, intra-period no-op, end-to-end extract, missing-closing-date fail-safe, and the direct Dec→Jan shift). All 22 tests pass.
+
+
 ## What's been implemented (Feb 2026)
 
 ### Feb 2026 — Statement upload: pre-check modal + post-hoc reprocess

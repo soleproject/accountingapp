@@ -135,6 +135,28 @@ async def upload_statement(
     veryfi_end = (veryfi_data.get("period_end_date")
                   or veryfi_data.get("end_date")
                   or veryfi_data.get("statement_date"))
+    # Sanity-check the Veryfi period. A single monthly statement should
+    # cover ~28-35 days. When Veryfi mis-reads the year (esp. on cross-
+    # year Dec→Jan statements where it stamps every date with the closing
+    # year), the reported range balloons to ~365 days (e.g. Jan 1 → Dec
+    # 31 of the same year). If the span exceeds 45 days AND we have
+    # transaction dates, trust the txn-derived boundaries instead. Also
+    # prefer `statement_date` (single anchor) over `period_end_date` in
+    # that pathological case since it's more reliably a real closing.
+    try:
+        if veryfi_start and veryfi_end:
+            _span = (datetime.fromisoformat(str(veryfi_end)[:10])
+                     - datetime.fromisoformat(str(veryfi_start)[:10])).days
+            if _span > 45 and txn_min and txn_max:
+                logging.getLogger(__name__).info(
+                    "Statements: Veryfi period span %s days (%s → %s) exceeds "
+                    "45-day monthly limit — falling back to txn-derived boundaries",
+                    _span, veryfi_start, veryfi_end,
+                )
+                veryfi_start = None
+                veryfi_end = veryfi_data.get("statement_date") or None
+    except Exception:  # noqa: BLE001
+        pass
     # Prefer Veryfi's dates when they envelope the transactions, otherwise
     # fall back to the extracted boundaries. If either is missing, use the
     # transaction-derived one directly.
@@ -826,10 +848,59 @@ async def reprocess_import(
 
     # 4) Re-run the categorize+insert loop on the cached candidates.
     lines = veryfi_service.extract_transactions(veryfi_data)
+
+    # Recompute the statement period from the (now year-corrected) txn
+    # dates, applying the same sanity check as the initial upload path:
+    # if Veryfi's header range is > 45 days (year-wrap symptom), trust
+    # the transaction-derived boundaries instead.
+    _txn_dates = sorted([ln["date"] for ln in lines if ln.get("date")])
+    _txn_min = _txn_dates[0] if _txn_dates else None
+    _txn_max = _txn_dates[-1] if _txn_dates else None
+    _v_start = veryfi_data.get("period_start_date") or veryfi_data.get("start_date")
+    _v_end = (veryfi_data.get("period_end_date")
+              or veryfi_data.get("end_date")
+              or veryfi_data.get("statement_date"))
+    try:
+        if _v_start and _v_end:
+            _span = (datetime.fromisoformat(str(_v_end)[:10])
+                     - datetime.fromisoformat(str(_v_start)[:10])).days
+            if _span > 45 and _txn_min and _txn_max:
+                _v_start = None
+                _v_end = veryfi_data.get("statement_date") or None
+    except Exception:  # noqa: BLE001
+        pass
+    if _v_start and _txn_min and _v_start > _txn_min:
+        _period_start = _txn_min
+    else:
+        _period_start = _v_start or _txn_min
+    if _v_end and _txn_max and _v_end < _txn_max:
+        _period_end = _txn_max
+    else:
+        _period_end = _v_end or _txn_max
+
+    # Build coa + accts for the shared insertion pipeline.
+    _accts = await db.accounts.find({"company_id": cid}).to_list(2000)
+    _coa = [{"code": a["code"], "name": a["name"], "type": a["type"]} for a in _accts]
+
+    # Re-shape lines with the fields _categorize_and_insert_veryfi_lines
+    # expects (matching the enrichment done in upload_statement).
+    _candidates = [{
+        "date": ln["date"] or datetime.now(timezone.utc).date().isoformat(),
+        "description": f"{ln['description']} (Veryfi)"
+                       if not ln.get("description", "").endswith("(Veryfi)")
+                       else ln["description"],
+        "merchant": ln["merchant"],
+        "merchant_name": ln["merchant"],
+        "amount": ln["amount"],
+        "bank_account_id": bank_account_id,
+        "bank_account_name": bank_acct["name"],
+    } for ln in lines]
+
     imported, skipped_closed = await _categorize_and_insert_veryfi_lines(
-        cid, lines, bank_acct, prior_import_id,
+        cid, _candidates, bank_acct, _coa, _accts,
         categorize_fn=categorize_fn,
         is_period_closed_fn=is_period_closed_fn,
+        import_id=prior_import_id,
     )
 
     # 5) Finalize the import row — mirror the same update the initial
@@ -844,6 +915,8 @@ async def reprocess_import(
             "account_name": bank_acct["name"],
             "account_code": bank_acct["code"],
             "account_matched": resolved["matched"],
+            "period_start": _period_start,
+            "period_end": _period_end,
             "reprocessed_at": now_iso(),
             "reprocess_hint": account_kind_hint,
             "updated_at": now_iso(),
