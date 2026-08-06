@@ -333,7 +333,7 @@ export default function Sidebar({ collapsed, onToggle }) {
       } ${
         // When hover-expanded, overlay the rest of the app instead of
         // pushing content aside so nothing reflows.
-        hoverExpanded ? "absolute inset-y-0 left-0 z-40 !w-64 shadow-xl" : ""
+        hoverExpanded ? "absolute inset-y-0 left-0 z-[1050] !w-64 shadow-xl" : ""
       }`}
       data-testid="app-sidebar"
       onMouseEnter={handleMouseEnter}
