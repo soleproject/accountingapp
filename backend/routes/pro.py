@@ -226,9 +226,12 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
             raise HTTPException(400, "This enterprise has no free spots remaining.")
 
     company_id = str(uuid.uuid4())
+    # Snap the entity type to one of the seven canonical forms.
+    from routes.onboarding import _canonicalize_business_type as _canon_bt
+    _bt = _canon_bt(inp.business_type) or inp.business_type
     await db.companies.insert_one({
         "id": company_id, "name": inp.company_name,
-        "business_type": inp.business_type, "business_description": inp.business_description,
+        "business_type": _bt, "business_description": inp.business_description,
         "reporting_basis": inp.reporting_basis,
         "owner_user_id": client_id, "pro_user_id": user["id"],
         "onboarding_complete": False,

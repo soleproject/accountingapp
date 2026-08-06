@@ -50,6 +50,10 @@ from deps import (
 
 router = APIRouter(prefix="/api")
 
+# Import the shared canonicalizer here (lazy alias) so that both this
+# route and the onboarding routes normalize business_type identically.
+from routes.onboarding import _canonicalize_business_type as _canon_bt  # noqa: E402
+
 
 # ----------------------- Companies -----------------------
 
@@ -86,7 +90,11 @@ async def create_company(inp: CompanyCreate, user: dict = Depends(get_current_us
         "user_id": user["id"], "role": "owner",
     })
     await db.companies.insert_one({
-        "id": cid, "name": inp.name, "business_type": inp.business_type,
+        "id": cid, "name": inp.name,
+        # Snap the entity type to one of the seven canonical forms so
+        # every downstream tax/reporting switch works against a closed
+        # enum instead of colloquial variants.
+        "business_type": _canon_bt(inp.business_type) or inp.business_type,
         "business_description": inp.business_description,
         "reporting_basis": inp.reporting_basis,
         "owner_user_id": user["id"], "onboarding_complete": False,
@@ -322,6 +330,12 @@ async def update_company(cid: str, patch: dict, user: dict = Depends(get_current
     updates = {k: v for k, v in (patch or {}).items() if k in allowed}
     if not updates:
         raise HTTPException(400, "No editable fields provided")
+    # Snap business_type to a canonical entity form so PATCHes from the
+    # Company Settings page + AI-driven updates land on the same enum.
+    if "business_type" in updates and isinstance(updates["business_type"], str):
+        canon = _canon_bt(updates["business_type"])
+        if canon:
+            updates["business_type"] = canon
     updates["updated_at"] = now_iso()
     # Encrypt any sensitive fields (`tax_id`, `ein`) before hitting Mongo.
     from crypto_service import encrypt as _enc

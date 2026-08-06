@@ -52,6 +52,81 @@ from deps import (
 router = APIRouter(prefix="/api")
 
 
+# ------------------------------------------------------------------
+# Business-type canonicalization
+# ------------------------------------------------------------------
+# The frontend now offers exactly seven entity forms in its dropdowns
+# (Sole Proprietor, LLC – Partnership, LLC – "S"/"C" Elected, "S"/"C"
+# Corporation, Limited Partnership). Whenever a value flows in from a
+# user-typed voice utterance, a legacy text field, or a mid-drift LLM
+# extraction, we snap it to one of the seven canonicals before writing
+# it to `companies.business_type`. This keeps the reports/dashboard
+# switches and the tax-treatment logic downstream working against a
+# closed, predictable enum.
+_CANONICAL_BUSINESS_TYPES: tuple[str, ...] = (
+    "Sole Proprietor",
+    "LLC – Partnership",
+    'LLC – "S" Elected',
+    'LLC – "C" Elected',
+    '"S" Corporation',
+    '"C" Corporation',
+    "Limited Partnership",
+)
+
+
+def _canonicalize_business_type(raw: str | None) -> str | None:
+    """Map any freeform business-type string to one of the seven
+    canonical entity forms. Returns None if nothing sensible can be
+    inferred, so callers can decide whether to persist a blank.
+
+    Matching rules (checked in order):
+      1. Exact match against the canonical list (case-insensitive).
+      2. Keyword heuristics tuned for common voice/typed variants
+         ('sole prop', 'sub-s', 's-corp llc', 'inc', 'limited
+         partnership', etc.).
+      3. Bare 'LLC' with no election detail → 'LLC – Partnership'
+         (IRS default treatment for multi-member LLCs).
+      4. Fallback: return the input as-is (untouched) so we don't
+         silently drop legacy values on a partial update.
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+    low = s.lower()
+    for c in _CANONICAL_BUSINESS_TYPES:
+        if c.lower() == low:
+            return c
+    has_llc = "llc" in low or "limited liability" in low
+    has_s = ("s-corp" in low or "s corp" in low or "sub s" in low
+             or "sub-s" in low or "subchapter s" in low or '"s"' in low
+             or " s elected" in low or "s-elected" in low
+             or "elected s" in low or "s election" in low
+             or "filing 2553" in low or "form 2553" in low)
+    has_c = ("c-corp" in low or "c corp" in low or '"c"' in low
+             or " c elected" in low or "c-elected" in low
+             or "elected c" in low or "c election" in low)
+    if has_llc and has_s:
+        return 'LLC – "S" Elected'
+    if has_llc and has_c:
+        return 'LLC – "C" Elected'
+    if has_llc:
+        return "LLC – Partnership"
+    if "limited partnership" in low or low == "lp" or low.endswith(" lp"):
+        return "Limited Partnership"
+    if has_s or "s corporation" in low:
+        return '"S" Corporation'
+    if has_c or "c corporation" in low or "inc" in low or "corporation" in low:
+        return '"C" Corporation'
+    if ("sole prop" in low or "sole-prop" in low or "sole proprietor" in low
+            or "self-employed" in low or "self employed" in low
+            or "schedule c" in low or low == "dba"):
+        return "Sole Proprietor"
+    # Unrecognised — hand back untouched. The caller can decide.
+    return s
+
+
 # ----------------------- Onboarding -----------------------
 
 @router.get("/companies/{cid}/onboarding")
@@ -82,7 +157,11 @@ async def update_onboarding(cid: str, inp: OnboardingUpdate, user: dict = Depend
     if basis in ("accrual", "cash"):
         company_sync["reporting_basis"] = basis
     if isinstance(answers.get("business_type"), str) and answers["business_type"].strip():
-        company_sync["business_type"] = answers["business_type"].strip()
+        # Snap to one of the seven canonical entity forms before writing.
+        # See `_canonicalize_business_type` for the mapping rules.
+        canon = _canonicalize_business_type(answers["business_type"])
+        if canon:
+            company_sync["business_type"] = canon
     if isinstance(answers.get("business_description"), str) and answers["business_description"].strip():
         company_sync["business_description"] = answers["business_description"].strip()
     if company_sync:
@@ -103,11 +182,28 @@ _COACH_STEP_SCHEMAS: dict[str, dict] = {
             "You are a CPA guiding a small-business owner through onboarding. "
             "Given a freeform sentence describing their business, extract the "
             "structured business profile fields. Respond with STRICT JSON — "
-            "no prose, no code fences. Missing fields → omit the key."
+            "no prose, no code fences. Missing fields → omit the key.\n\n"
+            "`business_type` MUST be exactly one of these seven canonical entity "
+            "forms (map colloquial phrases to the closest match):\n"
+            "  • \"Sole Proprietor\"     — 'sole prop', 'DBA', 'self-employed', "
+            "'schedule C', unincorporated single-owner\n"
+            "  • \"LLC – Partnership\"    — 'multi-member LLC' with no S/C election, "
+            "'LLC taxed as partnership'\n"
+            "  • \"LLC – \\\"S\\\" Elected\" — 'LLC S-corp', 'LLC elected S', "
+            "'S-elected LLC', 'LLC filing 2553'\n"
+            "  • \"LLC – \\\"C\\\" Elected\" — 'LLC taxed as C-corp', 'C-elected LLC'\n"
+            "  • \"\\\"S\\\" Corporation\"    — 'S-corp', 'Subchapter S', 'S corporation' "
+            "(NOT an LLC)\n"
+            "  • \"\\\"C\\\" Corporation\"    — 'C-corp', 'Inc.', 'corporation' "
+            "(NOT an LLC, no S election)\n"
+            "  • \"Limited Partnership\"   — 'LP', 'limited partnership'\n"
+            "If the user just says 'LLC' with no tax-election detail, default to "
+            "\"LLC – Partnership\" (the IRS-default treatment for multi-member LLCs). "
+            "Omit `business_type` entirely if truly ambiguous."
         ),
         "example_input": "We're an LLC doing IT security consulting for hospitals, cash-basis for now.",
         "example_output": {
-            "business_type": "LLC",
+            "business_type": "LLC – Partnership",
             "industry": "IT Security Consulting",
             "business_description": "IT security consulting for hospitals",
             "accounting_method": "cash",
@@ -221,6 +317,14 @@ async def onboarding_coach_extract(cid: str, payload: dict, user: dict = Depends
     # inserts sentinel values like 'ambiguous' for enum-like fields.
     if step == "qbo_link" and fields.get("qbo") not in ("yes", "no"):
         fields.pop("qbo", None)
+    # Snap `business_type` to one of the seven canonical entity forms
+    # BEFORE handing it back to the frontend, so the dropdown always
+    # renders a selected value (colloquial LLM output like "LLC" or
+    # "S-corp" would otherwise render blank).
+    if step == "business_profile" and isinstance(fields.get("business_type"), str):
+        canon = _canonicalize_business_type(fields["business_type"])
+        if canon:
+            fields["business_type"] = canon
     return {"step": step, "fields": fields}
 
 

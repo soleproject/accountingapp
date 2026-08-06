@@ -16,9 +16,7 @@ import {
  * Layout keeps to the app's existing conventions: white card, left-aligned
  * table, subtle divide-y rows, small action buttons on hover. No fancy grid.
  */
-const BUSINESS_TYPES = [
-  "LLC", "S-Corp", "C-Corp", "Partnership", "Sole Proprietorship", "Nonprofit",
-];
+import { BUSINESS_TYPES } from "@/constants/businessTypes";
 
 const REPORTING_BASES = [
   { value: "accrual", label: "Accrual" },
@@ -206,7 +204,7 @@ export default function MyBusinesses() {
 function BusinessFormModal({ initial, onClose, onSaved }) {
   const isEdit = !!initial?.id;
   const [name, setName] = useState(initial?.name || "");
-  const [type, setType] = useState(initial?.business_type || "LLC");
+  const [type, setType] = useState(initial?.business_type || "");
   const [basis, setBasis] = useState(initial?.reporting_basis || "accrual");
   const [desc, setDesc] = useState(initial?.business_description || "");
   const [busy, setBusy] = useState(false);
@@ -292,7 +290,11 @@ function BusinessFormModal({ initial, onClose, onSaved }) {
               className="mt-1 w-full border border-slate-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-slate-400 bg-white"
               data-testid="my-business-form-type"
             >
+              <option value="">— Select entity type —</option>
               {BUSINESS_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              {type && !BUSINESS_TYPES.includes(type) && (
+                <option value={type}>{type} (legacy)</option>
+              )}
             </select>
           </label>
           <label className="block">

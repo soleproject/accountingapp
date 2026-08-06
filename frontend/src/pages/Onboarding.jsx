@@ -5,6 +5,7 @@ import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { emitAction, useActionListener } from "@/lib/createBus";
 import { TID } from "@/constants/testIds";
+import { BUSINESS_TYPES } from "@/constants/businessTypes";
 import { CheckCircle2, ChevronRight, Loader2, Sparkles, ArrowLeft, Upload } from "lucide-react";
 import { toast } from "sonner";
 import PlaidLinkButton from "@/components/PlaidLinkButton";
@@ -847,10 +848,15 @@ export default function Onboarding() {
             <h2 className="font-heading text-xl font-semibold">Tell us about {current.name}</h2>
             <div>
               <label className="text-xs uppercase text-slate-500">Business type</label>
-              <input placeholder="e.g. Marketing agency, restaurant, SaaS company"
-                     value={answers.business_type || current.business_type || ""}
-                     onChange={(e) => setAns("business_type", e.target.value)}
-                     className="w-full mt-1 border rounded px-3 py-2 text-sm" />
+              <select
+                data-testid="onboarding-business-type"
+                value={answers.business_type || current.business_type || ""}
+                onChange={(e) => setAns("business_type", e.target.value)}
+                className="w-full mt-1 border rounded px-3 py-2 text-sm bg-white"
+              >
+                <option value="">— Select entity type —</option>
+                {BUSINESS_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
             </div>
             <div>
               <label className="text-xs uppercase text-slate-500">What does the business do?</label>

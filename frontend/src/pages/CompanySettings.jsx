@@ -10,15 +10,13 @@ import {
   AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
-const BUSINESS_TYPES = [
-  "LLC", "S-Corp", "C-Corp", "Sole Proprietor", "Partnership", "Non-profit", "Other",
-];
+import { BUSINESS_TYPES } from "@/constants/businessTypes";
 
 export default function CompanySettings() {
   const { currentId, current, refresh, companies } = useCompany();
   const nav = useNavigate();
   const [form, setForm] = useState({
-    name: "", business_type: "LLC", business_description: "", reporting_basis: "accrual",
+    name: "", business_type: "", business_description: "", reporting_basis: "accrual",
     logo_data_url: "", address: "", phone: "", email: "", website: "", tax_id: "",
   });
   const [saving, setSaving] = useState(false);
@@ -30,7 +28,7 @@ export default function CompanySettings() {
     if (current) {
       setForm({
         name: current.name || "",
-        business_type: current.business_type || "LLC",
+        business_type: current.business_type || "",
         business_description: current.business_description || "",
         reporting_basis: current.reporting_basis || "accrual",
         logo_data_url: current.logo_data_url || "",
@@ -125,7 +123,16 @@ export default function CompanySettings() {
               onChange={(e) => setForm({ ...form, business_type: e.target.value })}
               className="w-full border rounded-md px-3 py-2 text-sm bg-white"
             >
+              <option value="">— Select entity type —</option>
               {BUSINESS_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              {/* Legacy value support — if the stored value isn't in the
+                  canonical list (older records used "LLC", "S-Corp", …),
+                  keep it selectable so the field doesn't silently blank. */}
+              {form.business_type && !BUSINESS_TYPES.includes(form.business_type) && (
+                <option value={form.business_type}>
+                  {form.business_type} (legacy)
+                </option>
+              )}
             </select>
           </Field>
           <Field label="Reporting basis">
