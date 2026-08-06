@@ -333,7 +333,12 @@ export default function Sidebar({ collapsed, onToggle }) {
       } ${
         // When hover-expanded, overlay the rest of the app instead of
         // pushing content aside so nothing reflows.
-        hoverExpanded ? "absolute inset-y-0 left-0 z-[1050] !w-64 shadow-xl" : ""
+        // Overlay ONLY while the persistent state is collapsed AND the
+        // user is currently hovering. Once they click the toggle to
+        // pin the sidebar open, `collapsed` flips false and the sidebar
+        // reverts to normal flex-layout mode (no overlay, no shadow),
+        // so the content underneath is no longer obscured.
+        collapsed && hoverExpanded ? "absolute inset-y-0 left-0 z-[1050] !w-64 shadow-xl" : ""
       }`}
       data-testid="app-sidebar"
       onMouseEnter={handleMouseEnter}
@@ -363,7 +368,18 @@ export default function Sidebar({ collapsed, onToggle }) {
         )}
         <button
           data-testid={TID.sidebarToggle}
-          onClick={onToggle}
+          onClick={() => {
+            // Reset the transient hover-expanded flag before flipping
+            // the persistent collapsed state — otherwise pinning the
+            // sidebar open while hovering leaves the overlay classes
+            // stuck on, obscuring the content below.
+            setHoverExpanded(false);
+            if (_hoverTimerRef.current) {
+              clearTimeout(_hoverTimerRef.current);
+              _hoverTimerRef.current = null;
+            }
+            onToggle();
+          }}
           className="ml-auto p-1.5 text-slate-500 hover:bg-slate-100 rounded"
           title="Toggle sidebar"
         >
