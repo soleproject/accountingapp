@@ -356,7 +356,7 @@ export default function Layout() {
 
   return (
     <AiFocusProvider>
-      <div className="flex h-screen overflow-hidden bg-[#F5F6F8]">
+      <div className="flex h-screen overflow-hidden bg-[#F5F6F8] relative">
         <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
 
         <div className="flex-1 flex flex-col min-w-0">
