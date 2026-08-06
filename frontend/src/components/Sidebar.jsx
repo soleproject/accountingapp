@@ -29,7 +29,7 @@ const GROUPS = [
     items: [
       { to: "/invoices", label: "Invoices", icon: FileText },
       { to: "/payments?direction=in", label: "Payments", icon: CreditCard, matchPath: "/payments" },
-      { to: "/items?usage=sales", label: "Items", icon: Package, matchPath: "/items" },
+      { to: "/items?usage=sales", label: "Products & Services", icon: Package, matchPath: "/items" },
       { to: "/recurring", label: "Recurring", icon: Repeat },
       { to: "/customer-statements", label: "Customer Statements", icon: MailCheck },
       { to: "/contacts?type=customer", label: "Customers", icon: UserCircle, matchPath: "/contacts" },
