@@ -1392,20 +1392,6 @@ export default function AiPanel({ collapsed, onToggle }) {
       return;
     }
 
-    // ------ Navigation intent interceptor ---------------------------
-    // "take me to X" / "open X" / "go to X" / "show me X" / "navigate to
-    // X" — map to a route and navigate immediately, no LLM roundtrip.
-    // Ordered so more-specific phrases beat generic ones (e.g. "products
-    // and services" wins over "products" alone).
-    const navHit = matchNavIntent(userMsg);
-    if (navHit) {
-      navigate(navHit.url);
-      const say = `Opening ${navHit.label}.`;
-      setMessages(m => [...m, { role: "user", content: userMsg }, { role: "assistant", content: say }]);
-      if (voiceOnRef.current) speakOne(say);
-      return;
-    }
-
     // Live-accountant onboarding coach — fire the user's message to any
     // coach listener on either the onboarding page (Business Profile
     // extractor) OR the dashboard's onboarding-not-complete nudge. In BOTH
@@ -3473,96 +3459,4 @@ function MicButton({ mode, listening, streaming, ttsSpeaking, onCycle }) {
   );
 }
 
-
-
-// ─────────────────────────────────────────────────────────────────────────
-// Nav-intent matcher: turns "take me to products and services" into an
-// {url, label} pair the send() handler can navigate to. Keeps voice/typed
-// navigation instant (no LLM roundtrip) and unambiguous between the two
-// pages that share the /items path (?usage=sales vs ?usage=purchases).
-//
-// Rules:
-//   1. Aliases are ordered longest-first (products & services beats
-//      products alone; purchase items beats items alone).
-//   2. Only fires when the phrase is preceded by an intent verb — "take
-//      me to X", "open X", "go to X", "show me X", "navigate to X", "bring
-//      me to X". Bare noun phrases don't hijack normal chat.
-// ─────────────────────────────────────────────────────────────────────────
-const NAV_ALIASES = [
-  // ────── Sales/Sales-side items — MUST come before the Purchases items
-  //        aliases so a phrase like "products and services" wins over the
-  //        shorter "items".
-  { rx: /\b(?:products?\s*(?:and|&|\+)\s*services?)\b/i,
-    url: "/items?usage=sales", label: "Products & Services" },
-  { rx: /\b(?:products?\s+and\s+services?|sales\s+items?|items?\s+for\s+sale|products?(?:\s+catalog)?|services?)\b/i,
-    url: "/items?usage=sales", label: "Products & Services" },
-
-  // ────── Purchases-side items — narrower phrasing so we don't collide
-  //        with the sales aliases above. Bare "items" defaults to the
-  //        Purchases page (matches the sidebar's "Items" label).
-  { rx: /\b(?:purchases?\s+items?|purchase\s+catalog|items?\s+for\s+purchase|purchasing\s+items?)\b/i,
-    url: "/items?usage=purchases", label: "Purchases · Items" },
-  { rx: /(?:^|\s)items?(?:\s+page|\s+list)?\s*$|^items?$/i,
-    url: "/items?usage=purchases", label: "Purchases · Items" },
-
-  // ────── Everything else
-  { rx: /\b(?:invoices?|a\/?r|accounts\s+receivable|invoice\s+list)\b/i,
-    url: "/invoices", label: "Invoices" },
-  { rx: /\b(?:bills?|a\/?p|accounts\s+payable|bill\s+list)\b/i,
-    url: "/bills", label: "Bills" },
-  { rx: /\b(?:receipts?)\b/i, url: "/receipts", label: "Receipts" },
-  { rx: /\b(?:payments?)\b/i, url: "/payments", label: "Payments" },
-  { rx: /\b(?:contacts?|customers?|vendors?|clients?\s+list)\b/i,
-    url: "/contacts", label: "Contacts" },
-  { rx: /\b(?:transactions?|ledger|txns?)\b/i,
-    url: "/transactions", label: "Transactions" },
-  { rx: /\b(?:reports?|financials?|reporting)\b/i,
-    url: "/reports", label: "Reports" },
-  { rx: /\b(?:reconciliations?|reconcile|recon)\b/i,
-    url: "/accounting/reconciliation", label: "Reconciliation" },
-  { rx: /\b(?:chart\s+of\s+accounts?|coa)\b/i,
-    url: "/accounting/chart-of-accounts", label: "Chart of Accounts" },
-  { rx: /\b(?:journal\s+entries|journals?)\b/i,
-    url: "/accounting/journal-entries", label: "Journal Entries" },
-  { rx: /\b(?:general\s+ledger|g\/?l)\b/i,
-    url: "/accounting/general-ledger", label: "General Ledger" },
-  { rx: /\b(?:assets?\s+page|asset\s+list|fixed\s+assets?)\b/i,
-    url: "/accounting/assets", label: "Assets" },
-  { rx: /\b(?:loans?)\b/i, url: "/accounting/loans", label: "Loans" },
-  { rx: /\b(?:inventory)\b/i, url: "/accounting/inventory", label: "Inventory" },
-  { rx: /\b(?:tags?)\b/i, url: "/accounting/tags", label: "Tags" },
-  { rx: /\b(?:connections?|connect\s+accounts?|banking|import\s+statements?|statements?\s+import)\b/i,
-    url: "/connections", label: "Connections" },
-  { rx: /\b(?:communications?|inbox|ai\s+ask\s+client|comms)\b/i,
-    url: "/communications", label: "Communications" },
-  { rx: /\b(?:month[-\s]?close|close\s+the\s+month|period[-\s]?close)\b/i,
-    url: "/month-close", label: "Month Close" },
-  { rx: /\b(?:clients?)\b/i, url: "/pro/clients", label: "Clients" },
-  { rx: /\b(?:my\s+businesses?)\b/i, url: "/my-businesses", label: "My Businesses" },
-  { rx: /\b(?:billing|subscription|plan)\b/i, url: "/billing", label: "Billing" },
-  { rx: /\b(?:refer(?:rals?)?|refer\s*(?:&|and)\s*earn)\b/i,
-    url: "/refer", label: "Refer & Earn" },
-  { rx: /\b(?:settings?|preferences?)\b/i, url: "/settings", label: "Settings" },
-  { rx: /\b(?:dashboard|home)\b/i, url: "/dashboard", label: "Dashboard" },
-  { rx: /\b(?:onboarding|setup\s+wizard)\b/i, url: "/onboarding", label: "Onboarding" },
-  { rx: /\b(?:customer\s+statements?)\b/i,
-    url: "/customer-statements", label: "Customer Statements" },
-  { rx: /\b(?:recurring)\b/i, url: "/recurring", label: "Recurring" },
-];
-
-// Verbs that trigger navigation. Bare phrases like "products" alone
-// won't navigate — the user must SAY they want to go there.
-const NAV_VERB_RE = /^\s*(?:please\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+)?(?:take|bring|move|send)\s+(?:me\s+)?(?:to|over\s+to)\s+(?:the\s+)?(?:['"]?)(.+?)(?:['"]?)[.!?]*\s*$|^\s*(?:please\s+|can\s+you\s+)?(?:go|jump|switch|navigate)\s+(?:me\s+)?(?:to|over\s+to)\s+(?:the\s+)?(.+?)[.!?]*\s*$|^\s*(?:please\s+|can\s+you\s+)?(?:show|open|pull\s+up|display|bring\s+up)\s+(?:me\s+)?(?:the\s+)?(.+?)\s*(?:\s+page|\s+screen|\s+view|\s+tab)?[.!?]*\s*$/i;
-
-export function matchNavIntent(text) {
-  if (!text) return null;
-  const m = NAV_VERB_RE.exec(text.trim());
-  if (!m) return null;
-  const phrase = (m[1] || m[2] || m[3] || "").trim();
-  if (!phrase || phrase.length > 60) return null;
-  for (const a of NAV_ALIASES) {
-    if (a.rx.test(phrase)) return { url: a.url, label: a.label };
-  }
-  return null;
-}
 
