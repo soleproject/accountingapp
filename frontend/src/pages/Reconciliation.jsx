@@ -69,17 +69,43 @@ export default function Reconciliation() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [monthFilter]);
 
-  // History table is scoped to the requested month when the deep-link is
-  // present — real recons only, no fabricating.
+  // Account filter for the history table. Populated dynamically from
+  // the loaded reconciliations so the dropdown ONLY lists accounts that
+  // actually have at least one reconciliation attached — no clutter from
+  // banks the pro hasn't reconciled yet.
+  const [filterAcctId, setFilterAcctId] = useState("");
+  const historyAccountOptions = useMemo(() => {
+    const seen = new Map();
+    for (const r of history) {
+      const id = r.bank_account_id || r.account_id || "";
+      if (!id || seen.has(id)) continue;
+      seen.set(id, {
+        id,
+        name: r.account_name || "—",
+        last4: r.account_last4 || "",
+      });
+    }
+    return Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [history]);
+
+  // History table is scoped to (a) the requested month when arriving via
+  // Month Close deep-link, and (b) the account picked from the filter
+  // dropdown above the table. Both scopes stack.
   const visibleHistory = useMemo(() => {
-    if (!monthBounds) return history;
-    return history.filter(r => {
-      const s = r.period_start || r.as_of;
-      const e = r.period_end || r.as_of;
-      if (!s || !e) return false;
-      return s <= monthBounds.end && e >= monthBounds.start;
-    });
-  }, [history, monthBounds]);
+    let rows = history;
+    if (monthBounds) {
+      rows = rows.filter(r => {
+        const s = r.period_start || r.as_of;
+        const e = r.period_end || r.as_of;
+        if (!s || !e) return false;
+        return s <= monthBounds.end && e >= monthBounds.start;
+      });
+    }
+    if (filterAcctId) {
+      rows = rows.filter(r => (r.bank_account_id || r.account_id) === filterAcctId);
+    }
+    return rows;
+  }, [history, monthBounds, filterAcctId]);
 
   // Load bank/CC accounts + past reconciliations once we know the company.
   const load = async () => {
@@ -497,6 +523,40 @@ export default function Reconciliation() {
 
       {/* History table — primary surface */}
       <div className="rounded-xl border bg-white overflow-hidden" data-testid="recon-history">
+        {/* Account filter — populated from accounts that actually have a
+            reconciliation so the dropdown stays clean. Hidden when there
+            aren't at least two options (nothing to filter between). */}
+        {historyAccountOptions.length > 1 && (
+          <div className="flex items-center gap-2 px-4 py-2 border-b bg-slate-50/60 text-xs">
+            <span className="text-slate-500 uppercase tracking-widest">Filter</span>
+            <select
+              value={filterAcctId}
+              onChange={(e) => setFilterAcctId(e.target.value)}
+              className="border rounded-md px-2 py-1 text-xs bg-white"
+              data-testid="recon-history-account-filter"
+            >
+              <option value="">All accounts ({historyAccountOptions.length})</option>
+              {historyAccountOptions.map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.name}{a.last4 ? ` ···${a.last4}` : ""}
+                </option>
+              ))}
+            </select>
+            {filterAcctId && (
+              <button
+                onClick={() => setFilterAcctId("")}
+                className="text-slate-500 hover:text-slate-900 inline-flex items-center gap-1"
+                data-testid="recon-history-filter-clear"
+                title="Clear filter"
+              >
+                <X size={11} /> Clear
+              </button>
+            )}
+            <span className="text-slate-400 ml-auto">
+              Showing {visibleHistory.length} of {history.length}
+            </span>
+          </div>
+        )}
         <table className="w-full text-sm">
           <thead className="text-[11px] uppercase text-slate-500 border-b bg-slate-50">
             <tr>

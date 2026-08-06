@@ -16,6 +16,19 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - **Auth**: JWT (bcrypt), role-based access (superadmin / pro / client), multi-tenant memberships
 
 
+### Feb 2026 — Reconciliation page: filter history by account
+
+**Change**: Added a compact filter row above the reconciliation history table with an "Account" dropdown. The dropdown is populated dynamically from accounts that actually have at least one reconciliation (no clutter from banks the pro hasn't reconciled yet) and stacks with the existing month-scope deep-link filter. Includes a Clear button and a live "Showing N of M" count.
+
+**Files touched**: `pages/Reconciliation.jsx`
+- New `filterAcctId` state
+- New `historyAccountOptions` memo — unique accounts from `history[]`, sorted by name
+- `visibleHistory` memo now applies both `monthBounds` + `filterAcctId`
+- Filter bar rendered only when 2+ accounts exist (nothing to filter between otherwise)
+
+Tests: none needed (pure UI filter, no data flow change).
+
+
 ### Feb 2026 — Auto-reconciliation for liability (credit card) statements
 
 **Problem**: Uploading a credit-card statement via Veryfi auto-created a reconciliation that showed a huge false difference (e.g. AmEx-1004: statement $207.78 vs ledger $2,801.06 → diff -$5,602.12) even though the ledger and balance sheet tied perfectly. Asset (checking) statements reconciled fine.
