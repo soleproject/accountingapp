@@ -88,6 +88,37 @@ def _sum_lines(lines: list, tax: float = 0.0, shipping: float = 0.0,
     return round(subtotal, 2), disc_amt, ship, tax_v, total
 
 
+_INV_NUM_RE = re.compile(r"^(?P<prefix>[A-Za-z_-]*?)(?P<num>\d+)$")
+
+
+async def _next_invoice_number(cid: str, prefix: str = "INV-") -> str:
+    """Return the next sequential invoice number for a company.
+
+    Scans every existing invoice number in the company, extracts the
+    trailing integer, and returns `{prefix}{max+1}`. If no invoices
+    exist yet (or none match the numeric shape), starts at 1001 — a
+    friendly opening number that also avoids the "INV-1" awkwardness
+    when the user shows their first invoice to a client.
+
+    User-typed numbers (`inp.number` non-empty) always bypass this and
+    are stored as-is, so bespoke schemes like "2026-Q1-001" still work.
+    """
+    highest = 0
+    async for inv in db.invoices.find(
+        {"company_id": cid}, projection={"number": 1}
+    ):
+        m = _INV_NUM_RE.match(str(inv.get("number") or "").strip())
+        if not m:
+            continue
+        try:
+            n = int(m.group("num"))
+        except ValueError:
+            continue
+        if n > highest:
+            highest = n
+    return f"{prefix}{max(highest + 1, 1001)}"
+
+
 # ----------------------- Tax library (per company) -----------------------
 
 @router.get("/companies/{cid}/taxes")
@@ -279,7 +310,7 @@ async def create_invoice(cid: str, inp: InvoiceCreate, user: dict = Depends(get_
     )
     doc = {
         "id": iid, "company_id": cid,
-        "number": inp.number or f"INV-{random.randint(1000, 9999)}",
+        "number": inp.number or await _next_invoice_number(cid),
         "contact_id": inp.contact_id, "contact_name": inp.contact_name,
         "issue_date": inp.issue_date, "due_date": inp.due_date,
         "status": inp.status, "line_items": inp.line_items,
@@ -500,7 +531,7 @@ async def send_invoice_email(
 # Duplicate + Bulk-Tax-Import (Feb 2026)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _duplicate_doc(src: dict, *, kind: str) -> dict:
+async def _duplicate_doc(src: dict, *, kind: str) -> dict:
     """Return a fresh persist-ready doc that mirrors ``src`` line-for-line
     but with a new id, new number, today's issue date, +30 due date, and
     a reset status/balance. Used by both the invoice and bill duplicate
@@ -510,7 +541,12 @@ def _duplicate_doc(src: dict, *, kind: str) -> dict:
     today = datetime.now(timezone.utc).date().isoformat()
     due = (datetime.now(timezone.utc).date() + timedelta(days=30)).isoformat()
     prefix = "INV" if kind == "invoice" else "BILL"
-    fresh_number = f"{prefix}-{random.randint(1000, 9999)}"
+    # Invoices use sequential numbering — bill numbers stay random for
+    # now (user only asked for invoices to be sequential).
+    if kind == "invoice":
+        fresh_number = await _next_invoice_number(src.get("company_id") or "", prefix=f"{prefix}-")
+    else:
+        fresh_number = f"{prefix}-{random.randint(1000, 9999)}"
     default_status = "draft" if kind == "invoice" else "open"
     doc = {**src}
     doc["id"] = str(uuid.uuid4())
@@ -534,7 +570,7 @@ async def duplicate_invoice(cid: str, iid: str, user: dict = Depends(get_current
     src = await db.invoices.find_one({"id": iid, "company_id": cid})
     if not src:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    dup = _duplicate_doc(src, kind="invoice")
+    dup = await _duplicate_doc(src, kind="invoice")
     await db.invoices.insert_one(dup)
     return {"id": dup["id"], "invoice": coerce(dup)}
 
@@ -545,7 +581,7 @@ async def duplicate_bill(cid: str, bid: str, user: dict = Depends(get_current_us
     src = await db.bills.find_one({"id": bid, "company_id": cid})
     if not src:
         raise HTTPException(status_code=404, detail="Bill not found")
-    dup = _duplicate_doc(src, kind="bill")
+    dup = await _duplicate_doc(src, kind="bill")
     await db.bills.insert_one(dup)
     return {"id": dup["id"], "bill": coerce(dup)}
 

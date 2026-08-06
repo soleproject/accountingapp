@@ -16,6 +16,25 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - **Auth**: JWT (bcrypt), role-based access (superadmin / pro / client), multi-tenant memberships
 
 
+### Feb 2026 — Sequential invoice numbering
+
+**Problem**: Auto-generated invoice numbers were `INV-{random 4-digit}` (INV-9967, INV-5162, INV-5536…). Users expected the next invoice after INV-5162 to be INV-5163.
+
+**Fix (`routes/invoices.py::_next_invoice_number`)**
+- Scans every existing invoice number for the company, extracts the trailing integer via `_INV_NUM_RE = r"^[A-Za-z_-]*?(\d+)$"`, and returns `INV-{max+1}`.
+- Floor of 1001 for first-ever invoices — avoids the awkward "INV-1" first-invoice look.
+- Bespoke user-supplied numbers like `"2026-Q1-001"` still round-trip untouched (regex miss → skipped); user-typed numbers (`inp.number`) always bypass the helper entirely.
+
+**Applied everywhere invoices are minted**
+- `create_invoice` endpoint
+- `_duplicate_doc` helper (turned async; both invoice + bill duplicate endpoints re-awaited)
+- `recurring_service._create_from_template` (invoice branch — bills stay on the random scheme per user scope)
+
+**Tests**: `tests/test_sequential_invoice_numbers.py` — 5 tests (empty company → floor, highest+1, ignores non-matching numbers, respects higher-than-floor, regex shape tolerance). All passing.
+
+**Verified end-to-end** on the preview API: three back-to-back POSTs yielded INV-1001 → INV-1002 → INV-1003.
+
+
 ### Feb 2026 — Invoice list date off-by-one (UTC → local rendering)
 
 **Problem**: An invoice with `due_date = "2026-08-06"` rendered as "Aug 5, 2026" in the Invoices list (and every other list using `fmtDate`) for any user east/west of UTC.
