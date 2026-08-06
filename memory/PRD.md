@@ -16,6 +16,17 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - **Auth**: JWT (bcrypt), role-based access (superadmin / pro / client), multi-tenant memberships
 
 
+### Feb 2026 — Invoice list date off-by-one (UTC → local rendering)
+
+**Problem**: An invoice with `due_date = "2026-08-06"` rendered as "Aug 5, 2026" in the Invoices list (and every other list using `fmtDate`) for any user east/west of UTC.
+
+**Root cause**: `new Date("2026-08-06")` parses a bare YYYY-MM-DD string as **midnight UTC**. In `America/New_York` (UTC-4/-5) that instant is 8:00 PM the previous day, so `toLocaleDateString` renders "Aug 5".
+
+**Fix (`lib/api.js::fmtDate`)**: When the input matches `/^\d{4}-\d{2}-\d{2}$/`, build a **local** Date via `new Date(y, m-1, d)` so the displayed day always matches the picked day. ISO strings with a time component still fall through to the normal `new Date(s)` path.
+
+**Verified**: Node with `TZ=America/New_York` returns `"Aug 6, 2026"` for `"2026-08-06"` under the new code vs `"Aug 5, 2026"` under the old code.
+
+
 ### Feb 2026 — Voice invoices: "due today" now really means today (+ backdate rule)
 
 **Problems**
