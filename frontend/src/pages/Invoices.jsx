@@ -292,12 +292,23 @@ function InvoiceModal({ contacts, itemsCatalog, currentId, invoice, prefill, onC
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contacts, p.contact_id]);
-  const [issue, setIssue] = useState(invoice?.issue_date || p.issue_date || new Date().toISOString().slice(0, 10));
-  const [due, setDue] = useState(
-    invoice?.due_date
-    || p.due_date
-    || new Date(Date.now() + (Number(p.due_days) || 30) * 86400000).toISOString().slice(0, 10)
-  );
+  // Resolve the invoice/due dates with three rules:
+  //  1. `due_days === 0` (spoken "due today") must NOT be swallowed by
+  //     the `|| 30` fallback — check for undefined/null explicitly.
+  //  2. If the resolved due date lands BEFORE today, backdate the invoice
+  //     date to match so the invoice isn't stamped as already-overdue.
+  //  3. In edit mode, always trust the persisted values.
+  const _todayISO = new Date().toISOString().slice(0, 10);
+  const _dueDaysRaw = p.due_days;
+  const _dueOffset = (_dueDaysRaw === undefined || _dueDaysRaw === null || _dueDaysRaw === "")
+    ? 30 : Number(_dueDaysRaw);
+  const _dueDefault = new Date(Date.now() + _dueOffset * 86400000).toISOString().slice(0, 10);
+  const _resolvedDue = invoice?.due_date || p.due_date || _dueDefault;
+  const _resolvedIssue = invoice?.issue_date
+    || p.issue_date
+    || (_resolvedDue < _todayISO ? _resolvedDue : _todayISO);
+  const [issue, setIssue] = useState(_resolvedIssue);
+  const [due, setDue] = useState(_resolvedDue);
   const [lines, setLines] = useState(initLines);
   const [tax, setTax] = useState(invoice?.tax || Number(p.tax || 0));
   const [status, setStatus] = useState(invoice?.status || p.status || "sent");

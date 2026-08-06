@@ -892,6 +892,16 @@ export default function AiPanel({ collapsed, onToggle }) {
     try {
       if (intent === "create_invoice") {
         const amt = Number(prefill.amount || 0);
+        // Same due-date logic as InvoiceModal — `due_days:0` (spoken
+        // "due today") must survive, and a past-due date backdates the
+        // invoice date to match so the record isn't born overdue.
+        const _today = new Date().toISOString().slice(0, 10);
+        const _dueDays = prefill.due_days;
+        const _off = (_dueDays === undefined || _dueDays === null || _dueDays === "")
+          ? 30 : Number(_dueDays);
+        const _due = prefill.due_date
+          || new Date(Date.now() + _off * 86400000).toISOString().slice(0, 10);
+        const _issue = prefill.issue_date || (_due < _today ? _due : _today);
         // Voice path: if the backend hydrated `prefill.lines[]` from the
         // item catalog, POST those directly. Fallback to the legacy
         // single-line-with-amount shape when the utterance was a lump
@@ -915,8 +925,8 @@ export default function AiPanel({ collapsed, onToggle }) {
         const body = {
           contact_id: prefill.contact_id || null,
           contact_name: prefill.contact_name || "",
-          issue_date: prefill.issue_date || new Date().toISOString().slice(0, 10),
-          due_date: prefill.due_date || new Date(Date.now() + (Number(prefill.due_days) || 30) * 86400000).toISOString().slice(0, 10),
+          issue_date: _issue,
+          due_date: _due,
           line_items,
           tax: Number(prefill.tax || 0),
           status: prefill.status || "sent",
@@ -924,6 +934,13 @@ export default function AiPanel({ collapsed, onToggle }) {
         await api.post(`/companies/${currentId}/invoices`, body);
       } else if (intent === "create_bill") {
         const amt = Number(prefill.amount || 0);
+        const _today = new Date().toISOString().slice(0, 10);
+        const _dueDays = prefill.due_days;
+        const _off = (_dueDays === undefined || _dueDays === null || _dueDays === "")
+          ? 30 : Number(_dueDays);
+        const _due = prefill.due_date
+          || new Date(Date.now() + _off * 86400000).toISOString().slice(0, 10);
+        const _issue = prefill.issue_date || (_due < _today ? _due : _today);
         const line_items = (Array.isArray(prefill.lines) && prefill.lines.length)
           ? prefill.lines.map(l => {
               const quantity = Number(l.quantity || 1) || 1;
@@ -943,8 +960,8 @@ export default function AiPanel({ collapsed, onToggle }) {
         const body = {
           contact_id: prefill.contact_id || null,
           contact_name: prefill.contact_name || "",
-          issue_date: prefill.issue_date || new Date().toISOString().slice(0, 10),
-          due_date: prefill.due_date || new Date(Date.now() + (Number(prefill.due_days) || 30) * 86400000).toISOString().slice(0, 10),
+          issue_date: _issue,
+          due_date: _due,
           line_items,
           status: prefill.status || "open",
         };
