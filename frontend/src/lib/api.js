@@ -38,6 +38,16 @@ export const fmtMoney = (n) => {
 
 export const fmtDate = (s) => {
   if (!s) return "";
-  try { return new Date(s).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }); }
-  catch { return s; }
+  try {
+    // Bare `YYYY-MM-DD` strings (invoice.due_date, invoice.issue_date, etc.)
+    // are date-only — no time, no timezone. `new Date("2026-08-06")` parses
+    // those as midnight UTC, which renders as "Aug 5" in any timezone west
+    // of UTC (e.g. America/New_York). Detect the bare date shape and build
+    // a LOCAL Date so the displayed day always matches what the user picked.
+    const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const d = m
+      ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+      : new Date(s);
+    return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  } catch { return s; }
 };
