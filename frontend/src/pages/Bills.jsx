@@ -355,7 +355,7 @@ function BillModal({ contacts, itemsCatalog, currentId, bill, prefill, onClose }
                   onPickItem={(it) => upd(i, {
                     item_id: it.id,
                     item_name: it.name,
-                    description: it.description || it.name,
+                    description: it.name,
                     rate: Number(it.price || 0),
                     // Bills use the item's expense-account mapping — falls
                     // back to income_account when the user hasn't set one.
