@@ -16,6 +16,16 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - **Auth**: JWT (bcrypt), role-based access (superadmin / pro / client), multi-tenant memberships
 
 
+### Feb 2026 — Item picker: use item NAME on invoice/bill lines, not the internal description
+
+**Problem**: Picking an item from the ItemPicker (or having voice/AI hydrate one) filled the line description with the item's internal `description` field (e.g. "Test - widget 1") instead of the customer-facing `name` (e.g. "Widget 1"). That leaked internal SKU notes onto invoices.
+
+**Fix** (both voice + manual paths):
+- `routes/chat.py` (voice/AI hydration) — `description = match.name` (was `match.description || match.name`).
+- `pages/Invoices.jsx`, `pages/Bills.jsx`, `pages/InvoiceEditor.jsx`, `pages/BillEditor.jsx` (manual ItemPicker `onPickItem` handlers) — same flip.
+- Users can still overwrite the description inline; only the auto-fill default changed.
+
+
 ### Feb 2026 — AI voice invoices now match the item catalog
 
 **Problem**: Saying "create an invoice for Larry Brown, five widget ones" produced a single line with `description="five widget ones"`, quantity 1, and an invented $500 rate — the AI didn't cross-reference the item catalog even though `Widget 1` existed at $100/each.

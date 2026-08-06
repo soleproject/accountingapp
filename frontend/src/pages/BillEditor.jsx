@@ -537,8 +537,9 @@ function EditForm({
       item_id: it.id,
       item_name: it.name,
       // Only auto-fill description when the row description is empty
-      // — respect any hand-typed override.
-      description: (lines[i]?.description) || it.description || it.name || "",
+      // — respect any hand-typed override. Item NAME takes precedence
+      // over the internal catalog description on customer-facing docs.
+      description: (lines[i]?.description) || it.name || "",
       rate: Number(it.expense_price ?? it.price ?? lines[i]?.rate ?? 0),
       expense_account_id: it.expense_account_id || lines[i]?.expense_account_id || null,
       expense_account_name: it.expense_account_name || lines[i]?.expense_account_name || "",

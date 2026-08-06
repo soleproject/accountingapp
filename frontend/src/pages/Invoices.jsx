@@ -412,7 +412,11 @@ function InvoiceModal({ contacts, itemsCatalog, currentId, invoice, prefill, onC
                   onPickItem={(it) => upd(i, {
                     item_id: it.id,
                     item_name: it.name,
-                    description: it.description || it.name,
+                    // Item name on the line — the catalog `description`
+                    // is internal (cost notes / SKU details) and stays
+                    // out of the customer-facing invoice. User can
+                    // still overwrite inline.
+                    description: it.name,
                     rate: Number(it.price || 0),
                     income_account_id: it.income_account_id || null,
                     income_account_name: it.income_account_name || "",

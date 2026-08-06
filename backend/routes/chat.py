@@ -592,7 +592,12 @@ async def ai_parse_intent(cid: str, inp: IntentIn, user: dict = Depends(get_curr
                     resolved.append({
                         "item_id": match.get("id"),
                         "item_name": match.get("name"),
-                        "description": match.get("description") or match.get("name") or nm,
+                        # Prefer the item NAME on the invoice line — the
+                        # catalog `description` is internal (e.g. cost
+                        # notes) and shouldn't leak onto customer-facing
+                        # invoices. Users edit the line inline if they
+                        # want the long description.
+                        "description": match.get("name") or nm,
                         "quantity": qty,
                         "rate": rate,
                         "amount": round(qty * rate, 2),

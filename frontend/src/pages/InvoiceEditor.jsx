@@ -776,7 +776,7 @@ function EditForm({
                     onChangeText={(txt) => updLine(i, { description: txt })}
                     onPickItem={(it) => updLine(i, {
                       item_id: it.id, item_name: it.name,
-                      description: it.description || it.name,
+                      description: it.name,
                       rate: Number(it.price || 0),
                       income_account_id: it.income_account_id || null,
                       income_account_name: it.income_account_name || "",
