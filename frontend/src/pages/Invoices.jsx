@@ -251,6 +251,26 @@ function InvoiceModal({ contacts, itemsCatalog, currentId, invoice, prefill, onC
   const p = prefill || {};
   const initLines = () => {
     if (invoice?.line_items?.length) return invoice.line_items.map(l => ({ ...l }));
+    // Voice-driven: AI resolved specific catalog items. Trust the backend
+    // enrichment (chat.py `_match_item`) to have hydrated item_id, rate,
+    // income_account_*. Rows with rate=0 are cache-misses the user can
+    // fill in — keep the parsed quantity + name so nothing is lost.
+    if (Array.isArray(p.lines) && p.lines.length) {
+      return p.lines.map(l => {
+        const quantity = Number(l.quantity || 1) || 1;
+        const rate = Number(l.rate || 0);
+        return {
+          item_id: l.item_id || undefined,
+          item_name: l.item_name || undefined,
+          description: l.description || l.item_name || "",
+          quantity,
+          rate,
+          amount: quantity * rate,
+          income_account_id: l.income_account_id || undefined,
+          income_account_name: l.income_account_name || undefined,
+        };
+      });
+    }
     if (p.amount || p.description) {
       const amt = Number(p.amount || 0);
       return [{

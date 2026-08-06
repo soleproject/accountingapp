@@ -16,6 +16,23 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - **Auth**: JWT (bcrypt), role-based access (superadmin / pro / client), multi-tenant memberships
 
 
+### Feb 2026 — AI voice invoices now match the item catalog
+
+**Problem**: Saying "create an invoice for Larry Brown, five widget ones" produced a single line with `description="five widget ones"`, quantity 1, and an invented $500 rate — the AI didn't cross-reference the item catalog even though `Widget 1` existed at $100/each.
+
+**Fix — Backend**
+- **`ai_service.INTENT_SYSTEM`**: added a `lines: [{item_name, quantity}]` field to the create_invoice / create_bill JSON contract. Parser is instructed to extract number-words → digits, keep the item name verbatim, and leave `amount` null so the total is computed from the catalog.
+- **`routes/chat.py::_match_item`** (new): fuzzy-matches a spoken item reference against the company's item catalog. Normalization strips plural 's' and maps first-ten ordinal words to digits on both sides — so `"widget one"`, `"widget ones"`, `"Widget 1"` all resolve to the same catalog row. Scoring: exact = 1000, substring = 500, per-word overlap × 10; below-threshold returns None.
+- **`routes/chat.py::ai_parse_intent`**: after contact resolution, iterates `prefill.lines[]` and hydrates each into the canonical line-item shape `{item_id, item_name, description, quantity, rate, amount, income_account_id, income_account_name}`. Unmatched entries fall through as freeform `{description, quantity, rate:0}` so the user can fix inline.
+
+**Fix — Frontend**
+- **`pages/Invoices.jsx::initLines`**: honors `prefill.lines[]` when opening the invoice modal via voice; renders the resolved rate + description + item link.
+- **`components/AiPanel.jsx::submitPendingIntent`**: same mapping for the direct-POST path when the user says "confirm" quickly.
+- **`AiPanel.jsx` pending-intent card**: shows the computed line-item total (`Σ qty × rate`) instead of just the parsed lump-sum amount.
+
+**Tests**: `tests/test_voice_intent_item_matcher.py` — 6 tests (ordinal-word mapping, plurals, exact name, whitespace normalization, no-match fail-safe, deterministic tie-break). All passing.
+
+
 ### Feb 2026 — Receipts are now editable
 
 **Problem**: Receipts were create-only. To fix a typo or wrong amount you had to delete + re-enter, losing the attachment.

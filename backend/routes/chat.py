@@ -450,6 +450,66 @@ class IntentIn(BaseModel):
     text: str
 
 
+def _match_item(needle: str, catalog: list[dict]) -> Optional[dict]:
+    """Fuzzy-match a spoken item reference against the company's item
+    catalog. Ranking (highest wins):
+
+      exact case-insensitive name         → 1000
+      normalized-substring both ways      →  500
+      per-word overlap × 10                → variable
+
+    Voice STT often emits ordinal number-words ('widget one' for 'Widget
+    1') or plurals ('widget ones'), so we normalize by lowercasing,
+    stripping trailing plural 's', and mapping the first ten ordinal
+    words to their digit equivalents on BOTH sides of the comparison.
+    """
+    if not needle or not catalog:
+        return None
+
+    _ORDINAL = {
+        "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+        "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
+    }
+
+    def _norm(s: str) -> str:
+        s = str(s or "").lower().strip()
+        # collapse whitespace / punctuation
+        s = re.sub(r"[^\w\s]", " ", s)
+        toks = [t for t in s.split() if t]
+        out = []
+        for t in toks:
+            # trailing plural (widget → widget, ones → one)
+            base = t[:-1] if len(t) > 3 and t.endswith("s") else t
+            out.append(_ORDINAL.get(base, base))
+        return " ".join(out)
+
+    n = _norm(needle)
+    if not n:
+        return None
+    n_words = set(w for w in n.split() if len(w) >= 2)
+
+    best = None
+    best_score = 0
+    for it in catalog:
+        cand = _norm(it.get("name") or "")
+        if not cand:
+            continue
+        if cand == n:
+            score = 1000
+        elif n in cand or cand in n:
+            score = 500 + max(len(n), 1)
+        else:
+            c_words = set(cand.split())
+            overlap = len(n_words & c_words)
+            score = overlap * 10 if overlap else 0
+        if score > best_score:
+            best_score = score
+            best = it
+    # Require some real signal — a single 1-char accidental overlap
+    # shouldn't hydrate a random item.
+    return best if best_score >= 10 else None
+
+
 @router.post("/companies/{cid}/ai/parse-intent")
 async def ai_parse_intent(cid: str, inp: IntentIn, user: dict = Depends(get_current_user)):
     """Parse a natural-language utterance into a structured create/open intent.
@@ -499,6 +559,57 @@ async def ai_parse_intent(cid: str, inp: IntentIn, user: dict = Depends(get_curr
             prefill["contact_id"] = best.get("id")
             prefill["contact_name"] = best.get("name")
             prefill["matched_existing"] = True
+
+    # For create_invoice / create_bill: resolve `lines[]` against the item
+    # catalog so a spoken "five widget ones" hydrates into a real line
+    # {item_id, description, rate, quantity, income_account_*}. If the AI
+    # extracted an amount instead of lines (or the item name doesn't match),
+    # we leave prefill alone so the modal falls back to the freeform single-
+    # line-with-amount path.
+    if intent in ("create_invoice", "create_bill"):
+        raw_lines = prefill.get("lines")
+        if isinstance(raw_lines, list) and raw_lines:
+            usage = "sales" if intent == "create_invoice" else "purchases"
+            catalog = await db.items.find({
+                "company_id": cid,
+                "active": {"$ne": False},
+                "$or": [{"usage": usage}, {"usage": "both"}],
+            }).to_list(2000)
+            resolved: list[dict] = []
+            for entry in raw_lines:
+                if not isinstance(entry, dict):
+                    continue
+                nm = str(entry.get("item_name") or "").strip()
+                try:
+                    qty = float(entry.get("quantity") or 1) or 1
+                except (TypeError, ValueError):
+                    qty = 1
+                if not nm:
+                    continue
+                match = _match_item(nm, catalog)
+                if match:
+                    rate = float(match.get("price") or 0)
+                    resolved.append({
+                        "item_id": match.get("id"),
+                        "item_name": match.get("name"),
+                        "description": match.get("description") or match.get("name") or nm,
+                        "quantity": qty,
+                        "rate": rate,
+                        "amount": round(qty * rate, 2),
+                        "income_account_id": match.get("income_account_id") or match.get("account_id"),
+                        "income_account_name": match.get("income_account_name") or match.get("account_name") or "",
+                    })
+                else:
+                    # No catalog hit — keep the reference as a freeform line
+                    # with zero rate so the user can fill it in manually.
+                    resolved.append({
+                        "description": nm,
+                        "quantity": qty,
+                        "rate": 0,
+                        "amount": 0,
+                    })
+            if resolved:
+                prefill["lines"] = resolved
 
     parsed["prefill"] = prefill
     return parsed

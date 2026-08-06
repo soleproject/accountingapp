@@ -892,24 +892,60 @@ export default function AiPanel({ collapsed, onToggle }) {
     try {
       if (intent === "create_invoice") {
         const amt = Number(prefill.amount || 0);
+        // Voice path: if the backend hydrated `prefill.lines[]` from the
+        // item catalog, POST those directly. Fallback to the legacy
+        // single-line-with-amount shape when the utterance was a lump
+        // sum without item detail.
+        const line_items = (Array.isArray(prefill.lines) && prefill.lines.length)
+          ? prefill.lines.map(l => {
+              const quantity = Number(l.quantity || 1) || 1;
+              const rate = Number(l.rate || 0);
+              return {
+                item_id: l.item_id,
+                item_name: l.item_name,
+                description: l.description || l.item_name || "",
+                quantity,
+                rate,
+                amount: quantity * rate,
+                income_account_id: l.income_account_id,
+                income_account_name: l.income_account_name,
+              };
+            })
+          : [{ description: prefill.description || "Services", quantity: 1, rate: amt, amount: amt }];
         const body = {
           contact_id: prefill.contact_id || null,
           contact_name: prefill.contact_name || "",
           issue_date: prefill.issue_date || new Date().toISOString().slice(0, 10),
           due_date: prefill.due_date || new Date(Date.now() + (Number(prefill.due_days) || 30) * 86400000).toISOString().slice(0, 10),
-          line_items: [{ description: prefill.description || "Services", quantity: 1, rate: amt, amount: amt }],
+          line_items,
           tax: Number(prefill.tax || 0),
           status: prefill.status || "sent",
         };
         await api.post(`/companies/${currentId}/invoices`, body);
       } else if (intent === "create_bill") {
         const amt = Number(prefill.amount || 0);
+        const line_items = (Array.isArray(prefill.lines) && prefill.lines.length)
+          ? prefill.lines.map(l => {
+              const quantity = Number(l.quantity || 1) || 1;
+              const rate = Number(l.rate || 0);
+              return {
+                item_id: l.item_id,
+                item_name: l.item_name,
+                description: l.description || l.item_name || "",
+                quantity,
+                rate,
+                amount: quantity * rate,
+                income_account_id: l.income_account_id,
+                income_account_name: l.income_account_name,
+              };
+            })
+          : [{ description: prefill.description || "Services", quantity: 1, rate: amt, amount: amt }];
         const body = {
           contact_id: prefill.contact_id || null,
           contact_name: prefill.contact_name || "",
           issue_date: prefill.issue_date || new Date().toISOString().slice(0, 10),
           due_date: prefill.due_date || new Date(Date.now() + (Number(prefill.due_days) || 30) * 86400000).toISOString().slice(0, 10),
-          line_items: [{ description: prefill.description || "Services", quantity: 1, rate: amt, amount: amt }],
+          line_items,
           status: prefill.status || "open",
         };
         await api.post(`/companies/${currentId}/bills`, body);
@@ -3104,7 +3140,19 @@ export default function AiPanel({ collapsed, onToggle }) {
             <span className="text-xs text-indigo-900 flex-1 leading-tight">
               Pending: <b>{pendingIntent.intent.replace(/_/g, " ")}</b>
               {pendingIntent.prefill?.contact_name ? ` · ${pendingIntent.prefill.contact_name}` : ""}
-              {pendingIntent.prefill?.amount ? ` · $${pendingIntent.prefill.amount}` : ""}
+              {(() => {
+                // Prefer computed line-total when the backend hydrated `lines[]`
+                // from the item catalog; fall back to the parsed lump-sum amount.
+                const lines = pendingIntent.prefill?.lines;
+                if (Array.isArray(lines) && lines.length) {
+                  const total = lines.reduce(
+                    (s, l) => s + (Number(l.quantity || 1) * Number(l.rate || 0)),
+                    0,
+                  );
+                  if (total > 0) return ` · $${total.toFixed(2)}`;
+                }
+                return pendingIntent.prefill?.amount ? ` · $${pendingIntent.prefill.amount}` : "";
+              })()}
             </span>
             <button
               data-testid="ai-pending-confirm"
