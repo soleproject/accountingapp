@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   LayoutDashboard, FileText, Receipt, CreditCard, ScrollText, BarChart3,
   Users, Link2, Inbox, ChevronDown, ChevronRight, ArrowLeftRight, Boxes,
@@ -194,7 +194,39 @@ const isGroupActive = (loc, group, sticky = {}) =>
 export default function Sidebar({ collapsed, onToggle }) {
   const { branding } = useBranding();
   const logos = branding?.logos || {};
-  const logoUrl = collapsed
+  // ------------------------------------------------------------------
+  // Hover-to-expand: when the user has manually collapsed the sidebar
+  // (rail mode), mousing over it should temporarily expand it to the
+  // full 256px width; leaving snaps it back. `hoverExpanded` is the
+  // transient bit that overlays the persistent `collapsed` preference.
+  // We render the expanded sidebar as ABSOLUTE-positioned so the main
+  // content doesn't reflow every time the pointer crosses the rail —
+  // the rail always occupies 64px in the flex layout.
+  // ------------------------------------------------------------------
+  const [hoverExpanded, setHoverExpanded] = useState(false);
+  const _hoverTimerRef = useRef(null);
+  const handleMouseEnter = () => {
+    if (!collapsed) return;   // full mode is already expanded
+    if (_hoverTimerRef.current) {
+      clearTimeout(_hoverTimerRef.current);
+      _hoverTimerRef.current = null;
+    }
+    setHoverExpanded(true);
+  };
+  const handleMouseLeave = () => {
+    if (!collapsed) return;
+    // Small delay so a quick pointer twitch off the edge doesn't
+    // collapse before the user can click a link.
+    if (_hoverTimerRef.current) clearTimeout(_hoverTimerRef.current);
+    _hoverTimerRef.current = setTimeout(() => setHoverExpanded(false), 180);
+  };
+  useEffect(() => () => {
+    if (_hoverTimerRef.current) clearTimeout(_hoverTimerRef.current);
+  }, []);
+  // "Collapsed as far as the RENDER is concerned" — false whenever the
+  // user is hovering the rail even if the persisted state is collapsed.
+  const showCollapsed = collapsed && !hoverExpanded;
+  const logoUrl = showCollapsed
     ? (logos.icon_light || logos.logo_light || branding?.logo_data_url)
     : (logos.logo_light || logos.icon_light || branding?.logo_data_url);
   const { user } = useAuth();
@@ -252,10 +284,10 @@ export default function Sidebar({ collapsed, onToggle }) {
         data-testid={`${TID.navLink}-${item.label.replace(/\s+/g, "-").toLowerCase()}`}
         className={`nav-item flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
           active ? "nav-item-active" : "text-slate-700"
-        } ${indent && !collapsed ? "pl-9" : ""}`}
+        } ${indent && !showCollapsed ? "pl-9" : ""}`}
       >
         <Icon size={16} style={{ color: NAV_COLOR }} strokeWidth={2} />
-        {!collapsed && <span className="truncate">{item.label}</span>}
+        {!showCollapsed && <span className="truncate">{item.label}</span>}
       </NavLink>
     );
   };
@@ -274,7 +306,7 @@ export default function Sidebar({ collapsed, onToggle }) {
           aria-expanded={opened}
         >
           <Icon size={16} style={{ color: NAV_COLOR }} strokeWidth={2} />
-          {!collapsed && (
+          {!showCollapsed && (
             <>
               <span className="truncate">{group.label}</span>
               <span className="ml-auto text-slate-400">
@@ -283,7 +315,7 @@ export default function Sidebar({ collapsed, onToggle }) {
             </>
           )}
         </button>
-        {opened && !collapsed && (
+        {opened && !showCollapsed && (
           <div className="mt-0.5 space-y-0.5">
             {group.items.map((it) => (
               <Item key={it.label} item={it} group={group} indent />
@@ -298,14 +330,20 @@ export default function Sidebar({ collapsed, onToggle }) {
     <aside
       className={`shrink-0 border-r bg-white transition-all duration-300 flex flex-col ${
         collapsed ? "w-16" : "w-64"
+      } ${
+        // When hover-expanded, overlay the rest of the app instead of
+        // pushing content aside so nothing reflows.
+        hoverExpanded ? "absolute inset-y-0 left-0 z-40 !w-64 shadow-xl" : ""
       }`}
       data-testid="app-sidebar"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
       <div className="h-16 shrink-0 flex items-center gap-2 px-2 border-b">
         {logoUrl ? (
           <img
             src={logoUrl} alt="Firm logo"
-            className={collapsed
+            className={showCollapsed
               ? "h-12 w-12 object-contain"
               : "h-14 max-w-[210px] object-contain object-left flex-1 min-w-0"}
             data-testid="sidebar-firm-logo"
@@ -315,7 +353,7 @@ export default function Sidebar({ collapsed, onToggle }) {
             <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-blue-600 text-white shrink-0">
               <Sparkles size={16} />
             </div>
-            {!collapsed && (
+            {!showCollapsed && (
               <div>
                 <div className="font-heading font-bold text-slate-900 leading-tight">SmartBooks</div>
                 <div className="text-[10px] tracking-widest uppercase text-slate-500 leading-tight">Ledger</div>
@@ -374,19 +412,19 @@ export default function Sidebar({ collapsed, onToggle }) {
           always one click away without cluttering the bottom-right of
           the app. Fires the same global event the widget itself listens
           for so we keep a single source of truth for the panel. */}
-      <div className={`px-2 ${collapsed ? "pb-2" : "pb-1"}`}>
+      <div className={`px-2 ${showCollapsed ? "pb-2" : "pb-1"}`}>
         <button
           onClick={() => window.dispatchEvent(new Event("insights:open"))}
           data-testid="sidebar-insights-chat-btn"
           title="Ask about my data"
           className={`w-full flex items-center gap-2 rounded-lg border border-indigo-200 bg-gradient-to-br from-indigo-50 to-fuchsia-50 hover:from-indigo-100 hover:to-fuchsia-100 transition-colors ${
-            collapsed ? "justify-center p-2" : "px-3 py-2"
+            showCollapsed ? "justify-center p-2" : "px-3 py-2"
           }`}
         >
           <span className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-600 to-fuchsia-600 grid place-items-center text-white shrink-0">
             <Sparkles size={12} />
           </span>
-          {!collapsed && (
+          {!showCollapsed && (
             <span className="text-xs font-medium text-indigo-900 truncate">
               Ask about my data
             </span>
@@ -394,7 +432,7 @@ export default function Sidebar({ collapsed, onToggle }) {
         </button>
       </div>
 
-      {!collapsed && (
+      {!showCollapsed && (
         <div className="p-3 border-t text-[11px] text-slate-500">
           <div className="font-heading font-semibold text-slate-700">{user?.name}</div>
           <div className="truncate">{user?.email}</div>
