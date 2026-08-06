@@ -48,11 +48,12 @@ const GROUPS = [
   },
   {
     key: "banking",
-    label: "Banking",
+    label: "Connected Accounts",
     icon: Landmark,
     items: [
-      { to: "/connections", label: "Connect Accounts", icon: Link2 },
-      { to: "/connections?view=imports", label: "Import Statements", icon: Download, matchPath: "/connections" },
+      { to: "/connections", label: "Connect Accounts", icon: Link2, exact: true },
+      { to: "/connections?view=imports", label: "Import Statements", icon: Download, matchPath: "/connections", exact: true },
+      { to: "/connections/qbo", label: "Connect QBO", icon: Link2, matchPath: "/connections/qbo" },
     ],
   },
   {
@@ -148,7 +149,13 @@ const rememberSticky = (group, item) => {
 const isItemActive = (loc, item, sticky = {}, groupKey = null) => {
   // Prefer explicit matchPath (used when the link carries query params).
   const p = item.matchPath || item.to.split("?")[0];
-  const pathHit = loc.pathname === p || loc.pathname.startsWith(p + "/");
+  // `exact: true` limits highlighting to an EQUALS pathname match. Used
+  // when a sibling item lives on a deeper sub-route (e.g. Connect
+  // Accounts lives at `/connections`, Connect QBO at `/connections/qbo`
+  // — without `exact`, Connect Accounts would light up on the QBO page).
+  const pathHit = item.exact
+    ? loc.pathname === p
+    : (loc.pathname === p || loc.pathname.startsWith(p + "/"));
   if (!pathHit) return false;
 
   // Special case for query-param-scoped items (Customers, Vendors, etc.):
