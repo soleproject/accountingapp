@@ -524,9 +524,10 @@ export default function Reconciliation() {
       {/* History table — primary surface */}
       <div className="rounded-xl border bg-white overflow-hidden" data-testid="recon-history">
         {/* Account filter — populated from accounts that actually have a
-            reconciliation so the dropdown stays clean. Hidden when there
-            aren't at least two options (nothing to filter between). */}
-        {historyAccountOptions.length > 1 && (
+            reconciliation so the dropdown stays clean. Shown as soon as
+            any reconciliations exist so the pro can see the filter
+            surface even with a single account. */}
+        {historyAccountOptions.length >= 1 && (
           <div className="flex items-center gap-2 px-4 py-2 border-b bg-slate-50/60 text-xs">
             <span className="text-slate-500 uppercase tracking-widest">Filter</span>
             <select
