@@ -16,6 +16,19 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - **Auth**: JWT (bcrypt), role-based access (superadmin / pro / client), multi-tenant memberships
 
 
+### Feb 2026 — Voice invoices: "due today" now really means today (+ backdate rule)
+
+**Problems**
+1. Saying "due today" produced an invoice due 30 days out. Root cause: `Number(prefill.due_days) || 30` — when `due_days === 0` (today), JS's `||` falsy-check swallows the zero and falls back to 30.
+2. When a spoken due date lands in the past (e.g. "was due last week"), the invoice was still stamped with today's issue date, creating a record that's born already-overdue.
+
+**Fix**
+- **`ai_service.INTENT_SYSTEM`** — new due-date phrasing guide: 'today'→0, 'tomorrow'→1, 'yesterday'→-1, 'net 30'→30, 'was due last Monday'→negative offset, omitted→field skipped (frontend defaults to net-30).
+- **`Invoices.jsx::InvoiceModal`** & **`AiPanel.jsx::submitPendingIntent`** — replaced the `Number(x) || 30` fallback with an explicit `undefined/null/""` check, and added a backdate rule: if the resolved `due_date < today`, `issue_date` is set to `due_date`. Edit mode still trusts the persisted values.
+
+**Verified**: `Number(prefill.due_days === 0 ? 0 : (prefill.due_days ?? 30))` now correctly emits `2026-08-06 / 2026-08-06` for "due today" and shifts issue → due when the user says "was due last week".
+
+
 ### Feb 2026 — Item picker: use item NAME on invoice/bill lines, not the internal description
 
 **Problem**: Picking an item from the ItemPicker (or having voice/AI hydrate one) filled the line description with the item's internal `description` field (e.g. "Test - widget 1") instead of the customer-facing `name` (e.g. "Widget 1"). That leaked internal SKU notes onto invoices.
