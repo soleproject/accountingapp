@@ -329,16 +329,10 @@ export default function Sidebar({ collapsed, onToggle }) {
   return (
     <aside
       className={`shrink-0 border-r bg-white transition-all duration-300 flex flex-col ${
-        collapsed ? "w-16" : "w-64"
-      } ${
-        // When hover-expanded, overlay the rest of the app instead of
-        // pushing content aside so nothing reflows.
-        // Overlay ONLY while the persistent state is collapsed AND the
-        // user is currently hovering. Once they click the toggle to
-        // pin the sidebar open, `collapsed` flips false and the sidebar
-        // reverts to normal flex-layout mode (no overlay, no shadow),
-        // so the content underneath is no longer obscured.
-        collapsed && hoverExpanded ? "absolute inset-y-0 left-0 z-[1050] !w-64 shadow-xl" : ""
+        // Width follows the EFFECTIVE state (persistent + hover), so
+        // hovering over the rail expands the sidebar in-place and the
+        // main content reflows to the right instead of being covered.
+        showCollapsed ? "w-16" : "w-64"
       }`}
       data-testid="app-sidebar"
       onMouseEnter={handleMouseEnter}
