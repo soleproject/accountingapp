@@ -930,6 +930,22 @@ async def reprocess_import(
     except Exception:  # noqa: BLE001
         pass
 
+    # 7) Re-run the auto-reconciliation. The initial-upload path does this
+    #    at end of `upload_statement`, but reprocess also deletes the prior
+    #    recon (step 1) so we must recreate it — otherwise the user is left
+    #    with an "unreconciled" liability card after a reprocess even though
+    #    the ledger and statement tie perfectly. Fire-and-forget: any recon
+    #    failure must NOT block the reprocess flow, we log and move on.
+    try:
+        from reconciliation_engine import create_reconciliation_from_statement_import
+        await create_reconciliation_from_statement_import(cid, prior_import_id)
+    except Exception:  # noqa: BLE001
+        import logging as _log
+        _log.getLogger(__name__).exception(
+            "Reprocess: auto-reconciliation regeneration failed for import %s",
+            prior_import_id,
+        )
+
     return {
         "import_id": prior_import_id,
         "reinserted": imported,

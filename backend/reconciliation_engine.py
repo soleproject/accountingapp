@@ -346,7 +346,28 @@ async def create_reconciliation_from_statement_import(
     }).to_list(10000)
 
     txn_ids = [t["id"] for t in txns]
-    cleared_sum = round(sum(float(t.get("amount") or 0) for t in txns), 2)
+    raw_sum = round(sum(float(t.get("amount") or 0) for t in txns), 2)
+    # ------------------------------------------------------------------
+    # Liability sign convention
+    # ------------------------------------------------------------------
+    # For an ASSET account (checking, savings), the balance moves in the
+    # same direction as `amount`: closing = opening + sum(amount).
+    #
+    # For a LIABILITY account (credit card, LOC), amounts are stored
+    # using cash-flow convention — a charge is negative — but the
+    # LIABILITY balance grows by |amount|. So the actual change is the
+    # NEGATION of raw_sum. Same math applies to paydowns which are
+    # stored positive but decrease the liability.
+    #
+    # We normalize by flipping the sign on `cleared_sum` for liability
+    # accounts so the classic recon formula `diff = closing - opening -
+    # cleared_sum` reduces to 0 when the statement truly ties.
+    # ------------------------------------------------------------------
+    bank_acct = await db.accounts.find_one(
+        {"id": bank_account_id, "company_id": cid},
+    )
+    is_liability = bool(bank_acct and bank_acct.get("type") == "liability")
+    cleared_sum = round(-raw_sum if is_liability else raw_sum, 2)
     opening_r = round(float(opening), 2)
     closing_r = round(float(closing), 2)
     difference = round(closing_r - opening_r - cleared_sum, 2)

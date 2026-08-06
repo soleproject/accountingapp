@@ -16,6 +16,23 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - **Auth**: JWT (bcrypt), role-based access (superadmin / pro / client), multi-tenant memberships
 
 
+### Feb 2026 — Auto-reconciliation for liability (credit card) statements
+
+**Problem**: Uploading a credit-card statement via Veryfi auto-created a reconciliation that showed a huge false difference (e.g. AmEx-1004: statement $207.78 vs ledger $2,801.06 → diff -$5,602.12) even though the ledger and balance sheet tied perfectly. Asset (checking) statements reconciled fine.
+
+**Root cause**: `create_reconciliation_from_statement_import` used the ASSET sign convention `closing = opening + sum(amount)` for every account. Veryfi stores charges with a **negative** `amount` (cash-flow convention) even though they INCREASE the liability balance. On liabilities, the correct math is `closing = opening − sum(amount)` — the sign flips.
+
+**Fix (`reconciliation_engine.py::create_reconciliation_from_statement_import`)**
+- Look up the bank account, detect `type == "liability"`, and store `cleared_sum = -raw_sum` for liabilities (asset accounts still store raw). The classic recon formula `diff = closing − opening − cleared_sum` now reduces to 0 on a perfect tie for both asset and liability statements.
+
+**Fix (`statements.py::reprocess_import`)**
+- The reprocess flow cascade-deletes the prior recon (correct) but was never re-creating one. Added a step-7 call to `create_reconciliation_from_statement_import` so a Reprocess on a liability statement produces a fresh, correctly-signed recon in one click. Wrapped in try/except so a recon failure never blocks the reprocess.
+
+**Tests**: `tests/test_liability_recon_math.py` — 3 tests (liability perfect tie, asset unchanged, liability with mixed charges + paydown). All 38 targeted regression tests still passing.
+
+**How to fix the existing stale AmEx-1004 recon**: Un-reconcile from the reconciliation detail page, then hit Reprocess on the statement — the new recon will show diff=0 with the corrected math.
+
+
 ### Feb 2026 — Sequential invoice numbering
 
 **Problem**: Auto-generated invoice numbers were `INV-{random 4-digit}` (INV-9967, INV-5162, INV-5536…). Users expected the next invoice after INV-5162 to be INV-5163.
