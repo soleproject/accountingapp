@@ -168,10 +168,17 @@ async def generate_from_template(template: dict, run_date: Optional[date] = None
     status = template.get("status_on_generate") or "draft"
     coll = db.invoices if kind == "invoice" else db.bills
     prefix = "INV" if kind == "invoice" else "BILL"
+    # Invoices get sequential numbers; bills stay on the legacy random
+    # scheme (user only asked to fix invoice numbering).
+    if kind == "invoice":
+        from routes.invoices import _next_invoice_number  # local import avoids cycle
+        number = await _next_invoice_number(cid, prefix=f"{prefix}-")
+    else:
+        number = f"{prefix}-{random.randint(1000, 9999)}"
     doc = {
         "id": doc_id,
         "company_id": cid,
-        "number": f"{prefix}-{random.randint(1000, 9999)}",
+        "number": number,
         "contact_id": template.get("contact_id"),
         "contact_name": template.get("contact_name") or "",
         "issue_date": issue,
