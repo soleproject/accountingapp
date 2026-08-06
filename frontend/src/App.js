@@ -39,6 +39,7 @@ import Contacts from "@/pages/Contacts";
 import CustomerStatements from "@/pages/CustomerStatements";
 import LoansPage from "@/pages/LoansPage";
 import Connections from "@/pages/Connections";
+import QboConnect from "@/pages/QboConnect";
 import StatementImportDetail from "@/pages/StatementImportDetail";
 import CompanySettings from "@/pages/CompanySettings";
 import ProSettings from "@/pages/ProSettings";
@@ -119,6 +120,7 @@ function App() {
               <Route path="/contacts/:contactId" element={<Contacts />} />
               <Route path="/customer-statements" element={<CustomerStatements />} />
               <Route path="/connections" element={<Connections />} />
+              <Route path="/connections/qbo" element={<QboConnect />} />
               <Route path="/connections/imports/:importId" element={<StatementImportDetail />} />
               <Route path="/settings" element={<CompanySettings />} />
               <Route path="/pro/settings" element={<ProSettings />} />

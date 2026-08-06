@@ -247,6 +247,28 @@ export default function Connections() {
         </TabsContent>
 
         <TabsContent value="statements" className="mt-0">
+          {/* QBO migration entry point sits above the Statements grid
+              so pros discover it right where they'd expect — inside
+              the Import Statements area. Clicking navigates to the
+              dedicated /connections/qbo page. */}
+          <button
+            onClick={() => window.location.assign("/connections/qbo")}
+            data-testid="connections-qbo-card"
+            className="w-full mb-4 flex items-center gap-4 p-4 rounded-xl border bg-gradient-to-r from-emerald-50 to-cyan-50 hover:from-emerald-100 hover:to-cyan-100 text-left transition-colors"
+          >
+            <div className="w-11 h-11 rounded-lg bg-gradient-to-br from-emerald-500 to-cyan-600 grid place-items-center text-white shrink-0">
+              <Link2 size={20} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="font-heading font-semibold text-slate-900">
+                Migrate from QuickBooks Online
+              </div>
+              <div className="text-xs text-slate-600 mt-0.5">
+                One-click OAuth + bulk import of accounts, contacts, items and transactions.
+              </div>
+            </div>
+            <ChevronRight size={16} className="text-slate-400 shrink-0" />
+          </button>
           <StatementsTab companyId={currentId} />
         </TabsContent>
       </Tabs>
