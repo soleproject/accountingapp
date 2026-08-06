@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
+import { BUSINESS_TYPES } from "@/constants/businessTypes";
 import {
   AlertTriangle, CheckCircle2, ArrowRight, Plus, X, Loader2, UserPlus,
   BellRing, Wand2, FileWarning, ReceiptText, ScrollText, Sparkles, MailPlus,
@@ -1224,8 +1225,15 @@ function NewClientModal({ onClose, onCreated }) {
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="text-xs text-slate-600">Business type</label>
-              <input value={form.business_type} onChange={(e) => update("business_type", e.target.value)}
-                     placeholder="e.g. Marketing agency" className="w-full mt-1 border rounded px-2 py-1.5" />
+              <select
+                data-testid="new-client-business-type"
+                value={form.business_type}
+                onChange={(e) => update("business_type", e.target.value)}
+                className="w-full mt-1 border rounded px-2 py-1.5 bg-white"
+              >
+                <option value="">— Select entity type —</option>
+                {BUSINESS_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
             </div>
             <div>
               <label className="text-xs text-slate-600">Reporting basis</label>

@@ -16,6 +16,40 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - **Auth**: JWT (bcrypt), role-based access (superadmin / pro / client), multi-tenant memberships
 
 
+### Feb 2026 — Business Type: dropdown + AI canonicalization
+
+**Change**: Every place the app collects `business_type` (new-client modal, AI-assisted onboarding step 1, Company Settings, My Businesses form) now uses a **dropdown of seven canonical entity forms** instead of freeform text:
+  1. Sole Proprietor
+  2. LLC – Partnership
+  3. LLC – "S" Elected
+  4. LLC – "C" Elected
+  5. "S" Corporation
+  6. "C" Corporation
+  7. Limited Partnership
+
+**Frontend (`constants/businessTypes.js`)** — single source of truth, imported by `ProClients.jsx`, `Onboarding.jsx`, `CompanySettings.jsx`, `MyBusinesses.jsx`. Legacy values (`"LLC"`, `"S-Corp"`, etc.) still render as a `(legacy)` option so existing companies don't blank out.
+
+**Backend (`routes/onboarding.py::_canonicalize_business_type`)** — snap-to-canonical helper that maps colloquial voice/typed variants to the closed enum:
+  - "we're an LLC" → `LLC – Partnership` (IRS default)
+  - "LLC S-corp", "S-elected LLC", "filing 2553" → `LLC – "S" Elected`
+  - "Sub-S", "S corporation" (no LLC) → `"S" Corporation`
+  - "Acme Inc", "corporation" → `"C" Corporation`
+  - "sole prop", "self-employed", "Schedule C" → `Sole Proprietor`
+  - "LP", "Acme LP" → `Limited Partnership`
+  - Unrecognized → returned as-is (fail-safe, PATCH caller decides)
+
+**AI coach schema (`_COACH_STEP_SCHEMAS["business_profile"]`)** — new system prompt instructs the LLM to output one of the seven canonical values with the same mapping rules. Post-extract, the response is also run through `_canonicalize_business_type` so drifted LLM output still lands on-canon.
+
+**Wired into**:
+- `POST /api/companies` (self-service company create)
+- `POST /api/pro/clients` (pro creates a client)
+- `PATCH /api/companies/{cid}` (Company Settings save)
+- `PATCH /api/companies/{cid}/onboarding` (onboarding step 1 answers)
+- `POST /api/companies/{cid}/onboarding/coach/extract` (AI coach extraction)
+
+**Tests**: `tests/test_business_type_canon.py` — 11 tests (exact match, case-insensitive, bare-LLC default, LLC-S/C elected variants, S/C corp variants, sole prop synonyms, LP, empty/None fail-safe, unrecognized pass-through). All passing; 49/49 combined regression suite green.
+
+
 ### Feb 2026 — Reconciliation page: filter history by account
 
 **Change**: Added a compact filter row above the reconciliation history table with an "Account" dropdown. The dropdown is populated dynamically from accounts that actually have at least one reconciliation (no clutter from banks the pro hasn't reconciled yet) and stacks with the existing month-scope deep-link filter. Includes a Clear button and a live "Showing N of M" count.
