@@ -31,6 +31,7 @@ from routes.stripe_billing import router as stripe_billing_router  # noqa: F401
 from routes.firm_glance import router as firm_glance_router  # noqa: F401
 from routes.recurring import router as recurring_router  # noqa: F401
 from routes.items import router as items_router  # noqa: F401
+from routes.qbo import router as qbo_router  # noqa: F401
 from routes.root import router as root_router  # noqa: F401
 
 ALL_ROUTERS = [
@@ -65,5 +66,6 @@ ALL_ROUTERS = [
     firm_glance_router,
     recurring_router,
     items_router,
+    qbo_router,
     root_router,
 ]
