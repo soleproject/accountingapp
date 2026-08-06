@@ -335,23 +335,6 @@ export default function Reconciliation() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={runAutoBootstrap}
-            disabled={busy || !currentId}
-            data-testid="recon-auto-bootstrap-btn"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-cyan-200 bg-cyan-50 text-cyan-900 hover:bg-cyan-100 disabled:opacity-40"
-            title="Generate one real reconciliation per completed month from the Plaid transaction feed. Skips any period where the ledger and Plaid don't match."
-          >
-            <Sparkles size={13} className="text-cyan-700" /> Auto-reconcile from Plaid
-          </button>
-          <button
-            onClick={runAutoClear}
-            disabled={busy || !currentId}
-            data-testid="recon-auto-clear-btn"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border bg-white hover:bg-slate-50 disabled:opacity-40"
-          >
-            <Sparkles size={13} className="text-cyan-600" /> Auto-clear settled Plaid txns
-          </button>
           {!startOpen && (
             <button
               onClick={() => setStartOpen(true)}
@@ -575,7 +558,7 @@ export default function Reconciliation() {
               <tr><td colSpan={7} className="text-center py-10 text-slate-500 text-sm">
                 {monthBounds
                   ? <>No reconciliations for {monthBounds.start.slice(0, 7)} yet. Use "+ Start reconciliation" — the form is pre-filled with this month's date range.</>
-                  : <>No reconciliations yet. Hit "+ Start reconciliation" or "Auto-clear settled Plaid txns" to begin.</>}
+                  : <>No reconciliations yet. Hit "+ Start reconciliation" to begin.</>}
               </td></tr>
             )}
             {visibleHistory.map(r => (
