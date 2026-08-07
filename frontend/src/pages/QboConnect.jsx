@@ -299,7 +299,7 @@ export default function QboConnect() {
               </div>
             )}
             {done && (
-              <div className="mt-3 flex gap-2">
+              <div className="mt-3 flex gap-2 flex-wrap">
                 <button
                   onClick={() => navigate("/accounting/chart-of-accounts")}
                   className="px-3 py-1.5 text-xs rounded-md border bg-white hover:bg-slate-50"
@@ -311,6 +311,19 @@ export default function QboConnect() {
                   className="px-3 py-1.5 text-xs rounded-md border bg-white hover:bg-slate-50"
                 >
                   View Contacts
+                </button>
+                {/* Re-run entry point — completed jobs otherwise had no
+                    way to trigger a fresh import. Clears the job pointer
+                    locally so the "Start migration" button re-appears. */}
+                <button
+                  onClick={async () => {
+                    setJob(null);
+                    await startMigration();
+                  }}
+                  data-testid="qbo-rerun-btn"
+                  className="px-3 py-1.5 text-xs rounded-md border border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 inline-flex items-center gap-1"
+                >
+                  <RefreshCw size={12} /> Re-run migration
                 </button>
               </div>
             )}
