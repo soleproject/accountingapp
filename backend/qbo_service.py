@@ -332,6 +332,186 @@ def map_item(cid: str, realm_id: str, obj: dict) -> dict:
     }
 
 
+# ---- Transactional mappers -----------------------------------------
+# Every transactional doc carries the raw QBO payload under `raw` so
+# downstream users can rebuild schemas without a second migration.
+# Money values are rounded to 2dp at map-time. Contact + Account refs
+# preserve the QBO ID; we resolve to our internal IDs lazily via helper.
+
+async def _resolve_contact_id(cid: str, qbo_ref_id: str | None) -> str | None:
+    if not qbo_ref_id:
+        return None
+    doc = await db.contacts.find_one(
+        {"company_id": cid, "source": "qbo", "qbo_id": str(qbo_ref_id)},
+        projection={"id": 1, "_id": 0},
+    )
+    return doc.get("id") if doc else None
+
+
+async def _resolve_account_id(cid: str, qbo_ref_id: str | None) -> str | None:
+    if not qbo_ref_id:
+        return None
+    doc = await db.accounts.find_one(
+        {"company_id": cid, "source": "qbo", "qbo_id": str(qbo_ref_id)},
+        projection={"id": 1, "_id": 0},
+    )
+    return doc.get("id") if doc else None
+
+
+def _lines_from_qbo(obj: dict) -> list[dict]:
+    """Flatten QBO SalesItemLineDetail / AccountBasedExpenseLineDetail
+    into our line_items shape: {description, quantity, rate, amount,
+    item_qbo_id, account_qbo_id}. QBO returns SubTotal/DiscountLine rows
+    we deliberately skip."""
+    out: list[dict] = []
+    for ln in (obj.get("Line") or []):
+        dtype = ln.get("DetailType") or ""
+        if dtype in ("SubTotalLineDetail", "DiscountLineDetail"):
+            continue
+        detail = (ln.get("SalesItemLineDetail")
+                  or ln.get("AccountBasedExpenseLineDetail")
+                  or ln.get("ItemBasedExpenseLineDetail")
+                  or {})
+        qty = float(detail.get("Qty") or 1)
+        rate = float(detail.get("UnitPrice") or 0)
+        amt = float(ln.get("Amount") or 0)
+        out.append({
+            "description": ln.get("Description") or "",
+            "quantity": qty or 1,
+            "rate": round(rate or (amt / (qty or 1)), 2),
+            "amount": round(amt, 2),
+            "item_qbo_id": (detail.get("ItemRef") or {}).get("value"),
+            "account_qbo_id": (detail.get("AccountRef") or {}).get("value"),
+            "tax_code_qbo_id": (detail.get("TaxCodeRef") or {}).get("value"),
+        })
+    return out
+
+
+async def map_invoice(cid: str, realm_id: str, obj: dict) -> dict:
+    return {
+        "company_id": cid, "source": "qbo", "qbo_id": obj["Id"],
+        "realm_id": realm_id,
+        "number": obj.get("DocNumber") or f"QBO-INV-{obj['Id']}",
+        "contact_id": await _resolve_contact_id(cid, (obj.get("CustomerRef") or {}).get("value")),
+        "contact_name": (obj.get("CustomerRef") or {}).get("name") or "",
+        "issue_date": obj.get("TxnDate"),
+        "due_date": obj.get("DueDate") or obj.get("TxnDate"),
+        "line_items": _lines_from_qbo(obj),
+        "subtotal": round(float(obj.get("TotalAmt", 0)) - float((obj.get("TxnTaxDetail") or {}).get("TotalTax", 0) or 0), 2),
+        "tax": round(float((obj.get("TxnTaxDetail") or {}).get("TotalTax", 0) or 0), 2),
+        "total": round(float(obj.get("TotalAmt") or 0), 2),
+        "balance": round(float(obj.get("Balance") or 0), 2),
+        "status": "paid" if float(obj.get("Balance") or 0) == 0 else "sent",
+        "raw": obj, "created_at": now_iso(), "updated_at": now_iso(),
+    }
+
+
+async def map_bill(cid: str, realm_id: str, obj: dict) -> dict:
+    return {
+        "company_id": cid, "source": "qbo", "qbo_id": obj["Id"],
+        "realm_id": realm_id,
+        "number": obj.get("DocNumber") or f"QBO-BILL-{obj['Id']}",
+        "contact_id": await _resolve_contact_id(cid, (obj.get("VendorRef") or {}).get("value")),
+        "contact_name": (obj.get("VendorRef") or {}).get("name") or "",
+        "issue_date": obj.get("TxnDate"),
+        "due_date": obj.get("DueDate") or obj.get("TxnDate"),
+        "line_items": _lines_from_qbo(obj),
+        "total": round(float(obj.get("TotalAmt") or 0), 2),
+        "balance": round(float(obj.get("Balance") or 0), 2),
+        "status": "paid" if float(obj.get("Balance") or 0) == 0 else "open",
+        "raw": obj, "created_at": now_iso(), "updated_at": now_iso(),
+    }
+
+
+async def map_payment(cid: str, realm_id: str, obj: dict, kind: str) -> dict:
+    """Payment (received) OR BillPayment (made). `kind` distinguishes."""
+    ref = "CustomerRef" if kind == "payment" else "VendorRef"
+    return {
+        "company_id": cid, "source": "qbo", "qbo_id": obj["Id"],
+        "realm_id": realm_id, "kind": kind,
+        "contact_id": await _resolve_contact_id(cid, (obj.get(ref) or {}).get("value")),
+        "contact_name": (obj.get(ref) or {}).get("name") or "",
+        "date": obj.get("TxnDate"),
+        "amount": round(float(obj.get("TotalAmt") or 0), 2),
+        "deposit_account_id": await _resolve_account_id(cid, (obj.get("DepositToAccountRef") or {}).get("value")),
+        "payment_method": (obj.get("PaymentMethodRef") or {}).get("name") or "",
+        "reference": obj.get("PaymentRefNum") or "",
+        "applied_to": [{
+            "target_qbo_id": (li.get("LinkedTxn") or [{}])[0].get("TxnId") if li.get("LinkedTxn") else None,
+            "target_type": (li.get("LinkedTxn") or [{}])[0].get("TxnType") if li.get("LinkedTxn") else None,
+            "amount": round(float(li.get("Amount") or 0), 2),
+        } for li in (obj.get("Line") or [])],
+        "raw": obj, "created_at": now_iso(), "updated_at": now_iso(),
+    }
+
+
+async def map_journal_entry(cid: str, realm_id: str, obj: dict) -> dict:
+    lines = []
+    for ln in (obj.get("Line") or []):
+        d = ln.get("JournalEntryLineDetail") or {}
+        posting = d.get("PostingType") or "Debit"
+        amt = round(float(ln.get("Amount") or 0), 2)
+        lines.append({
+            "description": ln.get("Description") or "",
+            "account_qbo_id": (d.get("AccountRef") or {}).get("value"),
+            "account_id": await _resolve_account_id(cid, (d.get("AccountRef") or {}).get("value")),
+            "debit": amt if posting == "Debit" else 0,
+            "credit": amt if posting == "Credit" else 0,
+            "contact_qbo_id": ((d.get("Entity") or {}).get("EntityRef") or {}).get("value"),
+        })
+    return {
+        "company_id": cid, "source": "qbo", "qbo_id": obj["Id"],
+        "realm_id": realm_id,
+        "date": obj.get("TxnDate"),
+        "number": obj.get("DocNumber") or f"QBO-JE-{obj['Id']}",
+        "memo": obj.get("PrivateNote") or "",
+        "lines": lines,
+        "total_debit": round(sum(l["debit"] for l in lines), 2),
+        "total_credit": round(sum(l["credit"] for l in lines), 2),
+        "raw": obj, "created_at": now_iso(), "updated_at": now_iso(),
+    }
+
+
+async def map_txn_simple(cid: str, realm_id: str, obj: dict, kind: str) -> dict:
+    """Deposit / Transfer / SalesReceipt / RefundReceipt / CreditMemo /
+    Purchase → generic transactions row. Sign convention matches our
+    ledger (charges negative, deposits positive)."""
+    amt = round(float(obj.get("TotalAmt") or 0), 2)
+    if kind in ("Purchase", "RefundReceipt"):
+        amt = -abs(amt)
+    contact_ref = (obj.get("CustomerRef") or obj.get("VendorRef") or obj.get("EntityRef") or {}).get("value")
+    bank_ref = (obj.get("AccountRef") or obj.get("DepositToAccountRef") or {}).get("value")
+    return {
+        "company_id": cid, "source": "qbo", "qbo_id": obj["Id"],
+        "realm_id": realm_id, "qbo_type": kind,
+        "date": obj.get("TxnDate"),
+        "description": obj.get("PrivateNote") or obj.get("Memo") or f"QBO {kind}",
+        "amount": amt,
+        "contact_id": await _resolve_contact_id(cid, contact_ref),
+        "bank_account_id": await _resolve_account_id(cid, bank_ref),
+        "raw": obj, "created_at": now_iso(), "updated_at": now_iso(),
+    }
+
+
+def map_attachable(cid: str, realm_id: str, obj: dict) -> dict:
+    """Attachment metadata only — file download deferred (would need
+    a signed URL exchange per file + storage backend). Users can still
+    view every raw payload via the `raw` field."""
+    return {
+        "company_id": cid, "source": "qbo", "qbo_id": obj["Id"],
+        "realm_id": realm_id,
+        "file_name": obj.get("FileName") or "",
+        "file_size": obj.get("Size") or 0,
+        "content_type": obj.get("ContentType") or "",
+        "note": obj.get("Note") or "",
+        "attached_to": [{
+            "entity_type": ref.get("EntityRef", {}).get("type"),
+            "entity_qbo_id": ref.get("EntityRef", {}).get("value"),
+        } for ref in (obj.get("AttachableRef") or [])],
+        "raw": obj, "created_at": now_iso(), "updated_at": now_iso(),
+    }
+
+
 # ------------------------------------------------------------------
 # Upsert helpers — idempotent by (company_id, source, qbo_id)
 # ------------------------------------------------------------------
@@ -370,6 +550,12 @@ async def preview_counts(company_id: str) -> dict[str, int]:
         except Exception as ex:  # noqa: BLE001
             logger.warning("preview count failed for %s: %s", e, ex)
             out[e] = -1
+    # Persist so the UI can rehydrate on next page load without re-
+    # hitting QBO. Kept on the connection doc alongside the tokens.
+    await db.qbo_connections.update_one(
+        {"company_id": company_id},
+        {"$set": {"preview_counts": out, "preview_at": now_iso()}},
+    )
     return out
 
 
@@ -442,25 +628,28 @@ async def _run_entity(job_id: str, company_id: str, realm_id: str,
 
 
 _PIPELINE: list[tuple[str, callable, str]] = [
-    # Foundation — MUST run first, transactional records reference these.
-    ("Account",  map_account, "accounts"),
-    ("Customer", lambda c, r, o: map_contact(c, r, o, "customer"), "contacts"),
-    ("Vendor",   lambda c, r, o: map_contact(c, r, o, "vendor"),   "contacts"),
-    ("Item",     map_item,    "items"),
-    # Transactional — order doesn't matter for correctness, but we do
-    # invoices/bills first (largest volume typically) so progress bars
-    # feel snappier.
-    ("Invoice",       lambda c, r, o: map_invoice(c, r, o),      "invoices"),
-    ("Bill",          lambda c, r, o: map_bill(c, r, o),         "bills"),
-    ("Payment",       lambda c, r, o: map_payment(c, r, o, "in"),  "payments"),
-    ("BillPayment",   lambda c, r, o: map_payment(c, r, o, "out"), "payments"),
-    ("JournalEntry",  lambda c, r, o: map_journal_entry(c, r, o), "journal_entries"),
-    ("Deposit",       lambda c, r, o: map_generic_txn(c, r, o, "Deposit"),      "transactions"),
-    ("Transfer",      lambda c, r, o: map_generic_txn(c, r, o, "Transfer"),     "transactions"),
-    ("Purchase",      lambda c, r, o: map_generic_txn(c, r, o, "Purchase"),     "transactions"),
-    ("SalesReceipt",  lambda c, r, o: map_generic_txn(c, r, o, "SalesReceipt"), "transactions"),
-    ("RefundReceipt", lambda c, r, o: map_generic_txn(c, r, o, "RefundReceipt"),"transactions"),
-    ("CreditMemo",    lambda c, r, o: map_generic_txn(c, r, o, "CreditMemo"),   "transactions"),
+    # Foundation — Accounts, Customers, Vendors, Items — must import
+    # first so transactional refs (CustomerRef/AccountRef/ItemRef)
+    # resolve against real local IDs.
+    ("Account",       map_account, "accounts"),
+    ("Customer",      lambda c, r, o: map_contact(c, r, o, "customer"), "contacts"),
+    ("Vendor",        lambda c, r, o: map_contact(c, r, o, "vendor"),   "contacts"),
+    ("Item",          map_item, "items"),
+    # Transactional
+    ("Invoice",       map_invoice, "invoices"),
+    ("Bill",          map_bill,    "bills"),
+    ("Payment",       lambda c, r, o: map_payment(c, r, o, "payment"),      "payments"),
+    ("BillPayment",   lambda c, r, o: map_payment(c, r, o, "bill_payment"), "payments"),
+    ("JournalEntry",  map_journal_entry, "journal_entries"),
+    ("Deposit",       lambda c, r, o: map_txn_simple(c, r, o, "Deposit"),       "transactions"),
+    ("Transfer",      lambda c, r, o: map_txn_simple(c, r, o, "Transfer"),      "transactions"),
+    ("SalesReceipt",  lambda c, r, o: map_txn_simple(c, r, o, "SalesReceipt"),  "transactions"),
+    ("RefundReceipt", lambda c, r, o: map_txn_simple(c, r, o, "RefundReceipt"), "transactions"),
+    ("CreditMemo",    lambda c, r, o: map_txn_simple(c, r, o, "CreditMemo"),    "transactions"),
+    ("Purchase",      lambda c, r, o: map_txn_simple(c, r, o, "Purchase"),      "transactions"),
+    # Attachments — metadata only for v1 (file bytes deferred until we
+    # wire an object-storage backend for the downloads).
+    ("Attachable",    map_attachable, "qbo_attachments"),
 ]
 
 

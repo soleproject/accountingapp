@@ -106,16 +106,34 @@ async def qbo_oauth_callback(
 
 @router.get("/companies/{cid}/qbo/status")
 async def qbo_status(cid: str, user: dict = Depends(get_current_user)):
+    """Returns connection state PLUS the cached preview counts and the
+    most-recent migration job for this company — lets the frontend
+    rehydrate the 3-step page on reload without extra roundtrips."""
     await require_company(user, cid)
     conn = await Q.get_connection(cid)
+    last_job = await db.qbo_jobs.find_one(
+        {"company_id": cid, "stale": {"$ne": True}},
+        sort=[("created_at", -1)],
+    )
+    if last_job:
+        last_job.pop("_id", None)
     if not conn:
-        return {"connected": False}
+        return {"connected": False, "last_job": last_job}
+    preview = None
+    if conn.get("preview_counts"):
+        preview = {
+            "counts": conn["preview_counts"],
+            "total": sum(c for c in conn["preview_counts"].values() if c > 0),
+            "preview_at": conn.get("preview_at"),
+        }
     return {
         "connected": conn.get("status") == "connected",
         "realm_id": conn.get("realm_id"),
         "environment": conn.get("environment"),
         "connected_at": conn.get("created_at"),
         "last_updated": conn.get("updated_at"),
+        "preview": preview,
+        "last_job": last_job,
     }
 
 
@@ -132,11 +150,21 @@ async def qbo_disconnect(cid: str, user: dict = Depends(get_current_user)):
     await db.qbo_connections.update_one(
         {"company_id": cid},
         {"$set": {"status": "disconnected", "access_token_enc": None,
-                  "refresh_token_enc": None, "updated_at": now_iso()}},
+                  "refresh_token_enc": None, "updated_at": now_iso()},
+         # Wipe the cached preview + persistent old-job pointer so the
+         # UI shows a clean 3-step flow on the next Connect, not stale
+         # numbers from the last realm.
+         "$unset": {"preview_counts": "", "preview_at": ""}},
     )
     await db.qbo_jobs.update_many(
         {"company_id": cid, "status": {"$in": ["queued", "running"]}},
         {"$set": {"status": "cancelled", "finished_at": now_iso()}},
+    )
+    # Also mark any prior "done" jobs stale so refreshStatus doesn't
+    # hydrate a Complete state for a connection that no longer exists.
+    await db.qbo_jobs.update_many(
+        {"company_id": cid, "status": "done"},
+        {"$set": {"stale": True}},
     )
     return {"ok": True}
 
