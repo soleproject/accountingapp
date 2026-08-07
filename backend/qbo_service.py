@@ -256,6 +256,7 @@ def map_account(cid: str, realm_id: str, obj: dict) -> dict:
         "company_id": cid,
         "source": "qbo",
         "qbo_id": obj["Id"],
+        "id": f"qbo-account-{obj['Id']}",   # satisfy `id_uniq` on accounts
         "realm_id": realm_id,
         "code": obj.get("AcctNum") or "",
         "name": obj.get("FullyQualifiedName") or obj.get("Name") or "",
@@ -284,13 +285,15 @@ def map_contact(cid: str, realm_id: str, obj: dict, kind: str) -> dict:
         "source": "qbo",
         "qbo_id": obj["Id"],
         "qbo_type": kind,
+        # Deterministic top-level `id` that satisfies the `id_uniq`
+        # unique index on the contacts collection. Include `kind` in the
+        # key because Customer #1 and Vendor #1 both come from QBO with
+        # the same Id="1" and would otherwise collide.
+        "id": f"qbo-{kind}-{obj['Id']}",
         "realm_id": realm_id,
         "name": name,
-        # `normalized_name` matches the unique index on the contacts
-        # collection — without it every QBO contact would collide on
-        # `(company_id, null)` and only the first would insert.
         "normalized_name": normalize_contact_name(name),
-        "type": kind,   # 'customer' or 'vendor'
+        "type": kind,
         "email": email,
         "phone": phone,
         "address": " ".join(filter(None, [
@@ -311,6 +314,7 @@ def map_item(cid: str, realm_id: str, obj: dict) -> dict:
         "company_id": cid,
         "source": "qbo",
         "qbo_id": obj["Id"],
+        "id": f"qbo-item-{obj['Id']}",   # satisfy `id_uniq` on items
         "realm_id": realm_id,
         "name": obj.get("Name") or "",
         "description": obj.get("Description") or "",
@@ -333,8 +337,11 @@ def map_item(cid: str, realm_id: str, obj: dict) -> dict:
 # ------------------------------------------------------------------
 
 async def upsert(coll: str, doc: dict) -> None:
-    key = {"company_id": doc["company_id"], "source": "qbo",
-           "qbo_id": doc["qbo_id"]}
+    """Idempotent upsert keyed on the top-level `id` field. Uses `id`
+    (not `qbo_id`) because that's the field with the unique index on
+    `contacts` / `accounts` / etc. Any second migration for the same
+    realm becomes a no-op update instead of a duplicate-key insert."""
+    key = {"company_id": doc["company_id"], "id": doc["id"]}
     await db[coll].update_one(key, {"$set": doc}, upsert=True)
 
 
