@@ -51,7 +51,7 @@ const GROUPS = [
     label: "Connected Accounts",
     icon: Landmark,
     items: [
-      { to: "/connections", label: "Connect Accounts", icon: Link2, exact: true },
+      { to: "/connections", label: "Connect & Import", icon: Link2, exact: true },
       { to: "/connections?view=imports", label: "Import Statements", icon: Download, matchPath: "/connections", exact: true },
       { to: "/connections/qbo", label: "Connect QBO", icon: Link2, matchPath: "/connections/qbo" },
     ],

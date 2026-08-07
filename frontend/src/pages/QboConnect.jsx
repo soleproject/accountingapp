@@ -130,14 +130,6 @@ export default function QboConnect() {
 
   return (
     <div className="p-6 max-w-5xl" data-testid="qbo-connect-page">
-      <button
-        onClick={() => navigate("/connections")}
-        className="text-sm text-slate-500 hover:text-slate-800 mb-3 inline-flex items-center gap-1"
-        data-testid="qbo-back-btn"
-      >
-        <ChevronRight size={14} className="rotate-180" /> Back to Connections
-      </button>
-
       <div className="flex items-start gap-4 mb-6">
         <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-emerald-500 to-cyan-600 grid place-items-center text-white shrink-0">
           <Link2 size={26} />
