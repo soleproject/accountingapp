@@ -24,6 +24,13 @@ from auth import get_current_user
 from deps import require_company
 import qbo_service as Q
 
+# The OAuth callback runs on api.smartbookssoftware.ai but the user lives
+# on app.smartbookssoftware.ai — so every RedirectResponse must include
+# the absolute app URL, not a relative /connections/qbo path. Otherwise
+# the browser resolves the relative path against api.* and the SPA
+# catch-all on the FRONTEND service never sees the query params.
+_APP_URL = Q.QBO_APP_URL.rstrip("/")
+
 router = APIRouter(prefix="/api")
 
 
@@ -54,7 +61,7 @@ async def qbo_oauth_callback(
     redirects to `/connections/qbo?qbo_error=<reason>` so the frontend
     can surface a useful toast instead of dumping a raw 4xx page."""
     def _err(reason: str, cid: str | None = None) -> RedirectResponse:
-        target = f"/connections/qbo?qbo_error={reason}"
+        target = f"{_APP_URL}/connections/qbo?qbo_error={reason}"
         return RedirectResponse(target, status_code=302)
 
     # Intuit itself returned an error (user hit "No thanks", scope
@@ -89,9 +96,10 @@ async def qbo_oauth_callback(
         )
         return _err(f"save_failed:{str(e)[:120]}")
     # Success — land the user on the QBO Connect page (not the generic
-    # /connections page — that route doesn't refresh QBO status).
+    # /connections page — that route doesn't refresh QBO status). Absolute
+    # URL so the browser lands on the FRONTEND service, not the API.
     return RedirectResponse(
-        f"/connections/qbo?qbo=connected&realm={realmId}",
+        f"{_APP_URL}/connections/qbo?qbo=connected&realm={realmId}",
         status_code=302,
     )
 
