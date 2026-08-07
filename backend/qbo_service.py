@@ -43,6 +43,13 @@ API_BASE = ("https://sandbox-quickbooks.api.intuit.com/v3"
             if QBO_ENV == "sandbox"
             else "https://quickbooks.api.intuit.com/v3")
 
+# Deploy canary — bumped every time the mapper contract changes. The
+# diagnostics endpoint echoes this back so we can verify at a glance
+# which version Railway is actually running (vs. what's in git). If a
+# migration fails and this is NOT the string below, Railway is on stale
+# code and the fix is not in production yet.
+MAPPER_VERSION = "v4-2026-02-08-capital-Id-null-safe-per-row-isolation"
+
 
 def _auth_client() -> AuthClient:
     return AuthClient(

@@ -252,6 +252,7 @@ async def qbo_diagnostics(cid: str, user: dict = Depends(get_current_user)):
             "created_at": conn.get("created_at"),
             "updated_at": conn.get("updated_at"),
         },
+        "mapper_version": Q.MAPPER_VERSION,
         "jobs": jobs,
         "collections": out_collections,
         "live_qbo_preview": preview,
