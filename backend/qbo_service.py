@@ -37,6 +37,7 @@ QBO_CLIENT_SECRET = os.environ.get("QBO_CLIENT_SECRET")
 QBO_REDIRECT_URI = os.environ.get("QBO_REDIRECT_URI")
 QBO_MINOR_VERSION = os.environ.get("QBO_MINOR_VERSION", "75")
 
+QBO_APP_URL = os.environ.get("QBO_APP_URL", "https://app.smartbookssoftware.ai")
 API_BASE = ("https://sandbox-quickbooks.api.intuit.com/v3"
             if QBO_ENV == "sandbox"
             else "https://quickbooks.api.intuit.com/v3")
