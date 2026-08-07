@@ -17,6 +17,7 @@ Design notes (see `/app/memory/PRD.md` for full playbook):
 from __future__ import annotations
 import os
 import asyncio
+import inspect
 import random
 import logging
 from datetime import datetime, timezone, timedelta
@@ -581,6 +582,19 @@ async def _run_entity(job_id: str, company_id: str, realm_id: str,
     async for obj in query_all(company_id, realm_id, entity):
         try:
             doc = mapper(company_id, realm_id, obj)
+            # Defensive: if a future edit accidentally turns a mapper
+            # into `async def`, calling it synchronously returns an
+            # un-awaited coroutine and `upsert(doc)` crashes on
+            # `doc["company_id"]` with "'coroutine' object is not
+            # subscriptable". Detect that and await it here so a partial
+            # merge-conflict resolution can't silently break the pipeline
+            # (this exact bug hit QBO 1 Inc in Feb 2026).
+            if inspect.iscoroutine(doc):
+                logger.error(
+                    "QBO mapper for %s returned a coroutine — mapper "
+                    "should be sync. Awaiting defensively.", entity,
+                )
+                doc = await doc
             await upsert(target_coll, doc)
             processed += 1
         except Exception as e:  # noqa: BLE001
