@@ -308,9 +308,11 @@ export default function QboConnect() {
       <div className="text-xs text-slate-400 mt-6 flex items-start gap-2">
         <Sparkles size={12} className="mt-0.5 text-slate-300" />
         <span>
-          V1 imports Foundation entities (Chart of Accounts, Customers, Vendors, Items).
-          Transactional entities (Invoices, Bills, Payments, Journal Entries) land in the
-          next release — the connection persists so you won't reconnect.
+          Imports every QBO object: Chart of Accounts, Customers, Vendors,
+          Items, Invoices, Bills, Payments, Bill Payments, Journal Entries,
+          Deposits, Transfers, Sales/Refund Receipts, Credit Memos, Purchases,
+          and Attachment metadata. All records upsert idempotently by QBO ID —
+          safe to re-run.
         </span>
       </div>
     </div>
