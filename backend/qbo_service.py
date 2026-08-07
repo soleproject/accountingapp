@@ -274,16 +274,22 @@ def map_account(cid: str, realm_id: str, obj: dict) -> dict:
 def map_contact(cid: str, realm_id: str, obj: dict, kind: str) -> dict:
     """QBO Customer/Vendor → our contacts collection shape.
     `kind` is 'customer' or 'vendor'."""
+    from contact_resolver import normalize_contact_name
     addr = obj.get("BillAddr") or obj.get("ShipAddr") or {}
     phone = (obj.get("PrimaryPhone") or {}).get("FreeFormNumber")
     email = (obj.get("PrimaryEmailAddr") or {}).get("Address")
+    name = obj.get("DisplayName") or obj.get("CompanyName") or ""
     return {
         "company_id": cid,
         "source": "qbo",
         "qbo_id": obj["Id"],
         "qbo_type": kind,
         "realm_id": realm_id,
-        "name": obj.get("DisplayName") or obj.get("CompanyName") or "",
+        "name": name,
+        # `normalized_name` matches the unique index on the contacts
+        # collection — without it every QBO contact would collide on
+        # `(company_id, null)` and only the first would insert.
+        "normalized_name": normalize_contact_name(name),
         "type": kind,   # 'customer' or 'vendor'
         "email": email,
         "phone": phone,
