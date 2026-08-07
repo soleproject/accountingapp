@@ -548,6 +548,12 @@ async def preview_counts(company_id: str) -> dict[str, int]:
         except Exception as ex:  # noqa: BLE001
             logger.warning("preview count failed for %s: %s", e, ex)
             out[e] = -1
+    # Persist so the UI can rehydrate on next page load without re-
+    # hitting QBO. Kept on the connection doc alongside the tokens.
+    await db.qbo_connections.update_one(
+        {"company_id": company_id},
+        {"$set": {"preview_counts": out, "preview_at": now_iso()}},
+    )
     return out
 
 
