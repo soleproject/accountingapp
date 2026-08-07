@@ -567,30 +567,57 @@ async def _run_entity(job_id: str, company_id: str, realm_id: str,
                       entity: str, mapper, target_coll: str) -> None:
     """Iterate every QBO row for `entity`, run `mapper` (sync or async),
     upsert the mapped doc. Progress written every 25 rows so the
-    frontend poller has smooth increments."""
+    frontend poller has smooth increments.
+
+    Tracks successful upserts and per-row failures separately so a bad
+    mapper can't silently show "283 processed" while the DB is empty.
+    First 3 error messages per entity get echoed to the job doc for the
+    UI to display; every failure hits the logger."""
     import inspect
     is_async = inspect.iscoroutinefunction(mapper)
     processed = 0
+    ok_count = 0
+    err_count = 0
+    sample_errors: list[str] = []
     async for obj in query_all(company_id, realm_id, entity):
         try:
             doc = await mapper(company_id, realm_id, obj) if is_async \
                 else mapper(company_id, realm_id, obj)
+            # Detect the "sync lambda wrapping an async mapper" bug — if
+            # a coroutine leaked out of a lambda wrapper we'd upsert a
+            # coroutine object and everything would look fine. Await it.
+            if inspect.iscoroutine(doc):
+                doc = await doc
             await upsert(target_coll, doc)
+            ok_count += 1
         except Exception as e:  # noqa: BLE001
-            logger.warning("QBO %s row %s failed: %s", entity, obj.get("Id"), e)
+            err_count += 1
+            msg = f"{entity} row {obj.get('Id')}: {type(e).__name__}: {e}"
+            logger.warning(msg)
+            if len(sample_errors) < 3:
+                sample_errors.append(msg[:200])
         processed += 1
         if processed % 25 == 0:
             await db.qbo_jobs.update_one(
                 {"job_id": job_id},
-                {"$inc": {"processed": 25},
+                {"$inc": {"processed": 25, "imported": ok_count, "failed": err_count},
                  "$set": {"entity": entity, "updated_at": now_iso()}},
             )
+            ok_count = 0; err_count = 0
     tail = processed % 25
     if tail:
         await db.qbo_jobs.update_one(
             {"job_id": job_id},
-            {"$inc": {"processed": tail},
+            {"$inc": {"processed": tail, "imported": ok_count, "failed": err_count},
              "$set": {"entity": entity, "updated_at": now_iso()}},
+        )
+    # Publish the first 3 errors per entity so the UI can show a hint.
+    if sample_errors:
+        await db.qbo_jobs.update_one(
+            {"job_id": job_id},
+            {"$push": {"entity_errors": {
+                "entity": entity, "samples": sample_errors,
+            }}},
         )
 
 
