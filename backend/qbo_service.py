@@ -682,10 +682,17 @@ async def run_migration(job_id: str, company_id: str) -> None:
                           "status": "running", "updated_at": now_iso()}},
             )
             await _run_entity(job_id, company_id, realm_id, entity, mapper, coll)
+        # Post-import: resolve payment→invoice/bill links from each
+        # payment's `applied_to` array (QBO LinkedTxn data). This runs
+        # AFTER Invoices/Bills are all imported so the qbo_id → local
+        # id lookups succeed. Direct writes (no PATCH cascade) since
+        # QBO already gave us the correct balance on each doc.
+        linked = await resolve_payment_links(company_id)
         await db.qbo_jobs.update_one(
             {"job_id": job_id},
             {"$set": {"status": "done", "phase": "done",
-                      "finished_at": now_iso(), "percent": 100}},
+                      "finished_at": now_iso(), "percent": 100,
+                      "payments_linked": linked}},
         )
     except Exception as e:  # noqa: BLE001
         logger.exception("QBO migration failed for %s", company_id)
@@ -694,3 +701,64 @@ async def run_migration(job_id: str, company_id: str) -> None:
             {"$set": {"status": "failed", "error": str(e),
                       "finished_at": now_iso()}},
         )
+
+
+async def resolve_payment_links(company_id: str) -> int:
+    """Populate `linked_invoice_id` / `linked_bill_id` on QBO-imported
+    payments by resolving each `applied_to[i].txn_qbo_id` against our
+    local invoices/bills collections. Idempotent — payments already
+    linked keep their values; payments with no applied_to entries are
+    skipped. Returns the number of payments updated.
+
+    Direct write (bypasses the PATCH cascade) — the mapped invoice/bill
+    already carries QBO's authoritative `balance`, so re-applying the
+    payment impact via `_reverse_payment_impact` would double-count.
+    """
+    # Prefetch qbo_id → local id maps to avoid N+1 lookups.
+    inv_map = {}
+    async for inv in db.invoices.find(
+        {"company_id": company_id, "source": "qbo"},
+        {"id": 1, "qbo_id": 1},
+    ):
+        if inv.get("qbo_id"):
+            inv_map[str(inv["qbo_id"])] = inv["id"]
+
+    bill_map = {}
+    async for b in db.bills.find(
+        {"company_id": company_id, "source": "qbo"},
+        {"id": 1, "qbo_id": 1},
+    ):
+        if b.get("qbo_id"):
+            bill_map[str(b["qbo_id"])] = b["id"]
+
+    updated = 0
+    async for pay in db.payments.find(
+        {"company_id": company_id, "source": "qbo"},
+        {"id": 1, "applied_to": 1,
+         "linked_invoice_id": 1, "linked_bill_id": 1},
+    ):
+        applied = pay.get("applied_to") or []
+        if not applied:
+            continue
+        set_fields = {}
+        for link in applied:
+            ttype = link.get("txn_type")
+            tqid = link.get("txn_qbo_id")
+            if not tqid:
+                continue
+            tqid = str(tqid)
+            if ttype == "Invoice" and not pay.get("linked_invoice_id") \
+                    and "linked_invoice_id" not in set_fields \
+                    and tqid in inv_map:
+                set_fields["linked_invoice_id"] = inv_map[tqid]
+            elif ttype == "Bill" and not pay.get("linked_bill_id") \
+                    and "linked_bill_id" not in set_fields \
+                    and tqid in bill_map:
+                set_fields["linked_bill_id"] = bill_map[tqid]
+        if set_fields:
+            set_fields["updated_at"] = now_iso()
+            await db.payments.update_one(
+                {"id": pay["id"]}, {"$set": set_fields},
+            )
+            updated += 1
+    return updated
