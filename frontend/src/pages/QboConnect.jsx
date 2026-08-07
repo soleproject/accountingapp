@@ -46,6 +46,17 @@ export default function QboConnect() {
     if (!currentId) return;
     const r = await api.get(`/companies/${currentId}/qbo/status`);
     setStatus(r.data);
+    // Rehydrate the Preview + Migrate cards from server-cached state so
+    // navigating away and back preserves the page you were on.
+    if (r.data.preview) setPreview(r.data.preview);
+    if (r.data.last_job) {
+      setJob(r.data.last_job);
+      // If the last job is still in-flight, resume the poller so the
+      // progress bar picks up where it left off.
+      if (r.data.last_job.status === "queued" || r.data.last_job.status === "running") {
+        startPolling(r.data.last_job.job_id);
+      }
+    }
   };
   useEffect(() => { refreshStatus(); }, [currentId]);
 
@@ -87,6 +98,8 @@ export default function QboConnect() {
       toast.success("Disconnected");
       setStatus({ connected: false });
       setPreview(null);
+      setJob(null);
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     } catch (e) {
       toast.error(e.response?.data?.detail || "Disconnect failed");
     } finally { setBusy(false); }
