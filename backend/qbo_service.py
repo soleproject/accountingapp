@@ -403,11 +403,192 @@ async def _run_entity(job_id: str, company_id: str, realm_id: str,
 
 
 _PIPELINE: list[tuple[str, callable, str]] = [
+    # Foundation — MUST run first, transactional records reference these.
     ("Account",  map_account, "accounts"),
     ("Customer", lambda c, r, o: map_contact(c, r, o, "customer"), "contacts"),
     ("Vendor",   lambda c, r, o: map_contact(c, r, o, "vendor"),   "contacts"),
     ("Item",     map_item,    "items"),
+    # Transactional — order doesn't matter for correctness, but we do
+    # invoices/bills first (largest volume typically) so progress bars
+    # feel snappier.
+    ("Invoice",       lambda c, r, o: map_invoice(c, r, o),      "invoices"),
+    ("Bill",          lambda c, r, o: map_bill(c, r, o),         "bills"),
+    ("Payment",       lambda c, r, o: map_payment(c, r, o, "in"),  "payments"),
+    ("BillPayment",   lambda c, r, o: map_payment(c, r, o, "out"), "payments"),
+    ("JournalEntry",  lambda c, r, o: map_journal_entry(c, r, o), "journal_entries"),
+    ("Deposit",       lambda c, r, o: map_generic_txn(c, r, o, "Deposit"),      "transactions"),
+    ("Transfer",      lambda c, r, o: map_generic_txn(c, r, o, "Transfer"),     "transactions"),
+    ("Purchase",      lambda c, r, o: map_generic_txn(c, r, o, "Purchase"),     "transactions"),
+    ("SalesReceipt",  lambda c, r, o: map_generic_txn(c, r, o, "SalesReceipt"), "transactions"),
+    ("RefundReceipt", lambda c, r, o: map_generic_txn(c, r, o, "RefundReceipt"),"transactions"),
+    ("CreditMemo",    lambda c, r, o: map_generic_txn(c, r, o, "CreditMemo"),   "transactions"),
 ]
+
+
+# ------------------------------------------------------------------
+# Transactional mappers
+# ------------------------------------------------------------------
+
+def _map_lines(qbo_lines: list) -> list[dict]:
+    """Flatten QBO SalesItemLineDetail / AccountBasedExpenseLineDetail
+    into our unified {description, quantity, rate, amount} shape."""
+    out = []
+    for ln in qbo_lines or []:
+        if ln.get("DetailType") in ("SubTotalLineDetail", None):
+            continue
+        detail = (ln.get("SalesItemLineDetail")
+                  or ln.get("AccountBasedExpenseLineDetail")
+                  or ln.get("ItemBasedExpenseLineDetail")
+                  or {})
+        item_ref = (detail.get("ItemRef") or {})
+        acct_ref = (detail.get("AccountRef") or {})
+        qty = float(detail.get("Qty") or 1) or 1
+        rate = float(detail.get("UnitPrice") or 0)
+        amt = float(ln.get("Amount") or 0)
+        if not rate and qty:
+            rate = round(amt / qty, 4)
+        out.append({
+            "description": ln.get("Description") or "",
+            "quantity": qty,
+            "rate": rate,
+            "amount": round(amt, 2),
+            "item_qbo_id": item_ref.get("value"),
+            "item_name": item_ref.get("name"),
+            "account_qbo_id": acct_ref.get("value"),
+            "account_name": acct_ref.get("name"),
+        })
+    return out
+
+
+def map_invoice(cid: str, realm_id: str, obj: dict) -> dict:
+    cust = obj.get("CustomerRef") or {}
+    return {
+        "company_id": cid, "source": "qbo",
+        "qbo_id": obj["Id"], "id": f"qbo-invoice-{obj['Id']}",
+        "realm_id": realm_id,
+        "number": obj.get("DocNumber") or f"INV-{obj['Id']}",
+        "contact_qbo_id": cust.get("value"),
+        "contact_name": cust.get("name") or "",
+        "issue_date": obj.get("TxnDate") or "",
+        "due_date": obj.get("DueDate") or "",
+        "line_items": _map_lines(obj.get("Line") or []),
+        "subtotal": round(float(obj.get("TotalAmt") or 0)
+                          - float(obj.get("TxnTaxDetail", {}).get("TotalTax") or 0), 2),
+        "tax": round(float(obj.get("TxnTaxDetail", {}).get("TotalTax") or 0), 2),
+        "total": round(float(obj.get("TotalAmt") or 0), 2),
+        "balance": round(float(obj.get("Balance") or 0), 2),
+        "status": "paid" if float(obj.get("Balance") or 0) == 0 else "sent",
+        "currency": (obj.get("CurrencyRef") or {}).get("value", "USD"),
+        "raw": obj,
+        "created_at": now_iso(), "updated_at": now_iso(),
+    }
+
+
+def map_bill(cid: str, realm_id: str, obj: dict) -> dict:
+    vend = obj.get("VendorRef") or {}
+    return {
+        "company_id": cid, "source": "qbo",
+        "qbo_id": obj["Id"], "id": f"qbo-bill-{obj['Id']}",
+        "realm_id": realm_id,
+        "number": obj.get("DocNumber") or f"BILL-{obj['Id']}",
+        "contact_qbo_id": vend.get("value"),
+        "contact_name": vend.get("name") or "",
+        "issue_date": obj.get("TxnDate") or "",
+        "due_date": obj.get("DueDate") or "",
+        "line_items": _map_lines(obj.get("Line") or []),
+        "total": round(float(obj.get("TotalAmt") or 0), 2),
+        "balance": round(float(obj.get("Balance") or 0), 2),
+        "status": "paid" if float(obj.get("Balance") or 0) == 0 else "open",
+        "currency": (obj.get("CurrencyRef") or {}).get("value", "USD"),
+        "raw": obj,
+        "created_at": now_iso(), "updated_at": now_iso(),
+    }
+
+
+def map_payment(cid: str, realm_id: str, obj: dict, direction: str) -> dict:
+    """QBO Payment (money in) or BillPayment (money out) → payments coll.
+    `direction` is 'in' (customer→us) or 'out' (us→vendor)."""
+    ref = (obj.get("CustomerRef") if direction == "in"
+           else obj.get("VendorRef")) or {}
+    method = (obj.get("PaymentMethodRef") or {}).get("name")
+    return {
+        "company_id": cid, "source": "qbo",
+        "qbo_id": obj["Id"],
+        "id": f"qbo-payment-{direction}-{obj['Id']}",
+        "realm_id": realm_id,
+        "direction": direction,   # 'in' or 'out'
+        "contact_qbo_id": ref.get("value"),
+        "contact_name": ref.get("name") or "",
+        "date": obj.get("TxnDate") or "",
+        "amount": round(float(obj.get("TotalAmt") or 0), 2),
+        "method": method or ("Check" if direction == "out" else "Cash"),
+        "reference": obj.get("PaymentRefNum") or obj.get("DocNumber") or "",
+        # Applied-to links — LinkedTxn tells us which invoices/bills
+        # this payment settled.
+        "applied_to": [
+            {"txn_type": l.get("TxnType"), "txn_qbo_id": l.get("TxnId")}
+            for l in (obj.get("Line") or [])
+            for l in [ll for ll in (l.get("LinkedTxn") or [])]
+        ],
+        "deposit_account_qbo_id": ((obj.get("DepositToAccountRef")
+                                    or obj.get("APAccountRef") or {}).get("value")),
+        "raw": obj,
+        "created_at": now_iso(), "updated_at": now_iso(),
+    }
+
+
+def map_journal_entry(cid: str, realm_id: str, obj: dict) -> dict:
+    lines = []
+    for ln in obj.get("Line") or []:
+        d = ln.get("JournalEntryLineDetail") or {}
+        acct = (d.get("AccountRef") or {})
+        lines.append({
+            "account_qbo_id": acct.get("value"),
+            "account_name": acct.get("name") or "",
+            "debit": round(float(ln.get("Amount") or 0), 2)
+                     if d.get("PostingType") == "Debit" else 0.0,
+            "credit": round(float(ln.get("Amount") or 0), 2)
+                      if d.get("PostingType") == "Credit" else 0.0,
+            "description": ln.get("Description") or "",
+        })
+    return {
+        "company_id": cid, "source": "qbo",
+        "qbo_id": obj["Id"], "id": f"qbo-je-{obj['Id']}",
+        "realm_id": realm_id,
+        "number": obj.get("DocNumber") or f"JE-{obj['Id']}",
+        "date": obj.get("TxnDate") or "",
+        "memo": obj.get("PrivateNote") or "",
+        "lines": lines,
+        "total_debit": round(sum(l["debit"] for l in lines), 2),
+        "total_credit": round(sum(l["credit"] for l in lines), 2),
+        "raw": obj,
+        "created_at": now_iso(), "updated_at": now_iso(),
+    }
+
+
+def map_generic_txn(cid: str, realm_id: str, obj: dict, txn_type: str) -> dict:
+    """Deposit / Transfer / Purchase / SalesReceipt / RefundReceipt /
+    CreditMemo — normalized into the shared `transactions` collection
+    with a `txn_type` discriminator. Preserves the raw QBO doc so we
+    can build type-specific detail views without re-fetching."""
+    ref = (obj.get("CustomerRef") or obj.get("VendorRef")
+           or obj.get("EntityRef") or {})
+    return {
+        "company_id": cid, "source": "qbo",
+        "qbo_id": obj["Id"],
+        "id": f"qbo-{txn_type.lower()}-{obj['Id']}",
+        "realm_id": realm_id,
+        "txn_type": txn_type,
+        "number": obj.get("DocNumber") or f"{txn_type}-{obj['Id']}",
+        "date": obj.get("TxnDate") or "",
+        "contact_qbo_id": ref.get("value"),
+        "contact_name": ref.get("name") or "",
+        "amount": round(float(obj.get("TotalAmt") or 0), 2),
+        "memo": obj.get("PrivateNote") or "",
+        "line_items": _map_lines(obj.get("Line") or []),
+        "raw": obj,
+        "created_at": now_iso(), "updated_at": now_iso(),
+    }
 
 
 async def run_migration(job_id: str, company_id: str) -> None:
