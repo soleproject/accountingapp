@@ -42,14 +42,17 @@ export default function Payments() {
   useEffect(() => { load(); }, [currentId]);
   const del = async (id) => { if (confirm("Delete?")) { await api.delete(`/companies/${currentId}/payments/${id}`); load(); } };
 
-  // Filter items by direction + search query. Sales = money coming in
-  // (linked to an invoice), Purchases = money going out (linked to a
-  // bill). Payments with no link fall into "All" only.
+  // Filter items by direction + search query. Sales = money coming in,
+  // Purchases = money going out. Historically we relied on
+  // `linked_invoice_id` / `linked_bill_id` to classify direction, but
+  // QBO-imported payments only carry a `direction: "in"|"out"` field
+  // (their invoice/bill linkage lives in the `applied_to` array).
+  // Accept either signal so QBO imports show up in the right tab.
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return items.filter(p => {
-      if (direction === "in" && !p.linked_invoice_id) return false;
-      if (direction === "out" && !p.linked_bill_id) return false;
+      if (direction === "in"  && p.direction !== "in"  && !p.linked_invoice_id) return false;
+      if (direction === "out" && p.direction !== "out" && !p.linked_bill_id)    return false;
       if (!q) return true;
       const linkedDoc = p.linked_invoice_id
         ? invoices.find(i => i.id === p.linked_invoice_id)
