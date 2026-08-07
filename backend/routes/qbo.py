@@ -213,3 +213,65 @@ async def qbo_migration_status(cid: str, job_id: str,
         raise HTTPException(404, "Job not found")
     doc.pop("_id", None)
     return doc
+
+
+@router.get("/companies/{cid}/qbo/diagnostics")
+async def qbo_diagnostics(cid: str, user: dict = Depends(get_current_user)):
+    """Full audit of a company's QBO migration state. Returns:
+      - connection status (realm, environment, last update)
+      - every migration job the company has run
+      - count of source='qbo' docs in each target collection, WITH the
+        Preview count that QBO itself reported so we can spot deltas
+      - a sample of the FIRST qbo doc from each collection (name/id/type)
+        so the user can eyeball whether the mapping is landing correctly
+    Used exclusively for support triage. Cheap — a few counts + one
+    `find_one` per collection."""
+    await require_company(user, cid)
+    conn = await db.qbo_connections.find_one({"company_id": cid}) or {}
+    jobs_cur = db.qbo_jobs.find({"company_id": cid}).sort("created_at", -1)
+    jobs = []
+    async for j in jobs_cur:
+        j.pop("_id", None)
+        jobs.append(j)
+
+    # For each of the four Foundation collections, count how many QBO-
+    # sourced docs exist AND grab one sample so we can eyeball mapping.
+    out_collections = {}
+    for coll_name, entity_label in [
+        ("accounts", "Account"),
+        ("contacts", "Customer+Vendor"),
+        ("items", "Item"),
+    ]:
+        total = await db[coll_name].count_documents(
+            {"company_id": cid, "source": "qbo"},
+        )
+        sample = await db[coll_name].find_one(
+            {"company_id": cid, "source": "qbo"},
+            projection={"_id": 0, "raw": 0},   # trim heavy `raw` blob
+        )
+        out_collections[coll_name] = {
+            "entity": entity_label,
+            "count_in_db": total,
+            "sample": sample,
+        }
+
+    # Try a live QBO preview so we can compare live counts to imported.
+    preview = None
+    try:
+        if conn.get("status") == "connected":
+            preview = await Q.preview_counts(cid)
+    except Exception as e:  # noqa: BLE001
+        preview = {"error": str(e)[:200]}
+
+    return {
+        "connection": {
+            "connected": conn.get("status") == "connected",
+            "realm_id": conn.get("realm_id"),
+            "environment": conn.get("environment"),
+            "created_at": conn.get("created_at"),
+            "updated_at": conn.get("updated_at"),
+        },
+        "jobs": jobs,
+        "collections": out_collections,
+        "live_qbo_preview": preview,
+    }
