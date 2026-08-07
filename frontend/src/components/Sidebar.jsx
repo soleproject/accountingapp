@@ -48,7 +48,7 @@ const GROUPS = [
   },
   {
     key: "banking",
-    label: "Connected Accounts",
+    label: "Connect & Import",
     icon: Landmark,
     items: [
       { to: "/connections", label: "Connect Accounts", icon: Link2, exact: true },
