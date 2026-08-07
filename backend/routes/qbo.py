@@ -187,6 +187,20 @@ async def qbo_migration_status(cid: str, job_id: str,
     return doc
 
 
+@router.post("/companies/{cid}/qbo/relink-payments")
+async def qbo_relink_payments(cid: str, user: dict = Depends(get_current_user)):
+    """Backfill `linked_invoice_id` / `linked_bill_id` on already-
+    imported QBO payments by resolving each payment's `applied_to`
+    QBO IDs against our local invoices/bills. Idempotent — safe to run
+    multiple times. Returns the count updated on this call.
+
+    Used after a QBO migration that predates the auto-link step in
+    `run_migration`. Future migrations link payments automatically."""
+    await require_company(user, cid)
+    updated = await Q.resolve_payment_links(cid)
+    return {"payments_linked": updated}
+
+
 @router.get("/companies/{cid}/qbo/diagnostics")
 async def qbo_diagnostics(cid: str, user: dict = Depends(get_current_user)):
     """Full audit of a company's QBO migration state. Returns:
