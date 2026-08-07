@@ -1,0 +1,20 @@
+{
+  "summary": "Backend-only regression test for QBO mapper id namespacing fix. Ran the 7 targeted pytest files (test_qbo_mapper_ids, test_liability_recon_math, test_business_type_canon, test_sequential_invoice_numbers, test_voice_intent_item_matcher, test_duplicate_accounts_filter, test_liability_statement_import). All 53 tests passed. Also spot-verified qbo_service.py: all 8 mappers (account, contact, item, invoice, bill, payment, journal_entry, generic_txn) now include company_id[:8] prefix in the top-level `id`, contact ids include {kind} (customer/vendor) discriminator, and payment ids include {direction} (in/out) discriminator — matching the fix described.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_qbo_mapper_ids.py",
+    "/app/test_reports/pytest/iter70_qbo_mapper.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Mapper id shape is consistent across all 8 mappers: `qbo-{cid[:8]}-{kind}-{obj['Id']}`. Good.",
+    "Note: cid[:8] gives 16^8 ~ 4B distinct prefixes for hex IDs; collision-safe in practice but not theoretically unique. Acceptable trade-off for id readability."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (53/53)", "frontend": "N/A (skipped per request)"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "QBO mapper id-namespacing fix verified. 53/53 targeted tests pass. Full test suite was intentionally not run per request due to unrelated pre-existing env issues."
+}

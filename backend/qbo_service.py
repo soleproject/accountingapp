@@ -256,7 +256,7 @@ def map_account(cid: str, realm_id: str, obj: dict) -> dict:
         "company_id": cid,
         "source": "qbo",
         "qbo_id": obj["Id"],
-        "id": f"qbo-account-{obj['Id']}",   # satisfy `id_uniq` on accounts
+        "id": f"qbo-{cid[:8]}-account-{obj['Id']}",   # company-scoped, satisfies `id_uniq`
         "realm_id": realm_id,
         "code": obj.get("AcctNum") or "",
         "name": obj.get("FullyQualifiedName") or obj.get("Name") or "",
@@ -289,7 +289,7 @@ def map_contact(cid: str, realm_id: str, obj: dict, kind: str) -> dict:
         # unique index on the contacts collection. Include `kind` in the
         # key because Customer #1 and Vendor #1 both come from QBO with
         # the same Id="1" and would otherwise collide.
-        "id": f"qbo-{kind}-{obj['Id']}",
+        "id": f"qbo-{cid[:8]}-{kind}-{obj['Id']}",
         "realm_id": realm_id,
         "name": name,
         "normalized_name": normalize_contact_name(name),
@@ -314,7 +314,7 @@ def map_item(cid: str, realm_id: str, obj: dict) -> dict:
         "company_id": cid,
         "source": "qbo",
         "qbo_id": obj["Id"],
-        "id": f"qbo-item-{obj['Id']}",   # satisfy `id_uniq` on items
+        "id": f"qbo-{cid[:8]}-item-{obj['Id']}",   # satisfy `id_uniq` on items
         "realm_id": realm_id,
         "name": obj.get("Name") or "",
         "description": obj.get("Description") or "",
@@ -464,7 +464,7 @@ def map_invoice(cid: str, realm_id: str, obj: dict) -> dict:
     cust = obj.get("CustomerRef") or {}
     return {
         "company_id": cid, "source": "qbo",
-        "qbo_id": obj["Id"], "id": f"qbo-invoice-{obj['Id']}",
+        "qbo_id": obj["Id"], "id": f"qbo-{cid[:8]}-invoice-{obj['Id']}",
         "realm_id": realm_id,
         "number": obj.get("DocNumber") or f"INV-{obj['Id']}",
         "contact_qbo_id": cust.get("value"),
@@ -488,7 +488,7 @@ def map_bill(cid: str, realm_id: str, obj: dict) -> dict:
     vend = obj.get("VendorRef") or {}
     return {
         "company_id": cid, "source": "qbo",
-        "qbo_id": obj["Id"], "id": f"qbo-bill-{obj['Id']}",
+        "qbo_id": obj["Id"], "id": f"qbo-{cid[:8]}-bill-{obj['Id']}",
         "realm_id": realm_id,
         "number": obj.get("DocNumber") or f"BILL-{obj['Id']}",
         "contact_qbo_id": vend.get("value"),
@@ -514,7 +514,7 @@ def map_payment(cid: str, realm_id: str, obj: dict, direction: str) -> dict:
     return {
         "company_id": cid, "source": "qbo",
         "qbo_id": obj["Id"],
-        "id": f"qbo-payment-{direction}-{obj['Id']}",
+        "id": f"qbo-{cid[:8]}-payment-{direction}-{obj['Id']}",
         "realm_id": realm_id,
         "direction": direction,   # 'in' or 'out'
         "contact_qbo_id": ref.get("value"),
@@ -553,7 +553,7 @@ def map_journal_entry(cid: str, realm_id: str, obj: dict) -> dict:
         })
     return {
         "company_id": cid, "source": "qbo",
-        "qbo_id": obj["Id"], "id": f"qbo-je-{obj['Id']}",
+        "qbo_id": obj["Id"], "id": f"qbo-{cid[:8]}-je-{obj['Id']}",
         "realm_id": realm_id,
         "number": obj.get("DocNumber") or f"JE-{obj['Id']}",
         "date": obj.get("TxnDate") or "",
@@ -576,7 +576,7 @@ def map_generic_txn(cid: str, realm_id: str, obj: dict, txn_type: str) -> dict:
     return {
         "company_id": cid, "source": "qbo",
         "qbo_id": obj["Id"],
-        "id": f"qbo-{txn_type.lower()}-{obj['Id']}",
+        "id": f"qbo-{cid[:8]}-{txn_type.lower()}-{obj['Id']}",
         "realm_id": realm_id,
         "txn_type": txn_type,
         "number": obj.get("DocNumber") or f"{txn_type}-{obj['Id']}",
