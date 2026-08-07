@@ -50,11 +50,19 @@ export default function QboConnect() {
   useEffect(() => { refreshStatus(); }, [currentId]);
 
   // OAuth callback lands with ?qbo=connected — toast + refresh state.
+  // On failure it lands with ?qbo_error=<reason>, which we surface as
+  // an error toast (with the raw reason string so we can diagnose).
   useEffect(() => {
     if (params.get("qbo") === "connected") {
       toast.success("QuickBooks Online connected");
       refreshStatus();
       params.delete("qbo"); params.delete("realm");
+      setParams(params, { replace: true });
+    }
+    const qErr = params.get("qbo_error");
+    if (qErr) {
+      toast.error(`QBO connection failed: ${qErr}`, { duration: 20000 });
+      params.delete("qbo_error");
       setParams(params, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

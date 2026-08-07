@@ -45,31 +45,53 @@ async def qbo_oauth_start(cid: str, user: dict = Depends(get_current_user)):
 
 @router.get("/qbo/oauth/callback")
 async def qbo_oauth_callback(
-    code: str = Query(...),
-    state: str = Query(...),
-    realmId: str = Query(...),
+    code: str = Query(None),
+    state: str = Query(None),
+    realmId: str = Query(None),
+    error: str = Query(None),
 ):
-    """Intuit redirects here after the user consents. We validate the
-    one-shot state token, exchange the code for tokens, encrypt-and-
-    store them, then redirect the user back into the app."""
+    """Intuit redirects here after the user consents. Any failure path
+    redirects to `/connections/qbo?qbo_error=<reason>` so the frontend
+    can surface a useful toast instead of dumping a raw 4xx page."""
+    def _err(reason: str, cid: str | None = None) -> RedirectResponse:
+        target = f"/connections/qbo?qbo_error={reason}"
+        return RedirectResponse(target, status_code=302)
+
+    # Intuit itself returned an error (user hit "No thanks", scope
+    # rejected, invalid client, etc.). Bail early.
+    if error or not code or not state or not realmId:
+        return _err(error or "missing_params")
+
     rec = await db.qbo_oauth_states.find_one_and_delete({"state": state})
     if not rec:
-        raise HTTPException(400, "Invalid or expired state token")
+        return _err("state_expired")
     try:
         exp = datetime.fromisoformat(rec["expires_at"])
         if exp < datetime.now(timezone.utc):
-            raise HTTPException(400, "State token expired")
-    except (KeyError, ValueError) as e:
-        raise HTTPException(400, f"Bad state record: {e}") from e
+            return _err("state_expired")
+    except (KeyError, ValueError):
+        return _err("state_bad")
     cid = rec["company_id"]
     try:
         tokens = await Q.exchange_code(code, realmId)
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"Token exchange failed: {e}") from e
-    await Q.save_connection(cid, realmId, tokens)
-    # Redirect back to the app's Connections page with a success flag.
+        import logging
+        logging.getLogger(__name__).exception(
+            "QBO token exchange failed for cid=%s realm=%s", cid, realmId
+        )
+        return _err(f"exchange_failed:{str(e)[:120]}")
+    try:
+        await Q.save_connection(cid, realmId, tokens)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception(
+            "QBO save_connection failed for cid=%s", cid
+        )
+        return _err(f"save_failed:{str(e)[:120]}")
+    # Success — land the user on the QBO Connect page (not the generic
+    # /connections page — that route doesn't refresh QBO status).
     return RedirectResponse(
-        f"/connections?qbo=connected&realm={realmId}",
+        f"/connections/qbo?qbo=connected&realm={realmId}",
         status_code=302,
     )
 
