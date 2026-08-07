@@ -4318,3 +4318,33 @@ Local dev container had a stale Redis connection attempt that showed a Redis Con
 - No new database changes, no schema migration required.
 - Sprint 1 code (contact race fix + dedup script) IS live in prod — only the workers-8 change was rolled back.
 
+
+
+## 2026-02-07 — QBO transactional migration hardening (Invoice/Bill/Payment) 🛠️
+
+### Symptom
+"QBO 4 LLC" migration (CID `bae7e839-6754-4f16-bc8b-61b237bd9ed5`) imported Accounts/Customers/Vendors/Items successfully, then died. Invoices, Bills, Payments, JEs, and all downstream entities showed count=0.
+
+### Root cause
+`map_invoice` did `obj.get("TxnTaxDetail", {}).get("TotalTax") ...`. QBO returns `TxnTaxDetail: null` (explicit JSON null) on non-taxable invoices. `dict.get("TxnTaxDetail", {})` returns `None` when the key is *present but null* (the default only fires for missing keys). Second `.get()` on `None` → `AttributeError`. That exception bubbled through `_run_entity` → `run_migration`'s top-level try, marking the whole job as `failed` and skipping every remaining entity in `_PIPELINE`.
+
+### Fix
+- `map_invoice`: pre-extract `tax_detail = obj.get("TxnTaxDetail") or {}` — the `or {}` idiom coerces `None` to `{}`. Applied same treatment to other refs.
+- `map_payment`: rewrote the shadowed-variable nested comprehension into an explicit two-level loop that flattens LinkedTxn safely.
+- `_run_entity`: wraps each row in `try/except`. On failure: increments a `failed` counter and pushes `{qbo_id, error_type, error}` into `qbo_jobs.entity_errors.<Entity>` (bounded to 25 samples). Writes per-entity `entity_summary` (processed/failed) to the job doc on completion. **One bad row can no longer kill the pipeline.**
+- `/api/companies/{cid}/qbo/diagnostics`: now includes counts + sample docs for `invoices`, `bills`, `payments`, `journal_entries`, and `transactions` so partial imports are immediately visible. Job docs (already surfaced by the endpoint) now include `entity_errors` and `entity_summary` maps.
+
+### Verified
+- 14 mapper tests pass (`tests/test_qbo_mapper_null_safety.py` + `tests/test_qbo_mapper_ids.py`).
+- Backend hot-reload clean.
+- Live `GET /diagnostics` returns the new transactional collection blocks.
+
+### Files touched
+- `/app/backend/qbo_service.py` — mapper null-safety + `_run_entity` isolation.
+- `/app/backend/routes/qbo.py` — diagnostics endpoint extended.
+- `/app/backend/tests/test_qbo_mapper_null_safety.py` — new regression tests.
+
+### User's next steps
+1. Save to GitHub → PR merge → Railway auto-deploys.
+2. Re-run QBO 4 LLC migration.
+3. Re-fetch diagnostics. Even if a specific row fails, the job now continues; failed rows show up in `jobs[0].entity_errors` with exact error strings.

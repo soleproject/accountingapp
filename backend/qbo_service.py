@@ -381,25 +381,64 @@ async def preview_counts(company_id: str) -> dict[str, int]:
 
 async def _run_entity(job_id: str, company_id: str, realm_id: str,
                       entity: str, mapper, target_coll: str) -> None:
+    """Import all rows of `entity` from QBO into `target_coll`.
+
+    Per-row exceptions are caught and stashed in `qbo_jobs.entity_errors`
+    so a single malformed row (e.g. an Invoice with `TxnTaxDetail: null`
+    that broke the mapper) can never abort the entire pipeline. This
+    changed after "QBO 4 LLC" (Feb 2026) where one bad Invoice killed
+    Invoices → Bills → Payments → JEs → all downstream entities. We
+    keep at most 25 error samples per entity to bound the job doc size.
+    """
     processed = 0
+    failed = 0
     async for obj in query_all(company_id, realm_id, entity):
-        doc = mapper(company_id, realm_id, obj)
-        await upsert(target_coll, doc)
-        processed += 1
-        if processed % 25 == 0:
+        try:
+            doc = mapper(company_id, realm_id, obj)
+            await upsert(target_coll, doc)
+            processed += 1
+        except Exception as e:  # noqa: BLE001
+            failed += 1
+            logger.warning(
+                "QBO %s row failed for cid=%s qbo_id=%s: %s",
+                entity, company_id, (obj or {}).get("Id"), e,
+            )
+            # Stash up to 25 error samples per entity for support triage.
             await db.qbo_jobs.update_one(
                 {"job_id": job_id},
-                {"$inc": {"processed": 25},
-                 "$set": {"entity": entity, "updated_at": now_iso()}},
+                {"$push": {
+                    f"entity_errors.{entity}": {
+                        "$each": [{
+                            "qbo_id": (obj or {}).get("Id"),
+                            "error_type": type(e).__name__,
+                            "error": str(e)[:400],
+                        }],
+                        "$slice": -25,
+                    }
+                }},
             )
-    # Flush tail
-    tail = processed % 25
+        if (processed + failed) % 25 == 0:
+            await db.qbo_jobs.update_one(
+                {"job_id": job_id},
+                {"$set": {"entity": entity, "updated_at": now_iso()},
+                 "$inc": {"processed": 25}},
+            )
+    # Flush tail counter + write final per-entity summary counts so the
+    # diagnostics endpoint can show "imported N of M" without recounting.
+    tail = (processed + failed) % 25
+    update = {
+        "$set": {
+            "entity": entity,
+            "updated_at": now_iso(),
+            f"entity_summary.{entity}": {
+                "processed": processed,
+                "failed": failed,
+            },
+        },
+    }
     if tail:
-        await db.qbo_jobs.update_one(
-            {"job_id": job_id},
-            {"$inc": {"processed": tail},
-             "$set": {"entity": entity, "updated_at": now_iso()}},
-        )
+        update["$inc"] = {"processed": tail}
+    await db.qbo_jobs.update_one({"job_id": job_id}, update)
 
 
 _PIPELINE: list[tuple[str, callable, str]] = [
@@ -462,6 +501,13 @@ def _map_lines(qbo_lines: list) -> list[dict]:
 
 def map_invoice(cid: str, realm_id: str, obj: dict) -> dict:
     cust = obj.get("CustomerRef") or {}
+    # QBO returns TxnTaxDetail as an explicit `null` on non-taxable
+    # invoices, so `obj.get("TxnTaxDetail", {})` returns None (not {})
+    # and .get() blows up with AttributeError. Use `or {}` fallback.
+    tax_detail = obj.get("TxnTaxDetail") or {}
+    total = float(obj.get("TotalAmt") or 0)
+    tax = float(tax_detail.get("TotalTax") or 0)
+    balance = float(obj.get("Balance") or 0)
     return {
         "company_id": cid, "source": "qbo",
         "qbo_id": obj["Id"], "id": f"qbo-{cid[:8]}-invoice-{obj['Id']}",
@@ -472,12 +518,11 @@ def map_invoice(cid: str, realm_id: str, obj: dict) -> dict:
         "issue_date": obj.get("TxnDate") or "",
         "due_date": obj.get("DueDate") or "",
         "line_items": _map_lines(obj.get("Line") or []),
-        "subtotal": round(float(obj.get("TotalAmt") or 0)
-                          - float(obj.get("TxnTaxDetail", {}).get("TotalTax") or 0), 2),
-        "tax": round(float(obj.get("TxnTaxDetail", {}).get("TotalTax") or 0), 2),
-        "total": round(float(obj.get("TotalAmt") or 0), 2),
-        "balance": round(float(obj.get("Balance") or 0), 2),
-        "status": "paid" if float(obj.get("Balance") or 0) == 0 else "sent",
+        "subtotal": round(total - tax, 2),
+        "tax": round(tax, 2),
+        "total": round(total, 2),
+        "balance": round(balance, 2),
+        "status": "paid" if balance == 0 else "sent",
         "currency": (obj.get("CurrencyRef") or {}).get("value", "USD"),
         "raw": obj,
         "created_at": now_iso(), "updated_at": now_iso(),
@@ -511,6 +556,19 @@ def map_payment(cid: str, realm_id: str, obj: dict, direction: str) -> dict:
     ref = (obj.get("CustomerRef") if direction == "in"
            else obj.get("VendorRef")) or {}
     method = (obj.get("PaymentMethodRef") or {}).get("name")
+    # Flatten LinkedTxn across all Line entries into a single list of
+    # {txn_type, txn_qbo_id} tuples. Rewritten as an explicit loop
+    # because the previous nested-comprehension shadowed `l` in a way
+    # that was correct-but-confusing and easy to break during edits.
+    applied_to: list[dict] = []
+    for line in (obj.get("Line") or []):
+        for linked in (line.get("LinkedTxn") or []):
+            applied_to.append({
+                "txn_type": linked.get("TxnType"),
+                "txn_qbo_id": linked.get("TxnId"),
+            })
+    deposit_ref = (obj.get("DepositToAccountRef")
+                   or obj.get("APAccountRef") or {})
     return {
         "company_id": cid, "source": "qbo",
         "qbo_id": obj["Id"],
@@ -525,13 +583,8 @@ def map_payment(cid: str, realm_id: str, obj: dict, direction: str) -> dict:
         "reference": obj.get("PaymentRefNum") or obj.get("DocNumber") or "",
         # Applied-to links — LinkedTxn tells us which invoices/bills
         # this payment settled.
-        "applied_to": [
-            {"txn_type": l.get("TxnType"), "txn_qbo_id": l.get("TxnId")}
-            for l in (obj.get("Line") or [])
-            for l in [ll for ll in (l.get("LinkedTxn") or [])]
-        ],
-        "deposit_account_qbo_id": ((obj.get("DepositToAccountRef")
-                                    or obj.get("APAccountRef") or {}).get("value")),
+        "applied_to": applied_to,
+        "deposit_account_qbo_id": deposit_ref.get("value"),
         "raw": obj,
         "created_at": now_iso(), "updated_at": now_iso(),
     }

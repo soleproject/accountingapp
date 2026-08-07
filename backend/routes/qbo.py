@@ -208,11 +208,20 @@ async def qbo_diagnostics(cid: str, user: dict = Depends(get_current_user)):
 
     # For each of the four Foundation collections, count how many QBO-
     # sourced docs exist AND grab one sample so we can eyeball mapping.
+    # We also count the transactional collections (invoices/bills/etc.)
+    # because a common failure mode is "Foundation imported fine but
+    # Invoice/Bill/Payment mappers crashed" — the counts here immediately
+    # reveal a partial import.
     out_collections = {}
     for coll_name, entity_label in [
         ("accounts", "Account"),
         ("contacts", "Customer+Vendor"),
         ("items", "Item"),
+        ("invoices", "Invoice"),
+        ("bills", "Bill"),
+        ("payments", "Payment+BillPayment"),
+        ("journal_entries", "JournalEntry"),
+        ("transactions", "Deposit+Transfer+Purchase+SalesReceipt+RefundReceipt+CreditMemo"),
     ]:
         total = await db[coll_name].count_documents(
             {"company_id": cid, "source": "qbo"},
