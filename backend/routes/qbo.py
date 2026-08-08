@@ -352,6 +352,16 @@ async def qbo_cleanup_reverse(cid: str, user: dict = Depends(get_current_user)):
     return await reverse_cleanup(cid)
 
 
+@router.post("/companies/{cid}/qbo/cleanup-all-seeded")
+async def qbo_cleanup_all_seeded(cid: str, user: dict = Depends(get_current_user)):
+    """Aggressive one-click cleanup — deactivates EVERY seeded account
+    (source != qbo) that isn't a structural fallback and isn't referenced
+    by any existing ledger doc. Reversible via `cleanup-reverse`."""
+    await require_company(user, cid)
+    from pfc_ai_builder import apply_cleanup_all_seeded
+    return await apply_cleanup_all_seeded(cid)
+
+
 @router.get("/companies/{cid}/qbo/diagnostics")
 async def qbo_diagnostics(cid: str, user: dict = Depends(get_current_user)):
     """Full audit of a company's QBO migration state. Returns:

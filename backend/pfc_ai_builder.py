@@ -382,3 +382,64 @@ async def reverse_cleanup(company_id: str) -> dict:
     )
     return {"reactivated": r.modified_count}
 
+
+async def apply_cleanup_all_seeded(company_id: str) -> dict:
+    """Aggressive cleanup: deactivate EVERY seeded account (source != qbo)
+    that is neither a structural fallback nor referenced by an existing
+    ledger doc. Unlike `apply_cleanup`, this ignores whether a QBO
+    replacement exists — the assumption is that the user prefers a lean
+    QBO-only Chart of Accounts and is willing to let stray Plaid
+    transactions fall through to the resolver's structural fallbacks
+    (Uncategorized Expense/Income, Inter-Account Transfer, etc.).
+
+    Same `deactivated_reason='qbo_dedup'` marker so `reverse_cleanup`
+    undoes it in one click.
+    """
+    seeded = await db.accounts.find(
+        {"company_id": company_id,
+         "source": {"$ne": "qbo"},
+         "active": {"$ne": False}},
+        {"id": 1, "code": 1, "name": 1, "_id": 0},
+    ).to_list(2000)
+
+    to_deactivate: list[str] = []
+    skipped_structural = 0
+    skipped_referenced = 0
+    for a in seeded:
+        code = str(a.get("code") or "")
+        if code in _STRUCTURAL_KEEP_CODES:
+            skipped_structural += 1
+            continue
+        referenced = False
+        for coll, field in [
+            ("transactions", "category_account_id"),
+            ("invoices", "line_items.account_id"),
+            ("bills", "line_items.account_id"),
+            ("journal_entries", "lines.account_id"),
+            ("payments", "deposit_account_id"),
+        ]:
+            if await db[coll].find_one(
+                {"company_id": company_id, field: a["id"]},
+                projection={"_id": 1},
+            ):
+                referenced = True
+                break
+        if referenced:
+            skipped_referenced += 1
+            continue
+        to_deactivate.append(a["id"])
+
+    if not to_deactivate:
+        return {"deactivated": 0, "skipped_structural": skipped_structural,
+                "skipped_referenced": skipped_referenced}
+
+    r = await db.accounts.update_many(
+        {"company_id": company_id, "source": {"$ne": "qbo"},
+         "id": {"$in": to_deactivate}, "active": {"$ne": False}},
+        {"$set": {"active": False, "deactivated_at": now_iso(),
+                  "deactivated_reason": "qbo_dedup"}},
+    )
+    return {"deactivated": r.modified_count,
+            "skipped_structural": skipped_structural,
+            "skipped_referenced": skipped_referenced}
+
