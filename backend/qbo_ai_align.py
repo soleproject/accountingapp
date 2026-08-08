@@ -41,51 +41,78 @@ logger = logging.getLogger(__name__)
 
 
 def _canonical_targets() -> list[dict]:
-    """The 24 canonical codes PFC actually targets, hydrated with the
-    friendly name/type/subtype from `DEFAULT_COA`. We only feed the
-    LLM codes that transactions actually route to — feeding every
-    seeded account would be noise (e.g. `1300 Inventory` isn't a PFC
-    target for Plaid categorization)."""
-    pfc_codes = {m.account_code for m in PFC_COA_MAPPINGS if m.account_code}
-    by_code = {code: (code, name, typ, sub) for code, name, typ, sub in DEFAULT_COA}
-    out = []
-    for code in sorted(pfc_codes):
-        row = by_code.get(code)
-        if not row:
-            # PFC targets a code that's not in DEFAULT_COA (rare — usually
-            # a bespoke code like `4999 Uncategorized Income`). Emit a
-            # minimal row so the LLM still knows it exists.
-            out.append({"code": code, "name": f"Code {code}",
-                        "type": "expense", "subtype": ""})
-            continue
-        c, name, typ, sub = row
-        out.append({"code": c, "name": name, "type": typ, "subtype": sub})
-    return out
+    """The full canonical chart of accounts we can map to. Includes:
+
+    * The 24 PFC-routed codes (Plaid transactions land on these).
+    * All structural accounts from `DEFAULT_COA` (AP, AR, Inventory,
+      Fixed Assets, Sales Tax Payable, Retained Earnings, COGS, etc.)
+      — these don't get PFC-routed but they DO appear in QBO charts
+      and every one needs a target so the AI doesn't force them into
+      unrelated codes (e.g. mapping AP → Credit Card Payable, which
+      would break every unpaid bill).
+
+    We deliberately DON'T restrict this to PFC targets — that was the
+    Feb-2026 bug where QBO Thirteen LLC's Accounts Receivable got
+    mapped to Business Checking because AR wasn't a PFC target.
+    """
+    return [{"code": c, "name": n, "type": t, "subtype": s}
+            for c, n, t, s in DEFAULT_COA]
 
 
 def _prompt(targets: list[dict], qbo_accounts: list[dict]) -> str:
     return (
         "You are a CPA aligning a QuickBooks Online chart of accounts to a "
-        "canonical GAAP-numbered target list used by our Plaid categorization "
-        "engine. For each QBO account below, pick the SINGLE best canonical "
-        "code from the target list, or return `\"\"` if none fits.\n\n"
-        "RULES:\n"
-        "  1. Match on meaning, not string similarity. \"Job Materials\" → "
-        "     `6800 Supplies & Materials`. \"Fuel & Auto\" → `6120 "
-        "     Transportation`. \"Client Gifts\" → `6200 Advertising & "
-        "     Marketing`.\n"
-        "  2. TYPE must match: never map an expense to a revenue code, or an "
-        "     asset to a liability code, etc.\n"
-        "  3. Multiple QBO accounts CAN map to the same canonical code — QBO "
-        "     sub-accounts often collapse (e.g. QBO's `Utilities:Gas`, "
-        "     `Utilities:Electric`, `Utilities:Water` all → `6600 Utilities`).\n"
-        "  4. Assign a confidence: \"high\" (unambiguous), \"medium\" (likely "
-        "     match), \"low\" (weak/needs review), \"none\" (no reasonable "
-        "     match — return `\"\"` for canonical_code).\n"
-        "  5. If a QBO account is clearly personal (Owner's personal "
-        "     groceries, personal vehicle) map to `3300 Owner's Draw`.\n\n"
-        f"CANONICAL TARGETS:\n{json.dumps(targets, indent=0)}\n\n"
-        f"QBO ACCOUNTS TO MATCH:\n{json.dumps(qbo_accounts, indent=0)}\n\n"
+        "canonical GAAP-numbered chart used by our accounting engine. For "
+        "each QBO account below, pick the SINGLE best canonical code from "
+        "the target list, or return `\"\"` if none fits.\n\n"
+        "HARD RULES — do not violate these:\n"
+        "  1. TYPE MUST MATCH EXACTLY. Never map an expense to an equity "
+        "     code, an asset to a liability code, revenue to expense, etc. "
+        "     If no target of the correct type fits, return `\"\"` — "
+        "     DO NOT force a wrong-type match.\n"
+        "  2. STRUCTURAL ACCOUNTS MUST MAP TO THEIR STRUCTURAL COUNTERPART, "
+        "     NOT to a PFC operating category:\n"
+        "       • Accounts Payable → 2000 Accounts Payable (NEVER 2100 "
+        "         Credit Card).\n"
+        "       • Accounts Receivable → 1200 Accounts Receivable (NEVER "
+        "         1010 Business Checking).\n"
+        "       • Inventory Asset → 1300 Inventory.\n"
+        "       • Undeposited Funds → 1100 Undeposited Funds.\n"
+        "       • Prepaid Expenses → 1500 Prepaid Expenses.\n"
+        "       • Sales Tax / State Revenue / Board of Equalization "
+        "         Payables → 2200 Sales Tax Payable.\n"
+        "       • Notes/Loan Payable → 2500 Loans Payable.\n"
+        "       • Credit cards (Visa, Mastercard, Amex, credit card "
+        "         accounts) → 2100 Credit Card Payable.\n"
+        "       • Retained Earnings → 3100 Retained Earnings.\n"
+        "       • Opening Balance Equity → 3000 Owner's Equity.\n"
+        "       • Fixed assets (Truck, Equipment, Building) → 1600 "
+        "         Equipment. Accumulated Depreciation → 1700.\n"
+        "  3. QBO PARENT/CHILD RELATIONSHIPS use a `:` separator. Match the "
+        "     LEAF meaning: `Automobile:Fuel` is fuel (→ 6120 Transportation), "
+        "     but the parent `Automobile` alone is a general auto-expense "
+        "     bucket (→ 6120 Transportation as well). NEVER map a business "
+        "     auto-expense parent to Owner's Draw.\n"
+        "  4. Income-type sub-accounts stay as income even when nested "
+        "     under confusing parent names. `Landscaping Services:Job "
+        "     Materials:Plants and Soil` has type=revenue → 4000/4100 "
+        "     revenue codes.\n"
+        "  5. Owner's Draw (3300) is ONLY for clearly personal transactions "
+        "     on a business account — never for legitimate business "
+        "     expense buckets, opening equity, or retained earnings.\n"
+        "  6. Multiple QBO accounts CAN map to the same canonical code — "
+        "     QBO sub-accounts often collapse (`Utilities:Gas`, "
+        "     `Utilities:Electric` both → 6600 Utilities).\n"
+        "  7. If a QBO account genuinely has no counterpart (Depreciation "
+        "     expense, Unapplied Cash, Uncategorized), return `\"\"` with "
+        "     confidence=`none`.\n"
+        "  8. Confidence: `high` (unambiguous structural/name match), "
+        "     `medium` (semantic match, likely right), `low` (weak — "
+        "     needs review), `none` (return `\"\"` for code).\n\n"
+        f"CANONICAL TARGETS ({len(targets)} accounts):\n"
+        f"{json.dumps(targets, indent=0)}\n\n"
+        f"QBO ACCOUNTS TO MATCH ({len(qbo_accounts)} accounts):\n"
+        f"{json.dumps(qbo_accounts, indent=0)}\n\n"
         "Respond with ONLY a JSON array (no prose, no markdown fence). Each "
         "item MUST be:\n"
         '  {"qbo_id": "<the QBO account id>", '
