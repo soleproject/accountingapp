@@ -703,6 +703,12 @@ async def run_migration(job_id: str, company_id: str) -> None:
         # "Job Materials" with parent link) — this covers older
         # migrations that ran before the mapper was fixed.
         parents_linked = await resolve_account_parents(company_id)
+        # Post-import: promote each transaction's line-item AccountRef
+        # to a top-level `category_account_id` so the Transactions UI
+        # doesn't show "pick a category" for imports QBO already
+        # classified. Must run AFTER Account import (needs qbo_id →
+        # local id lookups).
+        categorized = await resolve_transaction_categories(company_id)
         # Post-import: auto-build the Plaid PFC → account map so Plaid
         # transactions land on QBO accounts (not our seeded ones) from
         # day one. AI does a best-effort pass at medium+ confidence.
@@ -748,6 +754,7 @@ async def run_migration(job_id: str, company_id: str) -> None:
                       "finished_at": now_iso(), "percent": 100,
                       "payments_linked": linked,
                       "parents_linked": parents_linked,
+                      "transactions_categorized": categorized,
                       "pfc_mapped": pfc_mapped}},
         )
     except Exception as e:  # noqa: BLE001
@@ -818,6 +825,60 @@ async def resolve_payment_links(company_id: str) -> int:
             )
             updated += 1
     return updated
+
+async def resolve_transaction_categories(company_id: str) -> int:
+    """Translate each QBO-imported transaction's line-item AccountRef
+    into a top-level `category_account_id` so the Transactions UI can
+    render the category instead of showing "pick a category". Also
+    populates the display fields (`category_account_code`,
+    `category_account_name`) so filters/exports work.
+
+    Skips transactions that already have a category assigned (idempotent)
+    and transactions whose line-item AccountRef doesn't resolve to a
+    known local account. Returns the number of transactions updated.
+    """
+    qbo_to_local: dict[str, dict] = {}
+    async for a in db.accounts.find(
+        {"company_id": company_id, "source": "qbo"},
+        {"id": 1, "qbo_id": 1, "code": 1, "name": 1, "_id": 0},
+    ):
+        if a.get("qbo_id"):
+            qbo_to_local[str(a["qbo_id"])] = a
+
+    if not qbo_to_local:
+        return 0
+
+    updated = 0
+    async for t in db.transactions.find(
+        {"company_id": company_id, "source": "qbo",
+         "$or": [{"category_account_id": {"$in": [None, ""]}},
+                 {"category_account_id": {"$exists": False}}]},
+        {"id": 1, "line_items": 1},
+    ):
+        picked = None
+        for ln in t.get("line_items") or []:
+            aqid = ln.get("account_qbo_id")
+            if not aqid:
+                continue
+            local = qbo_to_local.get(str(aqid))
+            if local:
+                picked = local
+                break
+        if not picked:
+            continue
+        await db.transactions.update_one(
+            {"id": t["id"]},
+            {"$set": {
+                "category_account_id": picked["id"],
+                "category_account_code": picked.get("code") or "",
+                "category_account_name": picked.get("name") or "",
+                "updated_at": now_iso(),
+            }},
+        )
+        updated += 1
+    return updated
+
+
 
 
 async def resolve_account_parents(company_id: str) -> int:

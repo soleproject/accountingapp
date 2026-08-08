@@ -401,6 +401,18 @@ async def qbo_rebuild_account_hierarchy(cid: str, user: dict = Depends(get_curre
     return {"updated": updated}
 
 
+@router.post("/companies/{cid}/qbo/rebuild-transaction-categories")
+async def qbo_rebuild_transaction_categories(cid: str, user: dict = Depends(get_current_user)):
+    """Backfill: for companies migrated before the resolver was wired
+    in, translate each QBO-imported transaction's line-item AccountRef
+    into a top-level `category_account_id` so the Transactions page
+    renders categories. Idempotent."""
+    await require_company(user, cid)
+    from qbo_service import resolve_transaction_categories
+    updated = await resolve_transaction_categories(cid)
+    return {"updated": updated}
+
+
 @router.get("/companies/{cid}/qbo/diagnostics")
 async def qbo_diagnostics(cid: str, user: dict = Depends(get_current_user)):
     """Full audit of a company's QBO migration state. Returns:

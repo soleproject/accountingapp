@@ -344,6 +344,25 @@ export default function QboConnect() {
                 >
                   <RefreshCw size={12} /> Rebuild account hierarchy
                 </button>
+                {/* Post-migration category promotion — copies each QBO
+                    transaction's line-item AccountRef into a top-level
+                    category_account_id so the Transactions page
+                    displays the category instead of "pick a category". */}
+                <button
+                  onClick={async () => {
+                    try {
+                      const r = await api.post(`/companies/${currentId}/qbo/rebuild-transaction-categories`);
+                      alert(`Categorized ${r.data.updated} imported transactions.`);
+                    } catch (e) {
+                      alert(`Failed: ${e?.response?.data?.detail || e.message}`);
+                    }
+                  }}
+                  data-testid="qbo-rebuild-txn-categories-btn"
+                  className="px-3 py-1.5 text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center gap-1"
+                  title="Assign categories to QBO transactions using their original AccountRef"
+                >
+                  <RefreshCw size={12} /> Categorize imported transactions
+                </button>
               </div>
             )}
           </div>
