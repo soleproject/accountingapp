@@ -95,8 +95,12 @@ def _acct_body(a: dict) -> dict:
         "Name": (a.get("name") or "").strip(),
         "AccountType": _QBO_ACCOUNT_TYPE.get(a.get("type"), "Expense"),
     }
-    if a.get("subtype"):
-        body["AccountSubType"] = a["subtype"]
+    # Deliberately NOT sending `AccountSubType`. Our local `subtype`
+    # values (`operating_expense`, etc.) don't map to QBO's strict
+    # enums (`OfficeGeneralAdministrativeExpenses`, `Utilities`, …).
+    # Letting QBO auto-assign the subtype based on AccountType is
+    # safer than 400-erroring on a subtype mismatch. Custom subtype
+    # mapping can be added in a future phase if users need it.
     if a.get("code"):
         body["AcctNum"] = str(a["code"])
     if a.get("description"):
