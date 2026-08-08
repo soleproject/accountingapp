@@ -330,6 +330,34 @@ function CleanupTab({ currentId, onDone }) {
     } finally { setBusy(false); }
   };
 
+  // Nuclear option — hides EVERY seeded account (except structural
+  // fallbacks + referenced ones). Meant for users who imported a full
+  // QBO Chart of Accounts and want the sidebar/reports to show only
+  // QBO-native accounts. Reversible via `reverseAll`.
+  const applyAllSeeded = async () => {
+    if (!confirm(
+      "Deactivate ALL seeded accounts (except structural fallbacks and any " +
+      "accounts already used by ledger entries)?\n\n" +
+      "This will hide every non-QBO account from the sidebar and reports, " +
+      "even if there's no direct QBO replacement. Plaid transactions with " +
+      "no override will fall through to Uncategorized Expense/Income.\n\n" +
+      "Fully reversible via the \"Reactivate all\" button."
+    )) return;
+    setBusy(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/qbo/cleanup-all-seeded`);
+      toast.success(
+        `Deactivated ${r.data.deactivated} seeded accounts ` +
+        `(kept ${r.data.skipped_structural} structural, ` +
+        `${r.data.skipped_referenced} referenced)`
+      );
+      await refresh();
+      onDone?.();
+    } catch (e) {
+      toast.error(`Failed: ${e?.response?.data?.detail || e.message}`);
+    } finally { setBusy(false); }
+  };
+
   const toggle = (id) => setSelected(s => {
     const n = new Set(s);
     if (n.has(id)) n.delete(id); else n.add(id);
@@ -366,6 +394,12 @@ function CleanupTab({ currentId, onDone }) {
           data-testid="cleanup-apply-btn">
           {busy ? <><Loader2 className="w-4 h-4 animate-spin inline mr-1" /> Working…</>
                 : `Deactivate ${selected.size} selected`}
+        </button>
+        <button onClick={applyAllSeeded} disabled={busy}
+          className="px-4 py-2 text-sm rounded-lg bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-60"
+          title="Aggressive: deactivate every seeded account except structural + referenced"
+          data-testid="cleanup-apply-all-btn">
+          Deactivate ALL seeded
         </button>
       </div>
     </div>
