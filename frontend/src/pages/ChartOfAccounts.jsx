@@ -286,6 +286,25 @@ export default function ChartOfAccounts() {
     try { localStorage.setItem("axiom_coa_show_codes", String(showCodes)); } catch {}
   }, [showCodes]);
 
+  // Include-inactive toggle — deactivated accounts (from the QBO
+  // dedup cleanup) are hidden from the CoA by default so the list
+  // matches what shows up in reports and account pickers. Flip on to
+  // review/reactivate them.
+  const [showInactive, setShowInactive] = useState(() => {
+    try { return localStorage.getItem("axiom_coa_show_inactive") === "true"; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("axiom_coa_show_inactive", String(showInactive)); } catch {}
+  }, [showInactive]);
+
+  // Total inactive count so the toggle can show "(N hidden)".
+  const inactiveCount = accts.filter(a => a.active === false).length;
+  // The list the rest of the page renders off of. Filtered before
+  // grouping so parent/child counts, tab counters, and duplicate
+  // detection stay consistent with what the user actually sees.
+  const visibleAccts = showInactive ? accts : accts.filter(a => a.active !== false);
+
   // Fires the same PATCH the edit form uses, then reloads.
   const reparent = async (childId, newParentId) => {
     if (!childId || childId === newParentId) return;
@@ -320,7 +339,7 @@ export default function ChartOfAccounts() {
     ? (x, y) => String(x.code).localeCompare(String(y.code))
     : (x, y) => String(x.name).localeCompare(String(y.name), undefined, { sensitivity: "base" });
   const grouped = TYPES.map(t => {
-    const items = accts.filter(a => a.type === t);
+    const items = visibleAccts.filter(a => a.type === t);
     const byId = Object.fromEntries(items.map(a => [a.id, a]));
     const topLevel = items.filter(a => !a.parent_account_id || !byId[a.parent_account_id]);
     topLevel.sort(cmpBy);
@@ -376,6 +395,17 @@ export default function ChartOfAccounts() {
             data-testid="coa-toggle-codes"
           >
             {showCodes ? <><EyeOff size={12} /> Hide codes</> : <><Eye size={12} /> Show codes</>}
+          </button>
+          {/* Show/hide inactive accounts — deactivated seeded accounts
+              hide by default so the CoA matches what reports and
+              account pickers see. Badge shows the hidden count. */}
+          <button
+            onClick={() => setShowInactive(v => !v)}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] ${showInactive ? "border-indigo-300 bg-indigo-50 text-indigo-800 hover:bg-indigo-100" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"}`}
+            title={showInactive ? "Hiding inactive accounts matches reports and pickers" : "Reveal deactivated accounts (useful for reactivation)"}
+            data-testid="coa-toggle-inactive"
+          >
+            {showInactive ? <><EyeOff size={12} /> Hide inactive</> : <><Eye size={12} /> Show inactive{inactiveCount ? ` (${inactiveCount})` : ""}</>}
           </button>
           {/* Backfill sub-types — assign Wave-style detail_type to any
               legacy accounts that don't have one yet. Idempotent. */}
@@ -539,7 +569,7 @@ export default function ChartOfAccounts() {
         <div className="border-b border-slate-200 flex items-end gap-1 overflow-x-auto" data-testid="coa-tab-bar">
           {COA_TABS.map(t => {
             // Count matching accounts for the pill badge.
-            const count = accts.filter(a => t.types.includes(a.type)).length;
+            const count = visibleAccts.filter(a => t.types.includes(a.type)).length;
             const active = activeTab === t.key;
             return (
               <button
