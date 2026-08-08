@@ -178,6 +178,13 @@ async def create_item(cid: str, inp: ItemIn, user: dict = Depends(get_current_us
         doc = await db.items.find_one({"id": doc["id"], "company_id": cid}) or doc
     except Exception:
         pass
+    # Fire-and-forget auto-push — no-op unless Mirror is enabled AND
+    # the "items" entity is toggled on.
+    try:
+        from qbo_mirror.autopush import try_auto_push
+        try_auto_push(cid, "item", doc["id"])
+    except Exception:  # noqa: BLE001
+        pass
     return {"item": coerce(doc)}
 
 

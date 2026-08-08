@@ -148,6 +148,13 @@ async def create_contact(cid: str, inp: ContactCreate, user: dict = Depends(get_
         await get_cache().ainvalidate(cid)
     except Exception:  # noqa: BLE001
         pass
+    # Fire-and-forget auto-push — no-op unless Mirror is enabled AND
+    # this contact type (customer/vendor) is toggled on.
+    try:
+        from qbo_mirror.autopush import try_auto_push
+        try_auto_push(cid, inp.type or "customer", xid)
+    except Exception:  # noqa: BLE001
+        pass
     return {"id": xid}
 
 
