@@ -36,8 +36,8 @@ export default function PfcCategoryMap() {
     setLoading(true);
     try {
       const [mapRes, accRes] = await Promise.all([
-        api.get(`/api/companies/${currentId}/pfc-map`),
-        api.get(`/api/companies/${currentId}/accounts`),
+        api.get(`/companies/${currentId}/pfc-map`),
+        api.get(`/companies/${currentId}/accounts`),
       ]);
       setRows(mapRes.data.rows || []);
       // Trim bank/credit-card accounts — those are never valid PFC
@@ -63,9 +63,9 @@ export default function PfcCategoryMap() {
     if (!confirm("Ask Claude to propose account matches for every Plaid category? This takes 30-60s.")) return;
     setBuilding(true);
     try {
-      const planRes = await api.get(`/api/companies/${currentId}/pfc-map/plan`);
+      const planRes = await api.get(`/companies/${currentId}/pfc-map/plan`);
       const plan = planRes.data;
-      const applyRes = await api.post(`/api/companies/${currentId}/pfc-map/apply`, {
+      const applyRes = await api.post(`/companies/${currentId}/pfc-map/apply`, {
         proposals: plan.proposals || [],
         min_confidence: "medium",
       });
@@ -81,7 +81,7 @@ export default function PfcCategoryMap() {
   const setOne = async (pfc_detailed, account_id) => {
     try {
       await api.put(
-        `/api/companies/${currentId}/pfc-map/${pfc_detailed}`,
+        `/companies/${currentId}/pfc-map/${pfc_detailed}`,
         { account_id: account_id || "" },
       );
       // Optimistic — patch the row in place so the whole page doesn't rerender.
