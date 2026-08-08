@@ -352,14 +352,17 @@ export default function QboConnect() {
                   onClick={async () => {
                     try {
                       const r = await api.post(`/companies/${currentId}/qbo/rebuild-transaction-categories`);
-                      alert(`Categorized ${r.data.updated} imported transactions.`);
+                      alert(
+                        `Categorized ${r.data.updated} transactions · ` +
+                        `signed ${r.data.signed} (in/out direction).`
+                      );
                     } catch (e) {
                       alert(`Failed: ${e?.response?.data?.detail || e.message}`);
                     }
                   }}
                   data-testid="qbo-rebuild-txn-categories-btn"
                   className="px-3 py-1.5 text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center gap-1"
-                  title="Assign categories to QBO transactions using their original AccountRef"
+                  title="Assign categories + signed amount (in/out) to QBO transactions"
                 >
                   <RefreshCw size={12} /> Categorize imported transactions
                 </button>

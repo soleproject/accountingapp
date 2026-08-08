@@ -648,6 +648,32 @@ def map_journal_entry(cid: str, realm_id: str, obj: dict) -> dict:
     }
 
 
+# Direction convention: positive `amount` = money INTO the bank/asset,
+# negative = money OUT. QBO returns TotalAmt as a magnitude, so we
+# sign it here based on the txn_type. Kept as a module-level constant
+# so the backfill resolver can reuse the exact same rules.
+_OUTFLOW_TXN_TYPES = {"Purchase", "RefundReceipt", "CreditMemo"}
+_INFLOW_TXN_TYPES = {"Deposit", "SalesReceipt"}
+# Transfer is signless at the top level — it's a wash between two
+# asset accounts; the debit/credit legs carry the direction. Leave
+# `amount` positive and expose direction='transfer' so the UI can
+# render an appropriate icon.
+
+
+def _signed_amount(txn_type: str, magnitude: float) -> float:
+    if txn_type in _OUTFLOW_TXN_TYPES:
+        return -abs(magnitude)
+    return abs(magnitude)
+
+
+def _direction_for(txn_type: str) -> str:
+    if txn_type in _OUTFLOW_TXN_TYPES:
+        return "out"
+    if txn_type in _INFLOW_TXN_TYPES:
+        return "in"
+    return "transfer"
+
+
 def map_generic_txn(cid: str, realm_id: str, obj: dict, txn_type: str) -> dict:
     """Deposit / Transfer / Purchase / SalesReceipt / RefundReceipt /
     CreditMemo — normalized into the shared `transactions` collection
@@ -655,6 +681,7 @@ def map_generic_txn(cid: str, realm_id: str, obj: dict, txn_type: str) -> dict:
     can build type-specific detail views without re-fetching."""
     ref = (obj.get("CustomerRef") or obj.get("VendorRef")
            or obj.get("EntityRef") or {})
+    magnitude = round(float(obj.get("TotalAmt") or 0), 2)
     return {
         "company_id": cid, "source": "qbo",
         "qbo_id": obj["Id"],
@@ -665,7 +692,8 @@ def map_generic_txn(cid: str, realm_id: str, obj: dict, txn_type: str) -> dict:
         "date": obj.get("TxnDate") or "",
         "contact_qbo_id": ref.get("value"),
         "contact_name": ref.get("name") or "",
-        "amount": round(float(obj.get("TotalAmt") or 0), 2),
+        "amount": _signed_amount(txn_type, magnitude),
+        "direction": _direction_for(txn_type),
         "memo": obj.get("PrivateNote") or "",
         "line_items": _map_lines(obj.get("Line") or []),
         "raw": obj,
@@ -711,6 +739,11 @@ async def run_migration(job_id: str, company_id: str) -> None:
         # classified. Must run AFTER Account import (needs qbo_id →
         # local id lookups).
         categorized = await resolve_transaction_categories(company_id)
+        # Post-import: sign each QBO transaction's `amount` based on
+        # txn_type so Purchases show as outflows (negative) and
+        # Deposits/SalesReceipts as inflows (positive). Also stamps a
+        # `direction` field so the UI can render the appropriate icon.
+        signed = await resolve_transaction_signs(company_id)
         # Post-import: auto-build the Plaid PFC → account map so Plaid
         # transactions land on QBO accounts (not our seeded ones) from
         # day one. AI does a best-effort pass at medium+ confidence.
@@ -757,6 +790,7 @@ async def run_migration(job_id: str, company_id: str) -> None:
                       "payments_linked": linked,
                       "parents_linked": parents_linked,
                       "transactions_categorized": categorized,
+                      "transactions_signed": signed,
                       "pfc_mapped": pfc_mapped}},
         )
     except Exception as e:  # noqa: BLE001
@@ -827,6 +861,31 @@ async def resolve_payment_links(company_id: str) -> int:
             )
             updated += 1
     return updated
+
+async def resolve_transaction_signs(company_id: str) -> int:
+    """Backfill for QBO-imported transactions saved with the older
+    always-positive amount. Re-signs `amount` and adds `direction`
+    per the `_signed_amount` / `_direction_for` rules. Idempotent —
+    once a doc has `direction` set, it's skipped."""
+    updated = 0
+    async for t in db.transactions.find(
+        {"company_id": company_id, "source": "qbo",
+         "direction": {"$exists": False}},
+        {"id": 1, "txn_type": 1, "amount": 1},
+    ):
+        txn_type = t.get("txn_type") or ""
+        mag = abs(float(t.get("amount") or 0))
+        signed = _signed_amount(txn_type, mag)
+        direction = _direction_for(txn_type)
+        await db.transactions.update_one(
+            {"id": t["id"]},
+            {"$set": {"amount": signed, "direction": direction,
+                      "updated_at": now_iso()}},
+        )
+        updated += 1
+    return updated
+
+
 
 async def resolve_transaction_categories(company_id: str) -> int:
     """Translate each QBO-imported transaction's line-item AccountRef
