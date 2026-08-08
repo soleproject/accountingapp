@@ -355,7 +355,8 @@ export default function QboConnect() {
                       alert(
                         `Categorized ${r.data.updated} · ` +
                         `signed ${r.data.signed} · ` +
-                        `linked ${r.data.banks} to bank/CC accounts.`
+                        `linked ${r.data.banks} to bank/CC · ` +
+                        `posted ${r.data.posted} to ledger.`
                       );
                     } catch (e) {
                       alert(`Failed: ${e?.response?.data?.detail || e.message}`);

@@ -411,11 +411,14 @@ async def qbo_rebuild_transaction_categories(cid: str, user: dict = Depends(get_
     await require_company(user, cid)
     from qbo_service import (resolve_transaction_categories,
                              resolve_transaction_signs,
-                             resolve_transaction_banks)
+                             resolve_transaction_banks,
+                             resolve_transaction_posted)
     categorized = await resolve_transaction_categories(cid)
     signed = await resolve_transaction_signs(cid)
     banks = await resolve_transaction_banks(cid)
-    return {"updated": categorized, "signed": signed, "banks": banks}
+    posted = await resolve_transaction_posted(cid)
+    return {"updated": categorized, "signed": signed, "banks": banks,
+            "posted": posted}
 
 
 @router.get("/companies/{cid}/qbo/diagnostics")
