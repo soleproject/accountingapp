@@ -390,6 +390,17 @@ async def qbo_cleanup_all_seeded(cid: str, user: dict = Depends(get_current_user
     return await apply_cleanup_all_seeded(cid)
 
 
+@router.post("/companies/{cid}/qbo/rebuild-account-hierarchy")
+async def qbo_rebuild_account_hierarchy(cid: str, user: dict = Depends(get_current_user)):
+    """Backfill for companies whose QBO CoA was imported before the
+    parent-resolver fix. Splits colon-joined names into leaf +
+    parent_account_id links. Idempotent — safe to run repeatedly."""
+    await require_company(user, cid)
+    from qbo_service import resolve_account_parents
+    updated = await resolve_account_parents(cid)
+    return {"updated": updated}
+
+
 @router.get("/companies/{cid}/qbo/diagnostics")
 async def qbo_diagnostics(cid: str, user: dict = Depends(get_current_user)):
     """Full audit of a company's QBO migration state. Returns:
