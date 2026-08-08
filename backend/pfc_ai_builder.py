@@ -385,14 +385,21 @@ async def reverse_cleanup(company_id: str) -> dict:
 
 async def apply_cleanup_all_seeded(company_id: str) -> dict:
     """Aggressive cleanup: deactivate EVERY seeded account (source != qbo)
-    that is not referenced by an existing ledger doc. Includes the
-    structural fallbacks (bank/CC/AP/AR/Equity/Uncategorized) — the
-    Plaid resolver falls back to QBO's Uncategorized Expense/Income
-    accounts when the seeded 6999/4999 slots are deactivated.
+    that is not referenced by an existing ledger doc AND is not one of
+    the two Plaid last-resort fallbacks (6999 Uncategorized Expense,
+    4999 Uncategorized Income). Keeping these two guarantees Plaid
+    transactions always have a valid destination even if QBO's own
+    Uncategorized accounts are missing or renamed.
 
     Same `deactivated_reason='qbo_dedup'` marker so `reverse_cleanup`
     undoes it in one click.
     """
+    # Only two codes are protected here — the resolver's last-resort
+    # income/expense fallback slots. Everything else (bank, CC, AP, AR,
+    # Equity, Fixed Assets, etc.) is fair game because QBO ships its
+    # own equivalents when imported.
+    _PLAID_FALLBACK_CODES = {"6999", "4999"}
+
     seeded = await db.accounts.find(
         {"company_id": company_id,
          "source": {"$ne": "qbo"},
@@ -402,7 +409,12 @@ async def apply_cleanup_all_seeded(company_id: str) -> dict:
 
     to_deactivate: list[str] = []
     skipped_referenced = 0
+    skipped_fallback = 0
     for a in seeded:
+        code = str(a.get("code") or "")
+        if code in _PLAID_FALLBACK_CODES:
+            skipped_fallback += 1
+            continue
         referenced = False
         for coll, field in [
             ("transactions", "category_account_id"),
@@ -423,7 +435,7 @@ async def apply_cleanup_all_seeded(company_id: str) -> dict:
         to_deactivate.append(a["id"])
 
     if not to_deactivate:
-        return {"deactivated": 0, "skipped_structural": 0,
+        return {"deactivated": 0, "skipped_structural": skipped_fallback,
                 "skipped_referenced": skipped_referenced}
 
     r = await db.accounts.update_many(
@@ -433,6 +445,6 @@ async def apply_cleanup_all_seeded(company_id: str) -> dict:
                   "deactivated_reason": "qbo_dedup"}},
     )
     return {"deactivated": r.modified_count,
-            "skipped_structural": 0,
+            "skipped_structural": skipped_fallback,
             "skipped_referenced": skipped_referenced}
 

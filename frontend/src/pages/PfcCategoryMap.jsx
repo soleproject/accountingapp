@@ -339,19 +339,23 @@ function CleanupTab({ currentId, onDone }) {
   const applyAllSeeded = async () => {
     if (!confirm(
       "Deactivate EVERY seeded account (including bank, credit card, " +
-      "AP, AR, Equity, and Uncategorized fallbacks)?\n\n" +
-      "Accounts already referenced by transactions, invoices, bills, or " +
-      "journal entries will be kept automatically.\n\n" +
-      "The Plaid resolver will fall back to QBO's Uncategorized Expense/" +
-      "Income accounts when the seeded fallbacks are hidden.\n\n" +
+      "AP, AR, Equity)?\n\n" +
+      "Kept automatically:\n" +
+      "  • 6999 Uncategorized Expense + 4999 Uncategorized Income " +
+      "(Plaid last-resort fallbacks)\n" +
+      "  • Any account already referenced by a transaction, invoice, " +
+      "bill, or journal entry\n\n" +
       "Fully reversible via the \"Reactivate all\" button."
     )) return;
     setBusy(true);
     try {
       const r = await api.post(`/companies/${currentId}/qbo/cleanup-all-seeded`);
+      const skipped = r.data.skipped_structural + r.data.skipped_referenced;
       toast.success(
         `Deactivated ${r.data.deactivated} seeded accounts ` +
-        `(${r.data.skipped_referenced} kept — referenced by ledger entries)`
+        (skipped ? `(kept ${r.data.skipped_structural} Plaid fallbacks, ` +
+                   `${r.data.skipped_referenced} referenced)`
+                 : "")
       );
       await refresh();
       onDone?.();
