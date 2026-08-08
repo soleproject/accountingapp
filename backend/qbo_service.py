@@ -725,6 +725,14 @@ def map_generic_txn(cid: str, realm_id: str, obj: dict, txn_type: str) -> dict:
         # `resolve_transaction_banks` post-migration (once Account
         # entities are in the DB).
         "bank_account_qbo_id": _bank_account_qbo_id(obj, txn_type),
+        # QBO transactions are already committed/finalized on Intuit's
+        # side — they're not drafts. Marking `posted=True` lets our
+        # reports (`_signed_balances`, Income Statement, Balance Sheet,
+        # General Ledger, Cash Flow) pick them up immediately.
+        # `needs_review=True` keeps them visible in the "To do" tab so
+        # the CPA can still verify/reclassify.
+        "posted": True,
+        "needs_review": True,
         "memo": obj.get("PrivateNote") or "",
         "line_items": _map_lines(obj.get("Line") or []),
         "raw": obj,
@@ -780,6 +788,10 @@ async def run_migration(job_id: str, company_id: str) -> None:
         # `bank_account_id` so the Account column stops falling back to
         # the company default.
         banks_resolved = await resolve_transaction_banks(company_id)
+        # Post-import: flip `posted=True` on every QBO transaction so
+        # they immediately populate the P&L, Balance Sheet, and General
+        # Ledger. QBO already committed these on Intuit's side.
+        posted_count = await resolve_transaction_posted(company_id)
         # Post-import: auto-build the Plaid PFC → account map so Plaid
         # transactions land on QBO accounts (not our seeded ones) from
         # day one. AI does a best-effort pass at medium+ confidence.
@@ -828,6 +840,7 @@ async def run_migration(job_id: str, company_id: str) -> None:
                       "transactions_categorized": categorized,
                       "transactions_signed": signed,
                       "transactions_banks_resolved": banks_resolved,
+                      "transactions_posted": posted_count,
                       "pfc_mapped": pfc_mapped}},
         )
     except Exception as e:  # noqa: BLE001
@@ -898,6 +911,20 @@ async def resolve_payment_links(company_id: str) -> int:
             )
             updated += 1
     return updated
+
+async def resolve_transaction_posted(company_id: str) -> int:
+    """Mark every QBO-imported transaction as `posted=True` so the
+    Income Statement, Balance Sheet, General Ledger, and Cash Flow
+    pick them up. QBO already finalized these on Intuit's side —
+    they are the ledger. Idempotent: only touches rows that don't
+    already have `posted=True`."""
+    r = await db.transactions.update_many(
+        {"company_id": company_id, "source": "qbo",
+         "posted": {"$ne": True}},
+        {"$set": {"posted": True, "updated_at": now_iso()}},
+    )
+    return r.modified_count
+
 
 async def resolve_transaction_banks(company_id: str) -> int:
     """Translate each QBO transaction's `bank_account_qbo_id` into a
