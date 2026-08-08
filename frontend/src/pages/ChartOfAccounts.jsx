@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, Sparkles, Loader2, Pencil, Check, X, GitMerge, AlertTriangle, GripVertical, Eye, EyeOff, Upload, FileSpreadsheet, FileText, ArrowLeft, History, Undo2 } from "lucide-react";
+import { Plus, Trash2, Sparkles, Loader2, Pencil, Check, X, GitMerge, AlertTriangle, GripVertical, Eye, EyeOff, Upload, Download, FileSpreadsheet, FileText, ArrowLeft, History, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 
@@ -228,6 +228,51 @@ export default function ChartOfAccounts() {
   };
   useEffect(() => { load(); }, [currentId, basis]);
 
+  // Export the current Chart of Accounts to a CSV file the user can
+  // open in Excel/Numbers/Sheets or hand to another bookkeeper. Uses
+  // the accounts already in state (no extra API call) plus the loaded
+  // balances. RFC-4180 quoting: any field containing a quote/comma/
+  // newline gets wrapped in quotes with internal quotes doubled.
+  const exportCsv = () => {
+    if (!accts.length) { toast.error("No accounts to export"); return; }
+    const byId = Object.fromEntries(accts.map(a => [a.id, a]));
+    const q = (v) => {
+      if (v === null || v === undefined) return "";
+      const s = String(v);
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const header = ["Code", "Name", "Type", "Subtype", "Parent Code",
+                    "Parent Name", "Source", "Active", "Description", "Balance"];
+    const rows = accts.map(a => {
+      const parent = a.parent_account_id ? byId[a.parent_account_id] : null;
+      return [
+        a.code || "",
+        a.name || "",
+        a.type || "",
+        a.subtype || a.detail_type || "",
+        parent?.code || "",
+        parent?.name || "",
+        a.source || "seeded",
+        a.active === false ? "false" : "true",
+        a.description || "",
+        balances?.[a.id] ?? "",
+      ].map(q).join(",");
+    });
+    const csv = [header.join(","), ...rows].join("\r\n");
+    // Excel opens UTF-8 correctly only with a BOM prefix.
+    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const stamp = new Date().toISOString().slice(0, 10);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `chart-of-accounts-${stamp}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${accts.length} accounts`);
+  };
+
   // Show/hide account code toggle. Persisted in localStorage so the
   // Pro's preference sticks across sessions. When codes are hidden we
   // sort each type's list alphabetically by name (the user's mental
@@ -394,6 +439,14 @@ export default function ChartOfAccounts() {
             <option value="ytd">YTD</option>
             <option value="cumulative">All-time</option>
           </select>
+          <button
+            onClick={exportCsv}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-800 text-xs hover:bg-slate-50"
+            data-testid="coa-export-btn"
+            title="Download Chart of Accounts as CSV"
+          >
+            <Download size={13} /> Export
+          </button>
           <button
             onClick={() => setImportOpen(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-indigo-300 bg-indigo-50 text-indigo-800 text-xs hover:bg-indigo-100"
