@@ -330,26 +330,32 @@ function CleanupTab({ currentId, onDone }) {
     } finally { setBusy(false); }
   };
 
-  // Nuclear option — hides EVERY seeded account (except structural
-  // fallbacks + referenced ones). Meant for users who imported a full
+  // Nuclear option — hides EVERY seeded account except those already
+  // referenced by ledger entries. Meant for users who imported a full
   // QBO Chart of Accounts and want the sidebar/reports to show only
-  // QBO-native accounts. Reversible via `reverseAll`.
+  // QBO-native accounts. Plaid falls back to QBO's Uncategorized
+  // Expense/Income when seeded 6999/4999 are deactivated. Reversible
+  // via `reverseAll`.
   const applyAllSeeded = async () => {
     if (!confirm(
-      "Deactivate ALL seeded accounts (except structural fallbacks and any " +
-      "accounts already used by ledger entries)?\n\n" +
-      "This will hide every non-QBO account from the sidebar and reports, " +
-      "even if there's no direct QBO replacement. Plaid transactions with " +
-      "no override will fall through to Uncategorized Expense/Income.\n\n" +
+      "Deactivate EVERY seeded account (including bank, credit card, " +
+      "AP, AR, Equity)?\n\n" +
+      "Kept automatically:\n" +
+      "  • 6999 Uncategorized Expense + 4999 Uncategorized Income " +
+      "(Plaid last-resort fallbacks)\n" +
+      "  • Any account already referenced by a transaction, invoice, " +
+      "bill, or journal entry\n\n" +
       "Fully reversible via the \"Reactivate all\" button."
     )) return;
     setBusy(true);
     try {
       const r = await api.post(`/companies/${currentId}/qbo/cleanup-all-seeded`);
+      const skipped = r.data.skipped_structural + r.data.skipped_referenced;
       toast.success(
         `Deactivated ${r.data.deactivated} seeded accounts ` +
-        `(kept ${r.data.skipped_structural} structural, ` +
-        `${r.data.skipped_referenced} referenced)`
+        (skipped ? `(kept ${r.data.skipped_structural} Plaid fallbacks, ` +
+                   `${r.data.skipped_referenced} referenced)`
+                 : "")
       );
       await refresh();
       onDone?.();
