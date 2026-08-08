@@ -252,3 +252,133 @@ async def get_pfc_map(company_id: str) -> list[dict]:
             "reasoning": o.get("reasoning") if o else None,
         })
     return rows
+
+
+# ------------------------------------------------------------------
+# Duplicate-cleanup after PFC map is built
+# ------------------------------------------------------------------
+
+# Codes that must NEVER be deactivated even if the PFC has been
+# remapped — these are structural fallbacks the resolver falls back
+# to when no override exists, so removing them would leave certain
+# Plaid transactions with no destination at all.
+_STRUCTURAL_KEEP_CODES = {
+    "1010", "1020",   # bank / savings — receive Plaid item holders
+    "2100", "2110",   # credit card payables
+    "3200",           # Inter-Account Transfer
+    "4999", "6999",   # Uncategorized fallbacks
+    "9999",           # Uncategorized Expense (legacy fallback)
+    "2000", "1200", "1300", "1500", "1100",   # AP/AR/Inventory/etc — structural
+    "3000", "3100", "3300",                    # equity accounts
+    "1600", "1700",                            # fixed assets
+}
+
+
+async def plan_cleanup(company_id: str) -> dict:
+    """List seeded accounts that have a QBO equivalent AND are safely
+    unreferenced. Returns {candidates: [...], kept_structural: [...]}
+    for the UI to show. Nothing is written."""
+    seeded = await db.accounts.find(
+        {"company_id": company_id,
+         "source": {"$ne": "qbo"},
+         "active": {"$ne": False}},
+        {"id": 1, "code": 1, "name": 1, "type": 1, "_id": 0},
+    ).to_list(500)
+
+    # Every PFC target code that has an override to a QBO account.
+    overridden_codes: set[str] = set()
+    qbo_by_id = {}
+    async for a in db.accounts.find(
+        {"company_id": company_id, "source": "qbo"},
+        {"id": 1, "code": 1, "name": 1, "type": 1, "_id": 0},
+    ):
+        qbo_by_id[a["id"]] = a
+
+    async for o in db.pfc_org_overrides.find({"company_id": company_id}):
+        aid = o.get("category_account_id")
+        if not aid or aid not in qbo_by_id:
+            continue
+        # This PFC now routes to a QBO account. Any seeded account
+        # with the same "target code" for this PFC is now redundant.
+        for m in PFC_COA_MAPPINGS:
+            if m.pfc_detailed == o["pfc_detailed"] and m.account_code:
+                overridden_codes.add(m.account_code)
+
+    candidates = []
+    kept = []
+    for a in seeded:
+        code = str(a.get("code") or "")
+        if code in _STRUCTURAL_KEEP_CODES:
+            kept.append({**a, "reason": "structural fallback"})
+            continue
+        if code not in overridden_codes:
+            kept.append({**a, "reason": "no QBO replacement"})
+            continue
+
+        # Reference check — never deactivate a seeded account with live
+        # ledger entries pointing at it. Cheap $exists probes.
+        refs = 0
+        for coll, field in [
+            ("transactions", "category_account_id"),
+            ("invoices", "line_items.account_id"),
+            ("bills", "line_items.account_id"),
+            ("journal_entries", "lines.account_id"),
+            ("payments", "deposit_account_id"),
+        ]:
+            if await db[coll].find_one(
+                {"company_id": company_id, field: a["id"]},
+                projection={"_id": 1},
+            ):
+                refs += 1
+        if refs:
+            kept.append({**a, "reason": f"referenced by {refs} ledger doc types"})
+            continue
+
+        # Which QBO account is going to inherit this seeded's PFC traffic?
+        replacement = None
+        async for o in db.pfc_org_overrides.find(
+            {"company_id": company_id},
+            {"pfc_detailed": 1, "category_account_id": 1, "_id": 0},
+        ):
+            aid = o.get("category_account_id")
+            if aid not in qbo_by_id:
+                continue
+            for m in PFC_COA_MAPPINGS:
+                if m.pfc_detailed == o["pfc_detailed"] and m.account_code == code:
+                    replacement = qbo_by_id[aid]
+                    break
+            if replacement:
+                break
+        candidates.append({
+            **a,
+            "replacement_account_id": replacement["id"] if replacement else None,
+            "replacement_name": replacement["name"] if replacement else None,
+        })
+    return {"candidates": candidates, "kept": kept}
+
+
+async def apply_cleanup(company_id: str, account_ids: list[str]) -> dict:
+    """Deactivate the given seeded accounts. Only touches docs matching
+    (company_id, id ∈ ids, source != qbo). Sets active=False +
+    deactivated_reason='qbo_dedup' — reversible via a simple update."""
+    if not account_ids:
+        return {"deactivated": 0}
+    r = await db.accounts.update_many(
+        {"company_id": company_id, "source": {"$ne": "qbo"},
+         "id": {"$in": account_ids}, "active": {"$ne": False}},
+        {"$set": {"active": False, "deactivated_at": now_iso(),
+                  "deactivated_reason": "qbo_dedup"}},
+    )
+    return {"deactivated": r.modified_count}
+
+
+async def reverse_cleanup(company_id: str) -> dict:
+    """Reactivate everything we deactivated via `apply_cleanup`. Undo
+    button for the settings page."""
+    r = await db.accounts.update_many(
+        {"company_id": company_id, "deactivated_reason": "qbo_dedup"},
+        {"$set": {"active": True},
+         "$unset": {"deactivated_at": "", "deactivated_reason": ""}},
+    )
+    return {"reactivated": r.modified_count}
+

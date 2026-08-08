@@ -162,6 +162,7 @@ export default function PfcCategoryMap() {
         {[
           {id: "pfc", label: "Plaid Categories"},
           {id: "coa", label: `Chart of Accounts (${allAccounts.length})`},
+          {id: "cleanup", label: "Cleanup Duplicates"},
         ].map(t => (
           <button
             key={t.id} onClick={() => setTab(t.id)}
@@ -259,8 +260,175 @@ export default function PfcCategoryMap() {
       ))}
 
       {tab === "coa" && <CoaTab allAccounts={allAccounts} rows={rows} loading={loading} />}
+      {tab === "cleanup" && <CleanupTab currentId={currentId} onDone={load} />}
     </div>
   );
+}
+
+
+/**
+ * Cleanup Duplicates tab — after the PFC map is built, some seeded
+ * accounts (Meals, Utilities, Rent, etc.) have QBO equivalents doing
+ * the same work. Deactivating the duplicates keeps the sidebar and
+ * reports clean without deleting data.
+ *
+ * SAFETY:
+ *  - Only deactivates seeded accounts (`source != qbo`) that:
+ *    (a) have a QBO replacement getting PFC traffic
+ *    (b) are not structural fallbacks (Uncategorized, banks, AP/AR)
+ *    (c) have ZERO ledger references (no txns/invoices/bills/JEs)
+ *  - Deactivate = `active: false` (still queryable) — NOT a delete
+ *  - "Reactivate all" button restores everything in one click
+ */
+function CleanupTab({ currentId, onDone }) {
+  const [plan, setPlan] = useState(null);
+  const [selected, setSelected] = useState(new Set());
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { if (currentId) refresh(); /* eslint-disable-next-line */ }, [currentId]);
+
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      const r = await api.get(`/companies/${currentId}/qbo/cleanup-plan`);
+      setPlan(r.data);
+      // Pre-select all candidates.
+      setSelected(new Set((r.data.candidates || []).map(c => c.id)));
+    } catch (e) {
+      toast.error(`Failed: ${e?.response?.data?.detail || e.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const apply = async () => {
+    const ids = [...selected];
+    if (!ids.length) { toast.error("Select at least one account."); return; }
+    if (!confirm(`Deactivate ${ids.length} seeded accounts? Reversible.`)) return;
+    setBusy(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/qbo/cleanup-apply`, { account_ids: ids });
+      toast.success(`Deactivated ${r.data.deactivated} accounts`);
+      await refresh();
+      onDone?.();
+    } catch (e) {
+      toast.error(`Failed: ${e?.response?.data?.detail || e.message}`);
+    } finally { setBusy(false); }
+  };
+
+  const reverseAll = async () => {
+    if (!confirm("Reactivate every seeded account that was previously deactivated?")) return;
+    setBusy(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/qbo/cleanup-reverse`);
+      toast.success(`Reactivated ${r.data.reactivated}`);
+      await refresh();
+      onDone?.();
+    } catch (e) {
+      toast.error(`Failed: ${e?.response?.data?.detail || e.message}`);
+    } finally { setBusy(false); }
+  };
+
+  const toggle = (id) => setSelected(s => {
+    const n = new Set(s);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    return n;
+  });
+
+  if (loading) return <div className="text-center py-16 text-slate-500">
+    <Loader2 className="w-6 h-6 animate-spin inline mr-2" /> Loading…
+  </div>;
+
+  const cands = plan?.candidates || [];
+  const kept = plan?.kept || [];
+
+  return <>
+    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+      <b>Read first:</b> Deactivating hides accounts from the sidebar and reports but
+      keeps them in the database. You can reactivate anytime. Nothing is deleted.
+      Accounts with existing ledger entries are auto-excluded (shown below).
+    </div>
+
+    <div className="flex items-center justify-between">
+      <div className="text-sm text-slate-700">
+        <b>{cands.length}</b> seeded accounts have QBO equivalents and are safe to deactivate.
+        Selected: <b>{selected.size}</b>.
+      </div>
+      <div className="flex gap-2">
+        <button onClick={reverseAll} disabled={busy}
+          className="px-3 py-1.5 text-xs rounded-md border bg-white hover:bg-slate-50 disabled:opacity-60"
+          data-testid="cleanup-reverse-btn">
+          Reactivate all previously deactivated
+        </button>
+        <button onClick={apply} disabled={busy || selected.size === 0}
+          className="px-4 py-2 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
+          data-testid="cleanup-apply-btn">
+          {busy ? <><Loader2 className="w-4 h-4 animate-spin inline mr-1" /> Working…</>
+                : `Deactivate ${selected.size} selected`}
+        </button>
+      </div>
+    </div>
+
+    {cands.length > 0 && (
+      <div className="rounded-xl border border-slate-200 overflow-hidden">
+        <table className="w-full text-sm" data-testid="cleanup-candidates-table">
+          <thead className="bg-slate-50 text-xs text-slate-600 uppercase tracking-wide">
+            <tr>
+              <th className="px-3 py-2 w-8"></th>
+              <th className="text-left px-3 py-2 font-medium w-20">Code</th>
+              <th className="text-left px-3 py-2 font-medium">Seeded Account (will hide)</th>
+              <th className="text-left px-3 py-2 font-medium w-8"></th>
+              <th className="text-left px-3 py-2 font-medium">Replaced by (QBO)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cands.map(c => (
+              <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50/50">
+                <td className="px-3 py-2">
+                  <input type="checkbox" checked={selected.has(c.id)}
+                    onChange={() => toggle(c.id)}
+                    data-testid={`cleanup-cb-${c.id}`} />
+                </td>
+                <td className="px-3 py-2 font-mono text-xs text-slate-700">{c.code || "—"}</td>
+                <td className="px-3 py-2">{c.name}</td>
+                <td className="text-slate-400 text-center">→</td>
+                <td className="px-3 py-2 text-slate-700">
+                  {c.replacement_name || <span className="text-slate-400">(via PFC map)</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+
+    {kept.length > 0 && (
+      <details className="rounded-xl border border-slate-200 p-4 bg-white text-sm">
+        <summary className="cursor-pointer text-slate-700 font-medium">
+          Why {kept.length} seeded accounts are being kept
+        </summary>
+        <table className="w-full text-sm mt-3">
+          <thead className="text-xs text-slate-500">
+            <tr>
+              <th className="text-left px-2 py-1 font-medium w-20">Code</th>
+              <th className="text-left px-2 py-1 font-medium">Name</th>
+              <th className="text-left px-2 py-1 font-medium">Reason kept</th>
+            </tr>
+          </thead>
+          <tbody>
+            {kept.map(k => (
+              <tr key={k.id} className="border-t border-slate-100">
+                <td className="px-2 py-1 font-mono text-xs">{k.code || "—"}</td>
+                <td className="px-2 py-1">{k.name}</td>
+                <td className="px-2 py-1 text-slate-500 text-xs">{k.reason}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </details>
+    )}
+  </>;
 }
 
 

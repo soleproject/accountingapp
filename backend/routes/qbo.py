@@ -321,6 +321,37 @@ async def pfc_map_set_one(
     )
 
 
+@router.get("/companies/{cid}/qbo/cleanup-plan")
+async def qbo_cleanup_plan(cid: str, user: dict = Depends(get_current_user)):
+    """List seeded accounts that have a QBO equivalent AND are
+    unreferenced — candidates for deactivation. `kept` are seeded
+    accounts we recommend keeping (structural, or no QBO replacement,
+    or referenced by ledger docs). NO writes."""
+    await require_company(user, cid)
+    from pfc_ai_builder import plan_cleanup
+    return await plan_cleanup(cid)
+
+
+@router.post("/companies/{cid}/qbo/cleanup-apply")
+async def qbo_cleanup_apply(
+    cid: str, payload: dict, user: dict = Depends(get_current_user),
+):
+    """Deactivate the seeded accounts the user confirmed on the
+    settings page. Body: {account_ids: [...]}."""
+    await require_company(user, cid)
+    from pfc_ai_builder import apply_cleanup
+    return await apply_cleanup(cid, payload.get("account_ids") or [])
+
+
+@router.post("/companies/{cid}/qbo/cleanup-reverse")
+async def qbo_cleanup_reverse(cid: str, user: dict = Depends(get_current_user)):
+    """Undo — reactivate every seeded account that got deactivated by
+    `cleanup-apply` (`deactivated_reason == "qbo_dedup"`)."""
+    await require_company(user, cid)
+    from pfc_ai_builder import reverse_cleanup
+    return await reverse_cleanup(cid)
+
+
 @router.get("/companies/{cid}/qbo/diagnostics")
 async def qbo_diagnostics(cid: str, user: dict = Depends(get_current_user)):
     """Full audit of a company's QBO migration state. Returns:
