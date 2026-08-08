@@ -265,6 +265,90 @@ async def qbo_ai_align_apply(
     )
 
 
+@router.post("/companies/{cid}/qbo/reset-qbo-codes")
+async def qbo_reset_codes(cid: str, user: dict = Depends(get_current_user)):
+    """Remove any `code` values we stamped onto QBO accounts by an
+    earlier `qbo_ai_align` run — that approach is retired in favor of
+    the per-company `pfc_org_overrides` map. Also reactivates seeded
+    accounts we deactivated. Safe to run — restores accounts to the
+    exact shape QBO migration produced."""
+    await require_company(user, cid)
+    reset = await db.accounts.update_many(
+        {"company_id": cid, "source": "qbo", "pfc_aligned_at": {"$exists": True}},
+        {"$unset": {"code": "", "pfc_aligned_at": "",
+                    "pfc_alignment_confidence": ""}},
+    )
+    reactivated = await db.accounts.update_many(
+        {"company_id": cid, "source": {"$ne": "qbo"},
+         "deactivated_reason": "qbo_ai_aligned"},
+        {"$set": {"active": True},
+         "$unset": {"deactivated_at": "", "deactivated_reason": ""}},
+    )
+    return {"reset_qbo_codes": reset.modified_count,
+            "reactivated_seeded": reactivated.modified_count}
+
+
+@router.get("/companies/{cid}/pfc-map/plan")
+async def pfc_map_plan(cid: str, user: dict = Depends(get_current_user)):
+    """Ask Claude to propose a Plaid PFC → account map for this company.
+    Returns the proposal for UI review (no DB writes)."""
+    await require_company(user, cid)
+    from pfc_ai_builder import plan_pfc_map
+    return await plan_pfc_map(cid)
+
+
+@router.post("/companies/{cid}/pfc-map/apply")
+async def pfc_map_apply(
+    cid: str, payload: dict, user: dict = Depends(get_current_user),
+):
+    """Commit a reviewed PFC → account map to `pfc_org_overrides`.
+    Payload: {proposals: [...], min_confidence: 'high|medium|low'}"""
+    await require_company(user, cid)
+    from pfc_ai_builder import apply_pfc_map
+    return await apply_pfc_map(
+        company_id=cid,
+        proposals=payload.get("proposals") or [],
+        min_confidence=payload.get("min_confidence", "medium"),
+    )
+
+
+@router.get("/companies/{cid}/pfc-map")
+async def pfc_map_get(cid: str, user: dict = Depends(get_current_user)):
+    """Return the current PFC → account map for this company — one row
+    per detailed PFC code, joined with account name/type. UI settings
+    page renders this."""
+    await require_company(user, cid)
+    from pfc_ai_builder import get_pfc_map
+    return {"rows": await get_pfc_map(cid)}
+
+
+@router.put("/companies/{cid}/pfc-map/{pfc_detailed}")
+async def pfc_map_set_one(
+    cid: str, pfc_detailed: str, payload: dict,
+    user: dict = Depends(get_current_user),
+):
+    """User override for a single PFC → account. Body: {account_id}.
+    Pass account_id='' to clear the override (falls back to code)."""
+    await require_company(user, cid)
+    aid = (payload.get("account_id") or "").strip()
+    if not aid:
+        await db.pfc_org_overrides.delete_one(
+            {"company_id": cid, "pfc_detailed": pfc_detailed},
+        )
+        return {"cleared": True}
+    # Validate the account belongs to this company.
+    exists = await db.accounts.find_one(
+        {"company_id": cid, "id": aid}, {"id": 1},
+    )
+    if not exists:
+        raise HTTPException(400, "account_id not found on this company")
+    from pfc_resolver import set_pfc_override
+    return await set_pfc_override(
+        company_id=cid, pfc_detailed=pfc_detailed,
+        category_account_id=aid, source="user",
+    )
+
+
 @router.get("/companies/{cid}/qbo/diagnostics")
 async def qbo_diagnostics(cid: str, user: dict = Depends(get_current_user)):
     """Full audit of a company's QBO migration state. Returns:
