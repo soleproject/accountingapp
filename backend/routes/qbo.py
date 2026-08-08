@@ -403,16 +403,19 @@ async def qbo_rebuild_account_hierarchy(cid: str, user: dict = Depends(get_curre
 
 @router.post("/companies/{cid}/qbo/rebuild-transaction-categories")
 async def qbo_rebuild_transaction_categories(cid: str, user: dict = Depends(get_current_user)):
-    """Backfill: for companies migrated before the resolver was wired
+    """Backfill: for companies migrated before the resolvers were wired
     in, translate each QBO-imported transaction's line-item AccountRef
-    into a top-level `category_account_id` and sign the amount based
-    on txn_type. Idempotent."""
+    into a top-level `category_account_id`, sign the amount based on
+    txn_type, and populate `bank_account_id` from the QBO source/deposit
+    account. Idempotent."""
     await require_company(user, cid)
     from qbo_service import (resolve_transaction_categories,
-                             resolve_transaction_signs)
+                             resolve_transaction_signs,
+                             resolve_transaction_banks)
     categorized = await resolve_transaction_categories(cid)
     signed = await resolve_transaction_signs(cid)
-    return {"updated": categorized, "signed": signed}
+    banks = await resolve_transaction_banks(cid)
+    return {"updated": categorized, "signed": signed, "banks": banks}
 
 
 @router.get("/companies/{cid}/qbo/diagnostics")

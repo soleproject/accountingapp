@@ -649,6 +649,32 @@ def _direction_for(txn_type: str) -> str:
     return "transfer"
 
 
+def _bank_account_qbo_id(obj: dict, txn_type: str) -> str | None:
+    """Extract QBO's bank/asset account id from the transaction based
+    on `txn_type`. Different QBO doc shapes stash the payment source
+    under different keys:
+
+      Purchase        → `AccountRef` (top-level bank/CC/asset)
+      Deposit         → `DepositToAccountRef` (destination bank)
+      SalesReceipt    → `DepositToAccountRef` (destination bank)
+      RefundReceipt   → `DepositToAccountRef` (source bank)
+      Transfer        → `FromAccountRef` (outbound leg)
+      CreditMemo      → `ARAccountRef` (AR side)
+    """
+    key = {
+        "Purchase":       "AccountRef",
+        "Deposit":        "DepositToAccountRef",
+        "SalesReceipt":   "DepositToAccountRef",
+        "RefundReceipt":  "DepositToAccountRef",
+        "Transfer":       "FromAccountRef",
+        "CreditMemo":     "ARAccountRef",
+    }.get(txn_type)
+    if not key:
+        return None
+    ref = obj.get(key) or {}
+    return ref.get("value") or None
+
+
 def map_generic_txn(cid: str, realm_id: str, obj: dict, txn_type: str) -> dict:
     """Deposit / Transfer / Purchase / SalesReceipt / RefundReceipt /
     CreditMemo — normalized into the shared `transactions` collection
@@ -669,6 +695,11 @@ def map_generic_txn(cid: str, realm_id: str, obj: dict, txn_type: str) -> dict:
         "contact_name": ref.get("name") or "",
         "amount": _signed_amount(txn_type, magnitude),
         "direction": _direction_for(txn_type),
+        # QBO id of the bank/asset account this transaction moved money
+        # in or out of. Translated to a local `bank_account_id` by
+        # `resolve_transaction_banks` post-migration (once Account
+        # entities are in the DB).
+        "bank_account_qbo_id": _bank_account_qbo_id(obj, txn_type),
         "memo": obj.get("PrivateNote") or "",
         "line_items": _map_lines(obj.get("Line") or []),
         "raw": obj,
@@ -742,6 +773,11 @@ async def run_migration(job_id: str, company_id: str) -> None:
         # Deposits/SalesReceipts as inflows (positive). Also stamps a
         # `direction` field so the UI can render the appropriate icon.
         signed = await resolve_transaction_signs(company_id)
+        # Post-import: translate each transaction's `bank_account_qbo_id`
+        # (Business Checking, Credit Card, etc.) into a local
+        # `bank_account_id` so the Account column stops falling back to
+        # the company default.
+        banks_resolved = await resolve_transaction_banks(company_id)
         # Post-import: auto-build the Plaid PFC → account map so Plaid
         # transactions land on QBO accounts (not our seeded ones) from
         # day one. AI does a best-effort pass at medium+ confidence.
@@ -789,6 +825,7 @@ async def run_migration(job_id: str, company_id: str) -> None:
                       "parents_linked": parents_linked,
                       "transactions_categorized": categorized,
                       "transactions_signed": signed,
+                      "transactions_banks_resolved": banks_resolved,
                       "pfc_mapped": pfc_mapped}},
         )
     except Exception as e:  # noqa: BLE001
@@ -859,6 +896,57 @@ async def resolve_payment_links(company_id: str) -> int:
             )
             updated += 1
     return updated
+
+async def resolve_transaction_banks(company_id: str) -> int:
+    """Translate each QBO transaction's `bank_account_qbo_id` into a
+    local `bank_account_id` so the Transactions UI's Account column
+    picks up Business Checking / Savings / Credit Card automatically
+    instead of falling back to the company-wide default. Idempotent:
+    skips docs that already have `bank_account_id` set."""
+    qbo_to_local: dict[str, str] = {}
+    async for a in db.accounts.find(
+        {"company_id": company_id, "source": "qbo"},
+        {"id": 1, "qbo_id": 1, "_id": 0},
+    ):
+        if a.get("qbo_id"):
+            qbo_to_local[str(a["qbo_id"])] = a["id"]
+
+    if not qbo_to_local:
+        return 0
+
+    updated = 0
+    # Two flavors of unresolved doc:
+    #   1. Newly imported — has `bank_account_qbo_id` populated by the
+    #      mapper, but not yet translated to a local id.
+    #   2. Pre-fix imports — has neither `bank_account_qbo_id` nor
+    #      `bank_account_id`; we recover from `raw` using the same
+    #      key-per-txn_type lookup the mapper uses at write time.
+    async for t in db.transactions.find(
+        {"company_id": company_id, "source": "qbo",
+         "$or": [{"bank_account_id": {"$in": [None, ""]}},
+                 {"bank_account_id": {"$exists": False}}]},
+        {"id": 1, "txn_type": 1, "bank_account_qbo_id": 1, "raw": 1},
+    ):
+        aqid = t.get("bank_account_qbo_id")
+        if not aqid:
+            aqid = _bank_account_qbo_id(t.get("raw") or {}, t.get("txn_type") or "")
+        if not aqid:
+            continue
+        local_id = qbo_to_local.get(str(aqid))
+        if not local_id:
+            continue
+        # Also stamp `bank_account_qbo_id` on legacy rows so future
+        # resolvers can skip the raw-doc dive.
+        await db.transactions.update_one(
+            {"id": t["id"]},
+            {"$set": {"bank_account_id": local_id,
+                      "bank_account_qbo_id": str(aqid),
+                      "updated_at": now_iso()}},
+        )
+        updated += 1
+    return updated
+
+
 
 async def resolve_transaction_signs(company_id: str) -> int:
     """Backfill for QBO-imported transactions saved with the older
