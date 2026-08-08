@@ -315,6 +315,14 @@ export default function QboConnect() {
                     <span className="ml-1 opacity-80">({job.pfc_mapped} auto-mapped)</span>
                   )}
                 </button>
+                <button
+                  onClick={() => navigate("/settings/qbo-mirror")}
+                  data-testid="qbo-mirror-btn"
+                  className="px-3 py-1.5 text-xs rounded-md border border-indigo-300 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 inline-flex items-center gap-1"
+                  title="Bi-directional QBO mirror (dry-run preview)"
+                >
+                  <RefreshCw size={12} /> Live Mirror (preview)
+                </button>
                 {/* Re-run entry point — completed jobs otherwise had no
                     way to trigger a fresh import. Clears the job pointer
                     locally so the "Start migration" button re-appears. */}
