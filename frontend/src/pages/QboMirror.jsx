@@ -461,21 +461,32 @@ export default function QboMirror() {
           ) : (
             <ul className="divide-y divide-slate-100">
               {logEntries.map((e, i) => (
-                <li key={i} className="py-2 flex items-start gap-3 text-xs">
-                  <span className={`px-1.5 py-0.5 rounded font-medium border
-                    ${e.kind === "config_change" ? "bg-slate-50 border-slate-200 text-slate-700"
-                    : e.kind === "dry_run"       ? "bg-indigo-50 border-indigo-200 text-indigo-700"
-                    : e.kind === "warning"       ? "bg-amber-50 border-amber-200 text-amber-700"
-                    : e.kind === "error"         ? "bg-rose-50 border-rose-200 text-rose-700"
-                                                 : "bg-slate-50 border-slate-200 text-slate-700"}`}>
-                    {e.kind}
-                  </span>
-                  <div className="flex-1">
-                    <div className="text-slate-800">{e.message}</div>
-                    <div className="text-slate-400 text-[10px] mt-0.5">
-                      {e.created_at}
-                    </div>
-                  </div>
+                <li key={i} className="py-2 text-xs">
+                  <details>
+                    <summary className="flex items-start gap-3 cursor-pointer hover:bg-slate-50 rounded px-1 -mx-1">
+                      <span className={`px-1.5 py-0.5 rounded font-medium border
+                        ${e.kind === "config_change" ? "bg-slate-50 border-slate-200 text-slate-700"
+                        : e.kind === "dry_run"       ? "bg-indigo-50 border-indigo-200 text-indigo-700"
+                        : e.kind === "mirror_pull"   ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                        : e.kind === "mirror_push"   ? "bg-violet-50 border-violet-200 text-violet-700"
+                        : e.kind === "warning"       ? "bg-amber-50 border-amber-200 text-amber-700"
+                        : e.kind === "error"         ? "bg-rose-50 border-rose-200 text-rose-700"
+                                                     : "bg-slate-50 border-slate-200 text-slate-700"}`}>
+                        {e.kind}
+                      </span>
+                      <div className="flex-1">
+                        <div className="text-slate-800">{e.message}</div>
+                        <div className="text-slate-400 text-[10px] mt-0.5">
+                          {e.created_at}
+                        </div>
+                      </div>
+                    </summary>
+                    {e.details && Object.keys(e.details).length > 0 && (
+                      <pre className="mt-2 ml-6 p-2 bg-slate-900 text-slate-100 rounded text-[10px] overflow-x-auto whitespace-pre-wrap max-h-96">
+                        {JSON.stringify(e.details, null, 2)}
+                      </pre>
+                    )}
+                  </details>
                 </li>
               ))}
             </ul>
