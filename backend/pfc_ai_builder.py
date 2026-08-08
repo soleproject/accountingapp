@@ -385,12 +385,10 @@ async def reverse_cleanup(company_id: str) -> dict:
 
 async def apply_cleanup_all_seeded(company_id: str) -> dict:
     """Aggressive cleanup: deactivate EVERY seeded account (source != qbo)
-    that is neither a structural fallback nor referenced by an existing
-    ledger doc. Unlike `apply_cleanup`, this ignores whether a QBO
-    replacement exists — the assumption is that the user prefers a lean
-    QBO-only Chart of Accounts and is willing to let stray Plaid
-    transactions fall through to the resolver's structural fallbacks
-    (Uncategorized Expense/Income, Inter-Account Transfer, etc.).
+    that is not referenced by an existing ledger doc. Includes the
+    structural fallbacks (bank/CC/AP/AR/Equity/Uncategorized) — the
+    Plaid resolver falls back to QBO's Uncategorized Expense/Income
+    accounts when the seeded 6999/4999 slots are deactivated.
 
     Same `deactivated_reason='qbo_dedup'` marker so `reverse_cleanup`
     undoes it in one click.
@@ -403,13 +401,8 @@ async def apply_cleanup_all_seeded(company_id: str) -> dict:
     ).to_list(2000)
 
     to_deactivate: list[str] = []
-    skipped_structural = 0
     skipped_referenced = 0
     for a in seeded:
-        code = str(a.get("code") or "")
-        if code in _STRUCTURAL_KEEP_CODES:
-            skipped_structural += 1
-            continue
         referenced = False
         for coll, field in [
             ("transactions", "category_account_id"),
@@ -430,7 +423,7 @@ async def apply_cleanup_all_seeded(company_id: str) -> dict:
         to_deactivate.append(a["id"])
 
     if not to_deactivate:
-        return {"deactivated": 0, "skipped_structural": skipped_structural,
+        return {"deactivated": 0, "skipped_structural": 0,
                 "skipped_referenced": skipped_referenced}
 
     r = await db.accounts.update_many(
@@ -440,6 +433,6 @@ async def apply_cleanup_all_seeded(company_id: str) -> dict:
                   "deactivated_reason": "qbo_dedup"}},
     )
     return {"deactivated": r.modified_count,
-            "skipped_structural": skipped_structural,
+            "skipped_structural": 0,
             "skipped_referenced": skipped_referenced}
 

@@ -330,17 +330,20 @@ function CleanupTab({ currentId, onDone }) {
     } finally { setBusy(false); }
   };
 
-  // Nuclear option — hides EVERY seeded account (except structural
-  // fallbacks + referenced ones). Meant for users who imported a full
+  // Nuclear option — hides EVERY seeded account except those already
+  // referenced by ledger entries. Meant for users who imported a full
   // QBO Chart of Accounts and want the sidebar/reports to show only
-  // QBO-native accounts. Reversible via `reverseAll`.
+  // QBO-native accounts. Plaid falls back to QBO's Uncategorized
+  // Expense/Income when seeded 6999/4999 are deactivated. Reversible
+  // via `reverseAll`.
   const applyAllSeeded = async () => {
     if (!confirm(
-      "Deactivate ALL seeded accounts (except structural fallbacks and any " +
-      "accounts already used by ledger entries)?\n\n" +
-      "This will hide every non-QBO account from the sidebar and reports, " +
-      "even if there's no direct QBO replacement. Plaid transactions with " +
-      "no override will fall through to Uncategorized Expense/Income.\n\n" +
+      "Deactivate EVERY seeded account (including bank, credit card, " +
+      "AP, AR, Equity, and Uncategorized fallbacks)?\n\n" +
+      "Accounts already referenced by transactions, invoices, bills, or " +
+      "journal entries will be kept automatically.\n\n" +
+      "The Plaid resolver will fall back to QBO's Uncategorized Expense/" +
+      "Income accounts when the seeded fallbacks are hidden.\n\n" +
       "Fully reversible via the \"Reactivate all\" button."
     )) return;
     setBusy(true);
@@ -348,8 +351,7 @@ function CleanupTab({ currentId, onDone }) {
       const r = await api.post(`/companies/${currentId}/qbo/cleanup-all-seeded`);
       toast.success(
         `Deactivated ${r.data.deactivated} seeded accounts ` +
-        `(kept ${r.data.skipped_structural} structural, ` +
-        `${r.data.skipped_referenced} referenced)`
+        `(${r.data.skipped_referenced} kept — referenced by ledger entries)`
       );
       await refresh();
       onDone?.();

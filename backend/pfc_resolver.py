@@ -80,9 +80,28 @@ async def resolve_pfc_coa(
     reviewed = pfc_mapping.reviewed_by_default(mapping.classification)
 
     # Preload this org's COA once (small, ~30-50 rows on default seed).
-    accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
+    # Filter out inactive accounts BEFORE indexing so we never resolve
+    # to a hidden account when the user has cleaned up seeded duplicates
+    # (`Deactivate ALL seeded` on the pfc-map page).
+    accts_all = await db.accounts.find({"company_id": company_id}).to_list(2000)
+    accts = [a for a in accts_all if a.get("active") is not False]
     by_id = {a["id"]: a for a in accts}
-    by_code = {a["code"]: a for a in accts}
+    by_code = {a["code"]: a for a in accts if a.get("code")}
+
+    # When the seeded 6999/4999 Uncategorized fallbacks have been
+    # deactivated, look for QBO-imported Uncategorized accounts by
+    # subtype (QBO uses `OtherMiscellaneousServiceCost` for Uncategorized
+    # Expense and `ServiceFeeIncome` for Uncategorized Income — but
+    # matching on name is more reliable across QBO regions).
+    def _qbo_uncat(direction: str):
+        want_type = "revenue" if direction == "income" else "expense"
+        for a in accts:
+            if a.get("source") != "qbo" or a.get("type") != want_type:
+                continue
+            nm = (a.get("name") or "").strip().lower()
+            if "uncategorized" in nm:
+                return a
+        return None
 
     # ---------------------------------------------------------------
     # Step 1. Per-org override — indexed (org, pfc_detailed) lookup.
@@ -135,6 +154,11 @@ async def resolve_pfc_coa(
     )
     fallback_code = "4999" if goes_to_income else "6999"
     fallback = by_code.get(fallback_code)
+    if not fallback:
+        # Seeded fallback was deactivated by "Deactivate ALL seeded" —
+        # try the QBO-imported Uncategorized Expense/Income instead so
+        # Plaid transactions still have a valid destination.
+        fallback = _qbo_uncat("income" if goes_to_income else "expense")
     if fallback:
         return ResolvedPfc(
             category_account_id=fallback["id"],
