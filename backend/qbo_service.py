@@ -995,7 +995,7 @@ async def resolve_transaction_categories(company_id: str) -> int:
     qbo_to_local: dict[str, dict] = {}
     async for a in db.accounts.find(
         {"company_id": company_id, "source": "qbo"},
-        {"id": 1, "qbo_id": 1, "code": 1, "name": 1, "_id": 0},
+        {"id": 1, "qbo_id": 1, "code": 1, "name": 1, "type": 1, "_id": 0},
     ):
         if a.get("qbo_id"):
             qbo_to_local[str(a["qbo_id"])] = a
