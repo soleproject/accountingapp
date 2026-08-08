@@ -67,10 +67,25 @@ export default function PfcCategoryMap() {
     if (!confirm("Ask Claude to propose account matches for every Plaid category? This takes 30-60s.")) return;
     setBuilding(true);
     try {
-      const planRes = await api.get(`/companies/${currentId}/pfc-map/plan`);
-      const plan = planRes.data;
+      // Two passes — Claude Sonnet is non-deterministic, and a single
+      // pass usually maps 60-75% at medium+ confidence. A second pass
+      // fills in the rows Claude was uncertain about the first time.
+      // We keep the highest-confidence proposal per PFC across runs.
+      const rank = { high: 3, medium: 2, low: 1, none: 0 };
+      const best = new Map();
+      for (let i = 0; i < 2; i++) {
+        const planRes = await api.get(`/companies/${currentId}/pfc-map/plan`);
+        for (const p of planRes.data?.proposals || []) {
+          const key = p.pfc_detailed;
+          if (!key) continue;
+          const prev = best.get(key);
+          if (!prev || (rank[p.confidence] || 0) > (rank[prev.confidence] || 0)) {
+            best.set(key, p);
+          }
+        }
+      }
       const applyRes = await api.post(`/companies/${currentId}/pfc-map/apply`, {
-        proposals: plan.proposals || [],
+        proposals: Array.from(best.values()),
         min_confidence: "medium",
       });
       toast.success(`AI mapped ${applyRes.data.written} categories · skipped ${applyRes.data.skipped} (low confidence)`);
