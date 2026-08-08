@@ -259,7 +259,14 @@ _ACCOUNT_TYPE_MAP = {
 
 
 def map_account(cid: str, realm_id: str, obj: dict) -> dict:
-    """QBO Account → our accounts collection shape."""
+    """QBO Account → our accounts collection shape.
+    `name` intentionally uses `Name` (the leaf), NOT
+    `FullyQualifiedName` — the colon-nested path (e.g.
+    `Landscaping Services:Job Materials:Decks and Patios`) belongs in
+    a parent-child tree, not a flat name. `parent_qbo_id` captures the
+    QBO parent id; `resolve_account_parents` translates it to a local
+    `parent_account_id` in a second pass after the whole page is
+    ingested (so children imported before parents still resolve)."""
     return {
         "company_id": cid,
         "source": "qbo",
@@ -267,12 +274,13 @@ def map_account(cid: str, realm_id: str, obj: dict) -> dict:
         "id": f"qbo-{cid[:8]}-account-{obj['Id']}",   # company-scoped, satisfies `id_uniq`
         "realm_id": realm_id,
         "code": obj.get("AcctNum") or "",
-        "name": obj.get("FullyQualifiedName") or obj.get("Name") or "",
+        "name": obj.get("Name") or obj.get("FullyQualifiedName") or "",
         "type": _ACCOUNT_TYPE_MAP.get(obj.get("AccountType") or "", "expense"),
         "subtype": obj.get("AccountSubType") or "",
         "active": bool(obj.get("Active", True)),
         "current_balance": round(float(obj.get("CurrentBalance") or 0), 2),
         "parent_qbo_id": (obj.get("ParentRef") or {}).get("value"),
+        "qbo_full_path": obj.get("FullyQualifiedName") or "",
         "qbo_last_updated": (obj.get("MetaData") or {}).get("LastUpdatedTime"),
         "raw": obj,
         "created_at": now_iso(),
@@ -690,6 +698,13 @@ async def run_migration(job_id: str, company_id: str) -> None:
         # id lookups succeed. Direct writes (no PATCH cascade) since
         # QBO already gave us the correct balance on each doc.
         linked = await resolve_payment_links(company_id)
+        # Post-import: translate each QBO account's `parent_qbo_id` into
+        # our internal `parent_account_id` so the CoA sidebar can render
+        # nested trees. Also unflattens any pre-existing colon-joined
+        # names (e.g. "Landscaping Services:Job Materials" → leaf
+        # "Job Materials" with parent link) — this covers older
+        # migrations that ran before the mapper was fixed.
+        parents_linked = await resolve_account_parents(company_id)
         # Post-import: auto-build the Plaid PFC → account map so Plaid
         # transactions land on QBO accounts (not our seeded ones) from
         # day one. AI does a best-effort pass at medium+ confidence.
@@ -713,6 +728,7 @@ async def run_migration(job_id: str, company_id: str) -> None:
             {"$set": {"status": "done", "phase": "done",
                       "finished_at": now_iso(), "percent": 100,
                       "payments_linked": linked,
+                      "parents_linked": parents_linked,
                       "pfc_mapped": pfc_mapped}},
         )
     except Exception as e:  # noqa: BLE001
@@ -780,6 +796,64 @@ async def resolve_payment_links(company_id: str) -> int:
             set_fields["updated_at"] = now_iso()
             await db.payments.update_one(
                 {"id": pay["id"]}, {"$set": set_fields},
+            )
+            updated += 1
+    return updated
+
+
+async def resolve_account_parents(company_id: str) -> int:
+    """Second-pass QBO account normalization. Two jobs:
+
+    1. Translate `parent_qbo_id` → local `parent_account_id` so the CoA
+       renders a proper nested tree (Landscaping Services > Job
+       Materials > Decks and Patios).
+    2. Unflatten legacy colon-joined names (e.g. name =
+       `Job Expenses:Cost of Labor:Installation`) that pre-date the
+       leaf-only mapper — reset name to the last segment. Only touches
+       QBO accounts whose current `name` still contains a `:`.
+
+    Idempotent: rerunning has no effect once every account has a
+    correct `parent_account_id` and no leftover colon-name. Returns the
+    number of accounts updated. Safe on companies with a partial QBO
+    footprint — accounts without a parent_qbo_id are skipped.
+    """
+    # Build qbo_id -> local id map for THIS company's QBO accounts.
+    qbo_to_local: dict[str, str] = {}
+    async for a in db.accounts.find(
+        {"company_id": company_id, "source": "qbo"},
+        {"id": 1, "qbo_id": 1},
+    ):
+        if a.get("qbo_id"):
+            qbo_to_local[str(a["qbo_id"])] = a["id"]
+
+    updated = 0
+    async for a in db.accounts.find(
+        {"company_id": company_id, "source": "qbo"},
+        {"id": 1, "name": 1, "parent_qbo_id": 1, "parent_account_id": 1,
+         "qbo_full_path": 1},
+    ):
+        set_fields: dict = {}
+
+        # 1) Parent link
+        pqid = a.get("parent_qbo_id")
+        if pqid and not a.get("parent_account_id"):
+            local_pid = qbo_to_local.get(str(pqid))
+            if local_pid:
+                set_fields["parent_account_id"] = local_pid
+
+        # 2) Unflatten colon-joined names
+        nm = a.get("name") or ""
+        if ":" in nm:
+            leaf = nm.rsplit(":", 1)[-1].strip()
+            if leaf and leaf != nm:
+                set_fields["name"] = leaf
+                if not a.get("qbo_full_path"):
+                    set_fields["qbo_full_path"] = nm
+
+        if set_fields:
+            set_fields["updated_at"] = now_iso()
+            await db.accounts.update_one(
+                {"id": a["id"]}, {"$set": set_fields},
             )
             updated += 1
     return updated

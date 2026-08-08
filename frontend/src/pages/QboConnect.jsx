@@ -325,6 +325,25 @@ export default function QboConnect() {
                 >
                   <RefreshCw size={12} /> Re-run migration
                 </button>
+                {/* Post-migration structural fix — unflattens colon-
+                    joined account names (Landscaping Services:Job
+                    Materials:Decks and Patios) into a proper parent
+                    tree. Idempotent, so safe to click repeatedly. */}
+                <button
+                  onClick={async () => {
+                    try {
+                      const r = await api.post(`/companies/${currentId}/qbo/rebuild-account-hierarchy`);
+                      alert(`Re-linked ${r.data.updated} accounts into a proper parent-child tree.`);
+                    } catch (e) {
+                      alert(`Failed: ${e?.response?.data?.detail || e.message}`);
+                    }
+                  }}
+                  data-testid="qbo-rebuild-hierarchy-btn"
+                  className="px-3 py-1.5 text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center gap-1"
+                  title="Split colon-joined account names into parent/child tree"
+                >
+                  <RefreshCw size={12} /> Rebuild account hierarchy
+                </button>
               </div>
             )}
           </div>
