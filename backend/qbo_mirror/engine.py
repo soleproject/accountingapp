@@ -163,20 +163,27 @@ def _diff_rows(local_rows: list[dict], qbo_rows: list[dict],
 # ─── Fetchers per entity ────────────────────────────────────────────
 
 async def _fetch_local(company_id: str, entity: str) -> list[dict]:
+    # Inactive local accounts/contacts/items are deliberately hidden —
+    # they shouldn't appear as `push_to_qbo` candidates. Filter them
+    # out so the diff report matches what the user sees in the CoA,
+    # Contacts, and Items pages.
+    inactive_skip = {"active": {"$ne": False}}
     if entity == "accounts":
         return [_norm_account_local(a) async for a in db.accounts.find(
-            {"company_id": company_id})]
+            {"company_id": company_id, **inactive_skip})]
     if entity == "customers":
         return [_norm_contact_local(c, "customer")
                 async for c in db.contacts.find(
-                    {"company_id": company_id, "kind": "customer"})]
+                    {"company_id": company_id, "kind": "customer",
+                     **inactive_skip})]
     if entity == "vendors":
         return [_norm_contact_local(c, "vendor")
                 async for c in db.contacts.find(
-                    {"company_id": company_id, "kind": "vendor"})]
+                    {"company_id": company_id, "kind": "vendor",
+                     **inactive_skip})]
     if entity == "items":
         return [_norm_item_local(i) async for i in db.items.find(
-            {"company_id": company_id})]
+            {"company_id": company_id, **inactive_skip})]
     return []
 
 
