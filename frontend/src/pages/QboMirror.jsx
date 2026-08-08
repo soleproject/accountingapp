@@ -36,6 +36,7 @@ export default function QboMirror() {
   const [config, setConfig] = useState(null);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
+  const [pulling, setPulling] = useState(false);
   const [report, setReport] = useState(null);
   const [logEntries, setLogEntries] = useState([]);
 
@@ -82,6 +83,47 @@ export default function QboMirror() {
     } finally { setRunning(false); }
   };
 
+  const runPull = async () => {
+    // Only Foundation entities. Enabled entities from the config are
+    // sent so the executor respects the user's checkbox choices.
+    const entities = Object.entries(config.entities || {})
+      .filter(([_, v]) => v)
+      .map(([k]) => k)
+      .filter(k => ["accounts", "customers", "vendors", "items"].includes(k));
+    if (!entities.length) {
+      toast.error("Enable at least one Foundation entity first.");
+      return;
+    }
+    const proceed = confirm(
+      "Pull missing rows from QBO into our system for: " +
+      entities.join(", ") + "?\n\n" +
+      "QBO Wins policy — any drifted field will be overwritten with " +
+      "QBO's value. This never touches invoices, bills, payments, or " +
+      "any ledger data. Safe to re-run."
+    );
+    if (!proceed) return;
+    setPulling(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/qbo/mirror/pull`,
+                                { entities });
+      if (r.data?.error) {
+        toast.error(r.data.error);
+      } else {
+        const t = r.data.totals || {};
+        toast.success(
+          `Pull complete — inserted ${t.inserted || 0}, updated ${t.updated || 0}`
+        );
+        // Refresh the preview so the user sees the new baseline (all
+        // zeros in Push/Pull ideally).
+        setReport(null);
+        await runDryRun();
+      }
+      await loadLog();
+    } catch (e) {
+      toast.error(`Pull failed: ${e?.response?.data?.detail || e.message}`);
+    } finally { setPulling(false); }
+  };
+
   if (!config) {
     return (
       <div className="p-8 flex items-center gap-2 text-slate-500">
@@ -108,7 +150,7 @@ export default function QboMirror() {
               <GitBranch className="w-6 h-6 text-indigo-600" />
               QBO Live Mirror
               <span className="text-[10px] font-medium tracking-wider uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
-                Phase 1a · Dry-Run Preview
+                Phase 1b · Inbound Pull
               </span>
             </h1>
             <p className="text-sm text-slate-600 mt-1 max-w-2xl">
@@ -207,28 +249,42 @@ export default function QboMirror() {
           </div>
         </div>
 
-        {/* Preview action */}
+        {/* Preview & Pull actions */}
         <div className="bg-white border rounded-lg p-5">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-sm font-medium text-slate-900">
-                Preview mirror actions
+                Preview & Pull
               </div>
               <div className="text-xs text-slate-500 mt-1 max-w-xl">
-                Reads every Foundation entity from both sides and shows
-                what a live sync <em>would</em> do. Zero writes to QBO or
-                to our system. Safe to run repeatedly.
+                <strong>Preview</strong> reads both sides and shows what
+                a live sync <em>would</em> do — zero writes.{" "}
+                <strong>Pull now</strong> executes an inbound-only sync:
+                inserts missing rows and overwrites drifted fields with
+                QBO's version (QBO Wins policy). Ledger data
+                (transactions, invoices, bills) is never touched.
               </div>
             </div>
-            <button
-              onClick={runDryRun}
-              disabled={running || !enabled}
-              data-testid="mirror-run-dryrun-btn"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
-            >
-              {running ? <><Loader2 className="w-4 h-4 animate-spin" /> Running…</>
-                       : <><Play size={14} /> Preview mirror actions</>}
-            </button>
+            <div className="flex gap-2 flex-shrink-0">
+              <button
+                onClick={runDryRun}
+                disabled={running || pulling || !enabled}
+                data-testid="mirror-run-dryrun-btn"
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+              >
+                {running ? <><Loader2 className="w-4 h-4 animate-spin" /> Preview…</>
+                         : <><Play size={14} /> Preview</>}
+              </button>
+              <button
+                onClick={runPull}
+                disabled={running || pulling || !enabled}
+                data-testid="mirror-run-pull-btn"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {pulling ? <><Loader2 className="w-4 h-4 animate-spin" /> Pulling…</>
+                         : <><ArrowLeft size={14} /> Pull now (QBO → us)</>}
+              </button>
+            </div>
           </div>
         </div>
 

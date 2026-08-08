@@ -174,12 +174,12 @@ async def _fetch_local(company_id: str, entity: str) -> list[dict]:
     if entity == "customers":
         return [_norm_contact_local(c, "customer")
                 async for c in db.contacts.find(
-                    {"company_id": company_id, "kind": "customer",
+                    {"company_id": company_id, "type": "customer",
                      **inactive_skip})]
     if entity == "vendors":
         return [_norm_contact_local(c, "vendor")
                 async for c in db.contacts.find(
-                    {"company_id": company_id, "kind": "vendor",
+                    {"company_id": company_id, "type": "vendor",
                      **inactive_skip})]
     if entity == "items":
         return [_norm_item_local(i) async for i in db.items.find(
