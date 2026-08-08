@@ -353,8 +353,9 @@ export default function QboConnect() {
                     try {
                       const r = await api.post(`/companies/${currentId}/qbo/rebuild-transaction-categories`);
                       alert(
-                        `Categorized ${r.data.updated} transactions · ` +
-                        `signed ${r.data.signed} (in/out direction).`
+                        `Categorized ${r.data.updated} · ` +
+                        `signed ${r.data.signed} · ` +
+                        `linked ${r.data.banks} to bank/CC accounts.`
                       );
                     } catch (e) {
                       alert(`Failed: ${e?.response?.data?.detail || e.message}`);
@@ -362,7 +363,7 @@ export default function QboConnect() {
                   }}
                   data-testid="qbo-rebuild-txn-categories-btn"
                   className="px-3 py-1.5 text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center gap-1"
-                  title="Assign categories + signed amount (in/out) to QBO transactions"
+                  title="Assign categories + signed amount + bank account to QBO transactions"
                 >
                   <RefreshCw size={12} /> Categorize imported transactions
                 </button>
