@@ -932,10 +932,41 @@ async def resolve_transaction_categories(company_id: str) -> int:
             )
 
     # Inbound QBO txn types post to the item's income account; outbound
-    # post to the expense account. Everything else defaults to income
-    # (safest — the fallback resolver still lets user re-pick).
+    # post to the expense account. `CreditMemo` is included here so its
+    # Uncategorized fallback lands in Uncategorized Expense (a customer
+    # credit reduces revenue, effectively an expense flow).
     _OUTBOUND = {"Purchase", "Bill", "BillPayment", "RefundReceipt",
-                 "VendorCredit"}
+                 "VendorCredit", "CreditMemo"}
+
+    # Last-resort Uncategorized fallbacks — used when a transaction's
+    # lines carry neither an AccountRef nor an Item that maps back to a
+    # local account (rare, but happens for QBO docs with only a memo
+    # line or a non-taxable "description-only" line). Prefer the QBO-
+    # imported Uncategorized accounts if the company has them; fall
+    # back to the seeded 6999 / 4999 slots that are always kept.
+    def _uncat(direction: str) -> dict | None:
+        want_type = "revenue" if direction == "in" else "expense"
+        for a in qbo_to_local.values():
+            if a.get("type") != want_type:
+                continue
+            nm = (a.get("name") or "").strip().lower()
+            if "uncategorized" in nm:
+                return a
+        # Fall through to seeded fallbacks (`Deactivate ALL seeded`
+        # preserves 6999 & 4999 specifically for this purpose).
+        code = "4999" if direction == "in" else "6999"
+        return seeded_fallback.get(code)
+
+    # Preload seeded 6999 / 4999 (only two candidates so a `find` is
+    # overkill; still one round trip).
+    seeded_fallback: dict[str, dict] = {}
+    async for a in db.accounts.find(
+        {"company_id": company_id, "source": {"$ne": "qbo"},
+         "code": {"$in": ["6999", "4999"]}},
+        {"id": 1, "code": 1, "name": 1, "_id": 0},
+    ):
+        if a.get("code"):
+            seeded_fallback[a["code"]] = a
 
     updated = 0
     async for t in db.transactions.find(
@@ -971,6 +1002,14 @@ async def resolve_transaction_categories(company_id: str) -> int:
                     if local:
                         picked = local
                         break
+        if not picked:
+            # No line-level AccountRef or Item resolution — drop the
+            # transaction into Uncategorized Expense/Income keyed by
+            # direction so the row stops showing "pick a category" and
+            # the user can re-classify later from the Transactions
+            # page.
+            direction = "out" if outbound else "in"
+            picked = _uncat(direction)
         if not picked:
             continue
         await db.transactions.update_one(
