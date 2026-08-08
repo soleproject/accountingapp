@@ -31,7 +31,7 @@ _UPDATE_FIELDS = {
     "accounts":  ["name", "type", "subtype", "active"],
     "customers": ["name", "email", "phone", "active", "address"],
     "vendors":   ["name", "email", "phone", "active", "address"],
-    "items":     ["name", "sku", "unit_price", "active"],
+    "items":     ["name", "sku", "price", "active"],
 }
 
 
