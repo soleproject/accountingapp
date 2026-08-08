@@ -37,6 +37,7 @@ export default function QboMirror() {
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
   const [pulling, setPulling] = useState(false);
+  const [pushing, setPushing] = useState(false);
   const [report, setReport] = useState(null);
   const [logEntries, setLogEntries] = useState([]);
 
@@ -124,6 +125,52 @@ export default function QboMirror() {
     } finally { setPulling(false); }
   };
 
+  const runPush = async () => {
+    const entities = Object.entries(config.entities || {})
+      .filter(([_, v]) => v)
+      .map(([k]) => k)
+      .filter(k => ["accounts", "customers", "vendors", "items"].includes(k));
+    if (!entities.length) {
+      toast.error("Enable at least one Foundation entity first.");
+      return;
+    }
+    const proceed = confirm(
+      "⚠️ THIS WRITES TO QBO ⚠️\n\n" +
+      "Push local-only rows from our system → QBO for: " +
+      entities.join(", ") + "?\n\n" +
+      "Only rows created in our app (with no qbo_id yet) will be sent. " +
+      "Existing QBO entities are never modified. Failures per row are " +
+      "shown after — nothing is atomic.\n\n" +
+      "Run Preview first to see how many rows will be pushed."
+    );
+    if (!proceed) return;
+    setPushing(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/qbo/mirror/push`,
+                                { entities });
+      if (r.data?.error) {
+        toast.error(r.data.error);
+      } else {
+        const t = r.data.totals || {};
+        if (t.failed > 0) {
+          toast.warning(
+            `Push complete — created ${t.inserted || 0} on QBO, ` +
+            `${t.failed} failed (see audit log for details).`
+          );
+        } else {
+          toast.success(
+            `Push complete — created ${t.inserted || 0} on QBO.`
+          );
+        }
+        setReport(null);
+        await runDryRun();
+      }
+      await loadLog();
+    } catch (e) {
+      toast.error(`Push failed: ${e?.response?.data?.detail || e.message}`);
+    } finally { setPushing(false); }
+  };
+
   if (!config) {
     return (
       <div className="p-8 flex items-center gap-2 text-slate-500">
@@ -150,7 +197,7 @@ export default function QboMirror() {
               <GitBranch className="w-6 h-6 text-indigo-600" />
               QBO Live Mirror
               <span className="text-[10px] font-medium tracking-wider uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
-                Phase 1b · Inbound Pull
+                Phase 1c · Bi-directional Foundation
               </span>
             </h1>
             <p className="text-sm text-slate-600 mt-1 max-w-2xl">
@@ -261,14 +308,16 @@ export default function QboMirror() {
                 a live sync <em>would</em> do — zero writes.{" "}
                 <strong>Pull now</strong> executes an inbound-only sync:
                 inserts missing rows and overwrites drifted fields with
-                QBO's version (QBO Wins policy). Ledger data
-                (transactions, invoices, bills) is never touched.
+                QBO's version (QBO Wins policy).{" "}
+                <strong>Push now</strong> executes an outbound-only sync:
+                creates local-only rows (no <code>qbo_id</code>) on QBO.
+                Neither touches ledger data.
               </div>
             </div>
-            <div className="flex gap-2 flex-shrink-0">
+            <div className="flex gap-2 flex-shrink-0 flex-wrap justify-end">
               <button
                 onClick={runDryRun}
-                disabled={running || pulling || !enabled}
+                disabled={running || pulling || pushing || !enabled}
                 data-testid="mirror-run-dryrun-btn"
                 className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
               >
@@ -277,12 +326,22 @@ export default function QboMirror() {
               </button>
               <button
                 onClick={runPull}
-                disabled={running || pulling || !enabled}
+                disabled={running || pulling || pushing || !enabled}
                 data-testid="mirror-run-pull-btn"
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
               >
                 {pulling ? <><Loader2 className="w-4 h-4 animate-spin" /> Pulling…</>
                          : <><ArrowLeft size={14} /> Pull now (QBO → us)</>}
+              </button>
+              <button
+                onClick={runPush}
+                disabled={running || pulling || pushing || !enabled}
+                data-testid="mirror-run-push-btn"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+                title="Writes to QBO — new local rows get created on Intuit's side"
+              >
+                {pushing ? <><Loader2 className="w-4 h-4 animate-spin" /> Pushing…</>
+                         : <><ArrowRight size={14} /> Push now (us → QBO)</>}
               </button>
             </div>
           </div>

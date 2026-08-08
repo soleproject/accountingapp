@@ -15,6 +15,7 @@ from deps import require_company
 from qbo_mirror.settings import get_config, upsert_config, append_log
 from qbo_mirror.engine import run_dry_run
 from qbo_mirror.pull import run_pull
+from qbo_mirror.push import run_push
 
 router = APIRouter(prefix="/api")
 
@@ -70,6 +71,17 @@ async def mirror_pull(cid: str, body: MirrorPullBody | None = None,
     await require_company(user, cid)
     entities = (body.entities if body else None)
     return await run_pull(cid, user.get("email") or "unknown", entities)
+
+
+@router.post("/companies/{cid}/qbo/mirror/push")
+async def mirror_push(cid: str, body: MirrorPullBody | None = None,
+                      user: dict = Depends(get_current_user)):
+    """Outbound-only sync — POST every local-only Foundation entity to
+    QBO. Only entities without a `qbo_id` are pushed. Ledger never
+    touched. Failures per row are surfaced in the response."""
+    await require_company(user, cid)
+    entities = (body.entities if body else None)
+    return await run_push(cid, user.get("email") or "unknown", entities)
 
 
 @router.get("/companies/{cid}/qbo/mirror/log")
