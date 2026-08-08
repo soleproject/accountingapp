@@ -835,10 +835,18 @@ async def resolve_transaction_categories(company_id: str) -> int:
     populates the display fields (`category_account_code`,
     `category_account_name`) so filters/exports work.
 
-    Skips transactions that already have a category assigned (idempotent)
-    and transactions whose line-item AccountRef doesn't resolve to a
-    known local account. Returns the number of transactions updated.
+    Resolution order per line:
+      1. Direct `account_qbo_id` (AccountBasedExpenseLineDetail) — the
+         common case for Purchases, Deposits, Transfers.
+      2. Fallback via `item_qbo_id` — SalesItemLineDetail /
+         ItemBasedExpenseLineDetail use an Item reference; the account
+         lives on the Item (`income_account_qbo_id` for inbound txn
+         types, `expense_account_qbo_id` for outbound).
+
+    Skips transactions that already have a category assigned (idempotent).
+    Returns the number of transactions updated.
     """
+    # qbo_id -> local account for THIS company (one-shot lookup).
     qbo_to_local: dict[str, dict] = {}
     async for a in db.accounts.find(
         {"company_id": company_id, "source": "qbo"},
@@ -850,22 +858,60 @@ async def resolve_transaction_categories(company_id: str) -> int:
     if not qbo_to_local:
         return 0
 
+    # qbo_id -> item's income+expense qbo account ids, so we can resolve
+    # item-based lines without a per-line DB round-trip.
+    item_to_accts: dict[str, tuple[str, str]] = {}
+    async for it in db.items.find(
+        {"company_id": company_id, "source": "qbo"},
+        {"qbo_id": 1, "income_account_qbo_id": 1,
+         "expense_account_qbo_id": 1, "_id": 0},
+    ):
+        if it.get("qbo_id"):
+            item_to_accts[str(it["qbo_id"])] = (
+                str(it.get("income_account_qbo_id") or ""),
+                str(it.get("expense_account_qbo_id") or ""),
+            )
+
+    # Inbound QBO txn types post to the item's income account; outbound
+    # post to the expense account. Everything else defaults to income
+    # (safest — the fallback resolver still lets user re-pick).
+    _OUTBOUND = {"Purchase", "Bill", "BillPayment", "RefundReceipt",
+                 "VendorCredit"}
+
     updated = 0
     async for t in db.transactions.find(
         {"company_id": company_id, "source": "qbo",
          "$or": [{"category_account_id": {"$in": [None, ""]}},
                  {"category_account_id": {"$exists": False}}]},
-        {"id": 1, "line_items": 1},
+        {"id": 1, "line_items": 1, "txn_type": 1},
     ):
+        txn_type = t.get("txn_type") or ""
+        outbound = txn_type in _OUTBOUND
         picked = None
         for ln in t.get("line_items") or []:
+            # 1. Direct account ref
             aqid = ln.get("account_qbo_id")
-            if not aqid:
-                continue
-            local = qbo_to_local.get(str(aqid))
-            if local:
-                picked = local
-                break
+            if aqid:
+                local = qbo_to_local.get(str(aqid))
+                if local:
+                    picked = local
+                    break
+            # 2. Item ref → item's income/expense account
+            iqid = ln.get("item_qbo_id")
+            if iqid:
+                inc, exp = item_to_accts.get(str(iqid), ("", ""))
+                candidate_qid = exp if outbound else inc
+                # If the "correct-direction" account is missing, fall
+                # back to the other side (some QBO items only carry
+                # one of the two — e.g. inventory items skip the
+                # income account on service-only companies).
+                if not candidate_qid:
+                    candidate_qid = inc or exp
+                if candidate_qid:
+                    local = qbo_to_local.get(candidate_qid)
+                    if local:
+                        picked = local
+                        break
         if not picked:
             continue
         await db.transactions.update_one(
