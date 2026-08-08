@@ -315,6 +315,16 @@ export default function QboConnect() {
                     <span className="ml-1 opacity-80">({job.pfc_mapped} auto-mapped)</span>
                   )}
                 </button>
+                {/* Re-run entry point — completed jobs otherwise had no
+                    way to trigger a fresh import. Clears the job pointer
+                    locally so the "Start migration" button re-appears. */}
+                <button
+                  onClick={async () => { setJob(null); await startMigration(); }}
+                  data-testid="qbo-rerun-btn"
+                  className="px-3 py-1.5 text-xs rounded-md border border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 inline-flex items-center gap-1"
+                >
+                  <RefreshCw size={12} /> Re-run migration
+                </button>
               </div>
             )}
           </div>
