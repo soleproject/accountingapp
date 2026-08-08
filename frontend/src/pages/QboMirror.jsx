@@ -5,7 +5,7 @@ import {
   ArrowRight, GitBranch, Info,
 } from "lucide-react";
 import { useCompany } from "@/lib/company";
-import api from "@/lib/axios";
+import { api } from "@/lib/api";
 
 /**
  * /settings/qbo-mirror — Phase 1a: dry-run preview only.
