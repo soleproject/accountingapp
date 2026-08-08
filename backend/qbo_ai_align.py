@@ -233,6 +233,11 @@ async def apply_alignment(
     """
     rank = {"high": 3, "medium": 2, "low": 1, "none": 0}
     threshold = rank.get(min_confidence, 2)
+    # Whitelist of legal codes — the AI occasionally invents placeholder
+    # codes like "9999" or "N/A" when it can't find a match instead of
+    # returning `""` as instructed. Guard against those so we never
+    # stamp a made-up code onto a real QBO account.
+    valid_codes = {c for c, *_ in DEFAULT_COA}
     stamped_codes: set[str] = set()
     stamped = skipped = 0
 
@@ -240,7 +245,8 @@ async def apply_alignment(
         code = (p.get("canonical_code") or "").strip()
         qbo_id = p.get("qbo_id")
         conf = (p.get("confidence") or "none").lower()
-        if not code or not qbo_id or rank.get(conf, 0) < threshold:
+        if not code or not qbo_id or rank.get(conf, 0) < threshold \
+                or code not in valid_codes:
             skipped += 1
             continue
         r = await db.accounts.update_one(
