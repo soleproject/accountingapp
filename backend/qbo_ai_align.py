@@ -233,22 +233,45 @@ async def apply_alignment(
     """
     rank = {"high": 3, "medium": 2, "low": 1, "none": 0}
     threshold = rank.get(min_confidence, 2)
-    # Whitelist of legal codes — the AI occasionally invents placeholder
-    # codes like "9999" or "N/A" when it can't find a match instead of
-    # returning `""` as instructed. Guard against those so we never
-    # stamp a made-up code onto a real QBO account.
-    valid_codes = {c for c, *_ in DEFAULT_COA}
+    # Whitelist of legal codes AND their canonical types — the AI has
+    # occasionally invented placeholder codes like "9999" or forced a
+    # cross-type match (e.g. `Cost of Goods Sold (cogs) → 6000 Meals
+    # (expense)` on the 2026-02-08 test run). Guard against both.
+    code_to_type = {c: t for c, _n, t, _s in DEFAULT_COA}
+    # Type-compatibility: cogs and expense flow to the P&L the same way
+    # so we allow that cross-mapping (users often collapse COGS into
+    # operating expense buckets). Every other pair must match exactly.
+    def _compatible(qbo_type: str, target_type: str) -> bool:
+        if qbo_type == target_type:
+            return True
+        if {qbo_type, target_type} == {"cogs", "expense"}:
+            return True
+        return False
+
     stamped_codes: set[str] = set()
     stamped = skipped = 0
+    skipped_reasons: dict[str, int] = {}
 
     for p in proposals or []:
         code = (p.get("canonical_code") or "").strip()
         qbo_id = p.get("qbo_id")
         conf = (p.get("confidence") or "none").lower()
-        if not code or not qbo_id or rank.get(conf, 0) < threshold \
-                or code not in valid_codes:
+
+        def _skip(reason: str):
+            nonlocal skipped
             skipped += 1
-            continue
+            skipped_reasons[reason] = skipped_reasons.get(reason, 0) + 1
+
+        if not code or not qbo_id:
+            _skip("empty_code_or_id"); continue
+        if rank.get(conf, 0) < threshold:
+            _skip(f"confidence_{conf}"); continue
+        if code not in code_to_type:
+            _skip(f"invalid_code_{code}"); continue
+        target_type = code_to_type[code]
+        qbo_type = (p.get("qbo_type") or "").lower()
+        if qbo_type and not _compatible(qbo_type, target_type):
+            _skip(f"type_mismatch_{qbo_type}_to_{target_type}"); continue
         r = await db.accounts.update_one(
             {"company_id": company_id, "source": "qbo", "id": qbo_id},
             {"$set": {"code": code, "pfc_aligned_at": now_iso(),
@@ -276,4 +299,5 @@ async def apply_alignment(
         )
         deactivated = r.modified_count
 
-    return {"stamped": stamped, "deactivated": deactivated, "skipped": skipped}
+    return {"stamped": stamped, "deactivated": deactivated,
+            "skipped": skipped, "skipped_reasons": skipped_reasons}
