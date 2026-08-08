@@ -713,8 +713,29 @@ async def run_migration(job_id: str, company_id: str) -> None:
         pfc_mapped = 0
         try:
             from pfc_ai_builder import plan_pfc_map, apply_pfc_map
-            plan = await plan_pfc_map(company_id)
-            r = await apply_pfc_map(company_id, plan.get("proposals") or [],
+            # Claude Sonnet is non-deterministic — a single pass on the
+            # same COA typically maps 60-75% of PFCs at medium+
+            # confidence; a second pass fills in the rows Claude was
+            # uncertain about the first time. Two passes closes the
+            # gap between the initial auto-run and what the user
+            # would get by clicking "Build with AI" once manually.
+            # We keep the HIGHEST-confidence proposal per PFC across
+            # runs — a "high" mapping never gets overwritten by a
+            # later "low" one.
+            rank = {"high": 3, "medium": 2, "low": 1, "none": 0}
+            best: dict[str, dict] = {}
+            for _ in range(2):
+                plan = await plan_pfc_map(company_id)
+                for p in plan.get("proposals") or []:
+                    key = p.get("pfc_detailed") or ""
+                    if not key:
+                        continue
+                    prev = best.get(key)
+                    if (not prev
+                            or rank.get(p.get("confidence"), 0)
+                            > rank.get(prev.get("confidence"), 0)):
+                        best[key] = p
+            r = await apply_pfc_map(company_id, list(best.values()),
                                     min_confidence="medium")
             pfc_mapped = r.get("written", 0)
         except Exception as e:  # noqa: BLE001
