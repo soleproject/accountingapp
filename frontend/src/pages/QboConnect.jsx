@@ -46,6 +46,17 @@ export default function QboConnect() {
     if (!currentId) return;
     const r = await api.get(`/companies/${currentId}/qbo/status`);
     setStatus(r.data);
+    // Rehydrate the Preview + Migrate cards from server-cached state so
+    // navigating away and back preserves the page you were on.
+    if (r.data.preview) setPreview(r.data.preview);
+    if (r.data.last_job) {
+      setJob(r.data.last_job);
+      // If the last job is still in-flight, resume the poller so the
+      // progress bar picks up where it left off.
+      if (r.data.last_job.status === "queued" || r.data.last_job.status === "running") {
+        startPolling(r.data.last_job.job_id);
+      }
+    }
   };
   useEffect(() => { refreshStatus(); }, [currentId]);
 
@@ -87,6 +98,8 @@ export default function QboConnect() {
       toast.success("Disconnected");
       setStatus({ connected: false });
       setPreview(null);
+      setJob(null);
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     } catch (e) {
       toast.error(e.response?.data?.detail || "Disconnect failed");
     } finally { setBusy(false); }
@@ -314,6 +327,18 @@ export default function QboConnect() {
                   {typeof job?.pfc_mapped === "number" && (
                     <span className="ml-1 opacity-80">({job.pfc_mapped} auto-mapped)</span>
                   )}
+                {/* Re-run entry point — completed jobs otherwise had no
+                    way to trigger a fresh import. Clears the job pointer
+                    locally so the "Start migration" button re-appears. */}
+                <button
+                  onClick={async () => {
+                    setJob(null);
+                    await startMigration();
+                  }}
+                  data-testid="qbo-rerun-btn"
+                  className="px-3 py-1.5 text-xs rounded-md border border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 inline-flex items-center gap-1"
+                >
+                  <RefreshCw size={12} /> Re-run migration
                 </button>
               </div>
             )}
@@ -324,9 +349,11 @@ export default function QboConnect() {
       <div className="text-xs text-slate-400 mt-6 flex items-start gap-2">
         <Sparkles size={12} className="mt-0.5 text-slate-300" />
         <span>
-          V1 imports Foundation entities (Chart of Accounts, Customers, Vendors, Items).
-          Transactional entities (Invoices, Bills, Payments, Journal Entries) land in the
-          next release — the connection persists so you won't reconnect.
+          Imports every QBO object: Chart of Accounts, Customers, Vendors,
+          Items, Invoices, Bills, Payments, Bill Payments, Journal Entries,
+          Deposits, Transfers, Sales/Refund Receipts, Credit Memos, Purchases,
+          and Attachment metadata. All records upsert idempotently by QBO ID —
+          safe to re-run.
         </span>
       </div>
     </div>
