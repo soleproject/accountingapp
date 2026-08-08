@@ -201,6 +201,42 @@ async def qbo_relink_payments(cid: str, user: dict = Depends(get_current_user)):
     return {"payments_linked": updated}
 
 
+@router.get("/companies/{cid}/qbo/ai-align-plan")
+async def qbo_ai_align_plan(cid: str, user: dict = Depends(get_current_user)):
+    """Ask Claude to align QBO-imported accounts to our canonical PFC
+    codes. Returns the plan for the UI to preview (no DB writes).
+
+    The UI shows the proposal grouped by confidence, lets the user edit
+    matches, then submits back to `POST /qbo/ai-align`."""
+    await require_company(user, cid)
+    from qbo_ai_align import plan_alignment
+    return await plan_alignment(cid)
+
+
+@router.post("/companies/{cid}/qbo/ai-align")
+async def qbo_ai_align_apply(
+    cid: str,
+    payload: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Commit an alignment plan. Payload:
+      {
+        "proposals": [...],           # from /ai-align-plan, possibly edited
+        "min_confidence": "medium",   # optional, default "medium"
+        "deactivate_seeded": true,    # optional, default true
+      }
+    Writes `code` onto matched QBO accounts and deactivates our seeded
+    duplicates for codes that got a QBO home."""
+    await require_company(user, cid)
+    from qbo_ai_align import apply_alignment
+    return await apply_alignment(
+        company_id=cid,
+        proposals=payload.get("proposals") or [],
+        min_confidence=payload.get("min_confidence", "medium"),
+        deactivate_seeded=bool(payload.get("deactivate_seeded", True)),
+    )
+
+
 @router.get("/companies/{cid}/qbo/diagnostics")
 async def qbo_diagnostics(cid: str, user: dict = Depends(get_current_user)):
     """Full audit of a company's QBO migration state. Returns:
