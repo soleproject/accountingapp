@@ -690,11 +690,30 @@ async def run_migration(job_id: str, company_id: str) -> None:
         # id lookups succeed. Direct writes (no PATCH cascade) since
         # QBO already gave us the correct balance on each doc.
         linked = await resolve_payment_links(company_id)
+        # Post-import: auto-build the Plaid PFC → account map so Plaid
+        # transactions land on QBO accounts (not our seeded ones) from
+        # day one. AI does a best-effort pass at medium+ confidence.
+        # Wrapped in try/except so an LLM hiccup can't fail the whole
+        # migration — user can always click "Build with AI" later on
+        # the settings page. QBO 15 LLC (Feb 2026) got 58/127 mapped
+        # in the first auto-run.
+        pfc_mapped = 0
+        try:
+            from pfc_ai_builder import plan_pfc_map, apply_pfc_map
+            plan = await plan_pfc_map(company_id)
+            r = await apply_pfc_map(company_id, plan.get("proposals") or [],
+                                    min_confidence="medium")
+            pfc_mapped = r.get("written", 0)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("PFC auto-map failed for %s: %s — user can "
+                           "run manually on the settings page.",
+                           company_id, e)
         await db.qbo_jobs.update_one(
             {"job_id": job_id},
             {"$set": {"status": "done", "phase": "done",
                       "finished_at": now_iso(), "percent": 100,
-                      "payments_linked": linked}},
+                      "payments_linked": linked,
+                      "pfc_mapped": pfc_mapped}},
         )
     except Exception as e:  # noqa: BLE001
         logger.exception("QBO migration failed for %s", company_id)

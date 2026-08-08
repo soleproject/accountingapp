@@ -4348,3 +4348,29 @@ Local dev container had a stale Redis connection attempt that showed a Redis Con
 1. Save to GitHub → PR merge → Railway auto-deploys.
 2. Re-run QBO 4 LLC migration.
 3. Re-fetch diagnostics. Even if a specific row fails, the job now continues; failed rows show up in `jobs[0].entity_errors` with exact error strings.
+
+## 2026-02-08 — QBO → Plaid PFC Auto-Categorization Pipeline 🎯
+
+### The core insight
+Trying to stamp our numeric codes onto QBO accounts was the wrong model — it was fragile (AI non-determinism), lossy (structural accounts like AP/AR/Inventory got mangled), and coupled QBO's schema to our seed. The right model is the existing `pfc_org_overrides` collection, populated per-company via AI at migration time.
+
+### What shipped
+- **New: `backend/pfc_ai_builder.py`** — Claude Sonnet 5 proposes `pfc_detailed → account_id` mappings using each company's actual chart. Type-safe (revenue→revenue, expense→expense), skips structural accounts, `medium+` confidence auto-writes.
+- **New endpoints** in `routes/qbo.py`: `GET /pfc-map/plan`, `POST /pfc-map/apply`, `GET /pfc-map`, `PUT /pfc-map/{pfc}`, `POST /qbo/reset-qbo-codes` (undo old code-stamping).
+- **New page** `frontend/src/pages/PfcCategoryMap.jsx` at `/settings/pfc-map` — 127-row table with account dropdowns, filter, "Build with AI" button, source badges (ai/user/pinned).
+- **Auto-runs on QBO migration** — `run_migration()` now calls `resolve_payment_links()` AND `apply_pfc_map()` after entities import. Wrapped in try/except so LLM hiccups don't fail the migration.
+
+### Test results — QBO 15 LLC (Feb 2026)
+- 89 accounts / 55 contacts / 18 items / 31 invoices / 15 bills / 26 payments (all auto-linked) / 3 JEs / 46 transactions imported cleanly.
+- PFC map: 58 of 127 categories auto-mapped at medium+ confidence. 69 correctly left unmapped (personal categories, ambiguous transfers). Manual overrides available per-row.
+- Verified isolation: Show LLC (non-QBO) categorization unchanged — same 11-bucket distribution as before this work.
+
+### Retired
+- `backend/qbo_ai_align.py` (still exists but no longer called — the "stamp codes onto QBO accounts" approach)
+- `POST /qbo/ai-align-plan` and `POST /qbo/ai-align` endpoints (kept for backward-compat, users should ignore)
+
+### Known limitations
+- INCOME_RENTAL sometimes maps to a domain-specific revenue account when the QBO chart has one — user can override via dropdown.
+- LOAN_PAYMENTS_* (non-credit-card) intentionally left unmapped — principal/interest splits need special handling.
+- `TRANSFER_OUT_ACCOUNT_TRANSFER` pre-existing routing bug (falls to Uncategorized instead of 3200 Inter-Account Transfer) — unrelated to this work, tracked for future session.
+
