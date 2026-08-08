@@ -79,7 +79,9 @@ def _norm_item_local(i: dict) -> dict:
         "natural_key": f"item::{(i.get('name') or '').strip().lower()}",
         "name": (i.get("name") or "").strip(),
         "sku": (i.get("sku") or "").strip(),
-        "unit_price": round(float(i.get("unit_price") or 0), 2),
+        # `map_item` stores unit price on the local doc as `price`
+        # (not `unit_price`) — see qbo_service.map_item line 337.
+        "price": round(float(i.get("price") or 0), 2),
         "active": i.get("active", True),
     }
 
@@ -90,7 +92,7 @@ def _norm_item_qbo(o: dict) -> dict:
         "natural_key": f"item::{(o.get('Name') or '').strip().lower()}",
         "name": (o.get("Name") or "").strip(),
         "sku": (o.get("Sku") or "").strip(),
-        "unit_price": round(float(o.get("UnitPrice") or 0), 2),
+        "price": round(float(o.get("UnitPrice") or 0), 2),
         "active": bool(o.get("Active", True)),
     }
 
@@ -102,7 +104,7 @@ _DRIFT_FIELDS = {
     "accounts":  ["name", "type", "active"],
     "customers": ["name", "email", "phone", "active"],
     "vendors":   ["name", "email", "phone", "active"],
-    "items":     ["name", "sku", "unit_price", "active"],
+    "items":     ["name", "sku", "price", "active"],
 }
 
 
