@@ -286,18 +286,34 @@ export default function QboConnect() {
               </div>
             )}
             {done && (
-              <div className="mt-3 flex gap-2">
+              <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   onClick={() => navigate("/accounting/chart-of-accounts")}
                   className="px-3 py-1.5 text-xs rounded-md border bg-white hover:bg-slate-50"
+                  data-testid="qbo-view-coa-btn"
                 >
                   View Chart of Accounts
                 </button>
                 <button
                   onClick={() => navigate("/contacts")}
                   className="px-3 py-1.5 text-xs rounded-md border bg-white hover:bg-slate-50"
+                  data-testid="qbo-view-contacts-btn"
                 >
                   View Contacts
+                </button>
+                {/* Migration auto-builds the Plaid PFC → QBO account
+                    map — this link takes users straight to the review
+                    page. Highlighted (indigo) because reviewing the
+                    AI's mapping is the recommended next step. */}
+                <button
+                  onClick={() => navigate("/settings/pfc-map")}
+                  className="px-3 py-1.5 text-xs rounded-md bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1"
+                  data-testid="qbo-view-pfc-map-btn"
+                >
+                  <Sparkles size={12} /> Review Plaid Categories
+                  {typeof job?.pfc_mapped === "number" && (
+                    <span className="ml-1 opacity-80">({job.pfc_mapped} auto-mapped)</span>
+                  )}
                 </button>
               </div>
             )}
