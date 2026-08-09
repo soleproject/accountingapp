@@ -95,12 +95,11 @@ def _acct_body(a: dict) -> dict:
         "Name": (a.get("name") or "").strip(),
         "AccountType": _QBO_ACCOUNT_TYPE.get(a.get("type"), "Expense"),
     }
-    # Deliberately NOT sending `AccountSubType`. Our local `subtype`
-    # values (`operating_expense`, etc.) don't map to QBO's strict
-    # enums (`OfficeGeneralAdministrativeExpenses`, `Utilities`, …).
-    # Letting QBO auto-assign the subtype based on AccountType is
-    # safer than 400-erroring on a subtype mismatch. Custom subtype
-    # mapping can be added in a future phase if users need it.
+    # Include `Active` explicitly — needed for "Make Inactive" flow
+    # to propagate to QBO (sparse update needs the field or QBO won't
+    # change the state).
+    if "active" in a:
+        body["Active"] = bool(a.get("active"))
     if a.get("code"):
         body["AcctNum"] = str(a["code"])
     if a.get("description"):
@@ -112,6 +111,8 @@ def _contact_body(c: dict) -> dict:
     body: dict[str, Any] = {
         "DisplayName": (c.get("name") or "").strip(),
     }
+    if "active" in c:
+        body["Active"] = bool(c.get("active"))
     if c.get("email"):
         body["PrimaryEmailAddr"] = {"Address": c["email"]}
     if c.get("phone"):
@@ -124,14 +125,14 @@ def _item_body(i: dict) -> dict:
         "Name": (i.get("name") or "").strip(),
         "Type": (i.get("item_type") or "Service"),
     }
+    if "active" in i:
+        body["Active"] = bool(i.get("active"))
     if i.get("sku"):
         body["Sku"] = i["sku"]
     if i.get("description"):
         body["Description"] = i["description"][:1000]
     if i.get("price"):
         body["UnitPrice"] = float(i["price"])
-    # QBO requires IncomeAccountRef for Service/Inventory. Skip if
-    # missing — QBO will 400, we'll surface the error per-row.
     if i.get("income_account_qbo_id"):
         body["IncomeAccountRef"] = {"value": str(i["income_account_qbo_id"])}
     return body
