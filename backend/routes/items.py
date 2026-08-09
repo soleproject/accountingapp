@@ -224,12 +224,29 @@ async def update_item(cid: str, iid: str, patch: ItemPatch, user: dict = Depends
             doc = await db.items.find_one({"id": iid, "company_id": cid})
     except Exception:
         pass
+    _fire_item_autoupdate(cid, iid)
     return {"item": coerce(doc) if doc else None}
+    # Note: `try_auto_update` for items is fired below inside the
+    # `update_item` endpoint — this line is the `create_item` tail.
+
+
+def _fire_item_autoupdate(cid: str, iid: str) -> None:
+    try:
+        from qbo_mirror.autopush import try_auto_update
+        try_auto_update(cid, "item", iid)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 @router.delete("/companies/{cid}/items/{iid}")
 async def delete_item(cid: str, iid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
+    # Capture qbo_id BEFORE local delete so we can fire the auto-delete
+    # hook against QBO after the local row is gone.
+    doomed = await db.items.find_one(
+        {"id": iid, "company_id": cid},
+        {"qbo_id": 1, "name": 1, "_id": 0},
+    )
     # Reverse the opening-balance JE (if any) so the BS drops back to
     # zero — otherwise the credit sits orphaned in Opening Balance
     # Equity forever.
@@ -241,6 +258,14 @@ async def delete_item(cid: str, iid: str, user: dict = Depends(get_current_user)
     except Exception:
         pass
     await db.items.delete_one({"id": iid, "company_id": cid})
+    # Fire-and-forget delete on QBO.
+    try:
+        from qbo_mirror.autopush import try_auto_delete
+        if doomed and doomed.get("qbo_id"):
+            try_auto_delete(cid, "item", doomed.get("qbo_id"),
+                             doomed.get("name") or "")
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True}
 
 

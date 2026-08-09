@@ -168,16 +168,41 @@ async def update_contact(cid: str, xid: str, payload: dict, user: dict = Depends
         await get_cache().ainvalidate(cid)
     except Exception:  # noqa: BLE001
         pass
+    # Auto-update on QBO if this row was already mirrored.
+    try:
+        c = await db.contacts.find_one(
+            {"id": xid, "company_id": cid}, {"type": 1, "_id": 0},
+        )
+        if c:
+            from qbo_mirror.autopush import try_auto_update
+            try_auto_update(cid, (c.get("type") or "customer"), xid)
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True}
 
 
 @router.delete("/companies/{cid}/contacts/{xid}")
 async def delete_contact(cid: str, xid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
+    # Capture qbo_id + type BEFORE the local delete so we can fire the
+    # auto-delete hook against QBO after the local row is gone.
+    doomed = await db.contacts.find_one(
+        {"id": xid, "company_id": cid},
+        {"qbo_id": 1, "type": 1, "name": 1, "_id": 0},
+    )
     await db.contacts.delete_one({"id": xid, "company_id": cid})
     try:
         from infra import get_cache
         await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+    # Fire-and-forget auto-delete on QBO.
+    try:
+        from qbo_mirror.autopush import try_auto_delete
+        if doomed and doomed.get("qbo_id"):
+            try_auto_delete(cid, (doomed.get("type") or "customer"),
+                             doomed.get("qbo_id"),
+                             doomed.get("name") or "")
     except Exception:  # noqa: BLE001
         pass
     return {"ok": True}
