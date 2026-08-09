@@ -774,25 +774,29 @@ async def _resolve_account_qbo_id(company_id: str,
 
 async def _payment_body_in(company_id: str, pay: dict) -> dict:
     """Customer Payment body (money in). Requires:
-      - contact_id → CustomerRef
+      - contact_id → CustomerRef (fallback: linked invoice's contact_id)
       - linked_invoice_id → Line[].LinkedTxn (Invoice, invoice.qbo_id)
       - bank_account_id → DepositToAccountRef (optional; QBO uses
         Undeposited Funds if omitted).
     """
-    cust = await _resolve_customer_ref(company_id, pay.get("contact_id"))
-    if not cust:
-        raise ValueError(
-            "Customer missing or not synced to QBO. Sync customers first.")
     inv_id = pay.get("linked_invoice_id")
     if not inv_id:
         raise ValueError("Payment has no linked invoice.")
     inv = await db.invoices.find_one(
         {"id": inv_id, "company_id": company_id},
-        {"qbo_id": 1, "_id": 0},
+        {"qbo_id": 1, "contact_id": 1, "_id": 0},
     )
     if not inv or not inv.get("qbo_id"):
         raise ValueError(
             "Linked invoice not synced to QBO. Sync the invoice first.")
+    # Fallback: if the payment row has no contact_id (common when
+    # the user records "Pay this invoice" from the invoice screen —
+    # the customer is implicit), reuse the invoice's contact_id.
+    contact_id = pay.get("contact_id") or inv.get("contact_id")
+    cust = await _resolve_customer_ref(company_id, contact_id)
+    if not cust:
+        raise ValueError(
+            "Customer missing or not synced to QBO. Sync customers first.")
     amount = round(float(pay.get("amount") or 0), 2)
     body: dict[str, Any] = {
         "CustomerRef": {"value": cust[0], "name": cust[1]},
@@ -816,27 +820,28 @@ async def _payment_body_in(company_id: str, pay: dict) -> dict:
 
 async def _payment_body_out(company_id: str, pay: dict) -> dict:
     """BillPayment body (money out). Requires:
-      - contact_id → VendorRef
+      - contact_id → VendorRef (fallback: linked bill's contact_id)
       - linked_bill_id → Line[].LinkedTxn (Bill, bill.qbo_id)
       - bank_account_id → CheckPayment.BankAccountRef.
 
     `PayType: Check` is the safest default — CreditCard requires a
     QBO credit-card account that we don't reliably know locally.
     """
-    vend = await _resolve_vendor_ref(company_id, pay.get("contact_id"))
-    if not vend:
-        raise ValueError(
-            "Vendor missing or not synced to QBO. Sync vendors first.")
     bill_id = pay.get("linked_bill_id")
     if not bill_id:
         raise ValueError("Bill payment has no linked bill.")
     bill = await db.bills.find_one(
         {"id": bill_id, "company_id": company_id},
-        {"qbo_id": 1, "_id": 0},
+        {"qbo_id": 1, "contact_id": 1, "_id": 0},
     )
     if not bill or not bill.get("qbo_id"):
         raise ValueError(
             "Linked bill not synced to QBO. Sync the bill first.")
+    contact_id = pay.get("contact_id") or bill.get("contact_id")
+    vend = await _resolve_vendor_ref(company_id, contact_id)
+    if not vend:
+        raise ValueError(
+            "Vendor missing or not synced to QBO. Sync vendors first.")
     amount = round(float(pay.get("amount") or 0), 2)
     bank_qbo = await _resolve_account_qbo_id(
         company_id, pay.get("bank_account_id"))
