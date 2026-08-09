@@ -4464,3 +4464,28 @@ prevention.
 - Phase 2f: Deposits / Transfers / Journal Entries mirror.
 - Real-time inbound webhooks or background auto-pull polling.
 - Sync Status Badges on CoA / Contacts / Items / Invoices / Bills.
+
+
+## 2026-08-09 — QBO Mirror Phase 2e (Payments + Bill Payments)
+
+**Status**: SHIPPED. Money movement now flows bi-directionally.
+
+### What shipped
+- Push (both directions), Pull (both directions), autopush on
+  create/delete, dry-run preview cards.
+- Direction dispatch in `routes/payments.py::_payment_mirror_entity`.
+- Registry split into `payment_in` / `payment_out` so a single
+  local collection can drive two QBO endpoints.
+- 8 unit tests, 19/19 total across all mirror test files.
+
+### Deferred
+- Payment UPDATE mirroring — user pattern: delete + recreate.
+- Multi-invoice / multi-bill single payments (single-link MVP).
+- Payment drift detection in preview (qbo_id-only match).
+
+### Next up
+- Phase 2f: Deposits / Transfers / Journal Entries mirror.
+- Background auto-pull polling (15-min scheduler) → QBO→us
+  becomes automatic without Intuit webhook config.
+- Sync Status Badges on CoA / Contacts / Items / Invoices / Bills
+  / Payments rows using `_sync_status`.

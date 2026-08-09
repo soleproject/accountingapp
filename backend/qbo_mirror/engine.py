@@ -178,6 +178,31 @@ def _norm_bill_qbo(o: dict) -> dict:
     }
 
 
+# ─── Payment normalizers (Phase 2e) ────────────────────────────────
+# Payments don't have a stable natural key (no DocNumber). We match
+# strictly by qbo_id; the natural_key here is intentionally
+# per-row-unique so `_diff_rows` never falls back to it.
+
+def _norm_payment_local(p: dict, direction: str) -> dict:
+    return {
+        "qbo_id": p.get("qbo_id"),
+        "natural_key": f"pay-{direction}::local::{p.get('id')}",
+        "amount": round(float(p.get("amount") or 0), 2),
+        "date": p.get("date") or "",
+        "direction": direction,
+    }
+
+
+def _norm_payment_qbo(o: dict, direction: str) -> dict:
+    return {
+        "qbo_id": o.get("Id"),
+        "natural_key": f"pay-{direction}::qbo::{o.get('Id')}",
+        "amount": round(float(o.get("TotalAmt") or 0), 2),
+        "date": o.get("TxnDate") or "",
+        "direction": direction,
+    }
+
+
 # ─── Diff builder ───────────────────────────────────────────────────
 # Fields whose drift is *significant* — cosmetic-only fields (e.g.
 # subtype spelling) don't count as drift to reduce noise in the report.
@@ -188,6 +213,12 @@ _DRIFT_FIELDS = {
     "items":     ["name", "sku", "price", "active"],
     "invoices":  ["number", "date", "total", "balance", "status"],
     "bills":     ["number", "date", "total", "balance", "status"],
+    # Payments intentionally have NO drift-tracked fields — the
+    # linkage cascade can shift amount/date locally in ways that
+    # don't reflect in QBO's own Payment record, and vice-versa.
+    # Users push/pull via the buttons instead.
+    "payments":       [],
+    "bill_payments":  [],
 }
 
 
@@ -277,6 +308,16 @@ async def _fetch_local(company_id: str, entity: str) -> list[dict]:
     if entity == "bills":
         return [_norm_bill_local(b) async for b in db.bills.find(
             {"company_id": company_id, "voided": {"$ne": True}})]
+    if entity == "payments":
+        return [_norm_payment_local(p, "in")
+                async for p in db.payments.find(
+                    {"company_id": company_id,
+                     "linked_invoice_id": {"$nin": [None, ""]}})]
+    if entity == "bill_payments":
+        return [_norm_payment_local(p, "out")
+                async for p in db.payments.find(
+                    {"company_id": company_id,
+                     "linked_bill_id": {"$nin": [None, ""]}})]
     return []
 
 
@@ -300,6 +341,12 @@ async def _fetch_qbo(company_id: str, realm_id: str,
     if entity == "bills":
         return [_norm_bill_qbo(o)
                 async for o in Q.query_all(company_id, realm_id, "Bill")]
+    if entity == "payments":
+        return [_norm_payment_qbo(o, "in")
+                async for o in Q.query_all(company_id, realm_id, "Payment")]
+    if entity == "bill_payments":
+        return [_norm_payment_qbo(o, "out")
+                async for o in Q.query_all(company_id, realm_id, "BillPayment")]
     return []
 
 
@@ -325,7 +372,7 @@ async def run_dry_run(company_id: str, user_email: str) -> dict:
     # so far). Push/Pull will land in a follow-up commit; for now
     # invoices flow through the same diff pipeline safely.
     for entity in ("accounts", "customers", "vendors", "items",
-                    "invoices", "bills"):
+                    "invoices", "bills", "payments", "bill_payments"):
         if not entities_cfg.get(entity, True):
             continue
         try:

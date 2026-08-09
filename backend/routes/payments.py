@@ -47,6 +47,21 @@ from deps import (
     is_period_closed, assert_open,
     categorize_and_insert, sync_and_import,
 )
+from qbo_mirror.autopush import (
+    try_auto_push, try_auto_update, try_auto_delete,
+)
+
+
+def _payment_mirror_entity(doc: dict) -> str | None:
+    """Which mirror-entity key applies to this payment doc.
+    None → unlinked payment, cannot be mirrored (would be a bare
+    QBO deposit/withdrawal, losing its business meaning)."""
+    if doc.get("linked_invoice_id"):
+        return "payment_in"
+    if doc.get("linked_bill_id"):
+        return "payment_out"
+    return None
+
 
 router = APIRouter(prefix="/api")
 
@@ -135,6 +150,11 @@ async def create_payment(cid: str, inp: PaymentCreate, user: dict = Depends(get_
                 }},
                 session=_s,
             )
+    # Fire-and-forget mirror push (both directions). Unlinked
+    # payments are silently skipped by `_payment_mirror_entity`.
+    entity = _payment_mirror_entity(inp.model_dump())
+    if entity:
+        try_auto_push(cid, entity, pid)
     return {"id": pid}
 
 
@@ -216,6 +236,14 @@ async def update_payment(cid: str, pid: str, payload: dict, user: dict = Depends
                 await db.bills.update_one({"id": bill["id"]},
                     {"$set": {"balance_due": round(bal, 2), "status": status,
                               "updated_at": now_iso()}})
+    # Fire-and-forget mirror update. If the payment has no qbo_id
+    # yet (initial autopush failed) this routes through fresh-push.
+    # Otherwise it's a documented no-op — payment linkage updates
+    # aren't mirrored (see qbo_mirror/autopush.py::_run_auto_update).
+    fresh = await db.payments.find_one({"id": pid, "company_id": cid})
+    entity = _payment_mirror_entity(fresh or {})
+    if entity:
+        try_auto_update(cid, entity, pid)
     return {"ok": True, "changed": True, "balance_recalculated": balance_dirty}
 
 
@@ -242,6 +270,8 @@ async def delete_payment(cid: str, pid: str, user: dict = Depends(get_current_us
     if not payment:
         # Idempotent — treat missing payment as already-deleted.
         return {"ok": True, "reversed": False}
+    entity = _payment_mirror_entity(payment)
+    qbo_id = payment.get("qbo_id")
     from link_cascade import _reverse_payment_impact
     if payment.get("linked_invoice_id") or payment.get("linked_bill_id"):
         await _reverse_payment_impact(cid, payment)
@@ -251,6 +281,9 @@ async def delete_payment(cid: str, pid: str, user: dict = Depends(get_current_us
         {"$set": {"linked_payment_id": None, "updated_at": now_iso()}},
     )
     await db.payments.delete_one({"id": pid, "company_id": cid})
+    # Mirror delete on QBO if this payment was previously synced.
+    if entity and qbo_id:
+        try_auto_delete(cid, entity, qbo_id, "")
     return {"ok": True, "reversed": bool(payment.get("linked_invoice_id") or payment.get("linked_bill_id"))}
 
 

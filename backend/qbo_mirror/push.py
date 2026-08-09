@@ -754,6 +754,204 @@ async def _push_bills(company_id: str, realm_id: str) -> dict:
             "failed": failed, "skipped": skipped}
 
 
+# ─── Payment push (Phase 2e) ───────────────────────────────────────
+# Two QBO entities: Payment (customer→us, "in") and BillPayment
+# (us→vendor, "out"). Direction is inferred from local's
+# `linked_invoice_id` / `linked_bill_id`. Unlinked payments cannot
+# be pushed — they'd be a bare deposit/withdrawal in QBO and lose
+# their business meaning.
+
+async def _resolve_account_qbo_id(company_id: str,
+                                    account_id: str | None) -> str | None:
+    if not account_id:
+        return None
+    a = await db.accounts.find_one(
+        {"id": account_id, "company_id": company_id},
+        {"qbo_id": 1, "_id": 0},
+    )
+    return str(a["qbo_id"]) if a and a.get("qbo_id") else None
+
+
+async def _payment_body_in(company_id: str, pay: dict) -> dict:
+    """Customer Payment body (money in). Requires:
+      - contact_id → CustomerRef
+      - linked_invoice_id → Line[].LinkedTxn (Invoice, invoice.qbo_id)
+      - bank_account_id → DepositToAccountRef (optional; QBO uses
+        Undeposited Funds if omitted).
+    """
+    cust = await _resolve_customer_ref(company_id, pay.get("contact_id"))
+    if not cust:
+        raise ValueError(
+            "Customer missing or not synced to QBO. Sync customers first.")
+    inv_id = pay.get("linked_invoice_id")
+    if not inv_id:
+        raise ValueError("Payment has no linked invoice.")
+    inv = await db.invoices.find_one(
+        {"id": inv_id, "company_id": company_id},
+        {"qbo_id": 1, "_id": 0},
+    )
+    if not inv or not inv.get("qbo_id"):
+        raise ValueError(
+            "Linked invoice not synced to QBO. Sync the invoice first.")
+    amount = round(float(pay.get("amount") or 0), 2)
+    body: dict[str, Any] = {
+        "CustomerRef": {"value": cust[0], "name": cust[1]},
+        "TotalAmt": amount,
+        "Line": [{
+            "Amount": amount,
+            "LinkedTxn": [{"TxnType": "Invoice",
+                             "TxnId": str(inv["qbo_id"])}],
+        }],
+    }
+    bank_qbo = await _resolve_account_qbo_id(
+        company_id, pay.get("bank_account_id"))
+    if bank_qbo:
+        body["DepositToAccountRef"] = {"value": bank_qbo}
+    if pay.get("date"):
+        body["TxnDate"] = pay["date"]
+    if pay.get("memo"):
+        body["PrivateNote"] = str(pay["memo"])[:4000]
+    return body
+
+
+async def _payment_body_out(company_id: str, pay: dict) -> dict:
+    """BillPayment body (money out). Requires:
+      - contact_id → VendorRef
+      - linked_bill_id → Line[].LinkedTxn (Bill, bill.qbo_id)
+      - bank_account_id → CheckPayment.BankAccountRef.
+
+    `PayType: Check` is the safest default — CreditCard requires a
+    QBO credit-card account that we don't reliably know locally.
+    """
+    vend = await _resolve_vendor_ref(company_id, pay.get("contact_id"))
+    if not vend:
+        raise ValueError(
+            "Vendor missing or not synced to QBO. Sync vendors first.")
+    bill_id = pay.get("linked_bill_id")
+    if not bill_id:
+        raise ValueError("Bill payment has no linked bill.")
+    bill = await db.bills.find_one(
+        {"id": bill_id, "company_id": company_id},
+        {"qbo_id": 1, "_id": 0},
+    )
+    if not bill or not bill.get("qbo_id"):
+        raise ValueError(
+            "Linked bill not synced to QBO. Sync the bill first.")
+    amount = round(float(pay.get("amount") or 0), 2)
+    bank_qbo = await _resolve_account_qbo_id(
+        company_id, pay.get("bank_account_id"))
+    if not bank_qbo:
+        # BillPayment requires a paying-account ref. Fail loudly.
+        raise ValueError(
+            "Bill payment has no bank account. Set the payment "
+            "account first.")
+    body: dict[str, Any] = {
+        "VendorRef": {"value": vend[0], "name": vend[1]},
+        "PayType": "Check",
+        "TotalAmt": amount,
+        "Line": [{
+            "Amount": amount,
+            "LinkedTxn": [{"TxnType": "Bill",
+                             "TxnId": str(bill["qbo_id"])}],
+        }],
+        "CheckPayment": {"BankAccountRef": {"value": bank_qbo}},
+    }
+    if pay.get("date"):
+        body["TxnDate"] = pay["date"]
+    if pay.get("memo"):
+        body["PrivateNote"] = str(pay["memo"])[:4000]
+    return body
+
+
+def _local_patch_from_qbo_payment(twin: dict) -> dict:
+    """Stamp QBO's authoritative fields back onto local payment."""
+    amount = float(twin.get("TotalAmt") or 0)
+    patch: dict[str, Any] = {
+        "amount": round(amount, 2),
+    }
+    if twin.get("TxnDate"):
+        patch["date"] = twin["TxnDate"]
+    return patch
+
+
+async def _push_payments_in(company_id: str, realm_id: str) -> dict:
+    """Push local customer payments (linked_invoice_id set, no qbo_id)."""
+    inserted = 0
+    failed: list[dict] = []
+    skipped: list[dict] = []
+    async for p in db.payments.find(
+        {"company_id": company_id, "source": {"$ne": "qbo"},
+         "linked_invoice_id": {"$nin": [None, ""]},
+         "$or": [{"qbo_id": {"$exists": False}},
+                 {"qbo_id": {"$in": [None, ""]}}]},
+    ):
+        try:
+            body = await _payment_body_in(company_id, p)
+            resp = await _post(
+                company_id, realm_id,
+                f"/company/{realm_id}/payment", body,
+            )
+            twin = resp.get("Payment") or {}
+            new_id = twin.get("Id")
+            if not new_id:
+                failed.append({"id": p["id"],
+                                "error": "no Id in QBO response"})
+                continue
+            twin_patch = _local_patch_from_qbo_payment(twin)
+            await db.payments.update_one(
+                {"id": p["id"]},
+                {"$set": {**twin_patch,
+                          "qbo_id": str(new_id), "realm_id": realm_id,
+                          "direction": "in",
+                          "_sync_origin": "mirror_push",
+                          "_sync_status": "synced",
+                          "updated_at": now_iso()}},
+            )
+            inserted += 1
+        except Exception as e:  # noqa: BLE001
+            failed.append({"id": p["id"], "error": str(e)[:400]})
+    return {"inserted": inserted, "failed": failed, "skipped": skipped}
+
+
+async def _push_payments_out(company_id: str, realm_id: str) -> dict:
+    """Push local bill payments (linked_bill_id set, no qbo_id)."""
+    inserted = 0
+    failed: list[dict] = []
+    skipped: list[dict] = []
+    async for p in db.payments.find(
+        {"company_id": company_id, "source": {"$ne": "qbo"},
+         "linked_bill_id": {"$nin": [None, ""]},
+         "$or": [{"qbo_id": {"$exists": False}},
+                 {"qbo_id": {"$in": [None, ""]}}]},
+    ):
+        try:
+            body = await _payment_body_out(company_id, p)
+            resp = await _post(
+                company_id, realm_id,
+                f"/company/{realm_id}/billpayment", body,
+            )
+            twin = resp.get("BillPayment") or {}
+            new_id = twin.get("Id")
+            if not new_id:
+                failed.append({"id": p["id"],
+                                "error": "no Id in QBO response"})
+                continue
+            twin_patch = _local_patch_from_qbo_payment(twin)
+            await db.payments.update_one(
+                {"id": p["id"]},
+                {"$set": {**twin_patch,
+                          "qbo_id": str(new_id), "realm_id": realm_id,
+                          "direction": "out",
+                          "_sync_origin": "mirror_push",
+                          "_sync_status": "synced",
+                          "updated_at": now_iso()}},
+            )
+            inserted += 1
+        except Exception as e:  # noqa: BLE001
+            failed.append({"id": p["id"], "error": str(e)[:400]})
+    return {"inserted": inserted, "failed": failed, "skipped": skipped}
+
+
 async def run_push(company_id: str, user_email: str,
                     entities: list[str] | None = None) -> dict:
     """Outbound-only sync — create local-only Foundation entities on
@@ -768,7 +966,7 @@ async def run_push(company_id: str, user_email: str,
 
     if entities is None:
         entities = ["accounts", "customers", "vendors", "items",
-                     "invoices", "bills"]
+                     "invoices", "bills", "payments", "bill_payments"]
 
     result: dict[str, dict] = {}
     for e in entities:
@@ -787,6 +985,10 @@ async def run_push(company_id: str, user_email: str,
                 result[e] = await _push_invoices(company_id, realm_id)
             elif e == "bills":
                 result[e] = await _push_bills(company_id, realm_id)
+            elif e == "payments":
+                result[e] = await _push_payments_in(company_id, realm_id)
+            elif e == "bill_payments":
+                result[e] = await _push_payments_out(company_id, realm_id)
         except Exception as err:  # noqa: BLE001
             result[e] = {"error": str(err)}
 

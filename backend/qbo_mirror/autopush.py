@@ -20,7 +20,9 @@ from qbo_service import get_access_token, API_BASE, QBO_MINOR_VERSION
 from qbo_mirror.settings import is_enabled, append_log
 from qbo_mirror.push import (
     _post, _acct_body, _contact_body, _item_body, _invoice_body,
-    _bill_body, _local_patch_from_qbo_invoice, _local_patch_from_qbo_bill,
+    _bill_body, _payment_body_in, _payment_body_out,
+    _local_patch_from_qbo_invoice, _local_patch_from_qbo_bill,
+    _local_patch_from_qbo_payment,
 )
 
 logger = logging.getLogger(__name__)
@@ -98,6 +100,36 @@ async def _push_one_bill(company_id: str, realm_id: str,
     return (str(new_id) if new_id else None, twin_patch)
 
 
+async def _push_one_payment_in(company_id: str, realm_id: str,
+                                 doc: dict) -> tuple[str | None, dict | None]:
+    """Single customer-payment push (money in)."""
+    body = await _payment_body_in(company_id, doc)
+    resp = await _post(company_id, realm_id,
+                        f"/company/{realm_id}/payment",
+                        body)
+    twin = resp.get("Payment") or {}
+    new_id = twin.get("Id")
+    twin_patch = _local_patch_from_qbo_payment(twin) if new_id else None
+    if twin_patch is not None:
+        twin_patch["direction"] = "in"
+    return (str(new_id) if new_id else None, twin_patch)
+
+
+async def _push_one_payment_out(company_id: str, realm_id: str,
+                                  doc: dict) -> tuple[str | None, dict | None]:
+    """Single bill-payment push (money out)."""
+    body = await _payment_body_out(company_id, doc)
+    resp = await _post(company_id, realm_id,
+                        f"/company/{realm_id}/billpayment",
+                        body)
+    twin = resp.get("BillPayment") or {}
+    new_id = twin.get("Id")
+    twin_patch = _local_patch_from_qbo_payment(twin) if new_id else None
+    if twin_patch is not None:
+        twin_patch["direction"] = "out"
+    return (str(new_id) if new_id else None, twin_patch)
+
+
 # ─── Update / Delete helpers ───────────────────────────────────────
 # QBO requires the current SyncToken on every update/delete — a sparse
 # update endpoint means "give me the FULL updated doc plus the token".
@@ -105,12 +137,14 @@ async def _push_one_bill(company_id: str, realm_id: str,
 # is current (stale tokens 400 with "stale object" errors).
 
 _ENTITY_META = {
-    "account":  ("account",  "Account",  "accounts", None),
-    "customer": ("customer", "Customer", "contacts", "customer"),
-    "vendor":   ("vendor",   "Vendor",   "contacts", "vendor"),
-    "item":     ("item",     "Item",     "items",    None),
-    "invoice":  ("invoice",  "Invoice",  "invoices", None),
-    "bill":     ("bill",     "Bill",     "bills",    None),
+    "account":     ("account",  "Account",  "accounts", None),
+    "customer":    ("customer", "Customer", "contacts", "customer"),
+    "vendor":      ("vendor",   "Vendor",   "contacts", "vendor"),
+    "item":        ("item",     "Item",     "items",    None),
+    "invoice":     ("invoice",  "Invoice",  "invoices", None),
+    "bill":        ("bill",     "Bill",     "bills",    None),
+    "payment_in":  ("payment",     "Payment",     "payments", None),
+    "payment_out": ("billpayment", "BillPayment", "payments", None),
 }
 
 
@@ -169,9 +203,9 @@ async def _run_auto_delete(company_id: str, entity: str, qbo_id: str,
                          f"/company/{realm_id}/{qbo_path}",
                          {"Id": qbo_id, "SyncToken": token},
                          operation="delete")
-        elif entity in ("invoice", "bill"):
-            # Invoice and Bill support hard delete via
-            # ?operation=delete.
+        elif entity in ("invoice", "bill", "payment_in", "payment_out"):
+            # Invoice, Bill, Payment, BillPayment all support hard
+            # delete via ?operation=delete.
             await _post(company_id, realm_id,
                          f"/company/{realm_id}/{qbo_path}",
                          {"Id": qbo_id, "SyncToken": token},
@@ -183,7 +217,7 @@ async def _run_auto_delete(company_id: str, entity: str, qbo_id: str,
                          {"Id": qbo_id, "SyncToken": token,
                           "Active": False, "sparse": True})
         await append_log(company_id, "autodelete",
-                          f"Auto-{'delete' if entity in ('item', 'invoice', 'bill') else 'inactivate'} "
+                          f"Auto-{'delete' if entity in ('item', 'invoice', 'bill', 'payment_in', 'payment_out') else 'inactivate'} "
                           f"{entity} {qbo_id}"
                           + (f" ({entity_name})" if entity_name else ""),
                           {"entity": entity, "qbo_id": qbo_id,
@@ -208,11 +242,12 @@ async def _run_auto_update(company_id: str, entity: str,
         doc = await db[coll].find_one({"id": doc_id, "company_id": company_id})
         if not doc:
             return
-        # Invoice-specific: an update on a row with no qbo_id yet
-        # means the initial autopush didn't fire (or failed). Route
-        # through the fresh-push path so the doc lands on QBO. The
-        # _run_one filter blocks voided rows; drafts are allowed.
-        if entity in ("invoice", "bill") and not doc.get("qbo_id"):
+        # Invoice/Bill/Payment-specific: an update on a row with no
+        # qbo_id yet means the initial autopush didn't fire (or
+        # failed). Route through the fresh-push path so the doc
+        # lands on QBO. The _run_one filter blocks voided rows.
+        if entity in ("invoice", "bill", "payment_in",
+                       "payment_out") and not doc.get("qbo_id"):
             if not doc.get("voided"):
                 await _run_one(company_id, entity, doc_id)
             return
@@ -284,6 +319,19 @@ async def _run_auto_update(company_id: str, entity: str,
                     {"entity": entity, "doc_id": doc_id,
                      "reason": str(ve)})
                 return
+        elif entity in ("payment_in", "payment_out"):
+            # Payment UPDATE is deliberately a no-op for MVP —
+            # amount/linkage changes require reversing the old
+            # LinkedTxn effect on QBO and re-applying, which is
+            # non-trivial and error-prone. The safer UX: user
+            # deletes the local payment (autodelete reverses QBO)
+            # and creates a fresh one. Logged for visibility.
+            await append_log(
+                company_id, "autoupdate",
+                f"Auto-update {entity} {doc_id} skipped — payment "
+                "updates are not mirrored (delete + recreate to sync).",
+                {"entity": entity, "doc_id": doc_id})
+            return
         else:
             return
         body["Id"] = qbo_id
@@ -400,12 +448,14 @@ def try_auto_update(company_id: str, entity: str, doc_id: str) -> None:
 
 # Registry so the hook stays tiny at each call site.
 _HANDLERS = {
-    "account":  ("accounts", _push_one_account, None),
-    "customer": ("contacts", _push_one_contact, "customer"),
-    "vendor":   ("contacts", _push_one_contact, "vendor"),
-    "item":     ("items",    _push_one_item,    None),
-    "invoice":  ("invoices", _push_one_invoice, None),
-    "bill":     ("bills",    _push_one_bill,    None),
+    "account":     ("accounts", _push_one_account,     None),
+    "customer":    ("contacts", _push_one_contact,     "customer"),
+    "vendor":      ("contacts", _push_one_contact,     "vendor"),
+    "item":        ("items",    _push_one_item,        None),
+    "invoice":     ("invoices", _push_one_invoice,     None),
+    "bill":        ("bills",    _push_one_bill,        None),
+    "payment_in":  ("payments", _push_one_payment_in,  None),
+    "payment_out": ("payments", _push_one_payment_out, None),
 }
 
 
@@ -413,12 +463,14 @@ _HANDLERS = {
 # Auto-push respects the per-entity toggles in the Mirror settings —
 # if the user unchecked "Customers", we don't autopush new customers.
 _ENTITY_TO_CFG_KEY = {
-    "account":  "accounts",
-    "customer": "customers",
-    "vendor":   "vendors",
-    "item":     "items",
-    "invoice":  "invoices",
-    "bill":     "bills",
+    "account":     "accounts",
+    "customer":    "customers",
+    "vendor":      "vendors",
+    "item":        "items",
+    "invoice":     "invoices",
+    "bill":        "bills",
+    "payment_in":  "payments",
+    "payment_out": "bill_payments",
 }
 
 

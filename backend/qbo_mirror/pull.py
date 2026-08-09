@@ -325,6 +325,71 @@ async def _pull_bills(company_id: str, realm_id: str) -> dict:
             "reclaimed": reclaimed}
 
 
+async def _pull_payments(company_id: str, realm_id: str,
+                          direction: str, qbo_entity: str) -> dict:
+    """Pull Payment (in) or BillPayment (out) rows from QBO into
+    the local `payments` collection. Matches by qbo_id + direction
+    (we can have same numeric Id across the two QBO endpoints)."""
+    existing_key = f"{qbo_entity}::"
+    existing: set[str] = set()
+    async for d in db.payments.find(
+        {"company_id": company_id, "direction": direction,
+         "qbo_id": {"$nin": [None, ""]}},
+        {"qbo_id": 1, "_id": 0},
+    ):
+        existing.add(str(d["qbo_id"]))
+
+    inserted = 0
+    updated = 0
+    async for obj in Q.query_all(company_id, realm_id, qbo_entity):
+        qid = str(obj.get("Id"))
+        mapped = Q.map_payment(company_id, realm_id, obj, direction)
+        mapped["_sync_origin"] = "mirror_pull"
+        # Link `applied_to` (QBO's LinkedTxn) to our local
+        # invoice/bill ids so the balance-heal in list endpoints
+        # can find these payments. Resolves TxnId → local id via
+        # invoices.qbo_id / bills.qbo_id lookup.
+        applied = mapped.get("applied_to") or []
+        for ap in applied:
+            tx_type = ap.get("txn_type")
+            tx_qbo_id = ap.get("txn_qbo_id")
+            if not tx_qbo_id:
+                continue
+            if tx_type == "Invoice":
+                inv = await db.invoices.find_one(
+                    {"company_id": company_id, "qbo_id": str(tx_qbo_id)},
+                    {"id": 1, "_id": 0},
+                )
+                if inv and not mapped.get("linked_invoice_id"):
+                    mapped["linked_invoice_id"] = inv["id"]
+            elif tx_type == "Bill":
+                b = await db.bills.find_one(
+                    {"company_id": company_id, "qbo_id": str(tx_qbo_id)},
+                    {"id": 1, "_id": 0},
+                )
+                if b and not mapped.get("linked_bill_id"):
+                    mapped["linked_bill_id"] = b["id"]
+
+        if qid in existing:
+            patch = {k: mapped[k] for k in
+                     ["amount", "date", "method", "contact_name",
+                      "linked_invoice_id", "linked_bill_id",
+                      "applied_to"]
+                     if k in mapped}
+            patch["_sync_origin"] = "mirror_pull"
+            patch["updated_at"] = now_iso()
+            await db.payments.update_one(
+                {"company_id": company_id, "direction": direction,
+                 "qbo_id": qid},
+                {"$set": patch},
+            )
+            updated += 1
+        else:
+            await db.payments.insert_one(mapped)
+            inserted += 1
+    return {"inserted": inserted, "updated": updated}
+
+
 async def run_pull(company_id: str, user_email: str,
                     entities: list[str] | None = None) -> dict:
     """Execute a Pull for each Foundation entity in `entities`
@@ -339,7 +404,7 @@ async def run_pull(company_id: str, user_email: str,
 
     if entities is None:
         entities = ["accounts", "customers", "vendors", "items",
-                     "invoices", "bills"]
+                     "invoices", "bills", "payments", "bill_payments"]
 
     result: dict[str, dict] = {}
     for e in entities:
@@ -358,6 +423,12 @@ async def run_pull(company_id: str, user_email: str,
                 result[e] = await _pull_invoices(company_id, realm_id)
             elif e == "bills":
                 result[e] = await _pull_bills(company_id, realm_id)
+            elif e == "payments":
+                result[e] = await _pull_payments(
+                    company_id, realm_id, "in", "Payment")
+            elif e == "bill_payments":
+                result[e] = await _pull_payments(
+                    company_id, realm_id, "out", "BillPayment")
         except Exception as err:  # noqa: BLE001
             result[e] = {"error": str(err)}
 

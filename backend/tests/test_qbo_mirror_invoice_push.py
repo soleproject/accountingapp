@@ -50,6 +50,11 @@ def stub_db(monkeypatch):
         items=[{"id": "item-1", "company_id": "cid",
                  "qbo_id": "11", "name": "Widget"}],
     )
+    # Patch the `db` reference in every mirror module that uses it —
+    # `from db import db` bound at import time so patching _db_mod.db
+    # doesn't propagate to modules already imported.
+    import qbo_mirror.push as _push_mod
+    monkeypatch.setattr(_push_mod, "db", fake)
     monkeypatch.setattr(_db_mod, "db", fake)
     return fake
 
