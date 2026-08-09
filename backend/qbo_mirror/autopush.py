@@ -20,6 +20,7 @@ from qbo_service import get_access_token, API_BASE, QBO_MINOR_VERSION
 from qbo_mirror.settings import is_enabled, append_log
 from qbo_mirror.push import (
     _post, _acct_body, _contact_body, _item_body, _invoice_body,
+    _local_patch_from_qbo_invoice,
 )
 
 logger = logging.getLogger(__name__)
@@ -66,16 +67,22 @@ async def _push_one_item(company_id: str, realm_id: str,
 
 
 async def _push_one_invoice(company_id: str, realm_id: str,
-                             doc: dict) -> tuple[str | None, str | None]:
+                             doc: dict) -> tuple[str | None, dict | None]:
     """Single-invoice push (used by autopush and manual push).
     Raises ValueError inside _invoice_body if the invoice can't be
-    mapped; caller records the failure in the sync log."""
+    mapped; caller records the failure in the sync log.
+
+    Returns (qbo_id, twin_patch) where twin_patch is QBO's
+    authoritative view of the invoice — merged into the local doc
+    by `_run_one` to prevent phantom drift on the next preview."""
     body = await _invoice_body(company_id, doc)
     resp = await _post(company_id, realm_id,
                         f"/company/{realm_id}/invoice",
                         body)
-    new_id = (resp.get("Invoice") or {}).get("Id")
-    return (str(new_id) if new_id else None, None)
+    twin = resp.get("Invoice") or {}
+    new_id = twin.get("Id")
+    twin_patch = _local_patch_from_qbo_invoice(twin) if new_id else None
+    return (str(new_id) if new_id else None, twin_patch)
 
 
 # ─── Update / Delete helpers ───────────────────────────────────────
@@ -262,15 +269,26 @@ async def _run_auto_update(company_id: str, entity: str,
         if entity != "invoice":
             body["sparse"] = True
 
-        await _post(company_id, realm_id,
+        resp = await _post(company_id, realm_id,
                      f"/company/{realm_id}/{qbo_path}",
                      body)
-        # Stamp origin so echoes don't loop.
+        # Stamp origin so echoes don't loop. For invoices, also
+        # stamp QBO's authoritative twin values (tax it auto-added,
+        # normalized dates, computed balance) to prevent phantom
+        # drift on the next preview.
+        set_patch: dict = {
+            "_sync_origin": "mirror_push",
+            "_sync_status": "synced",
+            "_sync_finished_at": now_iso(),
+        }
+        if entity == "invoice":
+            twin = resp.get("Invoice") or {}
+            if twin:
+                set_patch = {**_local_patch_from_qbo_invoice(twin),
+                             **set_patch}
         await db[coll].update_one(
             {"id": doc_id},
-            {"$set": {"_sync_origin": "mirror_push",
-                      "_sync_status": "synced",
-                      "_sync_finished_at": now_iso()}},
+            {"$set": set_patch},
         )
         await append_log(company_id, "autoupdate",
                           f"Auto-update {entity} {doc_id} (qbo_id {qbo_id})"
@@ -415,9 +433,9 @@ async def _run_one(company_id: str, entity: str, doc_id: str) -> None:
         )
 
         if kind:
-            qbo_id, _ = await handler(company_id, realm_id, doc, kind)
+            qbo_id, extra_patch = await handler(company_id, realm_id, doc, kind)
         else:
-            qbo_id, _ = await handler(company_id, realm_id, doc)
+            qbo_id, extra_patch = await handler(company_id, realm_id, doc)
 
         if not qbo_id:
             await db[coll].update_one(
@@ -431,13 +449,20 @@ async def _run_one(company_id: str, entity: str, doc_id: str) -> None:
                               {"entity": entity, "doc_id": doc_id})
             return
 
+        # Merge QBO's authoritative twin patch (currently used by
+        # invoices) so the next dry-run doesn't fire a phantom drift.
+        base_set: dict = {
+            "qbo_id": qbo_id, "realm_id": realm_id,
+            "_sync_origin": "mirror_push",
+            "_sync_status": "synced",
+            "_sync_finished_at": now_iso(),
+            "updated_at": now_iso(),
+        }
+        if isinstance(extra_patch, dict) and extra_patch:
+            base_set = {**extra_patch, **base_set}
         await db[coll].update_one(
             {"id": doc_id},
-            {"$set": {"qbo_id": qbo_id, "realm_id": realm_id,
-                      "_sync_origin": "mirror_push",
-                      "_sync_status": "synced",
-                      "_sync_finished_at": now_iso(),
-                      "updated_at": now_iso()},
+            {"$set": base_set,
              "$unset": {"_sync_error": ""}},
         )
         await append_log(company_id, "autopush",
