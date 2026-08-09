@@ -91,7 +91,7 @@ export default function QboMirror() {
     const entities = Object.entries(config.entities || {})
       .filter(([_, v]) => v)
       .map(([k]) => k)
-      .filter(k => ["accounts", "customers", "vendors", "items"].includes(k));
+      .filter(k => ["accounts", "customers", "vendors", "items", "invoices"].includes(k));
     if (!entities.length) {
       toast.error("Enable at least one Foundation entity first.");
       return;
@@ -130,7 +130,7 @@ export default function QboMirror() {
     const entities = Object.entries(config.entities || {})
       .filter(([_, v]) => v)
       .map(([k]) => k)
-      .filter(k => ["accounts", "customers", "vendors", "items"].includes(k));
+      .filter(k => ["accounts", "customers", "vendors", "items", "invoices"].includes(k));
     if (!entities.length) {
       toast.error("Enable at least one Foundation entity first.");
       return;

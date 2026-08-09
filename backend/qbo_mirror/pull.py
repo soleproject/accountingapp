@@ -186,6 +186,40 @@ async def _pull_items(company_id: str, realm_id: str) -> dict:
     return {"inserted": inserted, "updated": updated}
 
 
+async def _pull_invoices(company_id: str, realm_id: str) -> dict:
+    """Phase 2b — bring QBO invoices into our local system.
+    New invoices are inserted via `map_invoice`; existing ones get
+    `total`, `balance`, and `status` refreshed (line-item drift is
+    deferred to Phase 2c since line diffs need extra care).
+    """
+    existing = await _existing_qbo_ids(company_id, "invoices")
+    inserted = 0
+    updated = 0
+    async for obj in Q.query_all(company_id, realm_id, "Invoice"):
+        qid = str(obj.get("Id"))
+        mapped = Q.map_invoice(company_id, realm_id, obj)
+        mapped["_sync_origin"] = "mirror_pull"
+        # Invoices post to the ledger — mark them `posted=True` so the
+        # reports pick them up immediately (same pattern we established
+        # for QBO transactions).
+        mapped["posted"] = True
+        if qid not in existing:
+            await db.invoices.insert_one(mapped)
+            inserted += 1
+        else:
+            patch = {k: mapped[k] for k in
+                     ["total", "balance", "status", "subtotal", "tax",
+                      "due_date"] if k in mapped}
+            patch["_sync_origin"] = "mirror_pull"
+            patch["updated_at"] = now_iso()
+            await db.invoices.update_one(
+                {"company_id": company_id, "source": "qbo", "qbo_id": qid},
+                {"$set": patch},
+            )
+            updated += 1
+    return {"inserted": inserted, "updated": updated}
+
+
 async def run_pull(company_id: str, user_email: str,
                     entities: list[str] | None = None) -> dict:
     """Execute a Pull for each Foundation entity in `entities`
@@ -199,7 +233,7 @@ async def run_pull(company_id: str, user_email: str,
     realm_id = conn["realm_id"]
 
     if entities is None:
-        entities = ["accounts", "customers", "vendors", "items"]
+        entities = ["accounts", "customers", "vendors", "items", "invoices"]
 
     result: dict[str, dict] = {}
     for e in entities:
@@ -214,6 +248,8 @@ async def run_pull(company_id: str, user_email: str,
                                                   "vendor", "Vendor")
             elif e == "items":
                 result[e] = await _pull_items(company_id, realm_id)
+            elif e == "invoices":
+                result[e] = await _pull_invoices(company_id, realm_id)
         except Exception as err:  # noqa: BLE001
             result[e] = {"error": str(err)}
 
