@@ -36,8 +36,8 @@ DEFAULTS = {
         "purchases": False,
         "deposits": False,
         "transfers": False,
-        "payments": False,
-        "bill_payments": False,
+        "payments": True,
+        "bill_payments": True,
         "journal_entries": False,
     },
     # Conflict policy default. Only "qbo_wins" is implemented in

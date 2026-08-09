@@ -51,6 +51,8 @@ def stub_db(monkeypatch):
         accounts=[{"id": "acct-1", "company_id": "cid",
                     "qbo_id": "42", "name": "Office Supplies"}],
     )
+    import qbo_mirror.push as _push_mod
+    monkeypatch.setattr(_push_mod, "db", fake)
     monkeypatch.setattr(_db_mod, "db", fake)
     return fake
 

@@ -169,3 +169,69 @@ autopush + manual push + dry-run + pull treatment invoices got.
   path, missing vendor, missing account + no fallback, empty
   line items, DocNumber truncation, twin patch shape.
 - Combined with invoice tests: **11/11 pass**.
+
+
+## 2026-08-09 — QBO Mirror Phase 2e: Payments + Bill Payments
+
+**Money movement now syncs bi-directionally.** Customer Payments
+(money in) and Bill Payments (money out) auto-push to QBO on
+create/delete, pull via manual button, and resolve invoice/bill
+balances on both sides.
+
+**Backend**
+- `qbo_mirror/push.py`:
+  - `_payment_body_in()` — Customer Payment: CustomerRef +
+    LinkedTxn[Invoice] + DepositToAccountRef (optional; QBO uses
+    Undeposited Funds if omitted).
+  - `_payment_body_out()` — Bill Payment: VendorRef + PayType=Check
+    + LinkedTxn[Bill] + CheckPayment.BankAccountRef (required).
+  - `_push_payments_in()` / `_push_payments_out()` — bulk pushers.
+  - `_local_patch_from_qbo_payment()` — twin patch (amount, date).
+- `qbo_mirror/pull.py`:
+  - `_pull_payments()` — direction-aware; resolves QBO LinkedTxn
+    (Invoice / Bill) back into local `linked_invoice_id` /
+    `linked_bill_id` via qbo_id lookup so balance-heal in list
+    endpoints works.
+- `qbo_mirror/autopush.py`:
+  - Two entity registry slots: `payment_in` (Payment endpoint) and
+    `payment_out` (BillPayment endpoint). Both share the
+    `payments` collection but hit different QBO paths.
+  - `_push_one_payment_in` / `_push_one_payment_out` handlers.
+  - `_run_auto_delete()` — both directions hard-delete via
+    `?operation=delete`.
+  - `_run_auto_update()` — payment updates are deliberately a
+    no-op (amount/linkage changes require reversing old LinkedTxn
+    effect on QBO — non-trivial). Users delete + recreate.
+- `qbo_mirror/engine.py`:
+  - Minimal payment normalizers (match by qbo_id only, no drift
+    detection — payment drift signals are too fragile).
+  - `_DRIFT_FIELDS["payments"] = []`, same for bill_payments.
+  - Payments included in dry-run loop → preview cards for both.
+- `qbo_mirror/settings.py` — DEFAULTS enables `payments: True`
+  and `bill_payments: True`.
+- `routes/payments.py`:
+  - `_payment_mirror_entity()` helper dispatches on
+    `linked_invoice_id` vs `linked_bill_id` → `payment_in` /
+    `payment_out` / None (unlinked; skip).
+  - `create_payment` / `update_payment` / `delete_payment` all
+    fire the right autopush hook via the dispatch helper.
+
+**Frontend**
+- `pages/QboMirror.jsx` — Two new rows: "Customer Payments" and
+  "Bill Payments". Push/Pull whitelist extended.
+
+**Deliberately deferred**
+- Payment UPDATE mirroring — linkage/amount changes need QBO's
+  LinkedTxn to be manually unrolled. UX guidance: delete +
+  recreate the local payment; both operations auto-mirror.
+- Multi-invoice / multi-bill payments — single-link only for MVP.
+- Payment drift detection — qbo_id-only matching.
+
+**Regression coverage**
+- `tests/test_qbo_mirror_payment_push.py` — 8 unit tests: both
+  directions happy paths, missing customer/vendor, missing linked
+  doc, unsynced linked doc, missing bank account, twin patch.
+- All 3 mirror test files: **19/19 pass**.
+- Fixed cross-file `db` monkeypatch bug: `from db import db`
+  binds the reference at import time; tests now also patch
+  `qbo_mirror.push.db` directly so the fake propagates.
