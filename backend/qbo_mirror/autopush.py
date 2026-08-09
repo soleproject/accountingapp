@@ -193,13 +193,12 @@ async def _run_auto_update(company_id: str, entity: str,
         doc = await db[coll].find_one({"id": doc_id, "company_id": company_id})
         if not doc:
             return
-        # Invoice-specific: draft → sent transitions have no qbo_id yet.
-        # Route through the fresh-push path so the doc lands on QBO for
-        # the first time on the status flip.
+        # Invoice-specific: an update on a row with no qbo_id yet
+        # means the initial autopush didn't fire (or failed). Route
+        # through the fresh-push path so the doc lands on QBO. The
+        # _run_one filter blocks voided rows; drafts are allowed.
         if entity == "invoice" and not doc.get("qbo_id"):
-            status = (doc.get("status") or "").lower()
-            if status not in ("draft", "void", "voided") and \
-               not doc.get("voided"):
+            if not doc.get("voided"):
                 await _run_one(company_id, "invoice", doc_id)
             return
         if not doc.get("qbo_id"):
@@ -406,12 +405,14 @@ async def _run_one(company_id: str, entity: str, doc_id: str) -> None:
             return
         if doc.get("qbo_id"):
             return  # already synced
-        # Entity-specific pre-push filters — invoice drafts and voids
-        # don't belong on QBO. They become push-eligible when the user
-        # flips the status to 'sent' (see _run_auto_update).
+        # Entity-specific pre-push filters — only voided invoices are
+        # hard-skipped. Drafts DO autopush (they land on QBO as open
+        # invoices; QBO has no draft concept). The twin patch stamped
+        # after a successful push normalizes local status to
+        # "sent"/"paid" so the next preview sees no phantom drift.
         if entity == "invoice":
             status = (doc.get("status") or "").lower()
-            if status in ("draft", "void", "voided"):
+            if status in ("void", "voided"):
                 return
             if doc.get("voided"):
                 return
