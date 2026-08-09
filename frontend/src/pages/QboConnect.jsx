@@ -169,18 +169,35 @@ export default function QboConnect() {
           )}
         </div>
         {status?.connected ? (
-          <div className="flex items-center justify-between text-sm">
-            <div className="text-slate-600">
-              <div>Realm ID: <span className="font-mono text-xs">{status.realm_id}</span></div>
-              <div className="text-xs text-slate-400 mt-1">Connected {status.connected_at?.slice(0, 10)}</div>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-sm">
+              <div className="text-slate-600">
+                <div>Realm ID: <span className="font-mono text-xs">{status.realm_id}</span></div>
+                <div className="text-xs text-slate-400 mt-1">Connected {status.connected_at?.slice(0, 10)}</div>
+              </div>
+              <button
+                onClick={disconnect}
+                disabled={busy}
+                data-testid="qbo-disconnect-btn"
+                className="px-3 py-1.5 text-xs rounded-md border border-red-200 bg-white text-red-700 hover:bg-red-50 disabled:opacity-40"
+              >
+                Disconnect
+              </button>
             </div>
+            {/* Live Mirror shortcut — surfaced here so every
+                connected company can jump into the bi-directional
+                sync settings without hunting through the migration
+                step. Same button lives further down after a
+                migration completes; this one covers the "already
+                connected, no migration needed" flow. */}
             <button
-              onClick={disconnect}
-              disabled={busy}
-              data-testid="qbo-disconnect-btn"
-              className="px-3 py-1.5 text-xs rounded-md border border-red-200 bg-white text-red-700 hover:bg-red-50 disabled:opacity-40"
+              onClick={() => navigate("/settings/qbo-mirror")}
+              data-testid="qbo-mirror-link-top"
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-indigo-300 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 text-sm font-medium"
             >
-              Disconnect
+              <RefreshCw size={14} />
+              Open Live Mirror
+              <span className="text-[10px] uppercase tracking-wide bg-indigo-600 text-white px-1.5 py-0.5 rounded-full">Live</span>
             </button>
           </div>
         ) : (
@@ -319,9 +336,9 @@ export default function QboConnect() {
                   onClick={() => navigate("/settings/qbo-mirror")}
                   data-testid="qbo-mirror-btn"
                   className="px-3 py-1.5 text-xs rounded-md border border-indigo-300 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 inline-flex items-center gap-1"
-                  title="Bi-directional QBO mirror (dry-run preview)"
+                  title="Bi-directional live sync between our app and QBO"
                 >
-                  <RefreshCw size={12} /> Live Mirror (preview)
+                  <RefreshCw size={12} /> Open Live Mirror
                 </button>
                 {/* Re-run entry point — completed jobs otherwise had no
                     way to trigger a fresh import. Clears the job pointer
