@@ -232,24 +232,22 @@ async def _run_auto_update(company_id: str, entity: str,
                     doc = {**doc, "income_account_qbo_id": acct["qbo_id"]}
             body = _item_body(doc)
         elif entity == "invoice":
-            # Invoice sparse update is doc-level only (dates, memos,
-            # customer). Line-level drift is deferred — QBO requires
-            # matching Line.Id/Detail to preserve payment linkage and
-            # our local line model doesn't yet carry QBO's per-line
-            # Id. Full-line rewrite lands in Phase 3.
-            body = {}
-            if doc.get("issue_date"):
-                body["TxnDate"] = doc["issue_date"]
-            if doc.get("due_date"):
-                body["DueDate"] = doc["due_date"]
-            if doc.get("notes"):
-                body["CustomerMemo"] = {
-                    "value": str(doc["notes"])[:1000]}
-            if doc.get("internal_notes"):
-                body["PrivateNote"] = str(doc["internal_notes"])[:4000]
-            if not body:
-                # Nothing at the doc level actually changed that we
-                # can safely mirror. Skip.
+            # Full invoice replace — send local lines + doc-level
+            # fields so the user's edit propagates. QBO Wins during
+            # PULL; Us Wins during PUSH (this path is triggered by a
+            # user save on our side, so overwriting QBO is the
+            # intended direction).
+            # Payment linkage on removed lines is a QBO-side concern —
+            # flagged in CHANGELOG.
+            try:
+                body = await _invoice_body(company_id, doc)
+            except ValueError as ve:
+                # Missing customer / unmapped item — surface in log.
+                await append_log(
+                    company_id, "autoupdate",
+                    f"Auto-update invoice {doc_id} skipped: {ve}",
+                    {"entity": entity, "doc_id": doc_id,
+                     "reason": str(ve)})
                 return
         else:
             return
@@ -258,7 +256,11 @@ async def _run_auto_update(company_id: str, entity: str,
         # `sparse=true` lets us send only what we're actually
         # touching — QBO keeps everything else. Safer than a
         # true full-replace when we may not have all fields.
-        body["sparse"] = True
+        # Invoices are an exception: to sync line-item edits we need
+        # a full replace so QBO overwrites the Line array with our
+        # values.
+        if entity != "invoice":
+            body["sparse"] = True
 
         await _post(company_id, realm_id,
                      f"/company/{realm_id}/{qbo_path}",

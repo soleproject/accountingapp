@@ -399,6 +399,10 @@ async def update_invoice(cid: str, iid: str, payload: dict, user: dict = Depends
         if dup:
             number_conflict = True
     payload["updated_at"] = now_iso()
+    # A user PATCH is an authoritative local edit — clear any stale
+    # `_sync_origin: mirror_pull` from the last pull so autopush
+    # correctly propagates this change back to QBO on our next hop.
+    payload["_sync_origin"] = "user_edit"
     await db.invoices.update_one({"id": iid, "company_id": cid}, {"$set": payload})
     # Re-run inventory hooks so QOH & COGS JE mirror the latest lines.
     warnings: list[str] = []

@@ -36,8 +36,16 @@ _UPDATE_FIELDS = {
 
 
 async def _existing_qbo_ids(company_id: str, coll: str,
-                             extra: dict | None = None) -> set[str]:
-    q = {"company_id": company_id, "source": "qbo"}
+                             extra: dict | None = None,
+                             any_source: bool = False) -> set[str]:
+    """Return the set of qbo_ids already known locally. By default
+    limits to `source: "qbo"` (rows brought in by a prior Pull), but
+    `any_source=True` also includes local-origin rows that were pushed
+    to QBO and now carry a qbo_id — needed for invoices/bills where
+    the row is authored locally but still has a QBO twin."""
+    q: dict = {"company_id": company_id}
+    if not any_source:
+        q["source"] = "qbo"
     if extra:
         q.update(extra)
     ids: set[str] = set()
@@ -187,12 +195,15 @@ async def _pull_items(company_id: str, realm_id: str) -> dict:
 
 
 async def _pull_invoices(company_id: str, realm_id: str) -> dict:
-    """Phase 2b — bring QBO invoices into our local system.
+    """Phase 2b/c — bring QBO invoices into our local system.
     New invoices are inserted via `map_invoice`; existing ones get
-    `total`, `balance`, and `status` refreshed (line-item drift is
-    deferred to Phase 2c since line diffs need extra care).
+    `total`, `balance`, `status`, and `line_items` refreshed
+    (QBO Wins policy). Matches by qbo_id across BOTH source='qbo'
+    and locally-pushed rows so drift on an invoice we ourselves
+    originated flows back correctly.
     """
-    existing = await _existing_qbo_ids(company_id, "invoices")
+    existing = await _existing_qbo_ids(company_id, "invoices",
+                                        any_source=True)
     inserted = 0
     updated = 0
     async for obj in Q.query_all(company_id, realm_id, "Invoice"):
@@ -207,13 +218,23 @@ async def _pull_invoices(company_id: str, realm_id: str) -> dict:
             await db.invoices.insert_one(mapped)
             inserted += 1
         else:
+            # QBO Wins drift resolution — overwrite the local doc's
+            # totals AND line items with QBO's authoritative view.
+            # We also mirror `balance` onto `balance_due` (local
+            # field name) so downstream AR/statement logic stays
+            # consistent.
             patch = {k: mapped[k] for k in
                      ["total", "balance", "status", "subtotal", "tax",
-                      "due_date"] if k in mapped}
+                      "due_date", "issue_date", "line_items"]
+                     if k in mapped}
+            if "balance" in mapped:
+                patch["balance_due"] = mapped["balance"]
             patch["_sync_origin"] = "mirror_pull"
             patch["updated_at"] = now_iso()
+            # Match on qbo_id alone — a locally-pushed invoice has
+            # source != 'qbo' but still points at the same QBO row.
             await db.invoices.update_one(
-                {"company_id": company_id, "source": "qbo", "qbo_id": qid},
+                {"company_id": company_id, "qbo_id": qid},
                 {"$set": patch},
             )
             updated += 1
