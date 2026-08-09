@@ -22,6 +22,7 @@ const ENTITIES = [
   { key: "customers", label: "Customers" },
   { key: "vendors",   label: "Vendors" },
   { key: "items",     label: "Items / Products & Services" },
+  { key: "invoices",  label: "Invoices (Phase 2 · preview only)" },
 ];
 
 const BUCKET_META = {
@@ -197,7 +198,7 @@ export default function QboMirror() {
               <GitBranch className="w-6 h-6 text-indigo-600" />
               QBO Live Mirror
               <span className="text-[10px] font-medium tracking-wider uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
-                Phase 1c · Bi-directional Foundation
+                Phase 2a · Invoices Preview
               </span>
             </h1>
             <p className="text-sm text-slate-600 mt-1 max-w-2xl">
@@ -252,7 +253,7 @@ export default function QboMirror() {
             <div className="text-sm font-medium text-slate-900 mb-2">
               Foundation entities to include
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               {ENTITIES.map(e => (
                 <label key={e.key} className="flex items-center gap-2 text-sm">
                   <input
