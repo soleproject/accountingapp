@@ -125,10 +125,15 @@ def _norm_invoice_local(i: dict) -> dict:
 def _norm_invoice_qbo(o: dict) -> dict:
     total = float(o.get("TotalAmt") or 0)
     balance = float(o.get("Balance") or 0)
+    # Match the synthesis in qbo_service.map_invoice — when QBO
+    # returns an empty DocNumber (optional field, common in the
+    # wild), the local doc stores `f"INV-{Id}"`. Applying the same
+    # here keeps both sides symmetric.
+    number = (o.get("DocNumber") or "").strip() or f"INV-{o.get('Id')}"
     return {
         "qbo_id": o.get("Id"),
-        "natural_key": f"inv::{(o.get('DocNumber') or '').strip().lower()}",
-        "number": (o.get("DocNumber") or "").strip(),
+        "natural_key": f"inv::{number.lower()}",
+        "number": number,
         "date": o.get("TxnDate") or "",
         "total": round(total, 2),
         "balance": round(balance, 2),
@@ -158,10 +163,14 @@ def _norm_bill_local(b: dict) -> dict:
 def _norm_bill_qbo(o: dict) -> dict:
     total = float(o.get("TotalAmt") or 0)
     balance = float(o.get("Balance") or 0)
+    # Same synthesis as qbo_service.map_bill (fake number for QBO
+    # bills that omit DocNumber) — otherwise every no-DocNumber
+    # QBO bill perpetually flags as `number` drift.
+    number = (o.get("DocNumber") or "").strip() or f"BILL-{o.get('Id')}"
     return {
         "qbo_id": o.get("Id"),
-        "natural_key": f"bill::{(o.get('DocNumber') or '').strip().lower()}",
-        "number": (o.get("DocNumber") or "").strip(),
+        "natural_key": f"bill::{number.lower()}",
+        "number": number,
         "date": o.get("TxnDate") or "",
         "total": round(total, 2),
         "balance": round(balance, 2),
