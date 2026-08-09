@@ -200,12 +200,16 @@ async def _pull_invoices(company_id: str, realm_id: str) -> dict:
     `total`, `balance`, `status`, and `line_items` refreshed
     (QBO Wins policy). Matches by qbo_id across BOTH source='qbo'
     and locally-pushed rows so drift on an invoice we ourselves
-    originated flows back correctly.
+    originated flows back correctly. If no qbo_id match is found,
+    falls back to natural key (DocNumber) so a locally-created row
+    sharing the same number gets linked (and patched) rather than
+    duplicated.
     """
     existing = await _existing_qbo_ids(company_id, "invoices",
                                         any_source=True)
     inserted = 0
     updated = 0
+    reclaimed = 0
     async for obj in Q.query_all(company_id, realm_id, "Invoice"):
         qid = str(obj.get("Id"))
         mapped = Q.map_invoice(company_id, realm_id, obj)
@@ -214,31 +218,54 @@ async def _pull_invoices(company_id: str, realm_id: str) -> dict:
         # reports pick them up immediately (same pattern we established
         # for QBO transactions).
         mapped["posted"] = True
-        if qid not in existing:
-            await db.invoices.insert_one(mapped)
-            inserted += 1
-        else:
-            # QBO Wins drift resolution — overwrite the local doc's
-            # totals AND line items with QBO's authoritative view.
-            # We also mirror `balance` onto `balance_due` (local
-            # field name) so downstream AR/statement logic stays
-            # consistent.
-            patch = {k: mapped[k] for k in
-                     ["total", "balance", "status", "subtotal", "tax",
-                      "due_date", "issue_date", "line_items"]
-                     if k in mapped}
-            if "balance" in mapped:
-                patch["balance_due"] = mapped["balance"]
-            patch["_sync_origin"] = "mirror_pull"
-            patch["updated_at"] = now_iso()
-            # Match on qbo_id alone — a locally-pushed invoice has
-            # source != 'qbo' but still points at the same QBO row.
+
+        # ── QBO Wins patch (used by both drift-by-qbo_id and
+        # drift-by-natural-key branches).
+        patch = {k: mapped[k] for k in
+                 ["total", "balance", "status", "subtotal", "tax",
+                  "due_date", "issue_date", "line_items"]
+                 if k in mapped}
+        if "balance" in mapped:
+            patch["balance_due"] = mapped["balance"]
+        patch["_sync_origin"] = "mirror_pull"
+        patch["updated_at"] = now_iso()
+
+        if qid in existing:
+            # Direct qbo_id linkage — update the local twin.
             await db.invoices.update_one(
                 {"company_id": company_id, "qbo_id": qid},
                 {"$set": patch},
             )
             updated += 1
-    return {"inserted": inserted, "updated": updated}
+            continue
+
+        # No qbo_id linkage yet — try to reclaim a locally-authored
+        # row whose DocNumber matches this QBO invoice's number.
+        number = (mapped.get("number") or "").strip()
+        orphan = None
+        if number:
+            orphan = await db.invoices.find_one(
+                {"company_id": company_id, "number": number,
+                 "$or": [{"qbo_id": {"$exists": False}},
+                         {"qbo_id": {"$in": [None, ""]}}]},
+                {"id": 1, "_id": 0},
+            )
+        if orphan:
+            # Reclaim: attach the qbo_id + apply drift patch. Preserve
+            # the local `id` so payment links / attachments survive.
+            reclaim_patch = {**patch,
+                             "qbo_id": qid, "realm_id": realm_id}
+            await db.invoices.update_one(
+                {"id": orphan["id"]},
+                {"$set": reclaim_patch},
+            )
+            reclaimed += 1
+        else:
+            await db.invoices.insert_one(mapped)
+            inserted += 1
+
+    return {"inserted": inserted, "updated": updated,
+            "reclaimed": reclaimed}
 
 
 async def run_pull(company_id: str, user_email: str,

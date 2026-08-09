@@ -277,6 +277,34 @@ async def _default_service_item_qbo_id(company_id: str) -> tuple[str, str] | Non
     return None
 
 
+def _local_patch_from_qbo_invoice(twin: dict) -> dict:
+    """After a successful CREATE or UPDATE against QBO's invoice
+    endpoint, QBO returns the fully-hydrated Invoice — including any
+    tax it auto-applied, its own DueDate normalization, computed
+    Balance, etc. Stamp those authoritative values back onto the
+    local row so the next dry-run doesn't spuriously flag drift.
+    """
+    total = float(twin.get("TotalAmt") or 0)
+    tax_detail = twin.get("TxnTaxDetail") or {}
+    tax = float(tax_detail.get("TotalTax") or 0)
+    balance = float(twin.get("Balance") or 0)
+    patch: dict[str, Any] = {
+        "total": round(total, 2),
+        "subtotal": round(total - tax, 2),
+        "tax": round(tax, 2),
+        "balance": round(balance, 2),
+        "balance_due": round(balance, 2),
+        "status": "paid" if balance == 0 else "sent",
+    }
+    if twin.get("TxnDate"):
+        patch["issue_date"] = twin["TxnDate"]
+    if twin.get("DueDate"):
+        patch["due_date"] = twin["DueDate"]
+    if twin.get("DocNumber"):
+        patch["number"] = twin["DocNumber"]
+    return patch
+
+
 async def _invoice_body(company_id: str, inv: dict) -> dict:
     """Build a QBO Invoice create/update body from a local invoice
     doc. Raises ``ValueError`` with a human-readable reason when the
@@ -373,9 +401,14 @@ async def _push_invoices(company_id: str, realm_id: str) -> dict:
                 failed.append({"id": inv["id"], "number": inv.get("number"),
                                 "error": "no Id in QBO response"})
                 continue
+            # Stamp QBO's authoritative values back onto local so the
+            # next preview doesn't fire a phantom-drift (QBO may have
+            # normalized dates, auto-computed tax, adjusted balance).
+            twin_patch = _local_patch_from_qbo_invoice(resp.get("Invoice") or {})
             await db.invoices.update_one(
                 {"id": inv["id"]},
-                {"$set": {"qbo_id": str(new_id), "realm_id": realm_id,
+                {"$set": {**twin_patch,
+                          "qbo_id": str(new_id), "realm_id": realm_id,
                           "_sync_origin": "mirror_push",
                           "_sync_status": "synced",
                           "updated_at": now_iso()}},
@@ -429,9 +462,11 @@ async def _push_invoices(company_id: str, realm_id: str) -> dict:
                 failed.append({"id": inv["id"], "number": inv.get("number"),
                                 "error": "update: no Id in QBO response"})
                 continue
+            twin_patch = _local_patch_from_qbo_invoice(resp.get("Invoice") or {})
             await db.invoices.update_one(
                 {"id": inv["id"]},
-                {"$set": {"_sync_origin": "mirror_push",
+                {"$set": {**twin_patch,
+                          "_sync_origin": "mirror_push",
                           "_sync_status": "synced",
                           "updated_at": now_iso()}},
             )
