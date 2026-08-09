@@ -106,3 +106,66 @@ Phase 3 alongside a `taxes` mirror scope.
 - `tests/test_qbo_mirror_invoice_push.py` — 5 unit tests verifying
   happy path, missing customer, missing item + no fallback, empty
   line items, DocNumber truncation.
+
+
+## 2026-08-09 — QBO Mirror Phase 2d: Bills (Outbound + Inbound)
+
+**Bi-directional Bills sync complete.** Bills now enjoy the same
+autopush + manual push + dry-run + pull treatment invoices got.
+~200 LOC of net-new code; ~90% reused from the invoice path.
+
+**Backend**
+- `qbo_mirror/push.py`:
+  - `_resolve_vendor_ref`, `_resolve_account_ref`,
+    `_default_expense_account_qbo` (fallback: "Uncategorized
+    Expense" / "Miscellaneous" / alphabetically first Expense).
+  - `_bill_body()` — builds QBO Bill payload with `VendorRef` +
+    `AccountBasedExpenseLineDetail.AccountRef` per line.
+  - `_local_patch_from_qbo_bill()` — twin patch (TotalAmt,
+    Balance, TxnDate, DueDate, DocNumber, computed status
+    "paid"/"open").
+  - `_push_bills()` — 2-pass: create rows without qbo_id, then
+    full-replace UPDATE any locally-authored bill that has
+    drifted (compares TotalAmt with SyncToken lookup).
+- `qbo_mirror/pull.py`:
+  - `_pull_bills()` — mirror of `_pull_invoices` including
+    reclaim-by-DocNumber for legacy bills without qbo_id.
+- `qbo_mirror/engine.py`:
+  - `_norm_bill_local` / `_norm_bill_qbo` normalizers.
+  - `_DRIFT_FIELDS["bills"]` = number/date/total/balance/status.
+  - Bills wired into `_fetch_local`, `_fetch_qbo`, dry-run loop.
+- `qbo_mirror/autopush.py`:
+  - `_push_one_bill()` single-shot pusher returning twin patch.
+  - Bill registered in `_ENTITY_META`, `_HANDLERS`,
+    `_ENTITY_TO_CFG_KEY`.
+  - `_run_auto_update()` — bill branch: full replace via
+    `_bill_body`, sparse=false, twin-patch merged into set doc.
+  - `_run_auto_delete()` — bill uses `?operation=delete` (QBO
+    hard delete, same as invoice).
+  - `_run_one()` — void filter now covers both invoice and bill.
+- `qbo_mirror/settings.py` — DEFAULTS now enables `bills: True`.
+- `routes/bills.py`:
+  - `create_bill`, `update_bill`, `delete_bill`, `duplicate_bill`
+    wire `try_auto_push` / `try_auto_update` / `try_auto_delete`
+    hooks.
+  - PATCH clears stale `_sync_origin` for the same reason
+    invoices do.
+
+**Frontend**
+- `pages/QboMirror.jsx` — Bills added to ENTITIES list and
+  Push/Pull whitelists.
+
+**Deliberately deferred**
+- Item-based expense lines (`ItemBasedExpenseLineDetail`) — every
+  local line pushes as `AccountBasedExpenseLineDetail` for now.
+  Adding inventory-item support requires resolving item_id to a
+  QBO Item + selecting the right detail type per line.
+- Doc-level tax on bills — same reason as invoices (tax library
+  not mirrored). Bills carry `tax` locally; QBO recomputes on
+  its own tax code.
+
+**Regression coverage**
+- `tests/test_qbo_mirror_bill_push.py` — 6 unit tests: happy
+  path, missing vendor, missing account + no fallback, empty
+  line items, DocNumber truncation, twin patch shape.
+- Combined with invoice tests: **11/11 pass**.

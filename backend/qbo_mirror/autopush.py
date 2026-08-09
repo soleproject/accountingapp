@@ -20,7 +20,7 @@ from qbo_service import get_access_token, API_BASE, QBO_MINOR_VERSION
 from qbo_mirror.settings import is_enabled, append_log
 from qbo_mirror.push import (
     _post, _acct_body, _contact_body, _item_body, _invoice_body,
-    _local_patch_from_qbo_invoice,
+    _bill_body, _local_patch_from_qbo_invoice, _local_patch_from_qbo_bill,
 )
 
 logger = logging.getLogger(__name__)
@@ -85,6 +85,19 @@ async def _push_one_invoice(company_id: str, realm_id: str,
     return (str(new_id) if new_id else None, twin_patch)
 
 
+async def _push_one_bill(company_id: str, realm_id: str,
+                          doc: dict) -> tuple[str | None, dict | None]:
+    """Single-bill push. Same shape as `_push_one_invoice`."""
+    body = await _bill_body(company_id, doc)
+    resp = await _post(company_id, realm_id,
+                        f"/company/{realm_id}/bill",
+                        body)
+    twin = resp.get("Bill") or {}
+    new_id = twin.get("Id")
+    twin_patch = _local_patch_from_qbo_bill(twin) if new_id else None
+    return (str(new_id) if new_id else None, twin_patch)
+
+
 # ─── Update / Delete helpers ───────────────────────────────────────
 # QBO requires the current SyncToken on every update/delete — a sparse
 # update endpoint means "give me the FULL updated doc plus the token".
@@ -97,6 +110,7 @@ _ENTITY_META = {
     "vendor":   ("vendor",   "Vendor",   "contacts", "vendor"),
     "item":     ("item",     "Item",     "items",    None),
     "invoice":  ("invoice",  "Invoice",  "invoices", None),
+    "bill":     ("bill",     "Bill",     "bills",    None),
 }
 
 
@@ -155,8 +169,9 @@ async def _run_auto_delete(company_id: str, entity: str, qbo_id: str,
                          f"/company/{realm_id}/{qbo_path}",
                          {"Id": qbo_id, "SyncToken": token},
                          operation="delete")
-        elif entity == "invoice":
-            # Invoice supports hard delete via ?operation=delete.
+        elif entity in ("invoice", "bill"):
+            # Invoice and Bill support hard delete via
+            # ?operation=delete.
             await _post(company_id, realm_id,
                          f"/company/{realm_id}/{qbo_path}",
                          {"Id": qbo_id, "SyncToken": token},
@@ -168,7 +183,7 @@ async def _run_auto_delete(company_id: str, entity: str, qbo_id: str,
                          {"Id": qbo_id, "SyncToken": token,
                           "Active": False, "sparse": True})
         await append_log(company_id, "autodelete",
-                          f"Auto-{'delete' if entity in ('item', 'invoice') else 'inactivate'} "
+                          f"Auto-{'delete' if entity in ('item', 'invoice', 'bill') else 'inactivate'} "
                           f"{entity} {qbo_id}"
                           + (f" ({entity_name})" if entity_name else ""),
                           {"entity": entity, "qbo_id": qbo_id,
@@ -197,9 +212,9 @@ async def _run_auto_update(company_id: str, entity: str,
         # means the initial autopush didn't fire (or failed). Route
         # through the fresh-push path so the doc lands on QBO. The
         # _run_one filter blocks voided rows; drafts are allowed.
-        if entity == "invoice" and not doc.get("qbo_id"):
+        if entity in ("invoice", "bill") and not doc.get("qbo_id"):
             if not doc.get("voided"):
-                await _run_one(company_id, "invoice", doc_id)
+                await _run_one(company_id, entity, doc_id)
             return
         if not doc.get("qbo_id"):
             return  # never pushed → nothing on QBO to update
@@ -255,6 +270,20 @@ async def _run_auto_update(company_id: str, entity: str,
                     {"entity": entity, "doc_id": doc_id,
                      "reason": str(ve)})
                 return
+        elif entity == "bill":
+            # Same pattern as invoice — full replace of Lines +
+            # doc-level fields. QBO Bill lines don't carry the same
+            # payment-linkage concern (bills link to BillPayment on
+            # a separate txn), so a full replace is safer here.
+            try:
+                body = await _bill_body(company_id, doc)
+            except ValueError as ve:
+                await append_log(
+                    company_id, "autoupdate",
+                    f"Auto-update bill {doc_id} skipped: {ve}",
+                    {"entity": entity, "doc_id": doc_id,
+                     "reason": str(ve)})
+                return
         else:
             return
         body["Id"] = qbo_id
@@ -262,19 +291,19 @@ async def _run_auto_update(company_id: str, entity: str,
         # `sparse=true` lets us send only what we're actually
         # touching — QBO keeps everything else. Safer than a
         # true full-replace when we may not have all fields.
-        # Invoices are an exception: to sync line-item edits we need
-        # a full replace so QBO overwrites the Line array with our
-        # values.
-        if entity != "invoice":
+        # Invoices and bills are exceptions: to sync line-item edits
+        # we need a full replace so QBO overwrites the Line array
+        # with our values.
+        if entity not in ("invoice", "bill"):
             body["sparse"] = True
 
         resp = await _post(company_id, realm_id,
                      f"/company/{realm_id}/{qbo_path}",
                      body)
-        # Stamp origin so echoes don't loop. For invoices, also
-        # stamp QBO's authoritative twin values (tax it auto-added,
-        # normalized dates, computed balance) to prevent phantom
-        # drift on the next preview.
+        # Stamp origin so echoes don't loop. For invoices and bills,
+        # also stamp QBO's authoritative twin values (tax it
+        # auto-added, normalized dates, computed balance) to
+        # prevent phantom drift on the next preview.
         set_patch: dict = {
             "_sync_origin": "mirror_push",
             "_sync_status": "synced",
@@ -284,6 +313,11 @@ async def _run_auto_update(company_id: str, entity: str,
             twin = resp.get("Invoice") or {}
             if twin:
                 set_patch = {**_local_patch_from_qbo_invoice(twin),
+                             **set_patch}
+        elif entity == "bill":
+            twin = resp.get("Bill") or {}
+            if twin:
+                set_patch = {**_local_patch_from_qbo_bill(twin),
                              **set_patch}
         await db[coll].update_one(
             {"id": doc_id},
@@ -371,6 +405,7 @@ _HANDLERS = {
     "vendor":   ("contacts", _push_one_contact, "vendor"),
     "item":     ("items",    _push_one_item,    None),
     "invoice":  ("invoices", _push_one_invoice, None),
+    "bill":     ("bills",    _push_one_bill,    None),
 }
 
 
@@ -383,6 +418,7 @@ _ENTITY_TO_CFG_KEY = {
     "vendor":   "vendors",
     "item":     "items",
     "invoice":  "invoices",
+    "bill":     "bills",
 }
 
 
@@ -405,12 +441,13 @@ async def _run_one(company_id: str, entity: str, doc_id: str) -> None:
             return
         if doc.get("qbo_id"):
             return  # already synced
-        # Entity-specific pre-push filters — only voided invoices are
-        # hard-skipped. Drafts DO autopush (they land on QBO as open
-        # invoices; QBO has no draft concept). The twin patch stamped
-        # after a successful push normalizes local status to
-        # "sent"/"paid" so the next preview sees no phantom drift.
-        if entity == "invoice":
+        # Entity-specific pre-push filters — only voided invoices and
+        # bills are hard-skipped. Drafts DO autopush (they land on
+        # QBO as open documents; QBO has no draft concept). The twin
+        # patch stamped after a successful push normalizes local
+        # status to "sent"/"paid"/"open" so the next preview sees
+        # no phantom drift.
+        if entity in ("invoice", "bill"):
             status = (doc.get("status") or "").lower()
             if status in ("void", "voided"):
                 return
