@@ -483,6 +483,15 @@ async def create_account(cid: str, inp: AccountCreate, user: dict = Depends(get_
         await db.loans.insert_one(loan_doc)
         side_effect = {"kind": "loan", "loan_id": loan_doc["id"]}
 
+    # Fire-and-forget auto-push — no-op unless Mirror is enabled for
+    # this company AND the "accounts" entity is toggled on. Never
+    # blocks the response.
+    try:
+        from qbo_mirror.autopush import try_auto_push
+        try_auto_push(cid, "account", aid)
+    except Exception:  # noqa: BLE001
+        pass
+
     return {"id": aid, "side_effect": side_effect}
 
 
