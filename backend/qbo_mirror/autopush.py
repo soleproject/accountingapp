@@ -18,7 +18,9 @@ from typing import Any
 from db import db, now_iso
 from qbo_service import get_access_token, API_BASE, QBO_MINOR_VERSION
 from qbo_mirror.settings import is_enabled, append_log
-from qbo_mirror.push import _post, _acct_body, _contact_body, _item_body
+from qbo_mirror.push import (
+    _post, _acct_body, _contact_body, _item_body, _invoice_body,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,19 @@ async def _push_one_item(company_id: str, realm_id: str,
     return (str(new_id) if new_id else None, None)
 
 
+async def _push_one_invoice(company_id: str, realm_id: str,
+                             doc: dict) -> tuple[str | None, str | None]:
+    """Single-invoice push (used by autopush and manual push).
+    Raises ValueError inside _invoice_body if the invoice can't be
+    mapped; caller records the failure in the sync log."""
+    body = await _invoice_body(company_id, doc)
+    resp = await _post(company_id, realm_id,
+                        f"/company/{realm_id}/invoice",
+                        body)
+    new_id = (resp.get("Invoice") or {}).get("Id")
+    return (str(new_id) if new_id else None, None)
+
+
 # ─── Update / Delete helpers ───────────────────────────────────────
 # QBO requires the current SyncToken on every update/delete — a sparse
 # update endpoint means "give me the FULL updated doc plus the token".
@@ -74,6 +89,7 @@ _ENTITY_META = {
     "customer": ("customer", "Customer", "contacts", "customer"),
     "vendor":   ("vendor",   "Vendor",   "contacts", "vendor"),
     "item":     ("item",     "Item",     "items",    None),
+    "invoice":  ("invoice",  "Invoice",  "invoices", None),
 }
 
 
@@ -132,6 +148,12 @@ async def _run_auto_delete(company_id: str, entity: str, qbo_id: str,
                          f"/company/{realm_id}/{qbo_path}",
                          {"Id": qbo_id, "SyncToken": token},
                          operation="delete")
+        elif entity == "invoice":
+            # Invoice supports hard delete via ?operation=delete.
+            await _post(company_id, realm_id,
+                         f"/company/{realm_id}/{qbo_path}",
+                         {"Id": qbo_id, "SyncToken": token},
+                         operation="delete")
         else:
             # Customer / Vendor / Account: sparse-update Active=false.
             await _post(company_id, realm_id,
@@ -139,7 +161,7 @@ async def _run_auto_delete(company_id: str, entity: str, qbo_id: str,
                          {"Id": qbo_id, "SyncToken": token,
                           "Active": False, "sparse": True})
         await append_log(company_id, "autodelete",
-                          f"Auto-{'delete' if entity == 'item' else 'inactivate'} "
+                          f"Auto-{'delete' if entity in ('item', 'invoice') else 'inactivate'} "
                           f"{entity} {qbo_id}"
                           + (f" ({entity_name})" if entity_name else ""),
                           {"entity": entity, "qbo_id": qbo_id,
@@ -162,7 +184,18 @@ async def _run_auto_update(company_id: str, entity: str,
     qbo_path, qbo_key, coll, kind = meta
     try:
         doc = await db[coll].find_one({"id": doc_id, "company_id": company_id})
-        if not doc or not doc.get("qbo_id"):
+        if not doc:
+            return
+        # Invoice-specific: draft → sent transitions have no qbo_id yet.
+        # Route through the fresh-push path so the doc lands on QBO for
+        # the first time on the status flip.
+        if entity == "invoice" and not doc.get("qbo_id"):
+            status = (doc.get("status") or "").lower()
+            if status not in ("draft", "void", "voided") and \
+               not doc.get("voided"):
+                await _run_one(company_id, "invoice", doc_id)
+            return
+        if not doc.get("qbo_id"):
             return  # never pushed → nothing on QBO to update
         # Anti-loop: if the update itself came from a Mirror pull,
         # don't reflect it back to QBO.
@@ -198,6 +231,26 @@ async def _run_auto_update(company_id: str, entity: str,
                 if acct and acct.get("qbo_id"):
                     doc = {**doc, "income_account_qbo_id": acct["qbo_id"]}
             body = _item_body(doc)
+        elif entity == "invoice":
+            # Invoice sparse update is doc-level only (dates, memos,
+            # customer). Line-level drift is deferred — QBO requires
+            # matching Line.Id/Detail to preserve payment linkage and
+            # our local line model doesn't yet carry QBO's per-line
+            # Id. Full-line rewrite lands in Phase 3.
+            body = {}
+            if doc.get("issue_date"):
+                body["TxnDate"] = doc["issue_date"]
+            if doc.get("due_date"):
+                body["DueDate"] = doc["due_date"]
+            if doc.get("notes"):
+                body["CustomerMemo"] = {
+                    "value": str(doc["notes"])[:1000]}
+            if doc.get("internal_notes"):
+                body["PrivateNote"] = str(doc["internal_notes"])[:4000]
+            if not body:
+                # Nothing at the doc level actually changed that we
+                # can safely mirror. Skip.
+                return
         else:
             return
         body["Id"] = qbo_id
@@ -298,6 +351,7 @@ _HANDLERS = {
     "customer": ("contacts", _push_one_contact, "customer"),
     "vendor":   ("contacts", _push_one_contact, "vendor"),
     "item":     ("items",    _push_one_item,    None),
+    "invoice":  ("invoices", _push_one_invoice, None),
 }
 
 
@@ -309,6 +363,7 @@ _ENTITY_TO_CFG_KEY = {
     "customer": "customers",
     "vendor":   "vendors",
     "item":     "items",
+    "invoice":  "invoices",
 }
 
 
@@ -331,6 +386,15 @@ async def _run_one(company_id: str, entity: str, doc_id: str) -> None:
             return
         if doc.get("qbo_id"):
             return  # already synced
+        # Entity-specific pre-push filters — invoice drafts and voids
+        # don't belong on QBO. They become push-eligible when the user
+        # flips the status to 'sent' (see _run_auto_update).
+        if entity == "invoice":
+            status = (doc.get("status") or "").lower()
+            if status in ("draft", "void", "voided"):
+                return
+            if doc.get("voided"):
+                return
         # Connection check — no realm → nothing to do.
         conn = await db.qbo_connections.find_one(
             {"company_id": company_id, "status": "connected"},

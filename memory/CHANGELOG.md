@@ -51,3 +51,58 @@
 - Restaurant Vertical Foundation (P0 from earlier fork)
 - `_signed_balances` Mongo aggregation rewrite (scaling)
 - Veryfi multi-page PDF ~40% line-item drop warning banner
+
+
+## 2026-08-09 — QBO Mirror Phase 2c: Invoice Push (Outbound)
+
+**Bi-directional Invoice sync complete.** Local invoices now push to
+QBO in real-time, on create / update / delete, with the same
+anti-loop tagging (`_sync_origin: "mirror_push"`) already used for
+Foundation entities.
+
+**Backend**
+- `qbo_mirror/push.py`:
+  - `_invoice_body()` — translates local `contact_id` → QBO
+    `CustomerRef.value` and per-line `item_id` → `ItemRef.value`.
+    Falls back to a QBO-side Service item ("Services" / "Hours" /
+    "General" or any Service-typed item) when a line lacks
+    `item_id`.
+  - `_push_invoices()` — bulk pusher. Filters out drafts, voided
+    invoices, and rows already carrying a `qbo_id`.
+- `qbo_mirror/autopush.py`:
+  - `_push_one_invoice()` single-shot pusher + invoice registered in
+    `_ENTITY_META`, `_HANDLERS`, and `_ENTITY_TO_CFG_KEY`.
+  - `_run_auto_update()` — invoice branch does a doc-level sparse
+    update (DueDate, TxnDate, CustomerMemo, PrivateNote). Line-level
+    drift is deliberately deferred to Phase 3 because QBO requires
+    matching `Line.Id`/`Detail` to preserve payment linkage and our
+    local line model doesn't yet carry QBO's per-line Id.
+  - `_run_auto_delete()` — invoice supports QBO hard-delete via
+    `?operation=delete` (same shape as items).
+  - `_run_one()` — filters invoice drafts / voids from auto-push.
+  - `_run_auto_update()` — a draft → sent transition on an
+    unmirrored invoice routes to the fresh-push path so the row
+    lands on QBO for the first time on the status flip.
+- `routes/invoices.py`:
+  - `create_invoice`, `update_invoice`, `delete_invoice`,
+    `duplicate_invoice` now fire the corresponding
+    `try_auto_push` / `try_auto_update` / `try_auto_delete` hook.
+  - Duplicate strips the source `qbo_id`, so the copy is treated as
+    fresh push candidate.
+
+**Frontend**
+- `pages/QboMirror.jsx` — "Invoices (Phase 2 · preview only)" label
+  dropped; invoices now behave identically to Foundation entities
+  in Push / Pull / Preview flows.
+
+**Tax handling** — doc-level `TxnTaxDetail` is deliberately skipped.
+QBO recomputes tax from its own TaxCode/AST config; forcing our
+locally-rolled tax onto QBO for non-mirrored tax codes either
+errors out (non-AST companies with unmapped codes) or is silently
+overridden (AST-enabled companies). Full tax mirroring lands in
+Phase 3 alongside a `taxes` mirror scope.
+
+**Regression coverage**
+- `tests/test_qbo_mirror_invoice_push.py` — 5 unit tests verifying
+  happy path, missing customer, missing item + no fallback, empty
+  line items, DocNumber truncation.

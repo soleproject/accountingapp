@@ -214,6 +214,166 @@ async def _push_contacts(company_id: str, realm_id: str,
     return {"inserted": inserted, "failed": failed}
 
 
+# ─── Invoice push (Phase 2c) ───────────────────────────────────────
+# Bi-directional invoice mirror. Every line on a QBO SalesItemLine
+# requires an ItemRef, so we resolve local `item_id` → item.qbo_id
+# and fall back to a "Services"-typed QBO item if the line lacks one.
+# Doc-level tax is deliberately skipped: our local tax library isn't
+# mirrored to QBO (Phase 3), so forcing TxnTaxDetail here would either
+# be ignored (AST companies) or crash (non-AST with unmapped codes).
+
+async def _resolve_customer_ref(company_id: str,
+                                 contact_id: str | None
+                                 ) -> tuple[str, str] | None:
+    if not contact_id:
+        return None
+    c = await db.contacts.find_one(
+        {"id": contact_id, "company_id": company_id},
+        {"qbo_id": 1, "name": 1, "display_name": 1, "_id": 0},
+    )
+    if not c or not c.get("qbo_id"):
+        return None
+    return (str(c["qbo_id"]),
+            c.get("display_name") or c.get("name") or "")
+
+
+async def _resolve_item_ref(company_id: str,
+                             item_id: str | None
+                             ) -> tuple[str, str] | None:
+    if not item_id:
+        return None
+    it = await db.items.find_one(
+        {"id": item_id, "company_id": company_id},
+        {"qbo_id": 1, "name": 1, "_id": 0},
+    )
+    if not it or not it.get("qbo_id"):
+        return None
+    return (str(it["qbo_id"]), it.get("name") or "")
+
+
+async def _default_service_item_qbo_id(company_id: str) -> tuple[str, str] | None:
+    """Best-effort fallback item — locate a QBO-sourced Service item
+    (populated by a prior Mirror Pull) so lines without a mapped
+    item_id can still push. Prefers items literally named 'Services'
+    or 'Hours', then any active Service-typed item."""
+    for name_like in ("Services", "Hours", "General"):
+        it = await db.items.find_one(
+            {"company_id": company_id, "source": "qbo",
+             "active": {"$ne": False}, "name": name_like},
+            {"qbo_id": 1, "name": 1, "_id": 0},
+        )
+        if it and it.get("qbo_id"):
+            return (str(it["qbo_id"]), it.get("name") or "Services")
+    # Any Service-typed item as last resort.
+    it = await db.items.find_one(
+        {"company_id": company_id, "source": "qbo",
+         "active": {"$ne": False},
+         "item_type": {"$regex": "^service$", "$options": "i"}},
+        {"qbo_id": 1, "name": 1, "_id": 0},
+        sort=[("name", 1)],
+    )
+    if it and it.get("qbo_id"):
+        return (str(it["qbo_id"]), it.get("name") or "Services")
+    return None
+
+
+async def _invoice_body(company_id: str, inv: dict) -> dict:
+    """Build a QBO Invoice create/update body from a local invoice
+    doc. Raises ``ValueError`` with a human-readable reason when the
+    invoice can't be pushed (missing customer, unmapped item, etc.)."""
+    customer = await _resolve_customer_ref(company_id, inv.get("contact_id"))
+    if not customer:
+        raise ValueError(
+            "Customer missing or not synced to QBO. Sync customers first."
+        )
+
+    lines_out: list[dict] = []
+    fallback: tuple[str, str] | None = None
+    for idx, li in enumerate(inv.get("line_items") or [], start=1):
+        amount = float(li.get("amount") or 0)
+        qty = float(li.get("quantity") or 1) or 1
+        rate = float(li.get("rate") or (amount / qty if qty else 0))
+        description = (li.get("description") or "").strip()
+        ref = await _resolve_item_ref(company_id, li.get("item_id"))
+        if not ref:
+            if fallback is None:
+                fallback = await _default_service_item_qbo_id(company_id)
+            if not fallback:
+                raise ValueError(
+                    f"Line {idx} has no item and no fallback QBO Service "
+                    "item exists. Run Mirror Pull for items first."
+                )
+            ref = fallback
+        lines_out.append({
+            "DetailType": "SalesItemLineDetail",
+            "Amount": round(amount, 2),
+            "Description": description or ref[1] or "",
+            "SalesItemLineDetail": {
+                "ItemRef": {"value": ref[0], "name": ref[1]},
+                "Qty": qty,
+                "UnitPrice": rate,
+            },
+        })
+    if not lines_out:
+        raise ValueError("Invoice has no line items.")
+
+    body: dict[str, Any] = {
+        "CustomerRef": {"value": customer[0], "name": customer[1]},
+        "Line": lines_out,
+    }
+    if inv.get("issue_date"):
+        body["TxnDate"] = inv["issue_date"]
+    if inv.get("due_date"):
+        body["DueDate"] = inv["due_date"]
+    if inv.get("number"):
+        # QBO DocNumber caps at 21 chars.
+        body["DocNumber"] = str(inv["number"])[:21]
+    if inv.get("notes"):
+        body["CustomerMemo"] = {"value": str(inv["notes"])[:1000]}
+    if inv.get("internal_notes"):
+        body["PrivateNote"] = str(inv["internal_notes"])[:4000]
+    return body
+
+
+async def _push_invoices(company_id: str, realm_id: str) -> dict:
+    """Local invoices with no qbo_id → POST to QBO. Skips drafts and
+    voided invoices; those don't belong in QBO."""
+    inserted = 0
+    failed: list[dict] = []
+    cursor = db.invoices.find(
+        {"company_id": company_id, "source": {"$ne": "qbo"},
+         "status": {"$nin": ["draft", "void", "voided"]},
+         "voided": {"$ne": True},
+         "$or": [{"qbo_id": {"$exists": False}},
+                 {"qbo_id": {"$in": [None, ""]}}]},
+    )
+    async for inv in cursor:
+        try:
+            body = await _invoice_body(company_id, inv)
+            resp = await _post(
+                company_id, realm_id,
+                f"/company/{realm_id}/invoice",
+                body,
+            )
+            new_id = (resp.get("Invoice") or {}).get("Id")
+            if not new_id:
+                failed.append({"id": inv["id"], "number": inv.get("number"),
+                                "error": "no Id in QBO response"})
+                continue
+            await db.invoices.update_one(
+                {"id": inv["id"]},
+                {"$set": {"qbo_id": str(new_id), "realm_id": realm_id,
+                          "_sync_origin": "mirror_push",
+                          "_sync_status": "synced",
+                          "updated_at": now_iso()}},
+            )
+            inserted += 1
+        except Exception as e:  # noqa: BLE001
+            failed.append({"id": inv["id"], "number": inv.get("number"),
+                            "error": str(e)[:400]})
+    return {"inserted": inserted, "failed": failed}
+
+
 async def _push_items(company_id: str, realm_id: str) -> dict:
     inserted = 0
     failed: list[dict] = []
@@ -263,7 +423,7 @@ async def run_push(company_id: str, user_email: str,
     realm_id = conn["realm_id"]
 
     if entities is None:
-        entities = ["accounts", "customers", "vendors", "items"]
+        entities = ["accounts", "customers", "vendors", "items", "invoices"]
 
     result: dict[str, dict] = {}
     for e in entities:
@@ -278,6 +438,8 @@ async def run_push(company_id: str, user_email: str,
                                                   "vendor", "Vendor")
             elif e == "items":
                 result[e] = await _push_items(company_id, realm_id)
+            elif e == "invoices":
+                result[e] = await _push_invoices(company_id, realm_id)
         except Exception as err:  # noqa: BLE001
             result[e] = {"error": str(err)}
 

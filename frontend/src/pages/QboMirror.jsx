@@ -22,7 +22,7 @@ const ENTITIES = [
   { key: "customers", label: "Customers" },
   { key: "vendors",   label: "Vendors" },
   { key: "items",     label: "Items / Products & Services" },
-  { key: "invoices",  label: "Invoices (Phase 2 · preview only)" },
+  { key: "invoices",  label: "Invoices" },
 ];
 
 const BUCKET_META = {

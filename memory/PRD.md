@@ -4374,3 +4374,59 @@ Trying to stamp our numeric codes onto QBO accounts was the wrong model — it w
 - LOAN_PAYMENTS_* (non-credit-card) intentionally left unmapped — principal/interest splits need special handling.
 - `TRANSFER_OUT_ACCOUNT_TRANSFER` pre-existing routing bug (falls to Uncategorized instead of 3200 Inter-Account Transfer) — unrelated to this work, tracked for future session.
 
+
+
+## 2026-08-09 — QBO Mirror Phase 2c (Invoice Push / Outbound)
+
+**Status**: SHIPPED. Bi-directional invoice sync complete.
+
+### What shipped
+- **`qbo_mirror/push.py`**
+  - `_invoice_body(company_id, inv)` — QBO Invoice payload builder.
+    Translates local `contact_id` → `CustomerRef.value`, per-line
+    `item_id` → `ItemRef.value`. Falls back to a Service-typed QBO
+    item (prefers names "Services" / "Hours" / "General") when a
+    line lacks `item_id`. Handles `TxnDate`, `DueDate`, `DocNumber`
+    (21-char cap), `CustomerMemo`, `PrivateNote`.
+  - `_push_invoices()` — bulk pusher. Skips drafts, voided, and
+    already-mirrored invoices.
+- **`qbo_mirror/autopush.py`**
+  - `_push_one_invoice()` single-shot pusher.
+  - Invoice registered in `_ENTITY_META`, `_HANDLERS`,
+    `_ENTITY_TO_CFG_KEY`.
+  - `_run_auto_update()` — invoice branch: doc-level sparse update
+    only (TxnDate/DueDate/CustomerMemo/PrivateNote). Line-level
+    drift deferred to Phase 3.
+  - `_run_auto_delete()` — invoice uses `?operation=delete` (QBO
+    hard delete).
+  - `_run_one()` — filters `status in (draft, void, voided)`.
+  - `_run_auto_update()` fresh-push fallback — a draft → sent
+    transition on an unmirrored invoice routes to the fresh push
+    path so it lands on QBO for the first time on the flip.
+- **`routes/invoices.py`** — `create_invoice`, `update_invoice`,
+  `delete_invoice`, `duplicate_invoice` wire `try_auto_push` /
+  `try_auto_update` / `try_auto_delete` hooks. Duplicate strips
+  source `qbo_id` so the copy pushes fresh.
+- **`pages/QboMirror.jsx`** — dropped "(Phase 2 · preview only)"
+  label; invoices are now first-class in Push / Pull / Preview.
+- **`tests/test_qbo_mirror_invoice_push.py`** — 5 unit tests
+  covering body-builder happy path + all reject branches. All PASS.
+
+### Deliberately deferred
+- **Doc-level tax** — `TxnTaxDetail` skipped because our local
+  taxes library isn't mirrored to QBO. Forcing it onto QBO either
+  errors (non-AST company w/ unmapped TaxCode) or is silently
+  overridden (AST). Full tax mirror lands in Phase 3.
+- **Line-level updates** — QBO invoice line updates need the
+  per-line QBO Id to preserve payment linkage. Our local line
+  model doesn't yet carry it. Deferred to Phase 3.
+
+### Next up
+- **Phase 2d** — Bills push/pull mirror (same pattern as invoices).
+- **Phase 2e** — Payments / BillPayments mirror.
+- **Phase 2f** — Deposits / Transfers / Journal Entries mirror.
+- **Phase 3** — Estimates, POs, tax library mirror, line-level
+  invoice updates.
+- **Sync Status Badges** — UI badges on CoA/Contacts/Items/Invoices
+  rows using `_sync_status`.
+- **Real-time inbound webhooks** — replace manual Pull.
