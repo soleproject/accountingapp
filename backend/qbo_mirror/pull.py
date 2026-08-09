@@ -74,17 +74,79 @@ async def _pull_accounts(company_id: str, realm_id: str) -> dict:
 
 async def _pull_contacts(company_id: str, realm_id: str,
                           kind: str, qbo_entity: str) -> dict:
+    from pymongo.errors import DuplicateKeyError
     existing = await _existing_qbo_ids(company_id, "contacts",
                                         {"type": kind})
     inserted = 0
     updated = 0
+    skipped_dupname = 0
     async for obj in Q.query_all(company_id, realm_id, qbo_entity):
         qid = str(obj.get("Id"))
         mapped = Q.map_contact(company_id, realm_id, obj, kind)
         mapped["_sync_origin"] = "mirror_pull"
+        # `contacts` unique index is (company_id, normalized_name).
+        # `map_contact` may not populate this field, and a missing
+        # value collides with any other missing-normalized_name doc.
+        # Compute it here so the insert has a stable key.
+        if not mapped.get("normalized_name"):
+            try:
+                from contact_resolver import normalize_contact_name
+                mapped["normalized_name"] = normalize_contact_name(
+                    mapped.get("name") or "")
+            except Exception:  # noqa: BLE001
+                pass
         if qid not in existing:
-            await db.contacts.insert_one(mapped)
-            inserted += 1
+            # `contacts` has a unique index on (company_id,
+            # normalized_name). If a soft-deleted / merged / renamed
+            # local contact still owns that name, insert fails — but
+            # rather than crash the whole batch, we upsert-on-name:
+            # attach this qbo_id to the existing local row so the
+            # next Preview shows it as `In sync`.
+            try:
+                await db.contacts.insert_one(mapped)
+                inserted += 1
+            except DuplicateKeyError:
+                # A local contact already owns this normalized_name.
+                # Two possibilities:
+                #   (a) It's an already-mirrored row whose qbo_id
+                #       differs from `qid` — QBO has duplicate
+                #       DisplayNames (allowed in QBO, blocked here).
+                #       Skip; can't safely reassign without corrupting
+                #       the first sync link.
+                #   (b) It's a soft-orphaned row with no qbo_id — we
+                #       can reclaim it by stamping this qbo_id on.
+                from contact_resolver import normalize_contact_name
+                key = normalize_contact_name(mapped.get("name") or "")
+                orphan = await db.contacts.find_one(
+                    {"company_id": company_id, "normalized_name": key,
+                     "$or": [{"qbo_id": {"$exists": False}},
+                             {"qbo_id": {"$in": [None, ""]}}]},
+                    {"id": 1, "_id": 0},
+                )
+                if orphan:
+                    await db.contacts.update_one(
+                        {"id": orphan["id"]},
+                        {"$set": {"qbo_id": qid, "source": "qbo",
+                                  "realm_id": realm_id, "type": kind,
+                                  "_sync_origin": "mirror_pull",
+                                  "updated_at": now_iso()}},
+                    )
+                    skipped_dupname += 1
+                else:
+                    # Legitimate duplicate name — QBO has two rows
+                    # sharing the DisplayName. We can't take both.
+                    # Log so the user knows why the diff shows a
+                    # stubborn `Pull from QBO: 1` that never resolves.
+                    from qbo_mirror.settings import append_log
+                    await append_log(
+                        company_id, "warning",
+                        f"Duplicate name from QBO: '{mapped.get('name')}' "
+                        f"(qbo_id {qid}) skipped — local unique index "
+                        f"already occupied. Rename in QBO to resolve.",
+                        {"entity": kind, "qbo_id": qid,
+                         "normalized_name": key},
+                    )
+                    skipped_dupname += 1
         else:
             patch = {k: mapped[k] for k in _UPDATE_FIELDS[f"{kind}s"]
                      if k in mapped}
@@ -96,7 +158,8 @@ async def _pull_contacts(company_id: str, realm_id: str,
                 {"$set": patch},
             )
             updated += 1
-    return {"inserted": inserted, "updated": updated}
+    return {"inserted": inserted, "updated": updated,
+            "reclaimed_dup_name": skipped_dupname}
 
 
 async def _pull_items(company_id: str, realm_id: str) -> dict:
