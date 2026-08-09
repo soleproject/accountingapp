@@ -759,16 +759,35 @@ async def update_account(cid: str, aid: str, payload: dict, user: dict = Depends
                 raise HTTPException(400, "This account has sub-accounts of its own — flatten them before nesting.")
     payload["updated_at"] = now_iso()
     await db.accounts.update_one({"id": aid, "company_id": cid}, {"$set": payload})
+    # Auto-update on QBO if this account was already mirrored.
+    try:
+        from qbo_mirror.autopush import try_auto_update
+        try_auto_update(cid, "account", aid)
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True}
 
 
 @router.delete("/companies/{cid}/accounts/{aid}")
 async def delete_account(cid: str, aid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
+    # Capture qbo_id BEFORE local delete for the auto-delete hook.
+    doomed = await db.accounts.find_one(
+        {"id": aid, "company_id": cid},
+        {"qbo_id": 1, "name": 1, "_id": 0},
+    )
     await db.accounts.delete_one({"id": aid, "company_id": cid})
     # Cascade: drop any auto-spawned Loan row that pointed at this account
     # so the Loans page and CoA never desync.
     await db.loans.delete_many({"company_id": cid, "account_id": aid})
+    # Fire-and-forget delete on QBO.
+    try:
+        from qbo_mirror.autopush import try_auto_delete
+        if doomed and doomed.get("qbo_id"):
+            try_auto_delete(cid, "account", doomed.get("qbo_id"),
+                             doomed.get("name") or "")
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True}
 
 
