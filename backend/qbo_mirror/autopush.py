@@ -94,7 +94,18 @@ async def _qbo_get_sync_token(company_id: str, realm_id: str,
 
 async def _run_auto_delete(company_id: str, entity: str, qbo_id: str,
                              entity_name: str = "") -> None:
-    """Background delete task — inactivate the entity on QBO."""
+    """Background delete task — inactivates the entity on QBO.
+
+    QBO doesn't allow true delete for master-data (Customer, Vendor,
+    Account) — those endpoints reject `?operation=delete` with a
+    `ValidationFault: Unsupported Operation`. The correct pattern is a
+    sparse update with `Active: false`, which is what "Make inactive"
+    does in the QBO UI.
+
+    Items DO accept `?operation=delete` (soft-delete), so we keep the
+    delete op for items only. Everything else goes through the sparse-
+    update path.
+    """
     meta = _ENTITY_META.get(entity)
     if not meta:
         return
@@ -110,20 +121,26 @@ async def _run_auto_delete(company_id: str, entity: str, qbo_id: str,
         token = await _qbo_get_sync_token(company_id, realm_id,
                                             qbo_path, qbo_key, qbo_id)
         if token is None:
-            # QBO already doesn't have it — nothing to do.
             await append_log(company_id, "autodelete",
                               f"Auto-delete {entity} {qbo_id}: already absent on QBO",
                               {"entity": entity, "qbo_id": qbo_id})
             return
-        # QBO delete: `?operation=delete` with body `{Id, SyncToken}`.
-        # For master data (customer/vendor/account/item) this soft-
-        # deletes (`Active=false`) — data preserved, hidden from UI.
-        await _post(company_id, realm_id,
-                     f"/company/{realm_id}/{qbo_path}",
-                     {"Id": qbo_id, "SyncToken": token},
-                     operation="delete")
+
+        if entity == "item":
+            # Items support the real ?operation=delete (soft).
+            await _post(company_id, realm_id,
+                         f"/company/{realm_id}/{qbo_path}",
+                         {"Id": qbo_id, "SyncToken": token},
+                         operation="delete")
+        else:
+            # Customer / Vendor / Account: sparse-update Active=false.
+            await _post(company_id, realm_id,
+                         f"/company/{realm_id}/{qbo_path}",
+                         {"Id": qbo_id, "SyncToken": token,
+                          "Active": False, "sparse": True})
         await append_log(company_id, "autodelete",
-                          f"Auto-delete {entity} {qbo_id}"
+                          f"Auto-{'delete' if entity == 'item' else 'inactivate'} "
+                          f"{entity} {qbo_id}"
                           + (f" ({entity_name})" if entity_name else ""),
                           {"entity": entity, "qbo_id": qbo_id,
                            "name": entity_name})

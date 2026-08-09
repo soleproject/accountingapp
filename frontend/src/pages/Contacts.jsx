@@ -3,7 +3,7 @@ import { useSearchParams, useParams, useNavigate, Link } from "react-router-dom"
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, Pencil, GitMerge, ExternalLink, Tag, Sparkles, Upload, FileSpreadsheet, FileText, Loader2, Check, ArrowLeft, History, Undo2, UserCircle, Store, Search } from "lucide-react";
+import { Plus, Trash2, X, Pencil, GitMerge, ExternalLink, Tag, Sparkles, Upload, FileSpreadsheet, FileText, Loader2, Check, ArrowLeft, History, Undo2, UserCircle, Store, Search, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
@@ -99,9 +99,42 @@ export default function Contacts() {
     load();
   });
 
+  // Soft-hide a contact (industry-standard "Make Inactive" pattern).
+  // Preserves referential integrity for any invoices/payments/bills
+  // attached to the contact, and mirrors correctly to QBO — QBO's own
+  // "Make inactive" corresponds to a sparse update with Active=false.
+  const inactivate = async (e, id, name = "") => {
+    e.stopPropagation();
+    if (!confirm(
+      `Make "${name || "this contact"}" inactive?\n\n` +
+      "The contact will be hidden from lists but preserved for " +
+      "history. Any linked invoices/payments/bills stay intact.\n" +
+      "You can reactivate anytime from the Inactive filter.\n\n" +
+      "If QBO Mirror is on, this also marks the contact inactive " +
+      "in QBO (Active=false)."
+    )) return;
+    await api.patch(`/companies/${currentId}/contacts/${id}`,
+                     { active: false });
+    toast.success("Contact made inactive");
+    load();
+  };
+
+  const reactivate = async (e, id) => {
+    e.stopPropagation();
+    await api.patch(`/companies/${currentId}/contacts/${id}`,
+                     { active: true });
+    toast.success("Contact reactivated");
+    load();
+  };
+
   const del = async (e, id) => {
     e.stopPropagation();
-    if (!confirm("Delete this contact?")) return;
+    if (!confirm(
+      "Hard-delete this contact?\n\n" +
+      "This removes the contact entirely and cannot be undone. Only " +
+      "use for test entries with NO invoices/payments/bills attached.\n\n" +
+      "For normal cleanup, click Cancel and use \"Make Inactive\" instead."
+    )) return;
     await api.delete(`/companies/${currentId}/contacts/${id}`);
     toast.success("Contact deleted");
     load();
@@ -254,10 +287,22 @@ export default function Contacts() {
                 <Pencil size={13} />
               </button>
               <button
+                onClick={(e) => c.active === false
+                  ? reactivate(e, c.id)
+                  : inactivate(e, c.id, c.name)}
+                data-testid={`contact-inactivate-${c.id}`}
+                className={c.active === false
+                  ? "text-emerald-600 hover:text-emerald-800 p-1"
+                  : "text-amber-600 hover:text-amber-800 p-1"}
+                title={c.active === false ? "Reactivate" : "Make inactive"}
+              >
+                {c.active === false ? <Check size={13} /> : <EyeOff size={13} />}
+              </button>
+              <button
                 onClick={(e) => del(e, c.id)}
                 data-testid={`contact-delete-${c.id}`}
                 className="text-red-500 hover:text-red-700 p-1"
-                title="Delete"
+                title="Hard delete (rare — use Make Inactive instead)"
               >
                 <Trash2 size={13} />
               </button>
