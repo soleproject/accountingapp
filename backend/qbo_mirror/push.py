@@ -336,18 +336,25 @@ async def _invoice_body(company_id: str, inv: dict) -> dict:
 
 
 async def _push_invoices(company_id: str, realm_id: str) -> dict:
-    """Local invoices with no qbo_id → POST to QBO. Skips drafts and
-    voided invoices; those don't belong in QBO."""
+    """Local invoices with no qbo_id → POST to QBO. Manual push
+    respects user intent — a draft in the preview push queue is
+    pushed as an open invoice on QBO (QBO has no draft concept).
+    Only voided invoices are hard-skipped."""
     inserted = 0
     failed: list[dict] = []
+    skipped: list[dict] = []
     cursor = db.invoices.find(
         {"company_id": company_id, "source": {"$ne": "qbo"},
-         "status": {"$nin": ["draft", "void", "voided"]},
          "voided": {"$ne": True},
          "$or": [{"qbo_id": {"$exists": False}},
                  {"qbo_id": {"$in": [None, ""]}}]},
     )
     async for inv in cursor:
+        status = (inv.get("status") or "").lower()
+        if status in ("void", "voided"):
+            skipped.append({"id": inv["id"], "number": inv.get("number"),
+                             "reason": f"status={status}"})
+            continue
         try:
             body = await _invoice_body(company_id, inv)
             resp = await _post(
@@ -371,7 +378,7 @@ async def _push_invoices(company_id: str, realm_id: str) -> dict:
         except Exception as e:  # noqa: BLE001
             failed.append({"id": inv["id"], "number": inv.get("number"),
                             "error": str(e)[:400]})
-    return {"inserted": inserted, "failed": failed}
+    return {"inserted": inserted, "failed": failed, "skipped": skipped}
 
 
 async def _push_items(company_id: str, realm_id: str) -> dict:
