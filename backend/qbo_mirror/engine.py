@@ -104,13 +104,20 @@ def _norm_item_qbo(o: dict) -> dict:
 # meaningful; line-level drift is opaque and skipped for Phase 2.
 
 def _norm_invoice_local(i: dict) -> dict:
+    # Local invoices store the outstanding amount as `balance_due`
+    # (see routes/invoices.py::create_invoice). `balance` is only set
+    # on QBO-sourced invoices via map_invoice. Read both so the
+    # preview shows the true outstanding total either way.
+    bal = i.get("balance_due")
+    if bal is None:
+        bal = i.get("balance")
     return {
         "qbo_id": i.get("qbo_id"),
         "natural_key": f"inv::{(i.get('number') or '').strip().lower()}",
         "number": (i.get("number") or "").strip(),
         "date": i.get("issue_date") or i.get("date") or "",
         "total": round(float(i.get("total") or 0), 2),
-        "balance": round(float(i.get("balance") or 0), 2),
+        "balance": round(float(bal or 0), 2),
         "status": i.get("status") or "",
     }
 
