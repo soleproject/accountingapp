@@ -336,20 +336,26 @@ async def _invoice_body(company_id: str, inv: dict) -> dict:
 
 
 async def _push_invoices(company_id: str, realm_id: str) -> dict:
-    """Local invoices with no qbo_id → POST to QBO. Manual push
-    respects user intent — a draft in the preview push queue is
-    pushed as an open invoice on QBO (QBO has no draft concept).
-    Only voided invoices are hard-skipped."""
+    """Local invoices with no qbo_id → POST (create) to QBO.
+    Locally-authored invoices that already have a qbo_id but have
+    drifted → full-replace UPDATE. Manual push respects user intent —
+    a draft in the preview push queue is pushed as an open invoice
+    on QBO (QBO has no draft concept). Only voided invoices are
+    hard-skipped."""
     inserted = 0
+    updated = 0
     failed: list[dict] = []
     skipped: list[dict] = []
-    cursor = db.invoices.find(
+    # Two-pass: creates first, then updates. Ensures customer/item
+    # dependencies stay stable and log entries are cleanly ordered.
+
+    # ── PASS 1: create rows without qbo_id ─────────────────────────
+    async for inv in db.invoices.find(
         {"company_id": company_id, "source": {"$ne": "qbo"},
          "voided": {"$ne": True},
          "$or": [{"qbo_id": {"$exists": False}},
                  {"qbo_id": {"$in": [None, ""]}}]},
-    )
-    async for inv in cursor:
+    ):
         status = (inv.get("status") or "").lower()
         if status in ("void", "voided"):
             skipped.append({"id": inv["id"], "number": inv.get("number"),
@@ -378,7 +384,64 @@ async def _push_invoices(company_id: str, realm_id: str) -> dict:
         except Exception as e:  # noqa: BLE001
             failed.append({"id": inv["id"], "number": inv.get("number"),
                             "error": str(e)[:400]})
-    return {"inserted": inserted, "failed": failed, "skipped": skipped}
+
+    # ── PASS 2: full-replace update rows with a qbo_id that were
+    # authored locally (source != 'qbo'). We compare local totals
+    # against the QBO twin's TotalAmt to detect drift cheaply — if
+    # the number matches within a cent we skip the round-trip.
+    from qbo_service import _get
+    async for inv in db.invoices.find(
+        {"company_id": company_id, "source": {"$ne": "qbo"},
+         "voided": {"$ne": True},
+         "qbo_id": {"$nin": [None, ""]}},
+    ):
+        # Anti-loop: if the most recent write was ourselves reflecting
+        # QBO's state back, don't reflect it right back to QBO.
+        if inv.get("_sync_origin") == "mirror_pull":
+            continue
+        qbo_id = str(inv["qbo_id"])
+        try:
+            # Read the QBO twin to get SyncToken + current TotalAmt.
+            qr = await _get(company_id, realm_id,
+                             f"/company/{realm_id}/invoice/{qbo_id}",
+                             params={"minorversion": QBO_MINOR_VERSION})
+            twin = qr.get("Invoice") or {}
+            token = str(twin.get("SyncToken", "0"))
+            local_total = round(float(inv.get("total") or 0), 2)
+            remote_total = round(float(twin.get("TotalAmt") or 0), 2)
+            if abs(local_total - remote_total) < 0.01:
+                # No meaningful drift — nothing to push.
+                continue
+            body = await _invoice_body(company_id, inv)
+            body["Id"] = qbo_id
+            body["SyncToken"] = token
+            # Full replace (sparse=false is the QBO default when
+            # sparse isn't set). This overwrites lines to match the
+            # local state. Payment linkage on removed lines is a
+            # known QBO edge case — flagged in CHANGELOG.
+            resp = await _post(
+                company_id, realm_id,
+                f"/company/{realm_id}/invoice",
+                body,
+            )
+            new_id = (resp.get("Invoice") or {}).get("Id")
+            if not new_id:
+                failed.append({"id": inv["id"], "number": inv.get("number"),
+                                "error": "update: no Id in QBO response"})
+                continue
+            await db.invoices.update_one(
+                {"id": inv["id"]},
+                {"$set": {"_sync_origin": "mirror_push",
+                          "_sync_status": "synced",
+                          "updated_at": now_iso()}},
+            )
+            updated += 1
+        except Exception as e:  # noqa: BLE001
+            failed.append({"id": inv["id"], "number": inv.get("number"),
+                            "error": str(e)[:400]})
+
+    return {"inserted": inserted, "updated": updated,
+            "failed": failed, "skipped": skipped}
 
 
 async def _push_items(company_id: str, realm_id: str) -> dict:
