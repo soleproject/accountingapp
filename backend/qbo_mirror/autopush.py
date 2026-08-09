@@ -218,9 +218,14 @@ async def _run_auto_update(company_id: str, entity: str,
                       "_sync_finished_at": now_iso()}},
         )
         await append_log(company_id, "autoupdate",
-                          f"Auto-update {entity} {doc_id} (qbo_id {qbo_id})",
+                          f"Auto-update {entity} {doc_id} (qbo_id {qbo_id})"
+                          + (f" Active={body.get('Active')}"
+                             if 'Active' in body else ""),
                           {"entity": entity, "doc_id": doc_id,
-                           "qbo_id": qbo_id})
+                           "qbo_id": qbo_id,
+                           "sent_body": {k: v for k, v in body.items()
+                                          if k != "SyncToken"},
+                           "local_active": doc.get("active")})
     except Exception as e:  # noqa: BLE001
         err = str(e)[:400]
         logger.warning("autoupdate failed cid=%s entity=%s id=%s: %s",
