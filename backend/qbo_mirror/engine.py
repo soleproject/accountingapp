@@ -136,6 +136,39 @@ def _norm_invoice_qbo(o: dict) -> dict:
     }
 
 
+# ─── Bill normalizers (Phase 2d) ────────────────────────────────────
+# Match by DocNumber (aka "bill number"), same shape as invoices —
+# QBO uses DocNumber for both.
+
+def _norm_bill_local(b: dict) -> dict:
+    bal = b.get("balance_due")
+    if bal is None:
+        bal = b.get("balance")
+    return {
+        "qbo_id": b.get("qbo_id"),
+        "natural_key": f"bill::{(b.get('number') or '').strip().lower()}",
+        "number": (b.get("number") or "").strip(),
+        "date": b.get("issue_date") or b.get("date") or "",
+        "total": round(float(b.get("total") or 0), 2),
+        "balance": round(float(bal or 0), 2),
+        "status": b.get("status") or "",
+    }
+
+
+def _norm_bill_qbo(o: dict) -> dict:
+    total = float(o.get("TotalAmt") or 0)
+    balance = float(o.get("Balance") or 0)
+    return {
+        "qbo_id": o.get("Id"),
+        "natural_key": f"bill::{(o.get('DocNumber') or '').strip().lower()}",
+        "number": (o.get("DocNumber") or "").strip(),
+        "date": o.get("TxnDate") or "",
+        "total": round(total, 2),
+        "balance": round(balance, 2),
+        "status": "paid" if balance == 0 else "open",
+    }
+
+
 # ─── Diff builder ───────────────────────────────────────────────────
 # Fields whose drift is *significant* — cosmetic-only fields (e.g.
 # subtype spelling) don't count as drift to reduce noise in the report.
@@ -145,6 +178,7 @@ _DRIFT_FIELDS = {
     "vendors":   ["name", "email", "phone", "active"],
     "items":     ["name", "sku", "price", "active"],
     "invoices":  ["number", "date", "total", "balance", "status"],
+    "bills":     ["number", "date", "total", "balance", "status"],
 }
 
 
@@ -231,6 +265,9 @@ async def _fetch_local(company_id: str, entity: str) -> list[dict]:
         # voided invoices don't show up as push candidates.
         return [_norm_invoice_local(i) async for i in db.invoices.find(
             {"company_id": company_id, "voided": {"$ne": True}})]
+    if entity == "bills":
+        return [_norm_bill_local(b) async for b in db.bills.find(
+            {"company_id": company_id, "voided": {"$ne": True}})]
     return []
 
 
@@ -251,6 +288,9 @@ async def _fetch_qbo(company_id: str, realm_id: str,
     if entity == "invoices":
         return [_norm_invoice_qbo(o)
                 async for o in Q.query_all(company_id, realm_id, "Invoice")]
+    if entity == "bills":
+        return [_norm_bill_qbo(o)
+                async for o in Q.query_all(company_id, realm_id, "Bill")]
     return []
 
 
@@ -275,7 +315,8 @@ async def run_dry_run(company_id: str, user_email: str) -> dict:
     # Foundation entities (Phase 1) + Invoices (Phase 2 · dry-run only
     # so far). Push/Pull will land in a follow-up commit; for now
     # invoices flow through the same diff pipeline safely.
-    for entity in ("accounts", "customers", "vendors", "items", "invoices"):
+    for entity in ("accounts", "customers", "vendors", "items",
+                    "invoices", "bills"):
         if not entities_cfg.get(entity, True):
             continue
         try:

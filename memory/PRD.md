@@ -4430,3 +4430,37 @@ Trying to stamp our numeric codes onto QBO accounts was the wrong model — it w
 - **Sync Status Badges** — UI badges on CoA/Contacts/Items/Invoices
   rows using `_sync_status`.
 - **Real-time inbound webhooks** — replace manual Pull.
+
+
+## 2026-08-09 — QBO Mirror Phase 2d (Bills, Bi-directional)
+
+**Status**: SHIPPED. Bills now enjoy full bi-directional sync
+identical to invoices — autopush on create/update/delete,
+manual bulk push (2-pass: creates then drifted-updates),
+inbound pull with reclaim-by-DocNumber, twin-patch phantom-drift
+prevention.
+
+### What shipped
+- `_bill_body`, `_push_bills`, `_local_patch_from_qbo_bill`
+  (push.py)
+- `_pull_bills` (pull.py) with reclaim-by-DocNumber
+- Bill normalizers + drift fields (engine.py)
+- `_push_one_bill` + registry entries + update/delete branches
+  (autopush.py)
+- All four route hooks wired (routes/bills.py + duplicate_bill in
+  routes/invoices.py)
+- Bills toggle enabled by default (settings.py)
+- Bills row in mirror settings UI (QboMirror.jsx)
+- 6 regression unit tests
+
+### Deferred
+- ItemBasedExpenseLineDetail (inventory item purchases push as
+  AccountBasedExpenseLineDetail for now).
+- Bill-level tax pushdown (tax library still not mirrored).
+
+### Next up
+- Phase 2e: Payments + BillPayments mirror. Payments reference
+  both invoices and bills — both linkage sides now exist.
+- Phase 2f: Deposits / Transfers / Journal Entries mirror.
+- Real-time inbound webhooks or background auto-pull polling.
+- Sync Status Badges on CoA / Contacts / Items / Invoices / Bills.

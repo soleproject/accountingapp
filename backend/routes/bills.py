@@ -49,6 +49,9 @@ from deps import (
 )
 
 from routes.invoices import _sum_lines
+from qbo_mirror.autopush import (
+    try_auto_push, try_auto_update, try_auto_delete,
+)
 router = APIRouter(prefix="/api")
 
 
@@ -154,6 +157,9 @@ async def create_bill(cid: str, inp: BillCreate, user: dict = Depends(get_curren
         # the error into the doc so the UI can prompt the user.
         await db.bills.update_one({"id": bid, "company_id": cid},
                                   {"$set": {"inventory_error": str(e)}})
+    # Fire-and-forget mirror push. Silent no-op if QBO Mirror is
+    # disabled or bill is voided.
+    try_auto_push(cid, "bill", bid)
     return {"id": bid, "bill": coerce(doc)}
 
 
@@ -193,6 +199,10 @@ async def update_bill(cid: str, bid: str, payload: dict, user: dict = Depends(ge
         if dup:
             number_conflict = True
     payload["updated_at"] = now_iso()
+    # A user PATCH is an authoritative local edit — clear any stale
+    # `_sync_origin: mirror_pull` from the last pull so autopush
+    # correctly propagates this change back to QBO on our next hop.
+    payload["_sync_origin"] = "user_edit"
     await db.bills.update_one({"id": bid, "company_id": cid}, {"$set": payload})
     # Re-run inventory hooks on any save so QOH & JEs stay in sync with
     # the latest lines. Reads the freshest doc, then persists the new
@@ -209,6 +219,8 @@ async def update_bill(cid: str, bid: str, payload: dict, user: dict = Depends(ge
     except Exception as e:
         await db.bills.update_one({"id": bid, "company_id": cid},
                                   {"$set": {"inventory_error": str(e)}})
+    # Fire-and-forget mirror update.
+    try_auto_update(cid, "bill", bid)
     return {"ok": True, "number_conflict": number_conflict}
 
 
@@ -218,15 +230,19 @@ async def delete_bill(cid: str, bid: str, user: dict = Depends(get_current_user)
     from link_cascade import cascade_on_doc_delete
     # Reverse inventory hooks before wiping the doc — items get restored
     # to their pre-bill QOH and the JEs get removed.
+    existing = await db.bills.find_one({"id": bid, "company_id": cid})
+    qbo_id = (existing or {}).get("qbo_id")
+    bill_number = (existing or {}).get("number") or ""
     try:
         from inventory_service import _reverse_bill_hooks
-        existing = await db.bills.find_one({"id": bid, "company_id": cid})
         if existing:
             await _reverse_bill_hooks(cid, existing)
     except Exception:
         pass
     cascade = await cascade_on_doc_delete(cid, "bill", bid)
     await db.bills.delete_one({"id": bid, "company_id": cid})
+    # Mirror delete on QBO if this bill was previously synced.
+    try_auto_delete(cid, "bill", qbo_id, bill_number)
     return {"ok": True, **cascade}
 
 

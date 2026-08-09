@@ -515,6 +515,245 @@ async def _push_items(company_id: str, realm_id: str) -> dict:
     return {"inserted": inserted, "failed": failed}
 
 
+# ─── Bill push (Phase 2d) ──────────────────────────────────────────
+# Bills are structurally close to invoices but use VendorRef +
+# AccountBasedExpenseLineDetail. QBO does not treat the per-line
+# `account_id` (expense category) as optional — every line MUST
+# have an AccountRef. When a local line has no `expense_account_id`
+# we fall back to the QBO-side "Uncategorized Expense" account
+# (or the alphabetically first Expense-typed account) so the push
+# still succeeds. Users can re-categorize afterwards.
+
+async def _resolve_vendor_ref(company_id: str,
+                                contact_id: str | None
+                                ) -> tuple[str, str] | None:
+    if not contact_id:
+        return None
+    c = await db.contacts.find_one(
+        {"id": contact_id, "company_id": company_id},
+        {"qbo_id": 1, "name": 1, "display_name": 1, "_id": 0},
+    )
+    if not c or not c.get("qbo_id"):
+        return None
+    return (str(c["qbo_id"]),
+            c.get("display_name") or c.get("name") or "")
+
+
+async def _resolve_account_ref(company_id: str,
+                                 account_id: str | None
+                                 ) -> tuple[str, str] | None:
+    if not account_id:
+        return None
+    a = await db.accounts.find_one(
+        {"id": account_id, "company_id": company_id},
+        {"qbo_id": 1, "name": 1, "_id": 0},
+    )
+    if not a or not a.get("qbo_id"):
+        return None
+    return (str(a["qbo_id"]), a.get("name") or "")
+
+
+async def _default_expense_account_qbo(company_id: str
+                                         ) -> tuple[str, str] | None:
+    """Best-effort fallback expense account for bill lines missing
+    an expense_account_id. Prefers "Uncategorized Expense" (the
+    Plaid catch-all we already seed), then any active expense-typed
+    QBO account."""
+    for name_like in ("Uncategorized Expense", "Miscellaneous",
+                      "Other Expense"):
+        a = await db.accounts.find_one(
+            {"company_id": company_id, "source": "qbo",
+             "name": name_like, "active": {"$ne": False}},
+            {"qbo_id": 1, "name": 1, "_id": 0},
+        )
+        if a and a.get("qbo_id"):
+            return (str(a["qbo_id"]), a["name"])
+    a = await db.accounts.find_one(
+        {"company_id": company_id, "source": "qbo",
+         "type": "expense", "active": {"$ne": False}},
+        {"qbo_id": 1, "name": 1, "_id": 0},
+        sort=[("name", 1)],
+    )
+    if a and a.get("qbo_id"):
+        return (str(a["qbo_id"]), a.get("name") or "Expense")
+    return None
+
+
+async def _bill_body(company_id: str, bill: dict) -> dict:
+    """Build a QBO Bill create/update body from a local bill doc.
+    Raises ValueError with a human-readable reason if the bill
+    can't be pushed."""
+    vendor = await _resolve_vendor_ref(company_id, bill.get("contact_id"))
+    if not vendor:
+        raise ValueError(
+            "Vendor missing or not synced to QBO. Sync vendors first."
+        )
+    lines_out: list[dict] = []
+    fallback: tuple[str, str] | None = None
+    for idx, li in enumerate(bill.get("line_items") or [], start=1):
+        amount = float(li.get("amount") or 0)
+        description = (li.get("description") or "").strip()
+        acct = await _resolve_account_ref(
+            company_id, li.get("expense_account_id"))
+        if not acct:
+            if fallback is None:
+                fallback = await _default_expense_account_qbo(company_id)
+            if not fallback:
+                raise ValueError(
+                    f"Line {idx} has no expense account and no "
+                    "fallback QBO expense account exists. Run Mirror "
+                    "Pull for accounts first."
+                )
+            acct = fallback
+        lines_out.append({
+            "DetailType": "AccountBasedExpenseLineDetail",
+            "Amount": round(amount, 2),
+            "Description": description,
+            "AccountBasedExpenseLineDetail": {
+                "AccountRef": {"value": acct[0], "name": acct[1]},
+            },
+        })
+    if not lines_out:
+        raise ValueError("Bill has no line items.")
+
+    body: dict[str, Any] = {
+        "VendorRef": {"value": vendor[0], "name": vendor[1]},
+        "Line": lines_out,
+    }
+    if bill.get("issue_date"):
+        body["TxnDate"] = bill["issue_date"]
+    if bill.get("due_date"):
+        body["DueDate"] = bill["due_date"]
+    if bill.get("number"):
+        body["DocNumber"] = str(bill["number"])[:21]
+    if bill.get("internal_notes"):
+        body["PrivateNote"] = str(bill["internal_notes"])[:4000]
+    return body
+
+
+def _local_patch_from_qbo_bill(twin: dict) -> dict:
+    """Twin-patch equivalent of `_local_patch_from_qbo_invoice`.
+    Called after a successful CREATE or UPDATE against QBO's bill
+    endpoint so we stamp QBO's authoritative view back and avoid
+    phantom drift on the next preview."""
+    total = float(twin.get("TotalAmt") or 0)
+    balance = float(twin.get("Balance") or 0)
+    patch: dict[str, Any] = {
+        "total": round(total, 2),
+        "subtotal": round(total, 2),
+        "balance": round(balance, 2),
+        "balance_due": round(balance, 2),
+        "status": "paid" if balance == 0 else "open",
+    }
+    if twin.get("TxnDate"):
+        patch["issue_date"] = twin["TxnDate"]
+    if twin.get("DueDate"):
+        patch["due_date"] = twin["DueDate"]
+    if twin.get("DocNumber"):
+        patch["number"] = twin["DocNumber"]
+    return patch
+
+
+async def _push_bills(company_id: str, realm_id: str) -> dict:
+    """Local bills without qbo_id → POST (create). Locally-authored
+    bills that already carry a qbo_id but have drifted (total
+    differs) → full-replace UPDATE with SyncToken. Only voided
+    bills are hard-skipped."""
+    inserted = 0
+    updated = 0
+    failed: list[dict] = []
+    skipped: list[dict] = []
+
+    # PASS 1 — create
+    async for b in db.bills.find(
+        {"company_id": company_id, "source": {"$ne": "qbo"},
+         "voided": {"$ne": True},
+         "$or": [{"qbo_id": {"$exists": False}},
+                 {"qbo_id": {"$in": [None, ""]}}]},
+    ):
+        status = (b.get("status") or "").lower()
+        if status in ("void", "voided"):
+            skipped.append({"id": b["id"], "number": b.get("number"),
+                             "reason": f"status={status}"})
+            continue
+        try:
+            body = await _bill_body(company_id, b)
+            resp = await _post(
+                company_id, realm_id,
+                f"/company/{realm_id}/bill",
+                body,
+            )
+            twin = resp.get("Bill") or {}
+            new_id = twin.get("Id")
+            if not new_id:
+                failed.append({"id": b["id"], "number": b.get("number"),
+                                "error": "no Id in QBO response"})
+                continue
+            twin_patch = _local_patch_from_qbo_bill(twin)
+            await db.bills.update_one(
+                {"id": b["id"]},
+                {"$set": {**twin_patch,
+                          "qbo_id": str(new_id), "realm_id": realm_id,
+                          "_sync_origin": "mirror_push",
+                          "_sync_status": "synced",
+                          "updated_at": now_iso()}},
+            )
+            inserted += 1
+        except Exception as e:  # noqa: BLE001
+            failed.append({"id": b["id"], "number": b.get("number"),
+                            "error": str(e)[:400]})
+
+    # PASS 2 — update drifted rows
+    from qbo_service import _get
+    async for b in db.bills.find(
+        {"company_id": company_id, "source": {"$ne": "qbo"},
+         "voided": {"$ne": True},
+         "qbo_id": {"$nin": [None, ""]}},
+    ):
+        if b.get("_sync_origin") == "mirror_pull":
+            continue
+        qbo_id = str(b["qbo_id"])
+        try:
+            qr = await _get(company_id, realm_id,
+                             f"/company/{realm_id}/bill/{qbo_id}",
+                             params={"minorversion": QBO_MINOR_VERSION})
+            twin = qr.get("Bill") or {}
+            token = str(twin.get("SyncToken", "0"))
+            local_total = round(float(b.get("total") or 0), 2)
+            remote_total = round(float(twin.get("TotalAmt") or 0), 2)
+            if abs(local_total - remote_total) < 0.01:
+                continue
+            body = await _bill_body(company_id, b)
+            body["Id"] = qbo_id
+            body["SyncToken"] = token
+            resp = await _post(
+                company_id, realm_id,
+                f"/company/{realm_id}/bill",
+                body,
+            )
+            new_twin = resp.get("Bill") or {}
+            new_id = new_twin.get("Id")
+            if not new_id:
+                failed.append({"id": b["id"], "number": b.get("number"),
+                                "error": "update: no Id in QBO response"})
+                continue
+            twin_patch = _local_patch_from_qbo_bill(new_twin)
+            await db.bills.update_one(
+                {"id": b["id"]},
+                {"$set": {**twin_patch,
+                          "_sync_origin": "mirror_push",
+                          "_sync_status": "synced",
+                          "updated_at": now_iso()}},
+            )
+            updated += 1
+        except Exception as e:  # noqa: BLE001
+            failed.append({"id": b["id"], "number": b.get("number"),
+                            "error": str(e)[:400]})
+
+    return {"inserted": inserted, "updated": updated,
+            "failed": failed, "skipped": skipped}
+
+
 async def run_push(company_id: str, user_email: str,
                     entities: list[str] | None = None) -> dict:
     """Outbound-only sync — create local-only Foundation entities on
@@ -528,7 +767,8 @@ async def run_push(company_id: str, user_email: str,
     realm_id = conn["realm_id"]
 
     if entities is None:
-        entities = ["accounts", "customers", "vendors", "items", "invoices"]
+        entities = ["accounts", "customers", "vendors", "items",
+                     "invoices", "bills"]
 
     result: dict[str, dict] = {}
     for e in entities:
@@ -545,6 +785,8 @@ async def run_push(company_id: str, user_email: str,
                 result[e] = await _push_items(company_id, realm_id)
             elif e == "invoices":
                 result[e] = await _push_invoices(company_id, realm_id)
+            elif e == "bills":
+                result[e] = await _push_bills(company_id, realm_id)
         except Exception as err:  # noqa: BLE001
             result[e] = {"error": str(err)}
 

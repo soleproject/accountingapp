@@ -607,7 +607,13 @@ async def duplicate_bill(cid: str, bid: str, user: dict = Depends(get_current_us
     if not src:
         raise HTTPException(status_code=404, detail="Bill not found")
     dup = await _duplicate_doc(src, kind="bill")
+    # Duplicate is a brand-new document — strip source qbo_id so the
+    # autopush hook treats it as fresh.
+    dup.pop("qbo_id", None)
+    dup.pop("_sync_origin", None)
+    dup.pop("_sync_status", None)
     await db.bills.insert_one(dup)
+    try_auto_push(cid, "bill", dup["id"])
     return {"id": dup["id"], "bill": coerce(dup)}
 
 

@@ -268,6 +268,63 @@ async def _pull_invoices(company_id: str, realm_id: str) -> dict:
             "reclaimed": reclaimed}
 
 
+async def _pull_bills(company_id: str, realm_id: str) -> dict:
+    """Phase 2d — bring QBO bills into our local system. Mirror of
+    `_pull_invoices` — matches by qbo_id first, then by DocNumber
+    (reclaim), else insert. QBO Wins overwrite of totals + lines."""
+    existing = await _existing_qbo_ids(company_id, "bills",
+                                        any_source=True)
+    inserted = 0
+    updated = 0
+    reclaimed = 0
+    async for obj in Q.query_all(company_id, realm_id, "Bill"):
+        qid = str(obj.get("Id"))
+        mapped = Q.map_bill(company_id, realm_id, obj)
+        mapped["_sync_origin"] = "mirror_pull"
+        mapped["posted"] = True
+
+        patch = {k: mapped[k] for k in
+                 ["total", "balance", "status", "due_date",
+                  "issue_date", "line_items"]
+                 if k in mapped}
+        if "balance" in mapped:
+            patch["balance_due"] = mapped["balance"]
+        patch["_sync_origin"] = "mirror_pull"
+        patch["updated_at"] = now_iso()
+
+        if qid in existing:
+            await db.bills.update_one(
+                {"company_id": company_id, "qbo_id": qid},
+                {"$set": patch},
+            )
+            updated += 1
+            continue
+
+        number = (mapped.get("number") or "").strip()
+        orphan = None
+        if number:
+            orphan = await db.bills.find_one(
+                {"company_id": company_id, "number": number,
+                 "$or": [{"qbo_id": {"$exists": False}},
+                         {"qbo_id": {"$in": [None, ""]}}]},
+                {"id": 1, "_id": 0},
+            )
+        if orphan:
+            reclaim_patch = {**patch,
+                             "qbo_id": qid, "realm_id": realm_id}
+            await db.bills.update_one(
+                {"id": orphan["id"]},
+                {"$set": reclaim_patch},
+            )
+            reclaimed += 1
+        else:
+            await db.bills.insert_one(mapped)
+            inserted += 1
+
+    return {"inserted": inserted, "updated": updated,
+            "reclaimed": reclaimed}
+
+
 async def run_pull(company_id: str, user_email: str,
                     entities: list[str] | None = None) -> dict:
     """Execute a Pull for each Foundation entity in `entities`
@@ -281,7 +338,8 @@ async def run_pull(company_id: str, user_email: str,
     realm_id = conn["realm_id"]
 
     if entities is None:
-        entities = ["accounts", "customers", "vendors", "items", "invoices"]
+        entities = ["accounts", "customers", "vendors", "items",
+                     "invoices", "bills"]
 
     result: dict[str, dict] = {}
     for e in entities:
@@ -298,6 +356,8 @@ async def run_pull(company_id: str, user_email: str,
                 result[e] = await _pull_items(company_id, realm_id)
             elif e == "invoices":
                 result[e] = await _pull_invoices(company_id, realm_id)
+            elif e == "bills":
+                result[e] = await _pull_bills(company_id, realm_id)
         except Exception as err:  # noqa: BLE001
             result[e] = {"error": str(err)}
 
