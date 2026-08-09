@@ -47,6 +47,9 @@ from deps import (
     is_period_closed, assert_open,
     categorize_and_insert, sync_and_import,
 )
+from qbo_mirror.autopush import (
+    try_auto_push, try_auto_update, try_auto_delete,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -343,6 +346,10 @@ async def create_invoice(cid: str, inp: InvoiceCreate, user: dict = Depends(get_
     except Exception as e:
         await db.invoices.update_one({"id": iid, "company_id": cid},
                                      {"$set": {"inventory_error": str(e)}})
+    # Fire-and-forget mirror push. Silent no-op if QBO Mirror is
+    # disabled or the invoice is a draft; the autopush guard filters
+    # on doc.status internally.
+    try_auto_push(cid, "invoice", iid)
     return {"id": iid, "invoice": coerce(doc), "inventory_warnings": warnings}
 
 
@@ -407,6 +414,9 @@ async def update_invoice(cid: str, iid: str, payload: dict, user: dict = Depends
     except Exception as e:
         await db.invoices.update_one({"id": iid, "company_id": cid},
                                      {"$set": {"inventory_error": str(e)}})
+    # Fire-and-forget mirror update (doc-level fields only; line drift
+    # is skipped in Phase 2c — see autopush._run_auto_update).
+    try_auto_update(cid, "invoice", iid)
     return {"ok": True, "number_conflict": number_conflict, "inventory_warnings": warnings}
 
 
@@ -415,15 +425,19 @@ async def delete_invoice(cid: str, iid: str, user: dict = Depends(get_current_us
     await require_company(user, cid)
     from link_cascade import cascade_on_doc_delete
     # Restore QOH & remove COGS JEs before wiping the invoice.
+    existing = await db.invoices.find_one({"id": iid, "company_id": cid})
+    qbo_id = (existing or {}).get("qbo_id")
+    inv_number = (existing or {}).get("number") or ""
     try:
         from inventory_service import _reverse_invoice_hooks
-        existing = await db.invoices.find_one({"id": iid, "company_id": cid})
         if existing:
             await _reverse_invoice_hooks(cid, existing)
     except Exception:
         pass
     cascade = await cascade_on_doc_delete(cid, "invoice", iid)
     await db.invoices.delete_one({"id": iid, "company_id": cid})
+    # Mirror delete on QBO if this invoice was previously synced.
+    try_auto_delete(cid, "invoice", qbo_id, inv_number)
     return {"ok": True, **cascade}
 
 
@@ -571,7 +585,14 @@ async def duplicate_invoice(cid: str, iid: str, user: dict = Depends(get_current
     if not src:
         raise HTTPException(status_code=404, detail="Invoice not found")
     dup = await _duplicate_doc(src, kind="invoice")
+    # A duplicate is a brand-new document — strip the source qbo_id so
+    # the autopush hook treats it as fresh (else it'd short-circuit on
+    # "already synced").
+    dup.pop("qbo_id", None)
+    dup.pop("_sync_origin", None)
+    dup.pop("_sync_status", None)
     await db.invoices.insert_one(dup)
+    try_auto_push(cid, "invoice", dup["id"])
     return {"id": dup["id"], "invoice": coerce(dup)}
 
 
