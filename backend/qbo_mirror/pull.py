@@ -106,17 +106,47 @@ async def _pull_contacts(company_id: str, realm_id: str,
                 await db.contacts.insert_one(mapped)
                 inserted += 1
             except DuplicateKeyError:
+                # A local contact already owns this normalized_name.
+                # Two possibilities:
+                #   (a) It's an already-mirrored row whose qbo_id
+                #       differs from `qid` — QBO has duplicate
+                #       DisplayNames (allowed in QBO, blocked here).
+                #       Skip; can't safely reassign without corrupting
+                #       the first sync link.
+                #   (b) It's a soft-orphaned row with no qbo_id — we
+                #       can reclaim it by stamping this qbo_id on.
                 from contact_resolver import normalize_contact_name
                 key = normalize_contact_name(mapped.get("name") or "")
-                await db.contacts.update_one(
-                    {"company_id": company_id, "normalized_name": key},
-                    {"$set": {"qbo_id": qid, "source": "qbo",
-                              "realm_id": realm_id,
-                              "type": kind,
-                              "_sync_origin": "mirror_pull",
-                              "updated_at": now_iso()}},
+                orphan = await db.contacts.find_one(
+                    {"company_id": company_id, "normalized_name": key,
+                     "$or": [{"qbo_id": {"$exists": False}},
+                             {"qbo_id": {"$in": [None, ""]}}]},
+                    {"id": 1, "_id": 0},
                 )
-                skipped_dupname += 1
+                if orphan:
+                    await db.contacts.update_one(
+                        {"id": orphan["id"]},
+                        {"$set": {"qbo_id": qid, "source": "qbo",
+                                  "realm_id": realm_id, "type": kind,
+                                  "_sync_origin": "mirror_pull",
+                                  "updated_at": now_iso()}},
+                    )
+                    skipped_dupname += 1
+                else:
+                    # Legitimate duplicate name — QBO has two rows
+                    # sharing the DisplayName. We can't take both.
+                    # Log so the user knows why the diff shows a
+                    # stubborn `Pull from QBO: 1` that never resolves.
+                    from qbo_mirror.settings import append_log
+                    await append_log(
+                        company_id, "warning",
+                        f"Duplicate name from QBO: '{mapped.get('name')}' "
+                        f"(qbo_id {qid}) skipped — local unique index "
+                        f"already occupied. Rename in QBO to resolve.",
+                        {"entity": kind, "qbo_id": qid,
+                         "normalized_name": key},
+                    )
+                    skipped_dupname += 1
         else:
             patch = {k: mapped[k] for k in _UPDATE_FIELDS[f"{kind}s"]
                      if k in mapped}
