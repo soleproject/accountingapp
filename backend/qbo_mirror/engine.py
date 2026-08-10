@@ -130,6 +130,18 @@ def _norm_invoice_qbo(o: dict) -> dict:
     # wild), the local doc stores `f"INV-{Id}"`. Applying the same
     # here keeps both sides symmetric.
     number = (o.get("DocNumber") or "").strip() or f"INV-{o.get('Id')}"
+    # Three-way status: paid (balance=0) / partial (balance > 0 but
+    # less than total, i.e. QBO has applied at least one payment) /
+    # sent (fully open). Without the "partial" bucket, any
+    # partially-paid invoice showed a phantom drift because local
+    # stores "partial" verbatim while QBO's raw fields only expose
+    # Balance vs TotalAmt.
+    if balance == 0:
+        status = "paid"
+    elif balance < total:
+        status = "partial"
+    else:
+        status = "sent"
     return {
         "qbo_id": o.get("Id"),
         "natural_key": f"inv::{number.lower()}",
@@ -137,7 +149,7 @@ def _norm_invoice_qbo(o: dict) -> dict:
         "date": o.get("TxnDate") or "",
         "total": round(total, 2),
         "balance": round(balance, 2),
-        "status": "paid" if balance == 0 else "sent",
+        "status": status,
     }
 
 
@@ -167,6 +179,14 @@ def _norm_bill_qbo(o: dict) -> dict:
     # bills that omit DocNumber) — otherwise every no-DocNumber
     # QBO bill perpetually flags as `number` drift.
     number = (o.get("DocNumber") or "").strip() or f"BILL-{o.get('Id')}"
+    # Same 3-way status logic as invoices — a partially-paid bill
+    # locally is "partial", not "open".
+    if balance == 0:
+        status = "paid"
+    elif balance < total:
+        status = "partial"
+    else:
+        status = "open"
     return {
         "qbo_id": o.get("Id"),
         "natural_key": f"bill::{number.lower()}",
@@ -174,7 +194,7 @@ def _norm_bill_qbo(o: dict) -> dict:
         "date": o.get("TxnDate") or "",
         "total": round(total, 2),
         "balance": round(balance, 2),
-        "status": "paid" if balance == 0 else "open",
+        "status": status,
     }
 
 

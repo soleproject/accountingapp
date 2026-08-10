@@ -288,13 +288,21 @@ def _local_patch_from_qbo_invoice(twin: dict) -> dict:
     tax_detail = twin.get("TxnTaxDetail") or {}
     tax = float(tax_detail.get("TotalTax") or 0)
     balance = float(twin.get("Balance") or 0)
+    # Three-way status: matches _norm_invoice_qbo so preview stays
+    # in sync after an autopush that changed balance.
+    if balance == 0:
+        status = "paid"
+    elif balance < total:
+        status = "partial"
+    else:
+        status = "sent"
     patch: dict[str, Any] = {
         "total": round(total, 2),
         "subtotal": round(total - tax, 2),
         "tax": round(tax, 2),
         "balance": round(balance, 2),
         "balance_due": round(balance, 2),
-        "status": "paid" if balance == 0 else "sent",
+        "status": status,
     }
     if twin.get("TxnDate"):
         patch["issue_date"] = twin["TxnDate"]
@@ -638,12 +646,18 @@ def _local_patch_from_qbo_bill(twin: dict) -> dict:
     phantom drift on the next preview."""
     total = float(twin.get("TotalAmt") or 0)
     balance = float(twin.get("Balance") or 0)
+    if balance == 0:
+        status = "paid"
+    elif balance < total:
+        status = "partial"
+    else:
+        status = "open"
     patch: dict[str, Any] = {
         "total": round(total, 2),
         "subtotal": round(total, 2),
         "balance": round(balance, 2),
         "balance_due": round(balance, 2),
-        "status": "paid" if balance == 0 else "open",
+        "status": status,
     }
     if twin.get("TxnDate"):
         patch["issue_date"] = twin["TxnDate"]

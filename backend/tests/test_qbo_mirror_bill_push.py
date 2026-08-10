@@ -120,6 +120,7 @@ def test_doc_number_truncation(stub_db):
 
 def test_twin_patch_shape():
     from qbo_mirror.push import _local_patch_from_qbo_bill
+    # Total 250, balance 100 → partial (a payment covered $150).
     twin = {"Id": "99", "TotalAmt": 250, "Balance": 100,
              "TxnDate": "2026-02-01", "DueDate": "2026-03-01",
              "DocNumber": "BILL-9"}
@@ -127,8 +128,11 @@ def test_twin_patch_shape():
     assert p["total"] == 250.0
     assert p["balance"] == 100.0
     assert p["balance_due"] == 100.0
-    assert p["status"] == "open"
+    assert p["status"] == "partial"
     assert p["number"] == "BILL-9"
-    # Paid case
+    # Fully paid (balance=0)
     twin2 = {**twin, "Balance": 0}
     assert _local_patch_from_qbo_bill(twin2)["status"] == "paid"
+    # Fully open (balance==total)
+    twin3 = {**twin, "Balance": 250}
+    assert _local_patch_from_qbo_bill(twin3)["status"] == "open"
