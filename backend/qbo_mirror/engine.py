@@ -111,14 +111,26 @@ def _norm_invoice_local(i: dict) -> dict:
     bal = i.get("balance_due")
     if bal is None:
         bal = i.get("balance")
+    total = float(i.get("total") or 0)
+    balance = float(bal or 0)
+    # Compute status from balance/total directly rather than trusting
+    # the stored `status` field — legacy rows from before the 3-way
+    # migration carry "sent" for partially-paid invoices which would
+    # perpetually flag as drift. Keep symmetric with _norm_invoice_qbo.
+    if balance <= 0.01:
+        status = "paid"
+    elif balance < total - 0.01:
+        status = "partial"
+    else:
+        status = "sent"
     return {
         "qbo_id": i.get("qbo_id"),
         "natural_key": f"inv::{(i.get('number') or '').strip().lower()}",
         "number": (i.get("number") or "").strip(),
         "date": i.get("issue_date") or i.get("date") or "",
-        "total": round(float(i.get("total") or 0), 2),
-        "balance": round(float(bal or 0), 2),
-        "status": i.get("status") or "",
+        "total": round(total, 2),
+        "balance": round(balance, 2),
+        "status": status,
     }
 
 
@@ -161,14 +173,24 @@ def _norm_bill_local(b: dict) -> dict:
     bal = b.get("balance_due")
     if bal is None:
         bal = b.get("balance")
+    total = float(b.get("total") or 0)
+    balance = float(bal or 0)
+    # Same 3-way status logic as _norm_bill_qbo — ignore stored
+    # `status` to prevent legacy "open" vs computed "partial" drift.
+    if balance <= 0.01:
+        status = "paid"
+    elif balance < total - 0.01:
+        status = "partial"
+    else:
+        status = "open"
     return {
         "qbo_id": b.get("qbo_id"),
         "natural_key": f"bill::{(b.get('number') or '').strip().lower()}",
         "number": (b.get("number") or "").strip(),
         "date": b.get("issue_date") or b.get("date") or "",
-        "total": round(float(b.get("total") or 0), 2),
-        "balance": round(float(bal or 0), 2),
-        "status": b.get("status") or "",
+        "total": round(total, 2),
+        "balance": round(balance, 2),
+        "status": status,
     }
 
 
