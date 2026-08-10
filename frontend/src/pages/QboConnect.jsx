@@ -136,6 +136,19 @@ export default function QboConnect() {
   const running = job && (job.status === "queued" || job.status === "running");
   const done = job && job.status === "done";
 
+  // Wizard progression — determine which step is the "active" one
+  // so we can highlight ONE button in filled emerald + downgrade
+  // earlier completed steps to the outline (border) variant. The user's
+  // eye always lands on the next thing to do.
+  //   activeStep = 1 (connect) → 2 (preview) → 3 (migrate) → 4 (mirror)
+  let activeStep = 1;
+  if (status?.connected) activeStep = 2;
+  if (preview)           activeStep = 3;
+  if (done)              activeStep = 4;
+  const filled  = "px-4 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-40 inline-flex items-center gap-2";
+  const outline = "px-4 py-2 rounded-md border-2 border-emerald-600 bg-white text-emerald-700 text-sm font-medium hover:bg-emerald-50 disabled:opacity-40 inline-flex items-center gap-2";
+  const btnCls  = (step) => activeStep === step ? filled : outline;
+
   return (
     <div className="p-6 max-w-5xl" data-testid="qbo-connect-page">
       <div className="flex items-start gap-4 mb-6">
@@ -184,21 +197,6 @@ export default function QboConnect() {
                 Disconnect
               </button>
             </div>
-            {/* Live Mirror shortcut — surfaced here so every
-                connected company can jump into the bi-directional
-                sync settings without hunting through the migration
-                step. Same button lives further down after a
-                migration completes; this one covers the "already
-                connected, no migration needed" flow. */}
-            <button
-              onClick={() => navigate("/settings/qbo-mirror")}
-              data-testid="qbo-mirror-link-top"
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-indigo-300 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 text-sm font-medium"
-            >
-              <RefreshCw size={14} />
-              Open Live Mirror
-              <span className="text-[10px] uppercase tracking-wide bg-indigo-600 text-white px-1.5 py-0.5 rounded-full">Live</span>
-            </button>
           </div>
         ) : (
           <button
@@ -233,7 +231,7 @@ export default function QboConnect() {
             onClick={runPreview}
             disabled={busy || !status?.connected}
             data-testid="qbo-preview-btn"
-            className="px-4 py-2 rounded-md border bg-white text-sm hover:bg-slate-50 disabled:opacity-40 inline-flex items-center gap-2"
+            className={btnCls(2)}
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
             Preview what will import
@@ -274,7 +272,7 @@ export default function QboConnect() {
             onClick={startMigration}
             disabled={busy || !preview}
             data-testid="qbo-migrate-btn"
-            className="px-4 py-2 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-40 inline-flex items-center gap-2"
+            className={btnCls(3)}
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
             Start migration
@@ -335,7 +333,7 @@ export default function QboConnect() {
                 <button
                   onClick={() => navigate("/settings/qbo-mirror")}
                   data-testid="qbo-mirror-btn"
-                  className="px-3 py-1.5 text-xs rounded-md border border-indigo-300 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 inline-flex items-center gap-1"
+                  className="px-3 py-1.5 text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center gap-1"
                   title="Bi-directional live sync between our app and QBO"
                 >
                   <RefreshCw size={12} /> Open Live Mirror
@@ -399,12 +397,44 @@ export default function QboConnect() {
         )}
       </section>
 
+      {/* Step 4: Open Live Mirror — always visible when connected so
+          returning users can jump into the bi-directional sync
+          without needing to re-run migration. Bi-directional sync is
+          the real long-lived value prop, so it deserves its own step. */}
+      <section className={`rounded-xl border bg-white p-5 mb-4 transition-opacity ${
+        status?.connected ? "" : "opacity-40 pointer-events-none"
+      }`} data-testid="qbo-step-mirror">
+        <div className="flex items-center gap-3 mb-3">
+          <span className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-800 inline-flex items-center justify-center text-sm font-medium">
+            4
+          </span>
+          <h2 className="font-heading font-semibold text-slate-900">Open Live Mirror</h2>
+          <span className="text-[10px] uppercase tracking-wide bg-indigo-600 text-white px-1.5 py-0.5 rounded-full">Live</span>
+        </div>
+        <p className="text-sm text-slate-500 mb-4">
+          Bi-directional sync. Any change you make here — new invoices, bills,
+          purchases, deposits, edits, deletes — flows to QBO within seconds.
+          Any change in QBO comes back on the next pull. The dry-run preview
+          shows exactly what would move before anything ships.
+        </p>
+        <button
+          onClick={() => navigate("/settings/qbo-mirror")}
+          data-testid="qbo-mirror-open-btn"
+          className={btnCls(4)}
+        >
+          <RefreshCw size={14} />
+          Open Live Mirror
+        </button>
+      </section>
+
       <div className="text-xs text-slate-400 mt-6 flex items-start gap-2">
         <Sparkles size={12} className="mt-0.5 text-slate-300" />
         <span>
-          V1 imports Foundation entities (Chart of Accounts, Customers, Vendors, Items).
-          Transactional entities (Invoices, Bills, Payments, Journal Entries) land in the
-          next release — the connection persists so you won't reconnect.
+          Full-scope import covers every entity (Chart of Accounts, Customers,
+          Vendors, Items, Invoices, Bills, Payments, Journal Entries,
+          Estimates, Purchase Orders, Purchases, Sales Receipts, Deposits).
+          Once connected the Live Mirror keeps everything in sync bi-directionally —
+          you won't need to reconnect.
         </span>
       </div>
     </div>

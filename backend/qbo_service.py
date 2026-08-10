@@ -846,6 +846,25 @@ async def run_migration(job_id: str, company_id: str) -> None:
                 "Seeded-cleanup after migration failed for %s: %s — "
                 "user can run 'Deactivate ALL seeded' manually.",
                 company_id, e)
+        # Estimates + Purchase Orders have no `map_*` mapper in the
+        # migration entity list (they were added post-launch as
+        # mirror-only entities). Pull them via the mirror engine so
+        # a freshly-migrated company doesn't end up with dozens of
+        # `pull_from_qbo` records in the dry-run.
+        mirror_pulled = {"estimates": 0, "purchase_orders": 0}
+        try:
+            from qbo_mirror.pull import run_pull
+            pr = await run_pull(company_id, "migration",
+                                 entities=["estimates", "purchase_orders"])
+            for k in mirror_pulled:
+                r = (pr or {}).get(k) or {}
+                mirror_pulled[k] = (r.get("inserted", 0)
+                                     + r.get("updated", 0))
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Post-migration mirror pull failed for %s: %s — "
+                "user can hit Pull manually on the Mirror page.",
+                company_id, e)
         await db.qbo_jobs.update_one(
             {"job_id": job_id},
             {"$set": {"status": "done", "phase": "done",
@@ -857,7 +876,9 @@ async def run_migration(job_id: str, company_id: str) -> None:
                       "transactions_banks_resolved": banks_resolved,
                       "transactions_posted": posted_count,
                       "pfc_mapped": pfc_mapped,
-                      "seeded_deactivated": seeded_deactivated}},
+                      "seeded_deactivated": seeded_deactivated,
+                      "mirror_estimates_pulled": mirror_pulled["estimates"],
+                      "mirror_pos_pulled": mirror_pulled["purchase_orders"]}},
         )
     except Exception as e:  # noqa: BLE001
         logger.exception("QBO migration failed for %s", company_id)
