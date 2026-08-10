@@ -1166,7 +1166,64 @@ async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depe
         await log_ai(cid, "flag_review", 1)
     await db.transactions.insert_one(doc)
     await _invalidate_dash(cid)
+    # QBO Mirror: outflow (expense) manual transactions with a source
+    # bank/CC account + expense category are pushed to QBO as a
+    # `Purchase`. Tags txn_type so the mirror pipeline picks it up.
+    _maybe_autopush_purchase(cid, tid, doc)
     return {"id": tid, "transaction": coerce(doc)}
+
+
+def _maybe_autopush_purchase(cid: str, tid: str, doc: dict) -> None:
+    """Stamp `txn_type='Purchase'` and fire autopush when a manual
+    transaction qualifies (outflow, bank + expense category set).
+    Runs synchronously — the actual QBO POST is fire-and-forget."""
+    try:
+        amt = float(doc.get("amount") or 0)
+        if amt >= 0:
+            return  # inflows are not Purchases (they'd be Deposit/SalesReceipt)
+        if not doc.get("bank_account_id"):
+            return
+        # Category or split lines must be present so QBO gets a valid
+        # AccountBasedExpenseLineDetail. Splits are enough; single-line
+        # requires category_account_id.
+        if not doc.get("category_account_id") and not doc.get("splits"):
+            return
+        # Build the QBO-shaped line_items array from either the split
+        # array or the header category — the mirror push builder reads
+        # `line_items[].expense_account_id`.
+        if doc.get("splits"):
+            lines = [{"expense_account_id": s.get("category_account_id"),
+                       "description": s.get("description")
+                                       or doc.get("description") or "",
+                       "amount": abs(float(s.get("amount") or 0))}
+                      for s in doc["splits"] if s.get("category_account_id")]
+        else:
+            lines = [{"expense_account_id": doc["category_account_id"],
+                       "description": doc.get("description") or "",
+                       "amount": abs(amt)}]
+        # Detect the source account type to pick a sensible PaymentType.
+        # (Full resolution happens inside `_purchase_body`; we just set
+        # a hint here.)
+        from qbo_mirror.autopush import try_auto_push
+        set_patch = {
+            "txn_type": "Purchase",
+            "direction": "out",
+            "line_items": lines,
+            "payment_type": doc.get("payment_type") or "Cash",
+        }
+        import asyncio as _aio
+        async def _stamp_and_push():
+            await db.transactions.update_one(
+                {"id": tid, "company_id": cid},
+                {"$set": set_patch},
+            )
+            try_auto_push(cid, "purchase", tid)
+        try:
+            _aio.create_task(_stamp_and_push())
+        except RuntimeError:
+            pass
+    except Exception:  # noqa: BLE001 — must never block the create response
+        pass
 
 
 @router.patch("/companies/{cid}/transactions/{tid}")
@@ -1257,6 +1314,15 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
                 confidence=1.0, source="user",
             )
     await _invalidate_dash(cid)
+    # QBO Mirror: if the txn already exists on QBO (has qbo_id), push
+    # the update. Otherwise, if it now qualifies as a Purchase, kick
+    # off the initial autopush (via the same stamp+push helper).
+    if doc:
+        if doc.get("qbo_id") and doc.get("txn_type") == "Purchase":
+            from qbo_mirror.autopush import try_auto_update
+            try_auto_update(cid, "purchase", tid)
+        elif not doc.get("qbo_id"):
+            _maybe_autopush_purchase(cid, tid, doc)
     return {"transaction": coerce(doc)}
 
 
