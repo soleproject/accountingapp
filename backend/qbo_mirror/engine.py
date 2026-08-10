@@ -400,7 +400,7 @@ def _norm_purchase_qbo(o: dict) -> dict:
 def _norm_sales_receipt_local(t: dict) -> dict:
     number = (t.get("number") or "").strip()
     if not number and t.get("qbo_id"):
-        number = f"SR-{t.get('qbo_id')}"
+        number = f"SalesReceipt-{t.get('qbo_id')}"
     return {
         "qbo_id": t.get("qbo_id"),
         "natural_key": f"sr::{number.lower()}",
@@ -411,7 +411,8 @@ def _norm_sales_receipt_local(t: dict) -> dict:
 
 
 def _norm_sales_receipt_qbo(o: dict) -> dict:
-    number = (o.get("DocNumber") or "").strip() or f"SR-{o.get('Id')}"
+    number = (o.get("DocNumber") or "").strip() \
+        or f"SalesReceipt-{o.get('Id')}"
     return {
         "qbo_id": o.get("Id"),
         "natural_key": f"sr::{number.lower()}",
@@ -424,7 +425,7 @@ def _norm_sales_receipt_qbo(o: dict) -> dict:
 def _norm_deposit_local(t: dict) -> dict:
     number = (t.get("number") or "").strip()
     if not number and t.get("qbo_id"):
-        number = f"Dep-{t.get('qbo_id')}"
+        number = f"Deposit-{t.get('qbo_id')}"
     return {
         "qbo_id": t.get("qbo_id"),
         "natural_key": f"dep::{number.lower()}",
@@ -435,8 +436,9 @@ def _norm_deposit_local(t: dict) -> dict:
 
 
 def _norm_deposit_qbo(o: dict) -> dict:
-    # Deposits often lack a DocNumber; fall back to id.
-    number = (o.get("DocNumber") or "").strip() or f"Dep-{o.get('Id')}"
+    # Both sides synthesise `Deposit-{id}` when DocNumber is empty —
+    # matches the fake number the QBO importer stamps on local rows.
+    number = (o.get("DocNumber") or "").strip() or f"Deposit-{o.get('Id')}"
     return {
         "qbo_id": o.get("Id"),
         "natural_key": f"dep::{number.lower()}",

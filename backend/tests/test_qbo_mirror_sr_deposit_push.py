@@ -178,7 +178,9 @@ def test_sales_receipt_drift_normalizer_symmetry():
         "Id": "9", "DocNumber": "", "TxnDate": "2026-08-10",
         "TotalAmt": 500.0,
     })
-    assert local["number"] == qbo["number"] == "SR-9"
+    # Both sides synthesize `SalesReceipt-{id}` to match what the
+    # QBO importer stamps into `number` on imported rows.
+    assert local["number"] == qbo["number"] == "SalesReceipt-9"
     assert local["natural_key"] == qbo["natural_key"]
 
 
@@ -194,7 +196,8 @@ def test_deposit_drift_normalizer_symmetry():
         "Id": "12", "DocNumber": "", "TxnDate": "2026-08-10",
         "TotalAmt": 100.0,
     })
-    assert local["number"] == qbo["number"] == "Dep-12"
+    # Matches importer's `Deposit-{id}` synthesis.
+    assert local["number"] == qbo["number"] == "Deposit-12"
     assert local["natural_key"] == qbo["natural_key"]
 
 
