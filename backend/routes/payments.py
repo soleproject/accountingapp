@@ -90,8 +90,17 @@ async def create_payment(cid: str, inp: PaymentCreate, user: dict = Depends(get_
     pid = str(uuid.uuid4()); now = now_iso()
 
     async with ledger_transaction() as _s:
+        payload = inp.model_dump()
+        # Stamp direction from linkage so the diff engine + mirror
+        # dispatch both know which QBO endpoint applies. Unlinked
+        # payments (e.g. bare deposits) get no direction and won't
+        # be mirrored.
+        if payload.get("linked_invoice_id"):
+            payload["direction"] = "in"
+        elif payload.get("linked_bill_id"):
+            payload["direction"] = "out"
         await db.payments.insert_one({
-            "id": pid, "company_id": cid, **inp.model_dump(),
+            "id": pid, "company_id": cid, **payload,
             "created_at": now, "updated_at": now,
         }, session=_s)
         # If linked to invoice/bill, reduce balance_due

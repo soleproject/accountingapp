@@ -351,15 +351,26 @@ async def _fetch_local(company_id: str, entity: str) -> list[dict]:
         return [_norm_bill_local(b) async for b in db.bills.find(
             {"company_id": company_id, "voided": {"$ne": True}})]
     if entity == "payments":
+        # Match both new locally-authored payments (have
+        # linked_invoice_id) AND legacy QBO-imported payments (have
+        # direction stamped by map_payment). Migration-era payments
+        # don't carry linked_invoice_id directly — the QBO
+        # LinkedTxn only surfaces via `applied_to`.
         return [_norm_payment_local(p, "in")
                 async for p in db.payments.find(
                     {"company_id": company_id,
-                     "linked_invoice_id": {"$nin": [None, ""]}})]
+                     "$or": [
+                         {"direction": "in"},
+                         {"linked_invoice_id": {"$nin": [None, ""]}},
+                     ]})]
     if entity == "bill_payments":
         return [_norm_payment_local(p, "out")
                 async for p in db.payments.find(
                     {"company_id": company_id,
-                     "linked_bill_id": {"$nin": [None, ""]}})]
+                     "$or": [
+                         {"direction": "out"},
+                         {"linked_bill_id": {"$nin": [None, ""]}},
+                     ]})]
     return []
 
 
