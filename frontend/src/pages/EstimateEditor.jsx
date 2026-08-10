@@ -24,14 +24,8 @@ const iso = (d) => new Date(d).toISOString().slice(0, 10);
 const addDays = (baseIso, n) => iso(new Date(baseIso).getTime() + n * 86400000);
 
 /**
- * Full-page Invoice Editor — Wave-style layout.
- * Routes: /invoices/new  and  /invoices/:id/edit
- *
- * Structure (top→bottom, single column, cards):
- *   1. Header  — back / title / Send email / Save buttons
- *   2. Tabs    — Edit / Preview
- *   3. Business card (collapsible) — logo upload, title, summary, company info
- *   4. Invoice form card — customer + meta + line items + inline totals + notes/attachments
+ * Full-page Estimate Editor — Wave-style layout (parity with InvoiceEditor).
+ * Routes: /estimates/new  and  /estimates/:id/edit
  */
 export default function EstimateEditor() {
   const { id } = useParams();
@@ -39,8 +33,6 @@ export default function EstimateEditor() {
   const navigate = useNavigate();
   const { currentId, current, refresh: refreshCompany } = useCompany();
 
-  const [tab, setTab] = useState("edit"); // "edit" | "preview" | "followup"
-  const [followupCount, setFollowupCount] = useState(null);
   const [loading, setLoading] = useState(editMode);
   const [saving, setSaving] = useState(false);
 
@@ -67,12 +59,8 @@ export default function EstimateEditor() {
   const [attachments, setAttachments] = useState([]);
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
-  const [payments, setPayments] = useState([]);
 
-  const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
-  const pdfUrlRef = useRef(null);
-
-  // Load contacts, items, and (if editing) the invoice itself.
+  // Load contacts, items, and (if editing) the estimate itself.
   useEffect(() => {
     if (!currentId) return;
     let cancelled = false;
@@ -120,19 +108,6 @@ export default function EstimateEditor() {
           setAttachments(inv.attachments || []);
           setTitle(inv.title || "");
           setSummary(inv.summary || "");
-          // Load applied payments — feeds the Payment History + Summary blocks.
-          try {
-            const pr = await api.get(`/companies/${currentId}/payments`);
-            if (!cancelled) {
-              setPayments((pr.data.payments || []).filter(p => p.linked_invoice_id === id));
-            }
-          } catch { /* payments are optional context; ignore */ }
-          // Pre-fetch follow-up count so the tab badge shows immediately
-          // (even if the user hasn't opened the Follow-up history tab yet).
-          try {
-            const fr = await api.get(`/companies/${currentId}/estimates/${id}/followup-history`);
-            if (!cancelled) setFollowupCount(fr.data?.count || 0);
-          } catch { /* ignore — badge just stays hidden */ }
         }
       } catch (e) {
         toast.error(e.response?.data?.detail || "Failed to load estimate");
@@ -243,7 +218,7 @@ export default function EstimateEditor() {
       let iid = id;
       if (editMode) {
         const r = await api.patch(`/companies/${currentId}/estimates/${id}`, body);
-        if (r.data?.number_conflict) toast.warning(`Heads up — another invoice already uses ${body.number}.`);
+        if (r.data?.number_conflict) toast.warning(`Heads up — another estimate already uses ${body.number}.`);
         else if (!silent) toast.success("Estimate saved");
       } else {
         const r = await api.post(`/companies/${currentId}/estimates`, body);
@@ -260,44 +235,8 @@ export default function EstimateEditor() {
   };
 
   const goPreview = async () => {
-    let iid = id;
-    if (!editMode) { iid = await save({ silent: true }); if (!iid) return; }
-    else { await save({ silent: true }); }
-    setTab("preview");
-  };
-
-  useEffect(() => {
-    if (tab !== "preview" || !currentId || !id) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await api.get(`/companies/${currentId}/estimates/${id}/pdf`, { responseType: "blob" });
-        if (cancelled) return;
-        if (pdfUrlRef.current) URL.revokeObjectURL(pdfUrlRef.current);
-        const url = URL.createObjectURL(new Blob([r.data], { type: "application/pdf" }));
-        pdfUrlRef.current = url;
-        setPdfBlobUrl(url);
-      } catch (e) { toast.error("Could not load preview"); }
-    })();
-    return () => { cancelled = true; };
-  }, [tab, id, currentId]);
-  useEffect(() => () => { if (pdfUrlRef.current) URL.revokeObjectURL(pdfUrlRef.current); }, []);
-
-  const [sendOpen, setSendOpen] = useState(false);
-  const [sendTo, setSendTo] = useState("");
-  const [sending, setSending] = useState(false);
-
-  // Duplicate the invoice into a fresh draft (routes to the copy in edit mode).
-  const duplicate = async () => {
-    if (!editMode) { toast.info("Save the invoice first, then duplicate."); return; }
-    try {
-      await save({ silent: true });
-      const r = await api.post(`/companies/${currentId}/estimates/${id}/duplicate`);
-      toast.success(`Duplicated as ${r.data.invoice?.number || "new draft"}`);
-      navigate(`/invoices/${r.data.id}/edit`);
-    } catch (e) {
-      toast.error(e.response?.data?.detail || "Duplicate failed");
-    }
+    // Estimates have no PDF preview backend yet; keep it as a plain save.
+    await save({ silent: false });
   };
 
   // "Apply tax to all lines" — set the same tax on every line item.
@@ -314,28 +253,8 @@ export default function EstimateEditor() {
     })));
     toast.success(`Applied ${t.name} · ${Number(t.rate).toFixed(2)}% to all lines`);
   };
-  const openSend = async () => {
-    const iid = await save({ silent: true });
-    if (!iid) return;
-    const c = contacts.find(x => x.id === contact);
-    setSendTo(c?.email || "");
-    setSendOpen(true);
-  };
-  const doSend = async () => {
-    setSending(true);
-    try {
-      const r = await api.post(`/companies/${currentId}/estimates/${id}/send-email`, null, {
-        params: sendTo ? { to: sendTo } : {},
-      });
-      if (r.data.status === "sent") toast.success(`Emailed to ${r.data.to}`);
-      else if (r.data.status === "failed") toast.error("Send failed — check Communications log");
-      else toast.info(`Email skipped: ${r.data.status}`);
-      setSendOpen(false);
-    } catch (e) { toast.error(e.response?.data?.detail || "Send failed"); }
-    finally { setSending(false); }
-  };
 
-  if (loading) return <div className="p-8 text-slate-500">Loading invoice…</div>;
+  if (loading) return <div className="p-8 text-slate-500">Loading estimate…</div>;
 
   return (
     <div className="max-w-5xl mx-auto space-y-4 pb-16">
@@ -358,145 +277,44 @@ export default function EstimateEditor() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {editMode && (
-            <>
-              <button
-                data-testid="invoice-editor-duplicate"
-                onClick={duplicate}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 text-sm hover:bg-slate-50"
-                title="Duplicate as fresh draft"
-              ><Copy size={14} /> Duplicate</button>
-              <button
-                data-testid="invoice-editor-send"
-                onClick={openSend}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm hover:bg-emerald-100"
-              ><Send size={14} /> Send email</button>
-            </>
-          )}
           <button
             data-testid="invoice-editor-save"
             onClick={() => save()}
             disabled={saving}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50 shadow-sm"
-          ><Save size={14} /> {saving ? "Saving…" : (editMode ? "Save changes" : "Save invoice")}</button>
+          ><Save size={14} /> {saving ? "Saving…" : (editMode ? "Save changes" : "Save estimate")}</button>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex items-center gap-1 border-b" data-testid="invoice-editor-tabs">
-        <button
-          data-testid="invoice-editor-tab-edit"
-          onClick={() => setTab("edit")}
-          className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm border-b-2 -mb-px transition ${
-            tab === "edit"
-              ? "border-slate-900 text-slate-900 font-medium"
-              : "border-transparent text-slate-500 hover:text-slate-700"
-          }`}
-        ><Pencil size={13} /> Edit</button>
-        <button
-          data-testid="invoice-editor-tab-preview"
-          onClick={goPreview}
-          className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm border-b-2 -mb-px transition ${
-            tab === "preview"
-              ? "border-emerald-600 text-emerald-700 font-medium"
-              : "border-transparent text-slate-500 hover:text-slate-700"
-          }`}
-        ><Eye size={13} /> Preview</button>
-        {editMode && (
-          <button
-            data-testid="invoice-editor-tab-followup"
-            onClick={() => setTab("followup")}
-            className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm border-b-2 -mb-px transition ${
-              tab === "followup"
-                ? "border-indigo-600 text-indigo-700 font-medium"
-                : "border-transparent text-slate-500 hover:text-slate-700"
-            }`}
-          >
-            <Mail size={13} /> Follow-up history
-            {followupCount > 0 && (
-              <span
-                className={`ml-0.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-mono-num ${
-                  tab === "followup" ? "bg-indigo-100 text-indigo-700" : "bg-slate-200 text-slate-700"
-                }`}
-                data-testid="invoice-editor-followup-badge"
-              >{followupCount}</span>
-            )}
-          </button>
-        )}
-      </div>
-
-      {tab === "preview" ? (
-        <div className="rounded-xl border bg-slate-50 p-2 shadow-sm">
-          {pdfBlobUrl ? (
-            <iframe
-              title="Invoice preview"
-              src={pdfBlobUrl}
-              className="w-full h-[80vh] rounded-md bg-white border"
-              data-testid="invoice-editor-preview-iframe"
-            />
-          ) : (
-            <div className="h-[80vh] flex items-center justify-center text-slate-400 text-sm">Loading preview…</div>
-          )}
-        </div>
-      ) : tab === "followup" ? (
-        <div className="rounded-xl border bg-white shadow-sm" data-testid="invoice-editor-followup-tab">
-          <FollowupHistoryBlock
-            currentId={currentId}
-            docId={id}
-            docLabel={number}
-            onCount={setFollowupCount}
-          />
-        </div>
-      ) : (
-        <>
-          <BusinessHeaderCard
-            company={current}
-            title={title} setTitle={setTitle}
-            summary={summary} setSummary={setSummary}
-            onLogoUpload={onLogoUpload}
-            onLogoRemove={onLogoRemove}
-          />
-          <EditForm
-            {...{
-              contacts, setContacts, itemsCatalog, setItemsCatalog, taxes, setTaxes,
-              contact, setContact,
-              number, setNumber,
-              issue, setIssue, due, setDue,
-              termsLabel, setTermsLabel,
-              poNumber, setPoNumber,
-              status, setStatus,
-              lines, addLine, updLine, removeLine,
-              tax, setTax, shipping, setShipping,
-              discount, setDiscount, discountType, setDiscountType,
-              notes, setNotes, internalNotes, setInternalNotes,
-              attachments, onAttach, removeAttachment,
-              totals,
-              currentId,
-              taxModalLineIdx, setTaxModalLineIdx,
-              applyTaxToAllLines,
-              payments,
-              editMode,
-              docId: id,
-              reloadPayments: async () => {
-                if (!id) return;
-                try {
-                  const pr = await api.get(`/companies/${currentId}/payments`);
-                  setPayments((pr.data.payments || []).filter(p => p.linked_invoice_id === id));
-                } catch { /* silent */ }
-              },
-            }}
-          />
-        </>
-      )}
-
-      {sendOpen && (
-        <SendEmailDialog
-          to={sendTo} setTo={setSendTo}
-          sending={sending}
-          onClose={() => setSendOpen(false)}
-          onSend={doSend}
-        />
-      )}
+      <BusinessHeaderCard
+        company={current}
+        title={title} setTitle={setTitle}
+        summary={summary} setSummary={setSummary}
+        onLogoUpload={onLogoUpload}
+        onLogoRemove={onLogoRemove}
+      />
+      <EditForm
+        {...{
+          contacts, setContacts, itemsCatalog, setItemsCatalog, taxes, setTaxes,
+          contact, setContact,
+          number, setNumber,
+          issue, setIssue, due, setDue,
+          termsLabel, setTermsLabel,
+          poNumber, setPoNumber,
+          status, setStatus,
+          lines, addLine, updLine, removeLine,
+          tax, setTax, shipping, setShipping,
+          discount, setDiscount, discountType, setDiscountType,
+          notes, setNotes, internalNotes, setInternalNotes,
+          attachments, onAttach, removeAttachment,
+          totals,
+          currentId,
+          taxModalLineIdx, setTaxModalLineIdx,
+          applyTaxToAllLines,
+          editMode,
+          docId: id,
+        }}
+      />
 
       {taxModalLineIdx !== null && (
         <CreateTaxDialog
@@ -606,7 +424,7 @@ function BusinessHeaderCard({ company, title, setTitle, summary, setSummary, onL
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Invoice"
+              placeholder="Estimate"
               className="w-full text-right text-2xl font-heading font-semibold text-slate-800 border rounded px-3 py-2 focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
               data-testid="invoice-editor-title"
             />
@@ -614,7 +432,7 @@ function BusinessHeaderCard({ company, title, setTitle, summary, setSummary, onL
               type="text"
               value={summary}
               onChange={(e) => setSummary(e.target.value)}
-              placeholder="Summary (e.g. project name, description of invoice)"
+              placeholder="Summary (e.g. project name, description of estimate)"
               className="w-full text-right text-sm text-slate-600 border rounded px-3 py-2 italic focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
               data-testid="invoice-editor-summary"
             />
@@ -658,10 +476,8 @@ function EditForm({
   currentId,
   taxModalLineIdx, setTaxModalLineIdx,
   applyTaxToAllLines,
-  payments = [],
   editMode,
   docId,
-  reloadPayments,
 }) {
   const customerContacts = useMemo(
     () => contacts.filter(c => c.type === "customer" || c.type === "both"),
@@ -749,8 +565,10 @@ function EditForm({
             >
               <option value="draft">Draft</option>
               <option value="sent">Sent</option>
-              <option value="partial">Partial</option>
-              <option value="paid">Paid</option>
+              <option value="accepted">Accepted</option>
+              <option value="rejected">Rejected</option>
+              <option value="closed">Closed</option>
+              <option value="converted">Converted</option>
             </select>
           </MetaRow>
         </div>
@@ -921,28 +739,8 @@ function EditForm({
               data-testid="invoice-editor-total"
             >{fmtMoney(totals.total)}</span>
           </div>
-          <div className="flex items-center justify-between border-t pt-2">
-            <span className="text-sm font-medium text-slate-700">Amount Due</span>
-            <span
-              className={`text-sm font-mono-num font-semibold ${((payments || []).length > 0) ? "text-emerald-700" : "text-red-700"}`}
-              data-testid="invoice-editor-amount-due"
-            >{fmtMoney(Math.max(totals.total - (payments || []).reduce((s, p) => s + Number(p.amount || 0), 0), 0))}</span>
-          </div>
         </div>
       </div>
-
-      {editMode && (
-        <PaymentHistoryBlock
-          payments={payments}
-          original={totals.total}
-          kind="invoice"
-          docId={docId}
-          docLabel={number}
-          contactId={contact}
-          currentId={currentId}
-          onPaymentRecorded={reloadPayments}
-        />
-      )}
 
       {/* Notes / Terms + attachments */}
       <div className="px-6 py-5 border-t bg-slate-50/50 grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1020,41 +818,6 @@ function TotalsRow({ label, value, testId }) {
     <div className="flex items-center justify-between">
       <span className="text-sm text-slate-500">{label}</span>
       <span className="text-sm font-mono-num text-slate-800" data-testid={testId}>{value}</span>
-    </div>
-  );
-}
-
-function SendEmailDialog({ to, setTo, sending, onClose, onSend }) {
-  return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-3" data-testid="invoice-send-dialog">
-        <div className="flex items-center justify-between">
-          <h3 className="font-heading font-semibold inline-flex items-center gap-2">
-            <FileText size={16} /> Email invoice
-          </h3>
-          <button onClick={onClose}><X size={16} /></button>
-        </div>
-        <div className="space-y-1">
-          <label className="block text-[10px] uppercase tracking-wide text-slate-500">Send to</label>
-          <input
-            type="email" value={to}
-            onChange={(e) => setTo(e.target.value)}
-            placeholder="customer@example.com"
-            className="w-full border rounded px-2 py-1.5 text-sm"
-            data-testid="invoice-send-to"
-          />
-          <p className="text-[11px] text-slate-400">A PDF of this invoice will be attached.</p>
-        </div>
-        <div className="flex items-center justify-end gap-2 pt-2">
-          <button onClick={onClose} className="px-3 py-1.5 rounded-md text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
-          <button
-            onClick={onSend}
-            disabled={sending || !to || !to.includes("@")}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-600 text-white text-sm disabled:opacity-50"
-            data-testid="invoice-send-submit"
-          ><Send size={13} /> {sending ? "Sending…" : "Send"}</button>
-        </div>
-      </div>
     </div>
   );
 }
