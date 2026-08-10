@@ -54,7 +54,8 @@ def stub_db(monkeypatch):
               "name": "SupplyCo", "display_name": "SupplyCo"},
         ],
         accounts=[{"id": "bank-1", "company_id": "cid",
-                    "qbo_id": "35", "name": "Checking"}],
+                    "qbo_id": "35", "name": "Checking",
+                    "source": "qbo", "type": "bank"}],
         invoices=[{"id": "inv-1", "company_id": "cid",
                     "qbo_id": "1040"}],
         bills=[{"id": "bill-1", "company_id": "cid",
@@ -124,12 +125,29 @@ def test_payment_out_happy(stub_db):
     assert body["TxnDate"] == "2026-02-01"
 
 
-def test_payment_out_no_bank_account(stub_db):
+def test_payment_out_falls_back_to_default_bank(stub_db):
+    """When the payment doesn't specify a bank_account_id, we fall
+    back to a QBO-side bank account (the fixture has "Checking")
+    rather than blocking the push."""
     from qbo_mirror.push import _payment_body_out
-    with pytest.raises(ValueError, match="bank account"):
-        _run(_payment_body_out("cid",
-                                {"contact_id": "vend-1", "amount": 10,
-                                 "linked_bill_id": "bill-1"}))
+    body = _run(_payment_body_out(
+        "cid",
+        {"contact_id": "vend-1", "amount": 10,
+         "linked_bill_id": "bill-1"}))
+    # Falls back to the Checking account (qbo_id=35 in fixture).
+    assert body["CheckPayment"]["BankAccountRef"]["value"] == "35"
+
+
+def test_payment_out_no_bank_at_all(monkeypatch, stub_db):
+    """If there's truly no QBO bank account, we still fail loudly."""
+    from qbo_mirror.push import _payment_body_out
+    # Wipe accounts so the fallback finds nothing.
+    stub_db.accounts.rows = []
+    with pytest.raises(ValueError, match="no default"):
+        _run(_payment_body_out(
+            "cid",
+            {"contact_id": "vend-1", "amount": 10,
+             "linked_bill_id": "bill-1"}))
 
 
 def test_payment_out_no_bill(stub_db):
