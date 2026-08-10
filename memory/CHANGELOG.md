@@ -1,5 +1,32 @@
 # SmartBooks — Changelog
 
+## 2026-02-20 (later) — Dedicated Ledger Views: Sales Receipts, Credit Memos, Entity-Type Chip Strip
+
+### 📋 Two new list pages
+- **`/sales-receipts`** — dedicated Sales Receipts ledger with search, running totals ("N shown · $X total"), QBO sync indicator dot per row, edit/delete actions.
+- **`/credit-memos`** — dedicated Credit Memos ledger with an extra "Applies to" column showing whether the CM is linked to an invoice.
+- Both pages share `TxnTypeListPage.jsx` (config-driven internal component) so future entity-typed lists stay consistent.
+- Sidebar updated: both entries added under "Sales & Payments" group alongside Estimates and Invoices.
+
+### 🎛️ Entity-type chip strip on `/transactions`
+- Added an orthogonal filter chip strip above the existing status tabs: `All types · Expenses · Sales Receipts · Deposits · Credit Memos · Refund Receipts · Transfers`.
+- Wired to a new `txn_type` query param on `GET /api/companies/{cid}/transactions` (backend). CPA can now slice the ledger by QBO entity type without leaving the page.
+- All 7 chips carry `data-testid="txn-type-chip-{k}"` for automation.
+
+### ✅ Test coverage
+- `backend/tests/test_txn_type_filter.py` — 8 unit tests verifying the new `txn_type` query param correctly narrows the Mongo query (including a parametrized test across all 6 editor entity types + Transfer).
+- 165 backend tests still green.
+- Verified end-to-end via screenshots: Sales Receipts list renders with 1 row ($250 total), Credit Memos list renders with linked-invoice indicator, chip strip on /transactions shows all 7 chips with correct active state.
+
+### Files touched
+- `backend/routes/transactions.py::list_transactions` (+txn_type query param)
+- `backend/tests/test_txn_type_filter.py` (new, 8 tests)
+- `frontend/src/pages/TxnTypeListPage.jsx` (new, shared list component)
+- `frontend/src/pages/SalesReceipts.jsx` / `CreditMemos.jsx` (new, thin config wrappers)
+- `frontend/src/pages/Transactions.jsx` (chip strip + txn_type filter state + query wiring)
+- `frontend/src/components/Sidebar.jsx` (+2 sales items)
+- `frontend/src/App.js` (2 new routes)
+
 ## 2026-02-20 — Full-Page Editors for Purchase / Sales Receipt / Deposit / Credit Memo / Refund Receipt
 
 ### 🧾 Five new full-page editors (parity with Invoice/Bill editors)

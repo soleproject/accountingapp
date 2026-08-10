@@ -457,6 +457,10 @@ export default function Transactions() {
   const [filterContactId, setFilterContactId] = useState("");
   const [filterAmountMin, setFilterAmountMin] = useState("");
   const [filterAmountMax, setFilterAmountMax] = useState("");
+  // Entity-type chip strip — quick "slice by txn_type" filter. Kept
+  // separate from the status buckets above because the two dimensions
+  // are orthogonal: a Purchase can be either "ai" or "reviewed", etc.
+  const [txnTypeFilter, setTxnTypeFilter] = useState("");
   // "list" (default) or "rollup" — toggled by the two icons in the toolbar.
   const [view, setView] = useState("list");
   const [rollup, setRollup] = useState(null);
@@ -493,6 +497,7 @@ export default function Transactions() {
     if (filterContactId) params.set("contact_id", filterContactId);
     if (filterAmountMin) params.set("amount_min", filterAmountMin);
     if (filterAmountMax) params.set("amount_max", filterAmountMax);
+    if (txnTypeFilter) params.set("txn_type", txnTypeFilter);
     // "Let's Review" mode pins the list to a single contact so the
     // stepper walks vendor-by-vendor without the user re-typing filters.
     if (isLetsReview && lrContactId) params.set("contact_id", lrContactId);
@@ -561,7 +566,7 @@ export default function Transactions() {
     });
   }, [currentId]);
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize, debouncedSearch, dateFrom, dateTo, isLetsReview, lrContactId, isNoContactReview, ncrGroupKey, filterBankAccountId, filterCategoryId, filterContactId, filterAmountMin, filterAmountMax]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize, debouncedSearch, dateFrom, dateTo, isLetsReview, lrContactId, isNoContactReview, ncrGroupKey, filterBankAccountId, filterCategoryId, filterContactId, filterAmountMin, filterAmountMax, txnTypeFilter]);
   // Reset page when filters narrow/widen.
   useEffect(() => { setPage(p => (p === 1 ? p : 1)); }, [debouncedSearch, dateFrom, dateTo]);
 
@@ -1246,6 +1251,45 @@ export default function Transactions() {
           )}
         </div>
       </div>
+      {/* Entity-type chip strip — orthogonal filter to the status
+          tabs above. Lets the CPA slice the ledger by QBO entity
+          without leaving the page. Uses the same `txn_type` field
+          that the /sales-receipts and /credit-memos pages filter on. */}
+      {!isReviewMode && (
+        <div
+          className="flex items-center gap-1.5 flex-wrap"
+          data-testid="txn-type-chip-strip"
+        >
+          <span className="text-[11px] uppercase tracking-wide text-slate-400 mr-1">
+            Entity
+          </span>
+          {[
+            { k: "",              label: "All types" },
+            { k: "Purchase",      label: "Expenses" },
+            { k: "SalesReceipt",  label: "Sales Receipts" },
+            { k: "Deposit",       label: "Deposits" },
+            { k: "CreditMemo",    label: "Credit Memos" },
+            { k: "RefundReceipt", label: "Refund Receipts" },
+            { k: "Transfer",      label: "Transfers" },
+          ].map(({ k, label }) => {
+            const active = txnTypeFilter === k;
+            return (
+              <button
+                key={k || "all"}
+                onClick={() => { setTxnTypeFilter(k); setPage(1); }}
+                className={`px-2.5 py-1 text-[11px] font-medium rounded-full border transition-colors ${
+                  active
+                    ? "bg-slate-900 text-white border-slate-900"
+                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                }`}
+                data-testid={`txn-type-chip-${k || "all"}`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Filter toolbar: search + date range */}
       <div className="flex items-center gap-2 flex-wrap">
