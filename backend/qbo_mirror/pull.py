@@ -434,11 +434,20 @@ async def _pull_journal_entries(company_id: str, realm_id: str) -> dict:
 
 
 async def _pull_estimates(company_id: str, realm_id: str) -> dict:
-    """Phase 3 — bring QBO Estimates local. QBO Wins on drift."""
+    """Phase 3 — bring QBO Estimates local. QBO Wins on drift.
+
+    Defensive against unique-key collisions: QBO permits duplicate
+    DocNumbers on estimates (four rows can all say "1001"), so if a
+    legacy local unique index ever blocks the insert we log + skip
+    rather than crashing the batch. Orphan rows without a qbo_id
+    that happen to own the same natural key get adopted so a future
+    dry-run reports `In sync` for them."""
+    from pymongo.errors import DuplicateKeyError
     existing = await _existing_qbo_ids(company_id, "estimates",
                                         any_source=True)
     inserted = 0
     updated = 0
+    skipped_dupkey = 0
     async for obj in Q.query_all(company_id, realm_id, "Estimate"):
         qid = str(obj.get("Id"))
         # QBO Estimate → local shape (structured similar to invoice
@@ -501,17 +510,60 @@ async def _pull_estimates(company_id: str, realm_id: str) -> dict:
             )
             updated += 1
         else:
-            await db.estimates.insert_one(mapped)
-            inserted += 1
-    return {"inserted": inserted, "updated": updated}
+            try:
+                await db.estimates.insert_one(mapped)
+                inserted += 1
+            except DuplicateKeyError:
+                # A local estimate already owns a key (e.g. legacy
+                # unique on (company_id, number)). QBO permits
+                # duplicate DocNumbers on estimates — try to adopt
+                # an existing orphan (no qbo_id) or skip with a
+                # loud log entry the user can act on.
+                orphan = await db.estimates.find_one(
+                    {"company_id": company_id,
+                      "number": mapped.get("number"),
+                      "$or": [{"qbo_id": {"$exists": False}},
+                              {"qbo_id": {"$in": [None, ""]}}]},
+                    {"id": 1, "_id": 0},
+                )
+                if orphan:
+                    await db.estimates.update_one(
+                        {"id": orphan["id"]},
+                        {"$set": {"qbo_id": qid, "source": "qbo",
+                                  "realm_id": realm_id,
+                                  "_sync_origin": "mirror_pull",
+                                  "updated_at": now_iso()}},
+                    )
+                    skipped_dupkey += 1
+                else:
+                    from qbo_mirror.settings import append_log
+                    await append_log(
+                        company_id, "warning",
+                        f"Duplicate estimate number from QBO: "
+                        f"'{mapped.get('number')}' (qbo_id {qid}) "
+                        "skipped — local unique index already "
+                        "occupied. Drop the estimates(number) "
+                        "unique index to allow duplicates.",
+                        {"entity": "estimate", "qbo_id": qid,
+                         "number": mapped.get("number")},
+                    )
+                    skipped_dupkey += 1
+    return {"inserted": inserted, "updated": updated,
+             "skipped_dupkey": skipped_dupkey}
 
 
 async def _pull_purchase_orders(company_id: str, realm_id: str) -> dict:
-    """Phase 3 — bring QBO Purchase Orders local. QBO Wins on drift."""
+    """Phase 3 — bring QBO Purchase Orders local. QBO Wins on drift.
+
+    Same duplicate-key resilience as `_pull_estimates` — QBO permits
+    duplicate DocNumbers so we adopt orphans by (company_id, number)
+    when possible and skip-with-log otherwise."""
+    from pymongo.errors import DuplicateKeyError
     existing = await _existing_qbo_ids(company_id, "purchase_orders",
                                         any_source=True)
     inserted = 0
     updated = 0
+    skipped_dupkey = 0
     async for obj in Q.query_all(company_id, realm_id, "PurchaseOrder"):
         qid = str(obj.get("Id"))
         mapped = {
@@ -575,9 +627,41 @@ async def _pull_purchase_orders(company_id: str, realm_id: str) -> dict:
             )
             updated += 1
         else:
-            await db.purchase_orders.insert_one(mapped)
-            inserted += 1
-    return {"inserted": inserted, "updated": updated}
+            try:
+                await db.purchase_orders.insert_one(mapped)
+                inserted += 1
+            except DuplicateKeyError:
+                orphan = await db.purchase_orders.find_one(
+                    {"company_id": company_id,
+                      "number": mapped.get("number"),
+                      "$or": [{"qbo_id": {"$exists": False}},
+                              {"qbo_id": {"$in": [None, ""]}}]},
+                    {"id": 1, "_id": 0},
+                )
+                if orphan:
+                    await db.purchase_orders.update_one(
+                        {"id": orphan["id"]},
+                        {"$set": {"qbo_id": qid, "source": "qbo",
+                                  "realm_id": realm_id,
+                                  "_sync_origin": "mirror_pull",
+                                  "updated_at": now_iso()}},
+                    )
+                    skipped_dupkey += 1
+                else:
+                    from qbo_mirror.settings import append_log
+                    await append_log(
+                        company_id, "warning",
+                        f"Duplicate PO number from QBO: "
+                        f"'{mapped.get('number')}' (qbo_id {qid}) "
+                        "skipped — local unique index already "
+                        "occupied. Drop the purchase_orders(number) "
+                        "unique index to allow duplicates.",
+                        {"entity": "purchase_order", "qbo_id": qid,
+                         "number": mapped.get("number")},
+                    )
+                    skipped_dupkey += 1
+    return {"inserted": inserted, "updated": updated,
+             "skipped_dupkey": skipped_dupkey}
 
 
 async def run_pull(company_id: str, user_email: str,
