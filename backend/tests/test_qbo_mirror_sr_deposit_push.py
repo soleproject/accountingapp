@@ -315,3 +315,33 @@ def test_qualifier_deposit_needs_category(monkeypatch):
     _drive(_r())
     assert not stamped
     assert not pushed
+
+
+def test_derive_refresh_updates_line_items_on_amount_change(monkeypatch):
+    """Regression — the bug the user reported: editing a mirrored
+    transaction's `amount` used to leave `line_items[]` stale, so the
+    QBO push replayed the OLD amount and the twin-patch response
+    reverted the local field. `_derive_mirror_stamp` must recompute
+    `line_items` from the current header on every call."""
+    from routes.transactions import _derive_mirror_stamp
+    # Existing doc had $115k stamped at create-time.
+    doc_before = {
+        "id": "t", "company_id": "cid",
+        "amount": 115000.0,
+        "bank_account_id": "bank-1",
+        "contact_id": None,  # Deposit path
+        "category_account_id": "inc-1",
+        "line_items": [{"category_account_id": "inc-1", "amount": 115000.0}],
+        "qbo_id": "999", "txn_type": "Deposit",
+    }
+    # User edits header amount → $200. `line_items` in the DB is stale.
+    doc_after = {**doc_before, "amount": 200.0}
+    entity, txn_type, refresh = _derive_mirror_stamp(doc_after)
+    assert entity == "deposit"
+    assert txn_type == "Deposit"
+    assert refresh["line_items"][0]["amount"] == 200.0  # ← the fix
+    # Sign inversion also flips the branch: $200 outflow → Purchase.
+    doc_flipped = {**doc_after, "amount": -200.0}
+    entity_out, _t, refresh_out = _derive_mirror_stamp(doc_flipped)
+    assert entity_out == "purchase"
+    assert refresh_out["line_items"][0]["expense_account_id"] == "inc-1"
