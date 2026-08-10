@@ -2663,6 +2663,14 @@ async def delete_transaction(cid: str, tid: str, user: dict = Depends(get_curren
     cascade = await cascade_on_transaction_delete(cid, existing or {})
     await db.transactions.delete_one({"id": tid, "company_id": cid})
     await _invalidate_dash(cid)
+    # QBO Mirror: if this was a Purchase we'd pushed to QBO, propagate
+    # the delete so the two sides stay consistent (otherwise the next
+    # dry-run reports it as `pull_from_qbo`).
+    if existing and existing.get("qbo_id") \
+            and existing.get("txn_type") == "Purchase":
+        from qbo_mirror.autopush import try_auto_delete
+        try_auto_delete(cid, "purchase", str(existing["qbo_id"]),
+                         existing.get("description") or existing.get("number") or "")
     return {"ok": True, **cascade}
 
 
