@@ -73,6 +73,7 @@ const GROUPS = [
       { to: "/inventory-management", label: "Inventory", icon: Boxes, matchPath: "/inventory-management" },
       { to: "/accounting/tags", label: "Tags", icon: Tags },
       { to: "/accounting/reconciliation", label: "Reconciliation", icon: CheckCheck },
+      { to: "/accounting/bank-matches", label: "Bank Match Review", icon: Link2, advancedOnly: true },
       { to: "/accounting/journal-entries", label: "Journal Entries", icon: BookOpen },
       { to: "/accounting/general-ledger", label: "General Ledger", icon: Notebook },
       { to: "/accounting/taxes", label: "Tax Library", icon: Percent },

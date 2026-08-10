@@ -88,6 +88,7 @@ async def auto_match_bank_feed(
         "company_id": company_id,
         "id": {"$in": plaid_txn_ids},
         "matched_bank_txn_id": {"$exists": False},
+        "match_unlinked_at": {"$exists": False},
     }):
         scanned += 1
         bank_dt = _parse_iso(bank_row.get("date"))
@@ -111,6 +112,9 @@ async def auto_match_bank_feed(
             "txn_type": {"$in": list(_EDITOR_TYPES)},
             "matched_bank_txn_id": {"$exists": False},
             "plaid_transaction_id": {"$exists": False},
+            # CPA-unlinked rows are permanently opted out — don't
+            # re-pair a row a human has explicitly broken apart.
+            "match_unlinked_at": {"$exists": False},
             "date": {"$gte": date_from, "$lte": date_to},
             "$or": [
                 {"amount": bank_amt},

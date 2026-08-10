@@ -39,6 +39,7 @@ import CreditMemoEditor from "@/pages/CreditMemoEditor";
 import RefundReceiptEditor from "@/pages/RefundReceiptEditor";
 import SalesReceipts from "@/pages/SalesReceipts";
 import CreditMemos from "@/pages/CreditMemos";
+import BankMatchReview from "@/pages/BankMatchReview";
 import AdvancedModeRoute from "@/components/AdvancedModeRoute";
 import TaxLibrary from "@/pages/TaxLibrary";
 import Recurring from "@/pages/Recurring";
@@ -142,6 +143,7 @@ function App() {
               <Route path="/credit-memos" element={<AdvancedModeRoute><CreditMemos /></AdvancedModeRoute>} />
               <Route path="/refund-receipts/new" element={<AdvancedModeRoute><RefundReceiptEditor /></AdvancedModeRoute>} />
               <Route path="/refund-receipts/:id/edit" element={<AdvancedModeRoute><RefundReceiptEditor /></AdvancedModeRoute>} />
+              <Route path="/accounting/bank-matches" element={<AdvancedModeRoute><BankMatchReview /></AdvancedModeRoute>} />
               <Route path="/recurring" element={<Recurring />} />
               <Route path="/items" element={<Items />} />
               <Route path="/inventory-management" element={<InventoryPage />} />

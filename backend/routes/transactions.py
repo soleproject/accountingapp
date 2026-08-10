@@ -2899,3 +2899,130 @@ async def get_transaction(cid: str, tid: str,
         raise HTTPException(404, 'Transaction not found')
     return {'transaction': coerce(doc)}
 
+
+
+# ─── Bank Match Review ──────────────────────────────────────────────
+# Endpoints that surface silent-matcher pairs (see `bank_match.py`) so
+# CPAs in Advanced mode can confirm or unlink them. Defined at the
+# bottom of the file so the literal `/bank-matches` path is registered
+# after the parameterized `/transactions/{tid}` route (order doesn't
+# actually matter here since paths don't collide, but keeps the file
+# tidy).
+
+@router.get("/companies/{cid}/bank-matches")
+async def list_bank_matches(
+    cid: str, status: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """List every silent-matched bank ↔ editor pair for the company.
+
+    Query params:
+      status = "unconfirmed" (default view) | "confirmed" | "all"
+
+    Returns pairs as `{bank, editor}` objects with the two full
+    transaction docs so the review UI can render both sides without
+    a second fetch.
+    """
+    await require_company(user, cid)
+    q: dict = {"company_id": cid,
+                "matched_editor_txn_id": {"$exists": True}}
+    if status == "confirmed":
+        q["match_confirmed"] = True
+    elif status == "unconfirmed" or status is None:
+        q["match_confirmed"] = {"$ne": True}
+    # else "all" → no confirmation filter.
+    bank_rows = await db.transactions.find(q).sort(
+        "matched_at", -1).limit(500).to_list(length=None)
+    # Fetch every editor counterpart in one round-trip.
+    editor_ids = [r.get("matched_editor_txn_id") for r in bank_rows
+                    if r.get("matched_editor_txn_id")]
+    editor_rows = {}
+    if editor_ids:
+        async for e in db.transactions.find(
+            {"company_id": cid, "id": {"$in": editor_ids}}):
+            editor_rows[e["id"]] = coerce(e)
+    pairs = [{
+        "bank": coerce(b),
+        "editor": editor_rows.get(b.get("matched_editor_txn_id")),
+        "matched_at": b.get("matched_at"),
+        "confirmed": bool(b.get("match_confirmed")),
+    } for b in bank_rows]
+    return {"pairs": pairs, "count": len(pairs)}
+
+
+@router.post("/companies/{cid}/bank-matches/{bank_id}/confirm")
+async def confirm_bank_match(
+    cid: str, bank_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Mark a silent-matcher pair as CPA-confirmed. Locks it in so
+    future matcher runs (e.g. a re-import) won't try to disturb it,
+    and moves the pair off the default "unconfirmed" review queue."""
+    await require_company(user, cid)
+    bank = await db.transactions.find_one(
+        {"id": bank_id, "company_id": cid,
+          "matched_editor_txn_id": {"$exists": True}})
+    if not bank:
+        raise HTTPException(404, "Matched bank transaction not found")
+    editor_id = bank.get("matched_editor_txn_id")
+    stamp = now_iso()
+    await db.transactions.update_one(
+        {"id": bank_id, "company_id": cid},
+        {"$set": {"match_confirmed": True, "match_confirmed_at": stamp}},
+    )
+    if editor_id:
+        await db.transactions.update_one(
+            {"id": editor_id, "company_id": cid},
+            {"$set": {"match_confirmed": True, "match_confirmed_at": stamp}},
+        )
+    return {"ok": True, "confirmed_at": stamp}
+
+
+@router.post("/companies/{cid}/bank-matches/{bank_id}/unlink")
+async def unlink_bank_match(
+    cid: str, bank_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Break a silent-matcher pair — used when a CPA reviews a match
+    and decides the two rows are actually unrelated (e.g. a Sales
+    Receipt that happens to be the same dollar amount as an unrelated
+    bank deposit within the 3-day window). Both rows revert to their
+    unpaired state: matched pointers wiped, `hidden_by_match` cleared
+    on the editor side so it reappears in the ledger. We DON'T re-run
+    the matcher on the same batch — the CPA's decision sticks.
+    """
+    await require_company(user, cid)
+    bank = await db.transactions.find_one(
+        {"id": bank_id, "company_id": cid,
+          "matched_editor_txn_id": {"$exists": True}})
+    if not bank:
+        raise HTTPException(404, "Matched bank transaction not found")
+    editor_id = bank.get("matched_editor_txn_id")
+    # Wipe the four match fields on the bank side.
+    await db.transactions.update_one(
+        {"id": bank_id, "company_id": cid},
+        {"$unset": {
+            "matched_bank_txn_id": "",
+            "matched_editor_txn_id": "",
+            "matched_at": "",
+            "match_confirmed": "",
+            "match_confirmed_at": "",
+        },
+         # Suppression flag so re-runs of the matcher (which are rare
+         # but happen on backfills) don't immediately re-pair the same
+         # two rows. Stays set until the CPA manually intervenes.
+         "$set": {"match_unlinked_at": now_iso()}},
+    )
+    if editor_id:
+        await db.transactions.update_one(
+            {"id": editor_id, "company_id": cid},
+            {"$unset": {
+                "matched_bank_txn_id": "",
+                "matched_at": "",
+                "hidden_by_match": "",
+                "match_confirmed": "",
+                "match_confirmed_at": "",
+            },
+             "$set": {"match_unlinked_at": now_iso()}},
+        )
+    return {"ok": True}

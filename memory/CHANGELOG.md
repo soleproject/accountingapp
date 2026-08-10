@@ -1,5 +1,32 @@
 # SmartBooks — Changelog
 
+## 2026-02-20 (evening) — Bank Match Review Screen (Trust Loop)
+
+### 🔍 New page: Bank Match Review
+- **Route**: `/accounting/bank-matches` (Advanced-mode-only via `<AdvancedModeRoute>`)
+- **What it shows**: every silent-matched bank ↔ editor pair from `bank_match.auto_match_bank_feed` — side-by-side card layout with bank row on the left, editor row on the right, matched-at timestamp in the header strip.
+- **Actions per pair**: **Confirm** (locks it in — hidden from the default "Awaiting review" queue) or **Unlink** (breaks the pair, editor row reappears in the ledger, both sides tombstoned so the matcher won't re-pair them).
+- **Filter chips**: Awaiting review (default) · Confirmed · All. Live totals at top-right ("N pairs · $X total").
+- **Sidebar**: new "Bank Match Review" entry under Accounting group (advancedOnly, hidden in Simple mode).
+
+### 🔌 New backend endpoints (`routes/transactions.py`)
+- `GET /api/companies/{cid}/bank-matches?status=unconfirmed|confirmed|all` — one round-trip pair fetch (both sides hydrated), sorted by `matched_at` desc, capped at 500.
+- `POST /api/companies/{cid}/bank-matches/{bank_id}/confirm` — stamps `match_confirmed=True` + timestamp on both rows.
+- `POST /api/companies/{cid}/bank-matches/{bank_id}/unlink` — `$unset` every match pointer on both sides + `$set` a `match_unlinked_at` tombstone. Silent matcher now respects the tombstone via a `match_unlinked_at: {$exists: False}` guard in `bank_match.py` so re-syncs don't undo the CPA's decision.
+
+### ✅ Test coverage
+- `backend/tests/test_bank_match_review.py` — 10 tests: default status returns unconfirmed only, confirmed filter, all filter, both-sides hydration, confirmed flag reflected, confirm stamps both sides, confirm 404 for non-matched row, unlink wipes all 4 fields + tombstones both sides, unlink 404 for missing pair, unlink-then-confirm 404s (proves severance was structural not cosmetic).
+- 137 backend tests green (bank_match + review + accounting_mode + editor + txn_type + QBO mirror + pfc).
+- Screenshots verified end-to-end: empty state renders per-filter copy, seeded pair renders with confirm/unlink buttons, side-by-side comparison shows both amounts + dates + descriptions.
+
+### Files touched
+- `backend/routes/transactions.py` — 3 new endpoints (list / confirm / unlink) at file bottom.
+- `backend/bank_match.py` — matcher now respects `match_unlinked_at` tombstone on both sides.
+- `backend/tests/test_bank_match_review.py` (new, 10 tests).
+- `frontend/src/pages/BankMatchReview.jsx` (new, ~280 lines).
+- `frontend/src/components/Sidebar.jsx` — new advancedOnly entry under Accounting.
+- `frontend/src/App.js` — new guarded route.
+
 ## 2026-02-20 (later still) — Accounting Mode Toggle + Silent Bank Matcher
 
 ### 🎚️ Two-tier UX: Simple / Advanced accounting mode
