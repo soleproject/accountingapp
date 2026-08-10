@@ -29,6 +29,8 @@ const GROUPS = [
     items: [
       { to: "/estimates", label: "Estimates", icon: FileText },
       { to: "/invoices", label: "Invoices", icon: FileText },
+      { to: "/sales-receipts", label: "Sales Receipts", icon: Receipt },
+      { to: "/credit-memos", label: "Credit Memos", icon: FileText },
       { to: "/payments?direction=in", label: "Payments", icon: CreditCard, matchPath: "/payments" },
       { to: "/items?usage=sales", label: "Products & Services", icon: Package, matchPath: "/items" },
       { to: "/recurring", label: "Recurring", icon: Repeat },

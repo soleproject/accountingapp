@@ -933,9 +933,16 @@ async def list_transactions(
     amount_max: Optional[float] = None,
     no_contact: Optional[bool] = None,
     desc_group: Optional[str] = None,
+    txn_type: Optional[str] = None,
 ):
     await require_company(user, cid)
     query: dict = {"company_id": cid}
+    if txn_type:
+        # Filter by editor-stamped `txn_type` (Purchase / SalesReceipt /
+        # Deposit / CreditMemo / RefundReceipt / Transfer). Drives the
+        # dedicated /sales-receipts + /credit-memos list pages and the
+        # filter-chip strip on /transactions.
+        query["txn_type"] = txn_type
     if needs_review is not None:
         query["needs_review"] = needs_review
     # Status buckets — mutually exclusive tabs on the Transactions UI. Each
