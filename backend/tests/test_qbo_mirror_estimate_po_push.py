@@ -27,10 +27,11 @@ class _Coll:
 
 
 class _FakeDB:
-    def __init__(self, contacts, accounts, items):
+    def __init__(self, contacts, accounts, items, invoices=None):
         self.contacts = _Coll(contacts)
         self.accounts = _Coll(accounts)
         self.items = _Coll(items)
+        self.invoices = _Coll(invoices or [])
 
     def __getitem__(self, k):
         return getattr(self, k)
@@ -151,3 +152,75 @@ def test_twin_patches():
     assert pp["total"] == 300.0
     assert pp["due_date"] == "2026-02-01"
     assert pp["number"] == "PO-1"
+
+
+def test_estimate_converted_includes_linked_invoice(monkeypatch):
+    """When a converted estimate has a `converted_invoice_id` and
+    the target invoice has a `qbo_id`, the pushed body must set
+    TxnStatus="Closed" AND a LinkedTxn back-reference to the invoice
+    — mirroring what QBO does natively for convert-to-invoice."""
+    fake = _FakeDB(
+        contacts=[{"id": "cust-1", "company_id": "cid", "qbo_id": "77",
+                    "name": "Acme", "display_name": "Acme"}],
+        accounts=[],
+        items=[{"id": "item-1", "company_id": "cid",
+                 "qbo_id": "11", "name": "Widget"}],
+        invoices=[{"id": "inv-abc", "company_id": "cid", "qbo_id": "555"}],
+    )
+    import qbo_mirror.push as _push_mod
+    monkeypatch.setattr(_push_mod, "db", fake)
+    monkeypatch.setattr(_db_mod, "db", fake)
+    from qbo_mirror.push import _estimate_body
+    est = {
+        "id": "e1", "contact_id": "cust-1",
+        "issue_date": "2026-08-10", "status": "converted",
+        "converted_invoice_id": "inv-abc",
+        "line_items": [{"item_id": "item-1", "amount": 100}],
+    }
+    body = _run(_estimate_body("cid", est))
+    assert body["TxnStatus"] == "Closed"
+    assert body["LinkedTxn"] == [{"TxnType": "Invoice", "TxnId": "555"}]
+
+
+def test_estimate_converted_without_invoice_qbo_id_omits_linked(monkeypatch):
+    """If the invoice hasn't been synced yet, LinkedTxn should NOT
+    be emitted (QBO would reject an unknown TxnId). Status alone still
+    flips to Closed so the estimate leaves 'Pending'."""
+    fake = _FakeDB(
+        contacts=[{"id": "cust-1", "company_id": "cid", "qbo_id": "77",
+                    "name": "Acme", "display_name": "Acme"}],
+        accounts=[],
+        items=[{"id": "item-1", "company_id": "cid",
+                 "qbo_id": "11", "name": "Widget"}],
+        invoices=[{"id": "inv-abc", "company_id": "cid"}],  # no qbo_id
+    )
+    import qbo_mirror.push as _push_mod
+    monkeypatch.setattr(_push_mod, "db", fake)
+    monkeypatch.setattr(_db_mod, "db", fake)
+    from qbo_mirror.push import _estimate_body
+    est = {
+        "id": "e1", "contact_id": "cust-1",
+        "issue_date": "2026-08-10", "status": "converted",
+        "converted_invoice_id": "inv-abc",
+        "line_items": [{"item_id": "item-1", "amount": 100}],
+    }
+    body = _run(_estimate_body("cid", est))
+    assert body["TxnStatus"] == "Closed"
+    assert "LinkedTxn" not in body
+
+
+def test_drift_normalizer_maps_converted_to_closed():
+    """Local `status='converted'` on an estimate must not surface as
+    field drift after we push Closed to QBO. The engine's
+    normalizer should treat both as equivalent."""
+    from qbo_mirror.engine import _norm_estimate_local, _norm_estimate_qbo
+    local = _norm_estimate_local({
+        "number": "EST-100", "issue_date": "2026-08-10",
+        "total": 100.0, "status": "converted", "qbo_id": "999",
+    })
+    qbo = _norm_estimate_qbo({
+        "Id": "999", "DocNumber": "EST-100", "TxnDate": "2026-08-10",
+        "TotalAmt": 100.0, "TxnStatus": "Closed",
+    })
+    assert local["status"] == qbo["status"] == "closed"
+

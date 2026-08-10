@@ -281,13 +281,24 @@ def _norm_je_qbo(o: dict) -> dict:
 
 def _norm_estimate_local(e: dict) -> dict:
     number = (e.get("number") or "").strip()
+    status = (e.get("status") or "").lower()
+    # Both "converted" (local terminology) and "closed" map to QBO's
+    # "Closed" TxnStatus. Normalize so drift-detection doesn't fire
+    # a false positive after a convert-to-invoice.
+    if status == "converted":
+        status = "closed"
+    # QBO has no notion of "draft"; new estimates land as "Pending" —
+    # we map QBO's Pending to "sent" in _norm_estimate_qbo, so treat
+    # a local draft as "sent" here for parity.
+    if status == "draft":
+        status = "sent"
     return {
         "qbo_id": e.get("qbo_id"),
         "natural_key": f"est::{number.lower()}",
         "number": number,
         "date": e.get("issue_date") or "",
         "total": round(float(e.get("total") or 0), 2),
-        "status": (e.get("status") or "").lower(),
+        "status": status,
     }
 
 
