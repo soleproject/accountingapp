@@ -1333,6 +1333,18 @@ async def _po_body(company_id: str, po: dict) -> dict:
     qbo_status = _PO_STATUS_TO_QBO.get((po.get("status") or "").lower())
     if qbo_status:
         body["POStatus"] = qbo_status
+    # If this PO was converted to a bill locally, link the two in QBO
+    # so the PO shows its resulting bill (matches QBO's native
+    # "Convert to bill" behaviour).
+    conv_bid = po.get("converted_bill_id")
+    if conv_bid:
+        bill = await db.bills.find_one(
+            {"id": conv_bid, "company_id": company_id},
+            {"qbo_id": 1, "_id": 0},
+        )
+        if bill and bill.get("qbo_id"):
+            body["LinkedTxn"] = [{"TxnType": "Bill",
+                                    "TxnId": str(bill["qbo_id"])}]
     return body
 
 

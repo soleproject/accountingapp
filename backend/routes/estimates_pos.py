@@ -206,7 +206,7 @@ async def convert_estimate_to_invoice(
     # LinkedTxn back-reference to that invoice. This mirrors what QBO
     # does when the user converts natively — otherwise the estimate
     # stays "Pending" on the QBO side and shows up as drift.
-    try_auto_convert(cid, eid, iid)
+    try_auto_convert(cid, "estimate", eid, "invoice", iid)
     return {"id": iid, "invoice": _coerce(invoice)}
 
 
@@ -337,5 +337,9 @@ async def convert_po_to_bill(
                   "converted_bill_id": bid,
                   "updated_at": now_iso()}},
     )
-    try_auto_push(cid, "bill", bid)
+    # Chained QBO push: create the bill first (so it gets a qbo_id),
+    # then update the source PO with POStatus="Closed" + a LinkedTxn
+    # back-reference to that bill. Otherwise the PO stays "Open" on
+    # QBO and shows up as drift.
+    try_auto_convert(cid, "purchase_order", pid, "bill", bid)
     return {"id": bid, "bill": _coerce(bill)}

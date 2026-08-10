@@ -689,21 +689,34 @@ def try_auto_push(company_id: str, entity: str, doc_id: str) -> None:
         pass
 
 
-def try_auto_convert(company_id: str, estimate_id: str,
-                       invoice_id: str) -> None:
-    """Chained fire-and-forget for Estimate → Invoice conversion.
+def try_auto_convert(company_id: str, source_entity: str,
+                       source_id: str, target_entity: str,
+                       target_id: str) -> None:
+    """Chained fire-and-forget for pre-transactional → transactional
+    conversion (Estimate → Invoice, Purchase Order → Bill).
 
     Runs two QBO pushes back-to-back in a single task so ordering is
     preserved:
-      1. Push the newly-created invoice, awaiting its qbo_id stamp.
-      2. Push the source estimate as an update — its status flipped
-         to 'converted' locally, and now that the invoice has a
-         qbo_id, `_estimate_body` will include a LinkedTxn back to it.
+      1. Push the newly-created target (invoice/bill), awaiting its
+         qbo_id stamp.
+      2. Push the source (estimate/PO) as an update — its status
+         flipped to 'converted' locally, and now that the target has
+         a qbo_id, the body-builder will include a LinkedTxn back to
+         it (Invoice for estimates, Bill for POs).
 
-    Result in QBO: the estimate flips from 'Pending' → 'Closed' with
-    a link to the resulting invoice, mirroring what QBO does when a
+    Result in QBO: the source flips from 'Pending'/'Open' → 'Closed'
+    with a link to the resulting doc, mirroring what QBO does when a
     user converts natively.
     """
+    _CONVERT_CFG_KEYS = {
+        ("estimate", "invoice"): ("estimates", "invoices"),
+        ("purchase_order", "bill"): ("purchase_orders", "bills"),
+    }
+    cfg_keys = _CONVERT_CFG_KEYS.get((source_entity, target_entity))
+    if not cfg_keys:
+        return
+    src_cfg, tgt_cfg = cfg_keys
+
     async def _guarded() -> None:
         try:
             if not await is_enabled(company_id):
@@ -713,12 +726,12 @@ def try_auto_convert(company_id: str, estimate_id: str,
                 {"entities": 1, "_id": 0},
             )
             entities = (cfg or {}).get("entities") or {}
-            # Push invoice first (if entity enabled).
-            if entities.get("invoices") is not False:
-                await _run_one(company_id, "invoice", invoice_id)
-            # Then push the estimate status/LinkedTxn update.
-            if entities.get("estimates") is not False:
-                await _run_auto_update(company_id, "estimate", estimate_id)
+            # Push target first (if entity enabled).
+            if entities.get(tgt_cfg) is not False:
+                await _run_one(company_id, target_entity, target_id)
+            # Then push the source status/LinkedTxn update.
+            if entities.get(src_cfg) is not False:
+                await _run_auto_update(company_id, source_entity, source_id)
         except Exception as e:  # noqa: BLE001
             logger.warning("auto-convert guard failed: %s", e)
 
