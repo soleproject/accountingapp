@@ -934,9 +934,18 @@ async def list_transactions(
     no_contact: Optional[bool] = None,
     desc_group: Optional[str] = None,
     txn_type: Optional[str] = None,
+    include_matched: bool = False,
 ):
     await require_company(user, cid)
     query: dict = {"company_id": cid}
+    # Silent bank-feed matcher hides paired editor rows behind
+    # `hidden_by_match=True`. Callers that explicitly want to see the
+    # editor side of a pair (Sales Receipts list, Credit Memos list,
+    # dedicated /transactions?txn_type= views) can opt back in via
+    # `include_matched=True` — otherwise the default ledger view stays
+    # clean and doesn't double-count cash movements.
+    if not include_matched:
+        query["hidden_by_match"] = {"$ne": True}
     if txn_type:
         # Filter by editor-stamped `txn_type` (Purchase / SalesReceipt /
         # Deposit / CreditMemo / RefundReceipt / Transfer). Drives the

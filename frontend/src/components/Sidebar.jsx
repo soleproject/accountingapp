@@ -12,6 +12,7 @@ import {
 import { TID } from "@/constants/testIds";
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
+import { useCompany } from "@/lib/company";
 
 const NAV_COLOR = "#64748B";
 
@@ -29,8 +30,8 @@ const GROUPS = [
     items: [
       { to: "/estimates", label: "Estimates", icon: FileText },
       { to: "/invoices", label: "Invoices", icon: FileText },
-      { to: "/sales-receipts", label: "Sales Receipts", icon: Receipt },
-      { to: "/credit-memos", label: "Credit Memos", icon: FileText },
+      { to: "/sales-receipts", label: "Sales Receipts", icon: Receipt, advancedOnly: true },
+      { to: "/credit-memos", label: "Credit Memos", icon: FileText, advancedOnly: true },
       { to: "/payments?direction=in", label: "Payments", icon: CreditCard, matchPath: "/payments" },
       { to: "/items?usage=sales", label: "Products & Services", icon: Package, matchPath: "/items" },
       { to: "/recurring", label: "Recurring", icon: Repeat },
@@ -204,6 +205,7 @@ const isGroupActive = (loc, group, sticky = {}) =>
 
 export default function Sidebar({ collapsed, onToggle }) {
   const { branding } = useBranding();
+  const { isAdvancedMode } = useCompany();
   const logos = branding?.logos || {};
   // ------------------------------------------------------------------
   // Hover-to-expand: when the user has manually collapsed the sidebar
@@ -328,9 +330,14 @@ export default function Sidebar({ collapsed, onToggle }) {
         </button>
         {opened && !showCollapsed && (
           <div className="mt-0.5 space-y-0.5">
-            {group.items.map((it) => (
-              <Item key={it.label} item={it} group={group} indent />
-            ))}
+            {group.items
+              // Hide advanced-only items (Sales Receipts, Credit Memos)
+              // when the company is in "simple" accounting mode. Keeps
+              // the sidebar uncluttered for regular business owners.
+              .filter((it) => isAdvancedMode || !it.advancedOnly)
+              .map((it) => (
+                <Item key={it.label} item={it} group={group} indent />
+              ))}
           </div>
         )}
       </div>

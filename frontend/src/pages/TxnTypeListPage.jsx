@@ -39,7 +39,7 @@ export default function TxnTypeListPage({
     setLoading(true);
     try {
       const r = await api.get(`/companies/${cid}/transactions`, {
-        params: { txn_type: entityType, limit: 500 },
+        params: { txn_type: entityType, limit: 500, include_matched: true },
       });
       setRows(r.data.transactions || []);
     } catch (e) {

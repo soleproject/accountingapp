@@ -97,6 +97,11 @@ async def create_company(inp: CompanyCreate, user: dict = Depends(get_current_us
         "business_type": _canon_bt(inp.business_type) or inp.business_type,
         "business_description": inp.business_description,
         "reporting_basis": inp.reporting_basis,
+        # Default new companies to "simple" — the vast majority of small-
+        # biz owners never touch Sales Receipts / Credit Memos / QBO-
+        # entity editors. CPAs flip this to "advanced" per-client as
+        # needed via Settings.
+        "accounting_mode": "simple",
         "owner_user_id": user["id"], "onboarding_complete": False,
         "created_at": now, "updated_at": now,
     })
@@ -326,10 +331,25 @@ async def update_company(cid: str, patch: dict, user: dict = Depends(get_current
         # practical cap). Migration to object storage TBD once a firm
         # starts uploading huge logos.
         "logo_data_url", "address", "phone", "email", "website", "tax_id",
+        # Two-tier UX toggle:
+        #   "simple"   — bank feed + AI categorization only (default for
+        #               regular business owners; hides Sales Receipts,
+        #               Credit Memos, entity chip strip, QBO-shaped
+        #               editors from the sidebar and Transactions page).
+        #   "advanced" — full QBO parity, all editors + ledger views
+        #               visible. CPAs / bookkeepers flip this on per
+        #               client company as needed.
+        "accounting_mode",
     }
     updates = {k: v for k, v in (patch or {}).items() if k in allowed}
     if not updates:
         raise HTTPException(400, "No editable fields provided")
+    # Validate accounting_mode enum — anything outside {simple, advanced}
+    # would silently hide/show wrong UI, so reject with a clear 400.
+    if "accounting_mode" in updates:
+        if updates["accounting_mode"] not in ("simple", "advanced"):
+            raise HTTPException(400,
+                "accounting_mode must be 'simple' or 'advanced'")
     # Snap business_type to a canonical entity form so PATCHes from the
     # Company Settings page + AI-driven updates land on the same enum.
     if "business_type" in updates and isinstance(updates["business_type"], str):

@@ -29,10 +29,10 @@ const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
 /** "New" dropdown that surfaces both the quick-modal manual entry
  * (kept for one-off Plaid-style categorization) and the five full-
  * page editors (Expense, Sales Receipt, Deposit, Credit Memo, Refund
- * Receipt). Splitting them into their own screens lets each entity
- * carry the fields QBO expects (line items, memo, doc number, etc.)
- * without cramming everything into one modal. */
-function NewTransactionMenu({ onQuick }) {
+ * Receipt). In Simple accounting mode, only the Quick manual entry
+ * is shown — regular business owners don't need the QBO-shaped
+ * editors and a shorter menu is less overwhelming. */
+function NewTransactionMenu({ onQuick, advanced }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
@@ -48,23 +48,37 @@ function NewTransactionMenu({ onQuick }) {
     { label: "Quick manual entry",  desc: "Single-line categorization",
       onClick: onQuick,
       testId: TID.txnAddBtn },
-    { divider: true, label: "QBO-shaped entries" },
-    { label: "Expense",         desc: "Pay a vendor from a bank account",
-      onClick: () => navigate("/purchases/new"),
-      testId: "txn-new-purchase" },
-    { label: "Sales Receipt",   desc: "Customer paid at time of sale",
-      onClick: () => navigate("/sales-receipts/new"),
-      testId: "txn-new-sales-receipt" },
-    { label: "Bank Deposit",    desc: "Inflow with no customer (interest, rebates, owner)",
-      onClick: () => navigate("/deposits/new"),
-      testId: "txn-new-deposit" },
-    { label: "Credit Memo",     desc: "Reduce A/R without a cash refund",
-      onClick: () => navigate("/credit-memos/new"),
-      testId: "txn-new-credit-memo" },
-    { label: "Refund Receipt",  desc: "Cash refund back to a customer",
-      onClick: () => navigate("/refund-receipts/new"),
-      testId: "txn-new-refund-receipt" },
+    ...(advanced ? [
+      { divider: true, label: "QBO-shaped entries" },
+      { label: "Expense",         desc: "Pay a vendor from a bank account",
+        onClick: () => navigate("/purchases/new"),
+        testId: "txn-new-purchase" },
+      { label: "Sales Receipt",   desc: "Customer paid at time of sale",
+        onClick: () => navigate("/sales-receipts/new"),
+        testId: "txn-new-sales-receipt" },
+      { label: "Bank Deposit",    desc: "Inflow with no customer (interest, rebates, owner)",
+        onClick: () => navigate("/deposits/new"),
+        testId: "txn-new-deposit" },
+      { label: "Credit Memo",     desc: "Reduce A/R without a cash refund",
+        onClick: () => navigate("/credit-memos/new"),
+        testId: "txn-new-credit-memo" },
+      { label: "Refund Receipt",  desc: "Cash refund back to a customer",
+        onClick: () => navigate("/refund-receipts/new"),
+        testId: "txn-new-refund-receipt" },
+    ] : []),
   ];
+  // Simple mode: single item, no dropdown needed.
+  if (!advanced) {
+    return (
+      <button
+        data-testid={TID.txnAddBtn}
+        onClick={onQuick}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs"
+      >
+        <Plus size={13} /> Manual Transaction
+      </button>
+    );
+  }
   return (
     <div ref={rootRef} className="relative">
       <button
@@ -259,7 +273,7 @@ function ConfidenceChip({ conf, needs_review }) {
 }
 
 export default function Transactions() {
-  const { currentId } = useCompany();
+  const { currentId, isAdvancedMode } = useCompany();
   const { setFocus } = useAiFocus();
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -497,7 +511,14 @@ export default function Transactions() {
     if (filterContactId) params.set("contact_id", filterContactId);
     if (filterAmountMin) params.set("amount_min", filterAmountMin);
     if (filterAmountMax) params.set("amount_max", filterAmountMax);
-    if (txnTypeFilter) params.set("txn_type", txnTypeFilter);
+    if (txnTypeFilter) {
+      params.set("txn_type", txnTypeFilter);
+      // When explicitly filtering by an editor-authored entity type,
+      // surface the matched rows too — the CPA is asking "show me my
+      // Sales Receipts" and would be confused if the matched ones
+      // vanished. Only the default (unfiltered) ledger hides them.
+      params.set("include_matched", "true");
+    }
     // "Let's Review" mode pins the list to a single contact so the
     // stepper walks vendor-by-vendor without the user re-typing filters.
     if (isLetsReview && lrContactId) params.set("contact_id", lrContactId);
@@ -1247,6 +1268,7 @@ export default function Transactions() {
           {!isReviewMode && (
             <NewTransactionMenu
               onQuick={() => setCreating(true)}
+              advanced={isAdvancedMode}
             />
           )}
         </div>
@@ -1254,8 +1276,10 @@ export default function Transactions() {
       {/* Entity-type chip strip — orthogonal filter to the status
           tabs above. Lets the CPA slice the ledger by QBO entity
           without leaving the page. Uses the same `txn_type` field
-          that the /sales-receipts and /credit-memos pages filter on. */}
-      {!isReviewMode && (
+          that the /sales-receipts and /credit-memos pages filter on.
+          Only shown in Advanced accounting mode — regular business
+          owners never need to slice by QBO entity. */}
+      {!isReviewMode && isAdvancedMode && (
         <div
           className="flex items-center gap-1.5 flex-wrap"
           data-testid="txn-type-chip-strip"

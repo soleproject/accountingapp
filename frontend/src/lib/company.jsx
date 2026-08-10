@@ -36,8 +36,19 @@ export function CompanyProvider({ children }) {
 
   const current = companies.find(c => c.id === currentId) || null;
 
+  // Two-tier UX toggle — `accounting_mode` on the company doc drives
+  // whether the sidebar/transactions page surfaces QBO-entity ledgers
+  // (Sales Receipts, Credit Memos, entity chip strip, QBO-shaped
+  // editors). Defaults to "simple" if the field is missing (legacy
+  // companies created before the toggle existed).
+  const accountingMode = (current?.accounting_mode || "simple");
+  const isAdvancedMode = accountingMode === "advanced";
+
   return (
-    <CompanyCtx.Provider value={{ companies, currentId, current, switchCompany, refresh, loading }}>
+    <CompanyCtx.Provider value={{
+      companies, currentId, current, switchCompany, refresh, loading,
+      accountingMode, isAdvancedMode,
+    }}>
       {children}
     </CompanyCtx.Provider>
   );

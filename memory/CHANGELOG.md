@@ -1,5 +1,46 @@
 # SmartBooks — Changelog
 
+## 2026-02-20 (later still) — Accounting Mode Toggle + Silent Bank Matcher
+
+### 🎚️ Two-tier UX: Simple / Advanced accounting mode
+- **New company setting**: `accounting_mode` on `companies` collection (default: `"simple"`). Validated as enum `{"simple","advanced"}` on PATCH.
+- **Simple mode** (default for regular business owners):
+  - Sidebar hides "Sales Receipts" and "Credit Memos" entries (tagged `advancedOnly` in the group config).
+  - Entity chip strip on `/transactions` is hidden entirely.
+  - The "New transaction" dropdown reverts to a single "Manual Transaction" button (no QBO-shaped editors surfaced).
+  - Backdoor URLs (`/purchases/new`, `/sales-receipts`, `/credit-memos`, `/deposits/new`, `/refund-receipts/new`) redirect to `/accounting/transactions` via the new `<AdvancedModeRoute>` guard.
+- **Advanced mode** (opt-in for CPAs / bookkeepers): full QBO parity restored — chip strip, dedicated ledger lists, QBO-shaped editors all visible.
+- **Company Settings page**: added a two-tile radio card with plain-English explanations of each mode. Priya (CPA) can flip per-client from the Settings page.
+- **`useCompany` context**: now exposes `accountingMode` and `isAdvancedMode` so any component can conditionally render without a fetch.
+
+### 🤝 Silent bank-feed ↔ editor-authored matcher (`bank_match.py`)
+- New module fires as a **fire-and-forget task** after every Plaid `insert_many` — never slows down the Plaid hot path.
+- **Strict pairing rules**: same bank + absolute amount + date within ±3 days + sign agreement + neither side pre-matched + editor row has `txn_type` in {Purchase, SalesReceipt, Deposit, CreditMemo, RefundReceipt}. No LLM. Deterministic.
+- **What it prevents**: the double-count bug where a CPA-authored Sales Receipt + Plaid deposit for the same money movement inflated cash on the Balance Sheet.
+- **Match anchor**: bank row's `id` (the actual money movement is on the bank side). Both sides get `matched_bank_txn_id`. Editor row also gets `hidden_by_match=true`.
+- **Default `list_transactions` view** now filters out `hidden_by_match=true` rows so the ledger stays clean. Callers can opt back in with `include_matched=true` (SalesReceipts/CreditMemos lists + Transactions chip strip already do this so entity-typed views still show every row).
+
+### ✅ Test coverage
+- `backend/tests/test_bank_match.py` — 10 tests: happy paths (Purchase, SalesReceipt), all 5 rejection reasons (different bank/amount/window/sign, pre-matched on either side), empty-batch shortcut, batch of 2 pairing simultaneously.
+- `backend/tests/test_accounting_mode.py` — 4 tests: mode accepted for both values, invalid value rejected 400, other-field PATCH preserves existing mode.
+- 127 QBO-mirror + editor + PFC + accounting-mode + bank-match tests all pass.
+- Screenshots verified end-to-end: flipping `accounting_mode` between simple/advanced via PATCH correctly hides/shows sidebar items, chip strip, and dropdown menu.
+
+### Files touched
+- `backend/models.py` — no changes needed (patch dict was open-shape).
+- `backend/routes/companies.py` — allowed `accounting_mode` in PATCH, enum-validated, default `"simple"` on create.
+- `backend/routes/transactions.py::list_transactions` — added `include_matched` query param + default filter on `hidden_by_match`.
+- `backend/plaid_connect.py` — fires `auto_match_bank_feed` as a background task after `insert_many`.
+- `backend/bank_match.py` (new) — the silent matcher.
+- `backend/tests/test_bank_match.py`, `test_accounting_mode.py` (new).
+- `frontend/src/lib/company.jsx` — exposes `accountingMode` and `isAdvancedMode`.
+- `frontend/src/components/Sidebar.jsx` — filters items via `advancedOnly` tag.
+- `frontend/src/components/AdvancedModeRoute.jsx` (new) — route guard.
+- `frontend/src/pages/Transactions.jsx` — chip strip & NewTransactionMenu gated on `isAdvancedMode`; include_matched wired for txn_type slice.
+- `frontend/src/pages/TxnTypeListPage.jsx` — passes `include_matched=true`.
+- `frontend/src/pages/CompanySettings.jsx` — mode radio card.
+- `frontend/src/App.js` — wraps editor + list routes in `<AdvancedModeRoute>`.
+
 ## 2026-02-20 (later) — Dedicated Ledger Views: Sales Receipts, Credit Memos, Entity-Type Chip Strip
 
 ### 📋 Two new list pages

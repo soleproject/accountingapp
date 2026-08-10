@@ -39,6 +39,7 @@ import CreditMemoEditor from "@/pages/CreditMemoEditor";
 import RefundReceiptEditor from "@/pages/RefundReceiptEditor";
 import SalesReceipts from "@/pages/SalesReceipts";
 import CreditMemos from "@/pages/CreditMemos";
+import AdvancedModeRoute from "@/components/AdvancedModeRoute";
 import TaxLibrary from "@/pages/TaxLibrary";
 import Recurring from "@/pages/Recurring";
 import Items from "@/pages/Items";
@@ -129,18 +130,18 @@ function App() {
               <Route path="/bills" element={<Bills />} />
               <Route path="/bills/new" element={<BillEditor />} />
               <Route path="/bills/:id/edit" element={<BillEditor />} />
-              <Route path="/purchases/new" element={<PurchaseEditor />} />
-              <Route path="/purchases/:id/edit" element={<PurchaseEditor />} />
-              <Route path="/sales-receipts/new" element={<SalesReceiptEditor />} />
-              <Route path="/sales-receipts/:id/edit" element={<SalesReceiptEditor />} />
-              <Route path="/sales-receipts" element={<SalesReceipts />} />
-              <Route path="/deposits/new" element={<DepositEditor />} />
-              <Route path="/deposits/:id/edit" element={<DepositEditor />} />
-              <Route path="/credit-memos/new" element={<CreditMemoEditor />} />
-              <Route path="/credit-memos/:id/edit" element={<CreditMemoEditor />} />
-              <Route path="/credit-memos" element={<CreditMemos />} />
-              <Route path="/refund-receipts/new" element={<RefundReceiptEditor />} />
-              <Route path="/refund-receipts/:id/edit" element={<RefundReceiptEditor />} />
+              <Route path="/purchases/new" element={<AdvancedModeRoute><PurchaseEditor /></AdvancedModeRoute>} />
+              <Route path="/purchases/:id/edit" element={<AdvancedModeRoute><PurchaseEditor /></AdvancedModeRoute>} />
+              <Route path="/sales-receipts/new" element={<AdvancedModeRoute><SalesReceiptEditor /></AdvancedModeRoute>} />
+              <Route path="/sales-receipts/:id/edit" element={<AdvancedModeRoute><SalesReceiptEditor /></AdvancedModeRoute>} />
+              <Route path="/sales-receipts" element={<AdvancedModeRoute><SalesReceipts /></AdvancedModeRoute>} />
+              <Route path="/deposits/new" element={<AdvancedModeRoute><DepositEditor /></AdvancedModeRoute>} />
+              <Route path="/deposits/:id/edit" element={<AdvancedModeRoute><DepositEditor /></AdvancedModeRoute>} />
+              <Route path="/credit-memos/new" element={<AdvancedModeRoute><CreditMemoEditor /></AdvancedModeRoute>} />
+              <Route path="/credit-memos/:id/edit" element={<AdvancedModeRoute><CreditMemoEditor /></AdvancedModeRoute>} />
+              <Route path="/credit-memos" element={<AdvancedModeRoute><CreditMemos /></AdvancedModeRoute>} />
+              <Route path="/refund-receipts/new" element={<AdvancedModeRoute><RefundReceiptEditor /></AdvancedModeRoute>} />
+              <Route path="/refund-receipts/:id/edit" element={<AdvancedModeRoute><RefundReceiptEditor /></AdvancedModeRoute>} />
               <Route path="/recurring" element={<Recurring />} />
               <Route path="/items" element={<Items />} />
               <Route path="/inventory-management" element={<InventoryPage />} />
