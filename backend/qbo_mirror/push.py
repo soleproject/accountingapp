@@ -1398,6 +1398,147 @@ async def _push_purchase_orders(company_id: str, realm_id: str) -> dict:
     return {"inserted": inserted, "failed": failed}
 
 
+# ─── Purchase push (Phase 4) ───────────────────────────────────────
+# QBO "Purchase" covers cash / check / credit-card spending that
+# bypasses the AP workflow (no Bill created). Common examples: coffee
+# on a business card, SaaS subscription auto-charged. Local Purchases
+# live in the shared `db.transactions` collection with
+# `txn_type: "Purchase"`. QBO uses `PaymentType` (Cash|Check|CreditCard)
+# and `AccountRef` for the source bank/CC account.
+
+_PURCHASE_PAYMENT_TYPES = {"cash", "check", "creditcard"}
+
+
+async def _purchase_body(company_id: str, txn: dict) -> dict:
+    """QBO Purchase payload. Requires:
+      - `bank_account_id` → source bank/CC/asset account (AccountRef)
+      - `contact_id` (optional) → vendor entity (EntityRef)
+      - `line_items[]` with `expense_account_id` + `amount` each
+    """
+    src_acct = await _resolve_account_ref(
+        company_id, txn.get("bank_account_id"))
+    if not src_acct:
+        raise ValueError(
+            "Source account (bank/credit-card) missing or not synced "
+            "to QBO. Set `bank_account_id` before pushing.")
+
+    lines_out: list[dict] = []
+    fallback: tuple[str, str] | None = None
+    for idx, li in enumerate(txn.get("line_items") or [], start=1):
+        amount = float(li.get("amount") or 0)
+        description = (li.get("description") or "").strip()
+        acct = await _resolve_account_ref(
+            company_id, li.get("expense_account_id")
+            or li.get("category_account_id"))
+        if not acct:
+            if fallback is None:
+                fallback = await _default_expense_account_qbo(company_id)
+            if not fallback:
+                raise ValueError(
+                    f"Line {idx} has no expense account and no "
+                    "fallback QBO expense account exists.")
+            acct = fallback
+        lines_out.append({
+            "DetailType": "AccountBasedExpenseLineDetail",
+            "Amount": round(abs(amount), 2),
+            "Description": description,
+            "AccountBasedExpenseLineDetail": {
+                "AccountRef": {"value": acct[0], "name": acct[1]},
+            },
+        })
+    if not lines_out:
+        raise ValueError("Purchase has no line items.")
+
+    payment_type = (txn.get("payment_type") or "Cash").strip()
+    if payment_type.lower() not in _PURCHASE_PAYMENT_TYPES:
+        payment_type = "Cash"
+    # Normalize casing (QBO expects PascalCase).
+    payment_type = {"cash": "Cash", "check": "Check",
+                     "creditcard": "CreditCard"}[payment_type.lower()]
+
+    body: dict[str, Any] = {
+        "AccountRef": {"value": src_acct[0], "name": src_acct[1]},
+        "PaymentType": payment_type,
+        "Line": lines_out,
+    }
+    # Optional vendor entity.
+    if txn.get("contact_id"):
+        vend = await _resolve_vendor_ref(company_id, txn["contact_id"])
+        if vend:
+            body["EntityRef"] = {"value": vend[0], "name": vend[1],
+                                  "type": "Vendor"}
+    if txn.get("date"):
+        body["TxnDate"] = txn["date"]
+    if txn.get("number"):
+        body["DocNumber"] = str(txn["number"])[:21]
+    if txn.get("memo") or txn.get("notes"):
+        body["PrivateNote"] = str(txn.get("memo")
+                                    or txn.get("notes"))[:4000]
+    # Refund vs charge: `direction: "in"` means money coming back
+    # (vendor refund). QBO exposes this via `Credit=true`.
+    if txn.get("direction") == "in" or txn.get("credit"):
+        body["Credit"] = True
+    return body
+
+
+def _local_patch_from_qbo_purchase(twin: dict) -> dict:
+    """Fields QBO stamps back on a Purchase we just pushed. Preserves
+    the local `amount` sign convention (negative for outflows)."""
+    total = float(twin.get("TotalAmt") or 0)
+    is_credit = bool(twin.get("Credit"))
+    signed = abs(total) if is_credit else -abs(total)
+    patch: dict[str, Any] = {
+        "amount": round(signed, 2),
+        "direction": "in" if is_credit else "out",
+    }
+    if twin.get("TxnDate"):
+        patch["date"] = twin["TxnDate"]
+    if twin.get("DocNumber"):
+        patch["number"] = twin["DocNumber"]
+    if twin.get("PaymentType"):
+        patch["payment_type"] = twin["PaymentType"]
+    return patch
+
+
+async def _push_purchases(company_id: str, realm_id: str) -> dict:
+    """Push local-only purchases (transactions with
+    txn_type='Purchase' and no qbo_id) to QBO."""
+    inserted = 0
+    failed: list[dict] = []
+    async for t in db.transactions.find(
+        {"company_id": company_id, "txn_type": "Purchase",
+          "source": {"$ne": "qbo"},
+         "$or": [{"qbo_id": {"$exists": False}},
+                 {"qbo_id": {"$in": [None, ""]}}]},
+    ):
+        try:
+            body = await _purchase_body(company_id, t)
+            resp = await _post(
+                company_id, realm_id,
+                f"/company/{realm_id}/purchase", body,
+            )
+            twin = resp.get("Purchase") or {}
+            new_id = twin.get("Id")
+            if not new_id:
+                failed.append({"id": t["id"], "number": t.get("number"),
+                                "error": "no Id in QBO response"})
+                continue
+            twin_patch = _local_patch_from_qbo_purchase(twin)
+            await db.transactions.update_one(
+                {"id": t["id"]},
+                {"$set": {**twin_patch,
+                          "qbo_id": str(new_id), "realm_id": realm_id,
+                          "_sync_origin": "mirror_push",
+                          "_sync_status": "synced",
+                          "updated_at": now_iso()}},
+            )
+            inserted += 1
+        except Exception as ex:  # noqa: BLE001
+            failed.append({"id": t["id"], "number": t.get("number"),
+                            "error": str(ex)[:400]})
+    return {"inserted": inserted, "failed": failed}
+
+
 async def run_push(company_id: str, user_email: str,
                     entities: list[str] | None = None) -> dict:
     """Outbound-only sync — create local-only Foundation entities on
@@ -1413,7 +1554,8 @@ async def run_push(company_id: str, user_email: str,
     if entities is None:
         entities = ["accounts", "customers", "vendors", "items",
                      "invoices", "bills", "payments", "bill_payments",
-                     "journal_entries", "estimates", "purchase_orders"]
+                     "journal_entries", "estimates", "purchase_orders",
+                     "purchases"]
 
     result: dict[str, dict] = {}
     for e in entities:
@@ -1442,6 +1584,8 @@ async def run_push(company_id: str, user_email: str,
                 result[e] = await _push_estimates(company_id, realm_id)
             elif e == "purchase_orders":
                 result[e] = await _push_purchase_orders(company_id, realm_id)
+            elif e == "purchases":
+                result[e] = await _push_purchases(company_id, realm_id)
         except Exception as err:  # noqa: BLE001
             result[e] = {"error": str(err)}
 

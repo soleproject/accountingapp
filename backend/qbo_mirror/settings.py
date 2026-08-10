@@ -33,7 +33,7 @@ DEFAULTS = {
         "items": True,
         "invoices": True,
         "bills": True,
-        "purchases": False,
+        "purchases": True,
         "deposits": False,
         "transfers": False,
         "payments": True,
