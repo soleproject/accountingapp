@@ -687,3 +687,42 @@ def try_auto_push(company_id: str, entity: str, doc_id: str) -> None:
     except RuntimeError:
         # No running loop (e.g. called from a sync context). Skip.
         pass
+
+
+def try_auto_convert(company_id: str, estimate_id: str,
+                       invoice_id: str) -> None:
+    """Chained fire-and-forget for Estimate → Invoice conversion.
+
+    Runs two QBO pushes back-to-back in a single task so ordering is
+    preserved:
+      1. Push the newly-created invoice, awaiting its qbo_id stamp.
+      2. Push the source estimate as an update — its status flipped
+         to 'converted' locally, and now that the invoice has a
+         qbo_id, `_estimate_body` will include a LinkedTxn back to it.
+
+    Result in QBO: the estimate flips from 'Pending' → 'Closed' with
+    a link to the resulting invoice, mirroring what QBO does when a
+    user converts natively.
+    """
+    async def _guarded() -> None:
+        try:
+            if not await is_enabled(company_id):
+                return
+            cfg = await db.mirror_config.find_one(
+                {"company_id": company_id},
+                {"entities": 1, "_id": 0},
+            )
+            entities = (cfg or {}).get("entities") or {}
+            # Push invoice first (if entity enabled).
+            if entities.get("invoices") is not False:
+                await _run_one(company_id, "invoice", invoice_id)
+            # Then push the estimate status/LinkedTxn update.
+            if entities.get("estimates") is not False:
+                await _run_auto_update(company_id, "estimate", estimate_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("auto-convert guard failed: %s", e)
+
+    try:
+        asyncio.create_task(_guarded())
+    except RuntimeError:
+        pass

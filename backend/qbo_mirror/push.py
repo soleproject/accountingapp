@@ -1207,6 +1207,18 @@ async def _estimate_body(company_id: str, est: dict) -> dict:
     qbo_status = _EST_STATUS_TO_QBO.get((est.get("status") or "").lower())
     if qbo_status:
         body["TxnStatus"] = qbo_status
+    # If this estimate was converted to an invoice locally, link the two
+    # in QBO so the estimate shows its resulting invoice (matches QBO's
+    # native "Convert to invoice" behaviour).
+    conv_iid = est.get("converted_invoice_id")
+    if conv_iid:
+        inv = await db.invoices.find_one(
+            {"id": conv_iid, "company_id": company_id},
+            {"qbo_id": 1, "_id": 0},
+        )
+        if inv and inv.get("qbo_id"):
+            body["LinkedTxn"] = [{"TxnType": "Invoice",
+                                    "TxnId": str(inv["qbo_id"])}]
     return body
 
 

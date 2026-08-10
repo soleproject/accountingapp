@@ -22,7 +22,7 @@ from auth import get_current_user
 from deps import require_company
 from models import EstimateCreate, PurchaseOrderCreate
 from qbo_mirror.autopush import (
-    try_auto_push, try_auto_update, try_auto_delete,
+    try_auto_push, try_auto_update, try_auto_delete, try_auto_convert,
 )
 
 
@@ -201,7 +201,12 @@ async def convert_estimate_to_invoice(
                   "converted_invoice_id": iid,
                   "updated_at": now_iso()}},
     )
-    try_auto_push(cid, "invoice", iid)
+    # Chained QBO push: create the invoice first (so it gets a qbo_id),
+    # then update the source estimate with TxnStatus="Closed" + a
+    # LinkedTxn back-reference to that invoice. This mirrors what QBO
+    # does when the user converts natively — otherwise the estimate
+    # stays "Pending" on the QBO side and shows up as drift.
+    try_auto_convert(cid, eid, iid)
     return {"id": iid, "invoice": _coerce(invoice)}
 
 
