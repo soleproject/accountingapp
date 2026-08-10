@@ -161,3 +161,13 @@ def test_purchase_drift_normalizer_symmetry():
     assert local["number"] == qbo["number"] == "Purchase-173"
     assert local["total"] == qbo["total"] == 42.5
     assert local["natural_key"] == qbo["natural_key"]
+
+
+def test_purchases_registered_in_drift_fields():
+    """Regression — dry-run does `_DRIFT_FIELDS[entity]` (raw lookup,
+    not .get). If we ever forget to register a mirrored entity here
+    the whole dry-run report for that entity 500s with
+    `Error: 'purchases'`. Guard it explicitly."""
+    from qbo_mirror.engine import _DRIFT_FIELDS
+    assert "purchases" in _DRIFT_FIELDS
+    assert _DRIFT_FIELDS["purchases"] == ["number", "date", "total"]

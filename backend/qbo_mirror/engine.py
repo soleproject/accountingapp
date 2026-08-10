@@ -414,6 +414,10 @@ _DRIFT_FIELDS = {
     # `balance` (pre-transactional docs).
     "estimates":       ["number", "date", "total", "status"],
     "purchase_orders": ["number", "date", "total", "status"],
+    # Purchases: doc-level fields only. Signed local `amount` is
+    # normalised to abs `total`; both sides synthesize the same
+    # `Purchase-{qbo_id}` fallback when DocNumber is empty.
+    "purchases":       ["number", "date", "total"],
 }
 
 
