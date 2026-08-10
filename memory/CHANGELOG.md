@@ -1,5 +1,41 @@
 # SmartBooks — Changelog
 
+## 2026-02-20 — Full-Page Editors for Purchase / Sales Receipt / Deposit / Credit Memo / Refund Receipt
+
+### 🧾 Five new full-page editors (parity with Invoice/Bill editors)
+- `/purchases/new` + `/:id/edit`  → **Expense** (Purchase)
+- `/sales-receipts/new` + `/:id/edit`  → **Sales Receipt**
+- `/deposits/new` + `/:id/edit`  → **Bank Deposit**
+- `/credit-memos/new` + `/:id/edit`  → **Credit Memo**
+- `/refund-receipts/new` + `/:id/edit`  → **Refund Receipt**
+- One shared config-driven `TransactionEditor.jsx` component + 5 thin wrappers — keeps every editor in lockstep (a UX fix ripples to all 5 at once).
+- Header fields per entity: contact combobox (customer/vendor/none per type), bank picker (deposit-to / paid-from / hidden for CreditMemo), payment method, doc number, date. Line items with description + category picker + amount. Memo/notes. Attachments.
+- Launcher: replaced the "Manual Transaction" button on `/transactions` with a **New transaction** dropdown that surfaces Quick manual entry + all 5 QBO-shaped editors, each with a descriptive subtitle and `data-testid`.
+
+### 🔌 Backend wiring
+- **NEW endpoint**: `GET /api/companies/{cid}/transactions/{tid}` — single-transaction fetch used by editors to hydrate edit mode. Registered at bottom of `transactions.py` so literal routes (`/transfer-pairs`, `/split-suggestion`, `/cleanup-suggestions`) still match first.
+- Extended `TransactionCreate` model with editor-only fields: `txn_type`, `line_items`, `number`, `memo`, `notes`, `payment_type`, `linked_invoice_id`, `transfer_to_account_id`.
+- Editor-branch in `create_transaction`: when `txn_type` ∈ {Purchase, SalesReceipt, Deposit, CreditMemo, RefundReceipt, Transfer}, the qualifier is bypassed and the doc is stamped directly with `posted=True`, `human_reviewed=True`.
+- **Sign convention**: outflow types (Purchase, RefundReceipt) are stored negative; inflow types (SalesReceipt, Deposit, CreditMemo) positive. Backend flips the sign — editors always send positive numbers.
+- **CreditMemo bank guard**: server clears `bank_account_id` on CreditMemo docs even if the editor sends one (A/R adjustment doesn't hit cash).
+- **Autopush**: `_maybe_autopush_purchase` now short-circuits on explicit `txn_type` and fires the entity-specific autopush directly (Purchase → 'purchase', CreditMemo → 'credit_memo', etc.) — skips double-stamping.
+
+### ✅ Test coverage
+- `backend/tests/test_editor_txn_flow.py` (7 unit tests) — sign flip per type, CreditMemo bank clear, qualifier fallback, unknown-type ignore.
+- `backend/tests/test_editor_endpoints_live.py` (10 live-HTTP tests, added by testing agent) — full round-trip against deployed backend using `pro@axiom.ai` credentials. All 10 pass.
+- Regressions: 164 pytest tests still green (QBO mirror + PFC + editor suites).
+- Testing agent verdict: **no critical or minor backend/UI issues**. Frontend Save round-trip couldn't be fully driven by Playwright because ContactCombobox/SearchableAccountPicker don't expose `role=option` — noted as optional future work.
+
+### Files touched
+- `backend/models.py` (TransactionCreate — 8 new optional fields)
+- `backend/routes/transactions.py` (editor branch in POST, autopush short-circuit, new GET at file end)
+- `backend/tests/test_editor_txn_flow.py` (new, 7 tests)
+- `backend/tests/test_editor_endpoints_live.py` (new, 10 tests by testing agent)
+- `frontend/src/pages/TransactionEditor.jsx` (new, ~550 lines, config-driven shared editor)
+- `frontend/src/pages/PurchaseEditor.jsx` / `SalesReceiptEditor.jsx` / `DepositEditor.jsx` / `CreditMemoEditor.jsx` / `RefundReceiptEditor.jsx` (new, thin wrappers)
+- `frontend/src/pages/Transactions.jsx` (NewTransactionMenu dropdown)
+- `frontend/src/App.js` (10 new routes)
+
 ## 2026-02-20 — Transfers Mirror verified · Migration Banner · Plaid Transfer Bugfix
 
 ### 🪞 QBO Mirror — Transfers verified (Phase 4d closeout)

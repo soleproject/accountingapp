@@ -26,6 +26,81 @@ import { useAuth } from "@/lib/auth";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
 
+/** "New" dropdown that surfaces both the quick-modal manual entry
+ * (kept for one-off Plaid-style categorization) and the five full-
+ * page editors (Expense, Sales Receipt, Deposit, Credit Memo, Refund
+ * Receipt). Splitting them into their own screens lets each entity
+ * carry the fields QBO expects (line items, memo, doc number, etc.)
+ * without cramming everything into one modal. */
+function NewTransactionMenu({ onQuick }) {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  const items = [
+    { label: "Quick manual entry",  desc: "Single-line categorization",
+      onClick: onQuick,
+      testId: TID.txnAddBtn },
+    { divider: true, label: "QBO-shaped entries" },
+    { label: "Expense",         desc: "Pay a vendor from a bank account",
+      onClick: () => navigate("/purchases/new"),
+      testId: "txn-new-purchase" },
+    { label: "Sales Receipt",   desc: "Customer paid at time of sale",
+      onClick: () => navigate("/sales-receipts/new"),
+      testId: "txn-new-sales-receipt" },
+    { label: "Bank Deposit",    desc: "Inflow with no customer (interest, rebates, owner)",
+      onClick: () => navigate("/deposits/new"),
+      testId: "txn-new-deposit" },
+    { label: "Credit Memo",     desc: "Reduce A/R without a cash refund",
+      onClick: () => navigate("/credit-memos/new"),
+      testId: "txn-new-credit-memo" },
+    { label: "Refund Receipt",  desc: "Cash refund back to a customer",
+      onClick: () => navigate("/refund-receipts/new"),
+      testId: "txn-new-refund-receipt" },
+  ];
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        data-testid="txn-new-menu-btn"
+        onClick={() => setOpen(v => !v)}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs"
+      >
+        <Plus size={13} /> New transaction
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 top-full mt-1 w-72 bg-white border border-slate-200 rounded-lg shadow-lg z-30 py-1"
+          data-testid="txn-new-menu"
+        >
+          {items.map((it, i) => it.divider ? (
+            <div key={i} className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-slate-400 border-t border-slate-100 mt-1 first:border-t-0 first:mt-0">
+              {it.label}
+            </div>
+          ) : (
+            <button
+              key={i}
+              onClick={() => { setOpen(false); it.onClick && it.onClick(); }}
+              className="w-full text-left px-3 py-2 hover:bg-slate-50 flex flex-col gap-0.5"
+              data-testid={it.testId}
+            >
+              <span className="text-sm font-medium text-slate-800">{it.label}</span>
+              <span className="text-[11px] text-slate-500">{it.desc}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // Per-row "More" dropdown for the actions we don't want cluttering the row:
 // AI re-categorize, Split, and Link-to-invoice/bill. Opens on click, closes
 // on outside click or Escape. Positioned above the button so the menu never
@@ -1165,13 +1240,9 @@ export default function Transactions() {
             </div>
           )}
           {!isReviewMode && (
-            <button
-              data-testid={TID.txnAddBtn}
-              onClick={() => setCreating(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs"
-            >
-              <Plus size={13} /> Manual Transaction
-            </button>
+            <NewTransactionMenu
+              onQuick={() => setCreating(true)}
+            />
           )}
         </div>
       </div>

@@ -1079,6 +1079,8 @@ async def list_transactions(
     }
 
 
+
+
 @router.post("/companies/{cid}/transactions")
 async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
@@ -1164,6 +1166,46 @@ async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depe
         await log_ai(cid, "post_je", 1)
     if doc["needs_review"]:
         await log_ai(cid, "flag_review", 1)
+    # Editor-authored payloads — stamp txn_type + line_items directly
+    # so the qualifier doesn't try to re-derive them from amount sign
+    # (which loses fidelity: a Refund Receipt is inflow-to-customer,
+    # a Credit Memo is A/R-negative-with-customer, etc.).
+    _EDITOR_TXN_TYPES = {"Purchase", "SalesReceipt", "Deposit",
+                          "CreditMemo", "RefundReceipt", "Transfer"}
+    if inp.txn_type and inp.txn_type in _EDITOR_TXN_TYPES:
+        doc["txn_type"] = inp.txn_type
+        # Editor-authored rows always skip auto-review — the CPA typed
+        # every line themselves.
+        doc["human_reviewed"] = True
+        doc["needs_review"] = False
+        doc["posted"] = True
+        if inp.line_items:
+            doc["line_items"] = inp.line_items
+        if inp.number is not None:
+            doc["number"] = inp.number
+        if inp.memo is not None:
+            doc["memo"] = inp.memo
+        if inp.notes is not None:
+            doc["notes"] = inp.notes
+        if inp.payment_type is not None:
+            doc["payment_type"] = inp.payment_type
+        if inp.linked_invoice_id is not None:
+            doc["linked_invoice_id"] = inp.linked_invoice_id
+        if inp.transfer_to_account_id is not None:
+            doc["transfer_to_account_id"] = inp.transfer_to_account_id
+        # Sign convention: outflows are stored negative, inflows
+        # positive. Editors send a positive header amount; we flip
+        # for outflow types so the ledger reads correctly.
+        if inp.txn_type in ("Purchase", "RefundReceipt") and doc["amount"] > 0:
+            doc["amount"] = -abs(doc["amount"])
+        elif inp.txn_type in ("SalesReceipt", "Deposit", "CreditMemo") and doc["amount"] < 0:
+            doc["amount"] = abs(doc["amount"])
+        # CreditMemo is a *reduction* of A/R, not a cash inflow —
+        # bank_account_id doesn't apply. Clear it so drift/mirror
+        # doesn't try to reconcile against a bank.
+        if inp.txn_type == "CreditMemo":
+            doc["bank_account_id"] = None
+            doc["bank_account_name"] = ""
     await db.transactions.insert_one(doc)
     await _invalidate_dash(cid)
     # QBO Mirror: qualifier decides whether this manual transaction
@@ -1265,6 +1307,24 @@ def _maybe_autopush_purchase(cid: str, tid: str, doc: dict) -> None:
 
     Runs synchronously — the actual QBO POST is fire-and-forget."""
     try:
+        # Editor-authored payloads already stamped `txn_type` directly;
+        # skip the qualifier and fire the specific entity's autopush.
+        _EDITOR_ENTITY_MAP = {
+            "Purchase": "purchase", "SalesReceipt": "sales_receipt",
+            "Deposit": "deposit", "CreditMemo": "credit_memo",
+            "RefundReceipt": "refund_receipt", "Transfer": "transfer",
+        }
+        explicit = doc.get("txn_type")
+        if explicit and explicit in _EDITOR_ENTITY_MAP:
+            from qbo_mirror.autopush import try_auto_push
+            import asyncio as _aio
+            try:
+                _aio.create_task(
+                    _push_editor_txn(cid, tid, _EDITOR_ENTITY_MAP[explicit]),
+                )
+            except RuntimeError:
+                pass
+            return
         entity, _txn_type, set_patch = _derive_mirror_stamp(doc)
         if not entity or not set_patch:
             return
@@ -1281,6 +1341,17 @@ def _maybe_autopush_purchase(cid: str, tid: str, doc: dict) -> None:
         except RuntimeError:
             pass
     except Exception:  # noqa: BLE001 — must never block the create response
+        pass
+
+
+async def _push_editor_txn(cid: str, tid: str, entity: str) -> None:
+    """Fire QBO autopush for an editor-authored transaction that
+    already has its `txn_type` stamped. Kept separate from the
+    qualifier path so we skip the double-write."""
+    try:
+        from qbo_mirror.autopush import try_auto_push
+        try_auto_push(cid, entity, tid)
+    except Exception:  # noqa: BLE001
         pass
 
 
@@ -2795,4 +2866,20 @@ async def delete_transaction(cid: str, tid: str, user: dict = Depends(get_curren
                          existing.get("description") or existing.get("number") or "")
     return {"ok": True, **cascade}
 
+
+
+
+@router.get('/companies/{cid}/transactions/{tid}')
+async def get_transaction(cid: str, tid: str,
+                           user: dict = Depends(get_current_user)):
+    """Fetch a single transaction — used by the full-page editors
+    (Purchase / SalesReceipt / Deposit / CreditMemo / RefundReceipt)
+    to hydrate edit mode. Defined at the bottom of the file so literal
+    routes like /transactions/transfer-pairs and /transactions/split-
+    suggestion still match first."""
+    await require_company(user, cid)
+    doc = await db.transactions.find_one({'id': tid, 'company_id': cid})
+    if not doc:
+        raise HTTPException(404, 'Transaction not found')
+    return {'transaction': coerce(doc)}
 

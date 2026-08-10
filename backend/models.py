@@ -73,6 +73,23 @@ class TransactionCreate(BaseModel):
     # immediately without a re-resolve pass.
     contact_id: Optional[str] = None
     contact_name: Optional[str] = None
+    # Editor-authored fields — when a dedicated full-page editor
+    # (Purchase / SalesReceipt / Deposit / CreditMemo / RefundReceipt)
+    # submits a payload, it stamps `txn_type` explicitly so the mirror
+    # qualifier doesn't have to guess. `line_items` carries the multi-
+    # line detail (each with amount + category_account_id + description
+    # and optional item_id) that a stat plain "amount/category" pair
+    # can't express.
+    txn_type: Optional[str] = None
+    line_items: Optional[list] = None
+    number: Optional[str] = None
+    memo: Optional[str] = None
+    notes: Optional[str] = None
+    payment_type: Optional[str] = None
+    # Credit Memo: link back to the original invoice being credited.
+    linked_invoice_id: Optional[str] = None
+    # Transfer: destination bank account id.
+    transfer_to_account_id: Optional[str] = None
 
 
 class SplitIn(BaseModel):
