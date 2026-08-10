@@ -4489,3 +4489,33 @@ prevention.
   becomes automatic without Intuit webhook config.
 - Sync Status Badges on CoA / Contacts / Items / Invoices / Bills
   / Payments rows using `_sync_status`.
+
+
+## 2026-08-10 — QBO Mirror Phase 2f (Journal Entries)
+
+**Status**: SHIPPED. Full bi-directional JE sync.
+
+### What shipped
+- `_journal_entry_body` push builder + `_push_journal_entries`
+  bulk pusher (push.py)
+- `_pull_journal_entries` with account_id resolution (pull.py)
+- `_push_one_journal_entry` handler + registry entries (autopush.py)
+- JE normalizers, drift-fields entry, engine loop (engine.py)
+- Route hooks in `routes/journal.py` (create/delete)
+- Frontend ENTITIES + whitelists
+- 8 unit tests; 28/28 mirror tests total
+
+### Deferred (documented in CHANGELOG)
+- JE UPDATE mirroring — delete + recreate.
+- Deposits/Transfers push — no in-app authoring UI.
+- Deposits/Transfers pull — already covered by migration path.
+
+### Next up
+- **Background Auto-Pull Polling** — 15-min scheduler; QBO → us
+  becomes automatic, no Intuit dev config needed. Fills the "why
+  didn't my QBO change show up?" gap.
+- **Sync Status Badges** — 🟡/🟢/🔴 pips on all list rows using
+  `_sync_status`.
+- **Plaid `TRANSFER_OUT_ACCOUNT_TRANSFER`** — still routing to 6999.
+- **Estimates + Purchase Orders** — new doc types wired to mirror
+  from day one.

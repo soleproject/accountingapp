@@ -999,6 +999,145 @@ async def _push_payments_out(company_id: str, realm_id: str) -> dict:
     return {"inserted": inserted, "failed": failed, "skipped": skipped}
 
 
+# ─── Journal Entry push (Phase 2f) ─────────────────────────────────
+# Every JournalEntryLine must have PostingType: Debit|Credit plus
+# an AccountRef. Local lines carry `account_id` (UUID) OR
+# `account_name` (loose match). We prefer the UUID; fall back to
+# name lookup as a resilience mechanism for legacy imports.
+
+async def _resolve_account_ref_by_id_or_name(
+    company_id: str, account_id: str | None, account_name: str | None,
+) -> tuple[str, str] | None:
+    if account_id:
+        a = await db.accounts.find_one(
+            {"id": account_id, "company_id": company_id},
+            {"qbo_id": 1, "name": 1, "_id": 0},
+        )
+        if a and a.get("qbo_id"):
+            return (str(a["qbo_id"]), a.get("name") or "")
+    if account_name:
+        a = await db.accounts.find_one(
+            {"company_id": company_id, "name": account_name.strip(),
+             "active": {"$ne": False}},
+            {"qbo_id": 1, "name": 1, "_id": 0},
+        )
+        if a and a.get("qbo_id"):
+            return (str(a["qbo_id"]), a.get("name") or account_name)
+    return None
+
+
+async def _journal_entry_body(company_id: str, je: dict) -> dict:
+    """Build a QBO JournalEntry create body from a local JE. Each
+    local line becomes two potential JE lines (one debit OR one
+    credit — never both on the same row). Raises ValueError on any
+    unmapped account or unbalanced entry."""
+    lines_out: list[dict] = []
+    total_debit = 0.0
+    total_credit = 0.0
+    for idx, li in enumerate(je.get("lines") or [], start=1):
+        debit = round(float(li.get("debit") or 0), 2)
+        credit = round(float(li.get("credit") or 0), 2)
+        if debit and credit:
+            raise ValueError(
+                f"Line {idx} has both a debit and a credit — "
+                "each line must be one or the other.")
+        if debit == 0 and credit == 0:
+            continue  # skip empty rows
+        acct = await _resolve_account_ref_by_id_or_name(
+            company_id,
+            li.get("account_id"),
+            li.get("account_name"),
+        )
+        if not acct:
+            raise ValueError(
+                f"Line {idx} account not synced to QBO "
+                "(account_id or account_name missing/unmapped).")
+        posting_type = "Debit" if debit else "Credit"
+        amount = debit or credit
+        lines_out.append({
+            "DetailType": "JournalEntryLineDetail",
+            "Amount": amount,
+            "Description": (li.get("description") or "").strip(),
+            "JournalEntryLineDetail": {
+                "PostingType": posting_type,
+                "AccountRef": {"value": acct[0], "name": acct[1]},
+            },
+        })
+        if debit:
+            total_debit += debit
+        else:
+            total_credit += credit
+    if not lines_out:
+        raise ValueError("Journal entry has no lines.")
+    if abs(total_debit - total_credit) > 0.01:
+        raise ValueError(
+            f"JE unbalanced: debits {total_debit} ≠ credits {total_credit}")
+
+    body: dict[str, Any] = {"Line": lines_out}
+    if je.get("date"):
+        body["TxnDate"] = je["date"]
+    if je.get("number"):
+        body["DocNumber"] = str(je["number"])[:21]
+    if je.get("memo"):
+        body["PrivateNote"] = str(je["memo"])[:4000]
+    return body
+
+
+def _local_patch_from_qbo_je(twin: dict) -> dict:
+    """Twin patch after a successful JE push."""
+    patch: dict[str, Any] = {}
+    if twin.get("TxnDate"):
+        patch["date"] = twin["TxnDate"]
+    if twin.get("DocNumber"):
+        patch["number"] = twin["DocNumber"]
+    if twin.get("PrivateNote"):
+        patch["memo"] = twin["PrivateNote"]
+    return patch
+
+
+async def _push_journal_entries(company_id: str, realm_id: str) -> dict:
+    """Local JEs without qbo_id → POST to QBO. JE updates are NOT
+    mirrored — a JE that changed lines needs QBO's Line.Id chain
+    to preserve balance-affecting audit trail, and our local JE
+    doesn't yet carry those Ids. Users should delete + recreate."""
+    inserted = 0
+    failed: list[dict] = []
+    skipped: list[dict] = []
+    async for je in db.journal_entries.find(
+        {"company_id": company_id, "source": {"$ne": "qbo"},
+         "$or": [{"qbo_id": {"$exists": False}},
+                 {"qbo_id": {"$in": [None, ""]}}]},
+    ):
+        try:
+            body = await _journal_entry_body(company_id, je)
+            resp = await _post(
+                company_id, realm_id,
+                f"/company/{realm_id}/journalentry",
+                body,
+            )
+            twin = resp.get("JournalEntry") or {}
+            new_id = twin.get("Id")
+            if not new_id:
+                failed.append({"id": je["id"],
+                                "error": "no Id in QBO response"})
+                continue
+            twin_patch = _local_patch_from_qbo_je(twin)
+            await db.journal_entries.update_one(
+                {"id": je["id"]},
+                {"$set": {**twin_patch,
+                          "qbo_id": str(new_id), "realm_id": realm_id,
+                          "_sync_origin": "mirror_push",
+                          "_sync_status": "synced",
+                          "updated_at": now_iso()}},
+            )
+            inserted += 1
+        except Exception as e:  # noqa: BLE001
+            failed.append({"id": je["id"], "error": str(e)[:400]})
+    return {"inserted": inserted, "failed": failed, "skipped": skipped}
+
+
+
+
 async def run_push(company_id: str, user_email: str,
                     entities: list[str] | None = None) -> dict:
     """Outbound-only sync — create local-only Foundation entities on
@@ -1013,7 +1152,8 @@ async def run_push(company_id: str, user_email: str,
 
     if entities is None:
         entities = ["accounts", "customers", "vendors", "items",
-                     "invoices", "bills", "payments", "bill_payments"]
+                     "invoices", "bills", "payments", "bill_payments",
+                     "journal_entries"]
 
     result: dict[str, dict] = {}
     for e in entities:
@@ -1036,6 +1176,8 @@ async def run_push(company_id: str, user_email: str,
                 result[e] = await _push_payments_in(company_id, realm_id)
             elif e == "bill_payments":
                 result[e] = await _push_payments_out(company_id, realm_id)
+            elif e == "journal_entries":
+                result[e] = await _push_journal_entries(company_id, realm_id)
         except Exception as err:  # noqa: BLE001
             result[e] = {"error": str(err)}
 

@@ -245,6 +245,38 @@ def _norm_payment_qbo(o: dict, direction: str) -> dict:
     }
 
 
+# ─── Journal Entry normalizers (Phase 2f) ──────────────────────────
+# Match by qbo_id only — DocNumber is optional on QBO JEs and even
+# when set is often not unique across time. No field drift tracked
+# in this MVP; lines are the source of truth and comparing them
+# reliably is a Phase 3 job.
+
+def _norm_je_local(je: dict) -> dict:
+    return {
+        "qbo_id": je.get("qbo_id"),
+        "natural_key": f"je::local::{je.get('id')}",
+        "date": je.get("date") or "",
+        "total_debit": round(float(je.get("total_debit") or 0), 2),
+        "memo": (je.get("memo") or "").strip()[:80],
+    }
+
+
+def _norm_je_qbo(o: dict) -> dict:
+    lines = o.get("Line") or []
+    total_debit = sum(
+        float(ln.get("Amount") or 0)
+        for ln in lines
+        if (ln.get("JournalEntryLineDetail") or {}).get("PostingType") == "Debit"
+    )
+    return {
+        "qbo_id": o.get("Id"),
+        "natural_key": f"je::qbo::{o.get('Id')}",
+        "date": o.get("TxnDate") or "",
+        "total_debit": round(total_debit, 2),
+        "memo": (o.get("PrivateNote") or "").strip()[:80],
+    }
+
+
 # ─── Diff builder ───────────────────────────────────────────────────
 # Fields whose drift is *significant* — cosmetic-only fields (e.g.
 # subtype spelling) don't count as drift to reduce noise in the report.
@@ -261,6 +293,9 @@ _DRIFT_FIELDS = {
     # Users push/pull via the buttons instead.
     "payments":       [],
     "bill_payments":  [],
+    # JEs: no drift tracked in MVP (lines are truth; comparing is
+    # complex). qbo_id-only match surfaces push/pull deltas cleanly.
+    "journal_entries": [],
 }
 
 
@@ -371,6 +406,10 @@ async def _fetch_local(company_id: str, entity: str) -> list[dict]:
                          {"direction": "out"},
                          {"linked_bill_id": {"$nin": [None, ""]}},
                      ]})]
+    if entity == "journal_entries":
+        return [_norm_je_local(j)
+                async for j in db.journal_entries.find(
+                    {"company_id": company_id})]
     return []
 
 
@@ -400,6 +439,9 @@ async def _fetch_qbo(company_id: str, realm_id: str,
     if entity == "bill_payments":
         return [_norm_payment_qbo(o, "out")
                 async for o in Q.query_all(company_id, realm_id, "BillPayment")]
+    if entity == "journal_entries":
+        return [_norm_je_qbo(o)
+                async for o in Q.query_all(company_id, realm_id, "JournalEntry")]
     return []
 
 
@@ -425,7 +467,8 @@ async def run_dry_run(company_id: str, user_email: str) -> dict:
     # so far). Push/Pull will land in a follow-up commit; for now
     # invoices flow through the same diff pipeline safely.
     for entity in ("accounts", "customers", "vendors", "items",
-                    "invoices", "bills", "payments", "bill_payments"):
+                    "invoices", "bills", "payments", "bill_payments",
+                    "journal_entries"):
         if not entities_cfg.get(entity, True):
             continue
         try:

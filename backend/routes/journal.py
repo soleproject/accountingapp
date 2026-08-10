@@ -47,6 +47,7 @@ from deps import (
     is_period_closed, assert_open,
     categorize_and_insert, sync_and_import,
 )
+from qbo_mirror.autopush import try_auto_push, try_auto_delete
 
 router = APIRouter(prefix="/api")
 
@@ -74,6 +75,9 @@ async def create_je(cid: str, inp: JECreate, user: dict = Depends(get_current_us
         "lines": inp.lines, "total_debit": round(total_d, 2), "total_credit": round(total_c, 2),
         "created_by": user["id"], "created_at": now, "updated_at": now,
     })
+    # Fire-and-forget mirror push. JEs authored in-app land in QBO
+    # via `_push_one_journal_entry`; failures surface in mirror_log.
+    try_auto_push(cid, "journal_entry", jid)
     return {"id": jid}
 
 
@@ -83,7 +87,11 @@ async def delete_je(cid: str, jid: str, user: dict = Depends(get_current_user)):
     existing = await db.journal_entries.find_one({"id": jid, "company_id": cid})
     if existing:
         await assert_open(cid, existing.get("date"))
+    qbo_id = (existing or {}).get("qbo_id")
     await db.journal_entries.delete_one({"id": jid, "company_id": cid})
+    # Mirror the delete on QBO if the JE was previously synced.
+    if qbo_id:
+        try_auto_delete(cid, "journal_entry", qbo_id, "")
     return {"ok": True}
 
 
