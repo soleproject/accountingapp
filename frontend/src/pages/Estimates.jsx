@@ -11,7 +11,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
-import { useCompany } from "../contexts/CompanyContext";
+import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import { Plus, FileText, ArrowRight, Trash2 } from "lucide-react";
 import { Button } from "../components/ui/button";
@@ -37,7 +37,7 @@ const STATUS_TONES = {
 
 
 export default function Estimates() {
-  const { activeCompanyId } = useCompany();
+  const { currentId: activeCompanyId } = useCompany();
   const nav = useNavigate();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
