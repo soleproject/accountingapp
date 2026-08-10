@@ -1138,6 +1138,242 @@ async def _push_journal_entries(company_id: str, realm_id: str) -> dict:
 
 
 
+
+# ─── Estimate push (Phase 3) ───────────────────────────────────────
+# Estimates share Invoice's SalesItemLineDetail structure. Main
+# differences: `ExpirationDate` instead of `DueDate`, plus a
+# `TxnStatus` field ("Pending" | "Accepted" | "Closed" |
+# "Rejected") mapped from our local status vocabulary.
+
+_EST_STATUS_TO_QBO = {
+    "draft":     "Pending",
+    "sent":      "Pending",
+    "accepted":  "Accepted",
+    "rejected":  "Rejected",
+    "closed":    "Closed",
+    "converted": "Closed",  # QBO's terminal state
+}
+
+
+async def _estimate_body(company_id: str, est: dict) -> dict:
+    """QBO Estimate payload. Same line shape as invoices."""
+    customer = await _resolve_customer_ref(company_id, est.get("contact_id"))
+    if not customer:
+        raise ValueError(
+            "Customer missing or not synced to QBO. Sync customers first.")
+    lines_out: list[dict] = []
+    fallback: tuple[str, str] | None = None
+    for idx, li in enumerate(est.get("line_items") or [], start=1):
+        amount = float(li.get("amount") or 0)
+        qty = float(li.get("quantity") or 1) or 1
+        rate = float(li.get("rate") or (amount / qty if qty else 0))
+        description = (li.get("description") or "").strip()
+        ref = await _resolve_item_ref(company_id, li.get("item_id"))
+        if not ref:
+            if fallback is None:
+                fallback = await _default_service_item_qbo_id(company_id)
+            if not fallback:
+                raise ValueError(
+                    f"Line {idx} has no item and no fallback QBO "
+                    "Service item exists. Sync items first.")
+            ref = fallback
+        lines_out.append({
+            "DetailType": "SalesItemLineDetail",
+            "Amount": round(amount, 2),
+            "Description": description or ref[1] or "",
+            "SalesItemLineDetail": {
+                "ItemRef": {"value": ref[0], "name": ref[1]},
+                "Qty": qty,
+                "UnitPrice": rate,
+            },
+        })
+    if not lines_out:
+        raise ValueError("Estimate has no line items.")
+
+    body: dict[str, Any] = {
+        "CustomerRef": {"value": customer[0], "name": customer[1]},
+        "Line": lines_out,
+    }
+    if est.get("issue_date"):
+        body["TxnDate"] = est["issue_date"]
+    if est.get("expiration_date"):
+        body["ExpirationDate"] = est["expiration_date"]
+    if est.get("number"):
+        body["DocNumber"] = str(est["number"])[:21]
+    if est.get("notes"):
+        body["CustomerMemo"] = {"value": str(est["notes"])[:1000]}
+    if est.get("internal_notes"):
+        body["PrivateNote"] = str(est["internal_notes"])[:4000]
+    qbo_status = _EST_STATUS_TO_QBO.get((est.get("status") or "").lower())
+    if qbo_status:
+        body["TxnStatus"] = qbo_status
+    return body
+
+
+def _local_patch_from_qbo_estimate(twin: dict) -> dict:
+    total = float(twin.get("TotalAmt") or 0)
+    patch: dict[str, Any] = {
+        "total": round(total, 2),
+    }
+    if twin.get("TxnDate"):
+        patch["issue_date"] = twin["TxnDate"]
+    if twin.get("ExpirationDate"):
+        patch["expiration_date"] = twin["ExpirationDate"]
+    if twin.get("DocNumber"):
+        patch["number"] = twin["DocNumber"]
+    return patch
+
+
+async def _push_estimates(company_id: str, realm_id: str) -> dict:
+    inserted = 0
+    failed: list[dict] = []
+    async for e in db.estimates.find(
+        {"company_id": company_id, "source": {"$ne": "qbo"},
+         "$or": [{"qbo_id": {"$exists": False}},
+                 {"qbo_id": {"$in": [None, ""]}}]},
+    ):
+        try:
+            body = await _estimate_body(company_id, e)
+            resp = await _post(
+                company_id, realm_id,
+                f"/company/{realm_id}/estimate", body,
+            )
+            twin = resp.get("Estimate") or {}
+            new_id = twin.get("Id")
+            if not new_id:
+                failed.append({"id": e["id"], "number": e.get("number"),
+                                "error": "no Id in QBO response"})
+                continue
+            twin_patch = _local_patch_from_qbo_estimate(twin)
+            await db.estimates.update_one(
+                {"id": e["id"]},
+                {"$set": {**twin_patch,
+                          "qbo_id": str(new_id), "realm_id": realm_id,
+                          "_sync_origin": "mirror_push",
+                          "_sync_status": "synced",
+                          "updated_at": now_iso()}},
+            )
+            inserted += 1
+        except Exception as ex:  # noqa: BLE001
+            failed.append({"id": e["id"], "number": e.get("number"),
+                            "error": str(ex)[:400]})
+    return {"inserted": inserted, "failed": failed}
+
+
+# ─── Purchase Order push (Phase 3) ─────────────────────────────────
+# POs share Bill's AccountBasedExpenseLineDetail structure. Key
+# differences: `APAccountRef` isn't required (QBO defaults), and
+# there's a `POStatus` field.
+
+_PO_STATUS_TO_QBO = {
+    "open":      "Open",
+    "closed":    "Closed",
+    "converted": "Closed",
+}
+
+
+async def _po_body(company_id: str, po: dict) -> dict:
+    """QBO PurchaseOrder payload. Same line shape as bills."""
+    vendor = await _resolve_vendor_ref(company_id, po.get("contact_id"))
+    if not vendor:
+        raise ValueError(
+            "Vendor missing or not synced to QBO. Sync vendors first.")
+    lines_out: list[dict] = []
+    fallback: tuple[str, str] | None = None
+    for idx, li in enumerate(po.get("line_items") or [], start=1):
+        amount = float(li.get("amount") or 0)
+        description = (li.get("description") or "").strip()
+        acct = await _resolve_account_ref(
+            company_id, li.get("expense_account_id"))
+        if not acct:
+            if fallback is None:
+                fallback = await _default_expense_account_qbo(company_id)
+            if not fallback:
+                raise ValueError(
+                    f"Line {idx} has no expense account and no "
+                    "fallback QBO expense account exists.")
+            acct = fallback
+        lines_out.append({
+            "DetailType": "AccountBasedExpenseLineDetail",
+            "Amount": round(amount, 2),
+            "Description": description,
+            "AccountBasedExpenseLineDetail": {
+                "AccountRef": {"value": acct[0], "name": acct[1]},
+            },
+        })
+    if not lines_out:
+        raise ValueError("Purchase order has no line items.")
+
+    body: dict[str, Any] = {
+        "VendorRef": {"value": vendor[0], "name": vendor[1]},
+        "Line": lines_out,
+    }
+    if po.get("issue_date"):
+        body["TxnDate"] = po["issue_date"]
+    if po.get("due_date"):
+        body["DueDate"] = po["due_date"]
+    if po.get("number"):
+        body["DocNumber"] = str(po["number"])[:21]
+    if po.get("internal_notes"):
+        body["PrivateNote"] = str(po["internal_notes"])[:4000]
+    if po.get("notes"):
+        body["Memo"] = str(po["notes"])[:1000]
+    qbo_status = _PO_STATUS_TO_QBO.get((po.get("status") or "").lower())
+    if qbo_status:
+        body["POStatus"] = qbo_status
+    return body
+
+
+def _local_patch_from_qbo_po(twin: dict) -> dict:
+    total = float(twin.get("TotalAmt") or 0)
+    patch: dict[str, Any] = {
+        "total": round(total, 2),
+    }
+    if twin.get("TxnDate"):
+        patch["issue_date"] = twin["TxnDate"]
+    if twin.get("DueDate"):
+        patch["due_date"] = twin["DueDate"]
+    if twin.get("DocNumber"):
+        patch["number"] = twin["DocNumber"]
+    return patch
+
+
+async def _push_purchase_orders(company_id: str, realm_id: str) -> dict:
+    inserted = 0
+    failed: list[dict] = []
+    async for p in db.purchase_orders.find(
+        {"company_id": company_id, "source": {"$ne": "qbo"},
+         "$or": [{"qbo_id": {"$exists": False}},
+                 {"qbo_id": {"$in": [None, ""]}}]},
+    ):
+        try:
+            body = await _po_body(company_id, p)
+            resp = await _post(
+                company_id, realm_id,
+                f"/company/{realm_id}/purchaseorder", body,
+            )
+            twin = resp.get("PurchaseOrder") or {}
+            new_id = twin.get("Id")
+            if not new_id:
+                failed.append({"id": p["id"], "number": p.get("number"),
+                                "error": "no Id in QBO response"})
+                continue
+            twin_patch = _local_patch_from_qbo_po(twin)
+            await db.purchase_orders.update_one(
+                {"id": p["id"]},
+                {"$set": {**twin_patch,
+                          "qbo_id": str(new_id), "realm_id": realm_id,
+                          "_sync_origin": "mirror_push",
+                          "_sync_status": "synced",
+                          "updated_at": now_iso()}},
+            )
+            inserted += 1
+        except Exception as ex:  # noqa: BLE001
+            failed.append({"id": p["id"], "number": p.get("number"),
+                            "error": str(ex)[:400]})
+    return {"inserted": inserted, "failed": failed}
+
+
 async def run_push(company_id: str, user_email: str,
                     entities: list[str] | None = None) -> dict:
     """Outbound-only sync — create local-only Foundation entities on
@@ -1153,7 +1389,7 @@ async def run_push(company_id: str, user_email: str,
     if entities is None:
         entities = ["accounts", "customers", "vendors", "items",
                      "invoices", "bills", "payments", "bill_payments",
-                     "journal_entries"]
+                     "journal_entries", "estimates", "purchase_orders"]
 
     result: dict[str, dict] = {}
     for e in entities:
@@ -1178,6 +1414,10 @@ async def run_push(company_id: str, user_email: str,
                 result[e] = await _push_payments_out(company_id, realm_id)
             elif e == "journal_entries":
                 result[e] = await _push_journal_entries(company_id, realm_id)
+            elif e == "estimates":
+                result[e] = await _push_estimates(company_id, realm_id)
+            elif e == "purchase_orders":
+                result[e] = await _push_purchase_orders(company_id, realm_id)
         except Exception as err:  # noqa: BLE001
             result[e] = {"error": str(err)}
 

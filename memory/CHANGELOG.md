@@ -300,3 +300,61 @@ the Plaid pipeline.
   same-line rejects, unbalanced, unmapped account, empty, doc
   truncation, twin patch, account_name fallback.
 - All 4 mirror test files: **28/28 pass**.
+
+
+## 2026-08-10 — Phase 3: Estimates + Purchase Orders
+
+**New doc types, mirror-native from day one.** Estimates (sales
+quotes) and Purchase Orders (vendor commitments) are the two
+pre-transactional docs pros use throughout the sales/procurement
+cycle. Both auto-push to QBO on save/delete, pull down cleanly
+from QBO, and offer one-click convert to their transactional
+sibling.
+
+**Backend**
+- `models.py`: `EstimateCreate`, `PurchaseOrderCreate`.
+- `routes/estimates_pos.py` (new file): full CRUD for both plus
+  convert endpoints:
+  - `POST /companies/{cid}/estimates/{eid}/convert` → creates a
+    new Invoice with copied lines/contact, back-links the source
+    estimate (`source_estimate_id`, `converted_invoice_id`), flips
+    Estimate status to `converted`, fires invoice autopush.
+  - `POST /companies/{cid}/purchase-orders/{pid}/convert` → same
+    for PO → Bill.
+- `qbo_mirror/push.py`: `_estimate_body`, `_po_body`,
+  `_local_patch_from_qbo_estimate`, `_local_patch_from_qbo_po`,
+  `_push_estimates`, `_push_purchase_orders`. Status vocab maps:
+  Estimate `sent/draft → Pending`, `accepted → Accepted`,
+  `rejected → Rejected`, `closed/converted → Closed`. PO
+  `open → Open`, `closed/converted → Closed`.
+- `qbo_mirror/pull.py`: `_pull_estimates`, `_pull_purchase_orders`
+  with contact_id + line account_id / item_qbo_id resolution.
+- `qbo_mirror/autopush.py`: `_push_one_estimate`, `_push_one_po`,
+  registered in `_ENTITY_META`, `_HANDLERS`, `_ENTITY_TO_CFG_KEY`.
+  Full-replace update path, hard-delete via `?operation=delete`.
+- `qbo_mirror/engine.py`: 4 new normalizers, drift fields
+  (number/date/total/status — no balance since pre-transactional).
+- `qbo_mirror/settings.py`: `estimates: True`, `purchase_orders: True`.
+
+**Frontend**
+- `pages/Estimates.jsx` (~260 LOC): list + inline create dialog
+  + one-click convert-to-invoice + delete.
+- `pages/PurchaseOrders.jsx` (~250 LOC): same pattern for
+  vendor side.
+- `App.js`: routes wired at `/estimates` and `/purchase-orders`.
+- `components/Sidebar.jsx`: "Estimates" under Sales, "Purchase
+  Orders" under Purchases.
+- `pages/QboMirror.jsx`: new entity rows, whitelists extended.
+
+**Deliberately deferred**
+- Full editor page (multi-line grid + PDF preview + attachments) —
+  the create dialog handles the single-line MVP case. Users
+  needing complex quotes can convert-to-invoice and finish there.
+- Reverse-linking on invoice/bill delete → convert flag
+  (deleting a converted invoice doesn't reopen the estimate).
+
+**Regression coverage**
+- `tests/test_qbo_mirror_estimate_po_push.py` — 7 unit tests
+  covering happy path, status mapping (both), missing refs, twin
+  patches for both entities.
+- All 5 mirror test files: **35/35 pass**.
