@@ -1367,22 +1367,64 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
     # the old values — QBO would just replay the same doc it already
     # has and the twin patch would then revert the local amount.
     if doc:
-        if doc.get("qbo_id") and doc.get("txn_type") in (
-            "Purchase", "SalesReceipt", "Deposit"
-        ):
-            entity, _txn_type, refresh = _derive_mirror_stamp(doc)
+        entity_map = {"Purchase": "purchase",
+                       "SalesReceipt": "sales_receipt",
+                       "Deposit": "deposit"}
+        if doc.get("qbo_id") and doc.get("txn_type") in entity_map:
+            _entity, new_type, refresh = _derive_mirror_stamp(doc)
             if refresh:
+                old_type = doc["txn_type"]
+                if old_type != new_type:
+                    # Entity flip (e.g. SalesReceipt → Deposit because
+                    # the customer got cleared). The old `qbo_id`
+                    # points to a QBO row on a DIFFERENT endpoint,
+                    # so we must (a) tell QBO to delete the old row,
+                    # (b) clear the stale qbo_id locally, and
+                    # (c) push fresh on the new endpoint. Otherwise
+                    # the mirror ends up with a stranded (txn_type,
+                    # qbo_id) mismatch — the bug that showed up as
+                    # "push to QBO: 4" + "pull from QBO: 4" for the
+                    # same qbo_ids.
+                    from qbo_mirror.autopush import try_auto_delete
+                    try_auto_delete(
+                        cid, entity_map[old_type],
+                        str(doc["qbo_id"]),
+                        doc.get("description") or doc.get("number") or "")
+                    await db.transactions.update_one(
+                        {"id": tid, "company_id": cid},
+                        {"$set": refresh,
+                          "$unset": {"qbo_id": "", "realm_id": ""}},
+                    )
+                    doc = await db.transactions.find_one(
+                        {"id": tid, "company_id": cid})
+                    from qbo_mirror.autopush import try_auto_push
+                    try_auto_push(cid, entity_map[new_type], tid)
+                else:
+                    await db.transactions.update_one(
+                        {"id": tid, "company_id": cid},
+                        {"$set": refresh},
+                    )
+                    doc = await db.transactions.find_one(
+                        {"id": tid, "company_id": cid})
+                    from qbo_mirror.autopush import try_auto_update
+                    try_auto_update(cid, entity_map[new_type], tid)
+            else:
+                # `_derive_mirror_stamp` returned None — the txn no
+                # longer qualifies for mirroring (e.g. amount zeroed,
+                # bank cleared). Delete the QBO twin so the two sides
+                # stay consistent.
+                from qbo_mirror.autopush import try_auto_delete
+                try_auto_delete(
+                    cid, entity_map[doc["txn_type"]],
+                    str(doc["qbo_id"]),
+                    doc.get("description") or doc.get("number") or "")
                 await db.transactions.update_one(
                     {"id": tid, "company_id": cid},
-                    {"$set": refresh},
+                    {"$unset": {"qbo_id": "", "realm_id": "",
+                                 "txn_type": ""}},
                 )
                 doc = await db.transactions.find_one(
                     {"id": tid, "company_id": cid})
-            from qbo_mirror.autopush import try_auto_update
-            entity_map = {"Purchase": "purchase",
-                           "SalesReceipt": "sales_receipt",
-                           "Deposit": "deposit"}
-            try_auto_update(cid, entity_map[doc["txn_type"]], tid)
         elif not doc.get("qbo_id"):
             _maybe_autopush_purchase(cid, tid, doc)
     return {"transaction": coerce(doc)}
