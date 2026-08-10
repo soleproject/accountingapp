@@ -32,6 +32,11 @@ import PurchaseOrderEditor from "@/pages/PurchaseOrderEditor";
 import InvoiceEditor from "@/pages/InvoiceEditor";
 import Bills from "@/pages/Bills";
 import BillEditor from "@/pages/BillEditor";
+import PurchaseEditor from "@/pages/PurchaseEditor";
+import SalesReceiptEditor from "@/pages/SalesReceiptEditor";
+import DepositEditor from "@/pages/DepositEditor";
+import CreditMemoEditor from "@/pages/CreditMemoEditor";
+import RefundReceiptEditor from "@/pages/RefundReceiptEditor";
 import TaxLibrary from "@/pages/TaxLibrary";
 import Recurring from "@/pages/Recurring";
 import Items from "@/pages/Items";
@@ -122,6 +127,16 @@ function App() {
               <Route path="/bills" element={<Bills />} />
               <Route path="/bills/new" element={<BillEditor />} />
               <Route path="/bills/:id/edit" element={<BillEditor />} />
+              <Route path="/purchases/new" element={<PurchaseEditor />} />
+              <Route path="/purchases/:id/edit" element={<PurchaseEditor />} />
+              <Route path="/sales-receipts/new" element={<SalesReceiptEditor />} />
+              <Route path="/sales-receipts/:id/edit" element={<SalesReceiptEditor />} />
+              <Route path="/deposits/new" element={<DepositEditor />} />
+              <Route path="/deposits/:id/edit" element={<DepositEditor />} />
+              <Route path="/credit-memos/new" element={<CreditMemoEditor />} />
+              <Route path="/credit-memos/:id/edit" element={<CreditMemoEditor />} />
+              <Route path="/refund-receipts/new" element={<RefundReceiptEditor />} />
+              <Route path="/refund-receipts/:id/edit" element={<RefundReceiptEditor />} />
               <Route path="/recurring" element={<Recurring />} />
               <Route path="/items" element={<Items />} />
               <Route path="/inventory-management" element={<InventoryPage />} />
