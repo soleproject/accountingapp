@@ -69,6 +69,16 @@ async def list_estimates(cid: str, user: dict = Depends(get_current_user)):
     return {"estimates": rows}
 
 
+@router.get("/companies/{cid}/estimates/{eid}")
+async def get_estimate(cid: str, eid: str,
+                         user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    doc = await db.estimates.find_one({"id": eid, "company_id": cid})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Estimate not found")
+    return {"estimate": _coerce(doc)}
+
+
 @router.post("/companies/{cid}/estimates")
 async def create_estimate(cid: str, inp: EstimateCreate,
                             user: dict = Depends(get_current_user)):
