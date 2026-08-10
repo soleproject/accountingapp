@@ -9,8 +9,8 @@
  * structural rewrite.
  */
 import React, { useEffect, useState, useMemo } from "react";
-import axios from "axios";
 import { useNavigate } from "react-router-dom";
+import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import { Plus, FileText, ArrowRight, Trash2 } from "lucide-react";
@@ -24,8 +24,6 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "../components/ui/select";
 
-const API = process.env.REACT_APP_BACKEND_URL;
-
 const STATUS_TONES = {
   draft:     "bg-slate-100 text-slate-700",
   sent:      "bg-sky-100 text-sky-800",
@@ -37,7 +35,7 @@ const STATUS_TONES = {
 
 
 export default function Estimates() {
-  const { currentId: activeCompanyId } = useCompany();
+  const { currentId: cid } = useCompany();
   const nav = useNavigate();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -50,15 +48,11 @@ export default function Estimates() {
                                     rate: 0, description: "" },
   });
 
-  const cid = activeCompanyId;
-  const auth = { Authorization: `Bearer ${localStorage.getItem("token")}` };
-
   const load = async () => {
     if (!cid) return;
     setLoading(true);
     try {
-      const r = await axios.get(`${API}/api/companies/${cid}/estimates`,
-        { headers: auth });
+      const r = await api.get(`/companies/${cid}/estimates`);
       setRows(r.data.estimates || []);
     } catch (e) {
       toast.error("Failed to load estimates");
@@ -67,13 +61,20 @@ export default function Estimates() {
 
   const loadRefs = async () => {
     if (!cid) return;
-    const [c, i] = await Promise.all([
-      axios.get(`${API}/api/companies/${cid}/contacts?type=customer`,
-        { headers: auth }),
-      axios.get(`${API}/api/companies/${cid}/items`, { headers: auth }),
-    ]);
-    setCustomers(c.data.contacts || []);
-    setItems(i.data.items || []);
+    try {
+      const [c, i] = await Promise.all([
+        api.get(`/companies/${cid}/contacts`),
+        api.get(`/companies/${cid}/items?usage=sales`),
+      ]);
+      // Contacts endpoint returns ALL types; filter customer-side here.
+      const all = c.data.contacts || [];
+      setCustomers(all.filter(x =>
+        (x.type || "").toLowerCase() === "customer" && x.active !== false,
+      ));
+      setItems((i.data.items || []).filter(x => x.active !== false));
+    } catch (e) {
+      // Silent fail on refs — the dropdowns just show empty.
+    }
   };
 
   useEffect(() => { load(); loadRefs(); }, [cid]);
@@ -112,8 +113,7 @@ export default function Estimates() {
       }],
     };
     try {
-      await axios.post(`${API}/api/companies/${cid}/estimates`,
-        payload, { headers: auth });
+      await api.post(`/companies/${cid}/estimates`, payload);
       toast.success("Estimate created");
       setDialogOpen(false);
       load();
@@ -126,9 +126,8 @@ export default function Estimates() {
     if (!window.confirm(`Convert ${row.number || "estimate"} to an invoice?`))
       return;
     try {
-      const r = await axios.post(
-        `${API}/api/companies/${cid}/estimates/${row.id}/convert`,
-        {}, { headers: auth });
+      const r = await api.post(
+        `/companies/${cid}/estimates/${row.id}/convert`, {});
       toast.success("Invoice created");
       nav(`/invoices/${r.data.id}/edit`);
     } catch (e) {
@@ -139,8 +138,7 @@ export default function Estimates() {
   const remove = async (row) => {
     if (!window.confirm(`Delete estimate ${row.number || row.id.slice(0,8)}?`))
       return;
-    await axios.delete(`${API}/api/companies/${cid}/estimates/${row.id}`,
-      { headers: auth });
+    await api.delete(`/companies/${cid}/estimates/${row.id}`);
     toast.success("Deleted");
     load();
   };

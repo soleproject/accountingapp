@@ -3,8 +3,8 @@
  * Mirror of Estimates.jsx for the vendor side.
  */
 import React, { useEffect, useState, useMemo } from "react";
-import axios from "axios";
 import { useNavigate } from "react-router-dom";
+import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import { Plus, FileText, ArrowRight, Trash2 } from "lucide-react";
@@ -18,8 +18,6 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "../components/ui/select";
 
-const API = process.env.REACT_APP_BACKEND_URL;
-
 const STATUS_TONES = {
   open:      "bg-sky-100 text-sky-800",
   closed:    "bg-slate-200 text-slate-600",
@@ -28,7 +26,7 @@ const STATUS_TONES = {
 
 
 export default function PurchaseOrders() {
-  const { currentId: activeCompanyId } = useCompany();
+  const { currentId: cid } = useCompany();
   const nav = useNavigate();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -41,16 +39,11 @@ export default function PurchaseOrders() {
     line: { expense_account_id: "", amount: 0, description: "" },
   });
 
-  const cid = activeCompanyId;
-  const auth = { Authorization: `Bearer ${localStorage.getItem("token")}` };
-
   const load = async () => {
     if (!cid) return;
     setLoading(true);
     try {
-      const r = await axios.get(
-        `${API}/api/companies/${cid}/purchase-orders`,
-        { headers: auth });
+      const r = await api.get(`/companies/${cid}/purchase-orders`);
       setRows(r.data.purchase_orders || []);
     } catch (e) {
       toast.error("Failed to load purchase orders");
@@ -59,17 +52,22 @@ export default function PurchaseOrders() {
 
   const loadRefs = async () => {
     if (!cid) return;
-    const [v, a] = await Promise.all([
-      axios.get(`${API}/api/companies/${cid}/contacts?type=vendor`,
-        { headers: auth }),
-      axios.get(`${API}/api/companies/${cid}/accounts`, { headers: auth }),
-    ]);
-    setVendors(v.data.contacts || []);
-    // Only expense-type accounts make sense for PO lines.
-    const acs = (a.data.accounts || []).filter(x =>
-      (x.type || "").toLowerCase() === "expense" && x.active !== false,
-    );
-    setAccounts(acs);
+    try {
+      const [v, a] = await Promise.all([
+        api.get(`/companies/${cid}/contacts`),
+        api.get(`/companies/${cid}/accounts`),
+      ]);
+      const all = v.data.contacts || [];
+      setVendors(all.filter(x =>
+        (x.type || "").toLowerCase() === "vendor" && x.active !== false,
+      ));
+      const acs = (a.data.accounts || []).filter(x =>
+        (x.type || "").toLowerCase() === "expense" && x.active !== false,
+      );
+      setAccounts(acs);
+    } catch (e) {
+      // Silent — dropdowns show empty and user gets a picker error toast on save.
+    }
   };
 
   useEffect(() => { load(); loadRefs(); }, [cid]);
@@ -103,8 +101,7 @@ export default function PurchaseOrders() {
       }],
     };
     try {
-      await axios.post(`${API}/api/companies/${cid}/purchase-orders`,
-        payload, { headers: auth });
+      await api.post(`/companies/${cid}/purchase-orders`, payload);
       toast.success("Purchase order created");
       setDialogOpen(false);
       load();
@@ -117,9 +114,8 @@ export default function PurchaseOrders() {
     if (!window.confirm(`Convert ${row.number || "PO"} to a bill?`))
       return;
     try {
-      const r = await axios.post(
-        `${API}/api/companies/${cid}/purchase-orders/${row.id}/convert`,
-        {}, { headers: auth });
+      const r = await api.post(
+        `/companies/${cid}/purchase-orders/${row.id}/convert`, {});
       toast.success("Bill created");
       nav(`/bills/${r.data.id}/edit`);
     } catch (e) {
@@ -130,9 +126,7 @@ export default function PurchaseOrders() {
   const remove = async (row) => {
     if (!window.confirm(`Delete PO ${row.number || row.id.slice(0,8)}?`))
       return;
-    await axios.delete(
-      `${API}/api/companies/${cid}/purchase-orders/${row.id}`,
-      { headers: auth });
+    await api.delete(`/companies/${cid}/purchase-orders/${row.id}`);
     toast.success("Deleted");
     load();
   };
