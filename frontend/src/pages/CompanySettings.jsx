@@ -18,6 +18,7 @@ export default function CompanySettings() {
   const [form, setForm] = useState({
     name: "", business_type: "", business_description: "", reporting_basis: "accrual",
     logo_data_url: "", address: "", phone: "", email: "", website: "", tax_id: "",
+    accounting_mode: "simple",
   });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -37,6 +38,7 @@ export default function CompanySettings() {
         email: current.email || "",
         website: current.website || "",
         tax_id: current.tax_id || "",
+        accounting_mode: current.accounting_mode || "simple",
       });
     }
   }, [current]);
@@ -146,6 +148,60 @@ export default function CompanySettings() {
               <option value="cash">Cash</option>
             </select>
           </Field>
+        </div>
+
+        {/* Accounting mode — hides/shows QBO-shaped entities. Kept as
+            a full-width card so its consequences are obvious to the
+            person flipping it (this is a per-company setting that
+            changes the sidebar/toolbar for every user of the company). */}
+        <div
+          className="rounded-lg border border-slate-200 bg-slate-50/50 p-4"
+          data-testid="settings-accounting-mode-card"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold text-slate-900">
+                Accounting mode
+              </h3>
+              <p className="text-xs text-slate-600 mt-1 max-w-2xl">
+                <b>Simple</b> keeps the app focused on bank feeds and AI
+                categorization — best for business owners who just want
+                clean books. <b>Advanced</b> unlocks the full QuickBooks
+                toolkit: Sales Receipts, Credit Memos, Refund Receipts,
+                and dedicated ledger views. Ideal for CPAs and
+                bookkeepers running client books.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 shrink-0">
+              {[
+                { v: "simple",   label: "Simple",   desc: "Bank feed + AI" },
+                { v: "advanced", label: "Advanced", desc: "Full QBO parity" },
+              ].map(({ v, label, desc }) => (
+                <label
+                  key={v}
+                  className={`cursor-pointer flex items-start gap-2 px-3 py-2 rounded-md border transition-colors ${
+                    form.accounting_mode === v
+                      ? "bg-white border-slate-900 ring-1 ring-slate-900"
+                      : "bg-white border-slate-200 hover:border-slate-300"
+                  }`}
+                  data-testid={`settings-accounting-mode-${v}`}
+                >
+                  <input
+                    type="radio"
+                    name="accounting_mode"
+                    value={v}
+                    checked={form.accounting_mode === v}
+                    onChange={() => setForm({ ...form, accounting_mode: v })}
+                    className="mt-0.5"
+                  />
+                  <div>
+                    <div className="text-sm font-medium text-slate-900">{label}</div>
+                    <div className="text-[11px] text-slate-500">{desc}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
         </div>
 
         <Field label="Business description">

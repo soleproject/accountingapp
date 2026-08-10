@@ -1,5 +1,73 @@
 # SmartBooks — Changelog
 
+## 2026-02-20 (evening) — Bank Match Review Screen (Trust Loop)
+
+### 🔍 New page: Bank Match Review
+- **Route**: `/accounting/bank-matches` (Advanced-mode-only via `<AdvancedModeRoute>`)
+- **What it shows**: every silent-matched bank ↔ editor pair from `bank_match.auto_match_bank_feed` — side-by-side card layout with bank row on the left, editor row on the right, matched-at timestamp in the header strip.
+- **Actions per pair**: **Confirm** (locks it in — hidden from the default "Awaiting review" queue) or **Unlink** (breaks the pair, editor row reappears in the ledger, both sides tombstoned so the matcher won't re-pair them).
+- **Filter chips**: Awaiting review (default) · Confirmed · All. Live totals at top-right ("N pairs · $X total").
+- **Sidebar**: new "Bank Match Review" entry under Accounting group (advancedOnly, hidden in Simple mode).
+
+### 🔌 New backend endpoints (`routes/transactions.py`)
+- `GET /api/companies/{cid}/bank-matches?status=unconfirmed|confirmed|all` — one round-trip pair fetch (both sides hydrated), sorted by `matched_at` desc, capped at 500.
+- `POST /api/companies/{cid}/bank-matches/{bank_id}/confirm` — stamps `match_confirmed=True` + timestamp on both rows.
+- `POST /api/companies/{cid}/bank-matches/{bank_id}/unlink` — `$unset` every match pointer on both sides + `$set` a `match_unlinked_at` tombstone. Silent matcher now respects the tombstone via a `match_unlinked_at: {$exists: False}` guard in `bank_match.py` so re-syncs don't undo the CPA's decision.
+
+### ✅ Test coverage
+- `backend/tests/test_bank_match_review.py` — 10 tests: default status returns unconfirmed only, confirmed filter, all filter, both-sides hydration, confirmed flag reflected, confirm stamps both sides, confirm 404 for non-matched row, unlink wipes all 4 fields + tombstones both sides, unlink 404 for missing pair, unlink-then-confirm 404s (proves severance was structural not cosmetic).
+- 137 backend tests green (bank_match + review + accounting_mode + editor + txn_type + QBO mirror + pfc).
+- Screenshots verified end-to-end: empty state renders per-filter copy, seeded pair renders with confirm/unlink buttons, side-by-side comparison shows both amounts + dates + descriptions.
+
+### Files touched
+- `backend/routes/transactions.py` — 3 new endpoints (list / confirm / unlink) at file bottom.
+- `backend/bank_match.py` — matcher now respects `match_unlinked_at` tombstone on both sides.
+- `backend/tests/test_bank_match_review.py` (new, 10 tests).
+- `frontend/src/pages/BankMatchReview.jsx` (new, ~280 lines).
+- `frontend/src/components/Sidebar.jsx` — new advancedOnly entry under Accounting.
+- `frontend/src/App.js` — new guarded route.
+
+## 2026-02-20 (later still) — Accounting Mode Toggle + Silent Bank Matcher
+
+### 🎚️ Two-tier UX: Simple / Advanced accounting mode
+- **New company setting**: `accounting_mode` on `companies` collection (default: `"simple"`). Validated as enum `{"simple","advanced"}` on PATCH.
+- **Simple mode** (default for regular business owners):
+  - Sidebar hides "Sales Receipts" and "Credit Memos" entries (tagged `advancedOnly` in the group config).
+  - Entity chip strip on `/transactions` is hidden entirely.
+  - The "New transaction" dropdown reverts to a single "Manual Transaction" button (no QBO-shaped editors surfaced).
+  - Backdoor URLs (`/purchases/new`, `/sales-receipts`, `/credit-memos`, `/deposits/new`, `/refund-receipts/new`) redirect to `/accounting/transactions` via the new `<AdvancedModeRoute>` guard.
+- **Advanced mode** (opt-in for CPAs / bookkeepers): full QBO parity restored — chip strip, dedicated ledger lists, QBO-shaped editors all visible.
+- **Company Settings page**: added a two-tile radio card with plain-English explanations of each mode. Priya (CPA) can flip per-client from the Settings page.
+- **`useCompany` context**: now exposes `accountingMode` and `isAdvancedMode` so any component can conditionally render without a fetch.
+
+### 🤝 Silent bank-feed ↔ editor-authored matcher (`bank_match.py`)
+- New module fires as a **fire-and-forget task** after every Plaid `insert_many` — never slows down the Plaid hot path.
+- **Strict pairing rules**: same bank + absolute amount + date within ±3 days + sign agreement + neither side pre-matched + editor row has `txn_type` in {Purchase, SalesReceipt, Deposit, CreditMemo, RefundReceipt}. No LLM. Deterministic.
+- **What it prevents**: the double-count bug where a CPA-authored Sales Receipt + Plaid deposit for the same money movement inflated cash on the Balance Sheet.
+- **Match anchor**: bank row's `id` (the actual money movement is on the bank side). Both sides get `matched_bank_txn_id`. Editor row also gets `hidden_by_match=true`.
+- **Default `list_transactions` view** now filters out `hidden_by_match=true` rows so the ledger stays clean. Callers can opt back in with `include_matched=true` (SalesReceipts/CreditMemos lists + Transactions chip strip already do this so entity-typed views still show every row).
+
+### ✅ Test coverage
+- `backend/tests/test_bank_match.py` — 10 tests: happy paths (Purchase, SalesReceipt), all 5 rejection reasons (different bank/amount/window/sign, pre-matched on either side), empty-batch shortcut, batch of 2 pairing simultaneously.
+- `backend/tests/test_accounting_mode.py` — 4 tests: mode accepted for both values, invalid value rejected 400, other-field PATCH preserves existing mode.
+- 127 QBO-mirror + editor + PFC + accounting-mode + bank-match tests all pass.
+- Screenshots verified end-to-end: flipping `accounting_mode` between simple/advanced via PATCH correctly hides/shows sidebar items, chip strip, and dropdown menu.
+
+### Files touched
+- `backend/models.py` — no changes needed (patch dict was open-shape).
+- `backend/routes/companies.py` — allowed `accounting_mode` in PATCH, enum-validated, default `"simple"` on create.
+- `backend/routes/transactions.py::list_transactions` — added `include_matched` query param + default filter on `hidden_by_match`.
+- `backend/plaid_connect.py` — fires `auto_match_bank_feed` as a background task after `insert_many`.
+- `backend/bank_match.py` (new) — the silent matcher.
+- `backend/tests/test_bank_match.py`, `test_accounting_mode.py` (new).
+- `frontend/src/lib/company.jsx` — exposes `accountingMode` and `isAdvancedMode`.
+- `frontend/src/components/Sidebar.jsx` — filters items via `advancedOnly` tag.
+- `frontend/src/components/AdvancedModeRoute.jsx` (new) — route guard.
+- `frontend/src/pages/Transactions.jsx` — chip strip & NewTransactionMenu gated on `isAdvancedMode`; include_matched wired for txn_type slice.
+- `frontend/src/pages/TxnTypeListPage.jsx` — passes `include_matched=true`.
+- `frontend/src/pages/CompanySettings.jsx` — mode radio card.
+- `frontend/src/App.js` — wraps editor + list routes in `<AdvancedModeRoute>`.
+
 ## 2026-02-20 (later) — Dedicated Ledger Views: Sales Receipts, Credit Memos, Entity-Type Chip Strip
 
 ### 📋 Two new list pages

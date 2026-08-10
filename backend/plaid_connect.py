@@ -433,6 +433,16 @@ async def categorize_and_insert_plaid_txns(
             await log_ai_event(cid, "post_je", posted_count)
         if flagged_count:
             await log_ai_event(cid, "flag_review", flagged_count)
+        # Silent bank-feed ↔ editor-authored matcher. Fire-and-forget
+        # so it never slows down the Plaid ingest hot path. See
+        # bank_match.py for the strict pairing rules and rationale.
+        try:
+            import asyncio as _aio
+            from bank_match import auto_match_bank_feed
+            _aio.create_task(auto_match_bank_feed(
+                cid, [r["id"] for r in inserted]))
+        except Exception:  # noqa: BLE001 — matcher must never break sync
+            pass
     return inserted, skipped
 
 
