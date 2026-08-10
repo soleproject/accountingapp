@@ -2038,6 +2038,83 @@ async def _push_refund_receipts(company_id: str, realm_id: str) -> dict:
     return {"inserted": inserted, "failed": failed}
 
 
+# ─── Transfer push (Phase 4d — last transactional entity) ──────────
+# Bank-to-bank movement. QBO shape:
+#   FromAccountRef, ToAccountRef, Amount, TxnDate, PrivateNote.
+# No line items — a Transfer is a single credit + single debit.
+
+async def _transfer_body(company_id: str, txn: dict) -> dict:
+    from_acct = await _resolve_account_ref(
+        company_id, txn.get("bank_account_id"))
+    if not from_acct:
+        raise ValueError(
+            "Source account (from) missing or not synced to QBO.")
+    to_acct = await _resolve_account_ref(
+        company_id, txn.get("transfer_to_account_id"))
+    if not to_acct:
+        raise ValueError(
+            "Destination account (to) missing or not synced to QBO.")
+    amount = abs(float(txn.get("amount") or 0))
+    if amount == 0:
+        raise ValueError("Transfer amount must be non-zero.")
+    body: dict[str, Any] = {
+        "FromAccountRef": {"value": from_acct[0], "name": from_acct[1]},
+        "ToAccountRef":   {"value": to_acct[0],   "name": to_acct[1]},
+        "Amount": round(amount, 2),
+    }
+    if txn.get("date"):
+        body["TxnDate"] = txn["date"]
+    if txn.get("memo") or txn.get("notes") or txn.get("description"):
+        body["PrivateNote"] = str(txn.get("memo") or txn.get("notes")
+                                    or txn.get("description"))[:4000]
+    return body
+
+
+def _local_patch_from_qbo_transfer(twin: dict) -> dict:
+    patch: dict[str, Any] = {
+        "amount": round(abs(float(twin.get("Amount") or 0)), 2),
+        "direction": "transfer",
+    }
+    if twin.get("TxnDate"):
+        patch["date"] = twin["TxnDate"]
+    return patch
+
+
+async def _push_transfers(company_id: str, realm_id: str) -> dict:
+    inserted = 0
+    failed: list[dict] = []
+    async for t in db.transactions.find(
+        {"company_id": company_id, "txn_type": "Transfer",
+          "source": {"$ne": "qbo"},
+         "$or": [{"qbo_id": {"$exists": False}},
+                 {"qbo_id": {"$in": [None, ""]}}]},
+    ):
+        try:
+            body = await _transfer_body(company_id, t)
+            resp = await _post(
+                company_id, realm_id,
+                f"/company/{realm_id}/transfer", body,
+            )
+            twin = resp.get("Transfer") or {}
+            new_id = twin.get("Id")
+            if not new_id:
+                failed.append({"id": t["id"], "error": "no Id"})
+                continue
+            twin_patch = _local_patch_from_qbo_transfer(twin)
+            await db.transactions.update_one(
+                {"id": t["id"]},
+                {"$set": {**twin_patch,
+                          "qbo_id": str(new_id), "realm_id": realm_id,
+                          "_sync_origin": "mirror_push",
+                          "_sync_status": "synced",
+                          "updated_at": now_iso()}},
+            )
+            inserted += 1
+        except Exception as ex:  # noqa: BLE001
+            failed.append({"id": t["id"], "error": str(ex)[:400]})
+    return {"inserted": inserted, "failed": failed}
+
+
 async def run_push(company_id: str, user_email: str,
                     entities: list[str] | None = None) -> dict:
     """Outbound-only sync — create local-only Foundation entities on
@@ -2055,7 +2132,7 @@ async def run_push(company_id: str, user_email: str,
                      "invoices", "bills", "payments", "bill_payments",
                      "journal_entries", "estimates", "purchase_orders",
                      "purchases", "sales_receipts", "deposits",
-                     "credit_memos", "refund_receipts"]
+                     "credit_memos", "refund_receipts", "transfers"]
 
     result: dict[str, dict] = {}
     for e in entities:
@@ -2094,6 +2171,8 @@ async def run_push(company_id: str, user_email: str,
                 result[e] = await _push_credit_memos(company_id, realm_id)
             elif e == "refund_receipts":
                 result[e] = await _push_refund_receipts(company_id, realm_id)
+            elif e == "transfers":
+                result[e] = await _push_transfers(company_id, realm_id)
         except Exception as err:  # noqa: BLE001
             result[e] = {"error": str(err)}
 

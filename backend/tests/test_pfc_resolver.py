@@ -116,18 +116,64 @@ def test_cc_paydown_hits_2100_liability():
 # Guard: never resolve to the bank account being categorized
 # ---------------------------------------------------------------------------
 
-def test_transfer_in_account_transfer_never_resolves_to_bank():
-    """TRANSFER_IN_ACCOUNT_TRANSFER maps to 1010 (Checking) but the resolver's
-    bank-account guard forces it to fall through to uncategorized.
+def test_transfer_in_account_transfer_routes_to_clearing():
+    """TRANSFER_IN_ACCOUNT_TRANSFER maps to 1010 (Checking) but the
+    resolver's bank-account guard blocks that. Feb 20, 2026: instead
+    of falling through to 4999 Uncategorized (which polluted P&L),
+    real inter-account transfers now route to a `3xxx Inter-Account
+    Transfer` equity clearing account so neither leg posts to income
+    or expense. Auto-created if missing.
     """
     async def run():
         cid = await _seed_company_with_default_coa()
         try:
             r = await pfc_resolver.resolve_pfc_coa(cid, "TRANSFER_IN_ACCOUNT_TRANSFER")
-            assert r["source"] == "fallback_uncategorized"
-            assert r["category_account_code"] == "4999"  # income side of fallback
-            assert r["reviewed_by_default"] is False
+            assert r["source"] == "transfer_clearing"
+            assert r["category_account_name"] == "Inter-Account Transfer"
             assert r["classification"] == "asset_movement"
+            # And the account was materialized on the org.
+            xfer = await db.accounts.find_one(
+                {"company_id": cid, "id": r["category_account_id"]})
+            assert xfer is not None
+            assert xfer["type"] == "equity"
+            assert xfer["subtype"] == "transfer"
+        finally:
+            await _cleanup(cid)
+    _run(run())
+
+
+def test_transfer_out_account_transfer_routes_to_clearing():
+    """Same guarantee for the outbound leg — TRANSFER_OUT_ACCOUNT_TRANSFER
+    was the specific bug: it landed in 6999 Uncategorized Expense and
+    inflated business expense reports."""
+    async def run():
+        cid = await _seed_company_with_default_coa()
+        try:
+            r = await pfc_resolver.resolve_pfc_coa(cid, "TRANSFER_OUT_ACCOUNT_TRANSFER")
+            assert r["source"] == "transfer_clearing"
+            assert r["classification"] == "asset_movement"
+            assert r["category_account_code"] != "6999"
+            assert r["category_account_code"] != "4999"
+        finally:
+            await _cleanup(cid)
+    _run(run())
+
+
+def test_transfer_clearing_is_idempotent():
+    """Resolving multiple transfers in a row must reuse the same
+    clearing account — not create a new one each time."""
+    async def run():
+        cid = await _seed_company_with_default_coa()
+        try:
+            r1 = await pfc_resolver.resolve_pfc_coa(cid, "TRANSFER_OUT_ACCOUNT_TRANSFER")
+            r2 = await pfc_resolver.resolve_pfc_coa(cid, "TRANSFER_IN_SAVINGS")
+            r3 = await pfc_resolver.resolve_pfc_coa(cid, "TRANSFER_OUT_ACCOUNT_TRANSFER")
+            assert r1["category_account_id"] == r2["category_account_id"] == r3["category_account_id"]
+            # Only one clearing account exists.
+            xfers = await db.accounts.find(
+                {"company_id": cid, "type": "equity",
+                  "subtype": "transfer"}).to_list(10)
+            assert len(xfers) == 1
         finally:
             await _cleanup(cid)
     _run(run())

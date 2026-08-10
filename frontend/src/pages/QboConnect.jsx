@@ -301,6 +301,63 @@ export default function QboConnect() {
               </div>
             )}
             {done && (
+              <div
+                className="mt-3 rounded-lg border border-emerald-200 bg-gradient-to-br from-emerald-50 to-cyan-50 px-4 py-3"
+                data-testid="qbo-migration-complete-banner"
+              >
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 size={18} className="text-emerald-600 mt-0.5 shrink-0" />
+                  <div className="flex-1">
+                    <div className="text-sm font-semibold text-emerald-900">
+                      Migration complete
+                    </div>
+                    <div className="text-xs text-emerald-800/80 mt-0.5">
+                      Your QuickBooks Online data is now mirrored. Here's what we did after the import:
+                    </div>
+                    <dl className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                      <div
+                        className="rounded-md bg-white/70 border border-emerald-100 px-2.5 py-1.5"
+                        data-testid="qbo-stat-seeded-deactivated"
+                      >
+                        <dt className="text-emerald-700/70">Seeded accounts tidied</dt>
+                        <dd className="font-semibold text-emerald-900 tabular-nums">
+                          {(job.seeded_deactivated ?? 0).toLocaleString()}
+                        </dd>
+                      </div>
+                      <div
+                        className="rounded-md bg-white/70 border border-emerald-100 px-2.5 py-1.5"
+                        data-testid="qbo-stat-estimates-pulled"
+                      >
+                        <dt className="text-emerald-700/70">Estimates pulled</dt>
+                        <dd className="font-semibold text-emerald-900 tabular-nums">
+                          {(job.mirror_estimates_pulled ?? 0).toLocaleString()}
+                        </dd>
+                      </div>
+                      <div
+                        className="rounded-md bg-white/70 border border-emerald-100 px-2.5 py-1.5"
+                        data-testid="qbo-stat-pos-pulled"
+                      >
+                        <dt className="text-emerald-700/70">Purchase orders pulled</dt>
+                        <dd className="font-semibold text-emerald-900 tabular-nums">
+                          {(job.mirror_pos_pulled ?? 0).toLocaleString()}
+                        </dd>
+                      </div>
+                      <div
+                        className="rounded-md bg-white/70 border border-emerald-100 px-2.5 py-1.5"
+                        data-testid="qbo-stat-skipped-dupkey"
+                        title="Duplicate rows we detected and adopted instead of re-inserting"
+                      >
+                        <dt className="text-emerald-700/70">Duplicates adopted</dt>
+                        <dd className="font-semibold text-emerald-900 tabular-nums">
+                          {(job.skipped_dupkey ?? 0).toLocaleString()}
+                        </dd>
+                      </div>
+                    </dl>
+                  </div>
+                </div>
+              </div>
+            )}
+            {done && (
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   onClick={() => navigate("/accounting/chart-of-accounts")}

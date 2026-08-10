@@ -1,5 +1,36 @@
 # SmartBooks — Changelog
 
+## 2026-02-20 — Transfers Mirror verified · Migration Banner · Plaid Transfer Bugfix
+
+### 🪞 QBO Mirror — Transfers verified (Phase 4d closeout)
+- Added regression suite `backend/tests/test_qbo_mirror_transfer_push.py` (13 tests): body-builder happy path, absolute-value guard, required accounts, non-zero amount, memo fallback chain (memo → notes → description), twin-patch round-trip, autopush/dispatch registration guards. All 171 QBO mirror + PFC tests green.
+- Transfers now covered end-to-end: `_transfer_body` (push.py) + `_local_patch_from_qbo_transfer` (twin patch) + `_push_one_transfer` (autopush) + entity-meta registration → PATCH/DELETE cascades know how to talk to `/company/{realm}/transfer`.
+
+### 🎉 QBO Migration Completion Banner (Frontend)
+- After a migration finishes, `QboConnect.jsx` now surfaces a summary card (`data-testid="qbo-migration-complete-banner"`) with four stat tiles:
+  - `qbo-stat-seeded-deactivated` — seeded accounts auto-tidied
+  - `qbo-stat-estimates-pulled` — mirror pulled Estimates count
+  - `qbo-stat-pos-pulled` — mirror pulled Purchase Orders count
+  - `qbo-stat-skipped-dupkey` — duplicates adopted (previously invisible to users)
+- Backend: `qbo_service.run_migration` now aggregates `skipped_dupkey` across estimate + PO pulls and stores it on the job doc alongside the existing `seeded_deactivated` / `mirror_*_pulled` fields.
+
+### 🐛 Plaid Transfer Bug — TRANSFER_OUT_ACCOUNT_TRANSFER → Uncategorized (P1, recurring)
+- **Root cause**: PFC codes like `TRANSFER_OUT_ACCOUNT_TRANSFER` / `TRANSFER_IN_ACCOUNT_TRANSFER` / `TRANSFER_*_SAVINGS` were mapped to `1010` (Checking) with `asset_movement` classification. The resolver's bank-account guard (correctly) blocked routing to another bank, and the row fell all the way through to Step 3 → `6999` Uncategorized Expense (or `4999` Uncat Income). Real inter-account transfers were inflating P&L reports.
+- **Fix**: Added **Step 2b** in `pfc_resolver.py`: when the primary is blocked *and* classification is `asset_movement`, resolve to an equity clearing account (`Inter-Account Transfer`, subtype='transfer'). Idempotently auto-created via `_ensure_transfer_clearing_account` — matches parity with `_ensure_transfer_account` already used by mark-as-transfer / detect-transfers.
+- **New tests** in `test_pfc_resolver.py`:
+  - `test_transfer_in_account_transfer_routes_to_clearing`
+  - `test_transfer_out_account_transfer_routes_to_clearing`
+  - `test_transfer_clearing_is_idempotent` (multiple resolutions reuse the same account)
+- Result source is now `transfer_clearing` (new source enum). Legacy stale test that asserted the old buggy `fallback_uncategorized` behavior was replaced.
+
+### Files touched
+- `backend/pfc_resolver.py` (+82 lines: helper + Step 2b + import uuid/now_iso)
+- `backend/tests/test_pfc_resolver.py` (replaced 1 stale test with 3 new ones)
+- `backend/qbo_service.py` (skipped_dupkey aggregation)
+- `backend/tests/test_qbo_mirror_transfer_push.py` (new — 13 tests)
+- `frontend/src/pages/QboConnect.jsx` (Migration Completion Banner)
+
+
 ## 2026-08-08 — QBO Mirror Phase 1a + Migration Fixes
 
 ### 🪞 QBO Mirror Phase 1a (Dry-Run Preview)

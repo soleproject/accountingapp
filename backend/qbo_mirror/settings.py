@@ -38,7 +38,7 @@ DEFAULTS = {
         "deposits": True,
         "credit_memos": True,
         "refund_receipts": True,
-        "transfers": False,
+        "transfers": True,
         "payments": True,
         "bill_payments": True,
         "journal_entries": True,
