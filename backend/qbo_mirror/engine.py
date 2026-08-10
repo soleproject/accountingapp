@@ -448,6 +448,86 @@ def _norm_deposit_qbo(o: dict) -> dict:
     }
 
 
+# ─── CreditMemo / RefundReceipt normalizers (Phase 4c) ─────────────
+
+def _norm_credit_memo_local(t: dict) -> dict:
+    number = (t.get("number") or "").strip()
+    if not number and t.get("qbo_id"):
+        number = f"CreditMemo-{t.get('qbo_id')}"
+    return {
+        "qbo_id": t.get("qbo_id"),
+        "natural_key": f"cm::{number.lower()}",
+        "number": number,
+        "date": t.get("date") or "",
+        "total": round(abs(float(t.get("amount") or 0)), 2),
+    }
+
+
+def _norm_credit_memo_qbo(o: dict) -> dict:
+    number = (o.get("DocNumber") or "").strip() \
+        or f"CreditMemo-{o.get('Id')}"
+    return {
+        "qbo_id": o.get("Id"),
+        "natural_key": f"cm::{number.lower()}",
+        "number": number,
+        "date": o.get("TxnDate") or "",
+        "total": round(float(o.get("TotalAmt") or 0), 2),
+    }
+
+
+def _norm_refund_receipt_local(t: dict) -> dict:
+    number = (t.get("number") or "").strip()
+    if not number and t.get("qbo_id"):
+        number = f"RefundReceipt-{t.get('qbo_id')}"
+    return {
+        "qbo_id": t.get("qbo_id"),
+        "natural_key": f"rr::{number.lower()}",
+        "number": number,
+        "date": t.get("date") or "",
+        "total": round(abs(float(t.get("amount") or 0)), 2),
+    }
+
+
+def _norm_refund_receipt_qbo(o: dict) -> dict:
+    number = (o.get("DocNumber") or "").strip() \
+        or f"RefundReceipt-{o.get('Id')}"
+    return {
+        "qbo_id": o.get("Id"),
+        "natural_key": f"rr::{number.lower()}",
+        "number": number,
+        "date": o.get("TxnDate") or "",
+        "total": round(float(o.get("TotalAmt") or 0), 2),
+    }
+
+
+# ─── Transfer normalizers (Phase 4d) ───────────────────────────────
+# Transfers have no DocNumber in QBO — synth `Transfer-{id}` symmetric
+# with what our importer stamps.
+
+def _norm_transfer_local(t: dict) -> dict:
+    number = (t.get("number") or "").strip()
+    if not number and t.get("qbo_id"):
+        number = f"Transfer-{t.get('qbo_id')}"
+    return {
+        "qbo_id": t.get("qbo_id"),
+        "natural_key": f"tr::{(t.get('qbo_id') or number).lower()}",
+        "number": number,
+        "date": t.get("date") or "",
+        "total": round(abs(float(t.get("amount") or 0)), 2),
+    }
+
+
+def _norm_transfer_qbo(o: dict) -> dict:
+    number = f"Transfer-{o.get('Id')}"
+    return {
+        "qbo_id": o.get("Id"),
+        "natural_key": f"tr::{str(o.get('Id')).lower()}",
+        "number": number,
+        "date": o.get("TxnDate") or "",
+        "total": round(abs(float(o.get("Amount") or 0)), 2),
+    }
+
+
 # ─── Diff builder ───────────────────────────────────────────────────
 # Fields whose drift is *significant* — cosmetic-only fields (e.g.
 # subtype spelling) don't count as drift to reduce noise in the report.
@@ -477,6 +557,9 @@ _DRIFT_FIELDS = {
     "purchases":       ["number", "date", "total"],
     "sales_receipts":  ["number", "date", "total"],
     "deposits":        ["number", "date", "total"],
+    "credit_memos":    ["number", "date", "total"],
+    "refund_receipts": ["number", "date", "total"],
+    "transfers":       ["date", "total"],
 }
 
 
@@ -614,6 +697,21 @@ async def _fetch_local(company_id: str, entity: str) -> list[dict]:
                 async for t in db.transactions.find(
                     {"company_id": company_id, "txn_type": "Deposit",
                       "voided": {"$ne": True}})]
+    if entity == "credit_memos":
+        return [_norm_credit_memo_local(t)
+                async for t in db.transactions.find(
+                    {"company_id": company_id, "txn_type": "CreditMemo",
+                      "voided": {"$ne": True}})]
+    if entity == "refund_receipts":
+        return [_norm_refund_receipt_local(t)
+                async for t in db.transactions.find(
+                    {"company_id": company_id, "txn_type": "RefundReceipt",
+                      "voided": {"$ne": True}})]
+    if entity == "transfers":
+        return [_norm_transfer_local(t)
+                async for t in db.transactions.find(
+                    {"company_id": company_id, "txn_type": "Transfer",
+                      "voided": {"$ne": True}})]
     return []
 
 
@@ -661,6 +759,15 @@ async def _fetch_qbo(company_id: str, realm_id: str,
     if entity == "deposits":
         return [_norm_deposit_qbo(o)
                 async for o in Q.query_all(company_id, realm_id, "Deposit")]
+    if entity == "credit_memos":
+        return [_norm_credit_memo_qbo(o)
+                async for o in Q.query_all(company_id, realm_id, "CreditMemo")]
+    if entity == "refund_receipts":
+        return [_norm_refund_receipt_qbo(o)
+                async for o in Q.query_all(company_id, realm_id, "RefundReceipt")]
+    if entity == "transfers":
+        return [_norm_transfer_qbo(o)
+                async for o in Q.query_all(company_id, realm_id, "Transfer")]
     return []
 
 
@@ -688,7 +795,8 @@ async def run_dry_run(company_id: str, user_email: str) -> dict:
     for entity in ("accounts", "customers", "vendors", "items",
                     "invoices", "bills", "payments", "bill_payments",
                     "journal_entries", "estimates", "purchase_orders",
-                    "purchases", "sales_receipts", "deposits"):
+                    "purchases", "sales_receipts", "deposits",
+                    "credit_memos", "refund_receipts", "transfers"):
         if not entities_cfg.get(entity, True):
             continue
         try:

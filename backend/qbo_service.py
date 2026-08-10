@@ -852,6 +852,7 @@ async def run_migration(job_id: str, company_id: str) -> None:
         # a freshly-migrated company doesn't end up with dozens of
         # `pull_from_qbo` records in the dry-run.
         mirror_pulled = {"estimates": 0, "purchase_orders": 0}
+        skipped_dupkey = 0
         try:
             from qbo_mirror.pull import run_pull
             pr = await run_pull(company_id, "migration",
@@ -860,6 +861,7 @@ async def run_migration(job_id: str, company_id: str) -> None:
                 r = (pr or {}).get(k) or {}
                 mirror_pulled[k] = (r.get("inserted", 0)
                                      + r.get("updated", 0))
+                skipped_dupkey += r.get("skipped_dupkey", 0)
         except Exception as e:  # noqa: BLE001
             logger.warning(
                 "Post-migration mirror pull failed for %s: %s — "
@@ -878,7 +880,8 @@ async def run_migration(job_id: str, company_id: str) -> None:
                       "pfc_mapped": pfc_mapped,
                       "seeded_deactivated": seeded_deactivated,
                       "mirror_estimates_pulled": mirror_pulled["estimates"],
-                      "mirror_pos_pulled": mirror_pulled["purchase_orders"]}},
+                      "mirror_pos_pulled": mirror_pulled["purchase_orders"],
+                      "skipped_dupkey": skipped_dupkey}},
         )
     except Exception as e:  # noqa: BLE001
         logger.exception("QBO migration failed for %s", company_id)

@@ -5,6 +5,11 @@ Resolution order (strict precedence):
   0. no/unknown PFC                 → returns None (defer to merchant rules / LLM)
   1. pfc_org_overrides (per-org)    → short-circuits everything → source='override'
   2. Primary slot (org's default COA account for the mapped code) → source='primary'
+  2b. Asset-movement clearing (for TRANSFER_*_ACCOUNT_TRANSFER + savings) →
+      source='transfer_clearing' (Feb 20, 2026: previously fell through to
+      6999/4999 Uncategorized, polluting P&L. Real inter-account transfers
+      belong on an equity clearing account so neither leg posts to income
+      or expense.)
   3. Uncategorized fallback (direction-aware) → source='fallback_uncategorized'
   4. Unmapped (org missing even uncategorized) → source='unmapped', category_id=None
 
@@ -19,8 +24,9 @@ Additional invariants (mirrored from source):
 from __future__ import annotations
 from typing import Optional, TypedDict
 import re
+import uuid
 
-from db import db
+from db import db, now_iso
 import pfc_mapping
 from pfc_mapping import PfcMapping
 
@@ -57,6 +63,58 @@ def _is_bank_account(acct: dict) -> bool:
     if (acct.get("subtype") or "").lower() == "bank":
         return True
     return False
+
+
+_TRANSFER_CLEARING_NAME_RX = re.compile(
+    r"inter[-\s]?account\s+transfer|transfer\s+clearing", re.I)
+
+
+def _find_transfer_clearing_account(accts: list[dict]) -> Optional[dict]:
+    """Locate the equity clearing account that inter-account transfers
+    post to. Matches on subtype='transfer' first, then falls back to
+    name search — this keeps parity with `_ensure_transfer_account`
+    in routes/transactions.py (used by mark-as-transfer + detect-
+    transfers)."""
+    for a in accts:
+        if a.get("type") != "equity":
+            continue
+        if (a.get("subtype") or "").lower() == "transfer":
+            return a
+    for a in accts:
+        if a.get("type") != "equity":
+            continue
+        if _TRANSFER_CLEARING_NAME_RX.search(a.get("name") or ""):
+            return a
+    return None
+
+
+async def _ensure_transfer_clearing_account(company_id: str) -> Optional[dict]:
+    """Idempotently ensure the transfer clearing equity account exists
+    (creates a `3200 Inter-Account Transfer` row if missing). Kept
+    identical in spirit to `routes/transactions.py::_ensure_transfer_account`
+    so both entry points converge on the same account."""
+    accts = await db.accounts.find(
+        {"company_id": company_id, "type": "equity"},
+    ).to_list(500)
+    existing = _find_transfer_clearing_account(accts)
+    if existing:
+        return existing
+    # Pick the first free code in the 3200-3990 range.
+    used = {a.get("code") for a in await db.accounts.find(
+        {"company_id": company_id, "code": {"$exists": True}},
+    ).to_list(2000)}
+    code = next((str(n) for n in range(3200, 3999, 10)
+                  if str(n) not in used), "3900")
+    now = now_iso()
+    xfer = {
+        "id": str(uuid.uuid4()), "company_id": company_id, "code": code,
+        "name": "Inter-Account Transfer", "type": "equity",
+        "subtype": "transfer", "active": True, "balance": 0.0,
+        "created_at": now, "updated_at": now,
+        "source": "pfc_resolver_autofix",
+    }
+    await db.accounts.insert_one(xfer)
+    return xfer
 
 
 async def resolve_pfc_coa(
@@ -144,6 +202,34 @@ async def resolve_pfc_coa(
         )
 
     # ---------------------------------------------------------------
+    # Step 2b. Transfer clearing — real inter-account transfers.
+    # ---------------------------------------------------------------
+    # `asset_movement` covers PFC codes like TRANSFER_OUT_ACCOUNT_TRANSFER,
+    # TRANSFER_IN_ACCOUNT_TRANSFER, TRANSFER_OUT_SAVINGS, etc. Their
+    # primary account is a bank (1010/1020) which the guard above
+    # (correctly) blocks. Before Feb 20 2026 these fell through to
+    # 6999/4999 Uncategorized, causing real transfers to inflate P&L.
+    # Now they land on the equity clearing account instead so neither
+    # leg posts to income or expense — matches what mark-as-transfer
+    # and detect-transfers already do for user-initiated fixes.
+    if mapping.classification == "asset_movement":
+        clearing = await _ensure_transfer_clearing_account(company_id)
+        if clearing:
+            return ResolvedPfc(
+                category_account_id=clearing["id"],
+                category_account_code=clearing["code"],
+                category_account_name=clearing["name"],
+                classification=mapping.classification,
+                # Auto-transfers still route to needs_review=True so
+                # the CPA can eyeball the pair before it locks in —
+                # `reviewed` defaults to True for asset_movement per
+                # the mapping table.
+                reviewed_by_default=reviewed,
+                mapping=mapping,
+                source="transfer_clearing",
+            )
+
+    # ---------------------------------------------------------------
     # Step 3. Uncategorized fallback (direction-aware).
     # ---------------------------------------------------------------
     goes_to_income = (
@@ -211,7 +297,6 @@ async def set_pfc_override(
     each PFC to a specific QB account (Rocketbooks' `finalize-coa-after-qb.ts`
     path), or when a user manually pins a PFC to a specific category.
     """
-    from db import now_iso
     doc = {
         "company_id": company_id,
         "pfc_detailed": pfc_detailed,

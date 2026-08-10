@@ -32,6 +32,9 @@ const ENTITIES = [
   { key: "purchases", label: "Purchases / Expenses" },
   { key: "sales_receipts", label: "Sales Receipts" },
   { key: "deposits", label: "Deposits" },
+  { key: "credit_memos", label: "Credit Memos" },
+  { key: "refund_receipts", label: "Refund Receipts" },
+  { key: "transfers", label: "Transfers" },
 ];
 
 const BUCKET_META = {
@@ -100,7 +103,7 @@ export default function QboMirror() {
     const entities = Object.entries(config.entities || {})
       .filter(([_, v]) => v)
       .map(([k]) => k)
-      .filter(k => ["accounts", "customers", "vendors", "items", "invoices", "bills", "payments", "bill_payments", "journal_entries", "estimates", "purchase_orders", "purchases", "sales_receipts", "deposits"].includes(k));
+      .filter(k => ["accounts", "customers", "vendors", "items", "invoices", "bills", "payments", "bill_payments", "journal_entries", "estimates", "purchase_orders", "purchases", "sales_receipts", "deposits", "credit_memos", "refund_receipts", "transfers"].includes(k));
     if (!entities.length) {
       toast.error("Enable at least one Foundation entity first.");
       return;
@@ -139,7 +142,7 @@ export default function QboMirror() {
     const entities = Object.entries(config.entities || {})
       .filter(([_, v]) => v)
       .map(([k]) => k)
-      .filter(k => ["accounts", "customers", "vendors", "items", "invoices", "bills", "payments", "bill_payments", "journal_entries", "estimates", "purchase_orders", "purchases", "sales_receipts", "deposits"].includes(k));
+      .filter(k => ["accounts", "customers", "vendors", "items", "invoices", "bills", "payments", "bill_payments", "journal_entries", "estimates", "purchase_orders", "purchases", "sales_receipts", "deposits", "credit_memos", "refund_receipts", "transfers"].includes(k));
     if (!entities.length) {
       toast.error("Enable at least one Foundation entity first.");
       return;
