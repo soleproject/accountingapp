@@ -27,6 +27,7 @@ export default function BankMatchReview() {
   const [pairs, setPairs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const load = async () => {
     if (!cid) return;
@@ -72,6 +73,48 @@ export default function BankMatchReview() {
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to unlink");
     } finally { setBusyId(null); }
+  };
+
+  const bulkConfirm = async () => {
+    if (bulkBusy || pairs.length === 0) return;
+    // Only confirmable pairs — skip ones already confirmed (would
+    // just be a no-op but wastes a round-trip).
+    const ids = pairs.filter((p) => !p.confirmed).map((p) => p.bank.id);
+    if (ids.length === 0) {
+      toast.info("Nothing to confirm — all visible pairs are already confirmed.");
+      return;
+    }
+    if (!window.confirm(
+      `Confirm ${ids.length} pair${ids.length === 1 ? "" : "s"}? `
+       + `This locks in every match currently shown.`)) return;
+    setBulkBusy(true);
+    try {
+      const r = await api.post(
+        `/companies/${cid}/bank-matches/bulk-confirm`, { bank_ids: ids });
+      toast.success(`Confirmed ${r.data.confirmed} pair${r.data.confirmed === 1 ? "" : "s"}`);
+      // Fresh load so the counts and filter buckets stay honest.
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Bulk confirm failed");
+    } finally { setBulkBusy(false); }
+  };
+
+  const bulkUnlink = async () => {
+    if (bulkBusy || pairs.length === 0) return;
+    const ids = pairs.map((p) => p.bank.id);
+    if (!window.confirm(
+      `Unlink ${ids.length} pair${ids.length === 1 ? "" : "s"}? `
+       + `Every editor row will reappear in the ledger and the silent `
+       + `matcher won't re-pair these two rows on the next sync.`)) return;
+    setBulkBusy(true);
+    try {
+      const r = await api.post(
+        `/companies/${cid}/bank-matches/bulk-unlink`, { bank_ids: ids });
+      toast.success(`Unlinked ${r.data.unlinked} pair${r.data.unlinked === 1 ? "" : "s"}`);
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Bulk unlink failed");
+    } finally { setBulkBusy(false); }
   };
 
   const totals = useMemo(() => {
@@ -142,6 +185,41 @@ export default function BankMatchReview() {
           <span className="font-medium text-slate-700">{fmtMoney(totals.sum)}</span> total
         </div>
       </div>
+
+      {/* Bulk action bar — only surfaces when there's something to act
+          on. `Confirm all` skips already-confirmed rows so it's a no-op
+          on the Confirmed tab. `Unlink all` is destructive but idempotent
+          (tombstones are set-only, not toggled). */}
+      {!loading && pairs.length > 0 && (
+        <div
+          className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg border border-slate-200 bg-slate-50"
+          data-testid="bank-match-bulk-bar"
+        >
+          <div className="text-xs text-slate-600">
+            Reviewing a big batch? Act on all {pairs.length} pair{pairs.length === 1 ? "" : "s"} at once.
+          </div>
+          <div className="flex items-center gap-2">
+            {status !== "confirmed" && (
+              <button
+                onClick={bulkConfirm}
+                disabled={bulkBusy}
+                className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                data-testid="bank-match-bulk-confirm-btn"
+              >
+                <CheckCircle2 size={12} /> Confirm all
+              </button>
+            )}
+            <button
+              onClick={bulkUnlink}
+              disabled={bulkBusy}
+              className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-md border border-rose-200 bg-white text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+              data-testid="bank-match-bulk-unlink-btn"
+            >
+              <Unlink size={12} /> Unlink all
+            </button>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="border border-slate-200 rounded-lg bg-white p-8 text-center text-sm text-slate-400">

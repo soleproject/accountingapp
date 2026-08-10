@@ -1,5 +1,39 @@
 # SmartBooks — Changelog
 
+## 2026-02-20 (late night) — Match Indicators + Bulk Match Actions
+
+### 🚦 Match indicators on `/sales-receipts`
+- New **Bank match** column showing each row's reconciliation state at a glance:
+  - Green solid ✓ · **Reconciled** — CPA confirmed the pair
+  - Amber solid ✓ · **Matched · pending review** — silent matcher paired it, awaiting confirmation
+  - Slate slash icon · **Manually unlinked** — CPA broke a prior match (tombstoned)
+  - Amber outline ⏳ · **Awaiting bank feed** — no bank row seen yet
+- Icons carry the label inline on md+ screens; mobile shows icon-only with tooltip. Every dot has a `data-testid="match-dot-{key}"` for automation.
+- **Credit Memos intentionally skipped** — they're A/R adjustments with no cash leg, so a bank match will never exist. Toggle via new `showMatchStatus` prop on `TxnTypeListPage`.
+
+### ⚡ Bulk match actions on Bank Match Review
+- New action bar above the pair cards: **"Reviewing a big batch? Act on all N pairs at once."** with:
+  - **Confirm all** (emerald) — hidden on the Confirmed tab where it'd be a no-op
+  - **Unlink all** (rose) — always visible, requires a `window.confirm` guard
+- Frontend passes the exact list of currently-visible bank ids in the request body — deterministic, no filter-based race between UI state and DB state.
+
+### 🔌 New backend endpoints
+- `POST /api/companies/{cid}/bank-matches/bulk-confirm` — body `{"bank_ids": [...]}`, returns `{ok, confirmed}` count. Uses `update_many` on both sides (1 round-trip per side, not N).
+- `POST /api/companies/{cid}/bank-matches/bulk-unlink` — same shape, tombstones both sides with `match_unlinked_at`.
+- Both endpoints defensively filter non-string ids so a client bug can't confuse the Mongo `$in` operator.
+
+### ✅ Test coverage
+- `backend/tests/test_bank_match_bulk.py` — 7 tests: happy-path confirm/unlink of 2 pairs, empty list is a no-op, stale/unmatched ids are silently ignored, non-string ids are filtered, unrelated pairs (unmatched control row + already-confirmed Pair C) are left untouched by an unrelated bulk-unlink.
+- 189 backend tests green across the full accounting stack (bank_match + review + bulk + accounting_mode + editor + txn_type + QBO mirror + PFC).
+- Screenshots verified: Sales Receipts list shows the amber clock "Awaiting bank feed" dot for an unmatched row; Bank Match Review with 3 seeded pairs surfaces the bulk bar with "Act on all 3 pairs at once" and both bulk buttons.
+
+### Files touched
+- `backend/routes/transactions.py` — 2 new bulk endpoints at file bottom.
+- `backend/tests/test_bank_match_bulk.py` (new, 7 tests).
+- `frontend/src/pages/TxnTypeListPage.jsx` — `deriveMatchStatus` helper + `MatchDot` component + `showMatchStatus` prop + new column.
+- `frontend/src/pages/SalesReceipts.jsx` — `showMatchStatus={true}`.
+- `frontend/src/pages/BankMatchReview.jsx` — bulk bar with Confirm all / Unlink all + `bulkBusy` state guard.
+
 ## 2026-02-20 (evening) — Bank Match Review Screen (Trust Loop)
 
 ### 🔍 New page: Bank Match Review

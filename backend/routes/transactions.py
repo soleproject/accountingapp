@@ -3026,3 +3026,93 @@ async def unlink_bank_match(
              "$set": {"match_unlinked_at": now_iso()}},
         )
     return {"ok": True}
+
+
+@router.post("/companies/{cid}/bank-matches/bulk-confirm")
+async def bulk_confirm_bank_matches(
+    cid: str, payload: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Bulk-confirm every pair whose bank-row id is in `payload.bank_ids`.
+    Used by the "Confirm All" button on the Bank Match Review page —
+    the frontend passes the exact set of currently-visible pairs so
+    the operation is deterministic (no filter-based race between UI
+    state and DB state)."""
+    await require_company(user, cid)
+    ids = [i for i in (payload or {}).get("bank_ids", []) if isinstance(i, str)]
+    if not ids:
+        return {"ok": True, "confirmed": 0}
+    stamp = now_iso()
+    # Fetch bank rows to get their editor counterparts, so we can
+    # update both sides in one round-trip per pair. We do this in a
+    # scan so we can skip rows that aren't actually matched (defensive
+    # — the UI shouldn't hand us those but check anyway).
+    editor_ids = []
+    async for b in db.transactions.find({
+        "company_id": cid, "id": {"$in": ids},
+        "matched_editor_txn_id": {"$exists": True},
+    }):
+        eid = b.get("matched_editor_txn_id")
+        if eid:
+            editor_ids.append(eid)
+    # One update_many per side — much faster than N update_ones.
+    r_bank = await db.transactions.update_many(
+        {"company_id": cid, "id": {"$in": ids},
+          "matched_editor_txn_id": {"$exists": True}},
+        {"$set": {"match_confirmed": True, "match_confirmed_at": stamp}},
+    )
+    if editor_ids:
+        await db.transactions.update_many(
+            {"company_id": cid, "id": {"$in": editor_ids}},
+            {"$set": {"match_confirmed": True, "match_confirmed_at": stamp}},
+        )
+    return {"ok": True, "confirmed": r_bank.modified_count}
+
+
+@router.post("/companies/{cid}/bank-matches/bulk-unlink")
+async def bulk_unlink_bank_matches(
+    cid: str, payload: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Bulk-unlink every pair whose bank-row id is in `payload.bank_ids`.
+    Both sides are tombstoned with `match_unlinked_at` so the silent
+    matcher won't re-pair them on the next sync — same semantics as
+    single-row unlink, just batched."""
+    await require_company(user, cid)
+    ids = [i for i in (payload or {}).get("bank_ids", []) if isinstance(i, str)]
+    if not ids:
+        return {"ok": True, "unlinked": 0}
+    stamp = now_iso()
+    editor_ids = []
+    async for b in db.transactions.find({
+        "company_id": cid, "id": {"$in": ids},
+        "matched_editor_txn_id": {"$exists": True},
+    }):
+        eid = b.get("matched_editor_txn_id")
+        if eid:
+            editor_ids.append(eid)
+    r_bank = await db.transactions.update_many(
+        {"company_id": cid, "id": {"$in": ids},
+          "matched_editor_txn_id": {"$exists": True}},
+        {"$unset": {
+            "matched_bank_txn_id": "",
+            "matched_editor_txn_id": "",
+            "matched_at": "",
+            "match_confirmed": "",
+            "match_confirmed_at": "",
+         },
+         "$set": {"match_unlinked_at": stamp}},
+    )
+    if editor_ids:
+        await db.transactions.update_many(
+            {"company_id": cid, "id": {"$in": editor_ids}},
+            {"$unset": {
+                "matched_bank_txn_id": "",
+                "matched_at": "",
+                "hidden_by_match": "",
+                "match_confirmed": "",
+                "match_confirmed_at": "",
+             },
+             "$set": {"match_unlinked_at": stamp}},
+        )
+    return {"ok": True, "unlinked": r_bank.modified_count}

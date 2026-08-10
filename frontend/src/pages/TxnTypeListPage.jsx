@@ -3,8 +3,56 @@ import { useNavigate } from "react-router-dom";
 import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
-import { Plus, Trash2, Pencil, Search } from "lucide-react";
+import { Plus, Trash2, Pencil, Search, CheckCircle2, Clock, Unlink } from "lucide-react";
 import { Button } from "@/components/ui/button";
+
+/**
+ * Derive the bank-match status of an editor-authored transaction
+ * from its persisted fields. Used to render the "Bank match" column
+ * on `/sales-receipts` (and any other list that turns on the
+ * `showMatchStatus` flag). Credit Memos skip this — they're A/R
+ * adjustments with no cash leg, so no bank match will ever exist.
+ *
+ * Returns { key, label, tone } where `tone` is one of:
+ *   confirmed → green solid — CPA has reviewed and locked in the pair
+ *   matched   → amber solid — silent matcher paired it, awaiting review
+ *   unlinked  → slate slash — CPA broke a prior match, tombstoned
+ *   awaiting  → amber outline — no matching bank row seen yet
+ */
+function deriveMatchStatus(row) {
+  if (row.match_confirmed) {
+    return { key: "confirmed", label: "Reconciled", tone: "confirmed" };
+  }
+  if (row.matched_bank_txn_id) {
+    return { key: "matched", label: "Matched · pending review", tone: "matched" };
+  }
+  if (row.match_unlinked_at) {
+    return { key: "unlinked", label: "Manually unlinked", tone: "unlinked" };
+  }
+  return { key: "awaiting", label: "Awaiting bank feed", tone: "awaiting" };
+}
+
+
+function MatchDot({ row }) {
+  const s = deriveMatchStatus(row);
+  const styles = {
+    confirmed: { icon: CheckCircle2, cls: "text-emerald-600" },
+    matched:   { icon: CheckCircle2, cls: "text-amber-500" },
+    unlinked:  { icon: Unlink,       cls: "text-slate-400" },
+    awaiting:  { icon: Clock,        cls: "text-amber-400" },
+  }[s.tone];
+  const Ico = styles.icon;
+  return (
+    <span
+      className="inline-flex items-center gap-1 text-[11px] text-slate-600"
+      title={s.label}
+      data-testid={`match-dot-${s.key}`}
+    >
+      <Ico size={13} className={styles.cls} />
+      <span className="hidden md:inline">{s.label}</span>
+    </span>
+  );
+}
 
 /**
  * Shared list component for txn_type-scoped ledgers — currently
@@ -25,6 +73,7 @@ export default function TxnTypeListPage({
   editRoutePrefix,  // "/sales-receipts"
   testIdPrefix,     // "sales-receipts"
   showLinkedInvoice, // boolean — true only for CreditMemo
+  showMatchStatus = false, // boolean — true for entities with a cash leg
   contactLabel = "Customer",
   emptyHint,        // helper text for empty state
 }) {
@@ -127,6 +176,9 @@ export default function TxnTypeListPage({
                 <th className="text-left px-4 py-3">Applies to</th>
               )}
               <th className="text-right px-4 py-3">Amount</th>
+              {showMatchStatus && (
+                <th className="text-left px-4 py-3">Bank match</th>
+              )}
               <th className="text-center px-4 py-3">QBO</th>
               <th className="text-right px-4 py-3">Actions</th>
             </tr>
@@ -134,7 +186,7 @@ export default function TxnTypeListPage({
           <tbody className="divide-y divide-slate-100">
             {loading && (
               <tr>
-                <td colSpan={showLinkedInvoice ? 7 : 6}
+                <td colSpan={(showLinkedInvoice ? 1 : 0) + (showMatchStatus ? 1 : 0) + 6}
                     className="px-4 py-8 text-center text-slate-400">
                   Loading…
                 </td>
@@ -142,7 +194,7 @@ export default function TxnTypeListPage({
             )}
             {!loading && filtered.length === 0 && (
               <tr>
-                <td colSpan={showLinkedInvoice ? 7 : 6}
+                <td colSpan={(showLinkedInvoice ? 1 : 0) + (showMatchStatus ? 1 : 0) + 6}
                     className="px-4 py-12 text-center text-slate-400">
                   {emptyHint}
                 </td>
@@ -172,6 +224,11 @@ export default function TxnTypeListPage({
                 <td className="px-4 py-3 text-right tabular-nums font-medium">
                   {fmtMoney(Math.abs(Number(r.amount || 0)))}
                 </td>
+                {showMatchStatus && (
+                  <td className="px-4 py-3">
+                    <MatchDot row={r} />
+                  </td>
+                )}
                 <td className="px-4 py-3 text-center">
                   {r.qbo_id ? (
                     <span
