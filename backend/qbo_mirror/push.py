@@ -786,6 +786,27 @@ async def _resolve_account_qbo_id(company_id: str,
     return str(a["qbo_id"]) if a and a.get("qbo_id") else None
 
 
+async def _default_bank_account_qbo(company_id: str) -> str | None:
+    """Best-effort fallback for a payment that doesn't specify a
+    bank account. Prefers active accounts named "Checking" (the
+    default seed), then any active QBO account with type=bank."""
+    for name_like in ("Checking", "Cash", "Bank"):
+        a = await db.accounts.find_one(
+            {"company_id": company_id, "source": "qbo",
+             "active": {"$ne": False}, "name": name_like},
+            {"qbo_id": 1, "_id": 0},
+        )
+        if a and a.get("qbo_id"):
+            return str(a["qbo_id"])
+    a = await db.accounts.find_one(
+        {"company_id": company_id, "source": "qbo",
+         "active": {"$ne": False}, "type": "bank"},
+        {"qbo_id": 1, "_id": 0},
+        sort=[("name", 1)],
+    )
+    return str(a["qbo_id"]) if a and a.get("qbo_id") else None
+
+
 async def _payment_body_in(company_id: str, pay: dict) -> dict:
     """Customer Payment body (money in). Requires:
       - contact_id → CustomerRef (fallback: linked invoice's contact_id)
@@ -860,10 +881,17 @@ async def _payment_body_out(company_id: str, pay: dict) -> dict:
     bank_qbo = await _resolve_account_qbo_id(
         company_id, pay.get("bank_account_id"))
     if not bank_qbo:
-        # BillPayment requires a paying-account ref. Fail loudly.
+        # Fall back to the company's default bank account (Checking
+        # / Cash / any type=bank). Bill payments require an account
+        # ref, and QBO's UX for it is a plain dropdown — if the user
+        # missed the field locally, silently defaulting is more
+        # forgiving than blocking the push.
+        bank_qbo = await _default_bank_account_qbo(company_id)
+    if not bank_qbo:
+        # No mapped QBO bank account at all — genuinely can't push.
         raise ValueError(
-            "Bill payment has no bank account. Set the payment "
-            "account first.")
+            "Bill payment has no bank account and no default "
+            "QBO bank account is available. Sync accounts first.")
     body: dict[str, Any] = {
         "VendorRef": {"value": vend[0], "name": vend[1]},
         "PayType": "Check",
