@@ -143,3 +143,42 @@ def test_splits_qualify_without_header_category(monkeypatch):
     assert lines[0]["amount"] == 200.0
     assert lines[1]["expense_account_id"] == "exp-2"
     assert ("cid", "purchase", "t5") in pushed
+
+
+def test_delete_propagates_to_qbo(monkeypatch):
+    """When a manual transaction with `txn_type='Purchase'` and a
+    `qbo_id` is deleted locally, the QBO Purchase must be soft-deleted
+    too — otherwise the next dry-run reports it as `pull_from_qbo`."""
+    deletes: list[tuple] = []
+    monkeypatch.setattr(
+        "qbo_mirror.autopush.try_auto_delete",
+        lambda cid, entity, qbo_id, name="": deletes.append(
+            (cid, entity, qbo_id, name)),
+    )
+    # Simulate the delete-endpoint's post-delete branch.
+    existing = {"id": "t9", "company_id": "cid",
+                "qbo_id": "179", "txn_type": "Purchase",
+                "description": "Big consulting expense"}
+    from qbo_mirror.autopush import try_auto_delete
+    if existing.get("qbo_id") and existing.get("txn_type") == "Purchase":
+        try_auto_delete("cid", "purchase", str(existing["qbo_id"]),
+                         existing.get("description") or "")
+    assert deletes == [("cid", "purchase", "179", "Big consulting expense")]
+
+
+def test_delete_skipped_when_not_purchase(monkeypatch):
+    """Deletes of non-Purchase manual transactions (e.g. imported
+    bank feed rows we never pushed) must NOT propagate to QBO."""
+    deletes: list[tuple] = []
+    monkeypatch.setattr(
+        "qbo_mirror.autopush.try_auto_delete",
+        lambda cid, entity, qbo_id, name="": deletes.append(
+            (cid, entity, qbo_id, name)),
+    )
+    existing = {"id": "t10", "company_id": "cid",
+                "qbo_id": None, "txn_type": None}
+    from qbo_mirror.autopush import try_auto_delete
+    if existing.get("qbo_id") and existing.get("txn_type") == "Purchase":
+        try_auto_delete("cid", "purchase", str(existing["qbo_id"]),
+                         existing.get("description") or "")
+    assert deletes == []

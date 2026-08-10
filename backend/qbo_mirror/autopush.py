@@ -272,7 +272,7 @@ async def _run_auto_delete(company_id: str, entity: str, qbo_id: str,
                          {"Id": qbo_id, "SyncToken": token,
                           "Active": False, "sparse": True})
         await append_log(company_id, "autodelete",
-                          f"Auto-{'delete' if entity in ('item', 'invoice', 'bill', 'payment_in', 'payment_out', 'journal_entry', 'estimate', 'purchase_order') else 'inactivate'} "
+                          f"Auto-{'delete' if entity in ('item', 'invoice', 'bill', 'payment_in', 'payment_out', 'journal_entry', 'estimate', 'purchase_order', 'purchase') else 'inactivate'} "
                           f"{entity} {qbo_id}"
                           + (f" ({entity_name})" if entity_name else ""),
                           {"entity": entity, "qbo_id": qbo_id,
