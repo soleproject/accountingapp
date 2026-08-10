@@ -348,3 +348,23 @@ def test_derive_refresh_updates_line_items_on_amount_change(monkeypatch):
     entity_out, _t, refresh_out = _derive_mirror_stamp(doc_flipped)
     assert entity_out == "purchase"
     assert refresh_out["line_items"][0]["expense_account_id"] == "inc-1"
+
+
+def test_derive_flip_from_sales_receipt_to_deposit():
+    """Regression — the stranded qbo_id bug. A SalesReceipt whose
+    customer gets cleared should re-classify to Deposit. The PATCH
+    branch then knows the txn_type flipped and must delete the old
+    QBO SalesReceipt + push a fresh Deposit (see PATCH endpoint)."""
+    from routes.transactions import _derive_mirror_stamp
+    doc = {
+        "amount": 100.0, "bank_account_id": "bank-1",
+        "contact_id": None,  # customer cleared → no longer SalesReceipt
+        "category_account_id": "inc-1",
+        "qbo_id": "38", "txn_type": "SalesReceipt",
+    }
+    entity, txn_type, _refresh = _derive_mirror_stamp(doc)
+    assert entity == "deposit"
+    assert txn_type == "Deposit"
+    # The PATCH branch (transactions.update_transaction) must see
+    # old_type != new_type here and trigger delete-old + push-new
+    # rather than silently flipping txn_type while keeping qbo_id.
