@@ -829,6 +829,23 @@ async def run_migration(job_id: str, company_id: str) -> None:
             logger.warning("PFC auto-map failed for %s: %s — user can "
                            "run manually on the settings page.",
                            company_id, e)
+        # Auto-cleanup: deactivate every seeded account that isn't
+        # referenced by any ledger doc and isn't a structural
+        # fallback. Without this, freshly-migrated QBO companies
+        # show up in the Mirror dry-run with dozens of local-only
+        # seeded accounts wanting to be pushed to QBO (creating
+        # duplicates in the CoA). Idempotent — the button on the
+        # Cleanup Duplicates page runs the same function.
+        seeded_deactivated = 0
+        try:
+            from pfc_ai_builder import apply_cleanup_all_seeded
+            r = await apply_cleanup_all_seeded(company_id)
+            seeded_deactivated = (r or {}).get("deactivated", 0)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Seeded-cleanup after migration failed for %s: %s — "
+                "user can run 'Deactivate ALL seeded' manually.",
+                company_id, e)
         await db.qbo_jobs.update_one(
             {"job_id": job_id},
             {"$set": {"status": "done", "phase": "done",
@@ -839,7 +856,8 @@ async def run_migration(job_id: str, company_id: str) -> None:
                       "transactions_signed": signed,
                       "transactions_banks_resolved": banks_resolved,
                       "transactions_posted": posted_count,
-                      "pfc_mapped": pfc_mapped}},
+                      "pfc_mapped": pfc_mapped,
+                      "seeded_deactivated": seeded_deactivated}},
         )
     except Exception as e:  # noqa: BLE001
         logger.exception("QBO migration failed for %s", company_id)
