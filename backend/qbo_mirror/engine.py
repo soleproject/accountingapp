@@ -362,6 +362,35 @@ def _norm_po_qbo(o: dict) -> dict:
     }
 
 
+# ─── Purchase normalizers (Phase 4) ────────────────────────────────
+# Purchases live in the shared `db.transactions` collection with
+# `txn_type: "Purchase"`. Local `amount` is signed (negative for
+# outflows); QBO exposes it as positive TotalAmt. Compare absolute.
+
+def _norm_purchase_local(t: dict) -> dict:
+    number = (t.get("number") or "").strip()
+    if not number and t.get("qbo_id"):
+        number = f"Purchase-{t.get('qbo_id')}"
+    return {
+        "qbo_id": t.get("qbo_id"),
+        "natural_key": f"purch::{number.lower()}",
+        "number": number,
+        "date": t.get("date") or "",
+        "total": round(abs(float(t.get("amount") or 0)), 2),
+    }
+
+
+def _norm_purchase_qbo(o: dict) -> dict:
+    number = (o.get("DocNumber") or "").strip() or f"Purchase-{o.get('Id')}"
+    return {
+        "qbo_id": o.get("Id"),
+        "natural_key": f"purch::{number.lower()}",
+        "number": number,
+        "date": o.get("TxnDate") or "",
+        "total": round(float(o.get("TotalAmt") or 0), 2),
+    }
+
+
 # ─── Diff builder ───────────────────────────────────────────────────
 # Fields whose drift is *significant* — cosmetic-only fields (e.g.
 # subtype spelling) don't count as drift to reduce noise in the report.
@@ -507,6 +536,11 @@ async def _fetch_local(company_id: str, entity: str) -> list[dict]:
         return [_norm_po_local(p)
                 async for p in db.purchase_orders.find(
                     {"company_id": company_id})]
+    if entity == "purchases":
+        return [_norm_purchase_local(t)
+                async for t in db.transactions.find(
+                    {"company_id": company_id, "txn_type": "Purchase",
+                      "voided": {"$ne": True}})]
     return []
 
 
@@ -545,6 +579,9 @@ async def _fetch_qbo(company_id: str, realm_id: str,
     if entity == "purchase_orders":
         return [_norm_po_qbo(o)
                 async for o in Q.query_all(company_id, realm_id, "PurchaseOrder")]
+    if entity == "purchases":
+        return [_norm_purchase_qbo(o)
+                async for o in Q.query_all(company_id, realm_id, "Purchase")]
     return []
 
 
@@ -571,7 +608,8 @@ async def run_dry_run(company_id: str, user_email: str) -> dict:
     # invoices flow through the same diff pipeline safely.
     for entity in ("accounts", "customers", "vendors", "items",
                     "invoices", "bills", "payments", "bill_payments",
-                    "journal_entries", "estimates", "purchase_orders"):
+                    "journal_entries", "estimates", "purchase_orders",
+                    "purchases"):
         if not entities_cfg.get(entity, True):
             continue
         try:
