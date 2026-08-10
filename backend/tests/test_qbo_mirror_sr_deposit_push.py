@@ -368,3 +368,23 @@ def test_derive_flip_from_sales_receipt_to_deposit():
     # The PATCH branch (transactions.update_transaction) must see
     # old_type != new_type here and trigger delete-old + push-new
     # rather than silently flipping txn_type while keeping qbo_id.
+
+
+def test_mirror_relevant_fields_gate():
+    """Regression — the user's suspicion: approving/unapproving a
+    transaction should NOT trigger any mirror push/pull. The PATCH
+    endpoint gates the mirror block on `_MIRROR_RELEVANT_FIELDS`
+    intersecting the incoming update. Local-only fields like
+    `human_reviewed`, `tags`, `assigned_to`, `internal_notes` must
+    not appear in the set."""
+    from routes.transactions import _MIRROR_RELEVANT_FIELDS
+    # Must-be-relevant (any of these changes → push):
+    for k in ("amount", "date", "description", "contact_id",
+              "bank_account_id", "category_account_id", "splits",
+              "line_items", "payment_type", "number"):
+        assert k in _MIRROR_RELEVANT_FIELDS, k
+    # Must NOT trigger a push (local review state only):
+    for k in ("human_reviewed", "needs_review", "posted", "tags",
+              "assigned_to", "internal_notes", "reviewed_at",
+              "approved_by"):
+        assert k not in _MIRROR_RELEVANT_FIELDS, k

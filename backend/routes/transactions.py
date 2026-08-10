@@ -1174,6 +1174,19 @@ async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depe
     return {"id": tid, "transaction": coerce(doc)}
 
 
+# Fields whose change actually matters to QBO. If a PATCH only
+# touches fields OUTSIDE this set (e.g. `human_reviewed`, `tags`,
+# `internal_notes`, `assigned_to`), it's a purely local review-state
+# change and should not fire any mirror activity.
+_MIRROR_RELEVANT_FIELDS = frozenset({
+    "amount", "date", "description", "memo", "notes", "number",
+    "contact_id", "contact_name", "bank_account_id",
+    "category_account_id", "category_account_code",
+    "category_account_name", "splits", "line_items",
+    "payment_type",
+})
+
+
 def _derive_mirror_stamp(doc: dict) -> tuple[str | None, str | None, dict | None]:
     """Given a manual transaction, classify it into a mirror entity
     and return (entity, txn_type, stamp_fields). Called from both
@@ -1360,13 +1373,12 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
             )
     await _invalidate_dash(cid)
     # QBO Mirror: existing pushed docs → update; unpushed → qualifier.
-    # For mirrored transactions we RE-DERIVE the line_items from the
-    # current header fields on every save. Without this, edits to the
-    # header amount/category/splits never propagate to QBO because
-    # the stale `line_items` array (stamped at creation) still holds
-    # the old values — QBO would just replay the same doc it already
-    # has and the twin patch would then revert the local amount.
-    if doc:
+    # Skip the whole mirror pipeline when the PATCH only touched local
+    # review/tag/note fields (e.g. `human_reviewed`, `tags`,
+    # `assigned_to`) — those never map to a QBO field and mustn't
+    # burn a full-replace push cycle.
+    mirror_relevant = bool(set(upd.keys()) & _MIRROR_RELEVANT_FIELDS)
+    if doc and mirror_relevant:
         entity_map = {"Purchase": "purchase",
                        "SalesReceipt": "sales_receipt",
                        "Deposit": "deposit"}
