@@ -28,6 +28,7 @@ import Invoices from "@/pages/Invoices";
 import Estimates from "@/pages/Estimates";
 import EstimateEditor from "@/pages/EstimateEditor";
 import PurchaseOrders from "@/pages/PurchaseOrders";
+import PurchaseOrderEditor from "@/pages/PurchaseOrderEditor";
 import InvoiceEditor from "@/pages/InvoiceEditor";
 import Bills from "@/pages/Bills";
 import BillEditor from "@/pages/BillEditor";
@@ -114,6 +115,8 @@ function App() {
               <Route path="/estimates/new" element={<EstimateEditor />} />
               <Route path="/estimates/:id/edit" element={<EstimateEditor />} />
               <Route path="/purchase-orders" element={<PurchaseOrders />} />
+              <Route path="/purchase-orders/new" element={<PurchaseOrderEditor />} />
+              <Route path="/purchase-orders/:id/edit" element={<PurchaseOrderEditor />} />
               <Route path="/invoices/new" element={<InvoiceEditor />} />
               <Route path="/invoices/:id/edit" element={<InvoiceEditor />} />
               <Route path="/bills" element={<Bills />} />

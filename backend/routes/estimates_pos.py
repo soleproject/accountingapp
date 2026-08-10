@@ -223,6 +223,17 @@ async def list_pos(cid: str, user: dict = Depends(get_current_user)):
     return {"purchase_orders": rows}
 
 
+@router.get("/companies/{cid}/purchase-orders/{pid}")
+async def get_po(cid: str, pid: str,
+                  user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    doc = await db.purchase_orders.find_one({"id": pid, "company_id": cid})
+    if not doc:
+        raise HTTPException(status_code=404,
+                             detail="Purchase order not found")
+    return {"purchase_order": _coerce(doc)}
+
+
 @router.post("/companies/{cid}/purchase-orders")
 async def create_po(cid: str, inp: PurchaseOrderCreate,
                      user: dict = Depends(get_current_user)):
