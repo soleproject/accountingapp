@@ -22,10 +22,12 @@ from qbo_mirror.push import (
     _post, _acct_body, _contact_body, _item_body, _invoice_body,
     _bill_body, _payment_body_in, _payment_body_out,
     _journal_entry_body, _estimate_body, _po_body, _purchase_body,
+    _sales_receipt_body, _deposit_body,
     _local_patch_from_qbo_invoice, _local_patch_from_qbo_bill,
     _local_patch_from_qbo_payment, _local_patch_from_qbo_je,
     _local_patch_from_qbo_estimate, _local_patch_from_qbo_po,
     _local_patch_from_qbo_purchase,
+    _local_patch_from_qbo_sales_receipt, _local_patch_from_qbo_deposit,
 )
 
 logger = logging.getLogger(__name__)
@@ -179,6 +181,28 @@ async def _push_one_purchase(company_id: str, realm_id: str,
     return (str(new_id) if new_id else None, twin_patch)
 
 
+async def _push_one_sales_receipt(company_id: str, realm_id: str,
+                                    doc: dict) -> tuple[str | None, dict | None]:
+    body = await _sales_receipt_body(company_id, doc)
+    resp = await _post(company_id, realm_id,
+                        f"/company/{realm_id}/salesreceipt", body)
+    twin = resp.get("SalesReceipt") or {}
+    new_id = twin.get("Id")
+    twin_patch = _local_patch_from_qbo_sales_receipt(twin) if new_id else None
+    return (str(new_id) if new_id else None, twin_patch)
+
+
+async def _push_one_deposit(company_id: str, realm_id: str,
+                              doc: dict) -> tuple[str | None, dict | None]:
+    body = await _deposit_body(company_id, doc)
+    resp = await _post(company_id, realm_id,
+                        f"/company/{realm_id}/deposit", body)
+    twin = resp.get("Deposit") or {}
+    new_id = twin.get("Id")
+    twin_patch = _local_patch_from_qbo_deposit(twin) if new_id else None
+    return (str(new_id) if new_id else None, twin_patch)
+
+
 # ─── Update / Delete helpers ───────────────────────────────────────
 # QBO requires the current SyncToken on every update/delete — a sparse
 # update endpoint means "give me the FULL updated doc plus the token".
@@ -198,6 +222,8 @@ _ENTITY_META = {
     "estimate":       ("estimate",     "Estimate",      "estimates", None),
     "purchase_order": ("purchaseorder","PurchaseOrder", "purchase_orders", None),
     "purchase":       ("purchase",     "Purchase",      "transactions", None),
+    "sales_receipt":  ("salesreceipt", "SalesReceipt",  "transactions", None),
+    "deposit":        ("deposit",      "Deposit",       "transactions", None),
 }
 
 
@@ -258,7 +284,7 @@ async def _run_auto_delete(company_id: str, entity: str, qbo_id: str,
                          operation="delete")
         elif entity in ("invoice", "bill", "payment_in", "payment_out",
                         "journal_entry", "estimate", "purchase_order",
-                        "purchase"):
+                        "purchase", "sales_receipt", "deposit"):
             # All these transactional entities support hard delete
             # via ?operation=delete.
             await _post(company_id, realm_id,
@@ -272,7 +298,7 @@ async def _run_auto_delete(company_id: str, entity: str, qbo_id: str,
                          {"Id": qbo_id, "SyncToken": token,
                           "Active": False, "sparse": True})
         await append_log(company_id, "autodelete",
-                          f"Auto-{'delete' if entity in ('item', 'invoice', 'bill', 'payment_in', 'payment_out', 'journal_entry', 'estimate', 'purchase_order', 'purchase') else 'inactivate'} "
+                          f"Auto-{'delete' if entity in ('item', 'invoice', 'bill', 'payment_in', 'payment_out', 'journal_entry', 'estimate', 'purchase_order', 'purchase', 'sales_receipt', 'deposit') else 'inactivate'} "
                           f"{entity} {qbo_id}"
                           + (f" ({entity_name})" if entity_name else ""),
                           {"entity": entity, "qbo_id": qbo_id,
@@ -304,7 +330,7 @@ async def _run_auto_update(company_id: str, entity: str,
         if entity in ("invoice", "bill", "payment_in",
                        "payment_out", "journal_entry",
                        "estimate", "purchase_order",
-                       "purchase") and not doc.get("qbo_id"):
+                       "purchase", "sales_receipt", "deposit") and not doc.get("qbo_id"):
             if not doc.get("voided"):
                 await _run_one(company_id, entity, doc_id)
             return
@@ -408,6 +434,26 @@ async def _run_auto_update(company_id: str, entity: str,
                     {"entity": entity, "doc_id": doc_id,
                      "reason": str(ve)})
                 return
+        elif entity == "sales_receipt":
+            try:
+                body = await _sales_receipt_body(company_id, doc)
+            except ValueError as ve:
+                await append_log(
+                    company_id, "autoupdate",
+                    f"Auto-update sales_receipt {doc_id} skipped: {ve}",
+                    {"entity": entity, "doc_id": doc_id,
+                     "reason": str(ve)})
+                return
+        elif entity == "deposit":
+            try:
+                body = await _deposit_body(company_id, doc)
+            except ValueError as ve:
+                await append_log(
+                    company_id, "autoupdate",
+                    f"Auto-update deposit {doc_id} skipped: {ve}",
+                    {"entity": entity, "doc_id": doc_id,
+                     "reason": str(ve)})
+                return
         elif entity in ("payment_in", "payment_out", "journal_entry"):
             # Payment/JE UPDATE is deliberately a no-op for MVP —
             # amount/linkage/line changes on QBO require reversing
@@ -433,7 +479,8 @@ async def _run_auto_update(company_id: str, entity: str,
         # we need a full replace so QBO overwrites the Line array
         # with our values.
         if entity not in ("invoice", "bill", "estimate",
-                            "purchase_order", "purchase"):
+                            "purchase_order", "purchase",
+                            "sales_receipt", "deposit"):
             body["sparse"] = True
 
         resp = await _post(company_id, realm_id,
@@ -472,6 +519,16 @@ async def _run_auto_update(company_id: str, entity: str,
             twin = resp.get("Purchase") or {}
             if twin:
                 set_patch = {**_local_patch_from_qbo_purchase(twin),
+                             **set_patch}
+        elif entity == "sales_receipt":
+            twin = resp.get("SalesReceipt") or {}
+            if twin:
+                set_patch = {**_local_patch_from_qbo_sales_receipt(twin),
+                             **set_patch}
+        elif entity == "deposit":
+            twin = resp.get("Deposit") or {}
+            if twin:
+                set_patch = {**_local_patch_from_qbo_deposit(twin),
                              **set_patch}
         await db[coll].update_one(
             {"id": doc_id},
@@ -566,6 +623,8 @@ _HANDLERS = {
     "estimate":       ("estimates", _push_one_estimate, None),
     "purchase_order": ("purchase_orders", _push_one_po, None),
     "purchase":       ("transactions", _push_one_purchase, None),
+    "sales_receipt":  ("transactions", _push_one_sales_receipt, None),
+    "deposit":        ("transactions", _push_one_deposit, None),
 }
 
 
@@ -585,6 +644,8 @@ _ENTITY_TO_CFG_KEY = {
     "estimate":       "estimates",
     "purchase_order": "purchase_orders",
     "purchase":       "purchases",
+    "sales_receipt":  "sales_receipts",
+    "deposit":        "deposits",
 }
 
 
