@@ -182,6 +182,39 @@ def test_estimate_converted_includes_linked_invoice(monkeypatch):
     assert body["LinkedTxn"] == [{"TxnType": "Invoice", "TxnId": "555"}]
 
 
+def test_po_converted_includes_linked_bill(monkeypatch):
+    """Same LinkedTxn behaviour for PO→Bill conversion — the pushed
+    PO body must include POStatus="Closed" and LinkedTxn pointing at
+    the resulting bill."""
+    class _FDB(_FakeDB):
+        def __init__(self, contacts, accounts, items, invoices=None, bills=None):
+            super().__init__(contacts=contacts, accounts=accounts,
+                             items=items, invoices=invoices)
+            self.bills = _Coll(bills or [])
+    fake = _FDB(
+        contacts=[{"id": "vend-1", "company_id": "cid", "qbo_id": "88",
+                    "name": "SupplyCo", "display_name": "SupplyCo"}],
+        accounts=[{"id": "exp-1", "company_id": "cid",
+                    "qbo_id": "42", "name": "Office Supplies",
+                    "source": "qbo", "type": "expense"}],
+        items=[],
+        bills=[{"id": "bill-abc", "company_id": "cid", "qbo_id": "999"}],
+    )
+    import qbo_mirror.push as _push_mod
+    monkeypatch.setattr(_push_mod, "db", fake)
+    monkeypatch.setattr(_db_mod, "db", fake)
+    from qbo_mirror.push import _po_body
+    po = {
+        "id": "p1", "contact_id": "vend-1",
+        "issue_date": "2026-08-10", "status": "converted",
+        "converted_bill_id": "bill-abc",
+        "line_items": [{"expense_account_id": "exp-1", "amount": 10}],
+    }
+    body = _run(_po_body("cid", po))
+    assert body["POStatus"] == "Closed"
+    assert body["LinkedTxn"] == [{"TxnType": "Bill", "TxnId": "999"}]
+
+
 def test_estimate_converted_without_invoice_qbo_id_omits_linked(monkeypatch):
     """If the invoice hasn't been synced yet, LinkedTxn should NOT
     be emitted (QBO would reject an unknown TxnId). Status alone still
@@ -213,7 +246,12 @@ def test_drift_normalizer_maps_converted_to_closed():
     """Local `status='converted'` on an estimate must not surface as
     field drift after we push Closed to QBO. The engine's
     normalizer should treat both as equivalent."""
-    from qbo_mirror.engine import _norm_estimate_local, _norm_estimate_qbo
+    from qbo_mirror.engine import (
+        _norm_estimate_local, _norm_estimate_qbo,
+        _norm_po_local, _norm_po_qbo,
+        _norm_bill_local, _norm_bill_qbo,
+        _norm_invoice_local, _norm_invoice_qbo,
+    )
     local = _norm_estimate_local({
         "number": "EST-100", "issue_date": "2026-08-10",
         "total": 100.0, "status": "converted", "qbo_id": "999",
@@ -223,4 +261,39 @@ def test_drift_normalizer_maps_converted_to_closed():
         "TotalAmt": 100.0, "TxnStatus": "Closed",
     })
     assert local["status"] == qbo["status"] == "closed"
+
+    # PO converted → closed equivalence
+    po_local = _norm_po_local({
+        "number": "PO-100", "issue_date": "2026-08-10",
+        "total": 50.0, "status": "converted", "qbo_id": "12",
+    })
+    po_qbo = _norm_po_qbo({
+        "Id": "12", "DocNumber": "PO-100", "TxnDate": "2026-08-10",
+        "TotalAmt": 50.0, "POStatus": "Closed",
+    })
+    assert po_local["status"] == po_qbo["status"] == "closed"
+
+    # Bills / invoices with empty local number but qbo_id must
+    # synthesize the same fake number as the QBO side.
+    b_local = _norm_bill_local({
+        "number": "", "qbo_id": "173", "issue_date": "2026-08-10",
+        "total": 5650, "balance_due": 5650,
+    })
+    b_qbo = _norm_bill_qbo({
+        "Id": "173", "DocNumber": "", "TxnDate": "2026-08-10",
+        "TotalAmt": 5650, "Balance": 5650,
+    })
+    assert b_local["number"] == b_qbo["number"] == "BILL-173"
+    assert b_local["natural_key"] == b_qbo["natural_key"]
+
+    i_local = _norm_invoice_local({
+        "number": "", "qbo_id": "42", "issue_date": "2026-01-01",
+        "total": 100, "balance_due": 100,
+    })
+    i_qbo = _norm_invoice_qbo({
+        "Id": "42", "DocNumber": "", "TxnDate": "2026-01-01",
+        "TotalAmt": 100, "Balance": 100,
+    })
+    assert i_local["number"] == i_qbo["number"] == "INV-42"
+    assert i_local["natural_key"] == i_qbo["natural_key"]
 
