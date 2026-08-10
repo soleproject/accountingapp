@@ -1810,6 +1810,234 @@ async def _push_deposits(company_id: str, realm_id: str) -> dict:
     return {"inserted": inserted, "failed": failed}
 
 
+# ─── CreditMemo push (Phase 4c) ────────────────────────────────────
+# Customer credit that reduces future invoice balance. No cash side.
+# QBO shape: CustomerRef, Line[] with SalesItemLineDetail.ItemRef.
+
+async def _credit_memo_body(company_id: str, txn: dict) -> dict:
+    if not txn.get("contact_id"):
+        raise ValueError(
+            "CreditMemo requires a customer. Set `contact_id`.")
+    cust = await _resolve_customer_ref(company_id, txn.get("contact_id"))
+    if not cust:
+        raise ValueError("Customer not synced to QBO.")
+    lines_out: list[dict] = []
+    item_cache: tuple[str, str] | None = None
+    src_lines = (txn.get("line_items") or [{
+        "amount": abs(float(txn.get("amount") or 0)),
+        "description": txn.get("description") or "",
+        "category_account_id": txn.get("category_account_id"),
+    }])
+    for idx, li in enumerate(src_lines, start=1):
+        amount = abs(float(li.get("amount") or 0))
+        description = (li.get("description") or "").strip()
+        item_ref: tuple[str, str] | None = None
+        if li.get("item_id"):
+            it = await db.items.find_one(
+                {"id": li["item_id"], "company_id": company_id},
+                {"qbo_id": 1, "name": 1, "_id": 0},
+            )
+            if it and it.get("qbo_id"):
+                item_ref = (str(it["qbo_id"]), it.get("name") or "")
+        if not item_ref:
+            if item_cache is None:
+                item_cache = await _default_income_item_qbo(
+                    company_id, li.get("category_account_id")
+                    or txn.get("category_account_id"))
+            item_ref = item_cache
+        if not item_ref:
+            raise ValueError(
+                f"Line {idx}: no QBO-synced item available.")
+        lines_out.append({
+            "DetailType": "SalesItemLineDetail",
+            "Amount": round(amount, 2),
+            "Description": description,
+            "SalesItemLineDetail": {
+                "ItemRef": {"value": item_ref[0], "name": item_ref[1]},
+                "Qty": 1,
+                "UnitPrice": round(amount, 2),
+            },
+        })
+    body: dict[str, Any] = {
+        "CustomerRef": {"value": cust[0], "name": cust[1]},
+        "Line": lines_out,
+    }
+    if txn.get("date"):
+        body["TxnDate"] = txn["date"]
+    if txn.get("number"):
+        body["DocNumber"] = str(txn["number"])[:21]
+    if txn.get("memo") or txn.get("notes"):
+        body["PrivateNote"] = str(txn.get("memo")
+                                    or txn.get("notes"))[:4000]
+    return body
+
+
+def _local_patch_from_qbo_credit_memo(twin: dict) -> dict:
+    patch: dict[str, Any] = {
+        "amount": round(float(twin.get("TotalAmt") or 0), 2),
+        "direction": "in",  # credit reduces receivable → net effect in
+    }
+    if twin.get("TxnDate"):
+        patch["date"] = twin["TxnDate"]
+    if twin.get("DocNumber"):
+        patch["number"] = twin["DocNumber"]
+    return patch
+
+
+async def _push_credit_memos(company_id: str, realm_id: str) -> dict:
+    inserted = 0
+    failed: list[dict] = []
+    async for t in db.transactions.find(
+        {"company_id": company_id, "txn_type": "CreditMemo",
+          "source": {"$ne": "qbo"},
+         "$or": [{"qbo_id": {"$exists": False}},
+                 {"qbo_id": {"$in": [None, ""]}}]},
+    ):
+        try:
+            body = await _credit_memo_body(company_id, t)
+            resp = await _post(
+                company_id, realm_id,
+                f"/company/{realm_id}/creditmemo", body,
+            )
+            twin = resp.get("CreditMemo") or {}
+            new_id = twin.get("Id")
+            if not new_id:
+                failed.append({"id": t["id"], "error": "no Id"})
+                continue
+            twin_patch = _local_patch_from_qbo_credit_memo(twin)
+            await db.transactions.update_one(
+                {"id": t["id"]},
+                {"$set": {**twin_patch,
+                          "qbo_id": str(new_id), "realm_id": realm_id,
+                          "_sync_origin": "mirror_push",
+                          "_sync_status": "synced",
+                          "updated_at": now_iso()}},
+            )
+            inserted += 1
+        except Exception as ex:  # noqa: BLE001
+            failed.append({"id": t["id"], "error": str(ex)[:400]})
+    return {"inserted": inserted, "failed": failed}
+
+
+# ─── RefundReceipt push (Phase 4c) ─────────────────────────────────
+# Cash refund to a customer. QBO shape: CustomerRef,
+# DepositToAccountRef (source of cash — inverse of SalesReceipt),
+# Line[] with SalesItemLineDetail.ItemRef.
+
+async def _refund_receipt_body(company_id: str, txn: dict) -> dict:
+    if not txn.get("contact_id"):
+        raise ValueError(
+            "RefundReceipt requires a customer. Set `contact_id`.")
+    cust = await _resolve_customer_ref(company_id, txn.get("contact_id"))
+    if not cust:
+        raise ValueError("Customer not synced to QBO.")
+    src_acct = await _resolve_account_ref(
+        company_id, txn.get("bank_account_id"))
+    if not src_acct:
+        raise ValueError(
+            "Source account (bank) missing or not synced to QBO.")
+    lines_out: list[dict] = []
+    item_cache: tuple[str, str] | None = None
+    src_lines = (txn.get("line_items") or [{
+        "amount": abs(float(txn.get("amount") or 0)),
+        "description": txn.get("description") or "",
+        "category_account_id": txn.get("category_account_id"),
+    }])
+    for idx, li in enumerate(src_lines, start=1):
+        amount = abs(float(li.get("amount") or 0))
+        description = (li.get("description") or "").strip()
+        item_ref: tuple[str, str] | None = None
+        if li.get("item_id"):
+            it = await db.items.find_one(
+                {"id": li["item_id"], "company_id": company_id},
+                {"qbo_id": 1, "name": 1, "_id": 0},
+            )
+            if it and it.get("qbo_id"):
+                item_ref = (str(it["qbo_id"]), it.get("name") or "")
+        if not item_ref:
+            if item_cache is None:
+                item_cache = await _default_income_item_qbo(
+                    company_id, li.get("category_account_id")
+                    or txn.get("category_account_id"))
+            item_ref = item_cache
+        if not item_ref:
+            raise ValueError(
+                f"Line {idx}: no QBO-synced item available.")
+        lines_out.append({
+            "DetailType": "SalesItemLineDetail",
+            "Amount": round(amount, 2),
+            "Description": description,
+            "SalesItemLineDetail": {
+                "ItemRef": {"value": item_ref[0], "name": item_ref[1]},
+                "Qty": 1,
+                "UnitPrice": round(amount, 2),
+            },
+        })
+    body: dict[str, Any] = {
+        "CustomerRef": {"value": cust[0], "name": cust[1]},
+        "DepositToAccountRef": {"value": src_acct[0], "name": src_acct[1]},
+        "Line": lines_out,
+    }
+    if txn.get("date"):
+        body["TxnDate"] = txn["date"]
+    if txn.get("number"):
+        body["DocNumber"] = str(txn["number"])[:21]
+    if txn.get("memo") or txn.get("notes"):
+        body["PrivateNote"] = str(txn.get("memo")
+                                    or txn.get("notes"))[:4000]
+    return body
+
+
+def _local_patch_from_qbo_refund_receipt(twin: dict) -> dict:
+    # RefundReceipt is a cash outflow to a customer → negative local
+    # amount, direction "out".
+    total = float(twin.get("TotalAmt") or 0)
+    patch: dict[str, Any] = {
+        "amount": -round(abs(total), 2),
+        "direction": "out",
+    }
+    if twin.get("TxnDate"):
+        patch["date"] = twin["TxnDate"]
+    if twin.get("DocNumber"):
+        patch["number"] = twin["DocNumber"]
+    return patch
+
+
+async def _push_refund_receipts(company_id: str, realm_id: str) -> dict:
+    inserted = 0
+    failed: list[dict] = []
+    async for t in db.transactions.find(
+        {"company_id": company_id, "txn_type": "RefundReceipt",
+          "source": {"$ne": "qbo"},
+         "$or": [{"qbo_id": {"$exists": False}},
+                 {"qbo_id": {"$in": [None, ""]}}]},
+    ):
+        try:
+            body = await _refund_receipt_body(company_id, t)
+            resp = await _post(
+                company_id, realm_id,
+                f"/company/{realm_id}/refundreceipt", body,
+            )
+            twin = resp.get("RefundReceipt") or {}
+            new_id = twin.get("Id")
+            if not new_id:
+                failed.append({"id": t["id"], "error": "no Id"})
+                continue
+            twin_patch = _local_patch_from_qbo_refund_receipt(twin)
+            await db.transactions.update_one(
+                {"id": t["id"]},
+                {"$set": {**twin_patch,
+                          "qbo_id": str(new_id), "realm_id": realm_id,
+                          "_sync_origin": "mirror_push",
+                          "_sync_status": "synced",
+                          "updated_at": now_iso()}},
+            )
+            inserted += 1
+        except Exception as ex:  # noqa: BLE001
+            failed.append({"id": t["id"], "error": str(ex)[:400]})
+    return {"inserted": inserted, "failed": failed}
+
+
 async def run_push(company_id: str, user_email: str,
                     entities: list[str] | None = None) -> dict:
     """Outbound-only sync — create local-only Foundation entities on
@@ -1826,7 +2054,8 @@ async def run_push(company_id: str, user_email: str,
         entities = ["accounts", "customers", "vendors", "items",
                      "invoices", "bills", "payments", "bill_payments",
                      "journal_entries", "estimates", "purchase_orders",
-                     "purchases", "sales_receipts", "deposits"]
+                     "purchases", "sales_receipts", "deposits",
+                     "credit_memos", "refund_receipts"]
 
     result: dict[str, dict] = {}
     for e in entities:
@@ -1861,6 +2090,10 @@ async def run_push(company_id: str, user_email: str,
                 result[e] = await _push_sales_receipts(company_id, realm_id)
             elif e == "deposits":
                 result[e] = await _push_deposits(company_id, realm_id)
+            elif e == "credit_memos":
+                result[e] = await _push_credit_memos(company_id, realm_id)
+            elif e == "refund_receipts":
+                result[e] = await _push_refund_receipts(company_id, realm_id)
         except Exception as err:  # noqa: BLE001
             result[e] = {"error": str(err)}
 

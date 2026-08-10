@@ -1381,7 +1381,9 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
     if doc and mirror_relevant:
         entity_map = {"Purchase": "purchase",
                        "SalesReceipt": "sales_receipt",
-                       "Deposit": "deposit"}
+                       "Deposit": "deposit",
+                       "CreditMemo": "credit_memo",
+                       "RefundReceipt": "refund_receipt"}
         if doc.get("qbo_id") and doc.get("txn_type") in entity_map:
             _entity, new_type, refresh = _derive_mirror_stamp(doc)
             if refresh:
@@ -2781,11 +2783,14 @@ async def delete_transaction(cid: str, tid: str, user: dict = Depends(get_curren
     await _invalidate_dash(cid)
     # QBO Mirror: propagate delete for any mirrored txn_type.
     if existing and existing.get("qbo_id") \
-            and existing.get("txn_type") in ("Purchase", "SalesReceipt", "Deposit"):
+            and existing.get("txn_type") in ("Purchase", "SalesReceipt", "Deposit",
+                                              "CreditMemo", "RefundReceipt"):
         from qbo_mirror.autopush import try_auto_delete
         entity = {"Purchase": "purchase",
                    "SalesReceipt": "sales_receipt",
-                   "Deposit": "deposit"}[existing["txn_type"]]
+                   "Deposit": "deposit",
+                   "CreditMemo": "credit_memo",
+                   "RefundReceipt": "refund_receipt"}[existing["txn_type"]]
         try_auto_delete(cid, entity, str(existing["qbo_id"]),
                          existing.get("description") or existing.get("number") or "")
     return {"ok": True, **cascade}

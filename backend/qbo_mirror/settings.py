@@ -36,6 +36,8 @@ DEFAULTS = {
         "purchases": True,
         "sales_receipts": True,
         "deposits": True,
+        "credit_memos": True,
+        "refund_receipts": True,
         "transfers": False,
         "payments": True,
         "bill_payments": True,
