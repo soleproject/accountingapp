@@ -1166,58 +1166,112 @@ async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depe
         await log_ai(cid, "flag_review", 1)
     await db.transactions.insert_one(doc)
     await _invalidate_dash(cid)
-    # QBO Mirror: outflow (expense) manual transactions with a source
-    # bank/CC account + expense category are pushed to QBO as a
-    # `Purchase`. Tags txn_type so the mirror pipeline picks it up.
+    # QBO Mirror: qualifier decides whether this manual transaction
+    # maps to a Purchase (outflow), SalesReceipt (inflow + customer)
+    # or Deposit (inflow, no customer). Tags txn_type accordingly
+    # so the mirror pipeline picks it up.
     _maybe_autopush_purchase(cid, tid, doc)
     return {"id": tid, "transaction": coerce(doc)}
 
 
 def _maybe_autopush_purchase(cid: str, tid: str, doc: dict) -> None:
-    """Stamp `txn_type='Purchase'` and fire autopush when a manual
-    transaction qualifies (outflow, bank + expense category set).
+    """Classify a manual transaction into one of three QBO entities
+    based on its shape, then stamp `txn_type` and fire the matching
+    fire-and-forget autopush.
+
+      Outflow (amount < 0) + bank + category/splits  →  Purchase
+      Inflow  (amount > 0) + bank + customer         →  SalesReceipt
+      Inflow  (amount > 0) + bank + no customer      →  Deposit
+
     Runs synchronously — the actual QBO POST is fire-and-forget."""
     try:
         amt = float(doc.get("amount") or 0)
-        if amt >= 0:
-            return  # inflows are not Purchases (they'd be Deposit/SalesReceipt)
         if not doc.get("bank_account_id"):
+            return  # every mirrored type needs a bank/CC source or target
+        if amt == 0:
             return
-        # Category or split lines must be present so QBO gets a valid
-        # AccountBasedExpenseLineDetail. Splits are enough; single-line
-        # requires category_account_id.
-        if not doc.get("category_account_id") and not doc.get("splits"):
-            return
-        # Build the QBO-shaped line_items array from either the split
-        # array or the header category — the mirror push builder reads
-        # `line_items[].expense_account_id`.
-        if doc.get("splits"):
-            lines = [{"expense_account_id": s.get("category_account_id"),
-                       "description": s.get("description")
-                                       or doc.get("description") or "",
-                       "amount": abs(float(s.get("amount") or 0))}
-                      for s in doc["splits"] if s.get("category_account_id")]
+
+        set_patch: dict | None = None
+        entity: str | None = None
+
+        if amt < 0:
+            # ── Purchase / Expense ──
+            if not doc.get("category_account_id") and not doc.get("splits"):
+                return
+            if doc.get("splits"):
+                lines = [{"expense_account_id": s.get("category_account_id"),
+                           "description": s.get("description")
+                                           or doc.get("description") or "",
+                           "amount": abs(float(s.get("amount") or 0))}
+                          for s in doc["splits"]
+                          if s.get("category_account_id")]
+            else:
+                lines = [{"expense_account_id": doc["category_account_id"],
+                           "description": doc.get("description") or "",
+                           "amount": abs(amt)}]
+            set_patch = {
+                "txn_type": "Purchase",
+                "direction": "out",
+                "line_items": lines,
+                "payment_type": doc.get("payment_type") or "Cash",
+            }
+            entity = "purchase"
         else:
-            lines = [{"expense_account_id": doc["category_account_id"],
-                       "description": doc.get("description") or "",
-                       "amount": abs(amt)}]
-        # Detect the source account type to pick a sensible PaymentType.
-        # (Full resolution happens inside `_purchase_body`; we just set
-        # a hint here.)
+            # ── Inflow: SalesReceipt vs. Deposit ──
+            # SalesReceipt needs a customer AND at least a placeholder
+            # income category so the QBO push has something to book
+            # against (an item is looked up server-side).
+            if doc.get("contact_id"):
+                if doc.get("splits"):
+                    lines = [{"category_account_id": s.get("category_account_id"),
+                               "description": s.get("description")
+                                               or doc.get("description") or "",
+                               "amount": abs(float(s.get("amount") or 0))}
+                              for s in doc["splits"]]
+                else:
+                    lines = [{"category_account_id": doc.get("category_account_id"),
+                               "description": doc.get("description") or "",
+                               "amount": abs(amt)}]
+                set_patch = {
+                    "txn_type": "SalesReceipt",
+                    "direction": "in",
+                    "line_items": lines,
+                }
+                entity = "sales_receipt"
+            else:
+                # Deposit — no customer. Needs at least a source
+                # (income/other) account on each line.
+                if not doc.get("category_account_id") and not doc.get("splits"):
+                    return
+                if doc.get("splits"):
+                    lines = [{"category_account_id": s.get("category_account_id"),
+                               "description": s.get("description")
+                                               or doc.get("description") or "",
+                               "amount": abs(float(s.get("amount") or 0))}
+                              for s in doc["splits"]
+                              if s.get("category_account_id")]
+                else:
+                    lines = [{"category_account_id": doc["category_account_id"],
+                               "description": doc.get("description") or "",
+                               "amount": abs(amt)}]
+                set_patch = {
+                    "txn_type": "Deposit",
+                    "direction": "in",
+                    "line_items": lines,
+                }
+                entity = "deposit"
+
+        if not set_patch or not entity:
+            return
+
         from qbo_mirror.autopush import try_auto_push
-        set_patch = {
-            "txn_type": "Purchase",
-            "direction": "out",
-            "line_items": lines,
-            "payment_type": doc.get("payment_type") or "Cash",
-        }
         import asyncio as _aio
         async def _stamp_and_push():
             await db.transactions.update_one(
                 {"id": tid, "company_id": cid},
                 {"$set": set_patch},
             )
-            try_auto_push(cid, "purchase", tid)
+            try_auto_push(cid, entity, tid)
         try:
             _aio.create_task(_stamp_and_push())
         except RuntimeError:
@@ -1314,13 +1368,16 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
                 confidence=1.0, source="user",
             )
     await _invalidate_dash(cid)
-    # QBO Mirror: if the txn already exists on QBO (has qbo_id), push
-    # the update. Otherwise, if it now qualifies as a Purchase, kick
-    # off the initial autopush (via the same stamp+push helper).
+    # QBO Mirror: existing pushed docs → update; unpushed → qualifier.
     if doc:
-        if doc.get("qbo_id") and doc.get("txn_type") == "Purchase":
+        if doc.get("qbo_id") and doc.get("txn_type") in (
+            "Purchase", "SalesReceipt", "Deposit"
+        ):
             from qbo_mirror.autopush import try_auto_update
-            try_auto_update(cid, "purchase", tid)
+            entity = {"Purchase": "purchase",
+                       "SalesReceipt": "sales_receipt",
+                       "Deposit": "deposit"}[doc["txn_type"]]
+            try_auto_update(cid, entity, tid)
         elif not doc.get("qbo_id"):
             _maybe_autopush_purchase(cid, tid, doc)
     return {"transaction": coerce(doc)}
@@ -2663,13 +2720,14 @@ async def delete_transaction(cid: str, tid: str, user: dict = Depends(get_curren
     cascade = await cascade_on_transaction_delete(cid, existing or {})
     await db.transactions.delete_one({"id": tid, "company_id": cid})
     await _invalidate_dash(cid)
-    # QBO Mirror: if this was a Purchase we'd pushed to QBO, propagate
-    # the delete so the two sides stay consistent (otherwise the next
-    # dry-run reports it as `pull_from_qbo`).
+    # QBO Mirror: propagate delete for any mirrored txn_type.
     if existing and existing.get("qbo_id") \
-            and existing.get("txn_type") == "Purchase":
+            and existing.get("txn_type") in ("Purchase", "SalesReceipt", "Deposit"):
         from qbo_mirror.autopush import try_auto_delete
-        try_auto_delete(cid, "purchase", str(existing["qbo_id"]),
+        entity = {"Purchase": "purchase",
+                   "SalesReceipt": "sales_receipt",
+                   "Deposit": "deposit"}[existing["txn_type"]]
+        try_auto_delete(cid, entity, str(existing["qbo_id"]),
                          existing.get("description") or existing.get("number") or "")
     return {"ok": True, **cascade}
 

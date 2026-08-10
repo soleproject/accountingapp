@@ -78,11 +78,15 @@ def test_outflow_expense_qualifies(monkeypatch):
 
 
 def test_inflow_does_not_qualify(monkeypatch):
+    """Inflow WITHOUT a bank_account_id still can't be mirrored — the
+    qualifier needs a source or destination account. (With a customer
+    and a bank set, it would now stamp SalesReceipt — see
+    test_qbo_mirror_sr_deposit_push.py.)"""
     stamped, pushed, _tx = _install_stubs(monkeypatch)
     doc = {
         "id": "t2", "company_id": "cid",
-        "amount": 500.0,  # positive → inflow, not a Purchase
-        "bank_account_id": "bank-1",
+        "amount": 500.0,
+        "bank_account_id": None,  # no bank → skip
         "category_account_id": "rev-1",
     }
     async def _drive():

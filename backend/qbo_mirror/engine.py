@@ -391,6 +391,61 @@ def _norm_purchase_qbo(o: dict) -> dict:
     }
 
 
+# ─── SalesReceipt / Deposit normalizers (Phase 4b) ─────────────────
+# Same pattern: local rows live in `db.transactions`, amount is
+# positive for inflows. Both entities have optional DocNumber → we
+# synthesise `SR-{id}` / `Dep-{id}` when empty to keep both sides
+# symmetric.
+
+def _norm_sales_receipt_local(t: dict) -> dict:
+    number = (t.get("number") or "").strip()
+    if not number and t.get("qbo_id"):
+        number = f"SR-{t.get('qbo_id')}"
+    return {
+        "qbo_id": t.get("qbo_id"),
+        "natural_key": f"sr::{number.lower()}",
+        "number": number,
+        "date": t.get("date") or "",
+        "total": round(abs(float(t.get("amount") or 0)), 2),
+    }
+
+
+def _norm_sales_receipt_qbo(o: dict) -> dict:
+    number = (o.get("DocNumber") or "").strip() or f"SR-{o.get('Id')}"
+    return {
+        "qbo_id": o.get("Id"),
+        "natural_key": f"sr::{number.lower()}",
+        "number": number,
+        "date": o.get("TxnDate") or "",
+        "total": round(float(o.get("TotalAmt") or 0), 2),
+    }
+
+
+def _norm_deposit_local(t: dict) -> dict:
+    number = (t.get("number") or "").strip()
+    if not number and t.get("qbo_id"):
+        number = f"Dep-{t.get('qbo_id')}"
+    return {
+        "qbo_id": t.get("qbo_id"),
+        "natural_key": f"dep::{number.lower()}",
+        "number": number,
+        "date": t.get("date") or "",
+        "total": round(abs(float(t.get("amount") or 0)), 2),
+    }
+
+
+def _norm_deposit_qbo(o: dict) -> dict:
+    # Deposits often lack a DocNumber; fall back to id.
+    number = (o.get("DocNumber") or "").strip() or f"Dep-{o.get('Id')}"
+    return {
+        "qbo_id": o.get("Id"),
+        "natural_key": f"dep::{number.lower()}",
+        "number": number,
+        "date": o.get("TxnDate") or "",
+        "total": round(float(o.get("TotalAmt") or 0), 2),
+    }
+
+
 # ─── Diff builder ───────────────────────────────────────────────────
 # Fields whose drift is *significant* — cosmetic-only fields (e.g.
 # subtype spelling) don't count as drift to reduce noise in the report.
@@ -418,6 +473,8 @@ _DRIFT_FIELDS = {
     # normalised to abs `total`; both sides synthesize the same
     # `Purchase-{qbo_id}` fallback when DocNumber is empty.
     "purchases":       ["number", "date", "total"],
+    "sales_receipts":  ["number", "date", "total"],
+    "deposits":        ["number", "date", "total"],
 }
 
 
@@ -545,6 +602,16 @@ async def _fetch_local(company_id: str, entity: str) -> list[dict]:
                 async for t in db.transactions.find(
                     {"company_id": company_id, "txn_type": "Purchase",
                       "voided": {"$ne": True}})]
+    if entity == "sales_receipts":
+        return [_norm_sales_receipt_local(t)
+                async for t in db.transactions.find(
+                    {"company_id": company_id, "txn_type": "SalesReceipt",
+                      "voided": {"$ne": True}})]
+    if entity == "deposits":
+        return [_norm_deposit_local(t)
+                async for t in db.transactions.find(
+                    {"company_id": company_id, "txn_type": "Deposit",
+                      "voided": {"$ne": True}})]
     return []
 
 
@@ -586,6 +653,12 @@ async def _fetch_qbo(company_id: str, realm_id: str,
     if entity == "purchases":
         return [_norm_purchase_qbo(o)
                 async for o in Q.query_all(company_id, realm_id, "Purchase")]
+    if entity == "sales_receipts":
+        return [_norm_sales_receipt_qbo(o)
+                async for o in Q.query_all(company_id, realm_id, "SalesReceipt")]
+    if entity == "deposits":
+        return [_norm_deposit_qbo(o)
+                async for o in Q.query_all(company_id, realm_id, "Deposit")]
     return []
 
 
@@ -613,7 +686,7 @@ async def run_dry_run(company_id: str, user_email: str) -> dict:
     for entity in ("accounts", "customers", "vendors", "items",
                     "invoices", "bills", "payments", "bill_payments",
                     "journal_entries", "estimates", "purchase_orders",
-                    "purchases"):
+                    "purchases", "sales_receipts", "deposits"):
         if not entities_cfg.get(entity, True):
             continue
         try:
