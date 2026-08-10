@@ -27,6 +27,7 @@ const GROUPS = [
     label: "Sales & Payments",
     icon: FileText,
     items: [
+      { to: "/estimates", label: "Estimates", icon: FileText },
       { to: "/invoices", label: "Invoices", icon: FileText },
       { to: "/payments?direction=in", label: "Payments", icon: CreditCard, matchPath: "/payments" },
       { to: "/items?usage=sales", label: "Products & Services", icon: Package, matchPath: "/items" },
@@ -40,6 +41,7 @@ const GROUPS = [
     label: "Purchases",
     icon: ShoppingCart,
     items: [
+      { to: "/purchase-orders", label: "Purchase Orders", icon: FileText },
       { to: "/bills", label: "Bills", icon: Receipt },
       { to: "/payments?direction=out", label: "Payments", icon: CreditCard, matchPath: "/payments" },
       { to: "/items?usage=purchases", label: "Items", icon: Package, matchPath: "/items" },

@@ -21,9 +21,10 @@ from qbo_mirror.settings import is_enabled, append_log
 from qbo_mirror.push import (
     _post, _acct_body, _contact_body, _item_body, _invoice_body,
     _bill_body, _payment_body_in, _payment_body_out,
-    _journal_entry_body,
+    _journal_entry_body, _estimate_body, _po_body,
     _local_patch_from_qbo_invoice, _local_patch_from_qbo_bill,
     _local_patch_from_qbo_payment, _local_patch_from_qbo_je,
+    _local_patch_from_qbo_estimate, _local_patch_from_qbo_po,
 )
 
 logger = logging.getLogger(__name__)
@@ -144,6 +145,28 @@ async def _push_one_journal_entry(company_id: str, realm_id: str,
     return (str(new_id) if new_id else None, twin_patch)
 
 
+async def _push_one_estimate(company_id: str, realm_id: str,
+                               doc: dict) -> tuple[str | None, dict | None]:
+    body = await _estimate_body(company_id, doc)
+    resp = await _post(company_id, realm_id,
+                        f"/company/{realm_id}/estimate", body)
+    twin = resp.get("Estimate") or {}
+    new_id = twin.get("Id")
+    twin_patch = _local_patch_from_qbo_estimate(twin) if new_id else None
+    return (str(new_id) if new_id else None, twin_patch)
+
+
+async def _push_one_po(company_id: str, realm_id: str,
+                        doc: dict) -> tuple[str | None, dict | None]:
+    body = await _po_body(company_id, doc)
+    resp = await _post(company_id, realm_id,
+                        f"/company/{realm_id}/purchaseorder", body)
+    twin = resp.get("PurchaseOrder") or {}
+    new_id = twin.get("Id")
+    twin_patch = _local_patch_from_qbo_po(twin) if new_id else None
+    return (str(new_id) if new_id else None, twin_patch)
+
+
 # ─── Update / Delete helpers ───────────────────────────────────────
 # QBO requires the current SyncToken on every update/delete — a sparse
 # update endpoint means "give me the FULL updated doc plus the token".
@@ -151,15 +174,17 @@ async def _push_one_journal_entry(company_id: str, realm_id: str,
 # is current (stale tokens 400 with "stale object" errors).
 
 _ENTITY_META = {
-    "account":       ("account",  "Account",  "accounts", None),
-    "customer":      ("customer", "Customer", "contacts", "customer"),
-    "vendor":        ("vendor",   "Vendor",   "contacts", "vendor"),
-    "item":          ("item",     "Item",     "items",    None),
-    "invoice":       ("invoice",  "Invoice",  "invoices", None),
-    "bill":          ("bill",     "Bill",     "bills",    None),
-    "payment_in":    ("payment",     "Payment",     "payments", None),
-    "payment_out":   ("billpayment", "BillPayment", "payments", None),
-    "journal_entry": ("journalentry", "JournalEntry", "journal_entries", None),
+    "account":        ("account",  "Account",  "accounts", None),
+    "customer":       ("customer", "Customer", "contacts", "customer"),
+    "vendor":         ("vendor",   "Vendor",   "contacts", "vendor"),
+    "item":           ("item",     "Item",     "items",    None),
+    "invoice":        ("invoice",  "Invoice",  "invoices", None),
+    "bill":           ("bill",     "Bill",     "bills",    None),
+    "payment_in":     ("payment",     "Payment",     "payments", None),
+    "payment_out":    ("billpayment", "BillPayment", "payments", None),
+    "journal_entry":  ("journalentry", "JournalEntry", "journal_entries", None),
+    "estimate":       ("estimate",     "Estimate",      "estimates", None),
+    "purchase_order": ("purchaseorder","PurchaseOrder", "purchase_orders", None),
 }
 
 
@@ -218,9 +243,10 @@ async def _run_auto_delete(company_id: str, entity: str, qbo_id: str,
                          f"/company/{realm_id}/{qbo_path}",
                          {"Id": qbo_id, "SyncToken": token},
                          operation="delete")
-        elif entity in ("invoice", "bill", "payment_in", "payment_out", "journal_entry"):
-            # Invoice, Bill, Payment, BillPayment, JournalEntry all
-            # support hard delete via ?operation=delete.
+        elif entity in ("invoice", "bill", "payment_in", "payment_out",
+                        "journal_entry", "estimate", "purchase_order"):
+            # All these transactional entities support hard delete
+            # via ?operation=delete.
             await _post(company_id, realm_id,
                          f"/company/{realm_id}/{qbo_path}",
                          {"Id": qbo_id, "SyncToken": token},
@@ -232,7 +258,7 @@ async def _run_auto_delete(company_id: str, entity: str, qbo_id: str,
                          {"Id": qbo_id, "SyncToken": token,
                           "Active": False, "sparse": True})
         await append_log(company_id, "autodelete",
-                          f"Auto-{'delete' if entity in ('item', 'invoice', 'bill', 'payment_in', 'payment_out', 'journal_entry') else 'inactivate'} "
+                          f"Auto-{'delete' if entity in ('item', 'invoice', 'bill', 'payment_in', 'payment_out', 'journal_entry', 'estimate', 'purchase_order') else 'inactivate'} "
                           f"{entity} {qbo_id}"
                           + (f" ({entity_name})" if entity_name else ""),
                           {"entity": entity, "qbo_id": qbo_id,
@@ -262,7 +288,8 @@ async def _run_auto_update(company_id: str, entity: str,
         # failed). Route through the fresh-push path so the doc
         # lands on QBO. The _run_one filter blocks voided rows.
         if entity in ("invoice", "bill", "payment_in",
-                       "payment_out", "journal_entry") and not doc.get("qbo_id"):
+                       "payment_out", "journal_entry",
+                       "estimate", "purchase_order") and not doc.get("qbo_id"):
             if not doc.get("voided"):
                 await _run_one(company_id, entity, doc_id)
             return
@@ -334,6 +361,28 @@ async def _run_auto_update(company_id: str, entity: str,
                     {"entity": entity, "doc_id": doc_id,
                      "reason": str(ve)})
                 return
+        elif entity == "estimate":
+            # Full-replace update for Estimate — same rationale as
+            # invoice/bill (line changes must round-trip).
+            try:
+                body = await _estimate_body(company_id, doc)
+            except ValueError as ve:
+                await append_log(
+                    company_id, "autoupdate",
+                    f"Auto-update estimate {doc_id} skipped: {ve}",
+                    {"entity": entity, "doc_id": doc_id,
+                     "reason": str(ve)})
+                return
+        elif entity == "purchase_order":
+            try:
+                body = await _po_body(company_id, doc)
+            except ValueError as ve:
+                await append_log(
+                    company_id, "autoupdate",
+                    f"Auto-update purchase_order {doc_id} skipped: {ve}",
+                    {"entity": entity, "doc_id": doc_id,
+                     "reason": str(ve)})
+                return
         elif entity in ("payment_in", "payment_out", "journal_entry"):
             # Payment/JE UPDATE is deliberately a no-op for MVP —
             # amount/linkage/line changes on QBO require reversing
@@ -358,7 +407,7 @@ async def _run_auto_update(company_id: str, entity: str,
         # Invoices and bills are exceptions: to sync line-item edits
         # we need a full replace so QBO overwrites the Line array
         # with our values.
-        if entity not in ("invoice", "bill"):
+        if entity not in ("invoice", "bill", "estimate", "purchase_order"):
             body["sparse"] = True
 
         resp = await _post(company_id, realm_id,
@@ -382,6 +431,16 @@ async def _run_auto_update(company_id: str, entity: str,
             twin = resp.get("Bill") or {}
             if twin:
                 set_patch = {**_local_patch_from_qbo_bill(twin),
+                             **set_patch}
+        elif entity == "estimate":
+            twin = resp.get("Estimate") or {}
+            if twin:
+                set_patch = {**_local_patch_from_qbo_estimate(twin),
+                             **set_patch}
+        elif entity == "purchase_order":
+            twin = resp.get("PurchaseOrder") or {}
+            if twin:
+                set_patch = {**_local_patch_from_qbo_po(twin),
                              **set_patch}
         await db[coll].update_one(
             {"id": doc_id},
@@ -464,15 +523,17 @@ def try_auto_update(company_id: str, entity: str, doc_id: str) -> None:
 
 # Registry so the hook stays tiny at each call site.
 _HANDLERS = {
-    "account":       ("accounts", _push_one_account,     None),
-    "customer":      ("contacts", _push_one_contact,     "customer"),
-    "vendor":        ("contacts", _push_one_contact,     "vendor"),
-    "item":          ("items",    _push_one_item,        None),
-    "invoice":       ("invoices", _push_one_invoice,     None),
-    "bill":          ("bills",    _push_one_bill,        None),
-    "payment_in":    ("payments", _push_one_payment_in,  None),
-    "payment_out":   ("payments", _push_one_payment_out, None),
-    "journal_entry": ("journal_entries", _push_one_journal_entry, None),
+    "account":        ("accounts", _push_one_account,     None),
+    "customer":       ("contacts", _push_one_contact,     "customer"),
+    "vendor":         ("contacts", _push_one_contact,     "vendor"),
+    "item":           ("items",    _push_one_item,        None),
+    "invoice":        ("invoices", _push_one_invoice,     None),
+    "bill":           ("bills",    _push_one_bill,        None),
+    "payment_in":     ("payments", _push_one_payment_in,  None),
+    "payment_out":    ("payments", _push_one_payment_out, None),
+    "journal_entry":  ("journal_entries", _push_one_journal_entry, None),
+    "estimate":       ("estimates", _push_one_estimate, None),
+    "purchase_order": ("purchase_orders", _push_one_po, None),
 }
 
 
@@ -480,15 +541,17 @@ _HANDLERS = {
 # Auto-push respects the per-entity toggles in the Mirror settings —
 # if the user unchecked "Customers", we don't autopush new customers.
 _ENTITY_TO_CFG_KEY = {
-    "account":       "accounts",
-    "customer":      "customers",
-    "vendor":        "vendors",
-    "item":          "items",
-    "invoice":       "invoices",
-    "bill":          "bills",
-    "payment_in":    "payments",
-    "payment_out":   "bill_payments",
-    "journal_entry": "journal_entries",
+    "account":        "accounts",
+    "customer":       "customers",
+    "vendor":         "vendors",
+    "item":           "items",
+    "invoice":        "invoices",
+    "bill":           "bills",
+    "payment_in":     "payments",
+    "payment_out":    "bill_payments",
+    "journal_entry":  "journal_entries",
+    "estimate":       "estimates",
+    "purchase_order": "purchase_orders",
 }
 
 

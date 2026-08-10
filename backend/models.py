@@ -86,6 +86,48 @@ class RuleCreate(BaseModel):
     account_name: Optional[str] = None
     apply_to_existing: bool = True
 
+class EstimateCreate(BaseModel):
+    """Sales-cycle quote — a pre-invoice document sent to a
+    customer for pricing approval. Structurally close to
+    InvoiceCreate but with `expiration_date` instead of `due_date`
+    and a different status vocabulary."""
+    number: Optional[str] = None
+    contact_id: Optional[str] = None
+    contact_name: Optional[str] = ""
+    issue_date: str
+    expiration_date: Optional[str] = ""
+    line_items: list
+    tax: float = 0.0
+    notes: Optional[str] = ""
+    status: str = "draft"  # "draft" | "sent" | "accepted" | "rejected" | "closed"
+    po_number: Optional[str] = ""
+    shipping: float = 0.0
+    discount: float = 0.0
+    discount_type: Optional[str] = "amount"
+    internal_notes: Optional[str] = ""
+    attachments: Optional[list] = []
+    title: Optional[str] = ""
+    summary: Optional[str] = ""
+
+
+class PurchaseOrderCreate(BaseModel):
+    """Vendor-side pre-bill — a commitment to purchase. Structurally
+    close to BillCreate but with a `status` vocabulary reflecting
+    the fulfillment lifecycle rather than payment state."""
+    number: Optional[str] = None
+    contact_id: Optional[str] = None
+    contact_name: Optional[str] = ""
+    issue_date: str
+    due_date: Optional[str] = ""
+    line_items: list
+    tax: float = 0.0
+    notes: Optional[str] = ""
+    status: str = "open"  # "open" | "closed" | "converted"
+    internal_notes: Optional[str] = ""
+    attachments: Optional[list] = []
+
+
+
 
 class InvoiceCreate(BaseModel):
     number: Optional[str] = None

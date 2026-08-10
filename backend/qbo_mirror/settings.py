@@ -39,6 +39,8 @@ DEFAULTS = {
         "payments": True,
         "bill_payments": True,
         "journal_entries": True,
+        "estimates": True,
+        "purchase_orders": True,
     },
     # Conflict policy default. Only "qbo_wins" is implemented in
     # Phase 1; other values silently fall back.

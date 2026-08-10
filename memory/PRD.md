@@ -4519,3 +4519,42 @@ prevention.
 - **Plaid `TRANSFER_OUT_ACCOUNT_TRANSFER`** — still routing to 6999.
 - **Estimates + Purchase Orders** — new doc types wired to mirror
   from day one.
+
+
+## 2026-08-10 — Phase 3 (Estimates + Purchase Orders)
+
+**Status**: SHIPPED. Two new doc types with full bi-directional
+mirror + one-click convert workflow.
+
+### Endpoints
+- `GET/POST /companies/{cid}/estimates`
+- `PATCH/DELETE /companies/{cid}/estimates/{eid}`
+- `POST /companies/{cid}/estimates/{eid}/convert` → Invoice
+- `GET/POST /companies/{cid}/purchase-orders`
+- `PATCH/DELETE /companies/{cid}/purchase-orders/{pid}`
+- `POST /companies/{cid}/purchase-orders/{pid}/convert` → Bill
+
+### DB collections (new)
+- `db.estimates`: `id, company_id, number, contact_id,
+  contact_name, issue_date, expiration_date, line_items,
+  status (draft|sent|accepted|rejected|closed|converted),
+  total, subtotal, discount_amount, tax, shipping, notes,
+  internal_notes, source (opt: "qbo"), qbo_id, _sync_status,
+  converted_invoice_id, source_estimate_id (on the resulting
+  invoice)`
+- `db.purchase_orders`: same shape, `status
+  (open|closed|converted)`, `converted_bill_id`, `source_po_id`
+  (on the resulting bill).
+
+### Deferred (documented)
+- Full multi-line editor + PDF preview + attachments (MVP uses
+  single-line create dialog; users convert-to-invoice to finish).
+- Reverse-linking (deleting the resulting invoice/bill doesn't
+  reopen the estimate/PO).
+
+### Next up
+- Background Auto-Pull Polling (~30 min) → truly hands-off QBO→us
+- Sync Status Badges — 🟡/🟢/🔴 pips on all list rows
+- Plaid Transfer routing bug
+- Deposits & Transfers push (needs authoring UI)
+- Real-time QBO webhooks (Phase 4)

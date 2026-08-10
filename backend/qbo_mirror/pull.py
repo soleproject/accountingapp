@@ -433,6 +433,153 @@ async def _pull_journal_entries(company_id: str, realm_id: str) -> dict:
     return {"inserted": inserted, "updated": updated}
 
 
+async def _pull_estimates(company_id: str, realm_id: str) -> dict:
+    """Phase 3 — bring QBO Estimates local. QBO Wins on drift."""
+    existing = await _existing_qbo_ids(company_id, "estimates",
+                                        any_source=True)
+    inserted = 0
+    updated = 0
+    async for obj in Q.query_all(company_id, realm_id, "Estimate"):
+        qid = str(obj.get("Id"))
+        # QBO Estimate → local shape (structured similar to invoice
+        # but with expiration_date instead of due_date).
+        mapped = {
+            "id": f"qbo-{company_id[:8]}-estimate-{qid}",
+            "company_id": company_id,
+            "qbo_id": qid, "realm_id": realm_id, "source": "qbo",
+            "number": (obj.get("DocNumber") or "").strip()
+                       or f"EST-{qid}",
+            "contact_id": None,
+            "contact_name": ((obj.get("CustomerRef") or {})
+                              .get("name") or ""),
+            "contact_qbo_id": ((obj.get("CustomerRef") or {})
+                                .get("value")),
+            "issue_date": obj.get("TxnDate") or "",
+            "expiration_date": obj.get("ExpirationDate") or "",
+            "total": round(float(obj.get("TotalAmt") or 0), 2),
+            "status": {
+                "Pending": "sent", "Accepted": "accepted",
+                "Rejected": "rejected", "Closed": "closed",
+            }.get(obj.get("TxnStatus") or "", "sent"),
+            "notes": ((obj.get("CustomerMemo") or {}).get("value")
+                       or ""),
+            "internal_notes": obj.get("PrivateNote") or "",
+            "line_items": [
+                {"description": ln.get("Description") or "",
+                  "amount": float(ln.get("Amount") or 0),
+                  "quantity": float(((ln.get("SalesItemLineDetail")
+                                        or {}).get("Qty")) or 1),
+                  "rate": float(((ln.get("SalesItemLineDetail")
+                                    or {}).get("UnitPrice")) or 0),
+                  "item_qbo_id": ((ln.get("SalesItemLineDetail")
+                                     or {}).get("ItemRef") or {})
+                                  .get("value")}
+                for ln in (obj.get("Line") or [])
+                if ln.get("DetailType") == "SalesItemLineDetail"
+            ],
+            "_sync_origin": "mirror_pull",
+            "created_at": now_iso(), "updated_at": now_iso(),
+        }
+        # Resolve contact_qbo_id → local contact_id.
+        c = await db.contacts.find_one(
+            {"company_id": company_id,
+             "qbo_id": mapped["contact_qbo_id"]},
+            {"id": 1, "_id": 0},
+        )
+        if c:
+            mapped["contact_id"] = c["id"]
+        if qid in existing:
+            patch = {k: mapped[k] for k in
+                     ["total", "status", "expiration_date",
+                      "issue_date", "line_items", "contact_id"]
+                     if k in mapped}
+            patch["_sync_origin"] = "mirror_pull"
+            patch["updated_at"] = now_iso()
+            await db.estimates.update_one(
+                {"company_id": company_id, "qbo_id": qid},
+                {"$set": patch},
+            )
+            updated += 1
+        else:
+            await db.estimates.insert_one(mapped)
+            inserted += 1
+    return {"inserted": inserted, "updated": updated}
+
+
+async def _pull_purchase_orders(company_id: str, realm_id: str) -> dict:
+    """Phase 3 — bring QBO Purchase Orders local. QBO Wins on drift."""
+    existing = await _existing_qbo_ids(company_id, "purchase_orders",
+                                        any_source=True)
+    inserted = 0
+    updated = 0
+    async for obj in Q.query_all(company_id, realm_id, "PurchaseOrder"):
+        qid = str(obj.get("Id"))
+        mapped = {
+            "id": f"qbo-{company_id[:8]}-po-{qid}",
+            "company_id": company_id,
+            "qbo_id": qid, "realm_id": realm_id, "source": "qbo",
+            "number": (obj.get("DocNumber") or "").strip()
+                       or f"PO-{qid}",
+            "contact_id": None,
+            "contact_name": ((obj.get("VendorRef") or {})
+                              .get("name") or ""),
+            "contact_qbo_id": ((obj.get("VendorRef") or {})
+                                .get("value")),
+            "issue_date": obj.get("TxnDate") or "",
+            "due_date": obj.get("DueDate") or "",
+            "total": round(float(obj.get("TotalAmt") or 0), 2),
+            "status": {"Open": "open", "Closed": "closed"}.get(
+                obj.get("POStatus") or "", "open"),
+            "notes": obj.get("Memo") or "",
+            "internal_notes": obj.get("PrivateNote") or "",
+            "line_items": [
+                {"description": ln.get("Description") or "",
+                  "amount": float(ln.get("Amount") or 0),
+                  "account_qbo_id": ((ln.get(
+                      "AccountBasedExpenseLineDetail") or {})
+                      .get("AccountRef") or {}).get("value")}
+                for ln in (obj.get("Line") or [])
+                if ln.get("DetailType")
+                    == "AccountBasedExpenseLineDetail"
+            ],
+            "_sync_origin": "mirror_pull",
+            "created_at": now_iso(), "updated_at": now_iso(),
+        }
+        # Resolve contact_qbo_id → local contact_id + line account_id.
+        c = await db.contacts.find_one(
+            {"company_id": company_id,
+             "qbo_id": mapped["contact_qbo_id"]},
+            {"id": 1, "_id": 0},
+        )
+        if c:
+            mapped["contact_id"] = c["id"]
+        for ln in mapped["line_items"]:
+            if ln.get("account_qbo_id"):
+                a = await db.accounts.find_one(
+                    {"company_id": company_id,
+                     "qbo_id": ln["account_qbo_id"]},
+                    {"id": 1, "_id": 0},
+                )
+                if a:
+                    ln["expense_account_id"] = a["id"]
+        if qid in existing:
+            patch = {k: mapped[k] for k in
+                     ["total", "status", "due_date", "issue_date",
+                      "line_items", "contact_id"]
+                     if k in mapped}
+            patch["_sync_origin"] = "mirror_pull"
+            patch["updated_at"] = now_iso()
+            await db.purchase_orders.update_one(
+                {"company_id": company_id, "qbo_id": qid},
+                {"$set": patch},
+            )
+            updated += 1
+        else:
+            await db.purchase_orders.insert_one(mapped)
+            inserted += 1
+    return {"inserted": inserted, "updated": updated}
+
+
 async def run_pull(company_id: str, user_email: str,
                     entities: list[str] | None = None) -> dict:
     """Execute a Pull for each Foundation entity in `entities`
@@ -448,7 +595,7 @@ async def run_pull(company_id: str, user_email: str,
     if entities is None:
         entities = ["accounts", "customers", "vendors", "items",
                      "invoices", "bills", "payments", "bill_payments",
-                     "journal_entries"]
+                     "journal_entries", "estimates", "purchase_orders"]
 
     result: dict[str, dict] = {}
     for e in entities:
@@ -475,6 +622,10 @@ async def run_pull(company_id: str, user_email: str,
                     company_id, realm_id, "out", "BillPayment")
             elif e == "journal_entries":
                 result[e] = await _pull_journal_entries(company_id, realm_id)
+            elif e == "estimates":
+                result[e] = await _pull_estimates(company_id, realm_id)
+            elif e == "purchase_orders":
+                result[e] = await _pull_purchase_orders(company_id, realm_id)
         except Exception as err:  # noqa: BLE001
             result[e] = {"error": str(err)}
 
