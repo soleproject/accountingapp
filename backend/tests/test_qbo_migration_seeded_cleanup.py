@@ -39,3 +39,25 @@ def test_seeded_deactivated_reported_in_job_doc():
     src = inspect.getsource(qbo_service.run_migration)
     assert '"seeded_deactivated"' in src, (
         "job status update must include a `seeded_deactivated` field")
+
+
+def test_run_migration_pulls_estimates_and_pos_from_mirror():
+    """Regression — the 10-pull-from-QBO bug after fresh migration.
+    Estimates and POs have no mapper in the legacy migration list
+    (they're mirror-only entities added post-launch). `run_migration`
+    must call the mirror's `run_pull` for those two entities at the
+    tail, otherwise a freshly-migrated company shows 10+ dry-run
+    pulls the user has to trigger manually."""
+    import qbo_service
+    src = inspect.getsource(qbo_service.run_migration)
+    assert "run_pull" in src, (
+        "run_migration must call the mirror `run_pull` at the tail "
+        "to import Estimates + Purchase Orders")
+    assert '"estimates"' in src and '"purchase_orders"' in src, (
+        "the mirror pull call must explicitly request estimates and "
+        "purchase_orders entities")
+    assert '"mirror_estimates_pulled"' in src, (
+        "job status update must include a `mirror_estimates_pulled` "
+        "count so the completion banner can report it")
+    assert '"mirror_pos_pulled"' in src, (
+        "job status update must include a `mirror_pos_pulled` count")
