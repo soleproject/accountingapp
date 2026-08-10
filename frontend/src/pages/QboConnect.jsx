@@ -136,6 +136,19 @@ export default function QboConnect() {
   const running = job && (job.status === "queued" || job.status === "running");
   const done = job && job.status === "done";
 
+  // Wizard progression — determine which step is the "active" one
+  // so we can highlight ONE button in filled emerald + downgrade
+  // earlier completed steps to the outline (border) variant. The user's
+  // eye always lands on the next thing to do.
+  //   activeStep = 1 (connect) → 2 (preview) → 3 (migrate) → 4 (mirror)
+  let activeStep = 1;
+  if (status?.connected) activeStep = 2;
+  if (preview)           activeStep = 3;
+  if (done)              activeStep = 4;
+  const filled  = "px-4 py-2 rounded-md bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-40 inline-flex items-center gap-2";
+  const outline = "px-4 py-2 rounded-md border-2 border-emerald-600 bg-white text-emerald-700 text-sm font-medium hover:bg-emerald-50 disabled:opacity-40 inline-flex items-center gap-2";
+  const btnCls  = (step) => activeStep === step ? filled : outline;
+
   return (
     <div className="p-6 max-w-5xl" data-testid="qbo-connect-page">
       <div className="flex items-start gap-4 mb-6">
@@ -218,7 +231,7 @@ export default function QboConnect() {
             onClick={runPreview}
             disabled={busy || !status?.connected}
             data-testid="qbo-preview-btn"
-            className="px-4 py-2 rounded-md border bg-white text-sm hover:bg-slate-50 disabled:opacity-40 inline-flex items-center gap-2"
+            className={btnCls(2)}
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
             Preview what will import
@@ -259,7 +272,7 @@ export default function QboConnect() {
             onClick={startMigration}
             disabled={busy || !preview}
             data-testid="qbo-migrate-btn"
-            className="px-4 py-2 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-40 inline-flex items-center gap-2"
+            className={btnCls(3)}
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
             Start migration
@@ -407,7 +420,7 @@ export default function QboConnect() {
         <button
           onClick={() => navigate("/settings/qbo-mirror")}
           data-testid="qbo-mirror-open-btn"
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-indigo-300 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 text-sm font-medium"
+          className={btnCls(4)}
         >
           <RefreshCw size={14} />
           Open Live Mirror
