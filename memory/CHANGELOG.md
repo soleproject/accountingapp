@@ -235,3 +235,68 @@ balances on both sides.
 - Fixed cross-file `db` monkeypatch bug: `from db import db`
   binds the reference at import time; tests now also patch
   `qbo_mirror.push.db` directly so the fake propagates.
+
+
+## 2026-08-10 — QBO Mirror Phase 2f: Journal Entries
+
+**JE mirror complete.** Journal Entries authored in-app auto-push
+to QBO; QBO JEs pull down into local ledger. Rounds out the last
+common transaction type pros need bi-directionally synced.
+
+**Scope decision**: This phase covers **Journal Entries only**.
+Deposits and Transfers live in `db.transactions` (mixed with Plaid
+and every other transaction type) and have no in-app authoring
+UI, so push has no source and pull would duplicate the existing
+migration/sync path. Deferred to a later phase where we build
+"Add Deposit" / "Add Transfer" UIs and integrate carefully with
+the Plaid pipeline.
+
+**Backend**
+- `qbo_mirror/push.py`:
+  - `_journal_entry_body()` — builds a QBO JournalEntry payload
+    with proper `PostingType: Debit|Credit` + `AccountRef` per
+    line. Rejects on any of: same-line-both-postings,
+    unbalanced totals, unmapped account, empty JE. DocNumber
+    caps at 21 chars.
+  - `_push_journal_entries()` — bulk pusher (create only; JE
+    updates are documented no-op).
+  - `_local_patch_from_qbo_je()` — twin patch (date, number, memo).
+  - `_resolve_account_ref_by_id_or_name()` — resilient resolver
+    that falls back to `account_name` when `account_id` is
+    missing (legacy GL imports).
+- `qbo_mirror/pull.py`:
+  - `_pull_journal_entries()` — matches by qbo_id, resolves each
+    line's `account_qbo_id` back to local `account_id` so
+    downstream reports don't need name-based joins.
+- `qbo_mirror/autopush.py`:
+  - `_push_one_journal_entry()` handler.
+  - `journal_entry` registered in `_ENTITY_META`, `_HANDLERS`,
+    `_ENTITY_TO_CFG_KEY`.
+  - `_run_auto_update()` — JE branch documented no-op (audit
+    trail preservation would require QBO Line.Ids we don't
+    carry locally).
+  - `_run_auto_delete()` — JE uses `?operation=delete`.
+- `qbo_mirror/engine.py`:
+  - JE normalizers (`_norm_je_local` / `_norm_je_qbo`).
+  - qbo_id-only matching, no field drift for MVP.
+  - JE included in dry-run entity loop.
+- `qbo_mirror/settings.py` — `journal_entries: True` in defaults.
+- `routes/journal.py` — `create_je` fires `try_auto_push`;
+  `delete_je` captures qbo_id and fires `try_auto_delete`.
+
+**Frontend**
+- `pages/QboMirror.jsx` — "Journal Entries" row added to
+  ENTITIES + push/pull whitelists.
+
+**Deliberately deferred**
+- JE UPDATE mirroring (audit-trail preservation needs QBO
+  per-line Ids). UX: delete + recreate.
+- Deposits/Transfers push (no in-app authoring surface yet).
+- Deposits/Transfers pull-via-mirror (existing migration path
+  already covers this).
+
+**Regression coverage**
+- `tests/test_qbo_mirror_je_push.py` — 8 unit tests: happy path,
+  same-line rejects, unbalanced, unmapped account, empty, doc
+  truncation, twin patch, account_name fallback.
+- All 4 mirror test files: **28/28 pass**.
