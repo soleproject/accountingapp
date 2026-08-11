@@ -968,6 +968,18 @@ async def run_migration(job_id: str, company_id: str) -> None:
                 mirror_pulled[k] = (r.get("inserted", 0)
                                      + r.get("updated", 0))
                 skipped_dupkey += r.get("skipped_dupkey", 0)
+            # Diagnostic — surface inventory_adjustment skip reasons
+            # to the migration log so we can see WHY the tile shows 0
+            # despite the preview count being > 0.
+            inv_adj_stats = (pr or {}).get("inventory_adjustments") or {}
+            if inv_adj_stats.get("skipped"):
+                logger.info(
+                    "InventoryAdjustment pull: seen=%d inserted=%d "
+                    "skipped=%d reasons=%s",
+                    inv_adj_stats.get("seen", 0),
+                    inv_adj_stats.get("inserted", 0),
+                    inv_adj_stats.get("skipped", 0),
+                    inv_adj_stats.get("skip_reasons", {}))
         except Exception as e:  # noqa: BLE001
             logger.warning(
                 "Post-migration mirror pull failed for %s: %s — "

@@ -475,9 +475,13 @@ async def _pull_inventory_adjustments(
                 "inserted": 0, "updated": 0}
     inserted = 0
     updated = 0
+    skipped = 0
+    skip_reasons: dict[str, int] = {}
+    seen = 0
     async for obj in Q.query_all(
         company_id, realm_id, "InventoryAdjustment",
     ):
+        seen += 1
         qid = str(obj.get("Id"))
         mapped = Q.map_inventory_adjustment(company_id, realm_id, obj)
         # Resolve contra account (AdjustAccountRef → local account).
@@ -489,9 +493,12 @@ async def _pull_inventory_adjustments(
             })
         # Price each line at the local item's cost — the value
         # signed by QtyDiff sign gives us the debit/credit split.
+        # Fallback chain: local item.cost → QBO line.Amount (rare
+        # but populated when QBO computed a value at save time).
         priced_lines = []
         net_dollars = 0.0
-        for ln in mapped["inventory_adjustment_lines"]:
+        raw_lines = obj.get("Line") or []
+        for i, ln in enumerate(mapped["inventory_adjustment_lines"]):
             item = None
             if ln["item_qbo_id"]:
                 item = await db.items.find_one({
@@ -500,6 +507,13 @@ async def _pull_inventory_adjustments(
                 })
             cost = float((item or {}).get("cost") or 0)
             qty = float(ln["qty_diff"] or 0)
+            # QBO occasionally populates `Amount` on the line itself
+            # — usually only for pre-QBO-Online adjustments migrated
+            # from Desktop. Use it as a last-resort fallback.
+            if cost <= 0 and i < len(raw_lines):
+                amt_fallback = float(raw_lines[i].get("Amount") or 0)
+                if amt_fallback and qty:
+                    cost = round(abs(amt_fallback / qty), 4)
             if cost <= 0 or qty == 0:
                 continue
             value = round(abs(qty) * cost, 2)
@@ -515,6 +529,19 @@ async def _pull_inventory_adjustments(
         # to record. `net_dollars > 0` means inventory grew (write-
         # up); `< 0` means it shrunk (writedown).
         if net_dollars == 0 or not priced_lines:
+            skipped += 1
+            reason = ("no_priced_lines" if not priced_lines
+                       else "zero_net_dollars")
+            skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
+            # Diagnostic log — helps production debugging when the
+            # migration banner shows "Inv adjustments: 0" despite
+            # QBO showing a non-zero preview count.
+            import logging
+            logging.getLogger(__name__).info(
+                "InventoryAdjustment %s skipped (%s): "
+                "raw_lines=%d priced=%d net=$%.2f contra=%s",
+                qid, reason, len(raw_lines), len(priced_lines),
+                net_dollars, mapped["adjust_account_name"] or "?")
             continue
         abs_val = abs(round(net_dollars, 2))
         if net_dollars > 0:  # inventory INCREASED
@@ -564,7 +591,9 @@ async def _pull_inventory_adjustments(
                             "updated_at": now_iso()}},
             )
             updated += 1
-    return {"inserted": inserted, "updated": updated}
+    return {"inserted": inserted, "updated": updated,
+             "skipped": skipped, "seen": seen,
+             "skip_reasons": skip_reasons}
 
 
 
