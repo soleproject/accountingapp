@@ -563,35 +563,21 @@ export default function Transactions() {
     setSelected(new Set());
   };
 
-  // Options for the advanced-filter panel — bank accounts + contacts.
-  // Fetched once per company (not on every filter change) since these
-  // reference tables change infrequently relative to txns.
-  const [filterBankOptions, setFilterBankOptions] = useState([]);
+  // Contact options for the advanced-filter panel. Fetched once per
+  // company since contacts change infrequently relative to txns. The
+  // Bank account filter is sourced from `accts` (chart of accounts) so
+  // it doesn't need its own fetch — all Asset + Liability rows appear
+  // in the dropdown, banks, credit cards, loans and A/R/A/P alike.
   const [filterContactOptions, setFilterContactOptions] = useState([]);
   useEffect(() => {
     if (!currentId) return;
-    Promise.all([
-      api.get(`/companies/${currentId}/plaid/accounts`).catch(() => ({ data: {} })),
-      api.get(`/companies/${currentId}/contacts?limit=500`).catch(() => ({ data: {} })),
-    ]).then(([banksRes, contactsRes]) => {
-      // Plaid-linked accounts: use `account_id` (Plaid's id, which
-      // matches how the backend filters on `plaid_account_id`) and
-      // append the mask so multiple accounts under the same bank (e.g.
-      // both named "Adv Plus Banking") don't collide in the dropdown.
-      const connected = (banksRes.data?.connected || []).map((b) => {
-        const nm = b.name || b.official_name || "Account";
-        const mask = b.mask ? ` · **${b.mask}` : "";
-        const sub = b.subtype ? ` (${b.subtype})` : "";
-        return {
-          id: b.account_id,
-          name: `${nm}${mask}${sub}`,
-        };
-      }).filter((b) => b.id);
-      setFilterBankOptions(connected);
-      setFilterContactOptions((contactsRes.data?.contacts || []).map((c) => ({
-        id: c.id, name: c.name || c.display_name || "—",
-      })));
-    });
+    api.get(`/companies/${currentId}/contacts?limit=500`)
+      .catch(() => ({ data: {} }))
+      .then((contactsRes) => {
+        setFilterContactOptions((contactsRes.data?.contacts || []).map((c) => ({
+          id: c.id, name: c.name || c.display_name || "—",
+        })));
+      });
   }, [currentId]);
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize, debouncedSearch, dateFrom, dateTo, isLetsReview, lrContactId, isNoContactReview, ncrGroupKey, filterBankAccountId, filterCategoryId, filterContactId, filterAmountMin, filterAmountMax, txnTypeFilter]);
@@ -1475,9 +1461,43 @@ export default function Transactions() {
                 className="w-full px-2 py-1.5 rounded-md border border-slate-300 bg-white text-xs text-slate-800"
               >
                 <option value="">All accounts</option>
-                {filterBankOptions.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
+                {/* All Asset + Liability accounts from the COA — banks,
+                    credit cards, loans, A/R, A/P, fixed assets, etc. —
+                    grouped by type so the CPA can see which side of the
+                    ledger each row belongs to. Backend's bank_account_id
+                    filter already ORs on plaid_account_id so a single
+                    COA id catches both Plaid-fed and manual entries. */}
+                {(() => {
+                  const list = (accts || []).filter(
+                    (a) => ["asset", "liability"].includes(a.type),
+                  );
+                  const assets = list.filter((a) => a.type === "asset")
+                    .sort((x, y) => String(x.code).localeCompare(String(y.code)));
+                  const liabs = list.filter((a) => a.type === "liability")
+                    .sort((x, y) => String(x.code).localeCompare(String(y.code)));
+                  return (
+                    <>
+                      {assets.length > 0 && (
+                        <optgroup label="Assets">
+                          {assets.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.code} · {a.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {liabs.length > 0 && (
+                        <optgroup label="Liabilities">
+                          {liabs.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.code} · {a.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </>
+                  );
+                })()}
               </select>
             </div>
             <div>
