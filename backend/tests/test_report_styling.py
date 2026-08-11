@@ -62,13 +62,26 @@ def test_pdf_styles_spacing_prevents_overlap():
     assert sub.leading > sub.fontSize, "Subtitle leading not set"
 
 
-@pytest.mark.parametrize("family", ["Helvetica", "Times-Roman", "Courier"])
+@pytest.mark.parametrize("family", [
+    "Helvetica", "Times-Roman", "Courier",
+    # Bundled TTFs — full comprehensive pack. Any of these failing to
+    # register would silently fall back to Helvetica; this test guards
+    # against a missing/corrupt TTF slipping into the container.
+    "Inter", "Roboto", "OpenSans", "Lato", "Poppins", "Nunito",
+    "PTSerif", "PlayfairDisplay", "Lora", "LibreBaskerville",
+    "JetBrainsMono", "IBMPlexMono",
+])
 def test_pdf_styles_works_for_every_font_family(family):
     rs = R.resolve_report_style({"report_style": {"font_family": family}})
     s = R._pdf_styles(rs)
     # Bold variant exists for every supported family — RL naming
     # convention: <Family>-Bold. Assert the resolver picked one.
     assert "Bold" in s["Title2"].fontName
+    # Bundled families should be registered; if not, the resolver falls
+    # back to Helvetica-Bold silently (see log warning). Assert the
+    # bundled set covers what we expect.
+    if family not in ("Helvetica", "Times-Roman", "Courier"):
+        assert family in R.AVAILABLE_FONTS, f"{family} TTF missing"
 
 
 def test_income_statement_pdf_uses_custom_label():

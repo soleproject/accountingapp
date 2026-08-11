@@ -506,9 +506,29 @@ function ReportStylingCard({ value, onChange, onSave, saving }) {
             onChange={(e) => update({ font_family: e.target.value })}
             className="w-full border rounded-md px-3 py-2 text-sm bg-white"
           >
-            <option value="Helvetica">Helvetica (sans-serif)</option>
-            <option value="Times-Roman">Times Roman (serif)</option>
-            <option value="Courier">Courier (mono)</option>
+            <optgroup label="Built-in">
+              <option value="Helvetica">Helvetica (sans-serif)</option>
+              <option value="Times-Roman">Times Roman (serif)</option>
+              <option value="Courier">Courier (mono)</option>
+            </optgroup>
+            <optgroup label="Sans-serif">
+              <option value="Inter">Inter</option>
+              <option value="Roboto">Roboto</option>
+              <option value="OpenSans">Open Sans</option>
+              <option value="Lato">Lato</option>
+              <option value="Poppins">Poppins</option>
+              <option value="Nunito">Nunito</option>
+            </optgroup>
+            <optgroup label="Serif">
+              <option value="PTSerif">PT Serif</option>
+              <option value="PlayfairDisplay">Playfair Display</option>
+              <option value="Lora">Lora</option>
+              <option value="LibreBaskerville">Libre Baskerville</option>
+            </optgroup>
+            <optgroup label="Monospace">
+              <option value="JetBrainsMono">JetBrains Mono</option>
+              <option value="IBMPlexMono">IBM Plex Mono</option>
+            </optgroup>
           </select>
         </Field>
         <Field label="Title size (pt)">
