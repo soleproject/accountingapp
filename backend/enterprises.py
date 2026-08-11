@@ -97,12 +97,32 @@ async def ensure_firm_books_company_for_pro(user_id: str) -> Optional[dict]:
         return None
 
     # Already have one? Return it as-is.
+    #
+    # Look up by two paths to handle historical data:
+    #   1. Anything already flagged `is_firm_books=True` (new-shape rows)
+    #   2. Anything the pro owns whose name ends in "— Firm Books"
+    #      (legacy shape — created before we added the flag). If we
+    #      find a legacy row, retro-stamp the flag so subsequent
+    #      lookups take the fast path. This prevents the 3-copies-in-
+    #      the-dropdown bug we hit on production, where a company was
+    #      created but not flagged, so every boot spawned a new one.
     existing = await db.companies.find_one({
         "owner_user_id": user_id,
         "is_firm_books": True,
     })
     if existing:
         return existing
+    legacy = await db.companies.find_one({
+        "owner_user_id": user_id,
+        "name": {"$regex": r"—\s*Firm Books\s*$"},
+    })
+    if legacy:
+        await db.companies.update_one(
+            {"id": legacy["id"]},
+            {"$set": {"is_firm_books": True, "updated_at": now_iso()}},
+        )
+        legacy["is_firm_books"] = True
+        return legacy
 
     # Derive display name from the firm brand if set; fall back to the
     # user's name so "Priya Patel — Firm Books" still reads naturally
