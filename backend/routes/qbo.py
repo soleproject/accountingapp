@@ -15,7 +15,7 @@ import uuid
 import secrets
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
@@ -34,24 +34,66 @@ _APP_URL = Q.QBO_APP_URL.rstrip("/")
 router = APIRouter(prefix="/api")
 
 
+# Whitelist of API hosts we're willing to send Intuit back to. Each
+# entry MUST also be registered on the Intuit Developer app's Redirect
+# URIs list, or Intuit will reject the auth request with
+# `invalid_redirect_uri`. Adding a new private label = (1) add the API
+# host here, (2) add the same callback URL on developer.intuit.com.
+_QBO_ALLOWED_HOSTS = {
+    "api.smartbookssoftware.ai",
+    "api.cypherpro.accountingapp.ai",
+    # Additional private labels appended as they onboard. Keep in sync
+    # with the Redirect URIs list on the Intuit app.
+}
+
+
+def _redirect_uri_from_request(request: Request) -> str | None:
+    """Derive the Intuit callback URL from the incoming request Host,
+    provided the host is on the whitelist. Returns None so the caller
+    falls back to the env-configured default (SmartBooks flagship)."""
+    # Behind the Kubernetes ingress + Emergent proxy, the label's
+    # forwarding host lands in `x-forwarded-host` (Host is often
+    # rewritten to the internal service name).
+    host = (
+        request.headers.get("x-forwarded-host")
+        or request.headers.get("host")
+        or ""
+    ).split(":")[0].lower()
+    if host in _QBO_ALLOWED_HOSTS:
+        # Emergent always terminates TLS at the edge — use https
+        # unconditionally so the callback URL matches what's registered
+        # on Intuit (which requires https for prod).
+        return f"https://{host}/api/qbo/oauth/callback"
+    return None
+
+
 class OAuthStartOut(BaseModel):
     url: str
 
 
 @router.post("/companies/{cid}/qbo/oauth/start", response_model=OAuthStartOut)
-async def qbo_oauth_start(cid: str, user: dict = Depends(get_current_user)):
+async def qbo_oauth_start(cid: str, request: Request,
+                          user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     state = secrets.token_urlsafe(32)
+    # Per-request redirect URI so private-label domains (Cypher Pro,
+    # etc.) return the user to THEIR domain after consent instead of
+    # bouncing back to SmartBooks. The URI is persisted on the state
+    # record so the token-exchange callback can send Intuit the same
+    # exact value (Intuit does a strict-equality check).
+    redirect_uri = _redirect_uri_from_request(request)
     await db.qbo_oauth_states.insert_one({
         "state": state, "company_id": cid, "user_id": user["id"],
+        "redirect_uri": redirect_uri,
         "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
         "created_at": now_iso(),
     })
-    return {"url": Q.authorization_url(state)}
+    return {"url": Q.authorization_url(state, redirect_uri=redirect_uri)}
 
 
 @router.get("/qbo/oauth/callback")
 async def qbo_oauth_callback(
+    request: Request,
     code: str = Query(None),
     state: str = Query(None),
     realmId: str = Query(None),
@@ -59,9 +101,33 @@ async def qbo_oauth_callback(
 ):
     """Intuit redirects here after the user consents. Any failure path
     redirects to `/connections/qbo?qbo_error=<reason>` so the frontend
-    can surface a useful toast instead of dumping a raw 4xx page."""
-    def _err(reason: str, cid: str | None = None) -> RedirectResponse:
-        target = f"{_APP_URL}/connections/qbo?qbo_error={reason}"
+    can surface a useful toast instead of dumping a raw 4xx page.
+
+    Multi-tenant: the private-label host that initiated the flow is
+    persisted on the state record. We look it up here and (a) send
+    Intuit the same redirect_uri during the token exchange, and (b)
+    bounce the user back to the label's own frontend on success/error
+    instead of the SmartBooks flagship."""
+    # Fallback to the standard SmartBooks app URL if the state record
+    # doesn't carry a private-label return target.
+    def _label_app_url(rec: dict | None) -> str:
+        # Derive the front-end app URL from the redirect_uri host —
+        # e.g. `https://api.cypherpro.accountingapp.ai/api/qbo/...` →
+        # `https://cypherpro.accountingapp.ai`. The `api.` sub-domain
+        # convention is baked into how private labels are configured.
+        uri = (rec or {}).get("redirect_uri")
+        if uri:
+            try:
+                from urllib.parse import urlparse
+                host = urlparse(uri).netloc
+                if host.startswith("api."):
+                    return f"https://{host[4:]}"
+            except Exception:  # noqa: BLE001
+                pass
+        return _APP_URL
+
+    def _err(reason: str, rec: dict | None = None) -> RedirectResponse:
+        target = f"{_label_app_url(rec)}/connections/qbo?qbo_error={reason}"
         return RedirectResponse(target, status_code=302)
 
     # Intuit itself returned an error (user hit "No thanks", scope
@@ -75,18 +141,22 @@ async def qbo_oauth_callback(
     try:
         exp = datetime.fromisoformat(rec["expires_at"])
         if exp < datetime.now(timezone.utc):
-            return _err("state_expired")
+            return _err("state_expired", rec)
     except (KeyError, ValueError):
-        return _err("state_bad")
+        return _err("state_bad", rec)
     cid = rec["company_id"]
+    # Same redirect URI we sent to Intuit at auth-start time — Intuit
+    # rejects the exchange with `invalid_grant` otherwise. Persisted on
+    # the state record for exactly this reason.
+    stored_redirect_uri = rec.get("redirect_uri")
     try:
-        tokens = await Q.exchange_code(code, realmId)
+        tokens = await Q.exchange_code(code, realmId, redirect_uri=stored_redirect_uri)
     except Exception as e:  # noqa: BLE001
         import logging
         logging.getLogger(__name__).exception(
             "QBO token exchange failed for cid=%s realm=%s", cid, realmId
         )
-        return _err(f"exchange_failed:{str(e)[:120]}")
+        return _err(f"exchange_failed:{str(e)[:120]}", rec)
     try:
         await Q.save_connection(cid, realmId, tokens)
     except Exception as e:  # noqa: BLE001
@@ -94,7 +164,7 @@ async def qbo_oauth_callback(
         logging.getLogger(__name__).exception(
             "QBO save_connection failed for cid=%s", cid
         )
-        return _err(f"save_failed:{str(e)[:120]}")
+        return _err(f"save_failed:{str(e)[:120]}", rec)
     # Success — land the user on the QBO Connect page (not the generic
     # /connections page — that route doesn't refresh QBO status). Absolute
     # URL so the browser lands on the FRONTEND service, not the API.

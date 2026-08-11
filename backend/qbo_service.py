@@ -51,11 +51,20 @@ API_BASE = ("https://sandbox-quickbooks.api.intuit.com/v3"
 MAPPER_VERSION = "v4-2026-02-08-capital-Id-null-safe-per-row-isolation"
 
 
-def _auth_client() -> AuthClient:
+def _auth_client(redirect_uri: str | None = None) -> AuthClient:
+    """Build an Intuit AuthClient. `redirect_uri` defaults to the
+    platform-wide `QBO_REDIRECT_URI` env for the flagship SmartBooks
+    domain, but private-label deployments (Cypher Pro, Proactive
+    Books, etc.) pass their own callback URL so the consent flow
+    returns the user to the label domain they came from.
+
+    Every URL passed here must ALSO be registered as a Redirect URI on
+    the Intuit Developer app — Intuit does an exact-match check both
+    on the outbound auth URL and the token-exchange call."""
     return AuthClient(
         client_id=QBO_CLIENT_ID,
         client_secret=QBO_CLIENT_SECRET,
-        redirect_uri=QBO_REDIRECT_URI,
+        redirect_uri=redirect_uri or QBO_REDIRECT_URI,
         environment=QBO_ENV,
     )
 
@@ -64,19 +73,29 @@ def _auth_client() -> AuthClient:
 # OAuth: URL, callback exchange, refresh, revoke
 # ------------------------------------------------------------------
 
-def authorization_url(state: str) -> str:
+def authorization_url(state: str, redirect_uri: str | None = None) -> str:
     """Return the Intuit consent URL. `state` is a CSRF token bound to
     the caller's company_id, stored in db.qbo_oauth_states with a 10-min
-    expiry and consumed exactly once on callback."""
-    c = _auth_client()
+    expiry and consumed exactly once on callback.
+
+    `redirect_uri` overrides the default when a private-label domain
+    kicks off the flow — pass the SAME value here that gets stored on
+    the state record so `exchange_code` can send it back verbatim."""
+    c = _auth_client(redirect_uri)
     return c.get_authorization_url([Scopes.ACCOUNTING], state_token=state)
 
 
-async def exchange_code(code: str, realm_id: str) -> dict[str, Any]:
+async def exchange_code(code: str, realm_id: str,
+                        redirect_uri: str | None = None) -> dict[str, Any]:
     """Exchange an OAuth `code` for tokens. Wraps the sync SDK call in
-    `run_in_executor` since it's blocking."""
+    `run_in_executor` since it's blocking.
+
+    `redirect_uri` MUST match the URI sent in the original
+    authorization request — Intuit rejects the exchange otherwise
+    with `invalid_grant`. Callers persist the URI on the oauth state
+    record so this round-trips correctly for every private label."""
     def _blocking() -> dict[str, Any]:
-        c = _auth_client()
+        c = _auth_client(redirect_uri)
         c.get_bearer_token(code, realm_id=realm_id)
         return {
             "access_token": c.access_token,
