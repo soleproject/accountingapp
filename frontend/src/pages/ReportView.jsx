@@ -519,7 +519,7 @@ export default function ReportView() {
     URL.revokeObjectURL(url);
   };
 
-  const title = {
+  const defaultTitle = {
     "trial-balance": "Trial Balance",
     "balance-sheet": "Balance Sheet",
     "income-statement": "Income Statement",
@@ -529,6 +529,33 @@ export default function ReportView() {
     "1099-summary": "1099 Summary",
     "account-detail": "Account Detail",
   }[kind] || kind;
+  // Prefer the server-resolved label (per-company override from
+  // Company Settings → Report Styling) so a renamed report ("Profit &
+  // Loss") shows the same string in the on-screen H1, the report body
+  // heading, and the downloaded PDF.
+  const title = data?.report_label || defaultTitle;
+
+  // Report styling from Company Settings. Falls back to sane defaults
+  // if the server didn't send anything (e.g. legacy company row).
+  const rs = data?.report_style || {};
+  const fontFamilyCss = ({
+    "Helvetica":   "'Helvetica Neue', Helvetica, Arial, sans-serif",
+    "Times-Roman": "'Times New Roman', Times, serif",
+    "Courier":     "'Courier New', Courier, monospace",
+  })[rs.font_family] || undefined;
+  const headerStyle = fontFamilyCss ? { fontFamily: fontFamilyCss } : undefined;
+  const titleStyle = {
+    ...(headerStyle || {}),
+    fontSize:      rs.title_font_size ? `${rs.title_font_size}px` : undefined,
+    color:         rs.title_color || undefined,
+    marginBottom:  rs.title_space_after != null ? `${rs.title_space_after}px` : undefined,
+  };
+  const subtitleStyle = {
+    ...(headerStyle || {}),
+    fontSize:      rs.subtitle_font_size ? `${rs.subtitle_font_size}px` : undefined,
+    color:         rs.subtitle_color || undefined,
+    marginBottom:  rs.subtitle_space_after != null ? `${rs.subtitle_space_after}px` : undefined,
+  };
 
   return (
     <div className="space-y-4">
@@ -563,11 +590,26 @@ export default function ReportView() {
       {busy && <div className="flex items-center gap-2 text-slate-500 text-sm"><Loader2 size={14} className="animate-spin" /> Computing…</div>}
 
       {data && (
-        <div className="report-page mx-auto">
+        <div className="report-page mx-auto" style={headerStyle}>
           <div className="text-center border-b pb-4 mb-6">
-            <div className="font-heading text-2xl font-bold">{data.company_name || current?.name}</div>
-            <div className="uppercase tracking-widest text-sm mt-1">{title}</div>
-            <div className="text-xs text-slate-500 mt-1">
+            <div
+              data-testid="report-header-company"
+              className="font-heading font-bold"
+              style={titleStyle}
+            >
+              {data.company_name || current?.name}
+            </div>
+            <div
+              data-testid="report-header-title"
+              className="uppercase tracking-widest mt-1"
+              style={subtitleStyle}
+            >
+              {title}
+            </div>
+            <div
+              className="text-xs mt-1"
+              style={{ color: rs.subtitle_color || "#64748b" }}
+            >
               {kind === "balance-sheet"
                 ? `As of ${data.as_of} · ${data.basis} basis`
                 : kind === "1099-summary"

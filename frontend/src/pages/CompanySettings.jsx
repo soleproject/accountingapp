@@ -19,6 +19,7 @@ export default function CompanySettings() {
     name: "", business_type: "", business_description: "", reporting_basis: "accrual",
     logo_data_url: "", address: "", phone: "", email: "", website: "", tax_id: "",
     accounting_mode: "simple",
+    report_style: null,   // per-company report styling; see DEFAULT_REPORT_STYLE on the backend
   });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -39,6 +40,7 @@ export default function CompanySettings() {
         website: current.website || "",
         tax_id: current.tax_id || "",
         accounting_mode: current.accounting_mode || "simple",
+        report_style: current.report_style || null,
       });
     }
   }, [current]);
@@ -297,6 +299,14 @@ export default function CompanySettings() {
         </div>
       </div>
 
+      {/* --- Report styling --- */}
+      <ReportStylingCard
+        value={form.report_style}
+        onChange={(next) => setForm((f) => ({ ...f, report_style: next }))}
+        onSave={save}
+        saving={saving}
+      />
+
       {/* --- Tours & tips --- */}
       <div className="rounded-xl border bg-white p-5 space-y-3" data-testid="settings-tours-card">
         <div className="flex items-start gap-2">
@@ -417,6 +427,203 @@ function Field({ label, children }) {
     <label className="block">
       <div className="text-[11px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">{label}</div>
       {children}
+    </label>
+  );
+}
+
+// Defaults mirrored from `backend/reports.py::DEFAULT_REPORT_STYLE` +
+// `DEFAULT_REPORT_LABELS`. Keeping them here means the settings UI can
+// pre-fill placeholder text and preview the un-customized state before
+// the first save.
+const RS_DEFAULTS = {
+  font_family:          "Helvetica",
+  title_font_size:      18,
+  title_color:          "#0F172A",
+  title_space_after:    10,
+  subtitle_font_size:   11,
+  subtitle_color:       "#52525B",
+  subtitle_space_after: 3,
+  section_font_size:    11,
+  section_color:        "#0F172A",
+  section_bg_color:     "#F1F5F9",
+};
+
+const RS_REPORT_LABELS = [
+  ["income-statement",  "Income Statement"],
+  ["balance-sheet",     "Balance Sheet"],
+  ["trial-balance",     "Trial Balance"],
+  ["general-ledger",    "General Ledger"],
+  ["cash-flow",         "Statement of Cash Flows"],
+  ["sales-tax",         "Sales Tax Liability"],
+  ["1099-summary",      "1099 Summary"],
+  ["account-detail",    "Account Detail"],
+];
+
+function ReportStylingCard({ value, onChange, onSave, saving }) {
+  const rs = value || {};
+  const labels = rs.labels || {};
+  const update = (patch) => onChange({ ...(value || {}), ...patch });
+  const updateLabel = (slug, val) => {
+    const nextLabels = { ...(labels || {}) };
+    if (val && val.trim()) nextLabels[slug] = val;
+    else delete nextLabels[slug];
+    onChange({ ...(value || {}), labels: nextLabels });
+  };
+  const resetAll = () => onChange(null);
+
+  return (
+    <div
+      className="rounded-xl border bg-white p-5 space-y-4"
+      data-testid="settings-report-style-card"
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 className="font-heading font-semibold text-lg">Report styling</h3>
+          <p className="text-xs text-slate-500 mt-1 max-w-2xl">
+            Customize how every financial report renders — on-screen and
+            in exported PDFs. Change the report names your clients see,
+            pick a font family, tune header colors and spacing. Empty
+            fields fall back to sensible defaults.
+          </p>
+        </div>
+        <button
+          type="button"
+          data-testid="settings-report-style-reset"
+          onClick={resetAll}
+          className="text-xs text-slate-500 hover:text-rose-600 underline shrink-0"
+          title="Restore every knob to the app defaults"
+        >
+          Reset to defaults
+        </button>
+      </div>
+
+      {/* Fonts + sizes */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <Field label="Font family">
+          <select
+            data-testid="rs-font-family"
+            value={rs.font_family || RS_DEFAULTS.font_family}
+            onChange={(e) => update({ font_family: e.target.value })}
+            className="w-full border rounded-md px-3 py-2 text-sm bg-white"
+          >
+            <option value="Helvetica">Helvetica (sans-serif)</option>
+            <option value="Times-Roman">Times Roman (serif)</option>
+            <option value="Courier">Courier (mono)</option>
+          </select>
+        </Field>
+        <Field label="Title size (pt)">
+          <input
+            type="number" min={8} max={48}
+            data-testid="rs-title-size"
+            value={rs.title_font_size ?? RS_DEFAULTS.title_font_size}
+            onChange={(e) => update({ title_font_size: Number(e.target.value) || RS_DEFAULTS.title_font_size })}
+            className="w-full border rounded-md px-3 py-2 text-sm"
+          />
+        </Field>
+        <Field label="Subtitle size (pt)">
+          <input
+            type="number" min={6} max={24}
+            data-testid="rs-subtitle-size"
+            value={rs.subtitle_font_size ?? RS_DEFAULTS.subtitle_font_size}
+            onChange={(e) => update({ subtitle_font_size: Number(e.target.value) || RS_DEFAULTS.subtitle_font_size })}
+            className="w-full border rounded-md px-3 py-2 text-sm"
+          />
+        </Field>
+      </div>
+
+      {/* Colors */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <ColorField label="Title color"    value={rs.title_color    ?? RS_DEFAULTS.title_color}
+                    onChange={(v) => update({ title_color: v })} testId="rs-title-color" />
+        <ColorField label="Subtitle color" value={rs.subtitle_color ?? RS_DEFAULTS.subtitle_color}
+                    onChange={(v) => update({ subtitle_color: v })} testId="rs-subtitle-color" />
+        <ColorField label="Section color"  value={rs.section_color  ?? RS_DEFAULTS.section_color}
+                    onChange={(v) => update({ section_color: v })} testId="rs-section-color" />
+        <ColorField label="Section background" value={rs.section_bg_color ?? RS_DEFAULTS.section_bg_color}
+                    onChange={(v) => update({ section_bg_color: v })} testId="rs-section-bg-color" />
+      </div>
+
+      {/* Header spacing */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <Field label="Space after title (pt)">
+          <input
+            type="number" min={0} max={40}
+            data-testid="rs-title-space"
+            value={rs.title_space_after ?? RS_DEFAULTS.title_space_after}
+            onChange={(e) => update({ title_space_after: Number(e.target.value) || 0 })}
+            className="w-full border rounded-md px-3 py-2 text-sm"
+          />
+        </Field>
+        <Field label="Space after subtitle (pt)">
+          <input
+            type="number" min={0} max={40}
+            data-testid="rs-subtitle-space"
+            value={rs.subtitle_space_after ?? RS_DEFAULTS.subtitle_space_after}
+            onChange={(e) => update({ subtitle_space_after: Number(e.target.value) || 0 })}
+            className="w-full border rounded-md px-3 py-2 text-sm"
+          />
+        </Field>
+      </div>
+
+      {/* Per-report label overrides */}
+      <div className="border-t pt-4">
+        <div className="text-[11px] uppercase tracking-widest text-slate-500 mb-2 font-semibold">
+          Report names
+        </div>
+        <p className="text-xs text-slate-500 mb-3">
+          Rename any report so it matches how your firm labels it — e.g.
+          "Income Statement" → "Profit &amp; Loss". Leave a field blank
+          to use the built-in name.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {RS_REPORT_LABELS.map(([slug, deflabel]) => (
+            <Field key={slug} label={deflabel}>
+              <input
+                type="text"
+                data-testid={`rs-label-${slug}`}
+                value={labels[slug] || ""}
+                onChange={(e) => updateLabel(slug, e.target.value)}
+                placeholder={deflabel}
+                className="w-full border rounded-md px-3 py-2 text-sm"
+              />
+            </Field>
+          ))}
+        </div>
+      </div>
+
+      <div className="pt-2 flex items-center gap-2">
+        <button
+          data-testid="settings-report-style-save"
+          onClick={onSave}
+          disabled={saving}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm rounded-md hover:bg-slate-800 disabled:opacity-50"
+        >
+          {saving ? "Saving…" : "Save report styling"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ColorField({ label, value, onChange, testId }) {
+  return (
+    <label className="block">
+      <div className="text-[11px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">{label}</div>
+      <div className="flex items-center gap-2">
+        <input
+          type="color"
+          data-testid={testId}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="h-9 w-12 rounded border border-slate-300 bg-white cursor-pointer"
+        />
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="flex-1 min-w-0 border rounded-md px-2 py-2 text-xs font-mono"
+        />
+      </div>
     </label>
   );
 }
