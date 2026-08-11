@@ -331,8 +331,18 @@ def map_item(cid: str, realm_id: str, obj: dict) -> dict:
     # item's Type is "Inventory" — service/non-inventory items leave
     # them undefined. We store the raw values so the migration can
     # post an opening-inventory JE (see qbo_service.run_migration).
-    is_inventory = (obj.get("Type") or "").lower() == "inventory"
+    qbo_type_raw = (obj.get("Type") or "Service")
+    qbo_type_lower = qbo_type_raw.lower()
+    is_inventory = qbo_type_lower == "inventory"
     qty_on_hand = float(obj.get("QtyOnHand") or 0)
+    # App-native `type` field (used by the frontend Items page + the
+    # local inventory tables) uses lowercase values: 'service' /
+    # 'inventory' / 'product' (for non-inventory physical goods).
+    # QBO's Type enum maps: Inventory→inventory, NonInventory→product,
+    # Service→service, Group/Bundle/Category→service (closest fit).
+    native_type = ("inventory" if is_inventory
+                    else "product" if qbo_type_lower == "noninventory"
+                    else "service")
     return {
         "company_id": cid,
         "source": "qbo",
@@ -344,7 +354,11 @@ def map_item(cid: str, realm_id: str, obj: dict) -> dict:
         "price": round(float(obj.get("UnitPrice") or 0), 2),
         "cost": round(float(obj.get("PurchaseCost") or 0), 2),
         "usage": "both",
-        "item_type": obj.get("Type") or "Service",
+        # Both fields kept — `type` for the app-native UI/services,
+        # `item_type` preserves QBO's original enum so we can round-
+        # trip an item back to QBO with the correct Type value.
+        "type": native_type,
+        "item_type": qbo_type_raw,
         "sku": obj.get("Sku") or "",
         "active": bool(obj.get("Active", True)),
         "income_account_qbo_id": inc,
@@ -354,6 +368,10 @@ def map_item(cid: str, realm_id: str, obj: dict) -> dict:
         # special-case shape.
         "track_qty_on_hand": bool(obj.get("TrackQtyOnHand", is_inventory)),
         "qty_on_hand": qty_on_hand,
+        # App-native alias — Items.jsx and inventory_service.py both
+        # read `quantity_on_hand`. Keep both stamped so a single
+        # renamer sweep isn't needed later.
+        "quantity_on_hand": qty_on_hand,
         "reorder_point": float(obj.get("ReorderPoint") or 0),
         "inv_start_date": obj.get("InvStartDate") or None,
         "asset_account_qbo_id": asset,
