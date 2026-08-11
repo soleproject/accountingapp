@@ -1,5 +1,44 @@
 # SmartBooks — Changelog
 
+## 2026-02-21 (bugfix 2) — Inventory Field Alignment (Bugfix Round 2)
+
+### 🐛 Root cause
+User deployed the Feb 21 fix, ran a fresh migration on a QBO sandbox with real inventory items, saw the migration banner correctly report "**Opening inventory: $346.25**" — but the Items page still showed every item as `SERVICE` and Inventory Management still said "0 tracked items."
+
+Two more field-name mismatches between the mapper and the frontend:
+
+**Bug A** — `map_item` stamped **`item_type`** (with QBO's raw enum values like "Service" / "Inventory"), but Items.jsx reads **`it.type`** (with app-native lowercase values like "service" / "inventory"). Every item's TYPE column defaulted to "service".
+
+**Bug B** — `map_item` stamped **`qty_on_hand`**, but Items.jsx + `inventory_service.py` both read **`quantity_on_hand`**. Even for real Inventory items, the on-hand column showed "—".
+
+The opening-inventory JE worked because it used the QBO-native `qty_on_hand`, but the display layer needed the app-native names.
+
+### ✅ Fix
+`map_item` now stamps **all three fields** so every consumer finds what it expects:
+- `type` — app-native lowercase enum: `"inventory"` / `"product"` / `"service"` (mapped from QBO's Type: Inventory→inventory, NonInventory→product, Service/Group/Bundle→service). Powers the Items page display, inventory filters, and item CRUD APIs.
+- `item_type` — QBO's raw enum preserved so a future outbound `Item` push can round-trip the correct Type value.
+- `quantity_on_hand` — app-native alias of `qty_on_hand`, populated identically. Both read by different code paths; both stamped so no rename sweep is needed.
+- `qty_on_hand` — retained (used by `_post_opening_inventory_je`).
+
+`_UPDATE_FIELDS["items"]` expanded to include `type` and `quantity_on_hand` so re-pulls heal legacy rows.
+
+### 🔁 User remediation
+Same as the previous bugfix — a single re-pull heals everything:
+```
+POST /api/companies/{cid}/qbo/mirror/pull  Body: {"entities": ["items"]}
+```
+
+### ✅ Test coverage
+- `test_map_item_captures_inventory_fields` extended — asserts `type=="inventory"`, `item_type=="Inventory"`, `quantity_on_hand==50.0`.
+- `test_map_item_defaults_for_service_item` extended — asserts `type=="service"`.
+- New `test_map_item_noninventory_becomes_product` — locks in the QBO NonInventory → app-native "product" mapping.
+- 13 inventory-related backend tests all green.
+
+### Files touched
+- `backend/qbo_service.py::map_item` — added `type`, `quantity_on_hand` fields; kept `item_type`, `qty_on_hand`.
+- `backend/qbo_mirror/pull.py::_UPDATE_FIELDS["items"]` — added `type`, `quantity_on_hand`.
+- `backend/tests/test_qbo_inventory_migration.py` — extended + 1 new NonInventory test.
+
 ## 2026-02-21 (bugfix) — Inventory Migration Wire-Up
 
 ### 🐛 Root cause

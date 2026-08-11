@@ -37,10 +37,11 @@ _UPDATE_FIELDS = {
     # accounts on rows that migrated *before* the Feb 21 2026
     # inventory-fields patch shipped.
     "items":     ["name", "sku", "price", "active", "cost",
-                   "item_type", "description",
+                   "type", "item_type", "description",
                    "income_account_qbo_id", "expense_account_qbo_id",
                    "asset_account_qbo_id",
                    "track_qty_on_hand", "qty_on_hand",
+                   "quantity_on_hand",
                    "reorder_point", "inv_start_date"],
 }
 

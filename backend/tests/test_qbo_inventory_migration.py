@@ -109,6 +109,9 @@ def test_map_item_captures_inventory_fields():
     }
     m = map_item("cid", "realm", obj)
     assert m["qty_on_hand"] == 50.0
+    # App-native alias must be populated too — Items.jsx and
+    # inventory_service.py both read `quantity_on_hand`.
+    assert m["quantity_on_hand"] == 50.0
     assert m["cost"] == 10.00
     assert m["price"] == 25.00
     assert m["asset_account_qbo_id"] == "77"
@@ -116,6 +119,10 @@ def test_map_item_captures_inventory_fields():
     assert m["inv_start_date"] == "2025-01-01"
     assert m["reorder_point"] == 10.0
     assert m["sku"] == "WID-001"
+    # New Feb 21 (bugfix 2): app-native `type` field powers the Items
+    # page display + inventory filters. Must be lowercased.
+    assert m["type"] == "inventory"
+    assert m["item_type"] == "Inventory"  # QBO raw preserved
 
 
 def test_map_item_defaults_for_service_item():
@@ -129,6 +136,18 @@ def test_map_item_defaults_for_service_item():
     assert m["track_qty_on_hand"] is False
     assert m["asset_account_qbo_id"] is None
     assert m["inv_start_date"] is None
+    assert m["type"] == "service"
+
+
+def test_map_item_noninventory_becomes_product():
+    """QBO's `NonInventory` (physical goods without stock tracking)
+    maps to the app-native `product` type."""
+    from qbo_service import map_item
+    m = map_item("cid", "realm", {
+        "Id": "9", "Name": "Sticker", "Type": "NonInventory",
+        "UnitPrice": 1.00, "Active": True})
+    assert m["type"] == "product"
+    assert m["item_type"] == "NonInventory"
 
 
 # ─── Opening inventory JE ─────────────────────────────────────────
