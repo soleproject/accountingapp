@@ -340,6 +340,12 @@ async def update_company(cid: str, patch: dict, user: dict = Depends(get_current
         #               visible. CPAs / bookkeepers flip this on per
         #               client company as needed.
         "accounting_mode",
+        # Per-company report styling (fonts, colors, spacing, labels).
+        # Full schema lives in `reports.DEFAULT_REPORT_STYLE`. Front-end
+        # sends the entire dict on save — server accepts as-is (dict
+        # validation happens in the resolver at read time so a partial
+        # or legacy dict never crashes the PDF pipeline).
+        "report_style",
     }
     updates = {k: v for k, v in (patch or {}).items() if k in allowed}
     if not updates:

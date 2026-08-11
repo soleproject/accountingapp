@@ -293,6 +293,8 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
         "net_income": net_income,
         "accrual_ar_adjustment": accrual_adj_rev,
         "accrual_ap_adjustment": accrual_adj_exp,
+        "report_style": resolve_report_style(company),
+        "report_label": resolve_report_label(company, "income-statement"),
     }
 
 
@@ -424,6 +426,8 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
         "imbalance": round(total_assets - total_le, 2),
         "ar_open": round(ar_open, 2),
         "ap_open": round(ap_open, 2),
+        "report_style": resolve_report_style(company),
+        "report_label": resolve_report_label(company, "balance-sheet"),
     }
 
 
@@ -451,6 +455,8 @@ async def compute_trial_balance(company_id: str, as_of: str):
         "company_name": company["name"] if company else "", "as_of": as_of,
         "rows": rows, "total_debit": round(total_d, 2), "total_credit": round(total_c, 2),
         "balanced": abs(total_d - total_c) < 0.02,
+        "report_style": resolve_report_style(company),
+        "report_label": resolve_report_label(company, "trial-balance"),
     }
 
 
@@ -573,6 +579,8 @@ async def compute_general_ledger(company_id: str, start: str, end: str):
     return {
         "company_name": company["name"] if company else "",
         "period_start": start, "period_end": end, "sections": sections,
+        "report_style": resolve_report_style(company),
+        "report_label": resolve_report_label(company, "general-ledger"),
     }
 
 
@@ -643,6 +651,8 @@ async def compute_cash_flow(company_id: str, start: str, end: str):
         "operating_rows": _sort_rows(buckets["operating"]),
         "investing_rows": _sort_rows(buckets["investing"]),
         "financing_rows": _sort_rows(buckets["financing"]),
+        "report_style": resolve_report_style(company),
+        "report_label": resolve_report_label(company, "cash-flow"),
     }
 
 
@@ -685,6 +695,8 @@ async def compute_sales_tax(company_id: str, start: str, end: str):
         "net_liability": round(net_liability, 2),
         "invoices_count": len(invs),
         "bills_count": len(bills),
+        "report_style": resolve_report_style(company),
+        "report_label": resolve_report_label(company, "sales-tax"),
     }
 
 
@@ -741,6 +753,8 @@ async def compute_1099_summary(company_id: str, year: int):
         "rows": rows,
         "total_reportable": round(sum(r["total_paid"] for r in rows), 2),
         "count": len(rows),
+        "report_style": resolve_report_style(company),
+        "report_label": resolve_report_label(company, "1099-summary"),
     }
 
 
@@ -809,17 +823,118 @@ async def _aging(company_id: str, as_of: str, kind: str):
 
 # ---------- PDF rendering helpers ----------
 
-def _pdf_styles():
+def _pdf_styles(rs: dict | None = None):
+    """ReportLab paragraph styles resolved against a per-company
+    `report_style` dict (see `resolve_report_style`). Falls back to sane
+    Helvetica defaults when nothing is stored yet. All fonts land on
+    ReportLab's built-in families (Helvetica / Times-Roman / Courier) so
+    we don't have to ship font files with the container."""
+    rs = rs or resolve_report_style(None)
+    fam = rs.get("font_family") or "Helvetica"
+    # Bold variant for the family — RL naming: Helvetica-Bold /
+    # Times-Bold / Courier-Bold.
+    bold_map = {
+        "Helvetica": "Helvetica-Bold",
+        "Times-Roman": "Times-Bold",
+        "Courier": "Courier-Bold",
+    }
+    fam_bold = bold_map.get(fam, "Helvetica-Bold")
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="Title2", fontName="Helvetica-Bold", fontSize=18,
-                              alignment=1, spaceAfter=4))
-    styles.add(ParagraphStyle(name="SubTitle", fontName="Helvetica", fontSize=11,
-                              alignment=1, textColor=colors.HexColor("#52525B"), spaceAfter=2))
-    styles.add(ParagraphStyle(name="Section", fontName="Helvetica-Bold", fontSize=11,
-                              textColor=colors.HexColor("#0F172A"),
-                              backColor=colors.HexColor("#F1F5F9"), spaceBefore=8, spaceAfter=4,
-                              leftIndent=4, rightIndent=4))
+    title_size = float(rs.get("title_font_size") or 18)
+    sub_size = float(rs.get("subtitle_font_size") or 11)
+    sec_size = float(rs.get("section_font_size") or 11)
+    # `leading` sets the paragraph's line box height. Without it,
+    # ReportLab uses ~1.2× font size but stacks paragraphs so tightly
+    # that an 18pt title's descender overlaps the next 11pt line. Force
+    # an explicit leading + spaceAfter to guarantee breathing room.
+    styles.add(ParagraphStyle(
+        name="Title2", fontName=fam_bold, fontSize=title_size,
+        leading=title_size * 1.25,
+        alignment=1,
+        textColor=colors.HexColor(rs.get("title_color") or "#0F172A"),
+        spaceAfter=float(rs.get("title_space_after") or 10),
+    ))
+    styles.add(ParagraphStyle(
+        name="SubTitle", fontName=fam, fontSize=sub_size,
+        leading=sub_size * 1.4,
+        alignment=1,
+        textColor=colors.HexColor(rs.get("subtitle_color") or "#52525B"),
+        spaceAfter=float(rs.get("subtitle_space_after") or 3),
+    ))
+    styles.add(ParagraphStyle(
+        name="Section", fontName=fam_bold, fontSize=sec_size,
+        leading=sec_size * 1.3,
+        textColor=colors.HexColor(rs.get("section_color") or "#0F172A"),
+        backColor=colors.HexColor(rs.get("section_bg_color") or "#F1F5F9"),
+        spaceBefore=8, spaceAfter=4, leftIndent=4, rightIndent=4,
+    ))
     return styles
+
+
+# ────────────────────────────────────────────────────────────────
+# Report styling — per-company overrides for label/font/color/spacing
+# ────────────────────────────────────────────────────────────────
+
+# Default report display labels. Keys line up with the URL slugs used by
+# `ReportView.jsx` (see the `title` map in that file) so a single
+# label-override dictionary drives both the on-screen heading and the
+# PDF title.
+DEFAULT_REPORT_LABELS = {
+    "income-statement":   "Income Statement",
+    "balance-sheet":      "Balance Sheet",
+    "trial-balance":      "Trial Balance",
+    "general-ledger":     "General Ledger",
+    "cash-flow":          "Statement of Cash Flows",
+    "sales-tax":          "Sales Tax Liability",
+    "1099-summary":       "1099 Summary",
+    "account-detail":     "Account Detail",
+}
+
+# The full defaults applied when a company hasn't customized report
+# styling yet (or has customized only a few fields). Keep every knob the
+# UI exposes here so front-end and PDF stay in lock-step.
+DEFAULT_REPORT_STYLE = {
+    "font_family":           "Helvetica",       # Helvetica | Times-Roman | Courier
+    "title_font_size":       18,
+    "title_color":           "#0F172A",
+    "title_space_after":     10,                # pt below the company-name title
+    "subtitle_font_size":    11,
+    "subtitle_color":        "#52525B",
+    "subtitle_space_after":  3,
+    "section_font_size":     11,
+    "section_color":         "#0F172A",
+    "section_bg_color":      "#F1F5F9",
+    "labels":                {},                # per-report overrides, see DEFAULT_REPORT_LABELS
+}
+
+
+def resolve_report_style(company: dict | None) -> dict:
+    """Merge stored `report_style` overrides onto the app defaults.
+
+    Missing / null / empty-string values fall through to the default so
+    the CPA can clear a single field on the settings page without
+    zeroing the whole record."""
+    stored = ((company or {}).get("report_style")) or {}
+    out = dict(DEFAULT_REPORT_STYLE)
+    for k, v in stored.items():
+        if k == "labels":
+            continue
+        if v is None or v == "":
+            continue
+        out[k] = v
+    # Labels merge separately — start from defaults, layer overrides.
+    labels = dict(DEFAULT_REPORT_LABELS)
+    for k, v in (stored.get("labels") or {}).items():
+        if v:
+            labels[k] = v
+    out["labels"] = labels
+    return out
+
+
+def resolve_report_label(company: dict | None, kind: str) -> str:
+    """Return the user-facing label for a given report kind."""
+    rs = resolve_report_style(company)
+    return rs["labels"].get(kind) or DEFAULT_REPORT_LABELS.get(kind, kind)
 
 
 def _money_table(rows, totals_label, totals_amount):
@@ -915,10 +1030,11 @@ def build_income_statement_pdf(data: dict) -> bytes:
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=LETTER, leftMargin=0.6 * inch, rightMargin=0.6 * inch,
                             topMargin=0.6 * inch, bottomMargin=0.6 * inch)
-    s = _pdf_styles()
+    s = _pdf_styles(data.get("report_style"))
+    label = (data.get("report_label") or "Income Statement").upper()
     story = [
         Paragraph(data["company_name"], s["Title2"]),
-        Paragraph("INCOME STATEMENT", s["SubTitle"]),
+        Paragraph(label, s["SubTitle"]),
         Paragraph(f"For the period {data['period_start']} to {data['period_end']} &middot; {data['basis'].title()} Basis", s["SubTitle"]),
         Spacer(1, 12),
         Paragraph("REVENUE", s["Section"]),
@@ -937,10 +1053,11 @@ def build_balance_sheet_pdf(data: dict) -> bytes:
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=LETTER, leftMargin=0.6 * inch, rightMargin=0.6 * inch,
                             topMargin=0.6 * inch, bottomMargin=0.6 * inch)
-    s = _pdf_styles()
+    s = _pdf_styles(data.get("report_style"))
+    label = (data.get("report_label") or "Balance Sheet").upper()
     story = [
         Paragraph(data["company_name"], s["Title2"]),
-        Paragraph("BALANCE SHEET", s["SubTitle"]),
+        Paragraph(label, s["SubTitle"]),
         Paragraph(f"As of {data['as_of']} &middot; {data['basis'].title()} Basis", s["SubTitle"]),
         Spacer(1, 12),
         Paragraph("ASSETS", s["Section"]),
@@ -967,7 +1084,8 @@ def build_trial_balance_pdf(data: dict) -> bytes:
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=LETTER, leftMargin=0.6 * inch, rightMargin=0.6 * inch,
                             topMargin=0.6 * inch, bottomMargin=0.6 * inch)
-    s = _pdf_styles()
+    s = _pdf_styles(data.get("report_style"))
+    label = (data.get("report_label") or "Trial Balance").upper()
     rows = [["Code", "Account", "Debit", "Credit"]]
     for r in data["rows"]:
         rows.append([r["code"], r["name"], f"${r['debit']:,.2f}" if r["debit"] else "",
@@ -986,7 +1104,7 @@ def build_trial_balance_pdf(data: dict) -> bytes:
     ]))
     story = [
         Paragraph(data["company_name"], s["Title2"]),
-        Paragraph("TRIAL BALANCE", s["SubTitle"]),
+        Paragraph(label, s["SubTitle"]),
         Paragraph(f"As of {data['as_of']}", s["SubTitle"]),
         Spacer(1, 12), t,
     ]
@@ -998,10 +1116,11 @@ def build_general_ledger_pdf(data: dict) -> bytes:
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=LETTER, leftMargin=0.6 * inch, rightMargin=0.6 * inch,
                             topMargin=0.6 * inch, bottomMargin=0.6 * inch)
-    s = _pdf_styles()
+    s = _pdf_styles(data.get("report_style"))
+    label = (data.get("report_label") or "General Ledger").upper()
     story = [
         Paragraph(data["company_name"], s["Title2"]),
-        Paragraph("GENERAL LEDGER", s["SubTitle"]),
+        Paragraph(label, s["SubTitle"]),
         Paragraph(f"For the period {data['period_start']} to {data['period_end']}", s["SubTitle"]),
         Spacer(1, 10),
     ]
@@ -1033,7 +1152,8 @@ def build_cash_flow_pdf(data: dict) -> bytes:
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=LETTER, leftMargin=0.6 * inch, rightMargin=0.6 * inch,
                             topMargin=0.6 * inch, bottomMargin=0.6 * inch)
-    s = _pdf_styles()
+    s = _pdf_styles(data.get("report_style"))
+    label = (data.get("report_label") or "Statement of Cash Flows").upper()
     rows = [
         ["Cash flow from Operating Activities", f"${data['operating']:,.2f}"],
         ["Cash flow from Investing Activities", f"${data['investing']:,.2f}"],
@@ -1051,7 +1171,7 @@ def build_cash_flow_pdf(data: dict) -> bytes:
     ]))
     story = [
         Paragraph(data["company_name"], s["Title2"]),
-        Paragraph("STATEMENT OF CASH FLOWS", s["SubTitle"]),
+        Paragraph(label, s["SubTitle"]),
         Paragraph(f"For the period {data['period_start']} to {data['period_end']}", s["SubTitle"]),
         Spacer(1, 14), t,
     ]
@@ -1063,10 +1183,11 @@ def build_sales_tax_pdf(data: dict) -> bytes:
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=LETTER, leftMargin=0.6 * inch, rightMargin=0.6 * inch,
                             topMargin=0.6 * inch, bottomMargin=0.6 * inch)
-    s = _pdf_styles()
+    s = _pdf_styles(data.get("report_style"))
+    label = (data.get("report_label") or "Sales Tax Liability").upper()
     story = [
         Paragraph(data["company_name"], s["Title2"]),
-        Paragraph("SALES TAX LIABILITY", s["SubTitle"]),
+        Paragraph(label, s["SubTitle"]),
         Paragraph(f"For the period {data['period_start']} to {data['period_end']}", s["SubTitle"]),
         Spacer(1, 12),
     ]
@@ -1090,10 +1211,11 @@ def build_1099_pdf(data: dict) -> bytes:
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=LETTER, leftMargin=0.6 * inch, rightMargin=0.6 * inch,
                             topMargin=0.6 * inch, bottomMargin=0.6 * inch)
-    s = _pdf_styles()
+    s = _pdf_styles(data.get("report_style"))
+    label = (data.get("report_label") or "1099 Summary").upper()
     story = [
         Paragraph(data["company_name"], s["Title2"]),
-        Paragraph("1099 SUMMARY", s["SubTitle"]),
+        Paragraph(label, s["SubTitle"]),
         Paragraph(f"Tax year {data['year']} · Contractors paid ≥ $600", s["SubTitle"]),
         Spacer(1, 12),
     ]
@@ -1145,6 +1267,8 @@ async def compute_account_detail(company_id: str, account_id: str,
         return {
             "company_name": company["name"] if company else "",
             "account": None, "rows": [], "count": 0, "sum_amount": 0.0, "balance": 0.0,
+            "report_style": resolve_report_style(company),
+            "report_label": resolve_report_label(company, "account-detail"),
         }
     account_docs = await db.accounts.find(
         {"id": {"$in": account_ids}, "company_id": company_id}
@@ -1153,6 +1277,8 @@ async def compute_account_detail(company_id: str, account_id: str,
         return {
             "company_name": company["name"] if company else "",
             "account": None, "rows": [], "count": 0, "sum_amount": 0.0, "balance": 0.0,
+            "report_style": resolve_report_style(company),
+            "report_label": resolve_report_label(company, "account-detail"),
         }
     is_multi = len(account_docs) > 1
     # Present the aggregated account as a synthetic "account" so the
@@ -1355,6 +1481,8 @@ async def compute_account_detail(company_id: str, account_id: str,
         "balance": round(running, 2),
         "period_start": start,
         "period_end": end,
+        "report_style": resolve_report_style(company),
+        "report_label": resolve_report_label(company, "account-detail"),
     }
 
 
@@ -1362,9 +1490,10 @@ def build_account_detail_pdf(data: dict) -> bytes:
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=LETTER, leftMargin=0.6 * inch, rightMargin=0.6 * inch,
                             topMargin=0.6 * inch, bottomMargin=0.6 * inch)
-    s = _pdf_styles()
+    s = _pdf_styles(data.get("report_style"))
     a = data["account"] or {}
-    subtitle = f"ACCOUNT DETAIL &middot; {a.get('code', '')} {a.get('name', '')}"
+    label = (data.get("report_label") or "Account Detail").upper()
+    subtitle = f"{label} &middot; {a.get('code', '')} {a.get('name', '')}"
     story = [
         Paragraph(data["company_name"], s["Title2"]),
         Paragraph(subtitle, s["SubTitle"]),
