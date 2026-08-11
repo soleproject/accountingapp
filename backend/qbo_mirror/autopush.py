@@ -24,6 +24,7 @@ from qbo_mirror.push import (
     _journal_entry_body, _estimate_body, _po_body, _purchase_body,
     _sales_receipt_body, _deposit_body,
     _credit_memo_body, _refund_receipt_body, _transfer_body,
+    _inventory_adjustment_body,
     _local_patch_from_qbo_invoice, _local_patch_from_qbo_bill,
     _local_patch_from_qbo_payment, _local_patch_from_qbo_je,
     _local_patch_from_qbo_estimate, _local_patch_from_qbo_po,
@@ -31,6 +32,7 @@ from qbo_mirror.push import (
     _local_patch_from_qbo_sales_receipt, _local_patch_from_qbo_deposit,
     _local_patch_from_qbo_credit_memo, _local_patch_from_qbo_refund_receipt,
     _local_patch_from_qbo_transfer,
+    _local_patch_from_qbo_inventory_adjustment,
 )
 
 logger = logging.getLogger(__name__)
@@ -239,6 +241,24 @@ async def _push_one_transfer(company_id: str, realm_id: str,
     return (str(new_id) if new_id else None, twin_patch)
 
 
+async def _push_one_inventory_adjustment(
+    company_id: str, realm_id: str, doc: dict,
+) -> tuple[str | None, dict | None]:
+    """Single-shot push for a newly-created local inventory adjustment.
+    Fires from `apply_adjustment` via `try_auto_push('inventory_adjustment', je_id)`
+    so the CPA gets QBO round-trip within seconds of clicking Save."""
+    body = await _inventory_adjustment_body(company_id, doc)
+    resp = await _post(
+        company_id, realm_id,
+        f"/company/{realm_id}/inventoryadjustment", body,
+    )
+    twin = resp.get("InventoryAdjustment") or {}
+    new_id = twin.get("Id")
+    twin_patch = (_local_patch_from_qbo_inventory_adjustment(twin)
+                    if new_id else None)
+    return (str(new_id) if new_id else None, twin_patch)
+
+
 # ─── Update / Delete helpers ───────────────────────────────────────
 # QBO requires the current SyncToken on every update/delete — a sparse
 # update endpoint means "give me the FULL updated doc plus the token".
@@ -263,6 +283,11 @@ _ENTITY_META = {
     "credit_memo":    ("creditmemo",   "CreditMemo",    "transactions", None),
     "refund_receipt": ("refundreceipt","RefundReceipt", "transactions", None),
     "transfer":       ("transfer",     "Transfer",      "transactions", None),
+    # `inventory_adjustment` docs live in `journal_entries` (see
+    # `inventory_service.apply_adjustment`). Uses its own body builder
+    # + twin patch, matched via `_push_one_inventory_adjustment`.
+    "inventory_adjustment": ("inventoryadjustment", "InventoryAdjustment",
+                              "journal_entries", None),
 }
 
 
@@ -703,6 +728,8 @@ _HANDLERS = {
     "credit_memo":    ("transactions", _push_one_credit_memo, None),
     "refund_receipt": ("transactions", _push_one_refund_receipt, None),
     "transfer":       ("transactions", _push_one_transfer, None),
+    "inventory_adjustment": ("journal_entries",
+                              _push_one_inventory_adjustment, None),
 }
 
 

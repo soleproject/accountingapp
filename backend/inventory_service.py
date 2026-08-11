@@ -484,8 +484,33 @@ async def apply_adjustment(
             "source": SOURCE_ADJUSTMENT,
             "ref_kind": "adjustment",
             "lines": lines,
+            # Metadata the QBO mirror push builder consumes to rebuild
+            # a proper `InventoryAdjustment` payload (item ref + qty
+            # diff + contra account) — kept on the JE doc so a single
+            # source of truth drives both the local ledger and QBO.
+            "contra_account_id": adj_acct["id"],
+            "inventory_account_id": it.get("inventory_account_id"),
+            "inventory_adjustment_lines": [{
+                "item_id": item_id,
+                "item_name": it.get("name") or "",
+                "item_qbo_id": (str(it["qbo_id"])
+                                 if it.get("qbo_id") else None),
+                "qty_diff": delta,
+                "cost": target_cost,
+                "value": value_delta,
+                "description": memo or reason,
+            }],
             "created_at": now_iso(), "updated_at": now_iso(),
         })
+        # Fire-and-forget QBO push. Only meaningful when the item +
+        # contra account are both mirrored to QBO — otherwise the
+        # push worker will surface a `failed` entry the CPA can
+        # resolve on the Mirror page.
+        try:
+            from qbo_mirror.autopush import try_auto_push
+            try_auto_push(cid, "inventory_adjustment", je_id)
+        except Exception:  # noqa: BLE001 — never block local save
+            pass
 
     await db.items.update_one(
         {"id": item_id, "company_id": cid},
