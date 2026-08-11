@@ -1,5 +1,32 @@
 # SmartBooks — Changelog
 
+## 2026-02-24 — QBO Private-Label OAuth Redirect (Option A) — VERIFIED
+
+### 🎯 Goal
+Private-label domains (Cypher Pro, Proactive Books, etc.) that host their own `api.<label>.accountingapp.ai` API subdomain must bounce Intuit's OAuth consent flow back to THEIR domain, not to the SmartBooks flagship. Users lost trust when the consent flow landed on `smartbookssoftware.ai` mid-connection.
+
+### ✅ Implementation (`backend/routes/qbo.py` + `qbo_service.py`)
+- **`_redirect_uri_from_request(request)`** — pulls `x-forwarded-host` (Kubernetes ingress) or `Host` header, strips port suffix, lowercase-normalises, and only accepts hosts on `_QBO_ALLOWED_HOSTS` whitelist. Returns `None` for non-whitelisted hosts so the caller falls back to the env-configured flagship `QBO_REDIRECT_URI`.
+- **`qbo_oauth_start`** — takes `request: Request`, derives the per-request URI, persists it on the `qbo_oauth_states` row, and threads it through `Q.authorization_url(state, redirect_uri=)` so Intuit sees the label domain on the outbound consent URL.
+- **`qbo_oauth_callback`** — reads the persisted `redirect_uri` off the state doc and passes it into `Q.exchange_code(code, realm, redirect_uri=)` (Intuit does a strict-equality check on the exchange, otherwise it 400s with `invalid_grant`).
+- **`_label_app_url(rec)`** — helper that derives the front-end app URL from the persisted API URI (`api.cypherpro.accountingapp.ai` → `cypherpro.accountingapp.ai`) so success/error redirects also return the user to THEIR frontend, not SmartBooks.
+
+### 🔒 Allow-list gate
+`_QBO_ALLOWED_HOSTS = {"api.smartbookssoftware.ai", "api.cypherpro.accountingapp.ai"}`. Adding a new label requires (1) appending the host here, (2) adding the callback to the Intuit Developer Portal's Redirect URIs list — either alone would 400 the flow.
+
+### 🧪 Tests
+- **`tests/test_qbo_private_label_redirect.py`** — 8 unit tests: whitelist match via `x-forwarded-host`, `Host` fallback, forwarded-host wins over host, non-whitelist → None, missing headers → None, port-suffix stripping, case-insensitive match, whitelist sanity.
+- **Live curl verification** (direct backend, bypassing Emergent's ingress rewrite):
+  - No forwarding header → falls back to env `QBO_REDIRECT_URI` ✓
+  - `x-forwarded-host: api.cypherpro.accountingapp.ai` → `https://api.cypherpro.accountingapp.ai/api/qbo/oauth/callback` ✓
+  - `Host: api.smartbookssoftware.ai` → `https://api.smartbookssoftware.ai/api/qbo/oauth/callback` ✓
+- **Regression**: 152 QBO tests pass, zero new failures.
+
+### ⚠️ Operator action required
+Add `https://api.cypherpro.accountingapp.ai/api/qbo/oauth/callback` (and the callback for any other private label going live) to the Intuit Developer app's Redirect URIs list at developer.intuit.com — otherwise Intuit rejects the auth request with `invalid_redirect_uri`.
+
+
+
 ## 2026-02-21 (bugfix 3) — InventoryAdjustment Pull Diagnostics + Fallback
 
 ### 🐛 Problem
