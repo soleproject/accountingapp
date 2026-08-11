@@ -1,5 +1,43 @@
 # SmartBooks — Changelog
 
+## 2026-02-24 — Brand fallback to Stripe Product metadata
+
+### 🎯 Problem
+Operator set `brand=cypherpro` metadata on the **Product** in Stripe Dashboard (the natural place — that's where the "CypherPro" branding conceptually lives). But our webhook was only reading `session.metadata`, which reflects **Payment Link** metadata, not Product metadata. Result: after the fix in the previous entry, the webhook still routed to `smartbooks` because it never saw the Product's metadata.
+
+### ✅ Fix (`backend/routes/stripe_billing.py`)
+`_handle_checkout_completed` now falls back to a Stripe API expansion when session metadata is empty:
+```python
+if brand.key == "smartbooks" and _STRIPE_KEY and session.id:
+    expanded = stripe.checkout.Session.retrieve(
+        session.id, expand=["line_items.data.price.product"]
+    )
+    for ln in expanded.line_items.data:
+        candidate = resolve_brand(ln.price.product.metadata)
+        if candidate.key != "smartbooks":
+            brand = candidate
+            break
+```
+- Runs at most **one** Stripe API call per event (only when session metadata is empty).
+- Session metadata still wins if both are set (specific-over-general — allows a promo Payment Link to override its product's brand).
+- Any Stripe API failure is caught and swallowed — user creation never breaks because of a metadata lookup hiccup.
+
+### 🧪 Tests
+Added 3 tests to `test_stripe_private_label_welcome.py` (all monkeypatched — no real Stripe calls):
+- `test_brand_falls_back_to_product_metadata` — product metadata alone routes to CypherPro
+- `test_session_metadata_wins_over_product_metadata` — expansion isn't even called when session already has brand
+- `test_stripe_expansion_error_is_swallowed` — user still gets created + falls back to smartbooks
+
+Full private-label suite: **17/17 pass** across 5 consecutive runs. Combined `test_stripe_billing.py` + `test_stripe_private_label_welcome.py`: **24/24 pass** across 3 consecutive runs.
+
+### 📖 Operator playbook update
+For CypherPro (or any private label): add `metadata.brand=cypherpro` in EITHER place:
+- **Product** (Product catalog → Products → open → Metadata) — recommended, configures branding once per brand
+- **Payment Link** (Product catalog → Payment Links → open → Metadata) — overrides Product metadata; use for one-off promos
+Both work. Product metadata is the durable choice.
+
+
+
 ## 2026-02-24 — Private-Label Welcome Emails (CypherPro-branded)
 
 ### 🎯 Problem

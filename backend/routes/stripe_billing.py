@@ -492,8 +492,37 @@ async def _handle_checkout_completed(session: dict) -> dict:
     # email bail — even a bailed event should report which brand it
     # was attributed to (helps ops narrow "which label's Payment Link
     # is broken").
-    from private_labels import resolve_brand
+    from private_labels import resolve_brand, DEFAULT_BRAND_KEY
     brand = resolve_brand(session.get("metadata"))
+    # If Payment-Link metadata didn't carry a brand (the natural place
+    # to put it is on the Product, not the Payment Link — that's where
+    # most operators reach first), fall back to looking up the product
+    # metadata via Stripe expansion. This makes `brand=cypherpro` on
+    # the Product "just work" without also having to duplicate it on
+    # every Payment Link. Runs at most one Stripe API call per event.
+    if brand.get("key") == DEFAULT_BRAND_KEY and _STRIPE_KEY and session.get("id"):
+        try:
+            expanded = stripe.checkout.Session.retrieve(
+                session["id"],
+                expand=["line_items.data.price.product"],
+            )
+            lines = ((expanded.get("line_items") or {}).get("data") or [])
+            for ln in lines:
+                prod_md = (
+                    ((ln.get("price") or {}).get("product") or {}).get("metadata")
+                    or {}
+                )
+                candidate = resolve_brand(prod_md)
+                if candidate.get("key") != DEFAULT_BRAND_KEY:
+                    brand = candidate
+                    break
+        except Exception:  # noqa: BLE001
+            # Never let a Stripe API hiccup break user creation.
+            # Ops can still see the resolved brand in the outcome and
+            # spot the fallback missed via the diagnostic page.
+            logger.exception(
+                "checkout brand expansion failed for %s", session.get("id"),
+            )
     if not email:
         logger.warning("checkout.session.completed with no email: %s", session.get("id"))
         return {

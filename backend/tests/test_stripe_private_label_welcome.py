@@ -268,3 +268,148 @@ def test_bailed_no_email_still_reports_brand():
         assert outcome["brand"] == "cypherpro"
         await db.stripe_webhook_events.delete_one({"id": eid})
     _run(_t())
+
+
+def test_brand_falls_back_to_product_metadata(monkeypatch):
+    """Operators reach for the PRODUCT's metadata pane first (in Stripe
+    Dashboard) — but the session payload only carries the Payment
+    Link's metadata. Verify our webhook falls back to a Stripe
+    `line_items.price.product` expansion when the session metadata is
+    empty, so brand=cypherpro on the Product Just Works."""
+    async def _t():
+        # Force the code path — set a fake Stripe key so the branch runs.
+        monkeypatch.setattr(sb, "_STRIPE_KEY", "sk_test_fake", raising=False)
+
+        # Fake Stripe SDK response — Product carries brand=cypherpro,
+        # session metadata is empty.
+        def _fake_retrieve(session_id, expand=None):
+            return {
+                "id": session_id,
+                "line_items": {"data": [
+                    {"price": {"product": {"metadata": {"brand": "cypherpro"}}}}
+                ]},
+            }
+        monkeypatch.setattr(
+            sb.stripe.checkout.Session,
+            "retrieve",
+            _fake_retrieve,
+        )
+
+        fresh_email = f"prodmd_{uuid.uuid4().hex[:8]}@example.com"
+        eid = f"evt_prodmd_{uuid.uuid4().hex[:8]}"
+        await db.users.delete_one({"email": fresh_email})
+
+        evt = {
+            "id": eid,
+            "type": "checkout.session.completed",
+            "data": {"object": {
+                "id": "cs_prodmd_ok",
+                "customer": "cus_prodmd_1",
+                "customer_details": {"email": fresh_email, "name": "ProdMd Payer"},
+                "subscription": "sub_prodmd_1",
+                "mode": "subscription",
+                "metadata": {},  # explicitly no brand on the Payment Link
+            }},
+        }
+        code, body = await _post_event(evt)
+        assert code == 200
+        outcome = body["outcome"]
+        assert outcome["status"] == "user_created"
+        # Brand came from the PRODUCT metadata (via expansion), not the
+        # Payment Link metadata.
+        assert outcome["brand"] == "cypherpro"
+        assert outcome["magic_link_host"] == "https://app.cypherpro.accountingapp.ai"
+
+        # cleanup
+        user = await db.users.find_one({"email": fresh_email})
+        if user:
+            await db.users.delete_one({"id": user["id"]})
+            await db.password_set_tokens.delete_many({"user_id": user["id"]})
+            await db.communications.delete_many({"user_id": user["id"]})
+        await db.stripe_webhook_events.delete_one({"id": eid})
+    _run(_t())
+
+
+def test_session_metadata_wins_over_product_metadata(monkeypatch):
+    """When both are set, Payment-Link metadata wins — that's the more
+    specific signal (a link can override its product's brand if needed
+    for a promo/campaign)."""
+    async def _t():
+        monkeypatch.setattr(sb, "_STRIPE_KEY", "sk_test_fake", raising=False)
+
+        # Product tries to say smartbooks, session says cypherpro.
+        # Session wins → no expansion call needed.
+        def _fake_retrieve(session_id, expand=None):
+            raise AssertionError("Should not be called — session metadata already has brand")
+        monkeypatch.setattr(sb.stripe.checkout.Session, "retrieve", _fake_retrieve)
+
+        fresh_email = f"sessionwins_{uuid.uuid4().hex[:8]}@example.com"
+        eid = f"evt_sw_{uuid.uuid4().hex[:8]}"
+        await db.users.delete_one({"email": fresh_email})
+
+        evt = {
+            "id": eid,
+            "type": "checkout.session.completed",
+            "data": {"object": {
+                "id": "cs_sw_ok",
+                "customer": "cus_sw_1",
+                "customer_details": {"email": fresh_email, "name": "SW Payer"},
+                "subscription": "sub_sw_1",
+                "mode": "subscription",
+                "metadata": {"brand": "cypherpro"},
+            }},
+        }
+        code, body = await _post_event(evt)
+        assert code == 200
+        assert body["outcome"]["brand"] == "cypherpro"
+
+        # cleanup
+        user = await db.users.find_one({"email": fresh_email})
+        if user:
+            await db.users.delete_one({"id": user["id"]})
+            await db.password_set_tokens.delete_many({"user_id": user["id"]})
+            await db.communications.delete_many({"user_id": user["id"]})
+        await db.stripe_webhook_events.delete_one({"id": eid})
+    _run(_t())
+
+
+def test_stripe_expansion_error_is_swallowed(monkeypatch):
+    """A Stripe API hiccup during brand expansion must NEVER break
+    user creation — we fall back to `smartbooks` and log."""
+    async def _t():
+        monkeypatch.setattr(sb, "_STRIPE_KEY", "sk_test_fake", raising=False)
+
+        def _fake_retrieve(session_id, expand=None):
+            raise RuntimeError("stripe unavailable")
+        monkeypatch.setattr(sb.stripe.checkout.Session, "retrieve", _fake_retrieve)
+
+        fresh_email = f"expfail_{uuid.uuid4().hex[:8]}@example.com"
+        eid = f"evt_ef_{uuid.uuid4().hex[:8]}"
+        await db.users.delete_one({"email": fresh_email})
+
+        evt = {
+            "id": eid,
+            "type": "checkout.session.completed",
+            "data": {"object": {
+                "id": "cs_ef_ok",
+                "customer": "cus_ef_1",
+                "customer_details": {"email": fresh_email, "name": "EF Payer"},
+                "subscription": "sub_ef_1",
+                "mode": "subscription",
+                "metadata": {},
+            }},
+        }
+        code, body = await _post_event(evt)
+        # Still 200 — user creation succeeded despite the expansion crash.
+        assert code == 200
+        assert body["outcome"]["status"] == "user_created"
+        assert body["outcome"]["brand"] == "smartbooks"
+
+        # cleanup
+        user = await db.users.find_one({"email": fresh_email})
+        if user:
+            await db.users.delete_one({"id": user["id"]})
+            await db.password_set_tokens.delete_many({"user_id": user["id"]})
+            await db.communications.delete_many({"user_id": user["id"]})
+        await db.stripe_webhook_events.delete_one({"id": eid})
+    _run(_t())
