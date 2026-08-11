@@ -41,12 +41,26 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
 
-import zstandard as zstd
+try:
+    import zstandard as zstd
+    _ZSTD_AVAILABLE = True
+except ImportError:  # pragma: no cover — defensive; keeps the audit
+    # module importable on a container missing the dep so the whole
+    # app doesn't crash. Snapshots + diffs still get written, they
+    # just skip the compression step (bytes stored as raw JSON).
+    zstd = None
+    _ZSTD_AVAILABLE = False
+
 from fastapi import Request
 
 from db import db
 
 log = logging.getLogger(__name__)
+if not _ZSTD_AVAILABLE:
+    log.warning(
+        "audit: `zstandard` not installed — audit snapshots will be "
+        "stored uncompressed (add `zstandard` to requirements.txt).",
+    )
 
 # ────────────────────────────────────────────────────────────────
 # Event taxonomy
@@ -108,8 +122,8 @@ def _needs_snapshot(event_type: str, entity_type: Optional[str]) -> bool:
 # Compression + diff helpers
 # ────────────────────────────────────────────────────────────────
 
-_CCTX = zstd.ZstdCompressor(level=6)   # level 6 = good tradeoff; ~4× faster than default 22 with only marginal size loss
-_DCTX = zstd.ZstdDecompressor()
+_CCTX = zstd.ZstdCompressor(level=6) if _ZSTD_AVAILABLE else None
+_DCTX = zstd.ZstdDecompressor() if _ZSTD_AVAILABLE else None
 
 
 def _default(o: Any) -> Any:
@@ -125,6 +139,11 @@ def _compress(doc: Optional[dict]) -> Optional[bytes]:
     if doc is None:
         return None
     raw = json.dumps(doc, default=_default, separators=(",", ":")).encode("utf-8")
+    if _CCTX is None:
+        # zstd unavailable — store raw JSON so audit still works, just
+        # bigger on disk. Prefix a magic byte so `_decompress` knows
+        # to skip the zstd decode path.
+        return b"\x00J" + raw
     return _CCTX.compress(raw)
 
 
@@ -132,6 +151,13 @@ def _decompress(blob: Optional[bytes]) -> Optional[dict]:
     if not blob:
         return None
     try:
+        # Uncompressed marker (see `_compress`) — strip the 2-byte
+        # sentinel and parse the JSON directly.
+        if blob[:2] == b"\x00J":
+            return json.loads(blob[2:].decode("utf-8"))
+        if _DCTX is None:
+            log.warning("Audit decompress: zstd blob but zstd unavailable")
+            return None
         return json.loads(_DCTX.decompress(blob).decode("utf-8"))
     except Exception as e:  # noqa: BLE001 — corrupted blob returns null vs. crash
         log.warning("Audit decompress failed: %s", e)

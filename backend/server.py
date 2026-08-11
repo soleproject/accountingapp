@@ -207,9 +207,17 @@ async def startup():
     # Audit trail — enterprise-grade record of every mutating action,
     # login, impersonation, sync event, and export. Indexes cover the
     # three main query shapes: by-company timeline, by-user timeline,
-    # by-entity timeline.
-    import audit as _audit
-    await _audit.ensure_indexes()
+    # by-entity timeline. Wrapped defensively so a missing optional
+    # dep (zstandard) never bricks the whole app startup — the audit
+    # module has its own graceful-degrade path.
+    try:
+        import audit as _audit
+        await _audit.ensure_indexes()
+    except Exception as _e:  # noqa: BLE001
+        import logging as _log
+        _log.getLogger(__name__).error(
+            "audit init failed (non-fatal): %s", _e,
+        )
     # Any job left in queued/running from a previous process is stuck —
     # mark as failed so the Sync Pill doesn't display "syncing forever".
     stuck = await job_queue.reconcile_stuck_jobs()
