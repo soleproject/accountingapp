@@ -9,6 +9,7 @@ import {
   AlertTriangle, RefreshCw, Wrench, DollarSign, CheckCircle2, RotateCcw,
 } from "lucide-react";
 import TeamPanel from "@/components/TeamPanel";
+import PartnersCard from "@/components/PartnersCard";
 import { WhitelabelCompToggle } from "@/pages/AdminEnterpriseDetail";
 
 export default function SuperadminDash() {
@@ -75,6 +76,7 @@ export default function SuperadminDash() {
           onRevoked={() => { refreshData(); refreshSupers(); }}
         />
       )}
+      <PartnersCard />
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           ["Users", stats.total_users, Users, "#6366F1"],

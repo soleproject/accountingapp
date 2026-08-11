@@ -1,5 +1,78 @@
 # SmartBooks — Changelog
 
+## 2026-02-24 — Partner role (Phase 1 MVP)
+
+### 🎯 New user tier
+A **Partner** is a reseller that sits between Superadmin and the existing Pro/Enterprise/Client trees. Partners inherit every Pro capability (manage client books, get their own "Partner Books" with the same delete protections as Firm Books) AND gain Enterprise-management privileges — but scoped to only the enterprises and clients they created. Partners cannot create Superadmins and cannot see any other Partner's data.
+
+Hierarchy:
+```
+Superadmin
+├── Partners
+│   ├── Enterprises  (linked via partner_id)
+│   └── End Users    (linked via partner_id)
+└── Enterprises  (linked directly, no partner)
+    └── End Users
+```
+
+### ✅ Backend (`backend/partners.py`, `backend/routes/partners_routes.py`)
+
+**Data model additions:**
+- `users.role == "partner"` — new role in the RBAC layer
+- `users.branding` on partner docs — same shape as pro/firm branding (`firm_name`, `subdomain`, `logo_url`, `primary_color`)
+- `users.partner_id` — set on Pros/Enterprise-owners provisioned by a Partner
+- `companies.partner_id` — set on Enterprises + Clients created by a Partner (superadmin-created entities leave this unset)
+- `companies.is_partner_books == True` — marks the Partner's own accounting entity; delete-guarded via new `force_partner_books=true` query flag (mirrors `force_firm_books`)
+- New `partners` sidecar collection — light index doc for slug lookup + rollup
+
+**Endpoints (all prefixed `/api`):**
+- `POST /superadmin/partners` — create partner (auto-provisions Partner Books + fires magic-link welcome email; 409 on duplicate email; 409 on email belonging to a non-partner account so role changes stay explicit)
+- `GET /superadmin/partners` — list all partners with rollup stats
+- `GET /superadmin/partners/{id}` — detail
+- `PATCH /superadmin/partners/{id}` — update branding + subdomain (unique slug reprocess on change)
+- `GET /partner/me` — partner's own profile + stats (self-heals Partner Books if missing)
+- `GET /partner/summary` — one-shot dashboard payload
+- `GET /partner/clients` — clients scoped by `partner_id`
+- `GET /partner/enterprises` — enterprises scoped by `partner_id`
+
+**Idempotency:** `ensure_partner_books_company_for_partner()` uses the same defensive dedupe pattern as Firm Books (flag lookup → legacy name-suffix retro-stamp → mint new) so the 3-copies bug that hit Firm Books in production can't recur here.
+
+### ✅ Frontend
+
+- `frontend/src/components/PartnersCard.jsx` — Superadmin dashboard section with Partners list + New Partner button + Create modal (contact name/email + display name + subdomain + brand color picker). Auto-refreshes after create.
+- Injected into `SuperadminDash.jsx` right above the stat cards, exactly parallel to the existing Enterprises card layout.
+- `frontend/src/pages/PartnerDash.jsx` — new `/partner` landing page: brand-colored header, 4 stat cards (Clients / Enterprises / Users / Partner Books), Partner Books tile, action buttons (New Client / New Enterprise / Branding & Settings), and scoped client + enterprise lists. Every field flows from `GET /partner/summary` + `/partner/clients` + `/partner/enterprises`.
+- `Login.jsx` — post-login redirect now includes `partner` → `/partner`.
+
+### 🧪 Tests
+
+`backend/tests/test_partners.py` — **9 tests, all green**:
+- Create partner: provisions Partner Books, returns stats, marks `must_set_password=True`, writes sidecar row
+- Duplicate email → 409
+- Email belonging to a non-partner (client/pro) → 409 (role changes stay explicit)
+- List partners returns created partner with rollup
+- PATCH updates branding (display_name + primary_color)
+- Partner Books delete requires `force_partner_books=true` (403 without, 200 with)
+- Scoping: Partner A cannot see Partner B's clients (`/partner/summary` stats respect `partner_id`)
+- Partner role cannot access `/superadmin/partners` (403)
+- `ensure_partner_books_company_for_partner` is idempotent (protects against Firm Books 3-copies bug recurrence)
+
+Full regression on adjacent suites: **9 partner + 8 QBO + 17 stripe private-label + 16 partner-vs-stripe combined = 50/50 pass**.
+
+### 📸 Verified E2E on preview
+- Superadmin dashboard renders the Partners section with a real CypherPro partner card (brand chip, stat chips, Partner Books button, "Awaiting password set" notice)
+- New Partner modal opens, form has all fields (name/email/display_name/subdomain/color picker)
+- `/partner` dashboard: brand-colored header shows "CypherPro", subtitle "Partner dashboard · cypherpro-test.accountingapp.ai", Partner Books tile is clickable, stat cards populated, action buttons present, role badge on left sidebar reads **PARTNER**
+
+### 🔮 Deferred to Phase 2
+- Migration script: convert existing CypherPro Enterprise → Partner + re-link its 3 clients
+- Partner Settings page (mirrors Enterprise settings — subdomain edits, sign-in options, private-label brand key so `metadata.brand=cypherpro` routes to Partner's branding automatically)
+- Enterprises-under-Partner inheriting Partner branding cascade
+- Detailed Usage / Cost / Revenue breakdowns (Phase 1 shows only counts; Phase 2 will add $ + AI-spend rollups scoped to `partner_id`)
+- Stripe self-signup for Partners (right now the only creation path is Superadmin → New Partner)
+
+
+
 ## 2026-02-24 — Brand fallback to Stripe Product metadata
 
 ### 🎯 Problem

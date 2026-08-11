@@ -410,6 +410,7 @@ async def update_company(cid: str, patch: dict, request: Request, user: dict = D
 @router.delete("/companies/{cid}")
 async def delete_company(cid: str, confirm: str = "",
                          force_firm_books: bool = False,
+                         force_partner_books: bool = False,
                          user: dict = Depends(get_current_user)):
     """Hard-delete a company and every record scoped to it. Requires
     `?confirm=<company_name>` in the query string as a safeguard against
@@ -439,6 +440,19 @@ async def delete_company(cid: str, confirm: str = "",
             "`force_firm_books=true` to override, or convert this "
             "company to a regular company first via PATCH "
             "/companies/{cid} with {\"is_firm_books\": false}.",
+        )
+    # Partner Books are the same idea but scoped to Partner-role users
+    # (see partners.ensure_partner_books_company_for_partner). Distinct
+    # override flag from firm books so a client accidentally deleting a
+    # firm-books row can't accidentally take out a partner-books row
+    # via the same override — each protection is opted-in explicitly.
+    if company.get("is_partner_books") is True and not force_partner_books:
+        raise HTTPException(
+            403,
+            "Partner Books companies are protected. Pass "
+            "`force_partner_books=true` to override, or convert this "
+            "company to a regular company first via PATCH "
+            "/companies/{cid} with {\"is_partner_books\": false}.",
         )
     # Every collection that carries a `company_id` field
     per_company_collections = [
