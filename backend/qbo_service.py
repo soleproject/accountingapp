@@ -670,6 +670,70 @@ def map_journal_entry(cid: str, realm_id: str, obj: dict) -> dict:
     }
 
 
+def map_inventory_adjustment(cid: str, realm_id: str, obj: dict) -> dict:
+    """Shape a QBO `InventoryAdjustment` into a local `journal_entries`
+    row so the audit trail lives alongside other JEs and rolls up into
+    the same reports.
+
+    QBO's shape:
+      obj["AdjustAccountRef"]     — usually `5300 Inventory Shrinkage`
+                                     or `5900 Other Expenses`; this
+                                     account absorbs the P&L / equity
+                                     side of the adjustment.
+      obj["Line"][i]              — one line per item adjusted, with
+                                     `ItemAdjustmentLineDetail.QtyDiff`
+                                     (positive = increase on-hand,
+                                     negative = decrease) and
+                                     `ItemRef`. QBO does NOT include
+                                     the cost — we compute value at
+                                     import time using the item's
+                                     `cost` field (already migrated).
+
+    Ledger convention:
+      QtyDiff × item.cost = valuation delta.
+        Positive delta  → Dr 1300 Inventory Asset / Cr AdjustAccount
+        Negative delta  → Cr 1300 Inventory Asset / Dr AdjustAccount
+    """
+    lines_raw = obj.get("Line") or []
+    line_items: list[dict] = []
+    net_value = 0.0
+    for ln in lines_raw:
+        d = ln.get("ItemAdjustmentLineDetail") or {}
+        item_ref = (d.get("ItemRef") or {})
+        qty_diff = float(d.get("QtyDiff") or 0)
+        line_items.append({
+            "item_qbo_id": item_ref.get("value"),
+            "item_name": item_ref.get("name") or "",
+            "qty_diff": qty_diff,
+            "description": ln.get("Description") or "",
+        })
+        # `net_value` is computed downstream once we can resolve
+        # item cost from the local items collection — here we just
+        # preserve QBO's raw shape.
+    adjust_ref = (obj.get("AdjustAccountRef") or {})
+    return {
+        "company_id": cid, "source": "qbo_inv_adj",
+        "qbo_id": obj["Id"], "id": f"qbo-{cid[:8]}-invadj-{obj['Id']}",
+        "realm_id": realm_id,
+        "number": obj.get("DocNumber") or f"INVADJ-{obj['Id']}",
+        "date": obj.get("TxnDate") or "",
+        "memo": obj.get("PrivateNote") or "",
+        # We store the raw line shape + a placeholder empty `lines`
+        # array — the pull step (which has access to the items
+        # collection) is responsible for computing the priced
+        # debit/credit legs and writing them into `lines`.
+        "inventory_adjustment_lines": line_items,
+        "adjust_account_qbo_id": adjust_ref.get("value"),
+        "adjust_account_name": adjust_ref.get("name") or "",
+        "lines": [],  # populated by pull step once cost is resolved
+        "total_debit": 0.0, "total_credit": 0.0,
+        "raw": obj,
+        "created_at": now_iso(), "updated_at": now_iso(),
+    }
+
+
+
+
 # Direction convention: positive `amount` = money INTO the bank/asset,
 # negative = money OUT. QBO returns TotalAmt as a magnitude, so we
 # sign it here based on the txn_type. Kept as a module-level constant
@@ -875,12 +939,14 @@ async def run_migration(job_id: str, company_id: str) -> None:
         # mirror-only entities). Pull them via the mirror engine so
         # a freshly-migrated company doesn't end up with dozens of
         # `pull_from_qbo` records in the dry-run.
-        mirror_pulled = {"estimates": 0, "purchase_orders": 0}
+        mirror_pulled = {"estimates": 0, "purchase_orders": 0,
+                          "inventory_adjustments": 0}
         skipped_dupkey = 0
         try:
             from qbo_mirror.pull import run_pull
             pr = await run_pull(company_id, "migration",
-                                 entities=["estimates", "purchase_orders"])
+                                 entities=["estimates", "purchase_orders",
+                                             "inventory_adjustments"])
             for k in mirror_pulled:
                 r = (pr or {}).get(k) or {}
                 mirror_pulled[k] = (r.get("inserted", 0)
@@ -922,6 +988,7 @@ async def run_migration(job_id: str, company_id: str) -> None:
                       "seeded_deactivated": seeded_deactivated,
                       "mirror_estimates_pulled": mirror_pulled["estimates"],
                       "mirror_pos_pulled": mirror_pulled["purchase_orders"],
+                      "mirror_inv_adj_pulled": mirror_pulled["inventory_adjustments"],
                       "skipped_dupkey": skipped_dupkey,
                       "opening_inventory_value": opening_inv_value}},
         )

@@ -390,6 +390,128 @@ async def _pull_payments(company_id: str, realm_id: str,
     return {"inserted": inserted, "updated": updated}
 
 
+async def _pull_inventory_adjustments(
+    company_id: str, realm_id: str,
+) -> dict:
+    """Pull QBO `InventoryAdjustment` transactions and materialize
+    them as `journal_entries` rows priced against the local items
+    collection's cost basis.
+
+    Why store as JEs? Two reasons:
+      1. Existing Balance Sheet / P&L reports scan `journal_entries`
+         already, so the audit trail rolls up for free.
+      2. The mirror push story for outbound adjustments (Phase 6+)
+         can shape the same doc back into a QBO InventoryAdjustment
+         payload — one storage shape, two directions of flow.
+
+    Missing item cost → line skipped and logged; we don't want to
+    post a $0 leg that would silently zero out the JE total.
+    """
+    existing = await _existing_qbo_ids(
+        company_id, "journal_entries",
+        extra={"source": "qbo_inv_adj"})
+    # Load 1300 Inventory Asset up front — every adjustment posts
+    # against it, no point re-fetching per row.
+    inv_asset = await db.accounts.find_one(
+        {"company_id": company_id, "code": "1300"})
+    if not inv_asset:
+        return {"error": "No 1300 Inventory Asset account seeded",
+                "inserted": 0, "updated": 0}
+    inserted = 0
+    updated = 0
+    async for obj in Q.query_all(
+        company_id, realm_id, "InventoryAdjustment",
+    ):
+        qid = str(obj.get("Id"))
+        mapped = Q.map_inventory_adjustment(company_id, realm_id, obj)
+        # Resolve contra account (AdjustAccountRef → local account).
+        contra = None
+        if mapped["adjust_account_qbo_id"]:
+            contra = await db.accounts.find_one({
+                "company_id": company_id, "source": "qbo",
+                "qbo_id": mapped["adjust_account_qbo_id"],
+            })
+        # Price each line at the local item's cost — the value
+        # signed by QtyDiff sign gives us the debit/credit split.
+        priced_lines = []
+        net_dollars = 0.0
+        for ln in mapped["inventory_adjustment_lines"]:
+            item = None
+            if ln["item_qbo_id"]:
+                item = await db.items.find_one({
+                    "company_id": company_id, "source": "qbo",
+                    "qbo_id": ln["item_qbo_id"],
+                })
+            cost = float((item or {}).get("cost") or 0)
+            qty = float(ln["qty_diff"] or 0)
+            if cost <= 0 or qty == 0:
+                continue
+            value = round(abs(qty) * cost, 2)
+            priced_lines.append({
+                "item_id": (item or {}).get("id"),
+                "item_qbo_id": ln["item_qbo_id"],
+                "item_name": ln["item_name"],
+                "qty_diff": qty, "cost": cost,
+                "value": value if qty > 0 else -value,
+            })
+            net_dollars += value if qty > 0 else -value
+        # Build a balanced two-legged JE only if there's real value
+        # to record. `net_dollars > 0` means inventory grew (write-
+        # up); `< 0` means it shrunk (writedown).
+        if net_dollars == 0 or not priced_lines:
+            continue
+        abs_val = abs(round(net_dollars, 2))
+        if net_dollars > 0:  # inventory INCREASED
+            debit_leg = {"account_id": inv_asset["id"],
+                          "account_code": inv_asset.get("code"),
+                          "account_name": inv_asset.get("name"),
+                          "debit": abs_val, "credit": 0}
+            credit_leg = {"account_id": (contra or {}).get("id"),
+                           "account_code": (contra or {}).get("code"),
+                           "account_name": (contra or {}).get("name")
+                            or mapped["adjust_account_name"],
+                           "debit": 0, "credit": abs_val}
+        else:                # inventory DECREASED
+            credit_leg = {"account_id": inv_asset["id"],
+                           "account_code": inv_asset.get("code"),
+                           "account_name": inv_asset.get("name"),
+                           "debit": 0, "credit": abs_val}
+            debit_leg = {"account_id": (contra or {}).get("id"),
+                          "account_code": (contra or {}).get("code"),
+                          "account_name": (contra or {}).get("name")
+                           or mapped["adjust_account_name"],
+                          "debit": abs_val, "credit": 0}
+        mapped["lines"] = [debit_leg, credit_leg]
+        mapped["total_debit"] = abs_val
+        mapped["total_credit"] = abs_val
+        mapped["posted"] = True
+        mapped["human_reviewed"] = True
+        mapped["_sync_origin"] = "mirror_pull"
+        mapped["inventory_adjustment_priced_lines"] = priced_lines
+        if qid not in existing:
+            try:
+                await db.journal_entries.insert_one(mapped)
+                inserted += 1
+            except Exception:  # noqa: BLE001
+                # DuplicateKey under race — treat as an update instead.
+                await db.journal_entries.update_one(
+                    {"company_id": company_id, "source": "qbo_inv_adj",
+                      "qbo_id": qid},
+                    {"$set": mapped},
+                )
+                updated += 1
+        else:
+            await db.journal_entries.update_one(
+                {"company_id": company_id, "source": "qbo_inv_adj",
+                  "qbo_id": qid},
+                {"$set": {**mapped,
+                            "updated_at": now_iso()}},
+            )
+            updated += 1
+    return {"inserted": inserted, "updated": updated}
+
+
+
 async def _pull_journal_entries(company_id: str, realm_id: str) -> dict:
     """Phase 2f — bring QBO Journal Entries into local. Matches
     by qbo_id. Resolves each line's QBO AccountRef back to the
@@ -679,7 +801,8 @@ async def run_pull(company_id: str, user_email: str,
     if entities is None:
         entities = ["accounts", "customers", "vendors", "items",
                      "invoices", "bills", "payments", "bill_payments",
-                     "journal_entries", "estimates", "purchase_orders"]
+                     "journal_entries", "estimates", "purchase_orders",
+                     "inventory_adjustments"]
 
     result: dict[str, dict] = {}
     for e in entities:
@@ -710,6 +833,9 @@ async def run_pull(company_id: str, user_email: str,
                 result[e] = await _pull_estimates(company_id, realm_id)
             elif e == "purchase_orders":
                 result[e] = await _pull_purchase_orders(company_id, realm_id)
+            elif e == "inventory_adjustments":
+                result[e] = await _pull_inventory_adjustments(
+                    company_id, realm_id)
         except Exception as err:  # noqa: BLE001
             result[e] = {"error": str(err)}
 

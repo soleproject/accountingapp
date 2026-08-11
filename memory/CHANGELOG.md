@@ -1,5 +1,42 @@
 # SmartBooks — Changelog
 
+## 2026-02-21 — InventoryAdjustment History Migration
+
+### 🗂️ Full audit trail migration for inventory adjustments
+QBO's `InventoryAdjustment` entity carries the *history* of every write-up / writedown / count correction. Previously we only migrated the current on-hand snapshot; the trail was gone. Now:
+
+- **New mapper** `qbo_service.map_inventory_adjustment` extracts DocNumber, TxnDate, PrivateNote, AdjustAccountRef, and every Line's QtyDiff + ItemRef into a `qbo_inv_adj`-sourced doc shape.
+- **New pull step** `_pull_inventory_adjustments` in `qbo_mirror/pull.py`:
+  - Loads `1300 Inventory Asset` once, resolves the contra account (AdjustAccountRef → local qbo-mirrored account).
+  - Prices each line at the local item's `cost` field (already migrated in the Items pull).
+  - Builds a **balanced two-legged JE**: positive net → Dr Inventory Asset / Cr contra; negative net → reverse.
+  - Skips zero-cost items and $0 net adjustments (no ledger clutter).
+  - Stamps `posted=True`, `human_reviewed=True`, `_sync_origin=mirror_pull`, `source=qbo_inv_adj`.
+- **Registered in `run_pull`** and the migration finisher — the initial migration now pulls Estimates + POs + InventoryAdjustments in one shot.
+- **DuplicateKey resilience** — race-condition inserts fall through to `update_one` instead of surfacing to the user.
+- **Idempotent re-pulls** — same QBO id updates the existing JE rather than stacking a second one.
+
+### 🖼️ Migration Completion Banner — new tile
+Expanded to 6 columns; added **Inv adjustments** counter (`data-testid="qbo-stat-inv-adjustments"`) with a tooltip explaining the value proposition.
+
+### ✅ Test coverage
+`backend/tests/test_qbo_inventory_adjustments.py` — 7 tests:
+- Mapper shape (DocNumber, TxnDate, AdjustAccountRef, Line[])
+- Writedown (negative net) posts Cr 1300 / Dr contra
+- Writeup (positive net) posts Dr 1300 / Cr contra
+- Zero-cost items are skipped (no $0 legs)
+- Missing 1300 returns `{error: ...}` gracefully (doesn't crash)
+- Re-pull is idempotent (`update_one` fallback)
+- Multi-line adjustment netting to $0 skipped (no clutter)
+
+All 232 backend tests green (was 197, +7 new + 28 in other suites).
+
+### Files touched
+- `backend/qbo_service.py` — new `map_inventory_adjustment`, wired `inventory_adjustments` into the migration mirror pull.
+- `backend/qbo_mirror/pull.py` — new `_pull_inventory_adjustments`, registered in `_ENTITIES` + `run_pull`.
+- `backend/tests/test_qbo_inventory_adjustments.py` (new, 7 tests).
+- `frontend/src/pages/QboConnect.jsx` — 6-column banner grid + Inv adjustments tile.
+
 ## 2026-02-20 (very late) — Inventory Migration (Phase 5)
 
 ### 📦 Extended `Item` pull (`qbo_service.map_item`)
