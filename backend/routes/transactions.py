@@ -1229,6 +1229,19 @@ async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depe
     # or Deposit (inflow, no customer). Tags txn_type accordingly
     # so the mirror pipeline picks it up.
     _maybe_autopush_purchase(cid, tid, doc)
+    # Audit — every manually-created transaction. Diff-only per policy
+    # (see `_FULL_SNAPSHOT_ENTITIES` — transactions are high-volume so
+    # we store the compact diff, not the full doc).
+    try:
+        import audit as _audit
+        _audit.log_create(
+            "transaction", tid, coerce(doc),
+            actor={"id": user["id"], "email": user.get("email"), "role": user.get("role")},
+            company_id=cid,
+            summary=f"Created {doc.get('txn_type') or 'transaction'} {inp.merchant or inp.description or ''} for ${abs(inp.amount):,.2f}".strip(),
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return {"id": tid, "transaction": coerce(doc)}
 
 
@@ -1528,6 +1541,17 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
                     {"id": tid, "company_id": cid})
         elif not doc.get("qbo_id"):
             _maybe_autopush_purchase(cid, tid, doc)
+    # Audit — log the update. Diff is auto-computed from before/after.
+    try:
+        import audit as _audit
+        _audit.log_update(
+            "transaction", tid, coerce(existing) if existing else {}, coerce(doc),
+            actor={"id": user["id"], "email": user.get("email"), "role": user.get("role")},
+            company_id=cid,
+            summary=f"Updated transaction {(doc.get('description') or doc.get('memo') or '')[:60]}".strip(),
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return {"transaction": coerce(doc)}
 
 

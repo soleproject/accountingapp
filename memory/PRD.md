@@ -4558,3 +4558,65 @@ mirror + one-click convert workflow.
 - Plaid Transfer routing bug
 - Deposits & Transfers push (needs authoring UI)
 - Real-time QBO webhooks (Phase 4)
+
+
+### Feb 2026 — Per-Company Report Styling (+ 12 bundled fonts)
+
+**Problem**: PDF report header had a spacing bug where the 18pt company name overlapped the 11pt subtitle ("708 LLC" collided with "INCOME STATEMENT"). Also user asked to customize labels, fonts, colors and spacing.
+
+**Fix (spacing)**: Rebuilt `_pdf_styles` with explicit `leading` (line-height) and `spaceAfter` on Title2 and SubTitle.
+
+**Feature — Full report styling**
+- `backend/reports.py`: `DEFAULT_REPORT_STYLE`, `DEFAULT_REPORT_LABELS`, `resolve_report_style()`, `resolve_report_label()` helpers. Every compute function (`compute_income_statement`, `compute_balance_sheet`, `compute_trial_balance`, `compute_general_ledger`, `compute_cash_flow`, `compute_sales_tax`, `compute_1099_summary`, `compute_account_detail`) returns `report_style` + `report_label` in its payload. Every PDF builder honors both.
+- `routes/companies.py`: `report_style` added to the PATCH `/companies/{cid}` allowlist.
+- 12 bundled fonts (5.7 MB total): Inter, Roboto, Open Sans, Lato, Poppins, Nunito, PT Serif, Playfair Display, Lora, Libre Baskerville, JetBrains Mono, IBM Plex Mono. Downloaded via `scripts/download_fonts.py` using `fontTools.varLib.instancer` to extract Regular+Bold static TTFs from Google Fonts variable-font masters.
+- `backend/fonts/*.ttf`: 24 static TTF files (Regular + Bold pair per family). Registered on module load in `reports.py` via `pdfmetrics.registerFont`. Missing/corrupt TTF silently degrades to Helvetica.
+- Frontend: `CompanySettings.jsx` gains a `ReportStylingCard` with font family (15 options grouped Built-in / Sans / Serif / Mono), title & subtitle sizes, 4 color pickers, spacing controls, and 8 per-report label overrides. `ReportView.jsx` reads `data.report_style` + `data.report_label` and applies to the on-screen header via CSS `font-family` stacks with system fallbacks.
+
+**Tests**: `tests/test_report_styling.py` — 20 tests (defaults, partial overrides, label fallback, spacing prevents overlap, every font family renders, end-to-end PDF with custom label). All passing.
+
+
+### Feb 2026 — Enterprise Audit Trail
+
+**Feature**: Comprehensive audit log of every mutating action on the platform: financial writes, config changes, auth events (login/failed/logout/password_reset), impersonations, QBO/Plaid sync, exports. Enterprise scope (all events + full snapshot + retention forever).
+
+**Architecture**
+- `backend/audit.py` — Core audit module:
+  - `log_event()` — main API. Fire-and-forget via `asyncio.create_task` so user requests never wait.
+  - `log_create` / `log_update` / `log_delete` — thin convenience wrappers.
+  - Smart snapshot policy: full compressed before/after snapshots for deletes + config-shaped entities (company, account, tax_rate, user) + auth/impersonation/sync/export events. Regular row edits store a compact field-level diff only.
+  - zstd compression on all snapshots and diffs (~70% storage reduction).
+  - `_redact()` — deep-copies before storage, masking password/token/secret fields at every nesting level. Diff-of-redacted comparison ensures password changes never leak either.
+  - `hydrate_event()` — decompresses stored blobs on read; auto-derives diff from before/after for full-snapshot events so API responses are shape-consistent.
+  - `list_events()` / `count_events()` — permission-scoped read side. Regular users see only their own actions; CPAs/pros see every event in accessible companies (via `deps.company_ids_for_user`); superadmins see all.
+  - Indexes: `(company_id, timestamp -1)`, `(actor_user_id, timestamp -1)`, `(entity_type, entity_id, timestamp -1)`, `(event_type, timestamp -1)`, `(timestamp -1)`.
+- `backend/routes/audit_routes.py` — Read API:
+  - `GET /api/companies/{cid}/audit` — company timeline (filters: date range, event/entity type, actor, only_mine)
+  - `GET /api/audit/entity/{entity_type}/{entity_id}` — per-record timeline
+  - `GET /api/audit/me` — user's own actions across all accessible companies
+  - `GET /api/admin/audit` — superadmin global view
+- `backend/server.py::startup` — calls `audit.ensure_indexes()` on boot.
+
+**Instrumentation (this pass)**
+- Auth: successful login, failed login (both stamp IP + user-agent).
+- Impersonation: `impersonate_start` stamped with superadmin actor + target user metadata (existing lightweight `admin_audit_log` kept for backward compat).
+- Company settings: PATCH `/companies/{cid}` — full before/after snapshot per policy.
+- Transactions: `POST /companies/{cid}/transactions` (create), `PATCH /companies/{cid}/transactions/{tid}` (update).
+
+**Frontend**
+- `pages/AuditLog.jsx` — new global audit-log page (`/audit-log`). Scope tabs (This company / My actions), filter bar (event type, entity type, since/until, only-mine), color-coded event pills, expandable rows showing IP / user-agent / field-level diff table (red before → green after) / full JSON snapshot (collapsible).
+- `App.js` — `/audit-log` route registered.
+- `Sidebar.jsx` — "Audit log" link added under STANDALONE_BOTTOM with `History` icon.
+
+**Choices confirmed by user**: async fire-and-forget writes; zstd compressed snapshots; smart mixed snapshot strategy; keep hot forever (no cold-archive).
+
+**Tests**: `tests/test_audit.py` — 8 tests (diff shape, redaction at every depth, compression round-trip, snapshot-policy matrix, hydrate derives diff for full-snapshot events, hydrate honors stored diff for diff-only events, redaction masks password-change signal). All passing. Combined 28/28 tests green.
+
+**Future instrumentation** (documented, not yet hooked):
+- Invoices/bills/journal entries/accounts CRUD paths — copy the transaction pattern.
+- QBO pull/push completion events (`qbo_mirror/pull.py` + `push.py`).
+- Plaid sync events (`routes/plaid.py`).
+- Report/PDF exports (`routes/report_routes.py`).
+- MFA changes + password reset (auth flow additions).
+- Per-record `<AuditTimeline entity_type entity_id />` component embed in InvoiceEditor / BillEditor / etc.
+

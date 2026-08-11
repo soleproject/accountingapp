@@ -57,6 +57,7 @@ import QboMirror from "@/pages/QboMirror";
 import PfcCategoryMap from "@/pages/PfcCategoryMap";
 import StatementImportDetail from "@/pages/StatementImportDetail";
 import CompanySettings from "@/pages/CompanySettings";
+import AuditLog from "@/pages/AuditLog";
 import ProSettings from "@/pages/ProSettings";
 import MonthClose from "@/pages/MonthClose";
 import MyBusinesses from "@/pages/MyBusinesses";
@@ -159,6 +160,7 @@ function App() {
               <Route path="/settings/pfc-map" element={<PfcCategoryMap />} />
               <Route path="/connections/imports/:importId" element={<StatementImportDetail />} />
               <Route path="/settings" element={<CompanySettings />} />
+              <Route path="/audit-log" element={<AuditLog />} />
               <Route path="/pro/settings" element={<ProSettings />} />
               <Route path="/pro/team" element={<ProTeam />} />
               <Route path="/team" element={<CompanyTeam />} />
