@@ -1,5 +1,47 @@
 # SmartBooks — Changelog
 
+## 2026-02-21 (bugfix) — Inventory Migration Wire-Up
+
+### 🐛 Root cause
+User reported "Inventory doesn't show up after migration." Two coordinating bugs:
+
+**Bug 1** — `_UPDATE_FIELDS["items"]` in `qbo_mirror/pull.py` only refreshed `["name","sku","price","active"]`. Every inventory-relevant field (`cost`, `qty_on_hand`, `track_qty_on_hand`, `asset_account_qbo_id`, `item_type`, etc.) was silently dropped on updates. Companies migrated before the Feb 21 inventory-fields patch couldn't heal by re-running Pull.
+
+**Bug 2** — `map_item` stored QBO's account refs as QBO ID strings (`asset_account_qbo_id`, `expense_account_qbo_id`) but the local inventory system (`inventory_service.py`, `InventoryPage`) filters on:
+- **`track_inventory`** — the internal app boolean flag (distinct from QBO's `TrackQtyOnHand`)
+- **`inventory_account_id`** — the LOCAL account row id (not the QBO id)
+- **`cogs_account_id`** / **`expense_account_id`** / **`income_account_id`** — same story
+
+Result: even for real QBO Inventory-type items, the Inventory Management page showed "0 tracked items."
+
+### ✅ Fix
+`_pull_items` in `qbo_mirror/pull.py` now:
+1. Expands `_UPDATE_FIELDS["items"]` to include every inventory field so re-pulls heal legacy rows.
+2. Resolves `AssetAccountRef` → local account by `qbo_id` and stamps `inventory_account_id` + `inventory_account_name`.
+3. Same for `ExpenseAccountRef` (→ `cogs_account_id` + `expense_account_id`) and `IncomeAccountRef` (→ `income_account_id`).
+4. Flips `track_inventory=True` when item is `Type=Inventory` or `TrackQtyOnHand=True`.
+5. On existing rows, patches all resolved local IDs + flags too (not just the `_UPDATE_FIELDS` set) so legacy items catch up cleanly.
+
+### 🔁 User remediation
+Existing production companies just need to re-run mirror pull for items:
+```
+POST /api/companies/{cid}/qbo/mirror/pull  Body: {"entities": ["items"]}
+```
+The next call auto-heals every item row — no full migration re-run needed.
+
+### ✅ Test coverage
+`backend/tests/test_qbo_items_pull_resolution.py` — 4 tests:
+- New Inventory-typed item resolves all 4 local IDs + flips `track_inventory=True`
+- Service-typed item leaves `track_inventory=False` (no clutter on Inventory page)
+- Re-pull of a legacy pre-patch row heals it (proves `_UPDATE_FIELDS` fix works)
+- Guard rail asserting `_UPDATE_FIELDS["items"]` includes every inventory field
+
+All 248 backend tests green.
+
+### Files touched
+- `backend/qbo_mirror/pull.py::_pull_items` — full account resolution + `track_inventory` flip; `_UPDATE_FIELDS["items"]` expanded.
+- `backend/tests/test_qbo_items_pull_resolution.py` (new, 4 tests).
+
 ## 2026-02-21 (later) — InventoryAdjustment Mirror Push (Bi-Directional Loop Closed)
 
 ### 🔁 Outbound push for locally-created inventory adjustments
