@@ -198,26 +198,50 @@ async def _find_or_create_user_from_stripe(
     return doc, True
 
 
-async def _send_welcome_magic_link(user: dict, *, source: str = "stripe_signup") -> None:
+async def _send_welcome_magic_link(
+    user: dict,
+    *,
+    source: str = "stripe_signup",
+    brand: Optional[dict] = None,
+) -> None:
     """Mint a password-set token and email the magic link. Failures are
-    logged, never raised — the webhook must always ack 200 to Stripe."""
+    logged, never raised — the webhook must always ack 200 to Stripe.
+
+    `brand` is a `private_labels.Brand` dict resolved from
+    `session.metadata.brand`. When present, the magic-link host, email
+    subject/copy, and From display name all swap to the private label
+    (e.g. CypherPro) so the customer's welcome email matches the site
+    they just paid on. Falls back to the SmartBooks flagship when brand
+    is None or the default key.
+    """
     try:
         from routes.auth import mint_password_set_token
         from email_dispatcher import dispatch, public_base_url
         import email_templates as _tmpl
+        from private_labels import get_brand, DEFAULT_BRAND_KEY
+
+        # Resolve the brand for URL + copy. `brand` (dict) always wins;
+        # otherwise fall back to the flagship default.
+        b = brand or get_brand(DEFAULT_BRAND_KEY)
+        base_url = b.get("app_url") or public_base_url()
         token = await mint_password_set_token(user["id"], purpose="welcome", ttl_days=14)
-        magic_url = f"{public_base_url()}/set-password/{token}"
+        magic_url = f"{base_url.rstrip('/')}/set-password/{token}"
         subject, html = _tmpl.stripe_welcome(
             name=user.get("name") or user["email"].split("@")[0],
             magic_url=magic_url,
+            brand=b,
         )
+        # Force the From display to the brand only for actual private
+        # labels — SmartBooks flagship keeps its default From line.
+        is_private_label = b.get("key") and b["key"] != DEFAULT_BRAND_KEY
         await dispatch(
             kind="stripe_welcome",
             to=user["email"],
             subject=subject,
             html=html,
             initiating_user_id=user["id"],
-            related={"source": source},
+            related={"source": source, "brand": b.get("key")},
+            firm_name_override=b["display_name"] if is_private_label else None,
         )
     except Exception:  # noqa: BLE001
         logger.exception("Failed to send Stripe welcome to %s", user.get("email"))
@@ -464,6 +488,12 @@ async def _handle_checkout_completed(session: dict) -> dict:
         or session.get("customer_email")
         or ""
     ).lower().strip()
+    # Resolve the private-label brand from session metadata BEFORE the
+    # email bail — even a bailed event should report which brand it
+    # was attributed to (helps ops narrow "which label's Payment Link
+    # is broken").
+    from private_labels import resolve_brand
+    brand = resolve_brand(session.get("metadata"))
     if not email:
         logger.warning("checkout.session.completed with no email: %s", session.get("id"))
         return {
@@ -476,6 +506,7 @@ async def _handle_checkout_completed(session: dict) -> dict:
                 "default OFF)."
             ),
             "session_id": session.get("id"),
+            "brand": brand.get("key"),
         }
 
     name = (session.get("customer_details") or {}).get("name")
@@ -497,19 +528,23 @@ async def _handle_checkout_completed(session: dict) -> dict:
     )
 
     # Persist subscription id + plan hint on the user row so the "My
-    # Billing" page can render without a Stripe round-trip.
+    # Billing" page can render without a Stripe round-trip. Also stamp
+    # the brand key so downstream flows (e.g. re-sends of the welcome
+    # email) can honour the same private-label choice.
     update: dict = {"updated_at": now_iso()}
     if stripe_subscription_id:
         update["stripe_subscription_id"] = stripe_subscription_id
         update["subscription_status"] = "active"
     if stripe_customer_id and not user.get("stripe_customer_id"):
         update["stripe_customer_id"] = stripe_customer_id
+    if brand.get("key"):
+        update["private_label_brand"] = brand["key"]
     if update:
         await db.users.update_one({"id": user["id"]}, {"$set": update})
 
     welcome_sent = False
     if is_new:
-        await _send_welcome_magic_link(user, source="stripe_signup")
+        await _send_welcome_magic_link(user, source="stripe_signup", brand=brand)
         welcome_sent = True
 
     # Phase C — if the checkout was for a specific COMPANY (Add-Client
@@ -560,6 +595,8 @@ async def _handle_checkout_completed(session: dict) -> dict:
         "stripe_subscription_id": stripe_subscription_id,
         "linked_company_id": company_id if company_id and stripe_subscription_id else None,
         "whitelabel_flipped": whitelabel_flipped,
+        "brand": brand.get("key"),
+        "magic_link_host": brand.get("app_url"),
     }
 
 

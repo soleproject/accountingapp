@@ -113,6 +113,7 @@ async def dispatch(
     contact_id: Optional[str] = None,
     related: Optional[dict] = None,
     attachments: Optional[list] = None,
+    firm_name_override: Optional[str] = None,
 ) -> dict:
     """Send an email of a given `kind` on behalf of `initiating_user_id` and
     write one row to the audit log. Never raises.
@@ -121,6 +122,11 @@ async def dispatch(
     branding, the outbound email uses the firm's white-label sender
     (`{firm} <no-reply@accountingapp.ai>`). This keeps clients' inboxes
     free of "SmartBooks" branding when they signed up under a firm.
+
+    `firm_name_override` forces the From display name regardless of the
+    initiating user's branding — used by the Stripe welcome flow to
+    stamp the private-label brand (e.g. "CypherPro") on emails going to
+    a brand-new customer who doesn't yet have a firm affiliation.
     """
     if kind not in DEFAULT_PREFS:
         # Unknown kinds are a coding bug, but we still audit-log the attempt
@@ -152,6 +158,12 @@ async def dispatch(
         u = await db.users.find_one({"id": initiating_user_id})
         if u and (u.get("branding") or {}).get("firm_name"):
             firm_name = u["branding"]["firm_name"]
+
+    # Explicit override wins over the user-derived firm_name. Used by
+    # Stripe private-label welcome so the From reads "CypherPro" even
+    # though the customer has no firm affiliation yet.
+    if firm_name_override:
+        firm_name = firm_name_override
 
     try:
         resp = await send_email(

@@ -554,12 +554,36 @@ def month_close_signoff(*, client_name: str, company_name: str, month_label: str
 # see). Purposefully lighter tone than the pro-invited flow — the buyer
 # knows they signed up because *they* just paid Stripe.
 # --------------------------------------------------------------------------
-def stripe_welcome(*, name: str, magic_url: str) -> tuple[str, str]:
+def stripe_welcome(
+    *,
+    name: str,
+    magic_url: str,
+    brand: Optional[dict] = None,
+) -> tuple[str, str]:
+    """Post-Stripe-checkout welcome + set-password magic link.
+
+    When ``brand`` is passed (from ``private_labels.resolve_brand``), the
+    subject, heading, product name, and footer swap to the private label
+    (e.g. CypherPro) — including a clean footer that DROPS the
+    smartbookssoftware.ai reference so the email reads as purely
+    CypherPro branded. Falls back to SmartBooks copy when brand is None
+    or the flagship key.
+    """
+    brand = brand or {}
+    product = brand.get("product_name") or "SmartBooks"
+    display = brand.get("display_name") or product
+    tagline = brand.get("tagline") or ""
+    tagline_html = (
+        f'<div style="font-size:13px;color:#64748b;padding:0 0 12px;">{escape(tagline)}</div>'
+        if tagline else ""
+    )
+    is_private_label = bool(brand.get("key") and brand["key"] != "smartbooks")
     inner = f"""
-      <div style="{_H1}">Payment received — let's get you set up</div>
+      <div style="{_H1}">Payment received — welcome to {escape(product)}</div>
+      {tagline_html}
       <div style="{_P}">
         Hi {escape(name)},<br><br>
-        Thanks for subscribing to SmartBooks. Your account is created and
+        Thanks for subscribing to {escape(product)}. Your account is created and
         ready — pick a password and you're in.
       </div>
       <div style="padding:14px 0 6px;">
@@ -572,7 +596,10 @@ def stripe_welcome(*, name: str, magic_url: str) -> tuple[str, str]:
         email.
       </div>
     """
-    return "Welcome to SmartBooks — set your password", _wrap(inner)
+    subject = f"Welcome to {product} — set your password"
+    # Pass brand_name only for private labels — flagship SmartBooks
+    # keeps its historical footer with the smartbookssoftware.ai link.
+    return subject, _wrap(inner, brand_name=display if is_private_label else None)
 
 
 # --------------------------------------------------------------------------
