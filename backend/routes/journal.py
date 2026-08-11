@@ -70,14 +70,27 @@ async def create_je(cid: str, inp: JECreate, user: dict = Depends(get_current_us
     if abs(total_d - total_c) > 0.01:
         raise HTTPException(400, f"Debits ({total_d}) must equal credits ({total_c})")
     jid = str(uuid.uuid4()); now = now_iso()
-    await db.journal_entries.insert_one({
+    je_doc = {
         "id": jid, "company_id": cid, "date": inp.date, "memo": inp.memo,
         "lines": inp.lines, "total_debit": round(total_d, 2), "total_credit": round(total_c, 2),
         "created_by": user["id"], "created_at": now, "updated_at": now,
-    })
+    }
+    await db.journal_entries.insert_one(je_doc)
     # Fire-and-forget mirror push. JEs authored in-app land in QBO
     # via `_push_one_journal_entry`; failures surface in mirror_log.
     try_auto_push(cid, "journal_entry", jid)
+    # Audit — JE creation. Includes full lines so the diff/snapshot
+    # shows the exact debit/credit legs even if lines are edited later.
+    try:
+        import audit as _audit
+        _audit.log_create(
+            "journal_entry", jid, coerce(je_doc),
+            actor={"id": user["id"], "email": user.get("email"), "role": user.get("role")},
+            company_id=cid,
+            summary=f"JE {inp.date} · {(inp.memo or '')[:60]} · ${round(total_d, 2):,.2f}",
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return {"id": jid}
 
 
@@ -92,6 +105,17 @@ async def delete_je(cid: str, jid: str, user: dict = Depends(get_current_user)):
     # Mirror the delete on QBO if the JE was previously synced.
     if qbo_id:
         try_auto_delete(cid, "journal_entry", qbo_id, "")
+    # Audit — full snapshot on delete per policy.
+    try:
+        import audit as _audit
+        _audit.log_delete(
+            "journal_entry", jid, coerce(existing) if existing else {"id": jid},
+            actor={"id": user["id"], "email": user.get("email"), "role": user.get("role")},
+            company_id=cid,
+            summary=f"Deleted JE {(existing or {}).get('date','')} · {((existing or {}).get('memo') or '')[:60]}",
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True}
 
 

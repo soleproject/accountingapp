@@ -4620,3 +4620,31 @@ mirror + one-click convert workflow.
 - MFA changes + password reset (auth flow additions).
 - Per-record `<AuditTimeline entity_type entity_id />` component embed in InvoiceEditor / BillEditor / etc.
 
+
+
+### Feb 2026 — Audit Trail Phase 2: Invoice / Bill / JE / CoA CRUD Instrumentation
+
+**Feature**: Extended the audit trail to cover the remaining core CRUD paths beyond Phase 1 (auth + impersonation + company settings + transactions). Every create/update/delete on invoices, bills, journal entries, and chart-of-accounts now lands in `audit_events`.
+
+**Instrumentation added this pass**
+- `routes/invoices.py` — `POST /companies/{cid}/invoices` (create), `PATCH /companies/{cid}/invoices/{iid}` (update, before-doc fetched up front and reused as `existing`), `DELETE` (full snapshot per policy)
+- `routes/bills.py` — same 3 CRUD paths, same shape as invoices
+- `routes/journal.py` — `POST` create (includes full lines[] in snapshot), `DELETE` (full snapshot preserves debit/credit legs so compliance can reconstruct the pre-delete JE)
+- `routes/accounts.py` — `POST` create (full snapshot), `PATCH` update (full snapshot — CoA is config-shaped), `DELETE` (full snapshot)
+
+**Design notes**
+- Diff-only path fires for invoice/bill routine PATCH (high-volume). Full-snapshot path fires for JE + CoA + all deletes (per `_FULL_SNAPSHOT_ENTITIES` + `_FULL_SNAPSHOT_EVENTS` policy in `audit.py`).
+- Every route captures the BEFORE doc BEFORE mutation so the diff has both sides. Wrapped in try/except so an audit failure never blocks the primary write.
+- Denormalised summaries are human-readable: `Invoice INV-100 · Acme · $250.00`, `Bill BILL-661 updated (notes, _sync_origin)`, `JE 2026-01-15 · March rent · $5,000.00`.
+
+**Verified end-to-end** via curl: created + deleted an invoice, created + patched a bill, created + deleted a JE. All 6 events landed cleanly in `audit_events` with correct event_type, summary, and diff_field_count.
+
+**Tests**: `tests/test_audit_entity_instrumentation.py` — single consolidated test (motor client is loop-bound, so all coverage lives in one `asyncio.run`). Verifies invoice create/delete round-trip, bill diff-only shape, account full-snapshot shape, JE line preservation. All pass. Combined 29/29 audit + report-styling tests green.
+
+**Not yet instrumented** (documented, next-up):
+- QBO pull/push completion events (`qbo_mirror/pull.py` + `push.py`)
+- Plaid sync events (`routes/plaid.py`)
+- Report/PDF exports (`routes/report_routes.py`)
+- MFA changes + password reset (auth flow additions)
+- Per-record `<AuditTimeline entity_type entity_id />` component embedded in InvoiceEditor / BillEditor / etc.
+
