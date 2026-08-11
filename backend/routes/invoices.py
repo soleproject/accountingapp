@@ -350,19 +350,32 @@ async def create_invoice(cid: str, inp: InvoiceCreate, user: dict = Depends(get_
     # disabled or the invoice is a draft; the autopush guard filters
     # on doc.status internally.
     try_auto_push(cid, "invoice", iid)
+    # Audit — invoice creation.
+    try:
+        import audit as _audit
+        _audit.log_create(
+            "invoice", iid, coerce(doc),
+            actor={"id": user["id"], "email": user.get("email"), "role": user.get("role")},
+            company_id=cid,
+            summary=f"Invoice {doc.get('number') or ''} · {doc.get('contact_name') or ''} · ${total:,.2f}".strip(),
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return {"id": iid, "invoice": coerce(doc), "inventory_warnings": warnings}
 
 
 @router.patch("/companies/{cid}/invoices/{iid}")
 async def update_invoice(cid: str, iid: str, payload: dict, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
+    # Snapshot the BEFORE doc for the audit trail. Fetched up front so
+    # the totals-recompute branch below reuses it as `existing`.
+    before_doc = await db.invoices.find_one({"id": iid, "company_id": cid})
     # Any change to totals-affecting fields triggers a full recompute so
     # subtotal / total / balance_due stay consistent with the persisted
     # line items and the (possibly changed) discount / shipping / tax.
-    existing = None
+    existing = before_doc
     totals_fields = {"line_items", "tax", "shipping", "discount", "discount_type"}
     if totals_fields & set(payload.keys()):
-        existing = await db.invoices.find_one({"id": iid, "company_id": cid})
         if existing:
             lines = payload.get("line_items", existing.get("line_items") or [])
             # `existing.tax` on disk is the ROLLED-UP figure (doc-level
@@ -421,6 +434,18 @@ async def update_invoice(cid: str, iid: str, payload: dict, user: dict = Depends
     # Fire-and-forget mirror update (doc-level fields only; line drift
     # is skipped in Phase 2c — see autopush._run_auto_update).
     try_auto_update(cid, "invoice", iid)
+    # Audit — capture before/after diff.
+    try:
+        import audit as _audit
+        after_doc = await db.invoices.find_one({"id": iid, "company_id": cid})
+        _audit.log_update(
+            "invoice", iid, coerce(before_doc) if before_doc else {}, coerce(after_doc) if after_doc else {},
+            actor={"id": user["id"], "email": user.get("email"), "role": user.get("role")},
+            company_id=cid,
+            summary=f"Invoice {(after_doc or {}).get('number') or ''} updated ({', '.join(sorted(payload.keys()))[:120]})",
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True, "number_conflict": number_conflict, "inventory_warnings": warnings}
 
 
@@ -442,6 +467,17 @@ async def delete_invoice(cid: str, iid: str, user: dict = Depends(get_current_us
     await db.invoices.delete_one({"id": iid, "company_id": cid})
     # Mirror delete on QBO if this invoice was previously synced.
     try_auto_delete(cid, "invoice", qbo_id, inv_number)
+    # Audit — delete gets a FULL snapshot per policy.
+    try:
+        import audit as _audit
+        _audit.log_delete(
+            "invoice", iid, coerce(existing) if existing else {"id": iid, "number": inv_number},
+            actor={"id": user["id"], "email": user.get("email"), "role": user.get("role")},
+            company_id=cid,
+            summary=f"Deleted invoice {inv_number}",
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True, **cascade}
 
 

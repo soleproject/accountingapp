@@ -721,6 +721,18 @@ async def ensure_account(cid: str, inp: EnsureAccountIn, user: dict = Depends(ge
         }
         await db.loans.insert_one(loan_doc)
 
+    # Audit — CoA changes are config-shaped, so this is a FULL snapshot
+    # per policy (see `_FULL_SNAPSHOT_ENTITIES`).
+    try:
+        import audit as _audit
+        _audit.log_create(
+            "account", aid, coerce(doc),
+            actor={"id": user["id"], "email": user.get("email"), "role": user.get("role")},
+            company_id=cid,
+            summary=f"Created CoA · {doc.get('code','')} {doc.get('name','')}".strip(),
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return {"created": True, **coerce(doc)}
 
 
@@ -758,11 +770,27 @@ async def update_account(cid: str, aid: str, payload: dict, user: dict = Depends
             if child_count:
                 raise HTTPException(400, "This account has sub-accounts of its own — flatten them before nesting.")
     payload["updated_at"] = now_iso()
+    before_acct = await db.accounts.find_one({"id": aid, "company_id": cid})
     await db.accounts.update_one({"id": aid, "company_id": cid}, {"$set": payload})
     # Auto-update on QBO if this account was already mirrored.
     try:
         from qbo_mirror.autopush import try_auto_update
         try_auto_update(cid, "account", aid)
+    except Exception:  # noqa: BLE001
+        pass
+    # Audit — chart of accounts is a config-shaped entity, so this is
+    # a FULL snapshot per policy (see `_FULL_SNAPSHOT_ENTITIES`).
+    try:
+        import audit as _audit
+        after_acct = await db.accounts.find_one({"id": aid, "company_id": cid})
+        _audit.log_update(
+            "account", aid,
+            coerce(before_acct) if before_acct else {},
+            coerce(after_acct) if after_acct else {},
+            actor={"id": user["id"], "email": user.get("email"), "role": user.get("role")},
+            company_id=cid,
+            summary=f"CoA edit · {(after_acct or {}).get('code','')} {(after_acct or {}).get('name','')}".strip(),
+        )
     except Exception:  # noqa: BLE001
         pass
     return {"ok": True}
@@ -776,6 +804,9 @@ async def delete_account(cid: str, aid: str, user: dict = Depends(get_current_us
         {"id": aid, "company_id": cid},
         {"qbo_id": 1, "name": 1, "_id": 0},
     )
+    # Full doc snapshot for the audit trail (separate query so we
+    # keep the lightweight projected read above for the QBO hook).
+    before_acct = await db.accounts.find_one({"id": aid, "company_id": cid})
     await db.accounts.delete_one({"id": aid, "company_id": cid})
     # Cascade: drop any auto-spawned Loan row that pointed at this account
     # so the Loans page and CoA never desync.
@@ -786,6 +817,17 @@ async def delete_account(cid: str, aid: str, user: dict = Depends(get_current_us
         if doomed and doomed.get("qbo_id"):
             try_auto_delete(cid, "account", doomed.get("qbo_id"),
                              doomed.get("name") or "")
+    except Exception:  # noqa: BLE001
+        pass
+    # Audit — full snapshot on delete per policy.
+    try:
+        import audit as _audit
+        _audit.log_delete(
+            "account", aid, coerce(before_acct) if before_acct else {"id": aid},
+            actor={"id": user["id"], "email": user.get("email"), "role": user.get("role")},
+            company_id=cid,
+            summary=f"Deleted CoA · {(before_acct or {}).get('code','')} {(before_acct or {}).get('name','')}".strip(),
+        )
     except Exception:  # noqa: BLE001
         pass
     return {"ok": True}

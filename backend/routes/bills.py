@@ -160,15 +160,29 @@ async def create_bill(cid: str, inp: BillCreate, user: dict = Depends(get_curren
     # Fire-and-forget mirror push. Silent no-op if QBO Mirror is
     # disabled or bill is voided.
     try_auto_push(cid, "bill", bid)
+    # Audit — bill creation.
+    try:
+        import audit as _audit
+        _audit.log_create(
+            "bill", bid, coerce(doc),
+            actor={"id": user["id"], "email": user.get("email"), "role": user.get("role")},
+            company_id=cid,
+            summary=f"Bill {doc.get('number') or ''} · {doc.get('contact_name') or ''} · ${total:,.2f}".strip(),
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return {"id": bid, "bill": coerce(doc)}
 
 
 @router.patch("/companies/{cid}/bills/{bid}")
 async def update_bill(cid: str, bid: str, payload: dict, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
+    # Snapshot before doc for the audit trail (fetched even on
+    # non-totals-changing PATCHes so we always have diff context).
+    before_doc = await db.bills.find_one({"id": bid, "company_id": cid})
     totals_fields = {"line_items", "tax", "shipping", "discount", "discount_type"}
     if totals_fields & set(payload.keys()):
-        existing = await db.bills.find_one({"id": bid, "company_id": cid})
+        existing = before_doc
         if existing:
             lines = payload.get("line_items", existing.get("line_items") or [])
             # See invoices.py — peel rolled-up per-line tax off `existing.tax`
@@ -221,6 +235,18 @@ async def update_bill(cid: str, bid: str, payload: dict, user: dict = Depends(ge
                                   {"$set": {"inventory_error": str(e)}})
     # Fire-and-forget mirror update.
     try_auto_update(cid, "bill", bid)
+    # Audit — capture before/after diff.
+    try:
+        import audit as _audit
+        after_doc = await db.bills.find_one({"id": bid, "company_id": cid})
+        _audit.log_update(
+            "bill", bid, coerce(before_doc) if before_doc else {}, coerce(after_doc) if after_doc else {},
+            actor={"id": user["id"], "email": user.get("email"), "role": user.get("role")},
+            company_id=cid,
+            summary=f"Bill {(after_doc or {}).get('number') or ''} updated ({', '.join(sorted(payload.keys()))[:120]})",
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True, "number_conflict": number_conflict}
 
 
@@ -243,6 +269,17 @@ async def delete_bill(cid: str, bid: str, user: dict = Depends(get_current_user)
     await db.bills.delete_one({"id": bid, "company_id": cid})
     # Mirror delete on QBO if this bill was previously synced.
     try_auto_delete(cid, "bill", qbo_id, bill_number)
+    # Audit — full snapshot on delete per policy.
+    try:
+        import audit as _audit
+        _audit.log_delete(
+            "bill", bid, coerce(existing) if existing else {"id": bid, "number": bill_number},
+            actor={"id": user["id"], "email": user.get("email"), "role": user.get("role")},
+            company_id=cid,
+            summary=f"Deleted bill {bill_number}",
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True, **cascade}
 
 
