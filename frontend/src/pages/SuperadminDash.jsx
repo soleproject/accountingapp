@@ -41,8 +41,16 @@ export default function SuperadminDash() {
       <div className="flex items-center gap-3">
         <Shield className="text-indigo-500" size={22} />
         <h1 className="font-heading text-3xl font-bold tracking-tight">Superadmin</h1>
-        {isOwner && (
-          <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <Link
+            to="/admin/stripe-webhooks"
+            data-testid="nav-stripe-webhooks"
+            className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            title="Diagnose Stripe webhooks — see why a signup didn't create a user"
+          >
+            Stripe Webhooks
+          </Link>
+          {isOwner && (
             <button
               type="button"
               onClick={() => setGrantOpen(true)}
@@ -51,8 +59,8 @@ export default function SuperadminDash() {
             >
               <ShieldPlus size={16} /> Grant Superadmin
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
       {grantOpen && (
         <GrantSuperadminModal
