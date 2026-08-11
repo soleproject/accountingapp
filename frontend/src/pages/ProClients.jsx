@@ -1293,7 +1293,7 @@ function BillingSection({ billing, form, update }) {
 
 
 
-function NewClientModal({ onClose, onCreated }) {
+export function NewClientModal({ onClose, onCreated }) {
   const [form, setForm] = useState({
     company_name: "", business_type: "", business_description: "",
     client_name: "", client_email: "", client_password: "",
@@ -1552,7 +1552,7 @@ function NewClientModal({ onClose, onCreated }) {
 // from this quick-create UI — most manually-spawned enterprises start
 // unassigned and get a Pro attached later from the detail page.
 // -----------------------------------------------------------------------------
-function NewEnterpriseModal({ onClose, onCreated }) {
+export function NewEnterpriseModal({ onClose, onCreated }) {
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [ownerName, setOwnerName] = useState("");
