@@ -63,9 +63,14 @@ export default function CompanySettings() {
     }
     setDeleting(true);
     try {
-      const r = await api.delete(`/companies/${currentId}`, {
-        params: { confirm: current.name },
-      });
+      const params = { confirm: current.name };
+      // Firm Books companies need an explicit override flag on the
+      // server (see routes/companies.py::delete_company). The confirm-
+      // by-typing-the-name step already provides the "did you really
+      // mean this" gate, so we just add the flag here rather than
+      // stacking another dialog on top.
+      if (current?.is_firm_books) params.force_firm_books = true;
+      const r = await api.delete(`/companies/${currentId}`, { params });
       const rec = r.data.records_removed || {};
       const total = Object.values(rec).reduce((a, b) => a + b, 0);
       toast.success(`Deleted "${current.name}" and ${total} associated record(s).`);
@@ -389,10 +394,31 @@ export default function CompanySettings() {
           </AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete &quot;{current?.name}&quot;?</AlertDialogTitle>
+              <AlertDialogTitle>
+                Delete &quot;{current?.name}&quot;?
+                {current?.is_firm_books && (
+                  <span
+                    className="ml-2 inline-block px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-800 text-[10px] font-semibold uppercase tracking-widest align-middle"
+                    title="This is your firm's protected accounting entity"
+                  >
+                    Firm Books
+                  </span>
+                )}
+              </AlertDialogTitle>
               <AlertDialogDescription>
-                This action is <span className="font-semibold text-red-700">permanent</span>. To
-                confirm, type the company name below exactly as shown:
+                This action is <span className="font-semibold text-red-700">permanent</span>.
+                {current?.is_firm_books && (
+                  <span className="block mt-2 text-red-700 font-medium">
+                    ⚠ This is your Firm Books company — the accounting
+                    entity for your own firm. Deleting it removes every
+                    transaction, JE, and audit trail for your own books.
+                    A new Firm Books will be auto-provisioned on your
+                    next login unless you PATCH your role first.
+                  </span>
+                )}
+                <span className="block mt-2">
+                  To confirm, type the company name below exactly as shown:
+                </span>
                 <div className="mt-2 mb-1 font-mono-num text-slate-900">{current?.name}</div>
               </AlertDialogDescription>
             </AlertDialogHeader>
