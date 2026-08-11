@@ -7,7 +7,7 @@ import {
   BookOpen, Notebook, ListTree, Sparkles, Shield, Briefcase, Wand2,
   PanelLeftClose, PanelLeft, Settings2, Share2, Activity, Repeat, Package,
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
-  Percent, Lock,
+  Percent, Lock, History,
 } from "lucide-react";
 import { TID } from "@/constants/testIds";
 import { useAuth } from "@/lib/auth";
@@ -110,6 +110,7 @@ const STANDALONE_BOTTOM = [
   { to: "/my-businesses", label: "My Businesses", icon: Briefcase },
   { to: "/billing", label: "Billing", icon: CreditCard },
   { to: "/share", label: "Refer & earn", icon: Share2 },
+  { to: "/audit-log", label: "Audit log", icon: History },
   { to: "/settings", label: "Settings", icon: Settings2 },
 ];
 

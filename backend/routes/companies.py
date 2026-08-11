@@ -13,7 +13,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Any, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, Request
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
@@ -322,7 +322,7 @@ async def delete_pfc_override(cid: str, pfc_detailed: str,
 
 
 @router.patch("/companies/{cid}")
-async def update_company(cid: str, patch: dict, user: dict = Depends(get_current_user)):
+async def update_company(cid: str, patch: dict, request: Request, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     allowed = {
         "name", "business_type", "business_description", "reporting_basis", "auto_post_threshold",
@@ -363,6 +363,11 @@ async def update_company(cid: str, patch: dict, user: dict = Depends(get_current
         if canon:
             updates["business_type"] = canon
     updates["updated_at"] = now_iso()
+    # Snapshot the BEFORE doc for the audit trail. Grabbed before we
+    # touch the write path so encryption of tax_id/ein doesn't muddy
+    # the diff (audit stores decrypted-ish state — the crypto layer
+    # redacts the raw ciphertext through the field-name allowlist).
+    before_doc = await db.companies.find_one({"id": cid})
     # Encrypt any sensitive fields (`tax_id`, `ein`) before hitting Mongo.
     from crypto_service import encrypt as _enc
     if "tax_id" in updates and updates["tax_id"]:
@@ -376,7 +381,24 @@ async def update_company(cid: str, patch: dict, user: dict = Depends(get_current
     # Return decrypted view — sensitive fields are stored ciphered but
     # the caller (settings page) expects plaintext to render in the UI.
     from crypto_service import decrypt_doc
-    return coerce(decrypt_doc("companies", doc))
+    result = coerce(decrypt_doc("companies", doc))
+    # Audit — company settings changes are full-snapshot events per
+    # policy (see `_FULL_SNAPSHOT_ENTITIES` in audit.py).
+    try:
+        import audit as _audit
+        _audit.log_event(
+            event_type=_audit.EVENT_UPDATE,
+            actor={"id": user["id"], "email": user.get("email"), "role": user.get("role")},
+            company_id=cid,
+            entity_type="company", entity_id=cid,
+            before=decrypt_doc("companies", before_doc) if before_doc else None,
+            after=result,
+            request=request,
+            summary=f"Company settings updated ({', '.join(sorted(updates.keys()))})",
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    return result
 
 
 @router.delete("/companies/{cid}")

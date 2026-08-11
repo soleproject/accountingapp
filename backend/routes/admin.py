@@ -851,6 +851,26 @@ async def impersonate_user(
         })
     except Exception:  # noqa: BLE001 — audit failure never blocks impersonation
         pass
+    # Structured audit — every impersonation lands in the unified
+    # audit_events collection so the /audit-log page can surface it
+    # alongside every action the superadmin subsequently takes AS the
+    # target. `actor` is the SUPERADMIN (not the target) so the audit
+    # log clearly shows who triggered the impersonation.
+    try:
+        import audit as _audit
+        _audit.log_event(
+            event_type=_audit.EVENT_IMPERSONATE_START,
+            actor={"id": user["id"], "email": user.get("email"), "role": user.get("role")},
+            entity_type="user", entity_id=target["id"],
+            summary=f"{user.get('email')} started impersonating {target.get('email')}",
+            metadata={
+                "target_user_id":   target["id"],
+                "target_email":     target.get("email"),
+                "target_role":      target.get("role"),
+            },
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return {
         "token": token,
         "user": {

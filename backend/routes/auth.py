@@ -108,6 +108,19 @@ async def login(request: Request, inp: Annotated[LoginIn, Body()]):
         # Only failed attempts are recorded — a legit user who logs in
         # cleanly never adds to their own count.
         await _record_login_failure(email)
+        # Audit — capture the email + IP for a paper trail of intrusion
+        # attempts. Never leak whether the email exists.
+        try:
+            import audit as _audit
+            _audit.log_event(
+                event_type=_audit.EVENT_LOGIN_FAILED,
+                actor={"email": email},
+                request=request,
+                summary=f"Failed sign-in attempt for {email}",
+                metadata={"reason": "invalid_credentials"},
+            )
+        except Exception:  # noqa: BLE001 — audit failure never blocks auth
+            pass
         raise HTTPException(401, "Invalid credentials")
 
     # Clean slate on successful login so a locked-out user who
@@ -115,6 +128,17 @@ async def login(request: Request, inp: Annotated[LoginIn, Body()]):
     await _clear_login_failures(email)
 
     token = create_token(u["id"], u["role"])
+    # Audit — successful login.
+    try:
+        import audit as _audit
+        _audit.log_event(
+            event_type=_audit.EVENT_LOGIN,
+            actor={"id": u["id"], "email": u["email"], "role": u["role"]},
+            request=request,
+            summary=f"Signed in as {u['email']}",
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return {"token": token, "user": {"id": u["id"], "email": u["email"],
             "name": u["name"], "role": u["role"]}}
 
