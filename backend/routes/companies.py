@@ -417,6 +417,17 @@ async def delete_company(cid: str, confirm: str = "", user: dict = Depends(get_c
             400,
             f"To confirm deletion, pass ?confirm=<exact company name>. Got: {confirm!r}",
         )
+    # Firm Books companies are the CPA's own accounting entity —
+    # protected from deletion because losing it would strand the firm
+    # itself. If the pro really wants it gone they can toggle
+    # `is_firm_books=False` first (via a support ticket / admin tool),
+    # but the day-to-day delete flow refuses.
+    if company.get("is_firm_books") is True:
+        raise HTTPException(
+            403,
+            "Firm Books companies are protected and cannot be deleted. "
+            "Contact support if you truly need this removed.",
+        )
     # Every collection that carries a `company_id` field
     per_company_collections = [
         "accounts", "transactions", "journal_entries", "invoices", "bills",
