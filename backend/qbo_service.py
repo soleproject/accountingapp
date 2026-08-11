@@ -326,6 +326,13 @@ def map_contact(cid: str, realm_id: str, obj: dict, kind: str) -> dict:
 def map_item(cid: str, realm_id: str, obj: dict) -> dict:
     inc = (obj.get("IncomeAccountRef") or {}).get("value")
     exp = (obj.get("ExpenseAccountRef") or {}).get("value")
+    asset = (obj.get("AssetAccountRef") or {}).get("value")
+    # Inventory-specific fields. QBO only populates these when the
+    # item's Type is "Inventory" — service/non-inventory items leave
+    # them undefined. We store the raw values so the migration can
+    # post an opening-inventory JE (see qbo_service.run_migration).
+    is_inventory = (obj.get("Type") or "").lower() == "inventory"
+    qty_on_hand = float(obj.get("QtyOnHand") or 0)
     return {
         "company_id": cid,
         "source": "qbo",
@@ -342,6 +349,14 @@ def map_item(cid: str, realm_id: str, obj: dict) -> dict:
         "active": bool(obj.get("Active", True)),
         "income_account_qbo_id": inc,
         "expense_account_qbo_id": exp,
+        # Inventory tracking — only meaningful for Type=Inventory rows
+        # but stored on every row so downstream code doesn't have to
+        # special-case shape.
+        "track_qty_on_hand": bool(obj.get("TrackQtyOnHand", is_inventory)),
+        "qty_on_hand": qty_on_hand,
+        "reorder_point": float(obj.get("ReorderPoint") or 0),
+        "inv_start_date": obj.get("InvStartDate") or None,
+        "asset_account_qbo_id": asset,
         "raw": obj,
         "created_at": now_iso(),
         "updated_at": now_iso(),
@@ -370,7 +385,14 @@ PREVIEW_ENTITIES = [
     "Invoice", "Bill", "Payment", "BillPayment",
     "JournalEntry", "Deposit", "Transfer",
     "CreditMemo", "SalesReceipt", "RefundReceipt",
-    "Purchase", "Attachable",
+    "Purchase",
+    # New Feb 20, 2026 — surfaces inventory-adjustment volume in the
+    # preview scope tile grid so CPAs know upfront whether inventory
+    # history is part of the migration. We don't pull adjustments
+    # yet, but the count itself is diagnostic (a big number means
+    # "review your inventory strategy before migrating").
+    "InventoryAdjustment",
+    "Attachable",
 ]
 
 
@@ -869,6 +891,23 @@ async def run_migration(job_id: str, company_id: str) -> None:
                 "Post-migration mirror pull failed for %s: %s — "
                 "user can hit Pull manually on the Mirror page.",
                 company_id, e)
+
+        # Opening Inventory JE — post a single journal entry that
+        # brings the Inventory Asset account to its QBO opening
+        # value (sum of item.qty_on_hand × item.cost across every
+        # inventory item). Without this, reports show correct item
+        # counts but $0 in `1300 Inventory Asset`, and the Balance
+        # Sheet won't tie to QBO. Idempotent: rewrites the same
+        # bookmarked JE on re-migration instead of double-posting.
+        opening_inv_value = 0.0
+        try:
+            opening_inv_value = await _post_opening_inventory_je(company_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Opening inventory JE failed for %s: %s — CPA can "
+                "post the opening balance manually if needed.",
+                company_id, e)
+
         await db.qbo_jobs.update_one(
             {"job_id": job_id},
             {"$set": {"status": "done", "phase": "done",
@@ -883,7 +922,8 @@ async def run_migration(job_id: str, company_id: str) -> None:
                       "seeded_deactivated": seeded_deactivated,
                       "mirror_estimates_pulled": mirror_pulled["estimates"],
                       "mirror_pos_pulled": mirror_pulled["purchase_orders"],
-                      "skipped_dupkey": skipped_dupkey}},
+                      "skipped_dupkey": skipped_dupkey,
+                      "opening_inventory_value": opening_inv_value}},
         )
     except Exception as e:  # noqa: BLE001
         logger.exception("QBO migration failed for %s", company_id)
@@ -892,6 +932,103 @@ async def run_migration(job_id: str, company_id: str) -> None:
             {"$set": {"status": "failed", "error": str(e),
                       "finished_at": now_iso()}},
         )
+
+
+async def _post_opening_inventory_je(company_id: str) -> float:
+    """Post a single Opening Inventory JE that brings the local
+    Inventory Asset account into agreement with QBO's on-hand value
+    as of migration time.
+
+    For every migrated inventory item with `qty_on_hand > 0` and a
+    positive `cost`, add `qty × cost` to the debit side of Inventory
+    Asset. The credit leg goes to `3900 Opening Balance Equity` (or
+    the equity clearing account we already auto-create). Zero-value
+    items are skipped — QBO doesn't distinguish "0 units" from
+    "untracked", so we conservatively ignore them rather than post
+    a $0 JE that would clutter the ledger.
+
+    Idempotent: rewrites the previously-posted `qbo-opening-inv-<cid>`
+    JE on re-migration instead of stacking a second one. Returns the
+    total dollar value posted (or 0.0 if there was nothing to post).
+    """
+    from datetime import date
+    # Gather inventory items with real on-hand value.
+    total = 0.0
+    lines: list[dict] = []
+    inv_asset = await db.accounts.find_one(
+        {"company_id": company_id, "code": "1300"})
+    if not inv_asset:
+        # No 1300 Inventory Asset seeded — nothing to post to.
+        return 0.0
+    # Collect valuation lines first — short-circuits the whole function
+    # for service-only companies (no equity lookup, no JE upsert).
+    async for it in db.items.find({
+        "company_id": company_id, "source": "qbo",
+        "track_qty_on_hand": True,
+        "qty_on_hand": {"$gt": 0},
+    }):
+        qty = float(it.get("qty_on_hand") or 0)
+        cost = float(it.get("cost") or 0)
+        if qty <= 0 or cost <= 0:
+            continue
+        value = round(qty * cost, 2)
+        total += value
+        lines.append({
+            "description": f"{it.get('name', 'Item')} — {qty:g} @ {cost:.2f}",
+            "amount": value,
+            "item_id": it["id"],
+        })
+    if total <= 0 or not lines:
+        return 0.0
+    # Only now — knowing we have a real JE to post — look up (or auto-
+    # create) the equity contra account.
+    opening_eq = await db.accounts.find_one(
+        {"company_id": company_id,
+          "$or": [{"code": "3900"},
+                   {"name": {"$regex": "^Opening Balance Equity$",
+                              "$options": "i"}}]})
+    if not opening_eq:
+        # Fall back to the transfer clearing equity account created
+        # by pfc_resolver — same purpose (equity holding pen) and
+        # already auto-created when needed.
+        from pfc_resolver import _ensure_transfer_clearing_account
+        opening_eq = await _ensure_transfer_clearing_account(company_id)
+    if not opening_eq:
+        return 0.0
+    # Deterministic id so a re-run rewrites rather than duplicates.
+    je_id = f"qbo-opening-inv-{company_id[:8]}"
+    now = now_iso()
+    je_doc = {
+        "id": je_id,
+        "company_id": company_id,
+        "date": date.today().isoformat(),
+        "description": "QBO migration — opening inventory balance",
+        "source": "qbo_migration",
+        "posted": True,
+        "human_reviewed": True,
+        "lines": [
+            {"account_id": inv_asset["id"],
+              "account_code": inv_asset.get("code"),
+              "account_name": inv_asset.get("name"),
+              "debit": total, "credit": 0,
+              "description": f"Opening inventory ({len(lines)} items)"},
+            {"account_id": opening_eq["id"],
+              "account_code": opening_eq.get("code"),
+              "account_name": opening_eq.get("name"),
+              "debit": 0, "credit": total,
+              "description": "Contra to opening inventory"},
+        ],
+        "total": total,
+        "opening_inventory_lines": lines,
+        "created_at": now, "updated_at": now,
+    }
+    await db.journal_entries.update_one(
+        {"id": je_id, "company_id": company_id},
+        {"$set": je_doc}, upsert=True,
+    )
+    return total
+
+
 
 
 async def resolve_payment_links(company_id: str) -> int:

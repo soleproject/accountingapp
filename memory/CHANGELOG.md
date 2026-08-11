@@ -1,5 +1,49 @@
 # SmartBooks — Changelog
 
+## 2026-02-20 (very late) — Inventory Migration (Phase 5)
+
+### 📦 Extended `Item` pull (`qbo_service.map_item`)
+Beyond the existing name/price/cost/sku fields, we now capture every inventory-relevant field QBO exposes:
+- `qty_on_hand` — current on-hand quantity per item
+- `track_qty_on_hand` — the QBO flag distinguishing "Inventory" items from Service/NonInventory
+- `cost` — unit cost basis (already captured; used for COGS math)
+- `asset_account_qbo_id` — the `1300 Inventory Asset` account the item posts to
+- `income_account_qbo_id` / `expense_account_qbo_id` — sales + COGS accounts
+- `inv_start_date` — when QBO began inventory tracking for this item
+- `reorder_point` — reorder threshold
+
+Service items still pass through the same mapper harmlessly (all inventory fields default to `0` / `None` / `False`).
+
+### 💰 Opening Inventory JE (`qbo_service._post_opening_inventory_je`)
+After the migration finishes pulling accounts + items, we now post a single balanced JE that seeds the local `1300 Inventory Asset` account with the QBO-reported opening value.
+- **Debit**: `1300 Inventory Asset · SUM(qty × cost)` across every inventory item with `qty > 0` AND `cost > 0`.
+- **Credit**: `3900 Opening Balance Equity` (auto-falls back to the transfer clearing equity account if 3900 isn't seeded).
+- Skips zero-qty or zero-cost items to avoid $0 clutter lines.
+- **Idempotent** — deterministic JE id `qbo-opening-inv-<cid>` upserts on re-migration instead of stacking a second one.
+- Fires only when there's real inventory value to post; service-only companies short-circuit before any equity account lookup runs.
+
+### 📋 Preview scope now includes `InventoryAdjustment`
+Bumped `PREVIEW_ENTITIES` from 16 to 17 types. The migration preview tile grid now shows a count of QBO Inventory Adjustments so CPAs know upfront how much inventory-history is (and isn't) being pulled — currently we only pull the count as diagnostic; adjustment ingestion itself is a future task.
+
+### 🎨 Migration Completion Banner — new tile
+Bumped the banner grid to 5 columns and added an **Opening inventory** tile showing the total dollar value posted to `1300` during migration. `data-testid="qbo-stat-opening-inventory"`.
+
+### ✅ Test coverage
+- `backend/tests/test_qbo_inventory_migration.py` — 8 tests: mapper captures inventory fields for Inventory items and safely defaults for Service items; opening JE posts a balanced debit/credit with correct 1300 / 3900 accounts; zero-qty and zero-cost items are skipped; JE is idempotent on re-run; empty-inventory + missing-1300 short-circuit paths return 0.0 without crashing; `InventoryAdjustment` is in `PREVIEW_ENTITIES`.
+- 197 backend tests all green (was 189, added 8).
+
+### What's still ahead
+- **`InventoryAdjustment` pull** — bring adjustment history in as journal entries so the audit trail is preserved.
+- **`InventoryAdjustment` mirror push** — so Advanced-mode users can adjust stock here and have it flow to QBO.
+- **Class / Department / Location** entities — critical for the upcoming Restaurant Vertical.
+- **TaxAgency / TaxRate / TaxCode** — sales-tax setup migration.
+- **Terms / PaymentMethod / RecurringTransaction** — the "boring but important" QBO admin objects.
+
+### Files touched
+- `backend/qbo_service.py` — extended `map_item`, added `_post_opening_inventory_je`, wired the JE step into `run_migration`, added `InventoryAdjustment` to `PREVIEW_ENTITIES`, stored `opening_inventory_value` on the completed job doc.
+- `backend/tests/test_qbo_inventory_migration.py` (new, 8 tests).
+- `frontend/src/pages/QboConnect.jsx` — 5-column banner grid + Opening inventory tile.
+
 ## 2026-02-20 (midnight) — Match Indicators Everywhere
 
 ### 🎯 Consistent match visual language across the app
