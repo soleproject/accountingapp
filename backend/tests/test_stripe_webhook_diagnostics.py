@@ -31,7 +31,13 @@ from db import db  # noqa: E402
 import routes.stripe_billing as sb  # noqa: E402
 
 
-_LOOP = asyncio.new_event_loop()
+# Share the event loop with sibling stripe test files so Motor doesn't
+# bind to one loop and then get called from another when xdist's
+# loadscope groups multiple files onto the same worker process.
+try:
+    from tests.test_stripe_billing import _LOOP as _LOOP  # noqa: F401
+except ImportError:
+    _LOOP = asyncio.new_event_loop()
 
 
 def _run(coro):

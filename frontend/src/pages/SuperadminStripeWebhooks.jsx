@@ -74,6 +74,7 @@ function EventRow({ row }) {
     || snap.customer_email
     || outcome.email
     || "—";
+  const brand = outcome.brand || snap.metadata?.brand || "smartbooks";
   return (
     <>
       <tr className="border-t border-slate-200 hover:bg-slate-50">
@@ -96,6 +97,18 @@ function EventRow({ row }) {
         <td className="py-2 pr-3 align-top">
           <OutcomeBadge status={outcome.status} />
         </td>
+        <td className="py-2 pr-3 align-top">
+          <span
+            data-testid={`webhook-brand-${brand}`}
+            className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
+              brand === "smartbooks"
+                ? "bg-slate-100 text-slate-700"
+                : "bg-indigo-50 text-indigo-800 border border-indigo-200"
+            }`}
+          >
+            {brand}
+          </span>
+        </td>
         <td className="py-2 pr-3 align-top text-sm text-slate-800">
           {email}
         </td>
@@ -105,7 +118,7 @@ function EventRow({ row }) {
       </tr>
       {open && (
         <tr className="border-t border-slate-100 bg-slate-50">
-          <td colSpan={6} className="p-3">
+          <td colSpan={7} className="p-3">
             {outcome.hint && (
               <div className="mb-3 flex gap-2 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
                 <AlertTriangle className="h-5 w-5 flex-none text-rose-600" />
@@ -282,18 +295,19 @@ export default function SuperadminStripeWebhooks() {
               <th className="py-2 pr-3">Received</th>
               <th className="py-2 pr-3">Event type</th>
               <th className="py-2 pr-3">Outcome</th>
+              <th className="py-2 pr-3">Brand</th>
               <th className="py-2 pr-3">Payer email</th>
               <th className="py-2 pr-3">Session/event id</th>
             </tr>
           </thead>
           <tbody>
             {loading && rows.length === 0 && (
-              <tr><td colSpan={6} className="py-10 text-center text-sm text-slate-500">
+              <tr><td colSpan={7} className="py-10 text-center text-sm text-slate-500">
                 <Loader2 className="mx-auto h-5 w-5 animate-spin" />
               </td></tr>
             )}
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={6} className="py-10 text-center text-sm text-slate-500">
+              <tr><td colSpan={7} className="py-10 text-center text-sm text-slate-500">
                 No webhook events match these filters yet.
               </td></tr>
             )}

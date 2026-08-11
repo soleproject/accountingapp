@@ -1,5 +1,63 @@
 # SmartBooks — Changelog
 
+## 2026-02-24 — Private-Label Welcome Emails (CypherPro-branded)
+
+### 🎯 Problem
+CypherPro (and any future private label) shares the SmartBooks backend + database, but customers paying on `cypherpro.ai` were getting a **SmartBooks-branded** welcome email with a magic link pointing at `app.smartbookssoftware.ai/set-password/…`. Customers thought it was spam ("I paid CypherPro — why is SmartBooks emailing me?") and abandoned the signup.
+
+### ✅ Fixes
+
+**New brand registry (`backend/private_labels.py`)**
+- Single source of truth for every private-label brand: `{key, display_name, product_name, app_url, tagline}` per entry.
+- Ships with `smartbooks` (flagship) + `cypherpro` (first white-label) — extensible by editing the `_BRANDS` dict.
+- `resolve_brand(metadata)` reads `brand` / `label` / `private_label` keys off a Stripe session's `metadata` (operators use different vocabularies — we accept all three). Case-insensitive, unknown values fall back to `smartbooks` so a typo never breaks a signup.
+- Per-brand `app_url` respects env override (`BRAND_CYPHERPRO_APP_URL` etc.) so ops can retarget without a code push.
+
+**Brand-aware webhook (`routes/stripe_billing.py`)**
+- `_handle_checkout_completed` resolves brand from session metadata BEFORE anything else — so even a `bailed_no_email` outcome now reports which private-label link was misconfigured.
+- User doc gets stamped with `private_label_brand` on creation so future re-sends of the welcome email route to the right host without re-parsing Stripe metadata.
+- Outcome dict includes `brand` + `magic_link_host` fields; both surface on the diagnostic UI and the API response body.
+- `_send_welcome_magic_link(user, brand=…)` uses the brand's `app_url` for the magic-link base and passes the brand into the email template.
+
+**Brand-aware email template (`email_templates.py::stripe_welcome`)**
+- Accepts an optional `brand` dict. Subject swaps to `"Welcome to <product_name> — set your password"`, heading uses the product name, body includes the brand tagline ("your business, decoded" for CypherPro).
+- Footer: for private labels we PASS `brand_name` into `_wrap`, which drops the `smartbookssoftware.ai` reference so the email reads as purely CypherPro branded. Flagship SmartBooks signups keep their historical footer.
+- User-supplied name is HTML-escaped on render so a malicious payer can't inject markup.
+
+**Brand-aware From header (`email_dispatcher.py`)**
+- New `firm_name_override` kwarg on `dispatch()`. When set, wins over the initiating user's firm branding — used by the private-label welcome flow to force `"CypherPro <no-reply@accountingapp.ai>"` as the From line even though the fresh customer has no firm affiliation yet.
+- Reuses the existing `RESEND_FROM_FIRM` template plumbing — no new Resend domain verification required. (Note for later: switching to `no-reply@cypherpro.ai` requires the operator to add DNS records + verify a new Resend domain.)
+
+**Diagnostic UI updated (`frontend/src/pages/SuperadminStripeWebhooks.jsx`)**
+- New **Brand** column between Outcome and Payer Email — chip-highlighted for private labels so failed signups are easy to attribute at a glance.
+
+### 🧪 Tests
+`backend/tests/test_stripe_private_label_welcome.py` — **14 tests, all green**:
+- Brand resolution: `brand` / `label` / `private_label` aliases, case-insensitive, unknown → fallback, missing metadata → fallback, typo-safe
+- Template branding: subject swaps to product name, footer drops smartbookssoftware.ai for private labels, flagship keeps it, HTML injection escaped
+- Webhook integration: CypherPro session → outcome carries `brand: cypherpro` + `magic_link_host: app.cypherpro.accountingapp.ai`, user doc stamped with `private_label_brand`
+- Regression: sessions without brand metadata still route to `smartbooks` (preserves flagship behaviour)
+- Even `bailed_no_email` reports which brand's link was misconfigured
+
+**Combined stripe suite** (test_stripe_billing + test_stripe_webhook_diagnostics + test_stripe_private_label_welcome): **26/26 pass** across 4 consecutive parallel runs. Broader combined: **178 stripe + qbo tests pass**, zero regressions.
+
+### 📖 Operator playbook — attributing a Payment Link to CypherPro
+1. Stripe Dashboard → Product catalog → Payment Links → open each CypherPro link
+2. **Metadata** section → add key `brand`, value `cypherpro`. Save.
+3. That's it. From the next payment on:
+   - Welcome email subject: **"Welcome to CypherPro — set your password"**
+   - From line: **"CypherPro <no-reply@accountingapp.ai>"**
+   - Magic link: **`https://app.cypherpro.accountingapp.ai/set-password/<token>`**
+   - Diagnostic UI shows brand: `cypherpro` chip on the row
+
+### 🔮 Adding a new private label
+1. Add entry to `_BRANDS` dict in `backend/private_labels.py` (key + display_name + product_name + app_url + tagline)
+2. Stamp `metadata.brand=<key>` on every Payment Link in Stripe Dashboard
+3. Optionally set `BRAND_<KEY>_APP_URL` env override for staging/prod parity
+No template code, no separate email dispatcher, no per-brand webhook needed.
+
+
+
 ## 2026-02-24 — Stripe webhook outcome tracking + diagnostic endpoint
 
 ### 🐛 Problem
