@@ -134,6 +134,54 @@ export default function AuditLog() {
           <ScopeTab active={scope === "mine"} onClick={() => updateFilter("scope", "mine")}>
             My actions
           </ScopeTab>
+          {/* CSV export — respects every active filter. The download
+              itself is meta-audited server-side so the trail records
+              who pulled the trail (SOC 2 / SOX / discovery friendly). */}
+          <button
+            data-testid="audit-export-csv"
+            onClick={() => {
+              const qs = new URLSearchParams();
+              if (evtFilter)    qs.set("event_type", evtFilter);
+              if (entityFilter) qs.set("entity_type", entityFilter);
+              if (since)        qs.set("since", since);
+              if (until)        qs.set("until", until);
+              if (onlyMine && scope === "company") qs.set("only_mine", "true");
+              qs.set("limit", "50000");
+              const path = scope === "mine"
+                ? `${process.env.REACT_APP_BACKEND_URL}/api/audit/me.csv?${qs}`
+                : `${process.env.REACT_APP_BACKEND_URL}/api/companies/${cid}/audit.csv?${qs}`;
+              const token = localStorage.getItem("token");
+              // Use fetch → blob so we can attach the Authorization
+              // header (a plain <a href> can't). Then trigger a
+              // synthetic anchor click to save under the server-set
+              // filename.
+              fetch(path, { headers: { Authorization: `Bearer ${token}` } })
+                .then((r) => {
+                  if (!r.ok) throw new Error(`Export failed (${r.status})`);
+                  return r.blob().then((b) => ({
+                    blob: b,
+                    // Pull the filename from Content-Disposition
+                    cd: r.headers.get("Content-Disposition") || "",
+                  }));
+                })
+                .then(({ blob, cd }) => {
+                  const m = /filename="([^"]+)"/.exec(cd);
+                  const name = (m && m[1]) || `audit-${new Date().toISOString().slice(0, 10)}.csv`;
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url; a.download = name;
+                  document.body.appendChild(a); a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                  toast.success("Audit log exported");
+                })
+                .catch((e) => toast.error("Export failed", { description: e?.message }));
+            }}
+            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md bg-white text-slate-700 border hover:bg-slate-50"
+            title="Download the current filter selection as CSV"
+          >
+            Download CSV
+          </button>
         </div>
       </header>
 
