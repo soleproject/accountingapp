@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
@@ -53,7 +53,12 @@ export default function ProClients() {
   };
   const [showOnlyAction, setShowOnlyAction] = useState(false);
   const [resending, setResending] = useState({});
-  const { switchCompany, refresh } = useCompany();
+  const { switchCompany, refresh, companies } = useCompany();
+  const navigate = useNavigate();
+  // Firm Books company for this pro — surfaced as its own tile above
+  // the client list so partners can jump into their firm's own books
+  // in one click, instead of hunting through the company switcher.
+  const firmBooks = (companies || []).find((c) => c.is_firm_books === true);
   const { user } = useAuth();
   const isSuperadmin = user?.role === "superadmin";
 
@@ -218,6 +223,43 @@ export default function ProClients() {
         <EnterprisesGrid enterprises={enterprises} loading={entLoading} onOpenAsOwner={openAsOwner} />
       ) : (
       <>
+      {/* Firm Books tile — a one-click jump into the pro's OWN books.
+          Sits above the client-attention tile so partners don't have
+          to open the company switcher to work on their firm's own
+          accounting. Skipped silently if the pro somehow doesn't have
+          a firm-books company yet (the boot-time backfill in
+          `enterprises.ensure_default_enterprise` provisions one for
+          every pro, so this is defensive). */}
+      {firmBooks && (
+        <button
+          data-testid="firm-books-tile"
+          onClick={async () => {
+            await switchCompany(firmBooks.id);
+            navigate("/dashboard");
+          }}
+          className="w-full text-left rounded-xl border-2 border-cyan-200 bg-gradient-to-r from-cyan-50 to-white hover:from-cyan-100 hover:to-cyan-50 transition p-5 flex items-center justify-between gap-4 group"
+        >
+          <div className="flex items-center gap-4 min-w-0">
+            <div className="rounded-lg bg-cyan-500 text-white p-3 flex-shrink-0">
+              <Building2 size={22} />
+            </div>
+            <div className="min-w-0">
+              <div className="text-[10px] uppercase tracking-widest font-semibold text-cyan-700">
+                Your Firm
+              </div>
+              <div className="font-heading font-bold text-lg text-slate-900 truncate">
+                {firmBooks.name}
+              </div>
+              <div className="text-xs text-slate-500 mt-0.5">
+                Your firm's own accounting books · click to open
+              </div>
+            </div>
+          </div>
+          <div className="text-xs text-cyan-700 font-semibold uppercase tracking-widest flex-shrink-0 opacity-0 group-hover:opacity-100 transition">
+            Open →
+          </div>
+        </button>
+      )}
       <FirmAttentionTile
         firm={firm}
         showOnlyAction={showOnlyAction}

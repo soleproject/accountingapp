@@ -346,6 +346,12 @@ async def update_company(cid: str, patch: dict, request: Request, user: dict = D
         # validation happens in the resolver at read time so a partial
         # or legacy dict never crashes the PDF pipeline).
         "report_style",
+        # Firm Books flag — allows a pro to "detach" their firm books
+        # (set it to false), which un-protects the company for deletion
+        # and moves it out of the "Firm books" section in the switcher.
+        # One-way in practice; the auto-provisioner won't re-flag once
+        # cleared, and the pro can then delete via the normal flow.
+        "is_firm_books",
     }
     updates = {k: v for k, v in (patch or {}).items() if k in allowed}
     if not updates:
@@ -402,7 +408,9 @@ async def update_company(cid: str, patch: dict, request: Request, user: dict = D
 
 
 @router.delete("/companies/{cid}")
-async def delete_company(cid: str, confirm: str = "", user: dict = Depends(get_current_user)):
+async def delete_company(cid: str, confirm: str = "",
+                         force_firm_books: bool = False,
+                         user: dict = Depends(get_current_user)):
     """Hard-delete a company and every record scoped to it. Requires
     `?confirm=<company_name>` in the query string as a safeguard against
     accidental deletes. The requester must have an owner/pro/superadmin
@@ -419,14 +427,18 @@ async def delete_company(cid: str, confirm: str = "", user: dict = Depends(get_c
         )
     # Firm Books companies are the CPA's own accounting entity —
     # protected from deletion because losing it would strand the firm
-    # itself. If the pro really wants it gone they can toggle
-    # `is_firm_books=False` first (via a support ticket / admin tool),
-    # but the day-to-day delete flow refuses.
-    if company.get("is_firm_books") is True:
+    # itself. Bypass requires an explicit `force_firm_books=true` query
+    # flag so a regular UI delete can't accidentally wipe it out; a
+    # power user (or the future "Delete Firm Books" settings button)
+    # has to opt-in on purpose. The audit trail still catches it either
+    # way via the log_delete call at the end of this handler.
+    if company.get("is_firm_books") is True and not force_firm_books:
         raise HTTPException(
             403,
-            "Firm Books companies are protected and cannot be deleted. "
-            "Contact support if you truly need this removed.",
+            "Firm Books companies are protected. Pass "
+            "`force_firm_books=true` to override, or convert this "
+            "company to a regular company first via PATCH "
+            "/companies/{cid} with {\"is_firm_books\": false}.",
         )
     # Every collection that carries a `company_id` field
     per_company_collections = [
