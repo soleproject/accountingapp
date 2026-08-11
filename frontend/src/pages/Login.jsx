@@ -289,6 +289,10 @@ export default function Login() {
                     className="w-full text-left rounded-md border px-3 py-2 text-sm hover:bg-slate-50">
               <span className="font-medium">Superadmin</span> — Platform
             </button>
+            <button type="button" data-testid={TID.demoPartner} onClick={() => demo("partner@axiom.ai", "partner123")}
+                    className="w-full text-left rounded-md border px-3 py-2 text-sm hover:bg-slate-50">
+              <span className="font-medium">Partner</span> — AxiomPartners
+            </button>
           </div>
           )}
         </form>
