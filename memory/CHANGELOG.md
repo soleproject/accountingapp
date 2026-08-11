@@ -1,5 +1,38 @@
 # SmartBooks — Changelog
 
+## 2026-02-21 (later) — InventoryAdjustment Mirror Push (Bi-Directional Loop Closed)
+
+### 🔁 Outbound push for locally-created inventory adjustments
+- **New body builder** `push._inventory_adjustment_body`:
+  - Resolves the contra account (`Inventory Adjustments`) to its QBO id — raises `ValueError` if the account isn't mirrored yet, so the push worker surfaces a friendly `failed` row.
+  - Maps every line to QBO's `ItemAdjustmentLineDetail` shape with `QtyDiff` + `ItemRef`; silently skips lines whose item isn't mirrored (surfaces as truncated line count), raises if *every* line is unsynced.
+  - Truncates `DocNumber` to QBO's 21-char cap.
+  - Passes `TxnDate`, `PrivateNote` when present.
+- **Twin patch** `_local_patch_from_qbo_inventory_adjustment` — mirrors QBO's authoritative echo (`DocNumber`, `TxnDate`) back onto the local JE.
+- **New push worker** `_push_inventory_adjustments`: scans `journal_entries` for `source=adjustment` docs without `qbo_id` and posts them via `POST /company/{realm}/inventoryadjustment`.
+- **Autopush wiring**: added `inventory_adjustment` to `_ENTITY_META` (path=`inventoryadjustment`, coll=`journal_entries`), and `_push_one_inventory_adjustment` to the dispatch table. Fires from `inventory_service.apply_adjustment` immediately after the JE is inserted — CPA sees round-trip within seconds.
+- **Enriched local JE metadata**: `apply_adjustment` now stores `contra_account_id`, `inventory_account_id`, and `inventory_adjustment_lines[]` (with item_id + item_qbo_id + qty_diff + cost) on the JE doc so the push builder has everything it needs without a second query round-trip.
+
+### ✅ Test coverage
+`backend/tests/test_qbo_inv_adj_push.py` — 12 tests:
+- Body writedown/writeup/multiline shape all correct
+- Body silently skips items not yet synced to QBO
+- Body raises when contra account isn't synced (fail loud, don't post garbage)
+- Body raises when every line's item is unsynced
+- Body raises when every line has QtyDiff=0
+- DocNumber truncated to QBO's 21-char limit
+- Twin patch reflects QBO's authoritative DocNumber + TxnDate; safely omits missing fields
+- `inventory_adjustment` registered in `_ENTITY_META` with correct path/key/coll
+- Push module exposes `_push_inventory_adjustments`, `_inventory_adjustment_body`, `_local_patch_from_qbo_inventory_adjustment`
+
+All 216 backend tests still green across the QBO/mirror/PFC/bank-match/accounting-mode/editor suites.
+
+### Files touched
+- `backend/qbo_mirror/push.py` — new body builder + twin patch + `_push_inventory_adjustments` worker + registered in `run_push` entity list.
+- `backend/qbo_mirror/autopush.py` — imports body/patch helpers, added `_push_one_inventory_adjustment`, registered in `_ENTITY_META` + dispatch table.
+- `backend/inventory_service.py::apply_adjustment` — enriches the JE with mirror-consumable metadata + fires `try_auto_push('inventory_adjustment', je_id)` after insert.
+- `backend/tests/test_qbo_inv_adj_push.py` (new, 12 tests).
+
 ## 2026-02-21 — InventoryAdjustment History Migration
 
 ### 🗂️ Full audit trail migration for inventory adjustments

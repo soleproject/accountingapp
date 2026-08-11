@@ -2115,6 +2115,147 @@ async def _push_transfers(company_id: str, realm_id: str) -> dict:
     return {"inserted": inserted, "failed": failed}
 
 
+# ─── Inventory Adjustments ────────────────────────────────────────
+# Outbound push for local-only inventory adjustments — the doc lives
+# in `journal_entries` with `source=SOURCE_ADJUSTMENT` (see
+# `inventory_service.apply_adjustment`). QBO's `InventoryAdjustment`
+# entity carries QtyDiff per item + a single AdjustAccountRef contra,
+# so we invert the local `inventory_adjustment_lines` payload back
+# into that shape at push time.
+
+async def _inventory_adjustment_body(company_id: str, doc: dict) -> dict:
+    """Build a QBO InventoryAdjustment payload from a local
+    `journal_entries` doc created by `inventory_service.apply_adjustment`.
+
+    Local shape stores `inventory_adjustment_lines: [{item_id, qty_diff,
+    cost, value}]` (the "priced" trail) plus a `contra_account_id`
+    pointing at the local Inventory Adjustments expense account. We
+    reverse this into QBO's shape:
+      Line: [{ItemAdjustmentLineDetail: {QtyDiff, ItemRef}}, ...]
+      AdjustAccountRef: {value: <qbo id>}
+    """
+    # Locate the contra account's QBO id. Prefer the explicit
+    # `contra_account_id` on the doc; fall back to scanning the JE's
+    # lines for the non-Inventory account.
+    contra_ref = None
+    contra_id = doc.get("contra_account_id")
+    if not contra_id:
+        for ln in doc.get("lines") or []:
+            aid = ln.get("account_id")
+            if aid and (doc.get("inventory_account_id") is None
+                          or aid != doc.get("inventory_account_id")):
+                contra_id = aid
+                break
+    if contra_id:
+        acct = await db.accounts.find_one(
+            {"id": contra_id, "company_id": company_id})
+        if acct and acct.get("qbo_id"):
+            contra_ref = {"value": str(acct["qbo_id"]),
+                          "name": acct.get("name") or ""}
+    if not contra_ref:
+        raise ValueError(
+            "Contra account (Inventory Adjustments) not synced to QBO. "
+            "Push the accounts first, then re-fire the adjustment.")
+    # Prefer the priced lines (they carry item_id + qty_diff); fall
+    # back to reconstructing from generic JE lines is not attempted —
+    # too ambiguous.
+    priced = (doc.get("inventory_adjustment_lines")
+               or doc.get("inventory_adjustment_priced_lines") or [])
+    if not priced:
+        raise ValueError("No inventory adjustment lines on the doc.")
+    lines: list[dict] = []
+    for ln in priced:
+        item_qbo_id = ln.get("item_qbo_id")
+        if not item_qbo_id and ln.get("item_id"):
+            it = await db.items.find_one(
+                {"id": ln["item_id"], "company_id": company_id})
+            if it and it.get("qbo_id"):
+                item_qbo_id = str(it["qbo_id"])
+        if not item_qbo_id:
+            # Item not synced to QBO yet — the CPA must push items
+            # first. Skip rather than fail the whole adjustment.
+            continue
+        qty = float(ln.get("qty_diff") or 0)
+        if qty == 0:
+            continue
+        lines.append({
+            "DetailType": "ItemAdjustmentLineDetail",
+            "ItemAdjustmentLineDetail": {
+                "ItemRef": {"value": item_qbo_id,
+                              "name": ln.get("item_name") or ""},
+                "QtyDiff": qty,
+            },
+            "Description": ln.get("description") or doc.get("memo") or "",
+        })
+    if not lines:
+        raise ValueError(
+            "Every adjustment line references an item not yet synced to QBO.")
+    body: dict[str, Any] = {
+        "AdjustAccountRef": contra_ref,
+        "Line": lines,
+    }
+    if doc.get("date"):
+        body["TxnDate"] = doc["date"]
+    if doc.get("memo"):
+        body["PrivateNote"] = str(doc["memo"])[:4000]
+    if doc.get("number"):
+        body["DocNumber"] = str(doc["number"])[:21]  # QBO limit
+    return body
+
+
+def _local_patch_from_qbo_inventory_adjustment(twin: dict) -> dict:
+    """Twin patch — mirror QBO's authoritative echo back onto the
+    local JE after a successful push (in case QBO renamed DocNumber,
+    or adjusted TxnDate to something else)."""
+    patch: dict[str, Any] = {}
+    if twin.get("DocNumber"):
+        patch["number"] = twin["DocNumber"]
+    if twin.get("TxnDate"):
+        patch["date"] = twin["TxnDate"]
+    return patch
+
+
+async def _push_inventory_adjustments(
+    company_id: str, realm_id: str,
+) -> dict:
+    """Push every locally-created inventory adjustment that hasn't
+    been mirrored yet. Scan is scoped by `source=SOURCE_ADJUSTMENT`
+    (matches `inventory_service.SOURCE_ADJUSTMENT`)."""
+    inserted = 0
+    failed: list[dict] = []
+    async for doc in db.journal_entries.find({
+        "company_id": company_id,
+        "source": "adjustment",
+        "$or": [{"qbo_id": {"$exists": False}},
+                 {"qbo_id": {"$in": [None, ""]}}],
+    }):
+        try:
+            body = await _inventory_adjustment_body(company_id, doc)
+            resp = await _post(
+                company_id, realm_id,
+                f"/company/{realm_id}/inventoryadjustment", body,
+            )
+            twin = resp.get("InventoryAdjustment") or {}
+            new_id = twin.get("Id")
+            if not new_id:
+                failed.append({"id": doc["id"], "error": "no Id"})
+                continue
+            patch = _local_patch_from_qbo_inventory_adjustment(twin)
+            await db.journal_entries.update_one(
+                {"id": doc["id"], "company_id": company_id},
+                {"$set": {**patch,
+                          "qbo_id": str(new_id), "realm_id": realm_id,
+                          "_sync_origin": "mirror_push",
+                          "_sync_status": "synced",
+                          "updated_at": now_iso()}},
+            )
+            inserted += 1
+        except Exception as ex:  # noqa: BLE001
+            failed.append({"id": doc["id"], "error": str(ex)[:400]})
+    return {"inserted": inserted, "failed": failed}
+
+
+
 async def run_push(company_id: str, user_email: str,
                     entities: list[str] | None = None) -> dict:
     """Outbound-only sync — create local-only Foundation entities on
@@ -2132,7 +2273,8 @@ async def run_push(company_id: str, user_email: str,
                      "invoices", "bills", "payments", "bill_payments",
                      "journal_entries", "estimates", "purchase_orders",
                      "purchases", "sales_receipts", "deposits",
-                     "credit_memos", "refund_receipts", "transfers"]
+                     "credit_memos", "refund_receipts", "transfers",
+                     "inventory_adjustments"]
 
     result: dict[str, dict] = {}
     for e in entities:
@@ -2173,6 +2315,9 @@ async def run_push(company_id: str, user_email: str,
                 result[e] = await _push_refund_receipts(company_id, realm_id)
             elif e == "transfers":
                 result[e] = await _push_transfers(company_id, realm_id)
+            elif e == "inventory_adjustments":
+                result[e] = await _push_inventory_adjustments(
+                    company_id, realm_id)
         except Exception as err:  # noqa: BLE001
             result[e] = {"error": str(err)}
 
