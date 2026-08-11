@@ -13,7 +13,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Any, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, Request
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
@@ -484,7 +484,7 @@ async def delete_invoice(cid: str, iid: str, user: dict = Depends(get_current_us
 
 
 @router.get("/companies/{cid}/invoices/{iid}/pdf")
-async def invoice_pdf(cid: str, iid: str, user: dict = Depends(get_current_user)):
+async def invoice_pdf(cid: str, iid: str, request: Request, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     inv = await db.invoices.find_one({"id": iid, "company_id": cid})
     if not inv:
@@ -494,6 +494,20 @@ async def invoice_pdf(cid: str, iid: str, user: dict = Depends(get_current_user)
     from document_pdfs import build_document_pdf
     pdf = build_document_pdf(kind="invoice", doc=inv, company=company, payments=payments)
     filename = f"invoice-{inv.get('number','')}.pdf".replace(" ", "_")
+    # Audit — every invoice PDF download is a compliance-shaped event.
+    try:
+        import audit as _audit
+        _audit.log_export(
+            kind="invoice",
+            actor={"id": user["id"], "email": user.get("email"), "role": user.get("role")},
+            company_id=cid, file_format="pdf",
+            entity_type="invoice", entity_id=iid, filename=filename,
+            metadata={"number": inv.get("number"), "total": inv.get("total")},
+            request=request,
+            summary=f"Downloaded invoice {inv.get('number','')} PDF",
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return Response(
         content=pdf, media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{filename}"'},

@@ -13,7 +13,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Any, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, Request
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
@@ -424,13 +424,27 @@ async def inventory_movements(
 
 
 @router.get("/companies/{cid}/inventory-management/valuation/pdf")
-async def inventory_valuation_pdf(cid: str, user: dict = Depends(get_current_user)):
+async def inventory_valuation_pdf(cid: str, request: Request, user: dict = Depends(get_current_user)):
     """Print-friendly Inventory Valuation PDF for month-end audit binders."""
     await require_company(user, cid)
     from datetime import date as _date
     import inventory_service
     pdf = await inventory_service.build_valuation_pdf(cid)
     filename = f"inventory-valuation-{_date.today().isoformat()}.pdf"
+    # Audit — inventory valuation PDF download is compliance-sensitive.
+    try:
+        import audit as _audit
+        _audit.log_export(
+            kind="inventory-valuation",
+            actor={"id": user["id"], "email": user.get("email"), "role": user.get("role")},
+            company_id=cid, file_format="pdf",
+            entity_type="report", entity_id="inventory-valuation",
+            filename=filename,
+            request=request,
+            summary=f"Downloaded inventory valuation PDF ({_date.today().isoformat()})",
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return Response(
         content=pdf, media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{filename}"'},

@@ -13,7 +13,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Any, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, Request
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
@@ -286,7 +286,7 @@ async def delete_bill(cid: str, bid: str, user: dict = Depends(get_current_user)
 
 
 @router.get("/companies/{cid}/bills/{bid}/pdf")
-async def bill_pdf(cid: str, bid: str, user: dict = Depends(get_current_user)):
+async def bill_pdf(cid: str, bid: str, request: Request, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     bill = await db.bills.find_one({"id": bid, "company_id": cid})
     if not bill:
@@ -296,6 +296,20 @@ async def bill_pdf(cid: str, bid: str, user: dict = Depends(get_current_user)):
     from document_pdfs import build_document_pdf
     pdf = build_document_pdf(kind="bill", doc=bill, company=company, payments=payments)
     filename = f"bill-{bill.get('number','')}.pdf".replace(" ", "_")
+    # Audit — bill PDF download.
+    try:
+        import audit as _audit
+        _audit.log_export(
+            kind="bill",
+            actor={"id": user["id"], "email": user.get("email"), "role": user.get("role")},
+            company_id=cid, file_format="pdf",
+            entity_type="bill", entity_id=bid, filename=filename,
+            metadata={"number": bill.get("number"), "total": bill.get("total")},
+            request=request,
+            summary=f"Downloaded bill {bill.get('number','')} PDF",
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return Response(
         content=pdf, media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{filename}"'},

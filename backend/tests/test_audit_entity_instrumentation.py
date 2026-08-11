@@ -33,6 +33,17 @@ def test_all_entity_instrumentation_writes():
         from db import db
         await _wipe(db)
 
+        # ── Report PDF export — compliance-shaped event ────────────
+        audit.log_export(
+            kind="income-statement",
+            actor={"id": "u1", "email": "u@x", "role": "pro"},
+            company_id=AUDIT_CID,
+            file_format="pdf",
+            entity_type="report", entity_id="income-statement",
+            filename="income_statement.pdf",
+            metadata={"start": "2026-01-01", "end": "2026-12-31", "basis": "accrual"},
+        )
+
         # ── Transaction: create + delete ───────────────────────────
         audit.log_create(
             "transaction", "txn-1", {"id": "txn-1", "date": "2026-08-11", "amount": -42.50, "merchant": "Coffee Shop"},
@@ -103,6 +114,21 @@ def test_all_entity_instrumentation_writes():
         await asyncio.sleep(0.2)
 
         # ── Assertions ─────────────────────────────────────────────
+        # Export — full-snapshot event storing the descriptor (not the file bytes)
+        exp_row = await db.audit_events.find_one(
+            {"event_type": "export", "company_id": AUDIT_CID}
+        )
+        assert exp_row is not None
+        # Full-snapshot path picks up EVENT_EXPORT via `_FULL_SNAPSHOT_EVENTS`
+        assert exp_row.get("after_z") is not None
+        hy = audit.hydrate_event(exp_row)
+        assert hy["after"]["kind"] == "income-statement"
+        assert hy["after"]["filename"] == "income_statement.pdf"
+        assert hy["after"]["file_format"] == "pdf"
+        # Filter params round-trip via metadata
+        assert hy["metadata"]["start"] == "2026-01-01"
+        assert hy["metadata"]["basis"] == "accrual"
+
         # Transaction — create + delete round trip
         txn_rows = await db.audit_events.find(
             {"entity_type": "transaction", "company_id": AUDIT_CID}

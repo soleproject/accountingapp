@@ -13,7 +13,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Any, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, Request
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
@@ -48,6 +48,38 @@ from deps import (
     categorize_and_insert, sync_and_import,
 )
 
+
+# ────────────────────────────────────────────────────────────────
+# Shared export audit helper
+# ────────────────────────────────────────────────────────────────
+
+def _log_export(user: dict, cid: str, kind: str, filename: str,
+                request: Request, extra: Optional[dict] = None) -> None:
+    """One-liner audit call for every PDF/CSV export in this file.
+
+    Wrapped in try/except so a missing/misconfigured audit backend can
+    never block the download itself — the file bytes must always ship.
+    Compliance-shaped: captures who / when / from-what-IP / with-what-
+    params, but never the file contents (a 300KB PDF stored per event
+    would swamp the audit collection)."""
+    try:
+        import audit as _audit
+        _audit.log_export(
+            kind=kind,
+            actor={"id": user["id"], "email": user.get("email"),
+                    "role": user.get("role")},
+            company_id=cid,
+            file_format=filename.rsplit(".", 1)[-1].lower(),
+            entity_type="report",
+            entity_id=kind,
+            filename=filename,
+            metadata=extra or {},
+            request=request,
+            summary=f"Downloaded {kind} ({filename.rsplit('.', 1)[-1].upper()})",
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
 router = APIRouter(prefix="/api")
 
 
@@ -74,12 +106,14 @@ async def rep_income(cid: str, start: Optional[str] = None, end: Optional[str] =
 
 
 @router.get("/companies/{cid}/reports/income-statement/pdf")
-async def rep_income_pdf(cid: str, start: Optional[str] = None, end: Optional[str] = None,
+async def rep_income_pdf(cid: str, request: Request, start: Optional[str] = None, end: Optional[str] = None,
                          basis: str = "accrual", user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     s, e = _default_range()
     data = await R.compute_income_statement(cid, start or s, end or e, basis)
     pdf = R.build_income_statement_pdf(data)
+    _log_export(user, cid, "income-statement", "income_statement.pdf", request,
+                {"start": start or s, "end": end or e, "basis": basis})
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition": "attachment; filename=income_statement.pdf"})
 
@@ -93,11 +127,13 @@ async def rep_bs(cid: str, as_of: Optional[str] = None, basis: str = "accrual",
 
 
 @router.get("/companies/{cid}/reports/balance-sheet/pdf")
-async def rep_bs_pdf(cid: str, as_of: Optional[str] = None, basis: str = "accrual",
+async def rep_bs_pdf(cid: str, request: Request, as_of: Optional[str] = None, basis: str = "accrual",
                      user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     _, e = _default_range()
     data = await R.compute_balance_sheet(cid, as_of or e, basis)
+    _log_export(user, cid, "balance-sheet", "balance_sheet.pdf", request,
+                {"as_of": as_of or e, "basis": basis})
     return Response(content=R.build_balance_sheet_pdf(data), media_type="application/pdf",
                     headers={"Content-Disposition": "attachment; filename=balance_sheet.pdf"})
 
@@ -118,7 +154,7 @@ async def rep_account_detail(cid: str, account_id: str,
 
 
 @router.get("/companies/{cid}/reports/account-detail/pdf")
-async def rep_account_detail_pdf(cid: str, account_id: str,
+async def rep_account_detail_pdf(cid: str, request: Request, account_id: str,
                                  start: Optional[str] = None, end: Optional[str] = None,
                                  q: Optional[str] = None,
                                  contact_id: Optional[str] = None,
@@ -130,6 +166,9 @@ async def rep_account_detail_pdf(cid: str, account_id: str,
                                           q=q, contact_id=contact_id,
                                           min_amount=min_amount, max_amount=max_amount)
     fname = f"account_detail_{(data.get('account') or {}).get('code','x')}.pdf"
+    _log_export(user, cid, "account-detail", fname, request,
+                {"account_id": account_id, "start": start, "end": end,
+                 "q": q, "contact_id": contact_id})
     return Response(content=R.build_account_detail_pdf(data), media_type="application/pdf",
                     headers={"Content-Disposition": f"attachment; filename={fname}"})
 
@@ -143,10 +182,11 @@ async def rep_tb(cid: str, as_of: Optional[str] = None, user: dict = Depends(get
 
 
 @router.get("/companies/{cid}/reports/trial-balance/pdf")
-async def rep_tb_pdf(cid: str, as_of: Optional[str] = None, user: dict = Depends(get_current_user)):
+async def rep_tb_pdf(cid: str, request: Request, as_of: Optional[str] = None, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     _, e = _default_range()
     data = await R.compute_trial_balance(cid, as_of or e)
+    _log_export(user, cid, "trial-balance", "trial_balance.pdf", request, {"as_of": as_of or e})
     return Response(content=R.build_trial_balance_pdf(data), media_type="application/pdf",
                     headers={"Content-Disposition": "attachment; filename=trial_balance.pdf"})
 
@@ -160,11 +200,13 @@ async def rep_gl(cid: str, start: Optional[str] = None, end: Optional[str] = Non
 
 
 @router.get("/companies/{cid}/reports/general-ledger/pdf")
-async def rep_gl_pdf(cid: str, start: Optional[str] = None, end: Optional[str] = None,
+async def rep_gl_pdf(cid: str, request: Request, start: Optional[str] = None, end: Optional[str] = None,
                      user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     s, e = _default_range()
     data = await R.compute_general_ledger(cid, start or s, end or e)
+    _log_export(user, cid, "general-ledger", "general_ledger.pdf", request,
+                {"start": start or s, "end": end or e})
     return Response(content=R.build_general_ledger_pdf(data), media_type="application/pdf",
                     headers={"Content-Disposition": "attachment; filename=general_ledger.pdf"})
 
@@ -178,11 +220,13 @@ async def rep_cf(cid: str, start: Optional[str] = None, end: Optional[str] = Non
 
 
 @router.get("/companies/{cid}/reports/cash-flow/pdf")
-async def rep_cf_pdf(cid: str, start: Optional[str] = None, end: Optional[str] = None,
+async def rep_cf_pdf(cid: str, request: Request, start: Optional[str] = None, end: Optional[str] = None,
                      user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     s, e = _default_range()
     data = await R.compute_cash_flow(cid, start or s, end or e)
+    _log_export(user, cid, "cash-flow", "cash_flow.pdf", request,
+                {"start": start or s, "end": end or e})
     return Response(content=R.build_cash_flow_pdf(data), media_type="application/pdf",
                     headers={"Content-Disposition": "attachment; filename=cash_flow.pdf"})
 
@@ -196,11 +240,13 @@ async def rep_sales_tax(cid: str, start: Optional[str] = None, end: Optional[str
 
 
 @router.get("/companies/{cid}/reports/sales-tax/pdf")
-async def rep_sales_tax_pdf(cid: str, start: Optional[str] = None, end: Optional[str] = None,
+async def rep_sales_tax_pdf(cid: str, request: Request, start: Optional[str] = None, end: Optional[str] = None,
                             user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     s, e = _default_range()
     data = await R.compute_sales_tax(cid, start or s, end or e)
+    _log_export(user, cid, "sales-tax", "sales_tax_liability.pdf", request,
+                {"start": start or s, "end": end or e})
     return Response(content=R.build_sales_tax_pdf(data), media_type="application/pdf",
                     headers={"Content-Disposition": "attachment; filename=sales_tax_liability.pdf"})
 
@@ -213,10 +259,11 @@ async def rep_1099(cid: str, year: Optional[int] = None, user: dict = Depends(ge
 
 
 @router.get("/companies/{cid}/reports/1099-summary/pdf")
-async def rep_1099_pdf(cid: str, year: Optional[int] = None, user: dict = Depends(get_current_user)):
+async def rep_1099_pdf(cid: str, request: Request, year: Optional[int] = None, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     y = year or datetime.now(timezone.utc).year
     data = await R.compute_1099_summary(cid, y)
+    _log_export(user, cid, "1099-summary", "1099_summary.pdf", request, {"year": y})
     return Response(content=R.build_1099_pdf(data), media_type="application/pdf",
                     headers={"Content-Disposition": "attachment; filename=1099_summary.pdf"})
 
