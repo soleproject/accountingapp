@@ -93,7 +93,22 @@ export default function Login() {
     try {
       const u = await login(e, p);
       nav(u.role === "superadmin" ? "/admin" : u.role === "pro" ? "/pro/clients" : "/dashboard");
-    } catch (err) { setErr("Demo login failed"); }
+    } catch (err) {
+      // Surface the actual server response instead of a generic
+      // "Demo login failed". On production, the most likely causes are
+      //   * 401 "Invalid credentials" — demo users not seeded on that DB
+      //   * 429 rate lockout — the user tapped a demo button 5+ times
+      //   * Network / CORS
+      // Every one of those needs a different fix; swallowing them made
+      // production debugging impossible.
+      const detail = err?.response?.data?.detail;
+      const msg =
+        (detail && detail.message) ||
+        (typeof detail === "string" ? detail : null) ||
+        err?.message ||
+        "Demo login failed";
+      setErr(`Demo login failed — ${msg}`);
+    }
     finally { setBusy(false); }
   };
 
