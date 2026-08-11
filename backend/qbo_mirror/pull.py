@@ -31,7 +31,17 @@ _UPDATE_FIELDS = {
     "accounts":  ["name", "type", "subtype", "active"],
     "customers": ["name", "email", "phone", "active", "address"],
     "vendors":   ["name", "email", "phone", "active", "address"],
-    "items":     ["name", "sku", "price", "active"],
+    # Items — QBO Wins on everything except our editable `usage` flag.
+    # Inventory fields must be in this list so a re-pull picks up
+    # `qty_on_hand`, `cost`, `track_qty_on_hand`, and the linked
+    # accounts on rows that migrated *before* the Feb 21 2026
+    # inventory-fields patch shipped.
+    "items":     ["name", "sku", "price", "active", "cost",
+                   "item_type", "description",
+                   "income_account_qbo_id", "expense_account_qbo_id",
+                   "asset_account_qbo_id",
+                   "track_qty_on_hand", "qty_on_hand",
+                   "reorder_point", "inv_start_date"],
 }
 
 
@@ -178,12 +188,57 @@ async def _pull_items(company_id: str, realm_id: str) -> dict:
         qid = str(obj.get("Id"))
         mapped = Q.map_item(company_id, realm_id, obj)
         mapped["_sync_origin"] = "mirror_pull"
+        # Resolve QBO account refs → local account IDs so the local
+        # inventory system (`inventory_service.py`) can find them.
+        # Feb 21 2026: previously we stored only the QBO ids, which
+        # meant JE builders (apply_adjustment / cogs) had no local
+        # id to post against and the Inventory page's `track_inventory`
+        # filter never matched. Also flip on `track_inventory` (the
+        # internal app flag — separate from QBO's `TrackQtyOnHand`)
+        # for real inventory items so they light up the Inventory
+        # Management screen.
+        if mapped.get("asset_account_qbo_id"):
+            inv_acct = await db.accounts.find_one({
+                "company_id": company_id, "source": "qbo",
+                "qbo_id": mapped["asset_account_qbo_id"],
+            })
+            if inv_acct:
+                mapped["inventory_account_id"] = inv_acct["id"]
+                mapped["inventory_account_name"] = inv_acct.get("name")
+        if mapped.get("expense_account_qbo_id"):
+            cogs_acct = await db.accounts.find_one({
+                "company_id": company_id, "source": "qbo",
+                "qbo_id": mapped["expense_account_qbo_id"],
+            })
+            if cogs_acct:
+                mapped["cogs_account_id"] = cogs_acct["id"]
+                mapped["expense_account_id"] = cogs_acct["id"]
+        if mapped.get("income_account_qbo_id"):
+            inc_acct = await db.accounts.find_one({
+                "company_id": company_id, "source": "qbo",
+                "qbo_id": mapped["income_account_qbo_id"],
+            })
+            if inc_acct:
+                mapped["income_account_id"] = inc_acct["id"]
+        # Internal `track_inventory` flag — powers the Inventory page's
+        # visibility filter. Enabled when QBO tagged this as an
+        # Inventory-typed item (QtyOnHand tracking on).
+        mapped["track_inventory"] = (
+            (mapped.get("item_type") or "").lower() == "inventory"
+            or bool(mapped.get("track_qty_on_hand")))
         if qid not in existing:
             await db.items.insert_one(mapped)
             inserted += 1
         else:
             patch = {k: mapped[k] for k in _UPDATE_FIELDS["items"]
                      if k in mapped}
+            # Also flow the resolved local ids on updates so re-pulls
+            # heal items that migrated before this patch shipped.
+            for k in ("inventory_account_id", "inventory_account_name",
+                       "cogs_account_id", "expense_account_id",
+                       "income_account_id", "track_inventory"):
+                if k in mapped:
+                    patch[k] = mapped[k]
             patch["_sync_origin"] = "mirror_pull"
             patch["updated_at"] = now_iso()
             await db.items.update_one(
