@@ -3,7 +3,7 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Settings2, Save, Trash2, AlertTriangle, Loader2, Play, Sparkles } from "lucide-react";
+import { Settings2, Save, Trash2, AlertTriangle, Loader2, Play, Sparkles, Copy } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
@@ -11,6 +11,23 @@ import {
 } from "@/components/ui/alert-dialog";
 
 import { BUSINESS_TYPES } from "@/constants/businessTypes";
+
+/**
+ * Normalize a company-name string for comparison purposes.
+ *
+ * Legacy names from early onboarding sometimes carry non-breaking
+ * spaces (`\u00A0`) or double regular spaces that the user cannot
+ * reliably reproduce from their keyboard when confirming a delete.
+ * Trim, then replace any run of whitespace (regular + non-breaking +
+ * tab) with a single ASCII space so the disabled-check compares
+ * canonical forms only. Character content (letters, digits,
+ * punctuation, casing) still has to match — only whitespace shape is
+ * forgiven.
+ */
+function normName(s) {
+  if (s == null) return "";
+  return String(s).replace(/\s+/g, " ").trim();
+}
 
 export default function CompanySettings() {
   const { currentId, current, refresh, companies } = useCompany();
@@ -57,7 +74,17 @@ export default function CompanySettings() {
   };
 
   const doDelete = async () => {
-    if (confirmName !== current?.name) {
+    // Compare AFTER normalizing whitespace on both sides: trim, then
+    // collapse any run of whitespace (regular spaces, non-breaking
+    // spaces `\u00A0`, tabs, etc.) into a single ASCII space. Legacy
+    // company names sometimes include NBSPs from copy-paste or from
+    // early onboarding flows — the user cannot reliably reproduce
+    // those from their keyboard, so a strict `!==` comparison would
+    // leave them unable to delete a real company (as happened with
+    // "QBO 14 LLC"). This still requires the user to type the name
+    // character-for-character (spelling, casing, punctuation) — only
+    // whitespace shape is forgiven.
+    if (normName(confirmName) !== normName(current?.name)) {
       toast.error("The confirmation name doesn't match.");
       return;
     }
@@ -70,6 +97,9 @@ export default function CompanySettings() {
       // mean this" gate, so we just add the flag here rather than
       // stacking another dialog on top.
       if (current?.is_firm_books) params.force_firm_books = true;
+      // Same rationale for Partner Books — different flag so a firm-
+      // books override can't accidentally bypass a partner-books row.
+      if (current?.is_partner_books) params.force_partner_books = true;
       const r = await api.delete(`/companies/${currentId}`, { params });
       const rec = r.data.records_removed || {};
       const total = Object.values(rec).reduce((a, b) => a + b, 0);
@@ -419,7 +449,29 @@ export default function CompanySettings() {
                 <span className="block mt-2">
                   To confirm, type the company name below exactly as shown:
                 </span>
-                <div className="mt-2 mb-1 font-mono-num text-slate-900">{current?.name}</div>
+                <div className="mt-2 mb-1 flex items-center gap-2">
+                  <span className="font-mono-num text-slate-900">{current?.name}</span>
+                  <button
+                    type="button"
+                    data-testid="settings-delete-copy-name"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(current?.name || "");
+                        toast.success("Company name copied — paste into the box below");
+                      } catch {
+                        // Older browsers / iframe restrictions —
+                        // fall back to pre-filling the input for the
+                        // user so they aren't stuck.
+                        setConfirmName(current?.name || "");
+                        toast.info("Pre-filled the confirm box for you");
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-0.5 text-[11px] text-slate-600 hover:bg-slate-50"
+                    title="Copy the exact name to your clipboard"
+                  >
+                    <Copy size={11} /> Copy
+                  </button>
+                </div>
               </AlertDialogDescription>
             </AlertDialogHeader>
             <input
@@ -435,7 +487,7 @@ export default function CompanySettings() {
               <AlertDialogAction
                 data-testid="settings-delete-confirm-btn"
                 onClick={(e) => { e.preventDefault(); doDelete(); }}
-                disabled={deleting || confirmName !== current?.name}
+                disabled={deleting || normName(confirmName) !== normName(current?.name)}
                 className="bg-red-600 hover:bg-red-700 disabled:opacity-50"
               >
                 {deleting ? (<><Loader2 size={14} className="animate-spin mr-2" />Deleting…</>) : "Permanently delete"}

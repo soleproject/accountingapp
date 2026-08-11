@@ -18,6 +18,24 @@ from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
 from db import db, now_iso, coerce
+
+
+_WS_RE = re.compile(r"\s+")
+
+
+def _norm_name(s: Any) -> str:
+    """Canonicalize a company name for the delete-confirm comparison.
+
+    Collapses any run of whitespace (regular + non-breaking `\u00A0` +
+    tabs, matching the frontend `normName` helper) into a single ASCII
+    space then trims. This lets a user who typed `QBO 14 LLC` on their
+    keyboard match a stored name that carries NBSPs or double spaces
+    from legacy onboarding.
+    """
+    if not s:
+        return ""
+    return _WS_RE.sub(" ", str(s)).strip()
+
 from auth import (
     hash_password, verify_password, create_token,
     get_current_user, require_role,
@@ -421,7 +439,7 @@ async def delete_company(cid: str, confirm: str = "",
     company = await db.companies.find_one({"id": cid})
     if not company:
         raise HTTPException(404, "Company not found")
-    if not confirm or confirm.strip() != company.get("name", "").strip():
+    if not confirm or _norm_name(confirm) != _norm_name(company.get("name", "")):
         raise HTTPException(
             400,
             f"To confirm deletion, pass ?confirm=<exact company name>. Got: {confirm!r}",
