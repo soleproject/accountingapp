@@ -3,56 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { api, fmtMoney } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
-import { Plus, Trash2, Pencil, Search, CheckCircle2, Clock, Unlink } from "lucide-react";
+import { Plus, Trash2, Pencil, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
-
-/**
- * Derive the bank-match status of an editor-authored transaction
- * from its persisted fields. Used to render the "Bank match" column
- * on `/sales-receipts` (and any other list that turns on the
- * `showMatchStatus` flag). Credit Memos skip this — they're A/R
- * adjustments with no cash leg, so no bank match will ever exist.
- *
- * Returns { key, label, tone } where `tone` is one of:
- *   confirmed → green solid — CPA has reviewed and locked in the pair
- *   matched   → amber solid — silent matcher paired it, awaiting review
- *   unlinked  → slate slash — CPA broke a prior match, tombstoned
- *   awaiting  → amber outline — no matching bank row seen yet
- */
-function deriveMatchStatus(row) {
-  if (row.match_confirmed) {
-    return { key: "confirmed", label: "Reconciled", tone: "confirmed" };
-  }
-  if (row.matched_bank_txn_id) {
-    return { key: "matched", label: "Matched · pending review", tone: "matched" };
-  }
-  if (row.match_unlinked_at) {
-    return { key: "unlinked", label: "Manually unlinked", tone: "unlinked" };
-  }
-  return { key: "awaiting", label: "Awaiting bank feed", tone: "awaiting" };
-}
-
-
-function MatchDot({ row }) {
-  const s = deriveMatchStatus(row);
-  const styles = {
-    confirmed: { icon: CheckCircle2, cls: "text-emerald-600" },
-    matched:   { icon: CheckCircle2, cls: "text-amber-500" },
-    unlinked:  { icon: Unlink,       cls: "text-slate-400" },
-    awaiting:  { icon: Clock,        cls: "text-amber-400" },
-  }[s.tone];
-  const Ico = styles.icon;
-  return (
-    <span
-      className="inline-flex items-center gap-1 text-[11px] text-slate-600"
-      title={s.label}
-      data-testid={`match-dot-${s.key}`}
-    >
-      <Ico size={13} className={styles.cls} />
-      <span className="hidden md:inline">{s.label}</span>
-    </span>
-  );
-}
+import { MatchDot } from "@/components/MatchDot";
 
 /**
  * Shared list component for txn_type-scoped ledgers — currently

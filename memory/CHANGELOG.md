@@ -1,5 +1,30 @@
 # SmartBooks — Changelog
 
+## 2026-02-20 (midnight) — Match Indicators Everywhere
+
+### 🎯 Consistent match visual language across the app
+- **Shared component**: extracted `deriveMatchStatus` + `MatchDot` into `/app/frontend/src/components/MatchDot.jsx`. Two render modes: `full` (icon + label, for dedicated lists) and `compact` (icon-only, for dense rows). Single source of truth for reconciliation state — a tone tweak now ripples everywhere.
+- **`TxnTypeListPage.jsx`**: refactored to import the shared component (deleted its local copy).
+
+### 🏷️ Chip strip pending-review badges on `/transactions`
+- Each entity chip (Expenses, Sales Receipts, Deposits, Credit Memos, Refund Receipts, Transfers) now shows a small amber counter badge when silent-matched pairs of that type are awaiting the CPA's review.
+- Badge lives inside the chip button, tabular-nums-aligned so a `12` and a `1` look tidy side-by-side. Different tone on active chips (semi-transparent amber against the dark background) vs inactive (soft amber).
+- Counts fetched once from `GET /bank-matches?status=unconfirmed` and grouped client-side by `editor.txn_type` — no new backend endpoint needed. Advanced-mode only.
+
+### 🚦 Match dot on individual transaction rows
+- The **Merchant / Description** cell on the main Transactions ledger now shows a compact `MatchDot` (icon-only, tooltip on hover) whenever the row carries an editor-authored `txn_type` (Purchase, SalesReceipt, Deposit, CreditMemo, RefundReceipt).
+- Regular Plaid rows stay untouched — no visual clutter for the 90% case.
+- Reuses the exact same 4 tones as the Sales Receipts list (Reconciled / Matched pending / Manually unlinked / Awaiting bank feed).
+
+### ✅ Testing
+- 189 backend tests still green.
+- Screenshot verified: Sales Receipts chip shows amber "2" badge, Expenses chip shows amber "1" badge (matches the 3 seeded pending pairs); every seeded SalesReceipt row displays the amber clock indicator inline; unmatched pre-existing SalesReceipt row shows the outline "awaiting bank feed" state.
+
+### Files touched
+- `frontend/src/components/MatchDot.jsx` (new — shared component).
+- `frontend/src/pages/TxnTypeListPage.jsx` — replaced local `deriveMatchStatus` + `MatchDot` with the shared import.
+- `frontend/src/pages/Transactions.jsx` — imported `MatchDot`, added compact indicator in the description cell, added `pendingByType` state + one-shot fetch + badges on entity chip strip.
+
 ## 2026-02-20 (late night) — Match Indicators + Bulk Match Actions
 
 ### 🚦 Match indicators on `/sales-receipts`
