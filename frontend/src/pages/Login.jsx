@@ -76,7 +76,12 @@ export default function Login() {
     setErr(""); setBusy(true);
     try {
       const u = await login(email, password);
-      nav(u.role === "superadmin" ? "/admin" : u.role === "pro" ? "/pro/clients" : "/dashboard");
+      nav(
+        u.role === "superadmin" ? "/admin"
+        : u.role === "partner" ? "/partner"
+        : u.role === "pro" ? "/pro/clients"
+        : "/dashboard"
+      );
     } catch (e) {
       setErr(
         // 429 lockout returns `detail: {message, retry_after_seconds}` — surface the human copy.
@@ -92,7 +97,12 @@ export default function Login() {
     setErr(""); setBusy(true);
     try {
       const u = await login(e, p);
-      nav(u.role === "superadmin" ? "/admin" : u.role === "pro" ? "/pro/clients" : "/dashboard");
+      nav(
+        u.role === "superadmin" ? "/admin"
+        : u.role === "partner" ? "/partner"
+        : u.role === "pro" ? "/pro/clients"
+        : "/dashboard"
+      );
     } catch (err) {
       // Surface the actual server response instead of a generic
       // "Demo login failed". On production, the most likely causes are

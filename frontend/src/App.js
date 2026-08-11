@@ -22,6 +22,7 @@ import Onboarding from "@/pages/Onboarding";
 import SuperadminDash from "@/pages/SuperadminDash";
 import SuperadminUsage from "@/pages/SuperadminUsage";
 import SuperadminStripeWebhooks from "@/pages/SuperadminStripeWebhooks";
+import PartnerDash from "@/pages/PartnerDash";
 import ProClients from "@/pages/ProClients";
 import AdminEnterpriseDetail from "@/pages/AdminEnterpriseDetail";
 import { BillingSuccess, BillingCancel } from "@/pages/BillingReturn";
@@ -120,6 +121,7 @@ function App() {
               <Route path="/admin" element={<SuperadminDash />} />
               <Route path="/admin/usage" element={<SuperadminUsage />} />
               <Route path="/admin/stripe-webhooks" element={<SuperadminStripeWebhooks />} />
+              <Route path="/partner" element={<PartnerDash />} />
               <Route path="/admin/enterprises/:eid" element={<AdminEnterpriseDetail />} />
               <Route path="/pro/clients" element={<ProClients />} />
               <Route path="/invoices" element={<Invoices />} />
