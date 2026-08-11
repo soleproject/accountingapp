@@ -150,7 +150,11 @@ export default function AuditLog() {
               const path = scope === "mine"
                 ? `${process.env.REACT_APP_BACKEND_URL}/api/audit/me.csv?${qs}`
                 : `${process.env.REACT_APP_BACKEND_URL}/api/companies/${cid}/audit.csv?${qs}`;
-              const token = localStorage.getItem("token");
+              // Auth token lives under `axiom_token` (see lib/api.js).
+              // A stale `token` key was the source of the 401 we
+              // hit on production — always route through the same
+              // storage key the api client uses.
+              const token = localStorage.getItem("axiom_token");
               // Use fetch → blob so we can attach the Authorization
               // header (a plain <a href> can't). Then trigger a
               // synthetic anchor click to save under the server-set
