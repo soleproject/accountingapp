@@ -1,5 +1,33 @@
 # SmartBooks — Changelog
 
+## 2026-02-24 — Partner demo button on Login page
+
+### 🎯 New
+Fourth "Partner" one-click demo button on the login page (next to Client / Accounting Pro / Superadmin), signing in as `partner@axiom.ai` / `partner123` and auto-redirecting to `/partner`.
+
+### ✅ Changes
+- **`scripts/seed_demo_users.py`** — added Partner demo spec (Jordan Reseller, AxiomPartners, subdomain `axiompartners`, brand color `#c026d3`). Seed script now:
+  - Handles branding block (firm_name + subdomain + primary_color) as a merged nested dict
+  - Auto-creates the `partners` sidecar row for role=partner
+  - Calls `ensure_partner_books_company_for_partner()` on every seed run (idempotent — safe to re-run)
+  - Uses per-spec `user_id` capture so partner-side-effects don't recompute the id
+- **`pages/Login.jsx`** — fourth demo button `Partner — AxiomPartners` under the existing three
+- **`constants/testIds.js`** — added `demoPartner: "demo-partner-btn"` for testing
+- **`memory/test_credentials.md`** — added Partner demo credentials
+- Seed ran on preview → `+ created partner@axiom.ai (partner)` + Partner Books auto-provisioned
+
+### 🧪 Verified E2E
+- Login page renders all 4 demo buttons
+- Click Partner → auto sign-in → redirects to `/partner`
+- Dashboard shows `AxiomPartners` brand header, fuchsia avatar, `axiompartners.accountingapp.ai` chip, 4 stat cards (Clients 0 / Enterprises 0 / Users 0 / **Partner Books 1**), YOUR FIRM tile, action buttons, PARTNER role badge on sidebar
+
+### 📖 To activate on prod
+1. **Save to GitHub** → prod redeploys (frontend + backend)
+2. Run seed script on prod (if not part of your deploy pipeline): `python scripts/seed_demo_users.py`
+3. Verify the Partner button appears on `app.smartbookssoftware.ai/login`
+
+
+
 ## 2026-02-24 — Partners moved into the Clients/Enterprises toggle
 
 ### 🎯 UX change

@@ -7,6 +7,7 @@ export const TID = {
   demoAdmin: "demo-admin-btn",
   demoPro: "demo-pro-btn",
   demoClient: "demo-client-btn",
+  demoPartner: "demo-partner-btn",
   signoutBtn: "signout-btn",
 
   // Shell
