@@ -1,5 +1,40 @@
 # SmartBooks — Changelog
 
+## 2026-02-21 (bugfix 3) — InventoryAdjustment Pull Diagnostics + Fallback
+
+### 🐛 Problem
+Migration preview showed **`InventoryAdjustment: 4`** but the completion tile showed **`Inv adjustments: 0`**. The pull was silently skipping adjustments with no way to see why.
+
+### ✅ Fixes to `_pull_inventory_adjustments`
+1. **Return diagnostics** — `{inserted, updated, skipped, seen, skip_reasons}`. The `skip_reasons` dict counts each rejection cause (`no_priced_lines`, `zero_net_dollars`, `exception`). CPAs can now hit the pull endpoint directly and see exactly which adjustments were dropped and why.
+2. **Per-adjustment log line** — when a row is skipped, we now write an INFO log with the QBO id, raw line count, priced line count, net dollar value, and contra account name. Production log-scraping now surfaces the exact cause per adjustment.
+3. **Line-level `Amount` fallback** — QBO Desktop-migrated adjustments occasionally lack a matching local item but populate `Line.Amount`. We now use `Amount / QtyDiff` to infer a cost basis instead of silently dropping the line.
+
+### 📊 Migration finisher logging
+`qbo_service.run_migration` now logs the full stats dict when `inv_adj_stats.skipped > 0`, so a scan of the migration log immediately shows why the tile is 0.
+
+### 🔁 User remediation
+Re-run the pull to get real diagnostics:
+```
+POST /api/companies/{cid}/qbo/mirror/pull  Body: {"entities": ["inventory_adjustments"]}
+```
+Response now looks like:
+```json
+{"inventory_adjustments": {"inserted": 0, "updated": 0, "skipped": 4,
+  "seen": 4, "skip_reasons": {"no_priced_lines": 4}}}
+```
+`no_priced_lines` means the items referenced by the adjustments haven't been mirrored yet with cost > 0. Fix: re-pull items first (Feb 21 bugfix Round 2 patches), then re-pull inventory_adjustments.
+
+### ✅ Test coverage
+- Extended `test_pull_skips_zero_cost_items` to assert the new diagnostic fields (`skipped`, `seen`, `skip_reasons`).
+- New `test_pull_amount_fallback_when_item_cost_missing` — locks in the Desktop-migration line-Amount fallback.
+- 119 backend tests all green.
+
+### Files touched
+- `backend/qbo_mirror/pull.py::_pull_inventory_adjustments` — diagnostic counters, log line per skip, line.Amount fallback, extended return shape.
+- `backend/qbo_service.py::run_migration` — logs inv_adj_stats when skipped > 0.
+- `backend/tests/test_qbo_inventory_adjustments.py` — 1 extended + 1 new test.
+
 ## 2026-02-21 (bugfix 2) — Inventory Field Alignment (Bugfix Round 2)
 
 ### 🐛 Root cause

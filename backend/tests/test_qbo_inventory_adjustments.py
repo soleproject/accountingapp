@@ -209,6 +209,33 @@ def test_pull_skips_zero_cost_items(stub, monkeypatch):
     # $0 net → no JE inserted (we don't post empty JEs).
     assert r["inserted"] == 0
     assert len(fake.journal_entries.rows) == 0
+    # New Feb 21 (round 3): pull now returns diagnostics so users
+    # can see WHY the "Inv adjustments" tile shows 0 despite the
+    # preview count being > 0.
+    assert r["skipped"] == 1
+    assert r["seen"] == 1
+    assert r["skip_reasons"] == {"no_priced_lines": 1}
+
+
+def test_pull_amount_fallback_when_item_cost_missing(stub, monkeypatch):
+    """QBO Desktop-migrated adjustments occasionally lack a matching
+    local item but populate line-level `Amount`. Use it so the pull
+    doesn't silently drop the adjustment."""
+    fake, pull_mod, qs = stub
+    monkeypatch.setattr(qs, "query_all", _fake_query_all([{
+        "Id": "500", "DocNumber": "IADJ-500", "TxnDate": "2026-02-15",
+        "AdjustAccountRef": {"value": "20"},
+        "Line": [{
+            "Amount": 60.00,   # QBO computed value on the line itself
+            "ItemAdjustmentLineDetail": {
+                # Item that has 0 cost locally.
+                "QtyDiff": -2, "ItemRef": {"value": "99"}}}],
+    }]))
+    r = _run(pull_mod._pull_inventory_adjustments("cid", "realm"))
+    assert r["inserted"] == 1
+    je = fake.journal_entries.rows[0]
+    # 60 / 2 = 30 cost inferred → 2 * 30 = 60 total
+    assert je["total_debit"] == 60.0
 
 
 def test_pull_missing_1300_returns_error(monkeypatch):
