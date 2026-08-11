@@ -1,5 +1,43 @@
 # SmartBooks — Changelog
 
+## 2026-02-24 — Stripe webhook outcome tracking + diagnostic endpoint
+
+### 🐛 Problem
+CypherPro's private-label pricing page (`cypherpro.ai/pricing`) uses Stripe Payment Links. After the operator archived the old products and created new ones, paid signups stopped creating users and welcome emails stopped firing. Stripe Dashboard showed the webhook attempt as "Succeeded" (green checkmark) → looked like everything worked. In reality our handler was bailing silently on some path and 200-ing to Stripe so it wouldn't retry.
+
+### 🔍 Root-cause hunt
+Without outcome tracking, "Stripe says 200" told us nothing. The handler has several silent-bail paths:
+- **No email on the session** (Stripe Payment Link with "Collect customer information → Email" toggle OFF) — the most likely culprit when new Payment Links are hand-created in the Dashboard
+- Handler exception (caught + logged, but ignored)
+- User already exists (correct behaviour, but indistinguishable from "no user created" without instrumentation)
+
+### ✅ Fixes (`backend/routes/stripe_billing.py`)
+1. **Every handler now returns an outcome dict** — `_handle_checkout_completed` returns `{status: "user_created"|"user_existing"|"bailed_no_email", email, welcome_sent, stripe_customer_id, stripe_subscription_id, linked_company_id, whitelabel_flipped}`. The `bailed_no_email` path includes a plain-English hint pointing at the Stripe Dashboard toggle to flip.
+2. **`stripe_webhook_events` collection now stores** `payload_snapshot` (trimmed to ~2kb — id, customer, email, metadata, mode, line_price_ids, etc.) and `outcome` (status + processed_at).
+3. **Response body now includes the outcome** so operators (and tests) can see what happened per event without a DB round-trip.
+4. **New diagnostic endpoint**: `GET /api/admin/stripe/webhook-events?limit=50&event_type=&outcome_status=` (superadmin only). Returns recent events with their outcome + snapshot, plus a `recent_outcome_breakdown` histogram across the last 200 events for at-a-glance ops triage.
+
+### 🧪 Tests
+`backend/tests/test_stripe_webhook_diagnostics.py` — 5 tests, all green:
+- Payment Link with no email → `bailed_no_email` outcome + Dashboard-toggle hint
+- Happy path → `user_created` + `welcome_sent=True` + persisted stripe IDs
+- Invoice event → `line_price_ids` on snapshot for at-a-glance product ID
+- Metadata capped at 20 keys, values coerced to str
+- Snapshot helper never crashes on missing/None fields
+
+Combined suite (test_stripe_billing.py + test_stripe_webhook_diagnostics.py): **12/12 pass** across 3 parallel runs.
+
+### 📖 Operator playbook
+When a signup doesn't create a user, hit:
+```
+GET /api/admin/stripe/webhook-events?event_type=checkout.session.completed&limit=20
+```
+- If `outcome.status == "bailed_no_email"` → Stripe Payment Link has email collection off. Edit the Payment Link → **Collect customer information → Email** → ON.
+- If `outcome.status == "user_existing"` → the payer already had an account; welcome email deliberately not sent.
+- If `outcome.status == "handler_exception"` → error message in `outcome.error`, full traceback in backend logs.
+
+
+
 ## 2026-02-24 — QBO Private-Label OAuth Redirect (Option A) — VERIFIED
 
 ### 🎯 Goal
