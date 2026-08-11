@@ -193,6 +193,11 @@ async def signup(request: Request, inp: Annotated[SignupIn, Body()]):
             from email_dispatcher import dispatch, public_base_url
             import logging
             ent = await _ent.ensure_personal_enterprise_for_pro(uid)
+            # Every enterprise Pro also gets their own "Firm Books"
+            # company — their FIRM's accounting books, separate from
+            # any client company they manage. Auto-provisioned so the
+            # dropdown has it on day 0.
+            await _ent.ensure_firm_books_company_for_pro(uid)
             subject, html = _et.enterprise_welcome(
                 name=inp.name, enterprise_name=inp.enterprise_name.strip(),
                 enterprise_slug=(ent or {}).get("slug"),

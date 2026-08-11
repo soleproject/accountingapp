@@ -72,6 +72,77 @@ async def _resolve_unique_slug(base: str) -> str:
     return f"{base}-{int(time())}"
 
 
+async def ensure_firm_books_company_for_pro(user_id: str) -> Optional[dict]:
+    """Guarantee that a Pro user has a dedicated "Firm Books" company —
+    their own accounting entity, separate from any client company they
+    manage. Idempotent: if the pro already owns a company flagged
+    `is_firm_books=True`, we return it unchanged.
+
+    Rationale: an enterprise user (CPA / bookkeeping firm) needs to run
+    the software against THEIR OWN books, not just their clients'. The
+    Firm Books company lives at the top of their company switcher
+    (grouped under a "Firm books" section) and cannot be accidentally
+    deleted (guarded via `is_firm_books` in the delete endpoint).
+
+    The company is created with:
+      * name  = firm brand ("Northgate Advisory") + " — Firm Books"
+      * business_type = "professional-services" (best-fit tax setup)
+      * accounting_mode = "advanced" (CPAs want the full editor set)
+      * is_firm_books  = True    (dropdown grouping + delete guard)
+      * onboarding_complete = True (skip the onboarding wizard —
+        firm owners don't need the "let's connect your bank" flow)
+    """
+    user = await db.users.find_one({"id": user_id, "role": "pro"})
+    if not user:
+        return None
+
+    # Already have one? Return it as-is.
+    existing = await db.companies.find_one({
+        "owner_user_id": user_id,
+        "is_firm_books": True,
+    })
+    if existing:
+        return existing
+
+    # Derive display name from the firm brand if set; fall back to the
+    # user's name so "Priya Patel — Firm Books" still reads naturally
+    # for a solo CPA who hasn't set a firm name.
+    firm_name = ((user.get("branding") or {}).get("firm_name") or "").strip()
+    display = f"{firm_name or user.get('name') or 'My Firm'} — Firm Books"
+
+    now = now_iso()
+    cid = str(uuid.uuid4())
+    company = {
+        "id": cid,
+        "name": display,
+        "business_type": "professional-services",
+        "business_description": "Firm's own accounting books",
+        "reporting_basis": "accrual",
+        "accounting_mode": "advanced",
+        "owner_user_id": user_id,
+        "is_firm_books": True,
+        "onboarding_complete": True,
+        "created_at": now, "updated_at": now,
+    }
+    await db.companies.insert_one(company)
+    await db.memberships.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": user_id, "company_id": cid,
+        "role": "owner", "created_at": now,
+    })
+    # Auto-provision default chart of accounts — same CoA every new
+    # company gets on `POST /companies`, so the firm's books are usable
+    # from second-one-of-existence.
+    from seed import DEFAULT_COA
+    for code, name, atype, subtype in DEFAULT_COA:
+        await db.accounts.insert_one({
+            "id": str(uuid.uuid4()), "company_id": cid, "code": code, "name": name,
+            "type": atype, "subtype": subtype, "active": True, "balance": 0.0,
+            "created_at": now, "updated_at": now,
+        })
+    return company
+
+
 async def ensure_personal_enterprise_for_pro(user_id: str) -> Optional[dict]:
     """If the given Pro has a `branding.firm_name` set AND is still on
     the default SmartBooks enterprise (or has no enterprise_id at all),
@@ -168,7 +239,9 @@ async def ensure_default_enterprise() -> dict:
     )
 
     # Then, for every Pro who has set a Private Label Name, promote them
-    # onto their own Enterprise record.
+    # onto their own Enterprise record + guarantee they have a Firm
+    # Books company. Both helpers are idempotent, so re-running on
+    # every boot is safe.
     branded_pros = await db.users.find(
         {"role": "pro", "branding.firm_name": {"$nin": [None, ""]}},
         {"_id": 0, "id": 1},
@@ -180,6 +253,29 @@ async def ensure_default_enterprise() -> dict:
             import logging
             logging.getLogger(__name__).exception(
                 "Failed to spawn personal enterprise for pro %s", p["id"],
+            )
+        try:
+            await ensure_firm_books_company_for_pro(p["id"])
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "Failed to spawn firm books company for pro %s", p["id"],
+            )
+
+    # Every Pro also gets a "Firm Books" company for their own
+    # accounting — including those WITHOUT a private-label brand set
+    # (solo CPAs who haven't customized their firm brand yet). The
+    # helper is idempotent so this pass is cheap on every boot.
+    all_pros = await db.users.find(
+        {"role": "pro"}, {"_id": 0, "id": 1},
+    ).to_list(5000)
+    for p in all_pros:
+        try:
+            await ensure_firm_books_company_for_pro(p["id"])
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "Firm books backfill failed for pro %s", p["id"],
             )
 
     return existing

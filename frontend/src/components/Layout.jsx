@@ -9,7 +9,7 @@ import ImpersonatePill from "./ImpersonateBanner";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
-import { ChevronDown, LogOut, MessageSquare, Settings2, User, KeyRound, Loader2, X, Search } from "lucide-react";
+import { ChevronDown, LogOut, MessageSquare, Settings2, User, KeyRound, Loader2, X, Search, Building2 } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { AiFocusProvider } from "@/lib/aiFocus";
 import { useActionListener } from "@/lib/createBus";
@@ -41,11 +41,18 @@ function CompanySwitcher() {
     return hay.includes(q);
   });
 
+  // Split Firm Books out first — CPAs' own accounting entity lives at
+  // the top of the switcher, above the client-owner groups. `is_firm_books`
+  // is set by `enterprises.ensure_firm_books_company_for_pro` at pro
+  // signup.
+  const firmBooks = filtered.filter(c => c.is_firm_books === true);
+  const clientCompanies = filtered.filter(c => c.is_firm_books !== true);
+
   // Group into { ownerKey: {label, email, companies:[]} }. Owners with
   // no name fall back to their email; owners with neither (edge case)
   // land in a "Unassigned" bucket so nothing silently disappears.
   const groups = new Map();
-  for (const c of filtered) {
+  for (const c of clientCompanies) {
     const key = c.owner_email || c.owner_name || "__unassigned__";
     if (!groups.has(key)) {
       groups.set(key, {
@@ -95,9 +102,37 @@ function CompanySwitcher() {
             </div>
           </div>
           <div className="max-h-[420px] overflow-y-auto">
-            {orderedGroups.length === 0 && (
+            {orderedGroups.length === 0 && firmBooks.length === 0 && (
               <div className="px-3 py-6 text-center text-xs text-slate-500" data-testid="company-switcher-empty">
                 No matches for “{query}”.
+              </div>
+            )}
+            {/* Firm Books section — CPAs' own accounting entities.
+                Rendered at the very top with a distinct label + Building
+                icon so it's visually separated from client-owner groups. */}
+            {firmBooks.length > 0 && (
+              <div className="py-1 border-b" data-testid="switcher-group-firm-books">
+                <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-widest text-cyan-700 flex items-center gap-1.5">
+                  <Building2 size={10} className="text-cyan-500" />
+                  Firm books
+                </div>
+                {firmBooks.map(c => {
+                  const active = current?.id === c.id;
+                  return (
+                    <button
+                      key={c.id}
+                      data-testid={`${TID.companySwitcherOption}-${c.id}`}
+                      onClick={() => { switchCompany(c.id); setOpen(false); }}
+                      className={`w-full text-left px-3 py-1.5 hover:bg-cyan-50/50 text-sm flex items-center justify-between ${active ? "bg-cyan-50" : ""}`}
+                    >
+                      <div className="min-w-0">
+                        <div className={`font-medium truncate ${active ? "text-cyan-800" : "text-slate-900"}`}>{c.name}</div>
+                        <div className="text-[11px] text-slate-500 truncate">Firm's own accounting</div>
+                      </div>
+                      {active && <div className="text-[10px] uppercase tracking-widest text-cyan-700 font-semibold ml-2 flex-shrink-0">Current</div>}
+                    </button>
+                  );
+                })}
               </div>
             )}
             {orderedGroups.map(([key, group]) => (
