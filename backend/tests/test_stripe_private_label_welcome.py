@@ -123,7 +123,7 @@ def test_get_brand_falls_back_on_typo():
 def test_stripe_welcome_uses_brand_product_name_in_subject():
     subj, html = et.stripe_welcome(
         name="Alice",
-        magic_url="https://app.cypherpro.accountingapp.ai/set-password/tok",
+        magic_url="https://cypherpro.accountingapp.ai/set-password/tok",
         brand=pl.get_brand("cypherpro"),
     )
     assert subj == "Welcome to CypherPro — set your password"
@@ -192,7 +192,7 @@ def test_webhook_outcome_carries_cypherpro_brand():
         outcome = body["outcome"]
         assert outcome["status"] == "user_created"
         assert outcome["brand"] == "cypherpro"
-        assert outcome["magic_link_host"] == "https://app.cypherpro.accountingapp.ai"
+        assert outcome["magic_link_host"] == "https://cypherpro.accountingapp.ai"
 
         # User doc gets the brand stamped so future re-sends route
         # correctly without re-parsing the Stripe metadata.
@@ -318,7 +318,7 @@ def test_brand_falls_back_to_product_metadata(monkeypatch):
         # Brand came from the PRODUCT metadata (via expansion), not the
         # Payment Link metadata.
         assert outcome["brand"] == "cypherpro"
-        assert outcome["magic_link_host"] == "https://app.cypherpro.accountingapp.ai"
+        assert outcome["magic_link_host"] == "https://cypherpro.accountingapp.ai"
 
         # cleanup
         user = await db.users.find_one({"email": fresh_email})

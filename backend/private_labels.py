@@ -64,11 +64,14 @@ _BRANDS: dict[str, Brand] = {
         "display_name": "CypherPro",
         "product_name": "CypherPro",
         # CypherPro's frontend host — customers pay on cypherpro.ai and
-        # expect to sign in at app.cypherpro.accountingapp.ai. Override
-        # via BRAND_CYPHERPRO_APP_URL env if the host ever moves.
+        # sign in at cypherpro.accountingapp.ai. We use the single-level
+        # subdomain (NOT app.cypherpro.accountingapp.ai) so the operator's
+        # existing *.accountingapp.ai wildcard SSL cert covers it — a
+        # two-level subdomain would need a fresh cert. Override via
+        # BRAND_CYPHERPRO_APP_URL env if the host ever moves.
         "app_url": _appurl(
             "BRAND_CYPHERPRO_APP_URL",
-            "https://app.cypherpro.accountingapp.ai",
+            "https://cypherpro.accountingapp.ai",
         ),
         "tagline": "your business, decoded",
     },
