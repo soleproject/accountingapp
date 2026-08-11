@@ -314,7 +314,7 @@ export default function QboConnect() {
                     <div className="text-xs text-emerald-800/80 mt-0.5">
                       Your QuickBooks Online data is now mirrored. Here's what we did after the import:
                     </div>
-                    <dl className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <dl className="mt-2 grid grid-cols-2 sm:grid-cols-6 gap-2 text-xs">
                       <div
                         className="rounded-md bg-white/70 border border-emerald-100 px-2.5 py-1.5"
                         data-testid="qbo-stat-seeded-deactivated"
@@ -340,6 +340,27 @@ export default function QboConnect() {
                         <dt className="text-emerald-700/70">Purchase orders pulled</dt>
                         <dd className="font-semibold text-emerald-900 tabular-nums">
                           {(job.mirror_pos_pulled ?? 0).toLocaleString()}
+                        </dd>
+                      </div>
+                      <div
+                        className="rounded-md bg-white/70 border border-emerald-100 px-2.5 py-1.5"
+                        data-testid="qbo-stat-opening-inventory"
+                        title="Total dollar value posted to 1300 Inventory Asset for on-hand inventory as of migration"
+                      >
+                        <dt className="text-emerald-700/70">Opening inventory</dt>
+                        <dd className="font-semibold text-emerald-900 tabular-nums">
+                          ${(job.opening_inventory_value ?? 0)
+                            .toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                        </dd>
+                      </div>
+                      <div
+                        className="rounded-md bg-white/70 border border-emerald-100 px-2.5 py-1.5"
+                        data-testid="qbo-stat-inv-adjustments"
+                        title="Historical inventory adjustments (writeups, writedowns, count corrections) pulled from QBO and posted as journal entries"
+                      >
+                        <dt className="text-emerald-700/70">Inv adjustments</dt>
+                        <dd className="font-semibold text-emerald-900 tabular-nums">
+                          {(job.mirror_inv_adj_pulled ?? 0).toLocaleString()}
                         </dd>
                       </div>
                       <div
