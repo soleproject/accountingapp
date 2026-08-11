@@ -5,6 +5,7 @@ import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import { Plus, Trash2, Pencil, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { MatchDot } from "@/components/MatchDot";
 
 /**
  * Shared list component for txn_type-scoped ledgers — currently
@@ -25,6 +26,7 @@ export default function TxnTypeListPage({
   editRoutePrefix,  // "/sales-receipts"
   testIdPrefix,     // "sales-receipts"
   showLinkedInvoice, // boolean — true only for CreditMemo
+  showMatchStatus = false, // boolean — true for entities with a cash leg
   contactLabel = "Customer",
   emptyHint,        // helper text for empty state
 }) {
@@ -127,6 +129,9 @@ export default function TxnTypeListPage({
                 <th className="text-left px-4 py-3">Applies to</th>
               )}
               <th className="text-right px-4 py-3">Amount</th>
+              {showMatchStatus && (
+                <th className="text-left px-4 py-3">Bank match</th>
+              )}
               <th className="text-center px-4 py-3">QBO</th>
               <th className="text-right px-4 py-3">Actions</th>
             </tr>
@@ -134,7 +139,7 @@ export default function TxnTypeListPage({
           <tbody className="divide-y divide-slate-100">
             {loading && (
               <tr>
-                <td colSpan={showLinkedInvoice ? 7 : 6}
+                <td colSpan={(showLinkedInvoice ? 1 : 0) + (showMatchStatus ? 1 : 0) + 6}
                     className="px-4 py-8 text-center text-slate-400">
                   Loading…
                 </td>
@@ -142,7 +147,7 @@ export default function TxnTypeListPage({
             )}
             {!loading && filtered.length === 0 && (
               <tr>
-                <td colSpan={showLinkedInvoice ? 7 : 6}
+                <td colSpan={(showLinkedInvoice ? 1 : 0) + (showMatchStatus ? 1 : 0) + 6}
                     className="px-4 py-12 text-center text-slate-400">
                   {emptyHint}
                 </td>
@@ -172,6 +177,11 @@ export default function TxnTypeListPage({
                 <td className="px-4 py-3 text-right tabular-nums font-medium">
                   {fmtMoney(Math.abs(Number(r.amount || 0)))}
                 </td>
+                {showMatchStatus && (
+                  <td className="px-4 py-3">
+                    <MatchDot row={r} />
+                  </td>
+                )}
                 <td className="px-4 py-3 text-center">
                   {r.qbo_id ? (
                     <span

@@ -13,6 +13,7 @@ import {
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import CleanupCopilot, { NextStepCard } from "@/components/CleanupCopilot";
 import AccountPicker from "@/components/AccountPicker";
+import { MatchDot } from "@/components/MatchDot";
 import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
 import AskClientButton from "@/components/AskClientButton";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
@@ -471,10 +472,16 @@ export default function Transactions() {
   const [filterContactId, setFilterContactId] = useState("");
   const [filterAmountMin, setFilterAmountMin] = useState("");
   const [filterAmountMax, setFilterAmountMax] = useState("");
-  // Entity-type chip strip — quick "slice by txn_type" filter. Kept
-  // separate from the status buckets above because the two dimensions
-  // are orthogonal: a Purchase can be either "ai" or "reviewed", etc.
+  // Entity-type chip strip — orthogonal filter to the status buckets
+  // above. Kept separate because the two dimensions are orthogonal:
+  // a Purchase can be either "ai" or "reviewed", etc.
   const [txnTypeFilter, setTxnTypeFilter] = useState("");
+  // Bank-match pending counts by txn_type. Powers the small amber
+  // badge on each entity chip so CPAs know at a glance which types
+  // have unreviewed silent matches waiting. Fetched once per mode
+  // switch — the counts are stable enough that a few seconds of
+  // staleness is acceptable.
+  const [pendingByType, setPendingByType] = useState({});
   // "list" (default) or "rollup" — toggled by the two icons in the toolbar.
   const [view, setView] = useState("list");
   const [rollup, setRollup] = useState(null);
@@ -588,6 +595,32 @@ export default function Transactions() {
   }, [currentId]);
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize, debouncedSearch, dateFrom, dateTo, isLetsReview, lrContactId, isNoContactReview, ncrGroupKey, filterBankAccountId, filterCategoryId, filterContactId, filterAmountMin, filterAmountMax, txnTypeFilter]);
+
+  // Fetch unreviewed silent-match counts by txn_type — only in
+  // Advanced mode where the chip strip actually renders. Cheap: one
+  // API call, then group client-side. Re-runs when the company
+  // switches so counts follow the active tenant.
+  useEffect(() => {
+    if (!currentId || !isAdvancedMode) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.get(
+          `/companies/${currentId}/bank-matches`,
+          { params: { status: "unconfirmed" } });
+        if (cancelled) return;
+        const by = {};
+        for (const p of (r.data.pairs || [])) {
+          const t = p.editor?.txn_type;
+          if (t) by[t] = (by[t] || 0) + 1;
+        }
+        setPendingByType(by);
+      } catch {
+        if (!cancelled) setPendingByType({});
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [currentId, isAdvancedMode]);
   // Reset page when filters narrow/widen.
   useEffect(() => { setPage(p => (p === 1 ? p : 1)); }, [debouncedSearch, dateFrom, dateTo]);
 
@@ -1297,11 +1330,12 @@ export default function Transactions() {
             { k: "Transfer",      label: "Transfers" },
           ].map(({ k, label }) => {
             const active = txnTypeFilter === k;
+            const pending = k ? (pendingByType[k] || 0) : 0;
             return (
               <button
                 key={k || "all"}
                 onClick={() => { setTxnTypeFilter(k); setPage(1); }}
-                className={`px-2.5 py-1 text-[11px] font-medium rounded-full border transition-colors ${
+                className={`px-2.5 py-1 text-[11px] font-medium rounded-full border transition-colors inline-flex items-center gap-1.5 ${
                   active
                     ? "bg-slate-900 text-white border-slate-900"
                     : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
@@ -1309,6 +1343,22 @@ export default function Transactions() {
                 data-testid={`txn-type-chip-${k || "all"}`}
               >
                 {label}
+                {/* Amber pending-review counter — only shown when
+                    silent-matched pairs of this txn_type are still
+                    awaiting the CPA's confirm-or-unlink decision. */}
+                {pending > 0 && (
+                  <span
+                    className={`min-w-[16px] h-4 px-1 rounded-full text-[10px] font-semibold tabular-nums grid place-items-center ${
+                      active
+                        ? "bg-amber-300/90 text-amber-950"
+                        : "bg-amber-100 text-amber-800"
+                    }`}
+                    title={`${pending} pair${pending === 1 ? "" : "s"} awaiting bank match review`}
+                    data-testid={`txn-type-chip-pending-${k}`}
+                  >
+                    {pending}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -1631,7 +1681,17 @@ export default function Transactions() {
                     </div>
                   </td>
                   <td className="px-3 py-2">
-                    <div className="font-medium">{t.merchant || t.description}</div>
+                    <div className="flex items-center gap-2">
+                      <div className="font-medium truncate">{t.merchant || t.description}</div>
+                      {/* Reconciliation indicator — only shown on rows
+                          that were authored via a full-page editor
+                          (Sales Receipt, Deposit, etc.) since bank-
+                          feed rows are their own source of truth. */}
+                      {["SalesReceipt", "Deposit", "Purchase",
+                          "CreditMemo", "RefundReceipt"].includes(t.txn_type) && (
+                        <MatchDot row={t} mode="compact" />
+                      )}
+                    </div>
                     {t.splits?.length > 0 && <div className="text-[10px] text-indigo-600">Split into {t.splits.length}</div>}
                     {(t.linked_invoice_id || t.linked_bill_id) && (
                       <div className="text-[10px] text-emerald-700">Linked to {t.linked_invoice_id ? "invoice" : "bill"}</div>

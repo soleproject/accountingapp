@@ -16,6 +16,7 @@ export default function SalesReceipts() {
       editRoutePrefix="/sales-receipts"
       testIdPrefix="sales-receipts"
       showLinkedInvoice={false}
+      showMatchStatus={true}
       emptyHint="No sales receipts yet. Create your first one to record a cash sale."
     />
   );
