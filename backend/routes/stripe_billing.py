@@ -389,27 +389,76 @@ async def stripe_webhook(request: Request):
         await db.stripe_webhook_events.insert_one({
             "id": event_id, "type": event_type,
             "received_at": now_iso(),
+            # `payload_snapshot` = trimmed copy of the event object for
+            # diagnostic /admin/stripe/webhook-events. Full raw event
+            # would blow up doc size (Stripe events can be 100kb+), so
+            # we keep only the fields we look at + a few adjacent ones
+            # for context. All PII we already store elsewhere.
+            "payload_snapshot": _snapshot_event_object(event["data"]["object"]),
+            "outcome": {"status": "pending"},
         })
 
     obj = event["data"]["object"]
+    outcome: dict = {"status": "ok"}
     try:
         if event_type == "checkout.session.completed":
-            await _handle_checkout_completed(obj)
+            outcome = await _handle_checkout_completed(obj) or outcome
         elif event_type == "invoice.paid":
-            await _handle_invoice_paid(obj)
+            outcome = await _handle_invoice_paid(obj) or outcome
         elif event_type == "invoice.payment_failed":
-            await _handle_invoice_payment_failed(obj)
+            outcome = await _handle_invoice_payment_failed(obj) or outcome
         elif event_type in ("customer.subscription.deleted",
                              "customer.subscription.updated"):
-            await _handle_subscription_change(obj)
-    except Exception:  # noqa: BLE001
+            outcome = await _handle_subscription_change(obj) or outcome
+        else:
+            outcome = {"status": "ignored_event_type"}
+    except Exception as e:  # noqa: BLE001
         logger.exception("Stripe webhook handler failed for %s", event_type)
         # We still 200 so Stripe stops retrying — the event is logged in
         # `stripe_webhook_events` for manual replay if needed.
-    return {"status": "ok", "type": event_type}
+        outcome = {"status": "handler_exception", "error": str(e)[:500]}
+    if event_id:
+        await db.stripe_webhook_events.update_one(
+            {"id": event_id},
+            {"$set": {"outcome": outcome, "processed_at": now_iso()}},
+        )
+    return {"status": "ok", "type": event_type, "outcome": outcome}
 
 
-async def _handle_checkout_completed(session: dict) -> None:
+def _snapshot_event_object(obj: dict) -> dict:
+    """Trim a Stripe event object down to the fields we care about for
+    diagnostics. Keeps the ID, key identifiers, customer info, and
+    metadata — enough to understand why a webhook did (or did not)
+    create a user, without persisting the entire 100kb raw event."""
+    if not isinstance(obj, dict):
+        return {}
+    keep_top = (
+        "id", "object", "customer", "customer_email", "subscription",
+        "status", "amount_total", "currency", "mode", "livemode",
+        "payment_status", "client_reference_id", "created",
+        "amount_paid", "amount_due", "billing_reason",
+    )
+    out = {k: obj.get(k) for k in keep_top if k in obj}
+    if isinstance(obj.get("customer_details"), dict):
+        cd = obj["customer_details"]
+        out["customer_details"] = {
+            k: cd.get(k) for k in ("email", "name", "phone") if k in cd
+        }
+    if isinstance(obj.get("metadata"), dict):
+        # Metadata is user-controlled so cap at 2kb to be safe.
+        md = obj["metadata"]
+        out["metadata"] = {k: str(v)[:500] for k, v in list(md.items())[:20]}
+    # For invoice events, show the price ids on the lines so it's
+    # obvious which product paid (or failed to pay).
+    lines = ((obj.get("lines") or {}).get("data") or [])
+    if lines:
+        out["line_price_ids"] = [
+            (ln.get("price") or {}).get("id") for ln in lines[:5]
+        ]
+    return out
+
+
+async def _handle_checkout_completed(session: dict) -> dict:
     email = (
         (session.get("customer_details") or {}).get("email")
         or session.get("customer_email")
@@ -417,7 +466,17 @@ async def _handle_checkout_completed(session: dict) -> None:
     ).lower().strip()
     if not email:
         logger.warning("checkout.session.completed with no email: %s", session.get("id"))
-        return
+        return {
+            "status": "bailed_no_email",
+            "hint": (
+                "Stripe Payment Link did not include a customer email. "
+                "In the Stripe Dashboard, edit the Payment Link and turn "
+                "ON 'Collect customer information → Email' (subscription "
+                "links usually have this on by default; one-time links "
+                "default OFF)."
+            ),
+            "session_id": session.get("id"),
+        }
 
     name = (session.get("customer_details") or {}).get("name")
     stripe_customer_id = session.get("customer")
@@ -448,8 +507,10 @@ async def _handle_checkout_completed(session: dict) -> None:
     if update:
         await db.users.update_one({"id": user["id"]}, {"$set": update})
 
+    welcome_sent = False
     if is_new:
         await _send_welcome_magic_link(user, source="stripe_signup")
+        welcome_sent = True
 
     # Phase C — if the checkout was for a specific COMPANY (Add-Client
     # "Pay with client card" flow attached metadata.company_id) then
@@ -472,6 +533,7 @@ async def _handle_checkout_completed(session: dict) -> None:
     # we set at session-create time). Handles both one-time and
     # subscription price types.
     md = session.get("metadata") or {}
+    whitelabel_flipped = False
     if (md.get("whitelabel_upgrade") or "").lower() == "true":
         pro_uid = md.get("pro_user_id")
         # Prefer the explicit pro_user_id from metadata; fall back to
@@ -487,6 +549,18 @@ async def _handle_checkout_completed(session: dict) -> None:
                     "branding.whitelabel_paid_session_id": session.get("id"),
                 }},
             )
+            whitelabel_flipped = True
+
+    return {
+        "status": "user_created" if is_new else "user_existing",
+        "user_id": user["id"],
+        "email": email,
+        "welcome_sent": welcome_sent,
+        "stripe_customer_id": stripe_customer_id,
+        "stripe_subscription_id": stripe_subscription_id,
+        "linked_company_id": company_id if company_id and stripe_subscription_id else None,
+        "whitelabel_flipped": whitelabel_flipped,
+    }
 
 
 async def _handle_invoice_paid(invoice: dict) -> None:
@@ -1496,3 +1570,69 @@ async def get_company_billing_state(
         "stripe_configured": bool(_STRIPE_KEY),
     }
 
+
+
+# --------------------------------------------------------------------------
+# Admin diagnostic — inspect recent Stripe webhook events
+#
+# The webhook always ACKs 200 to Stripe (so the Dashboard shows a green
+# checkmark even when we couldn't create a user, e.g. Payment Link with
+# no email collection). This endpoint surfaces the REAL outcome per
+# event so ops can debug "why didn't my signup create a user".
+# --------------------------------------------------------------------------
+
+@router.get("/admin/stripe/webhook-events")
+async def list_stripe_webhook_events(
+    limit: int = 50,
+    event_type: Optional[str] = None,
+    outcome_status: Optional[str] = None,
+    user: dict = Depends(require_role("superadmin")),
+):
+    """List the most-recent webhook events with their outcome + trimmed
+    payload snapshot. Superadmin only.
+
+    Query params:
+      - ``limit``: page size, capped at 200
+      - ``event_type``: filter to e.g. ``checkout.session.completed``
+      - ``outcome_status``: filter to e.g. ``bailed_no_email`` or
+        ``user_created`` — makes it trivial to find every event that
+        FAILED to create a user.
+
+    Response fields per row: ``id``, ``type``, ``received_at``,
+    ``processed_at``, ``outcome`` (dict with status + hint), and
+    ``payload_snapshot`` (customer email, metadata, mode, etc.).
+    """
+    limit = max(1, min(int(limit or 50), 200))
+    q: dict = {}
+    if event_type:
+        q["type"] = event_type
+    if outcome_status:
+        q["outcome.status"] = outcome_status
+    cur = (
+        db.stripe_webhook_events.find(q)
+        .sort("received_at", -1)
+        .limit(limit)
+    )
+    rows: list[dict] = []
+    async for r in cur:
+        r.pop("_id", None)
+        rows.append(r)
+
+    # Also compute a tiny outcome-status breakdown across the last 200
+    # so ops can eyeball at a glance: "5 user_created, 3 bailed_no_email,
+    # 12 user_existing".
+    breakdown_cur = db.stripe_webhook_events.aggregate([
+        {"$sort": {"received_at": -1}},
+        {"$limit": 200},
+        {"$group": {"_id": "$outcome.status", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ])
+    breakdown: dict = {}
+    async for b in breakdown_cur:
+        breakdown[b["_id"] or "unknown"] = b["count"]
+
+    return {
+        "count": len(rows),
+        "recent_outcome_breakdown": breakdown,
+        "events": rows,
+    }
