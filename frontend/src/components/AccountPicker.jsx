@@ -48,9 +48,18 @@ export default function AccountPicker({ value, accounts, onChange, companyId, is
       const k = (a.type || "other").toLowerCase();
       (groups[k] = groups[k] || []).push(a);
     }
-    // Stable type order.
-    const order = ["expense", "cogs", "revenue", "asset", "liability", "equity", "other"];
-    return order.filter(k => groups[k]?.length).map(k => ({ type: k, items: groups[k] }));
+    // Stable type order for the well-known types. Any additional types
+    // present in the data (income, cogs, other_income, other_expense,
+    // bank, credit_card, accounts_receivable, etc.) render *after* the
+    // known ones, alphabetically — so nothing gets silently dropped.
+    const order = ["expense", "cost_of_goods_sold", "cogs", "revenue", "income",
+                   "other_income", "other_expense",
+                   "asset", "liability", "equity", "other"];
+    const extras = Object.keys(groups)
+      .filter(k => !order.includes(k))
+      .sort();
+    const finalOrder = [...order, ...extras];
+    return finalOrder.filter(k => groups[k]?.length).map(k => ({ type: k, items: groups[k] }));
   }, [accounts, q]);
 
   // Close on outside click. Popover is portaled to document.body so
@@ -176,7 +185,7 @@ export default function AccountPicker({ value, accounts, onChange, companyId, is
                 {filtered.map(g => (
                   <div key={g.type}>
                     <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
-                      {g.type}
+                      {g.type.replace(/_/g, " ")}
                     </div>
                     {g.items.map(a => (
                       <button

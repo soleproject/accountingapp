@@ -1162,15 +1162,13 @@ export default function Transactions() {
                 <AccountPicker
                   value={bulkPreviewAcctId}
                   accounts={(accts || []).filter((a) =>
-                    // Postable-only filter — expense + income + COGS +
-                    // other-income/expense. Excludes bank / AR / AP /
-                    // Equity / Uncat sinks so the CPA can't mass-code
-                    // vendor rows to a bank account by mistake. Plus
-                    // asset / liability so users can post refunds or
-                    // clearing to those manually if needed.
-                    ["expense", "income", "cost_of_goods_sold",
-                     "other_income", "other_expense", "asset", "liability"].includes(a.type)
-                    && !["9999", "6999", "4999"].includes(a.code)
+                    // Full chart-of-accounts access — CPAs asked to be
+                    // able to bulk-code to any account type (revenue,
+                    // equity, liability, etc.) not just expenses. Only
+                    // the system Uncategorized sinks (9999/6999/4999)
+                    // are excluded so bulk actions can't loop rows
+                    // back into the review queue they came from.
+                    !["9999", "6999", "4999"].includes(a.code)
                   )}
                   onChange={(id) => previewBulkCategory(id)}
                   companyId={currentId}
@@ -1245,9 +1243,10 @@ export default function Transactions() {
                 <AccountPicker
                   value={bulkPreviewAcctId}
                   accounts={(accts || []).filter((a) =>
-                    ["expense", "income", "cost_of_goods_sold",
-                     "other_income", "other_expense", "asset", "liability"].includes(a.type)
-                    && !["9999", "6999", "4999"].includes(a.code)
+                    // Full chart-of-accounts access (see comment on the
+                    // Lets-Review picker above). Only system Uncat sinks
+                    // are excluded.
+                    !["9999", "6999", "4999"].includes(a.code)
                   )}
                   onChange={(id) => previewBulkCategory(id)}
                   companyId={currentId}
