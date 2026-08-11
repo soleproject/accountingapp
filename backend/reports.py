@@ -14,15 +14,61 @@ Display convention:
   so we NEGATE their raw balance for display.
 """
 from __future__ import annotations
+import os
+import logging
 from io import BytesIO
 from collections import defaultdict
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
 from db import db
+
+log = logging.getLogger(__name__)
+
+
+# ────────────────────────────────────────────────────────────────
+# Custom font registration
+# ────────────────────────────────────────────────────────────────
+
+# TTF families bundled at `backend/fonts/`. Each has a Regular + Bold
+# static file (variable fonts were instanced at build time via
+# `scripts/download_fonts.py`). Registered lazily on first import so a
+# single process pays the load cost once; every subsequent PDF render
+# hits ReportLab's in-memory glyph cache.
+FONTS_DIR = os.path.join(os.path.dirname(__file__), "fonts")
+_BUNDLED_FONTS = [
+    "Inter", "Roboto", "OpenSans", "Nunito", "Poppins", "Lato",
+    "PlayfairDisplay", "Lora", "LibreBaskerville", "PTSerif",
+    "JetBrainsMono", "IBMPlexMono",
+]
+
+
+def _register_bundled_fonts() -> set[str]:
+    """Register every bundled TTF with ReportLab. Returns the set of
+    families that loaded successfully so the resolver can fall back to
+    Helvetica if a file is ever missing at runtime."""
+    ok: set[str] = set()
+    for fam in _BUNDLED_FONTS:
+        reg = os.path.join(FONTS_DIR, f"{fam}-Regular.ttf")
+        bold = os.path.join(FONTS_DIR, f"{fam}-Bold.ttf")
+        if not (os.path.isfile(reg) and os.path.isfile(bold)):
+            log.warning("Report font %s missing (%s / %s) — skipping", fam, reg, bold)
+            continue
+        try:
+            pdfmetrics.registerFont(TTFont(fam, reg))
+            pdfmetrics.registerFont(TTFont(f"{fam}-Bold", bold))
+            ok.add(fam)
+        except Exception as e:  # noqa: BLE001 — TTF corruption shouldn't crash the app
+            log.warning("Report font %s failed to load: %s", fam, e)
+    return ok
+
+
+AVAILABLE_FONTS = _register_bundled_fonts()
 
 
 # ---------- Core: signed balance builder ----------
@@ -826,19 +872,28 @@ async def _aging(company_id: str, as_of: str, kind: str):
 def _pdf_styles(rs: dict | None = None):
     """ReportLab paragraph styles resolved against a per-company
     `report_style` dict (see `resolve_report_style`). Falls back to sane
-    Helvetica defaults when nothing is stored yet. All fonts land on
-    ReportLab's built-in families (Helvetica / Times-Roman / Courier) so
-    we don't have to ship font files with the container."""
+    Helvetica defaults when nothing is stored yet. Supports built-in
+    RL families (Helvetica / Times-Roman / Courier) plus the 12 bundled
+    TTFs — see `AVAILABLE_FONTS`. If a stored family isn't available
+    (missing TTF, corrupted file, etc.) we silently degrade to
+    Helvetica so a broken font doesn't crash the PDF pipeline."""
     rs = rs or resolve_report_style(None)
     fam = rs.get("font_family") or "Helvetica"
-    # Bold variant for the family — RL naming: Helvetica-Bold /
-    # Times-Bold / Courier-Bold.
-    bold_map = {
-        "Helvetica": "Helvetica-Bold",
+    # Built-in ReportLab families use RL's naming convention for Bold.
+    builtin_bold_map = {
+        "Helvetica":   "Helvetica-Bold",
         "Times-Roman": "Times-Bold",
-        "Courier": "Courier-Bold",
+        "Courier":     "Courier-Bold",
     }
-    fam_bold = bold_map.get(fam, "Helvetica-Bold")
+    if fam in builtin_bold_map:
+        fam_bold = builtin_bold_map[fam]
+    elif fam in AVAILABLE_FONTS:
+        fam_bold = f"{fam}-Bold"
+    else:
+        # Unknown family — fall back to Helvetica so we never crash.
+        log.warning("Requested report font %r not registered; falling back to Helvetica", fam)
+        fam = "Helvetica"
+        fam_bold = "Helvetica-Bold"
     styles = getSampleStyleSheet()
     title_size = float(rs.get("title_font_size") or 18)
     sub_size = float(rs.get("subtitle_font_size") or 11)

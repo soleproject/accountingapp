@@ -538,10 +538,28 @@ export default function ReportView() {
   // Report styling from Company Settings. Falls back to sane defaults
   // if the server didn't send anything (e.g. legacy company row).
   const rs = data?.report_style || {};
+  // Map the PDF font family name to a browser CSS `font-family`. We
+  // don't fetch the actual TTFs in the browser (they'd pull ~5 MB per
+  // page load) — instead we pick the closest system-installed fallback.
+  // Web looks approximately right; the PDF is exact. Sans-serif fonts
+  // fall back to Helvetica Neue, serifs to Georgia/Times, monos to
+  // Menlo/Consolas.
   const fontFamilyCss = ({
-    "Helvetica":   "'Helvetica Neue', Helvetica, Arial, sans-serif",
-    "Times-Roman": "'Times New Roman', Times, serif",
-    "Courier":     "'Courier New', Courier, monospace",
+    "Helvetica":         "'Helvetica Neue', Helvetica, Arial, sans-serif",
+    "Times-Roman":       "'Times New Roman', Times, serif",
+    "Courier":           "'Courier New', Courier, monospace",
+    "Inter":             "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    "Roboto":            "'Roboto', 'Helvetica Neue', Arial, sans-serif",
+    "OpenSans":          "'Open Sans', 'Helvetica Neue', Arial, sans-serif",
+    "Lato":              "'Lato', 'Helvetica Neue', Arial, sans-serif",
+    "Poppins":           "'Poppins', 'Helvetica Neue', Arial, sans-serif",
+    "Nunito":            "'Nunito', 'Helvetica Neue', Arial, sans-serif",
+    "PTSerif":           "'PT Serif', Georgia, 'Times New Roman', serif",
+    "PlayfairDisplay":   "'Playfair Display', Georgia, 'Times New Roman', serif",
+    "Lora":              "'Lora', Georgia, 'Times New Roman', serif",
+    "LibreBaskerville":  "'Libre Baskerville', Georgia, 'Times New Roman', serif",
+    "JetBrainsMono":     "'JetBrains Mono', 'Fira Mono', Menlo, Consolas, monospace",
+    "IBMPlexMono":       "'IBM Plex Mono', 'Fira Mono', Menlo, Consolas, monospace",
   })[rs.font_family] || undefined;
   const headerStyle = fontFamilyCss ? { fontFamily: fontFamilyCss } : undefined;
   const titleStyle = {
