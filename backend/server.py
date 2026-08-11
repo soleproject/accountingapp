@@ -224,6 +224,61 @@ async def startup():
     if stuck:
         print(f"[startup] reconciled {stuck} stuck sync job(s) from prior process")
 
+    # Demo Partner user auto-seed — the flagship seed.py only runs on a
+    # first-boot empty DB, but the Partner tier shipped later so
+    # existing prod DBs still don't have the `partner@axiom.ai` demo
+    # user that the login page's "Partner — AxiomPartners" button
+    # signs in as. Provision idempotently here so a redeploy auto-
+    # backfills it without needing anyone to shell into the container
+    # and run the re-seed script by hand. Fully defensive — errors are
+    # swallowed and logged so a demo-seed hiccup never blocks real
+    # user traffic.
+    try:
+        from partners import ensure_partner_books_company_for_partner
+        from auth import hash_password as _hash_password
+        from datetime import datetime as _dt, timezone as _tz
+        import uuid as _uuid
+        _existing = await db.users.find_one({"email": "partner@axiom.ai"})
+        _now = _dt.now(_tz.utc).isoformat()
+        if not _existing:
+            _pid = str(_uuid.uuid4())
+            await db.users.insert_one({
+                "id": _pid,
+                "email": "partner@axiom.ai",
+                "name": "Jordan Reseller",
+                "password": _hash_password("partner123"),
+                "role": "partner",
+                "firm_name": "AxiomPartners",  # legacy top-level
+                "branding": {
+                    "firm_name": "AxiomPartners",
+                    "subdomain": "axiompartners",
+                    "primary_color": "#c026d3",
+                },
+                "created_at": _now, "updated_at": _now,
+            })
+            await db.partners.insert_one({
+                "id": _pid, "user_id": _pid,
+                "slug": "axiompartners", "created_at": _now,
+            })
+            print("[startup] seeded demo partner partner@axiom.ai")
+            await ensure_partner_books_company_for_partner(_pid)
+        elif _existing.get("role") != "partner":
+            # Existing account with the same email but wrong role —
+            # DO NOT auto-promote. Log so ops sees it and can decide.
+            print(
+                f"[startup] SKIP partner seed: partner@axiom.ai already exists "
+                f"as role={_existing.get('role')!r}. Fix manually if needed."
+            )
+        else:
+            # Already a partner — ensure Partner Books exists (idempotent)
+            # so a slow-role-migration didn't leave them without one.
+            await ensure_partner_books_company_for_partner(_existing["id"])
+    except Exception as _seed_exc:  # noqa: BLE001
+        import logging as _log
+        _log.getLogger(__name__).warning(
+            "demo partner auto-seed non-fatal error: %s", _seed_exc,
+        )
+
 
 @app.on_event("shutdown")
 async def shutdown():
