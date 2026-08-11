@@ -421,6 +421,47 @@ def log_delete(entity_type: str, entity_id: str, before: dict, *,
     )
 
 
+def log_export(kind: str, *,
+               actor: Optional[dict], company_id: Optional[str],
+               file_format: str = "pdf",
+               entity_type: Optional[str] = None,
+               entity_id: Optional[str] = None,
+               filename: Optional[str] = None,
+               metadata: Optional[dict] = None,
+               request: Optional[Request] = None,
+               summary: Optional[str] = None) -> None:
+    """Compliance-shaped export audit. Fires for every PDF/CSV
+    download so an auditor can later prove *who* downloaded *what*
+    data *when*. Full-snapshot event per policy (`_FULL_SNAPSHOT_EVENTS`
+    includes `EVENT_EXPORT`) — but the "snapshot" here is just the
+    report identity + params, not the file bytes (a 300KB PDF stored
+    for every download would swamp the audit collection). Storage is
+    ~500B per export event.
+
+    `kind` names the report or resource (`income-statement`,
+    `balance-sheet`, `chart-of-accounts`, `bills-list`, etc.). Kept
+    freeform so the caller can identify their export succinctly.
+    """
+    meta = {"file_format": file_format, "kind": kind}
+    if filename:
+        meta["filename"] = filename
+    if metadata:
+        meta.update(metadata)
+    log_event(
+        event_type=EVENT_EXPORT,
+        actor=actor, company_id=company_id,
+        entity_type=entity_type or "export",
+        entity_id=entity_id or kind,
+        # `after` carries the export descriptor so the full-snapshot
+        # branch of `_needs_snapshot` picks it up and stores it.
+        # `before` stays None — nothing to compare against.
+        before=None, after=meta,
+        summary=summary or f"Exported {kind} ({file_format.upper()})",
+        metadata=meta,
+        request=request,
+    )
+
+
 # ────────────────────────────────────────────────────────────────
 # Read side — permission-scoped listing
 # ────────────────────────────────────────────────────────────────
