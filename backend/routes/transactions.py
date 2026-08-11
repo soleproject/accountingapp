@@ -2904,6 +2904,23 @@ async def delete_transaction(cid: str, tid: str, user: dict = Depends(get_curren
                    "RefundReceipt": "refund_receipt"}[existing["txn_type"]]
         try_auto_delete(cid, entity, str(existing["qbo_id"]),
                          existing.get("description") or existing.get("number") or "")
+    # Audit — deletes get a full snapshot per policy so a compliance
+    # auditor can reconstruct the exact row that was removed
+    # (amount, splits, links, and all).
+    try:
+        import audit as _audit
+        _audit.log_delete(
+            "transaction", tid, coerce(existing) if existing else {"id": tid},
+            actor={"id": user["id"], "email": user.get("email"), "role": user.get("role")},
+            company_id=cid,
+            summary=(
+                f"Deleted transaction "
+                f"{(existing or {}).get('merchant') or (existing or {}).get('description') or ''} "
+                f"for ${abs(float((existing or {}).get('amount') or 0)):,.2f}"
+            ).strip(),
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True, **cascade}
 
 

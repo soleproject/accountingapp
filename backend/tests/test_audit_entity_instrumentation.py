@@ -33,6 +33,21 @@ def test_all_entity_instrumentation_writes():
         from db import db
         await _wipe(db)
 
+        # ── Transaction: create + delete ───────────────────────────
+        audit.log_create(
+            "transaction", "txn-1", {"id": "txn-1", "date": "2026-08-11", "amount": -42.50, "merchant": "Coffee Shop"},
+            actor={"id": "u1", "email": "u@x", "role": "pro"},
+            company_id=AUDIT_CID,
+            summary="Created transaction Coffee Shop for $42.50",
+        )
+        audit.log_delete(
+            "transaction", "txn-1",
+            {"id": "txn-1", "date": "2026-08-11", "amount": -42.50, "merchant": "Coffee Shop", "splits": []},
+            actor={"id": "u1", "email": "u@x", "role": "pro"},
+            company_id=AUDIT_CID,
+            summary="Deleted transaction Coffee Shop for $42.50",
+        )
+
         # ── Invoice: create + delete ───────────────────────────────
         audit.log_create(
             "invoice", "inv-1", {"id": "inv-1", "number": "INV-100", "total": 250.0},
@@ -88,6 +103,15 @@ def test_all_entity_instrumentation_writes():
         await asyncio.sleep(0.2)
 
         # ── Assertions ─────────────────────────────────────────────
+        # Transaction — create + delete round trip
+        txn_rows = await db.audit_events.find(
+            {"entity_type": "transaction", "company_id": AUDIT_CID}
+        ).to_list(10)
+        assert sorted(r["event_type"] for r in txn_rows) == ["create", "delete"]
+        txn_del = next(r for r in txn_rows if r["event_type"] == "delete")
+        hy = audit.hydrate_event(txn_del)
+        assert hy["before"]["merchant"] == "Coffee Shop"
+
         # Invoice
         inv_rows = await db.audit_events.find(
             {"entity_type": "invoice", "company_id": AUDIT_CID}
