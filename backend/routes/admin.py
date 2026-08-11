@@ -697,10 +697,13 @@ class EnterpriseCreate(BaseModel):
 @router.post("/admin/enterprises")
 async def create_enterprise(
     payload: EnterpriseCreate,
-    user: dict = Depends(require_role("superadmin")),
+    user: dict = Depends(require_role("superadmin", "partner")),
 ):
-    """Superadmin — mint a new Enterprise. Slug is auto-generated from
-    the name (kebab-case) with de-dupe suffixing when necessary.
+    """Superadmin OR Partner — mint a new Enterprise. Slug is auto-
+    generated from the name (kebab-case) with de-dupe suffixing when
+    necessary. When the caller is a Partner, the enterprise is
+    stamped with `partner_id` so it appears in the Partner's scoped
+    dashboard rollups.
 
     When `owner_email` is supplied we ALSO provision a Pro user for
     that email — creating one with `must_set_password=True` if it
@@ -762,6 +765,10 @@ async def create_enterprise(
         "free_user_allotment": payload.free_user_allotment,
         "default_product": payload.default_product,
         "default_discount": payload.default_discount,
+        # Partner attribution — when the caller is a Partner, tag the
+        # enterprise so it lands in the Partner's scoped dashboard
+        # rollups. Superadmin-created enterprises leave this unset.
+        **({"partner_id": user["id"]} if user.get("role") == "partner" else {}),
         "created_at": now,
         "updated_at": now,
     }

@@ -3,19 +3,28 @@ import { Link, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import {
   Handshake, Building, Users as UsersIcon, ExternalLink, Loader2,
-  Plus, RefreshCw, BookOpen, Palette, Copy,
+  Plus, RefreshCw, BookOpen, Palette, UserPlus, Shield,
 } from "lucide-react";
+import { NewClientModal, NewEnterpriseModal } from "@/pages/ProClients";
 
 /**
  * Partner Dashboard — the landing page for a logged-in Partner user.
  *
- * Data source: `GET /api/partner/summary` (partner-scoped by role
- * gate on the server — Partner A cannot see Partner B's stats).
+ * Data source: `GET /api/partner/summary` + `/partner/clients` +
+ * `/partner/enterprises` (partner-scoped on the server — Partner A
+ * cannot see Partner B's rows).
  *
- * Layout mirrors Superadmin's overall aesthetic (stat cards + section
- * cards) but every number is scoped to just this Partner's tree. Also
- * surfaces Partner Books as a first-class tile, matching how the
- * Firm Books tile is prominent on the Pro dashboard.
+ * Layout: brand header + 4 stat cards + Partner Books tile + a
+ * "My Clients" section with a Clients | Enterprises toggle (mirrors
+ * the Superadmin `/pro/clients` toggle UX). The relevant "New Client"
+ * or "New Enterprise" button lives on the header of the section and
+ * swaps with the toggle.
+ *
+ * The modals themselves are reused from ProClients (exported) so the
+ * create UX is identical to what Pros + Superadmins already know.
+ * Backend endpoints (`POST /pro/clients`, `POST /admin/enterprises`)
+ * were extended to accept `role=partner` and auto-stamp `partner_id`
+ * on the created row so the scoping filters find them.
  */
 
 function StatCard({ label, value, Icon, tone = "indigo" }) {
@@ -50,6 +59,11 @@ export default function PartnerDash() {
   const [err, setErr] = useState("");
   const [clients, setClients] = useState([]);
   const [enterprises, setEnterprises] = useState([]);
+  // My Clients section — toggle state. `clients` (default) shows the
+  // client-companies list; `enterprises` shows the enterprises list.
+  const [mode, setMode] = useState("clients");
+  const [creatingClient, setCreatingClient] = useState(false);
+  const [creatingEnterprise, setCreatingEnterprise] = useState(false);
   const nav = useNavigate();
 
   async function load() {
@@ -89,7 +103,7 @@ export default function PartnerDash() {
 
   const p = summary.partner;
   const s = p.stats || {};
-  const brandColor = p.primary_color || "#4f46e5";
+  const brandColor = p.primary_color || "#c026d3";
 
   return (
     <div data-testid="partner-dashboard" className="mx-auto max-w-6xl px-4 py-6 space-y-6">
@@ -123,6 +137,14 @@ export default function PartnerDash() {
           >
             <RefreshCw className="h-4 w-4" />
           </button>
+          <Link
+            to="/pro/settings"
+            data-testid="partner-settings"
+            className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            <Palette className="h-4 w-4" />
+            Branding
+          </Link>
         </div>
       </div>
 
@@ -166,102 +188,133 @@ export default function PartnerDash() {
         </button>
       )}
 
-      {/* Actions */}
-      <div className="flex flex-wrap gap-2">
-        <Link
-          to="/pro/clients?new=1"
-          data-testid="partner-new-client"
-          className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-        >
-          <Plus className="h-4 w-4" />
-          New Client
-        </Link>
-        <Link
-          to="/pro/clients?enterprise=1&new=1"
-          data-testid="partner-new-enterprise"
-          className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        >
-          <Plus className="h-4 w-4" />
-          New Enterprise
-        </Link>
-        <Link
-          to="/pro/settings"
-          data-testid="partner-settings"
-          className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        >
-          <Palette className="h-4 w-4" />
-          Branding & Settings
-        </Link>
-      </div>
-
-      {/* Clients + Enterprises lists — compact */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <section className="rounded-xl border border-slate-200 bg-white">
-          <div className="flex items-center gap-2 border-b border-slate-100 p-3">
-            <UsersIcon className="h-4 w-4 text-slate-500" />
-            <h3 className="text-sm font-semibold text-slate-900">
-              Your Clients ({clients.length})
-            </h3>
+      {/* My Clients section — toggle-based, mirrors the Superadmin
+          `/pro/clients` pattern but drops the "Partners" toggle option
+          (a Partner cannot create other Partners). */}
+      <section
+        data-testid="partner-my-clients"
+        className="rounded-xl border border-slate-200 bg-white"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-900">My Clients</h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {mode === "enterprises"
+                ? "Enterprises you've provisioned under your partner brand."
+                : "Client companies you manage — onboarding status + activity at a glance."}
+            </p>
           </div>
-          <div className="max-h-72 overflow-auto divide-y divide-slate-100">
-            {clients.length === 0 && (
-              <div className="p-6 text-center text-sm text-slate-500">
-                No clients yet. Click <span className="font-medium">New Client</span> above.
-              </div>
-            )}
-            {clients.map((c) => (
-              <Link
-                key={c.id}
-                to={`/companies/${c.id}`}
-                data-testid={`partner-client-row-${c.id}`}
-                className="flex items-center gap-3 p-3 hover:bg-slate-50"
+          <div className="flex items-center gap-2">
+            <div
+              data-testid="partner-my-clients-toggle"
+              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white p-0.5"
+            >
+              <button
+                onClick={() => setMode("clients")}
+                data-testid="partner-toggle-clients"
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition ${
+                  mode === "clients" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"
+                }`}
               >
-                <Building className="h-4 w-4 text-slate-400" />
-                <div className="flex-1 min-w-0">
-                  <div className="truncate text-sm font-medium text-slate-900">{c.name}</div>
-                  <div className="text-xs text-slate-500">{c.business_type || "—"}</div>
-                </div>
-                <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
-              </Link>
-            ))}
-          </div>
-        </section>
-
-        <section className="rounded-xl border border-slate-200 bg-white">
-          <div className="flex items-center gap-2 border-b border-slate-100 p-3">
-            <Building className="h-4 w-4 text-slate-500" />
-            <h3 className="text-sm font-semibold text-slate-900">
-              Your Enterprises ({enterprises.length})
-            </h3>
-          </div>
-          <div className="max-h-72 overflow-auto divide-y divide-slate-100">
-            {enterprises.length === 0 && (
-              <div className="p-6 text-center text-sm text-slate-500">
-                No enterprises yet. Click <span className="font-medium">New Enterprise</span> above.
-              </div>
-            )}
-            {enterprises.map((e) => (
-              <div
-                key={e.id}
-                data-testid={`partner-enterprise-row-${e.id}`}
-                className="flex items-center gap-3 p-3"
+                <UsersIcon size={11} /> Clients
+              </button>
+              <button
+                onClick={() => setMode("enterprises")}
+                data-testid="partner-toggle-enterprises"
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition ${
+                  mode === "enterprises" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-50"
+                }`}
               >
-                <Building className="h-4 w-4 text-slate-400" />
-                <div className="flex-1 min-w-0">
-                  <div className="truncate text-sm font-medium text-slate-900">{e.name}</div>
-                  <div className="text-xs text-slate-500 font-mono">
-                    {e.slug || "—"}
+                <Shield size={11} /> Enterprises
+              </button>
+            </div>
+            {mode === "clients" ? (
+              <button
+                data-testid="partner-new-client-btn"
+                onClick={() => setCreatingClient(true)}
+                className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800"
+              >
+                <UserPlus size={14} /> New Client
+              </button>
+            ) : (
+              <button
+                data-testid="partner-new-enterprise-btn"
+                onClick={() => setCreatingEnterprise(true)}
+                className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+              >
+                <Shield size={14} /> New Enterprise
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="p-4">
+          {mode === "clients" ? (
+            clients.length === 0 ? (
+              <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 py-8 text-center text-sm text-slate-500">
+                No clients yet. Click <span className="font-medium text-slate-700">New Client</span> above to onboard your first one.
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {clients.map((c) => (
+                  <Link
+                    key={c.id}
+                    to={`/companies/${c.id}`}
+                    data-testid={`partner-client-row-${c.id}`}
+                    className="flex items-center gap-3 p-3 hover:bg-slate-50 rounded-md"
+                  >
+                    <Building className="h-4 w-4 text-slate-400" />
+                    <div className="flex-1 min-w-0">
+                      <div className="truncate text-sm font-medium text-slate-900">{c.name}</div>
+                      <div className="text-xs text-slate-500">{c.business_type || "—"}</div>
+                    </div>
+                    <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
+                  </Link>
+                ))}
+              </div>
+            )
+          ) : enterprises.length === 0 ? (
+            <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 py-8 text-center text-sm text-slate-500">
+              No enterprises yet. Click <span className="font-medium text-slate-700">New Enterprise</span> above to provision your first one.
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {enterprises.map((e) => (
+                <div
+                  key={e.id}
+                  data-testid={`partner-enterprise-row-${e.id}`}
+                  className="flex items-center gap-3 p-3"
+                >
+                  <Building className="h-4 w-4 text-slate-400" />
+                  <div className="flex-1 min-w-0">
+                    <div className="truncate text-sm font-medium text-slate-900">{e.name}</div>
+                    <div className="text-xs text-slate-500 font-mono">
+                      {e.slug || "—"}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
 
       <div className="text-xs text-slate-400">
         Updated {new Date(summary.generated_at).toLocaleString()}
       </div>
+
+      {creatingClient && (
+        <NewClientModal
+          onClose={() => setCreatingClient(false)}
+          onCreated={async () => { await load(); setCreatingClient(false); }}
+        />
+      )}
+      {creatingEnterprise && (
+        <NewEnterpriseModal
+          onClose={() => setCreatingEnterprise(false)}
+          onCreated={async () => { await load(); setCreatingEnterprise(false); }}
+        />
+      )}
     </div>
   );
 }

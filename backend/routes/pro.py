@@ -54,7 +54,7 @@ router = APIRouter(prefix="/api")
 # ----------------------- Pro dashboard -----------------------
 
 @router.get("/pro/clients")
-async def pro_clients(user: dict = Depends(require_role("pro", "superadmin"))):
+async def pro_clients(user: dict = Depends(require_role("pro", "superadmin", "partner"))):
     # Only ACTIVE pro memberships — archived staff shouldn't see their
     # former client list. Superadmins are unaffected (they get every
     # company below).
@@ -112,7 +112,7 @@ async def pro_clients(user: dict = Depends(require_role("pro", "superadmin"))):
 
 
 @router.get("/pro/clients/lookup")
-async def pro_lookup_client(email: str, user: dict = Depends(require_role("pro", "superadmin"))):
+async def pro_lookup_client(email: str, user: dict = Depends(require_role("pro", "superadmin", "partner"))):
     """Lightweight probe used by the New-Client dialog to detect whether the
     given email already belongs to a client user. Only reveals name — never
     password / other PII. Returns {exists: bool, name: str|null}.
@@ -124,7 +124,7 @@ async def pro_lookup_client(email: str, user: dict = Depends(require_role("pro",
 
 
 @router.get("/pro/billing/context")
-async def pro_billing_context(user: dict = Depends(require_role("pro", "superadmin"))):
+async def pro_billing_context(user: dict = Depends(require_role("pro", "superadmin", "partner"))):
     """Everything the Add-Client modal needs to render its payer/product/
     discount pickers in a single fetch:
 
@@ -152,7 +152,7 @@ async def pro_billing_context(user: dict = Depends(require_role("pro", "superadm
 
 
 @router.post("/pro/clients")
-async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role("pro", "superadmin"))):
+async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role("pro", "superadmin", "partner"))):
     """Create (or reuse) a client user + a new company + memberships, and seed
     the default CoA. If the email already belongs to a `client` user, we reuse
     that user and just add a fresh membership for the new company — this lets
@@ -234,6 +234,11 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
         "business_type": _bt, "business_description": inp.business_description,
         "reporting_basis": inp.reporting_basis,
         "owner_user_id": client_id, "pro_user_id": user["id"],
+        # Partner stamp — when the caller is a Partner, we tag the
+        # company so the Partner's dashboard rollups + scoping filters
+        # find it. Pros/Superadmins never set this so their clients
+        # remain in the platform-wide bucket.
+        **({"partner_id": user["id"]} if user.get("role") == "partner" else {}),
         "onboarding_complete": False,
         # Enterprise + billing intent. `billing_state` starts pending;
         # Phase C's Stripe webhook flips it to active/past_due/canceled.
@@ -380,7 +385,7 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
 
 
 @router.post("/pro/clients/{cid}/resend-welcome")
-async def resend_welcome_email(cid: str, user: dict = Depends(require_role("pro", "superadmin"))):
+async def resend_welcome_email(cid: str, user: dict = Depends(require_role("pro", "superadmin", "partner"))):
     """Re-send the welcome / activation email for ``cid``'s owner.
 
     Two paths, chosen automatically:
@@ -615,7 +620,7 @@ def _branding_out(user_doc: dict) -> dict:
 
 
 @router.get("/pro/branding")
-async def get_pro_branding(user: dict = Depends(require_role("pro", "superadmin"))):
+async def get_pro_branding(user: dict = Depends(require_role("pro", "superadmin", "partner"))):
     doc = await db.users.find_one({"id": user["id"]})
     return _branding_out(doc or {})
 
@@ -648,7 +653,7 @@ async def get_effective_branding(user: dict = Depends(get_current_user)):
 
 
 @router.post("/pro/branding/whitelabel-waitlist")
-async def whitelabel_waitlist(user: dict = Depends(require_role("pro", "superadmin"))):
+async def whitelabel_waitlist(user: dict = Depends(require_role("pro", "superadmin", "partner"))):
     """One-click "I want white-label" interest capture. Records the
     firm owner + timestamp on ``users.branding.whitelabel_waitlist_at``
     so a superadmin can pull the list before enabling the payment
@@ -665,7 +670,7 @@ async def whitelabel_waitlist(user: dict = Depends(require_role("pro", "superadm
 @router.patch("/pro/branding")
 async def patch_pro_branding(
     inp: BrandingPatch,
-    user: dict = Depends(require_role("pro", "superadmin")),
+    user: dict = Depends(require_role("pro", "superadmin", "partner")),
 ):
     # ------------------------------------------------------------------
     # White-label gate — every branding field EXCEPT the affiliate
@@ -792,7 +797,7 @@ async def patch_pro_branding(
 async def upload_pro_logo(
     file: UploadFile = File(...),
     variant: str = Form("logo_light"),
-    user: dict = Depends(require_role("pro", "superadmin")),
+    user: dict = Depends(require_role("pro", "superadmin", "partner")),
 ):
     """Accept PNG/JPG/SVG/WebP up to 500 KB. Written into
     `branding.logos.<variant>` where variant ∈ {logo_light, logo_dark,
@@ -824,7 +829,7 @@ async def upload_pro_logo(
 @router.delete("/pro/branding/logo")
 async def delete_pro_logo(
     variant: str = "logo_light",
-    user: dict = Depends(require_role("pro", "superadmin")),
+    user: dict = Depends(require_role("pro", "superadmin", "partner")),
 ):
     if user.get("role") != "superadmin":
         me = await db.users.find_one({"id": user["id"]})
@@ -966,7 +971,7 @@ from pro_alerts import (  # noqa: E402
 
 @router.get("/pro/alerts")
 async def pro_list_alerts(
-    user: dict = Depends(require_role("pro", "superadmin")),
+    user: dict = Depends(require_role("pro", "superadmin", "partner")),
 ):
     """Return the current pro's last 50 alerts, newest first, plus the
     unread count so the sidebar badge can render in one round-trip."""
@@ -978,7 +983,7 @@ async def pro_list_alerts(
 @router.post("/pro/alerts/{alert_id}/read")
 async def pro_mark_alert_read(
     alert_id: str,
-    user: dict = Depends(require_role("pro", "superadmin")),
+    user: dict = Depends(require_role("pro", "superadmin", "partner")),
 ):
     ok = await mark_read(alert_id, user["id"])
     if not ok:
@@ -988,7 +993,7 @@ async def pro_mark_alert_read(
 
 @router.post("/pro/alerts/read-all")
 async def pro_mark_all_alerts_read(
-    user: dict = Depends(require_role("pro", "superadmin")),
+    user: dict = Depends(require_role("pro", "superadmin", "partner")),
 ):
     n = await mark_all_read(user["id"])
     return {"ok": True, "marked": n}
@@ -1013,7 +1018,7 @@ def _current_period() -> str:
 
 @router.get("/pro/insights-cost-alerts/config")
 async def get_insights_cost_alert_config(
-    user: dict = Depends(require_role("pro", "superadmin")),
+    user: dict = Depends(require_role("pro", "superadmin", "partner")),
 ):
     """Return the firm's per-client Insights-spend threshold. `0` means
     the alert tile is disabled (no threshold set)."""
@@ -1024,7 +1029,7 @@ async def get_insights_cost_alert_config(
 @router.patch("/pro/insights-cost-alerts/config")
 async def patch_insights_cost_alert_config(
     inp: InsightsCostAlertConfigIn,
-    user: dict = Depends(require_role("pro", "superadmin")),
+    user: dict = Depends(require_role("pro", "superadmin", "partner")),
 ):
     """Save the firm's per-client Insights-spend threshold. Set to 0 to
     disable the warning tile entirely."""
@@ -1039,7 +1044,7 @@ async def patch_insights_cost_alert_config(
 @router.get("/pro/insights-cost-alerts")
 async def list_insights_cost_alerts(
     threshold_usd: Optional[float] = Query(None, ge=0, le=10000),
-    user: dict = Depends(require_role("pro", "superadmin")),
+    user: dict = Depends(require_role("pro", "superadmin", "partner")),
 ):
     """Return every client whose current-month Insights spend meets or
     exceeds the firm's configured threshold.
