@@ -1699,9 +1699,18 @@ export default function Transactions() {
                       </span>
                     </div>
                   </td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <div className="font-medium truncate">{t.merchant || t.description}</div>
+                  <td className="px-3 py-2 align-top max-w-[420px]">
+                    {/* Merchant + description. Cap the column at ~420px
+                        and wrap onto multiple lines with `break-words`
+                        + `whitespace-normal` for long bank-feed strings
+                        (e.g. "NV ENERGY NORTH DES:SPPC PYMT ID:…") so
+                        the table never forces a horizontal scrollbar.
+                        Long single tokens (no spaces) still break via
+                        `break-all` so they can't overflow the cell. */}
+                    <div className="flex items-start gap-2 min-w-0">
+                      <div className="font-medium break-words break-all whitespace-normal leading-snug flex-1 min-w-0">
+                        {t.merchant || t.description}
+                      </div>
                       {/* Reconciliation indicator — only shown on rows
                           that were authored via a full-page editor
                           (Sales Receipt, Deposit, etc.) since bank-
@@ -1711,9 +1720,9 @@ export default function Transactions() {
                         <MatchDot row={t} mode="compact" />
                       )}
                     </div>
-                    {t.splits?.length > 0 && <div className="text-[10px] text-indigo-600">Split into {t.splits.length}</div>}
+                    {t.splits?.length > 0 && <div className="text-[10px] text-indigo-600 mt-0.5">Split into {t.splits.length}</div>}
                     {(t.linked_invoice_id || t.linked_bill_id) && (
-                      <div className="text-[10px] text-emerald-700">Linked to {t.linked_invoice_id ? "invoice" : "bill"}</div>
+                      <div className="text-[10px] text-emerald-700 mt-0.5">Linked to {t.linked_invoice_id ? "invoice" : "bill"}</div>
                     )}
                   </td>
                   <td className="px-3 py-2">
