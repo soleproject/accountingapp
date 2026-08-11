@@ -9,9 +9,10 @@ import {
   AlertTriangle, CheckCircle2, ArrowRight, Plus, X, Loader2, UserPlus,
   BellRing, Wand2, FileWarning, ReceiptText, ScrollText, Sparkles, MailPlus,
   Building2, Shield, Users2, Palette, Link as LinkIcon, Gift, Ticket, CreditCard,
-  Search, LayoutGrid, List as ListIcon,
+  Search, LayoutGrid, List as ListIcon, Handshake, ExternalLink, BookOpen,
 } from "lucide-react";
 import { toast } from "sonner";
+import { CreatePartnerModal } from "@/components/PartnersCard";
 
 export default function ProClients() {
   const [clients, setClients] = useState([]);
@@ -66,9 +67,15 @@ export default function ProClients() {
   // `enterprise` = list of every accounting-firm ENTERPRISE on the
   // platform (each card is clickable and drills into the enterprise
   // detail page with a companies list-report + KPIs).
+  // `partners` = list of every reseller Partner — same superadmin-only
+  // gate as enterprises. Clicking a partner card previews their scoped
+  // dashboard (Phase 2 will add a partner detail page).
   const [mode, setMode] = useState("clients");
   const [enterprises, setEnterprises] = useState([]);
   const [entLoading, setEntLoading] = useState(false);
+  const [partners, setPartners] = useState([]);
+  const [partnersLoading, setPartnersLoading] = useState(false);
+  const [creatingPartner, setCreatingPartner] = useState(false);
 
   // Search + layout toggle for the client portfolio. `q` matches on
   // company name, business type, owner name, and owner email — cheap
@@ -134,6 +141,27 @@ export default function ProClients() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, isSuperadmin]);
 
+  // Partners view — same superadmin-only gate as enterprises. Rollup
+  // stats (clients, enterprises, users, has_partner_books) are
+  // computed on the backend so the grid is one cheap fetch.
+  const loadPartners = async () => {
+    if (!isSuperadmin) return;
+    setPartnersLoading(true);
+    try {
+      const r = await api.get("/superadmin/partners");
+      setPartners(r.data?.partners || []);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to load partners");
+    } finally {
+      setPartnersLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (!isSuperadmin || mode !== "partners" || partners.length) return;
+    loadPartners();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, isSuperadmin]);
+
   // Sort by urgency so the most-in-need client bubbles to the top-left.
   // Primary: action_count desc (badge counts across flags, recons, invoices, bills).
   // Secondary: onboarding_complete false first (still-onboarding needs help),
@@ -167,11 +195,13 @@ export default function ProClients() {
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="font-heading text-3xl font-bold tracking-tight">
-            {mode === "enterprise" ? "Enterprises" : "My Clients"}
+            {mode === "enterprise" ? "Enterprises" : mode === "partners" ? "Partners" : "My Clients"}
           </h1>
           <p className="text-slate-500 text-sm mt-1">
             {mode === "enterprise"
               ? "Every accounting-firm parent on the platform. Click one to drill into its KPIs and companies."
+              : mode === "partners"
+              ? "Resellers who provision their own enterprises + clients. Each Partner sees usage, costs, and revenue scoped only to their tree."
               : "Firm portfolio · onboarding status · transactions needing your call."}
           </p>
         </div>
@@ -196,6 +226,15 @@ export default function ProClients() {
               >
                 <Shield size={11} /> Enterprises
               </button>
+              <button
+                onClick={() => setMode("partners")}
+                data-testid="pro-clients-view-partners"
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition ${
+                  mode === "partners" ? "bg-fuchsia-600 text-white" : "text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                <Handshake size={11} /> Partners
+              </button>
             </div>
           )}
           {mode === "clients" && (
@@ -216,11 +255,22 @@ export default function ProClients() {
               <Shield size={14} /> Add Enterprise
             </button>
           )}
+          {mode === "partners" && isSuperadmin && (
+            <button
+              data-testid="new-partner-btn"
+              onClick={() => setCreatingPartner(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-fuchsia-600 hover:bg-fuchsia-700 text-white text-sm"
+            >
+              <Handshake size={14} /> New Partner
+            </button>
+          )}
         </div>
       </div>
 
       {mode === "enterprise" ? (
         <EnterprisesGrid enterprises={enterprises} loading={entLoading} onOpenAsOwner={openAsOwner} />
+      ) : mode === "partners" ? (
+        <PartnersGrid partners={partners} loading={partnersLoading} />
       ) : (
       <>
       {/* Firm Books tile — a one-click jump into the pro's OWN books.
@@ -456,6 +506,20 @@ export default function ProClients() {
           }}
         />
       )}
+      {/* Partner-create modal — same hoisting rationale as the
+          enterprise one above. Reuses the CreatePartnerModal from the
+          PartnersCard component so the "New Partner" experience is
+          identical between the toggle grid and any future entry
+          point. */}
+      {creatingPartner && (
+        <CreatePartnerModal
+          onClose={() => setCreatingPartner(false)}
+          onCreated={async () => {
+            await loadPartners();
+            setCreatingPartner(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -679,6 +743,119 @@ function EnterprisesGrid({ enterprises, loading, onOpenAsOwner }) {
   );
 }
 
+// --------------------------------------------------------------------------
+// PartnersGrid — SUPERADMIN-ONLY view of every Partner (reseller) on
+// the platform. Fuchsia gradient border + Handshake icon so it reads
+// visually distinct from the indigo Enterprises grid. Each card shows
+// the partner's brand mark (first-letter avatar in their brand color),
+// display name, subdomain chip, and rollup stats (clients, enterprises,
+// linked users, Partner Books present/absent).
+//
+// Data source: `GET /api/superadmin/partners` — the rollup counts are
+// pre-computed server-side so this grid is one cheap fetch even at
+// hundreds of partners.
+// --------------------------------------------------------------------------
+function PartnersGrid({ partners, loading }) {
+  if (loading) {
+    return (
+      <div className="rounded-xl border border-dashed p-10 text-center text-slate-500 flex items-center justify-center gap-2">
+        <Loader2 size={16} className="animate-spin" /> Loading partners…
+      </div>
+    );
+  }
+  if (!partners.length) {
+    return (
+      <div className="rounded-xl border border-dashed p-10 text-center text-slate-500">
+        No partners yet. Click <span className="font-medium text-slate-700">New Partner</span> to create your first reseller (e.g. CypherPro).
+      </div>
+    );
+  }
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="partners-grid">
+      {partners.map((p) => {
+        const brandColor = p.primary_color || "#c026d3";
+        const s = p.stats || {};
+        return (
+          <div
+            key={p.id}
+            data-testid={`partner-card-${p.id}`}
+            className="group relative rounded-xl p-[1.5px] bg-gradient-to-br from-fuchsia-500 via-pink-500 to-rose-500 shadow-sm hover:shadow-md transition-shadow"
+          >
+            <div className="rounded-[10px] bg-white p-4 h-full flex flex-col">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="inline-flex items-center justify-center w-7 h-7 rounded font-semibold text-white text-xs flex-shrink-0"
+                      style={{ backgroundColor: brandColor }}
+                      title={p.display_name}
+                    >
+                      {(p.display_name || p.name || "?").charAt(0).toUpperCase()}
+                    </span>
+                    <div className="font-heading font-semibold text-lg truncate">
+                      {p.display_name || p.name}
+                    </div>
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1 truncate">
+                    {p.email}
+                  </div>
+                  {p.subdomain && (
+                    <div className="text-[11px] text-slate-500 mt-1 font-mono truncate">
+                      {p.subdomain}.accountingapp.ai
+                    </div>
+                  )}
+                </div>
+                <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 font-medium flex-shrink-0">
+                  Partner
+                </span>
+              </div>
+
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                <div className="rounded-md bg-cyan-50/60 p-2">
+                  <div className="text-[10px] uppercase text-cyan-700 flex items-center gap-1">
+                    <Ticket size={10} /> Clients
+                  </div>
+                  <div className="font-mono-num font-semibold text-cyan-800">{s.clients ?? 0}</div>
+                </div>
+                <div className="rounded-md bg-indigo-50/60 p-2">
+                  <div className="text-[10px] uppercase text-indigo-700 flex items-center gap-1">
+                    <Building2 size={10} /> Enterprises
+                  </div>
+                  <div className="font-mono-num font-semibold text-indigo-800">{s.enterprises ?? 0}</div>
+                </div>
+                <div className="rounded-md bg-slate-50 p-2">
+                  <div className="text-[10px] uppercase text-slate-600 flex items-center gap-1">
+                    <Users2 size={10} /> Users
+                  </div>
+                  <div className="font-mono-num font-semibold text-slate-800">{s.linked_users ?? 0}</div>
+                </div>
+              </div>
+
+              <div className="mt-3 flex-1 text-[11px] text-slate-600 space-y-1">
+                {s.has_partner_books && s.partner_books_company_id && (
+                  <Link
+                    to={`/companies/${s.partner_books_company_id}`}
+                    data-testid={`partner-books-open-${p.id}`}
+                    className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-800 hover:bg-emerald-100"
+                  >
+                    <BookOpen size={11} />
+                    Partner Books
+                    <ExternalLink size={9} />
+                  </Link>
+                )}
+                {p.must_set_password && (
+                  <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 mt-1 inline-block">
+                    Awaiting password set
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 function FirmAttentionTile({ firm, showOnlyAction, onToggle }) {
   if (!firm) return null;
   const { clients_total = 0, clients_needing_action = 0, totals = {} } = firm;
@@ -748,6 +925,7 @@ const FIRM_TONE = {
   indigo: { fg: "text-indigo-700", ring: "bg-indigo-100" },
   rose:   { fg: "text-rose-700",   ring: "bg-rose-100" },
 };
+
 
 function FirmStat({ label, value = 0, icon: Icon, tone }) {
   const t = FIRM_TONE[tone] || FIRM_TONE.amber;

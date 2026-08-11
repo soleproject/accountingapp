@@ -1,5 +1,25 @@
 # SmartBooks — Changelog
 
+## 2026-02-24 — Partners moved into the Clients/Enterprises toggle
+
+### 🎯 UX change
+Partners no longer live in a separate section on the Superadmin dashboard — they're now the third pill in the same toggle group as Clients + Enterprises on `/pro/clients`, matching the existing spatial model users already know.
+
+### ✅ Frontend changes
+- `pages/ProClients.jsx` — added third `Partners` toggle (fuchsia + Handshake icon, distinct from indigo Enterprises), matching `New Partner` button (fuchsia), a `PartnersGrid` renderer with pink/rose gradient border (visually parallel to EnterprisesGrid but distinct), lazy-loaded on tab click. `CreatePartnerModal` reused from `components/PartnersCard.jsx` (now exported).
+- Header dynamically swaps to `Partners` when the toggle is selected + subtitle explains the tier.
+- Grid cards show brand-color avatar, contact email, subdomain chip, 3-column stat grid (Clients / Enterprises / Users), Partner Books deep-link, and "Awaiting password set" chip when the invite hasn't been claimed.
+- `SuperadminDash.jsx` — removed the separate `PartnersCard` inject.
+
+### 🧪 Regression
+34/34 pass across partner + QBO + stripe suites. Verified E2E on preview:
+- Toggle shows 3 buttons: Clients | Enterprises | Partners
+- Clicking Partners → header becomes "Partners", subtitle updates, New Partner button appears (fuchsia)
+- Empty state renders correctly with the CypherPro hint
+- Create Partner modal opens from this toggle exactly as before
+
+
+
 ## 2026-02-24 — Partner role (Phase 1 MVP)
 
 ### 🎯 New user tier

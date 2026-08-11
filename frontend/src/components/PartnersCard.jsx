@@ -90,7 +90,7 @@ function PartnerCard({ partner, onOpenBooks }) {
   );
 }
 
-function CreatePartnerModal({ onClose, onCreated }) {
+export function CreatePartnerModal({ onClose, onCreated }) {
   const [form, setForm] = useState({
     name: "",
     email: "",
