@@ -2010,8 +2010,12 @@ async def admin_toggle_whitelabel_comp(
     pro = await db.users.find_one({"id": pro_id})
     if not pro:
         raise HTTPException(404, "Pro not found")
-    if pro.get("role") not in {"pro", "superadmin"}:
-        raise HTTPException(400, "Target user is not a Pro.")
+    # Accept `partner` too — Partners are Pro-like users who also get
+    # their own white-label comp toggle (surfaced on the Partner
+    # Detail page's "Partner white-label" section). The DB shape is
+    # identical, so the same branding.whitelabel_comp flag works.
+    if pro.get("role") not in {"pro", "superadmin", "partner"}:
+        raise HTTPException(400, "Target user is not a Pro or Partner.")
     if inp.granted:
         await db.users.update_one(
             {"id": pro_id},
