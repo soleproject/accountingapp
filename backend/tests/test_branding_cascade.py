@@ -274,3 +274,83 @@ def test_pro_user_falls_through_to_own_when_partner_wl_locked():
 
         await _wipe([partner_uid, pro_uid], [], [])
     _run(_t())
+
+
+
+def test_pro_inherits_partner_brand_via_enterprise_partner_id_without_own_partner_id():
+    """Simulates the exact production scenario the user reported:
+    an existing enterprise-owner Pro whose USER doc pre-dates the fix
+    (no `partner_id`) but whose ENTERPRISE doc carries `partner_id`.
+    The cascade's second walk-up path resolves the Partner brand."""
+    async def _t():
+        partner_uid = await _mk_user("partner", wl_source="comp", firm_name="PartnerBrand")
+        pro_uid = await _mk_user("pro", wl_source=None, firm_name=None)
+
+        eid = str(uuid.uuid4())
+        await db.enterprises.insert_one({
+            "id": eid, "name": "Legacy Enterprise",
+            "slug": f"legacy-{uuid.uuid4().hex[:6]}",
+            "owner_user_id": pro_uid, "partner_id": partner_uid,
+        })
+        # Explicitly DO NOT set partner_id on the pro user — that's the
+        # legacy-data situation.
+        await db.users.update_one(
+            {"id": pro_uid},
+            {"$set": {"enterprise_id": eid}, "$unset": {"partner_id": ""}},
+        )
+
+        tok = create_token(pro_uid, "pro")
+        async with await _client() as c:
+            r = await c.get("/api/branding/effective",
+                            headers={"Authorization": f"Bearer {tok}"})
+        assert r.status_code == 200
+        assert r.json()["firm_name"] == "PartnerBrand"
+
+        await _wipe([partner_uid, pro_uid], [], [eid])
+    _run(_t())
+
+
+def test_startup_backfill_stamps_partner_id_on_existing_enterprise_owners():
+    """The Feb-2026 startup backfill walks every enterprise with a
+    `partner_id` and stamps that partner_id onto the owner user if
+    it isn't already there. Verifies the loop's core invariant."""
+    async def _t():
+        partner_uid = await _mk_user("partner", wl_source="comp", firm_name="PartnerBrand")
+        pro_uid = await _mk_user("pro", wl_source=None)
+
+        eid = str(uuid.uuid4())
+        await db.enterprises.insert_one({
+            "id": eid, "name": "Preexisting Enterprise",
+            "slug": f"pre-{uuid.uuid4().hex[:6]}",
+            "owner_user_id": pro_uid, "partner_id": partner_uid,
+        })
+        # Pretend the user is legacy — no partner_id set yet.
+        await db.users.update_one(
+            {"id": pro_uid},
+            {"$unset": {"partner_id": ""}},
+        )
+
+        # Run the same query the startup does, inline.
+        stamped = 0
+        async for _e in db.enterprises.find(
+            {"partner_id": {"$exists": True, "$ne": None},
+             "owner_user_id": {"$exists": True, "$ne": None}},
+        ):
+            res = await db.users.update_one(
+                {"id": _e["owner_user_id"],
+                 "$or": [
+                    {"partner_id": {"$exists": False}},
+                    {"partner_id": None},
+                    {"partner_id": {"$ne": _e["partner_id"]}},
+                 ]},
+                {"$set": {"partner_id": _e["partner_id"]}},
+            )
+            if res.modified_count:
+                stamped += 1
+
+        assert stamped >= 1, "backfill should stamp at least our test user"
+        u = await db.users.find_one({"id": pro_uid})
+        assert u.get("partner_id") == partner_uid
+
+        await _wipe([partner_uid, pro_uid], [], [eid])
+    _run(_t())

@@ -279,6 +279,40 @@ async def startup():
             "demo partner auto-seed non-fatal error: %s", _seed_exc,
         )
 
+    # One-time backfill (Feb 2026) — for the Enterprise → Partner → Pro
+    # branding cascade to work on ENTERPRISES CREATED BEFORE THE FIX,
+    # we need to stamp `partner_id` onto the enterprise-owner Pro user
+    # whenever their enterprise doc carries a `partner_id`. New
+    # enterprises get this stamp inline in `POST /admin/enterprises`;
+    # this loop backfills pre-existing rows. Idempotent — the `$ne`
+    # guard means users already stamped are skipped.
+    try:
+        stamped = 0
+        async for _ent_doc in db.enterprises.find(
+            {"partner_id": {"$exists": True, "$ne": None},
+             "owner_user_id": {"$exists": True, "$ne": None}},
+            {"id": 1, "partner_id": 1, "owner_user_id": 1, "_id": 0},
+        ):
+            res = await db.users.update_one(
+                {"id": _ent_doc["owner_user_id"],
+                 "$or": [
+                    {"partner_id": {"$exists": False}},
+                    {"partner_id": None},
+                    {"partner_id": {"$ne": _ent_doc["partner_id"]}},
+                 ]},
+                {"$set": {"partner_id": _ent_doc["partner_id"]}},
+            )
+            if res.modified_count:
+                stamped += 1
+        if stamped:
+            print(f"[startup] branding-cascade backfill: stamped partner_id "
+                  f"on {stamped} enterprise-owner pro user(s)")
+    except Exception as _bf_exc:  # noqa: BLE001
+        import logging as _log
+        _log.getLogger(__name__).warning(
+            "partner_id backfill non-fatal error: %s", _bf_exc,
+        )
+
 
 @app.on_event("shutdown")
 async def shutdown():

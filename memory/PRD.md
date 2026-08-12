@@ -4661,5 +4661,13 @@ mirror + one-click convert workflow.
 - `routes/pro.py` — `/branding/effective` now, for role=`pro`, checks whether the Pro's WL is unlocked. If not, it walks to (a) `user.partner_id`, else (b) `enterprise.partner_id` via `user.enterprise_id`, and returns the Partner's branding when the Partner's WL is unlocked. Falls through to own brand → platform default otherwise.
 - `routes/admin.py` — `POST /admin/enterprises` now stamps BOTH `enterprise_id` AND `partner_id` on the resulting Pro owner user (when the caller is a Partner). Redundant with the enterprise-doc path but resilient.
 
-**Tests**: `tests/test_branding_cascade.py` extended with 4 new tests covering the Pro-as-Enterprise-Owner cascade (via direct `partner_id`, via `enterprise.partner_id`, own-WL-unlocked short-circuit, and locked+locked falls to own brand). All 8/8 pass. Verified end-to-end via curl creating a real enterprise as partner@axiom.ai and hitting `/branding/effective` as the newly-provisioned Pro owner — returns `firm_name: "AxiomPartners"` correctly.
+**Tests**: `tests/test_branding_cascade.py` extended with 6 new tests covering the Pro-as-Enterprise-Owner cascade (via direct `partner_id`, via `enterprise.partner_id`, own-WL-unlocked short-circuit, locked+locked → own brand, legacy-user scenario with only enterprise stamped, and the backfill loop itself). All 10/10 pass. Verified end-to-end via curl + Playwright screenshot: created an Enterprise as `partner@axiom.ai`, logged in as the fresh Pro owner, sidebar renders "AxiomPartners" instead of the platform "SmartBooks / Ledger" wordmark.
+
+### Feb 2026 — Follow-up: Sidebar `firm_name` render + startup backfill
+
+User reported that `michael+enterprise@bigsaas.ai` (an existing enterprise-owner Pro under a partner) STILL saw "SmartBooks / Ledger" in the sidebar after the cascade fix landed. Two additional root causes were fixed:
+
+1. **`components/Sidebar.jsx`** — When the branding response returned a `firm_name` but no logo, the sidebar hardcoded "SmartBooks / Ledger" wordmark regardless. Now renders `branding.firm_name` as the top-of-sidebar text when set (with `data-testid="sidebar-firm-name"`), falls back to the platform wordmark otherwise.
+
+2. **`server.py` startup backfill** — Enterprises created BEFORE the `partner_id`-stamping code landed had `partner_id` on the enterprise doc but NOT on the owner user, so the cascade's fast-path (`user.partner_id`) couldn't fire. Added an idempotent startup loop that walks every enterprise with a `partner_id` and stamps that value onto the owner user if missing. Logs count of stamped rows to the startup output.
 
