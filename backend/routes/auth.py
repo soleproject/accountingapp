@@ -532,6 +532,50 @@ async def change_password(request: Request, inp: Annotated[ChangePasswordIn, Bod
 
 
 # ----------------------------------------------------------------------
+# Change-email (self-service, requires bearer token + current password
+# for confirmation). Used by the Enterprise settings page so an
+# enterprise-owner Pro can rotate the address the login/magic-link
+# emails go to when their company transitions between people.
+# ----------------------------------------------------------------------
+class ChangeEmailIn(BaseModel):
+    current_password: str
+    new_email: EmailStr
+
+
+@router.post("/auth/change-email")
+@limiter.limit("5/minute")
+async def change_email(
+    request: Request,
+    inp: Annotated[ChangeEmailIn, Body()],
+    user: dict = Depends(get_current_user),
+):
+    """Rotate the caller's login email.
+
+    Requires the current password so a stolen JWT alone can't hijack
+    the account. Rejects duplicate emails (case-insensitive) and
+    no-op changes. Existing JWTs remain valid — auth is by user id,
+    not email — so no forced re-login.
+    """
+    fresh = await db.users.find_one({"id": user["id"]})
+    if not fresh or not verify_password(inp.current_password, fresh["password"]):
+        raise HTTPException(400, "Current password is incorrect.")
+    new_email = str(inp.new_email).lower().strip()
+    if new_email == (fresh.get("email") or "").lower():
+        raise HTTPException(400, "That is already your email address.")
+    # Case-insensitive collision check across all users.
+    existing = await db.users.find_one({"email": new_email})
+    if existing and existing.get("id") != user["id"]:
+        # Don't leak whether the email is registered — return the same
+        # error users see when they type their current email.
+        raise HTTPException(400, "That email is already in use.")
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"email": new_email, "updated_at": now_iso()}},
+    )
+    return {"ok": True, "email": new_email}
+
+
+# ----------------------------------------------------------------------
 # Password-set magic link (used for newly-invited clients).
 #
 # When a Pro creates a client from the "New Client" modal, we mint a
