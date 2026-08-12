@@ -209,3 +209,192 @@ async def rollup_stats(partner_id: str) -> dict:
         "has_partner_books": bool(partner_books),
         "partner_books_company_id": (partner_books or {}).get("id"),
     }
+
+
+
+# --------------------------------------------------------------------------
+# Financial rollups — real $-value Usage / Costs / Revenue scoped to the
+# Partner's tree. Ties three sources together:
+#
+#   Usage  — sum of `ai_usage_events.cost_cents` where the event's
+#            company_id is in the Partner's tree of companies (any
+#            company where `partner_id == self.id`). This is what
+#            Partners "consumed" on behalf of their clients.
+#
+#   Costs  — same source, same tree, but grouped by feature/service so
+#            the Partner can see where their spend went (Insights,
+#            categorizer, Veryfi OCR, etc.). Alias of Usage — both
+#            surface the same underlying $ number; the naming
+#            distinction is UX polish so we can show consumption
+#            (Usage) alongside a per-service drilldown (Costs).
+#
+#   Revenue — sum of `enterprise_invoices.amount_due_cents` where the
+#             invoice's enterprise_id is in the Partner's tree
+#             (enterprises with `partner_id == self.id`) and the
+#             invoice is finalized/paid. This is what the Partner is
+#             earning through the platform's consolidated billing.
+#
+# Everything is bucketed by `month_key` (YYYY-MM) for a 3-month trend
+# alongside the current month's total. `count_documents` + a single
+# `$group` aggregation each — well under the 100 ms budget even at
+# 10k events / month.
+# --------------------------------------------------------------------------
+
+def _month_key(dt: datetime) -> str:
+    return dt.strftime("%Y-%m")
+
+
+def _month_keys_trailing(n: int) -> list[str]:
+    """Return the last `n` YYYY-MM keys ending with the current month
+    (in UTC), oldest first. `n=3` on 2026-02-15 → ["2025-12","2026-01","2026-02"]."""
+    now = datetime.now(timezone.utc)
+    y, m = now.year, now.month
+    keys: list[str] = []
+    for _ in range(n):
+        keys.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+    return list(reversed(keys))
+
+
+async def _partner_tree_company_ids(partner_id: str) -> list[str]:
+    """Every company that belongs to the Partner's tree — direct
+    partner-provisioned client companies AND companies attached to
+    enterprises the Partner provisioned."""
+    ids: set[str] = set()
+    async for c in db.companies.find(
+        {"partner_id": partner_id},
+        {"id": 1, "_id": 0},
+    ):
+        if c.get("id"):
+            ids.add(c["id"])
+    # Also pull companies attached to any enterprise the partner owns —
+    # they may not have `partner_id` themselves if provisioned via a
+    # non-partner-scoped flow but still belong to the partner tree.
+    ent_ids = [
+        e["id"] async for e in db.enterprises.find(
+            {"partner_id": partner_id}, {"id": 1, "_id": 0},
+        ) if e.get("id")
+    ]
+    if ent_ids:
+        async for c in db.companies.find(
+            {"enterprise_id": {"$in": ent_ids}},
+            {"id": 1, "_id": 0},
+        ):
+            if c.get("id"):
+                ids.add(c["id"])
+    return list(ids)
+
+
+async def _partner_tree_enterprise_ids(partner_id: str) -> list[str]:
+    return [
+        e["id"] async for e in db.enterprises.find(
+            {"partner_id": partner_id}, {"id": 1, "_id": 0},
+        ) if e.get("id")
+    ]
+
+
+async def _usage_by_month(company_ids: list[str], months: list[str]) -> dict[str, dict]:
+    """Return `{month_key: {"total_cents": int, "by_service": {name: cents}}}`
+    for every month in `months`. Zero-fills months with no activity."""
+    out: dict[str, dict] = {m: {"total_cents": 0, "by_service": {}} for m in months}
+    if not company_ids:
+        return out
+    # Use the ISO-string `ts` and match by prefix — one call, one
+    # $group, no cross-collection joins. The `ts` field is indexed.
+    pipeline = [
+        {"$match": {
+            "company_id": {"$in": company_ids},
+            # Match any month in our window with a prefix regex.
+            "ts": {"$regex": f"^({'|'.join(months)})"},
+        }},
+        {"$project": {
+            "month_key": {"$substrBytes": ["$ts", 0, 7]},
+            "service": {"$ifNull": ["$service", "unknown"]},
+            "cost_cents": {"$ifNull": ["$cost_cents", 0]},
+        }},
+        {"$group": {
+            "_id": {"month": "$month_key", "service": "$service"},
+            "cents": {"$sum": "$cost_cents"},
+        }},
+    ]
+    async for row in db.ai_usage_events.aggregate(pipeline):
+        mk = row["_id"]["month"]
+        svc = row["_id"]["service"]
+        cents = int(row.get("cents") or 0)
+        if mk not in out:
+            continue
+        out[mk]["total_cents"] += cents
+        out[mk]["by_service"][svc] = out[mk]["by_service"].get(svc, 0) + cents
+    return out
+
+
+async def _revenue_by_month(enterprise_ids: list[str], months: list[str]) -> dict[str, int]:
+    """Return `{month_key: cents}` — sum of `amount_due_cents` on
+    invoices that reached at least `finalized` state (i.e. billed;
+    `paid` obviously counts, `failed`/`empty` don't). Zero-fills."""
+    out: dict[str, int] = {m: 0 for m in months}
+    if not enterprise_ids:
+        return out
+    pipeline = [
+        {"$match": {
+            "enterprise_id": {"$in": enterprise_ids},
+            "month_key": {"$in": months},
+            "status": {"$in": ["finalized", "paid"]},
+        }},
+        {"$group": {
+            "_id": "$month_key",
+            "cents": {"$sum": {"$ifNull": ["$amount_due_cents", 0]}},
+        }},
+    ]
+    async for row in db.enterprise_invoices.aggregate(pipeline):
+        mk = row.get("_id")
+        if mk in out:
+            out[mk] = int(row.get("cents") or 0)
+    return out
+
+
+async def partner_financials(partner_id: str, *, months: int = 3) -> dict:
+    """Aggregate the Partner-tree rollup for the dashboard. Returns a
+    payload the frontend renders directly with no further math."""
+    month_keys = _month_keys_trailing(months)
+    current = month_keys[-1]
+
+    company_ids = await _partner_tree_company_ids(partner_id)
+    enterprise_ids = await _partner_tree_enterprise_ids(partner_id)
+
+    usage_by_month = await _usage_by_month(company_ids, month_keys)
+    revenue_by_month = await _revenue_by_month(enterprise_ids, month_keys)
+
+    trend = [
+        {
+            "month_key": mk,
+            "usage_cents": usage_by_month[mk]["total_cents"],
+            "revenue_cents": revenue_by_month[mk],
+        }
+        for mk in month_keys
+    ]
+
+    # `by_service` breakdown for the current month, sorted highest-first.
+    current_services = usage_by_month[current]["by_service"]
+    by_service_sorted = sorted(
+        (
+            {"service": svc, "cents": cents}
+            for svc, cents in current_services.items()
+        ),
+        key=lambda r: r["cents"], reverse=True,
+    )
+
+    return {
+        "current_month_key": current,
+        "usage_cents_current": usage_by_month[current]["total_cents"],
+        "revenue_cents_current": revenue_by_month[current],
+        "by_service_current": by_service_sorted,
+        "trend": trend,
+        "tree_summary": {
+            "company_count": len(company_ids),
+            "enterprise_count": len(enterprise_ids),
+        },
+    }

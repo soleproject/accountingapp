@@ -363,3 +363,27 @@ async def partner_summary(user: dict = Depends(require_role("partner", "superadm
         "partner": _p.serialize(user, stats=stats),
         "generated_at": now_iso(),
     }
+
+
+@router.get("/partner/financials")
+async def partner_financials(
+    months: int = 3,
+    user: dict = Depends(require_role("partner", "superadmin")),
+):
+    """Real $-value Usage / Costs / Revenue rollup scoped to the
+    Partner's tree. Returns:
+
+      * `usage_cents_current`   — $ spent by the Partner's tree of
+        companies on LLM + service calls this month.
+      * `revenue_cents_current` — $ billed to enterprises the Partner
+        provisioned this month (finalized + paid invoices).
+      * `by_service_current`    — per-service breakdown of Usage for
+        the current month (descending $).
+      * `trend`                 — trailing `months`-month series of
+        `{month_key, usage_cents, revenue_cents}`.
+
+    `months` is clamped to `[1, 12]` — anything larger is truncated
+    to protect the aggregation cost.
+    """
+    months = max(1, min(int(months or 3), 12))
+    return await _p.partner_financials(user["id"], months=months)

@@ -4671,3 +4671,23 @@ User reported that `michael+enterprise@bigsaas.ai` (an existing enterprise-owner
 
 2. **`server.py` startup backfill** — Enterprises created BEFORE the `partner_id`-stamping code landed had `partner_id` on the enterprise doc but NOT on the owner user, so the cascade's fast-path (`user.partner_id`) couldn't fire. Added an idempotent startup loop that walks every enterprise with a `partner_id` and stamps that value onto the owner user if missing. Logs count of stamped rows to the startup output.
 
+
+
+### Feb 2026 — Partner Dashboard Rollup ($-value Usage / Revenue / Margin)
+
+The Partner Dashboard previously showed only entity counts (Clients / Enterprises / Users / Partner Books). Extended with a **Financials** section that surfaces real $-value rollups scoped to the Partner's tree.
+
+**Backend** (`partners.py::partner_financials` + `GET /api/partner/financials?months=3`):
+- **Usage** — `$sum(ai_usage_events.cost_cents)` for every company in the Partner's tree (direct `companies.partner_id` OR attached to an enterprise the Partner owns).
+- **Revenue** — `$sum(enterprise_invoices.amount_due_cents)` where the invoice's `status ∈ {finalized, paid}` and `enterprise_id` is in the Partner's tree.
+- **Margin** — Revenue − Usage (computed client-side).
+- **Trend** — trailing 3 months (configurable via `months=N`, clamped to 12) of both series, oldest-first.
+- **By-service** — current-month per-service breakdown of usage $ (openai_llm, veryfi_ocr, resend_email, etc.) sorted descending.
+
+**Frontend** (`pages/PartnerDash.jsx`): Three `MoneyTile` cards (Usage / Revenue / Margin) + a `TrendBars` component (indigo=usage, emerald=revenue) + a `ServiceBreakdown` bar list. Rendered conditionally — if the API errors we skip the section rather than blocking the dashboard.
+
+**Isolation**: Partner A never sees Partner B's data (`_partner_tree_company_ids` filters on `partner_id == self.id`). Confirmed by dedicated test.
+
+**Tests**: `tests/test_partner_financials.py` — 5 tests covering direct-client usage sum, enterprise invoice revenue, enterprise-attached companies pulled via `enterprise_id`, 3-month trend window, and Partner-vs-Partner isolation. All 5/5 pass standalone; 24/24 pass alongside `test_partners.py` + `test_branding_cascade.py` (all three files now share a single event loop via `tests/_shared_loop.py` so Motor's cached-loop bug doesn't fire when xdist pins them to the same worker).
+
+**Verified end-to-end**: Seeded usage + revenue rows for `partner@axiom.ai`; Playwright screenshot confirmed tiles show `$58.60 Usage · $245.00 Revenue · $186.40 Margin` with per-service breakdown (`openai_llm $42.70`, `veryfi_ocr $12.50`, `resend_email $3.40`) and a 3-month trend.
