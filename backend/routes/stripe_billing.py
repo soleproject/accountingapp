@@ -1295,8 +1295,8 @@ async def create_whitelabel_checkout_session(
       • ``whitelabel_upgrade = "true"``  — webhook fan-out marker
       • ``pro_user_id``                   — who to flip on success
     """
-    if user.get("role") not in {"pro", "superadmin"}:
-        raise HTTPException(403, "Only accounting pros can purchase white-label.")
+    if user.get("role") not in {"pro", "superadmin", "partner"}:
+        raise HTTPException(403, "Only accounting pros and partners can purchase white-label.")
 
     # Refresh the user doc so we can short-circuit if they're already
     # unlocked (comp'd by superadmin or previously paid). Prevents double-
