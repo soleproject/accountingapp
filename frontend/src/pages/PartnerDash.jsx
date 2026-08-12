@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import {
   Handshake, Building, Users as UsersIcon, ExternalLink, Loader2,
   Plus, RefreshCw, BookOpen, Palette, UserPlus, Shield,
+  DollarSign, TrendingUp, Cpu,
 } from "lucide-react";
 import { NewClientModal, NewEnterpriseModal } from "@/pages/ProClients";
 
@@ -54,11 +55,134 @@ function StatCard({ label, value, Icon, tone = "indigo" }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Financials tiles + trend — the "$-value" rollup that sits below the entity
+// count StatCards. Three cards on top (Usage, Revenue, Margin) and a simple
+// bar-trend for the last N months.
+// ---------------------------------------------------------------------------
+
+function fmtUSD(cents) {
+  const dollars = (Number(cents) || 0) / 100;
+  return dollars.toLocaleString("en-US", {
+    style: "currency", currency: "USD",
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  });
+}
+
+function fmtMonth(monthKey) {
+  // "2026-02" → "Feb"
+  const [y, m] = String(monthKey || "").split("-");
+  const d = new Date(Number(y || 0), Number(m || 1) - 1, 1);
+  return d.toLocaleString("en-US", { month: "short" });
+}
+
+function MoneyTile({ label, cents, sub, Icon, tone, testid }) {
+  const tones = {
+    indigo: "bg-indigo-50 text-indigo-700 border-indigo-200",
+    emerald: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    rose: "bg-rose-50 text-rose-700 border-rose-200",
+  };
+  return (
+    <div
+      data-testid={testid}
+      className="rounded-xl border border-slate-200 bg-white p-4"
+    >
+      <div className="flex items-center gap-2">
+        <div className={`inline-flex h-8 w-8 items-center justify-center rounded-md border ${tones[tone] || tones.indigo}`}>
+          <Icon className="h-4 w-4" />
+        </div>
+        <div className="text-xs uppercase tracking-wider text-slate-500">{label}</div>
+      </div>
+      <div className="mt-2 font-heading text-3xl font-bold text-slate-900 tabular-nums">
+        {fmtUSD(cents)}
+      </div>
+      {sub && <div className="mt-0.5 text-xs text-slate-500">{sub}</div>}
+    </div>
+  );
+}
+
+function TrendBars({ trend }) {
+  const max = Math.max(
+    1,
+    ...trend.map((t) => Math.max(t.usage_cents || 0, t.revenue_cents || 0)),
+  );
+  return (
+    <div className="grid grid-cols-3 gap-4" data-testid="partner-financials-trend">
+      {trend.map((t) => {
+        const uh = Math.max(4, Math.round(((t.usage_cents || 0) / max) * 96));
+        const rh = Math.max(4, Math.round(((t.revenue_cents || 0) / max) * 96));
+        return (
+          <div key={t.month_key} className="flex flex-col items-center gap-2">
+            <div className="flex h-24 items-end gap-2">
+              <div
+                className="w-6 rounded-t bg-indigo-400"
+                style={{ height: `${uh}px` }}
+                title={`Usage · ${fmtUSD(t.usage_cents)}`}
+              />
+              <div
+                className="w-6 rounded-t bg-emerald-500"
+                style={{ height: `${rh}px` }}
+                title={`Revenue · ${fmtUSD(t.revenue_cents)}`}
+              />
+            </div>
+            <div className="text-xs font-medium text-slate-700">{fmtMonth(t.month_key)}</div>
+            <div className="flex items-center gap-2 text-[10px] text-slate-500">
+              <span className="inline-flex items-center gap-1">
+                <span className="h-2 w-2 rounded-sm bg-indigo-400" />
+                {fmtUSD(t.usage_cents)}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-[10px] text-slate-500">
+              <span className="inline-flex items-center gap-1">
+                <span className="h-2 w-2 rounded-sm bg-emerald-500" />
+                {fmtUSD(t.revenue_cents)}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ServiceBreakdown({ rows }) {
+  if (!rows || rows.length === 0) {
+    return (
+      <div className="text-xs text-slate-400">No AI/service spend this month yet.</div>
+    );
+  }
+  const total = rows.reduce((s, r) => s + (r.cents || 0), 0);
+  return (
+    <div className="space-y-1.5" data-testid="partner-financials-by-service">
+      {rows.slice(0, 5).map((r) => {
+        const pct = total > 0 ? Math.round((r.cents / total) * 100) : 0;
+        return (
+          <div key={r.service} className="grid grid-cols-[1fr_auto] items-center gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center justify-between text-xs">
+                <span className="truncate text-slate-700">{r.service}</span>
+                <span className="tabular-nums text-slate-500">{fmtUSD(r.cents)}</span>
+              </div>
+              <div className="mt-1 h-1.5 w-full overflow-hidden rounded bg-slate-100">
+                <div
+                  className="h-full rounded bg-indigo-400"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function PartnerDash() {
   const [summary, setSummary] = useState(null);
   const [err, setErr] = useState("");
   const [clients, setClients] = useState([]);
   const [enterprises, setEnterprises] = useState([]);
+  const [financials, setFinancials] = useState(null);
   // My Clients section — toggle state. `clients` (default) shows the
   // client-companies list; `enterprises` shows the enterprises list.
   const [mode, setMode] = useState("clients");
@@ -69,6 +193,10 @@ export default function PartnerDash() {
   async function load() {
     setErr("");
     try {
+      // Summary / clients / enterprises are essential and must all
+      // succeed. Financials is a soft-required rollup — if the endpoint
+      // fails (older backend, transient error) we still render the rest
+      // of the dashboard.
       const [s, c, e] = await Promise.all([
         api.get("/partner/summary"),
         api.get("/partner/clients"),
@@ -77,6 +205,12 @@ export default function PartnerDash() {
       setSummary(s.data);
       setClients(c.data.clients || []);
       setEnterprises(e.data.enterprises || []);
+      try {
+        const f = await api.get("/partner/financials?months=3");
+        setFinancials(f.data);
+      } catch {
+        setFinancials(null);
+      }
     } catch (e) {
       setErr(e?.response?.data?.detail || e.message || "Failed to load");
     }
@@ -160,6 +294,68 @@ export default function PartnerDash() {
           tone="amber"
         />
       </div>
+
+      {/* Financials rollup — $-value Usage / Revenue / Margin scoped
+          to this Partner's tree. Loaded lazily; if the API errored we
+          still render the rest of the dashboard, this section just
+          stays absent so users aren't blocked. */}
+      {financials && (
+        <section
+          data-testid="partner-financials"
+          className="rounded-xl border border-slate-200 bg-white"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
+            <div>
+              <h2 className="text-xl font-semibold text-slate-900">
+                Financials
+              </h2>
+              <p className="text-xs text-slate-500">
+                Current month ({fmtMonth(financials.current_month_key)}) · {financials.tree_summary?.company_count || 0} companies · {financials.tree_summary?.enterprise_count || 0} enterprises
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-3">
+            <MoneyTile
+              testid="partner-usage-tile"
+              label="Usage"
+              cents={financials.usage_cents_current}
+              sub="AI + service spend consumed by your tree"
+              Icon={Cpu}
+              tone="indigo"
+            />
+            <MoneyTile
+              testid="partner-revenue-tile"
+              label="Revenue"
+              cents={financials.revenue_cents_current}
+              sub="Consolidated invoices billed this month"
+              Icon={DollarSign}
+              tone="emerald"
+            />
+            <MoneyTile
+              testid="partner-margin-tile"
+              label="Margin"
+              cents={(financials.revenue_cents_current || 0) - (financials.usage_cents_current || 0)}
+              sub="Revenue − Usage (before Stripe / platform fees)"
+              Icon={TrendingUp}
+              tone={(financials.revenue_cents_current || 0) >= (financials.usage_cents_current || 0) ? "emerald" : "rose"}
+            />
+          </div>
+          <div className="grid grid-cols-1 gap-6 border-t border-slate-100 p-4 md:grid-cols-2">
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Last 3 months
+              </div>
+              <TrendBars trend={financials.trend || []} />
+            </div>
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Where usage went ({fmtMonth(financials.current_month_key)})
+              </div>
+              <ServiceBreakdown rows={financials.by_service_current || []} />
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Partner Books tile */}
       {s.has_partner_books && s.partner_books_company_id && (

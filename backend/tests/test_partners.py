@@ -24,12 +24,7 @@ sys.path.insert(0, "/app/backend")
 from server import app  # noqa: E402
 from db import db  # noqa: E402
 from auth import create_token, hash_password  # noqa: E402
-
-_LOOP = asyncio.new_event_loop()
-
-
-def _run(coro):
-    return _LOOP.run_until_complete(coro)
+from tests._shared_loop import run as _run  # noqa: E402
 
 
 async def _admin_token() -> str:
