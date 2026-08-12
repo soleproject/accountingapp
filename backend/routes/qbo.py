@@ -76,43 +76,62 @@ def _return_to_host_from_request(request: Request) -> str | None:
     Independent of `_redirect_uri_from_request` — the Intuit callback
     URL is constrained to hosts Intuit knows about, but the FINAL
     redirect at the end of the flow can be ANY frontend host our app
-    serves. Sources checked (highest priority first):
+    serves.
 
-      1. `x-forwarded-host` — the label's public hostname as seen by
-         the edge proxy. This is the source of truth for private-label
-         subdomains that share a host with the API (i.e. no separate
-         `api.` split).
-      2. `origin` / `referer` — fallback if the proxy strips the
-         forwarding header for some reason.
+    Header priority — the more the source *directly* reflects "which
+    tab is the browser on right now", the higher it ranks:
 
-    Returns a scheme+host string like `https://enterprise.accountingapp.ai`
-    or `None` if we can't determine it (caller falls back to
-    `_APP_URL`)."""
+      1. `Referer` — the FULL URL of the page that made the API call
+         (e.g. `https://enterprise.accountingapp.ai/connections/qbo`).
+         Set by every same-origin fetch — authoritative for the
+         frontend host.
+      2. `Origin` — scheme+host only; set on cross-origin and POST
+         requests. Same authority as Referer but missing the path.
+      3. `x-forwarded-host` — the Emergent/Kubernetes ingress
+         forwarding host. Falls back here ONLY when the browser
+         didn't provide the other two (curl, non-browser flows), and
+         even then, we skip any host we recognize as the flagship API
+         (`api.smartbookssoftware.ai`) because "strip api. prefix"
+         collapses that to the bare marketing domain
+         `smartbookssoftware.ai` — which doesn't serve the app.
+
+    Returns a scheme+host string or None if nothing usable was found."""
+    # 1. Referer — parse to scheme+host.
+    ref = request.headers.get("referer") or request.headers.get("referrer")
+    if ref:
+        try:
+            from urllib.parse import urlparse
+            p = urlparse(ref)
+            if p.scheme in {"http", "https"} and p.netloc:
+                return f"{p.scheme}://{p.netloc}"
+        except Exception:  # noqa: BLE001
+            pass
+
+    # 2. Origin — already scheme+host, just trust it.
+    origin = request.headers.get("origin")
+    if origin and origin.startswith(("http://", "https://")):
+        # Some proxies append a trailing slash — strip it.
+        return origin.rstrip("/")
+
+    # 3. Fallback — x-forwarded-host. Only fires for non-browser
+    # callers (curl, Postman) or misconfigured proxies.
     host = (
         request.headers.get("x-forwarded-host")
         or request.headers.get("host")
         or ""
     ).split(":")[0].lower()
-    if host:
-        # Strip a leading `api.` — some deployments split API onto a
-        # separate subdomain, but the FRONTEND lives on the bare
-        # label subdomain. If there's no `api.` prefix, the host IS
-        # the frontend host (shared-host private labels like
-        # `<label>.accountingapp.ai`).
-        frontend_host = host[4:] if host.startswith("api.") else host
-        return f"https://{frontend_host}"
-    # Fallback — parse origin / referer headers.
-    for hdr in ("origin", "referer"):
-        raw = request.headers.get(hdr)
-        if raw:
-            try:
-                from urllib.parse import urlparse
-                p = urlparse(raw)
-                if p.scheme and p.netloc:
-                    return f"{p.scheme}://{p.netloc}"
-            except Exception:  # noqa: BLE001
-                continue
-    return None
+    if not host:
+        return None
+    # Skip internal / opaque hosts that can't map to a real frontend.
+    if host in {"localhost", "127.0.0.1", "0.0.0.0"}:
+        return None
+    # If the host clearly points at an API subdomain, we cannot
+    # confidently derive the frontend host — return None and let the
+    # caller fall back to `_APP_URL` rather than sending the user to
+    # a wrong bare domain.
+    if host.startswith("api."):
+        return None
+    return f"https://{host}"
 
 
 class OAuthStartOut(BaseModel):
@@ -167,27 +186,28 @@ async def qbo_oauth_callback(
     # Fallback to the standard SmartBooks app URL if the state record
     # doesn't carry a private-label return target.
     def _label_app_url(rec: dict | None) -> str:
-        # Priority 1: `return_to_host` — captured from the FRONTEND
-        # host on OAuth start. This is the authoritative source for
-        # "where did this user come from" and works for every private
-        # label, including shared-host labels (`enterprise.accountingapp.ai`)
-        # where the app and API run on the same subdomain.
+        # Priority 1: `return_to_host` — captured from the FRONTEND's
+        # Referer/Origin on OAuth start. This is the authoritative
+        # source for "where did this user come from" and works for
+        # every label, including shared-host labels
+        # (`enterprise.accountingapp.ai`).
         rth = (rec or {}).get("return_to_host")
         if rth:
             return rth.rstrip("/")
         # Priority 2 (legacy): derive from the Intuit-callback host by
-        # stripping the `api.` prefix. Only fires for labels that split
-        # API onto its own subdomain AND registered that host on the
-        # Intuit Developer app.
+        # stripping the `api.` prefix — but ONLY when the resulting
+        # host is a private-label subdomain, not the bare
+        # `smartbookssoftware.ai` marketing site (which doesn't serve
+        # the app). Belt-and-suspenders: if `return_to_host` is missing
+        # but `redirect_uri` points at `api.<label>.accountingapp.ai`,
+        # we can still recover the label's frontend.
         uri = (rec or {}).get("redirect_uri")
         if uri:
             try:
                 from urllib.parse import urlparse
                 host = urlparse(uri).netloc
-                if host.startswith("api."):
+                if host.startswith("api.") and host.endswith(".accountingapp.ai"):
                     return f"https://{host[4:]}"
-                if host:
-                    return f"https://{host}"
             except Exception:  # noqa: BLE001
                 pass
         return _APP_URL

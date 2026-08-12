@@ -4706,4 +4706,13 @@ The Partner Dashboard previously showed only entity counts (Clients / Enterprise
 4. **Success redirect fixed** — now uses `_label_app_url(rec)` (was hardcoded `_APP_URL`).
 5. Error early-exit (Intuit `error`, missing params) now peeks the state record before returning so "No thanks" also lands on the label's own frontend.
 
-**Tests**: `tests/test_qbo_oauth_return_host.py` — 5 tests: `x-forwarded-host` capture, `api.*` prefix strip, success-redirects-to-label, error-redirects-to-label, and legacy state without `return_to_host` falls back to platform default. All 5/5 pass; 29/29 pass alongside partner + branding suites.
+**Fix v2** (Feb 2026 iteration 2): First attempt trusted `x-forwarded-host` and naively stripped an `api.` prefix — which collapsed `api.smartbookssoftware.ai` to the bare marketing domain `smartbookssoftware.ai` (404 in production, no app served there). Rewrote `_return_to_host_from_request` header priority to: **1) `Referer`** (browser tab URL, always set on same-origin fetches), **2) `Origin`** (scheme+host, set on POST/CORS), **3) `x-forwarded-host` as last resort** — and even then, hosts starting with `api.` return `None` so we fall through to `_APP_URL` instead of guessing wrong. The callback's legacy `redirect_uri`-derived fallback only strips `api.` when the host ends with `.accountingapp.ai` (label subdomain).
+
+**Fix** (`routes/qbo.py`) — final shape:
+1. `_return_to_host_from_request()` uses Referer → Origin → x-forwarded-host (skipping api.* fallback).
+2. `POST /companies/{cid}/qbo/oauth/start` persists `return_to_host` alongside `redirect_uri` on the state record.
+3. `_label_app_url(rec)` checks `return_to_host` FIRST, then a guarded legacy-strip on `redirect_uri`, then `_APP_URL`.
+4. Success redirect uses `_label_app_url(rec)`.
+5. Error early-exit peeks the state record so "No thanks" also lands on the label host.
+
+**Tests**: `tests/test_qbo_oauth_return_host.py` — 6 tests now: Referer capture, Origin-fallback capture, api.* host in x-forwarded-host returns None (guards the bare-domain bug), success redirect to label, error redirect to label, and legacy state without `return_to_host` falls back to platform. All 6/6 pass; 30/30 pass alongside partner + branding suites.
