@@ -7,6 +7,7 @@ import {
   DollarSign, TrendingUp, Cpu,
 } from "lucide-react";
 import { NewClientModal, NewEnterpriseModal } from "@/pages/ProClients";
+import { toast } from "sonner";
 
 /**
  * Partner Dashboard — the landing page for a logged-in Partner user.
@@ -177,6 +178,111 @@ function ServiceBreakdown({ rows }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// EnterpriseRow — clickable row that navigates to the enterprise detail page
+// AND surfaces an inline "Comp WL" toggle for the enterprise owner. The row
+// itself is a <Link>; the toggle intercepts clicks with stopPropagation so
+// tapping the toggle doesn't also navigate.
+//
+// The toggle is only rendered when the enterprise has an owner (there's no
+// user to comp otherwise). At the quota cap, un-checked rows disable the
+// toggle so the partner can't blow past 2 comps.
+// ---------------------------------------------------------------------------
+function EnterpriseRow({ ent, wlComps, onToggle }) {
+  const [busy, setBusy] = useState(false);
+  const isComped = !!ent.owner_whitelabel_comp;
+  const hasOwner = !!ent.owner_user_id;
+  const remaining = wlComps ? wlComps.remaining : null;
+  // When the row's own state IS "comped", the toggle must stay
+  // enabled regardless of `remaining` — revoking is unbounded.
+  const disabled =
+    busy ||
+    !hasOwner ||
+    (!isComped && remaining !== null && remaining <= 0);
+
+  const flip = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (disabled) return;
+    setBusy(true);
+    try {
+      await api.post(`/admin/pros/${ent.owner_user_id}/whitelabel-comp`, {
+        granted: !isComped,
+      });
+      toast.success(
+        isComped
+          ? "White-label comp revoked."
+          : "White-label comp applied.",
+      );
+      onToggle && (await onToggle());
+    } catch (err) {
+      toast.error(
+        err?.response?.data?.detail || err.message || "Toggle failed",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      data-testid={`partner-enterprise-row-${ent.id}`}
+      className="flex items-center gap-3 p-3 hover:bg-slate-50 rounded-md"
+    >
+      <Link
+        to={`/admin/enterprises/${ent.id}`}
+        className="flex flex-1 items-center gap-3 min-w-0"
+        data-testid={`partner-enterprise-link-${ent.id}`}
+      >
+        <Building className="h-4 w-4 text-slate-400" />
+        <div className="flex-1 min-w-0">
+          <div className="truncate text-sm font-medium text-slate-900">
+            {ent.name}
+          </div>
+          <div className="text-xs text-slate-500 font-mono">
+            {ent.slug || "—"}
+          </div>
+        </div>
+      </Link>
+      {/* Inline WL-comp toggle — only shown when there's an owner to
+          comp. Uses a compact pill-style switch styled after the
+          existing shadcn Switch to feel native. */}
+      {hasOwner && (
+        <button
+          type="button"
+          onClick={flip}
+          disabled={disabled}
+          aria-pressed={isComped}
+          data-testid={`partner-enterprise-wl-toggle-${ent.id}`}
+          title={
+            !hasOwner
+              ? "This enterprise has no owner to comp."
+              : isComped
+                ? "Click to revoke this owner's white-label comp"
+                : remaining !== null && remaining <= 0
+                  ? "No comps remaining — revoke one before granting another."
+                  : "Comp this owner's white-label"
+          }
+          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors border ${
+            isComped
+              ? "bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700"
+              : "bg-white text-slate-600 border-slate-300 hover:bg-slate-100"
+          } disabled:opacity-40 disabled:cursor-not-allowed`}
+        >
+          <span
+            className={`inline-block h-2 w-2 rounded-full ${
+              isComped ? "bg-white" : "bg-slate-400"
+            }`}
+          />
+          {isComped ? "WL comped" : "Comp WL"}
+        </button>
+      )}
+      <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
+    </div>
+  );
+}
+
+
 export default function PartnerDash() {
   const [summary, setSummary] = useState(null);
   const [err, setErr] = useState("");
@@ -194,9 +300,9 @@ export default function PartnerDash() {
     setErr("");
     try {
       // Summary / clients / enterprises are essential and must all
-      // succeed. Financials is a soft-required rollup — if the endpoint
-      // fails (older backend, transient error) we still render the rest
-      // of the dashboard.
+      // succeed. Financials + wl-comps are soft-required — if the
+      // endpoint fails (older backend, transient error) we still
+      // render the rest of the dashboard.
       const [s, c, e] = await Promise.all([
         api.get("/partner/summary"),
         api.get("/partner/clients"),
@@ -206,8 +312,13 @@ export default function PartnerDash() {
       setClients(c.data.clients || []);
       setEnterprises(e.data.enterprises || []);
       try {
-        const f = await api.get("/partner/financials?months=3");
-        setFinancials(f.data);
+        const [f, w] = await Promise.all([
+          api.get("/partner/financials?months=3"),
+          api.get("/partner/wl-comps"),
+        ]);
+        // Piggy-back the wl-comp quota onto financials so a single
+        // state slot carries all the "meta" the UI needs.
+        setFinancials({ ...f.data, _wlComps: w.data });
       } catch {
         setFinancials(null);
       }
@@ -476,21 +587,16 @@ export default function PartnerDash() {
           ) : (
             <div className="divide-y divide-slate-100">
               {enterprises.map((e) => (
-                <Link
+                <EnterpriseRow
                   key={e.id}
-                  to={`/admin/enterprises/${e.id}`}
-                  data-testid={`partner-enterprise-row-${e.id}`}
-                  className="flex items-center gap-3 p-3 hover:bg-slate-50 rounded-md"
-                >
-                  <Building className="h-4 w-4 text-slate-400" />
-                  <div className="flex-1 min-w-0">
-                    <div className="truncate text-sm font-medium text-slate-900">{e.name}</div>
-                    <div className="text-xs text-slate-500 font-mono">
-                      {e.slug || "—"}
-                    </div>
-                  </div>
-                  <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
-                </Link>
+                  ent={e}
+                  wlComps={financials?._wlComps || null}
+                  onToggle={async () => {
+                    // Reload the full list so the counter + row state
+                    // update from a single authoritative source.
+                    await load();
+                  }}
+                />
               ))}
             </div>
           )}
