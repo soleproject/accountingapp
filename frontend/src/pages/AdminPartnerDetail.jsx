@@ -160,8 +160,14 @@ export default function AdminPartnerDetail() {
           <WhitelabelCompToggle
             proId={p.id}
             initial={{
-              whitelabel_unlocked: !!(p.whitelabel_unlocked ?? data.partner_wl?.unlocked),
-              source: p.wl_source ?? data.partner_wl?.source ?? null,
+              // WhitelabelCompToggle reads `state.comp` / `state.paid`
+              // / `state.unlocked` / `state.source` — pass all four so
+              // the pill renders the correct label on refresh and the
+              // Comp/Revoke button toggles the correct way.
+              comp: (data.partner_wl?.source === "comp"),
+              paid: (data.partner_wl?.source === "paid"),
+              unlocked: !!data.partner_wl?.unlocked,
+              source: data.partner_wl?.source ?? null,
             }}
           />
         </div>
@@ -206,7 +212,9 @@ export default function AdminPartnerDetail() {
                 <WhitelabelCompToggle
                   proId={pro.id}
                   initial={{
-                    whitelabel_unlocked: pro.whitelabel_unlocked,
+                    comp: (pro.source === "comp"),
+                    paid: (pro.source === "paid"),
+                    unlocked: !!pro.whitelabel_unlocked,
                     source: pro.source,
                   }}
                 />
