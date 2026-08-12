@@ -19,6 +19,12 @@ export default function ProSettings() {
   // the pro's own user name via `firm_name_fallback`).
   const [firmName, setFirmName] = useState("");
   const [savingFirmName, setSavingFirmName] = useState(false);
+  // Login email rotation — self-service change of the caller's own
+  // login email. Requires the current password so a stolen JWT alone
+  // can't hijack the account. Wire-shape: POST /auth/change-email.
+  const [newEmail, setNewEmail] = useState("");
+  const [emailPassword, setEmailPassword] = useState("");
+  const [savingEmail, setSavingEmail] = useState(false);
   const [preset, setPreset] = useState("default");
   // Local, unsaved custom palette overrides. Auto-saved with a short debounce
   // whenever the user edits a color, so there's no separate "Save" step to
@@ -307,6 +313,29 @@ export default function ProSettings() {
     } finally { setSavingFirmName(false); }
   };
 
+  const saveEmail = async () => {
+    if (!newEmail.trim() || !emailPassword) return;
+    setSavingEmail(true);
+    try {
+      const r = await api.post("/auth/change-email", {
+        current_password: emailPassword,
+        new_email: newEmail.trim(),
+      });
+      // Refresh the cached user so the sidebar / topbar reflect
+      // the new address without a hard reload.
+      const stored = JSON.parse(localStorage.getItem("axiom_user") || "null");
+      if (stored) {
+        stored.email = r.data.email;
+        localStorage.setItem("axiom_user", JSON.stringify(stored));
+      }
+      toast.success(`Login email updated to ${r.data.email}.`);
+      setNewEmail("");
+      setEmailPassword("");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Email change failed");
+    } finally { setSavingEmail(false); }
+  };
+
   const pickPreset = async (p) => {
     setPreset(p);
     setCustom({});
@@ -484,6 +513,87 @@ export default function ProSettings() {
         </p>
       </section>
       </LockedSection>
+
+      {/* ---------- Login email ---------- */}
+      {/* Unlike branding, this section is NOT locked behind white-label
+          — every enterprise / partner / pro needs to be able to rotate
+          the address that receives their login and magic-link emails. */}
+      <section
+        className="rounded-xl border bg-white p-6"
+        data-testid="account-email-card"
+      >
+        <div className="flex items-center gap-2 mb-2">
+          <Type size={16} className="text-slate-500" />
+          <h2 className="font-heading font-semibold">Login email</h2>
+        </div>
+        <p className="text-sm text-slate-500 mb-4">
+          The address you sign in with and where invoices, magic-link
+          logins, and system notifications get sent. Requires your
+          current password to confirm — a stolen browser session alone
+          can't hijack the account.
+        </p>
+        <div className="text-[11px] text-slate-500 mb-3">
+          Currently:{" "}
+          <span
+            className="font-mono-num text-slate-700"
+            data-testid="account-email-current"
+          >
+            {user?.email || "—"}
+          </span>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">
+              New email
+            </label>
+            <input
+              type="email"
+              autoComplete="off"
+              value={newEmail}
+              onChange={(e) => setNewEmail(e.target.value)}
+              placeholder="you@company.com"
+              className="w-full border rounded-md px-3 py-1.5 text-sm"
+              data-testid="account-email-new"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">
+              Current password
+            </label>
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={emailPassword}
+              onChange={(e) => setEmailPassword(e.target.value)}
+              placeholder="Confirm your password"
+              className="w-full border rounded-md px-3 py-1.5 text-sm"
+              data-testid="account-email-current-password"
+            />
+          </div>
+        </div>
+        <button
+          onClick={saveEmail}
+          disabled={
+            savingEmail ||
+            !newEmail.trim() ||
+            !emailPassword ||
+            newEmail.trim().toLowerCase() === (user?.email || "").toLowerCase()
+          }
+          className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-800 disabled:opacity-50"
+          data-testid="account-email-save"
+        >
+          {savingEmail ? (
+            <Loader2 size={13} className="animate-spin" />
+          ) : (
+            <Save size={13} />
+          )}
+          Update email
+        </button>
+        <p className="text-[11px] text-slate-400 mt-2">
+          Your existing session stays valid. Future logins use the new
+          address; the old one stops working immediately.
+        </p>
+      </section>
 
       {/* ---------- Sign-in address ---------- */}
       <LockedSection isLocked={isLocked} testId="branding-signin-card-locked">
