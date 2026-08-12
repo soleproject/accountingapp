@@ -409,8 +409,19 @@ export default function Sidebar({ collapsed, onToggle }) {
         {user?.role === "superadmin" && (
           <Item item={{ to: "/admin/usage", label: "Usage & Costs", icon: Activity }} />
         )}
-        {(user?.role === "pro" || user?.role === "superadmin") && (
-          <Item item={{ to: "/pro/clients", label: "Clients", icon: Briefcase }} />
+        {/* Partner top link — their own scoped dashboard with the
+            "My Clients" section (Clients | Enterprises toggle). Sits
+            in the same slot Superadmin uses so the top-of-nav pattern
+            reads consistently across roles. */}
+        {user?.role === "partner" && (
+          <Item item={{ to: "/partner", label: "Partner Dashboard", icon: Shield }} />
+        )}
+        {(user?.role === "pro" || user?.role === "superadmin" || user?.role === "partner") && (
+          <Item item={{
+            to: user?.role === "partner" ? "/partner" : "/pro/clients",
+            label: "Clients",
+            icon: Briefcase,
+          }} />
         )}
 
         {/* Dashboard */}
