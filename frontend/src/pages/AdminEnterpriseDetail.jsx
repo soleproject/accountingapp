@@ -82,10 +82,10 @@ export default function AdminEnterpriseDetail() {
     } finally { setSaving(false); }
   };
 
-  if (user?.role !== "superadmin") {
+  if (user?.role !== "superadmin" && user?.role !== "partner") {
     return (
       <div className="p-8 text-sm text-slate-500">
-        Only superadmins can view enterprises.
+        Only superadmins and partners can view enterprises.
       </div>
     );
   }
@@ -236,16 +236,17 @@ export default function AdminEnterpriseDetail() {
                       {p.firm_name}
                     </span>
                   )}
-                  <WhitelabelCompToggle
-                    proId={p.id}
-                    initial={{
-                      comp: !!p.whitelabel_comp,
-                      paid: !!p.whitelabel_paid,
-                      unlocked: !!p.whitelabel_unlocked,
-                      source: p.whitelabel_source,
-                    }}
-                  />
-                  <span className="text-[11px] text-slate-400">
+                  {user?.role === "superadmin" && (
+                    <WhitelabelCompToggle
+                      proId={p.id}
+                      initial={{
+                        comp: !!p.whitelabel_comp,
+                        paid: !!p.whitelabel_paid,
+                        unlocked: !!p.whitelabel_unlocked,
+                        source: p.whitelabel_source,
+                      }}
+                    />
+                  )}                  <span className="text-[11px] text-slate-400">
                     Joined {p.joined_at ? new Date(p.joined_at).toLocaleDateString() : "—"}
                   </span>
                 </div>
@@ -334,7 +335,12 @@ export default function AdminEnterpriseDetail() {
       </section>
 
       {/* ---------- Consolidated billing (Phase D) ---------- */}
-      <EnterpriseBillingSection eid={eid} />
+      {/* Superadmin-only: the Stripe billing endpoints below are
+          gated to superadmins on the backend anyway, so rendering
+          this section to a partner would just surface 403 toasts. */}
+      {user?.role === "superadmin" && (
+        <EnterpriseBillingSection eid={eid} />
+      )}
     </div>
   );
 }

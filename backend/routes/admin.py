@@ -1608,12 +1608,44 @@ async def orphan_fix_role_drift(user: dict = Depends(require_role("superadmin"))
     return {"elevated": result.modified_count}
 
 
-@router.get("/admin/enterprises/{eid}")
-async def get_enterprise(eid: str, user: dict = Depends(require_role("superadmin"))):
-    """Detail: enterprise + KPI roll-ups + companies list report."""
-    ent = await db.enterprises.find_one({"id": eid}, {"_id": 0})
+async def _require_enterprise_access(eid: str, user: dict) -> dict:
+    """Fetch the enterprise doc and verify the caller can act on it.
+
+    Superadmins → any enterprise.
+    Partners    → only enterprises they provisioned (`ent.partner_id
+                  == user.id`). Non-matching → 404 (not 403) to avoid
+                  leaking existence of other partners' rows.
+    Other roles → shouldn't reach here (role gate blocks first), but
+                  defense-in-depth 403 if they do.
+
+    Returns the enterprise doc so the caller doesn't need a second
+    round-trip. Raises HTTPException on any denial.
+    """
+    ent = await db.enterprises.find_one({"id": eid})
     if not ent:
         raise HTTPException(404, "Enterprise not found")
+    role = user.get("role")
+    if role == "superadmin":
+        return ent
+    if role == "partner":
+        if ent.get("partner_id") != user["id"]:
+            # Treat someone else's enterprise as "not found" — a
+            # partner shouldn't be able to enumerate the platform.
+            raise HTTPException(404, "Enterprise not found")
+        return ent
+    raise HTTPException(403, "Forbidden")
+
+
+@router.get("/admin/enterprises/{eid}")
+async def get_enterprise(eid: str,
+                         user: dict = Depends(require_role("superadmin", "partner"))):
+    """Detail: enterprise + KPI roll-ups + companies list report.
+
+    Available to Superadmins (any enterprise) and Partners (only
+    enterprises they provisioned — `ent.partner_id == user.id`). The
+    payload shape is identical for both roles so the frontend can
+    reuse the same detail view."""
+    ent = await _require_enterprise_access(eid, user)
     stats = await _ent.rollup_stats(eid)
 
     # Pros belonging to this enterprise (name + email so the detail page
@@ -1706,10 +1738,8 @@ async def get_enterprise(eid: str, user: dict = Depends(require_role("superadmin
 
 @router.patch("/admin/enterprises/{eid}")
 async def patch_enterprise(eid: str, inp: EnterprisePatch,
-                           user: dict = Depends(require_role("superadmin"))):
-    ent = await db.enterprises.find_one({"id": eid})
-    if not ent:
-        raise HTTPException(404, "Enterprise not found")
+                           user: dict = Depends(require_role("superadmin", "partner"))):
+    ent = await _require_enterprise_access(eid, user)
 
     updates: dict = {}
     if inp.name is not None:
