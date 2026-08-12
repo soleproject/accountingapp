@@ -628,27 +628,84 @@ async def get_pro_branding(user: dict = Depends(require_role("pro", "superadmin"
 @router.get("/branding/effective")
 async def get_effective_branding(user: dict = Depends(get_current_user)):
     """Return the branding the current user should SEE (as opposed to
-    edit). Pros/superadmins see their own. Client-users (owners) inherit
-    the branding of the pro who manages any company they belong to —
-    that's how firm branding cascades into the client's app."""
+    edit).
+
+    Cascade (specific → general):
+      1. Pro / Partner / Superadmin — always see their OWN branding.
+      2. Client / Enterprise-owner user — walks:
+           a) Enterprise brand — if their managing pro has an
+              `enterprise_id` and that enterprise's owner has WL
+              unlocked, return the enterprise owner's branding.
+           b) Partner brand — if the company was provisioned by a
+              Partner (company.partner_id set) and the Partner has WL
+              unlocked, return the Partner's branding.
+           c) Pro brand — existing behaviour: the managing pro's own
+              branding, if their WL is unlocked.
+           d) Platform default (empty) — no override anywhere in the
+              chain.
+
+    Rationale: each tier can opt out (turn WL off) and gracefully falls
+    through to the next. Guarantees a client of a private-labelled
+    Enterprise sees THAT enterprise's brand, and a client of a
+    non-private-labelled Enterprise-under-Partner sees the Partner's
+    brand, and everyone else sees SmartBooks.
+    """
     if user.get("role") in {"pro", "superadmin", "partner"}:
         doc = await db.users.find_one({"id": user["id"]})
         return _branding_out(doc or {})
-    # Owner / client-user: find a managing pro through shared company
-    # memberships. If they belong to multiple firms, pick the most recent
-    # pro relationship — an edge case for now, and deterministic enough.
+
+    # Owner / client-user — walk the cascade.
     memberships = await db.memberships.find({"user_id": user["id"]}).to_list(200)
     company_ids = [m["company_id"] for m in memberships if m.get("company_id")]
     if not company_ids:
         return _branding_out({})
+
+    # Load the most-recently-updated company the user belongs to as the
+    # "primary" — matches the transaction-scoping default we use
+    # elsewhere. Also carries partner_id + enterprise_id if set.
+    company = await db.companies.find_one(
+        {"id": {"$in": company_ids}},
+        sort=[("updated_at", -1)],
+    ) or {}
+
+    # 1) Enterprise brand — via the managing pro's enterprise_id.
     pro_ms = await db.memberships.find({
         "company_id": {"$in": company_ids},
         "role": "pro",
     }).sort("created_at", -1).to_list(50)
+    managing_pro = None
     for pm in pro_ms:
-        pro = await db.users.find_one({"id": pm["user_id"]})
-        if pro:
-            return _branding_out(pro)
+        p = await db.users.find_one({"id": pm["user_id"]})
+        if p:
+            managing_pro = p
+            break
+
+    if managing_pro and managing_pro.get("enterprise_id"):
+        ent = await db.enterprises.find_one({"id": managing_pro["enterprise_id"]})
+        if ent and ent.get("owner_user_id"):
+            ent_owner = await db.users.find_one({"id": ent["owner_user_id"]})
+            if ent_owner and _whitelabel_state(ent_owner).get("whitelabel_unlocked"):
+                return _branding_out(ent_owner)
+
+    # 2) Partner brand — via company.partner_id (stamped at create-time
+    #    for any company a Partner provisioned). Falls through to the
+    #    pro branding if the Partner hasn't unlocked WL yet.
+    if company.get("partner_id"):
+        partner_doc = await db.users.find_one({
+            "id": company["partner_id"], "role": "partner",
+        })
+        if partner_doc and _whitelabel_state(partner_doc).get("whitelabel_unlocked"):
+            return _branding_out(partner_doc)
+
+    # 3) Pro brand — the historical fallback. Returns pro branding
+    #    even if WL isn't unlocked (so the firm_name in the tab title
+    #    still shows something friendly). If your pro has WL locked,
+    #    the returned `whitelabel_unlocked: false` disables editable
+    #    fields on the client side but the display name still renders.
+    if managing_pro:
+        return _branding_out(managing_pro)
+
+    # 4) Platform default.
     return _branding_out({})
 
 
