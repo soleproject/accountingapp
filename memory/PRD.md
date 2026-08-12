@@ -4648,3 +4648,18 @@ mirror + one-click convert workflow.
 - MFA changes + password reset (auth flow additions)
 - Per-record `<AuditTimeline entity_type entity_id />` component embedded in InvoiceEditor / BillEditor / etc.
 
+
+---
+
+### Feb 2026 — Branding Cascade Fix for Enterprise-Owner Pros
+
+**Bug**: An Enterprise user (Pro role, WL locked) created under a Partner was incorrectly seeing the Superadmin/Platform default branding instead of the Partner's branding upon login.
+
+**Root cause**: `GET /api/branding/effective` short-circuited for role=`pro` and returned the Pro's OWN branding without ever walking the cascade to the parent Partner.
+
+**Fix**:
+- `routes/pro.py` — `/branding/effective` now, for role=`pro`, checks whether the Pro's WL is unlocked. If not, it walks to (a) `user.partner_id`, else (b) `enterprise.partner_id` via `user.enterprise_id`, and returns the Partner's branding when the Partner's WL is unlocked. Falls through to own brand → platform default otherwise.
+- `routes/admin.py` — `POST /admin/enterprises` now stamps BOTH `enterprise_id` AND `partner_id` on the resulting Pro owner user (when the caller is a Partner). Redundant with the enterprise-doc path but resilient.
+
+**Tests**: `tests/test_branding_cascade.py` extended with 4 new tests covering the Pro-as-Enterprise-Owner cascade (via direct `partner_id`, via `enterprise.partner_id`, own-WL-unlocked short-circuit, and locked+locked falls to own brand). All 8/8 pass. Verified end-to-end via curl creating a real enterprise as partner@axiom.ai and hitting `/branding/effective` as the newly-provisioned Pro owner — returns `firm_name: "AxiomPartners"` correctly.
+

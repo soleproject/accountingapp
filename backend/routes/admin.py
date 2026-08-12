@@ -774,10 +774,18 @@ async def create_enterprise(
     }
     await db.enterprises.insert_one(ent)
     if owner_user_id:
-        await db.users.update_one(
-            {"id": owner_user_id},
-            {"$set": {"enterprise_id": ent["id"]}},
-        )
+        # Stamp `enterprise_id` so the pro's dashboard scopes correctly
+        # and the branding cascade can walk owner_user -> enterprise_id
+        # -> enterprise.partner_id -> partner.branding.
+        update: dict = {"enterprise_id": ent["id"]}
+        # If the caller was a Partner, also directly stamp
+        # `partner_id` on the enterprise-owner Pro so the cascade has
+        # a one-hop path (`user.partner_id` -> partner). Redundant
+        # with the enterprise.partner_id path, but resilient if the
+        # enterprise doc is ever deleted or migrated separately.
+        if user.get("role") == "partner":
+            update["partner_id"] = user["id"]
+        await db.users.update_one({"id": owner_user_id}, {"$set": update})
 
     # Dispatch the welcome / invite email best-effort. Failure to email
     # never blocks the enterprise-create flow — the admin can hit
