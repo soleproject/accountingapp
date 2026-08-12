@@ -186,8 +186,20 @@ export default function AdminEnterpriseDetail() {
               <span className="text-slate-400">/</span>
               {editing ? (
                 <input
-                  type="number" min={0} max={10000} value={allotDraft}
-                  onChange={(e) => setAllotDraft(e.target.value)}
+                  type="number"
+                  min={0}
+                  max={user?.role === "partner" ? 2 : 10000}
+                  value={allotDraft}
+                  onChange={(e) => {
+                    // Partner cap — same 2-spot ceiling enforced on
+                    // the create modal AND on the backend. Clamp here
+                    // so the field never briefly holds a value the
+                    // backend would reject.
+                    const cap = user?.role === "partner" ? 2 : 10000;
+                    const raw = Number(e.target.value);
+                    if (Number.isNaN(raw)) return;
+                    setAllotDraft(Math.max(0, Math.min(cap, raw)));
+                  }}
                   className="w-16 border rounded-md px-1 py-0.5 text-xl font-mono-num"
                   data-testid="ent-allotment-input"
                 />

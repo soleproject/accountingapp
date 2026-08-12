@@ -1562,6 +1562,14 @@ export function NewClientModal({ onClose, onCreated }) {
 // unassigned and get a Pro attached later from the detail page.
 // -----------------------------------------------------------------------------
 export function NewEnterpriseModal({ onClose, onCreated }) {
+  const { user } = useAuth();
+  // Partner users are capped at 2 free spots per enterprise they
+  // provision (business policy — Partners resell paid seats). The
+  // backend enforces the same cap so a Partner can't bypass this by
+  // hitting the API directly.
+  const PARTNER_MAX_FREE_SPOTS = 2;
+  const isPartner = user?.role === "partner";
+  const freeSpotsMax = isPartner ? PARTNER_MAX_FREE_SPOTS : 10000;
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [ownerName, setOwnerName] = useState("");
@@ -1706,14 +1714,27 @@ export function NewEnterpriseModal({ onClose, onCreated }) {
               </select>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Free spots</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                Free spots
+                {isPartner && (
+                  <span className="ml-1 font-normal text-slate-400">
+                    (max {PARTNER_MAX_FREE_SPOTS} for partners)
+                  </span>
+                )}
+              </label>
               <input
                 data-testid="new-enterprise-free-spots"
                 type="number"
                 min="0"
-                max="10000"
+                max={freeSpotsMax}
                 value={freeSpots}
-                onChange={(e) => setFreeSpots(e.target.value)}
+                onChange={(e) => {
+                  // Client-side clamp so the field never even briefly
+                  // holds an out-of-range value for the current role.
+                  const raw = Number(e.target.value);
+                  if (Number.isNaN(raw)) return;
+                  setFreeSpots(Math.max(0, Math.min(freeSpotsMax, raw)));
+                }}
                 className="w-full px-3 py-2 rounded-md border border-slate-300 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
               />
             </div>
