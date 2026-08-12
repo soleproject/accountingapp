@@ -197,7 +197,48 @@ async def get_partner(
     if not p:
         raise HTTPException(404, "Partner not found")
     stats = await _p.rollup_stats(partner_id)
-    return {"partner": _p.serialize(p, stats=stats)}
+
+    # Pros the partner has provisioned — for the "Comped / Revoke"
+    # whitelabel column on the detail page. Mirrors the enterprise
+    # detail page's `pros` block so the same WhitelabelCompToggle
+    # component drops in as-is.
+    pros: list[dict] = []
+    async for u in db.users.find({
+        "partner_id": partner_id, "role": {"$in": ["pro", "partner"]},
+    }):
+        b = (u.get("branding") or {})
+        pros.append({
+            "id": u["id"],
+            "email": u.get("email"),
+            "name": u.get("name") or u.get("email"),
+            "firm_name": b.get("firm_name"),
+            "whitelabel_comp": bool(b.get("whitelabel_comp")),
+            "whitelabel_paid": bool(b.get("whitelabel_paid")),
+            "whitelabel_unlocked": bool(b.get("whitelabel_comp") or b.get("whitelabel_paid")),
+            "source": "comp" if b.get("whitelabel_comp") else ("paid" if b.get("whitelabel_paid") else None),
+            "created_at": u.get("created_at"),
+        })
+
+    # Client companies the partner owns (excluding their Partner Books)
+    companies: list[dict] = []
+    async for c in db.companies.find({
+        "partner_id": partner_id,
+        "is_partner_books": {"$ne": True},
+    }).sort("created_at", -1):
+        companies.append({
+            "id": c["id"], "name": c.get("name"),
+            "business_type": c.get("business_type"),
+            "owner_user_id": c.get("owner_user_id"),
+            "pro_user_id": c.get("pro_user_id"),
+            "onboarding_complete": bool(c.get("onboarding_complete")),
+            "created_at": c.get("created_at"),
+        })
+
+    return {
+        "partner": _p.serialize(p, stats=stats),
+        "pros": pros,
+        "companies": companies,
+    }
 
 
 @router.patch("/superadmin/partners/{partner_id}")

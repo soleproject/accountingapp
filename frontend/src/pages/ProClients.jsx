@@ -849,6 +849,15 @@ function PartnersGrid({ partners, loading }) {
                   </div>
                 )}
               </div>
+              <div className="mt-3 pt-3 border-t border-slate-100">
+                <Link
+                  to={`/admin/partners/${p.id}`}
+                  data-testid={`open-partner-${p.id}`}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-fuchsia-700 hover:text-fuchsia-900"
+                >
+                  Open partner <ExternalLink size={11} />
+                </Link>
+              </div>
             </div>
           </div>
         );
