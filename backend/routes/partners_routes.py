@@ -335,14 +335,37 @@ async def partner_clients(user: dict = Depends(require_role("partner", "superadm
 
 @router.get("/partner/enterprises")
 async def partner_enterprises(user: dict = Depends(require_role("partner", "superadmin"))):
-    """List enterprises this partner has provisioned."""
+    """List enterprises this partner has provisioned. Includes each
+    enterprise owner's white-label comp state so the Partner
+    Dashboard can render an inline "Comp WL" toggle per row without
+    a follow-up round-trip. Owners with no user account or without a
+    WL flag surface as `owner_whitelabel_comp: false`."""
     rows: list[dict] = []
-    async for e in db.enterprises.find({"partner_id": user["id"]}).sort("name", 1):
+    # Pre-fetch owner branding in one query — otherwise this is an
+    # N+1 across every enterprise.
+    ents = [e async for e in db.enterprises.find({"partner_id": user["id"]}).sort("name", 1)]
+    owner_ids = [e.get("owner_user_id") for e in ents if e.get("owner_user_id")]
+    owners: dict[str, dict] = {}
+    if owner_ids:
+        async for o in db.users.find(
+            {"id": {"$in": owner_ids}},
+            {"id": 1, "email": 1, "name": 1, "branding.whitelabel_comp": 1,
+             "branding.whitelabel_paid": 1, "_id": 0},
+        ):
+            owners[o["id"]] = o
+    for e in ents:
+        owner_id = e.get("owner_user_id")
+        owner = owners.get(owner_id) if owner_id else None
+        owner_b = (owner or {}).get("branding") or {}
         rows.append({
             "id": e["id"],
             "name": e.get("name"),
             "slug": e.get("slug"),
-            "owner_user_id": e.get("owner_user_id"),
+            "owner_user_id": owner_id,
+            "owner_email": (owner or {}).get("email"),
+            "owner_name": (owner or {}).get("name"),
+            "owner_whitelabel_comp": bool(owner_b.get("whitelabel_comp")),
+            "owner_whitelabel_paid": bool(owner_b.get("whitelabel_paid")),
             "created_at": e.get("created_at"),
         })
     return {"enterprises": rows, "count": len(rows)}

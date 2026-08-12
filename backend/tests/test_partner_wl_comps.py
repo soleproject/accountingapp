@@ -239,3 +239,176 @@ def test_partner_wl_comp_idempotent_when_owner_already_comped():
         finally:
             await _wipe([pid])
     _run(_t())
+
+
+# ---------------------------------------------------------------------------
+# Inline row-toggle path — `POST /admin/pros/{pro_id}/whitelabel-comp`
+# now accepts `partner` role, with the same 2-comp quota and a scope check
+# so partners can only flip pros in their own tree.
+# ---------------------------------------------------------------------------
+
+def test_partner_can_grant_wl_comp_via_admin_endpoint():
+    async def _t():
+        pid = await _mk_partner()
+        # Give the partner a Pro in their tree.
+        pro_uid = str(uuid.uuid4())
+        await db.users.insert_one({
+            "id": pro_uid,
+            "email": f"pro-{uuid.uuid4().hex[:6]}@example.com",
+            "name": "Pro In Tree", "password": hash_password("x"),
+            "role": "pro", "partner_id": pid,
+        })
+        try:
+            tok = create_token(pid, "partner")
+            async with await _client() as c:
+                r = await c.post(
+                    f"/api/admin/pros/{pro_uid}/whitelabel-comp",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"granted": True},
+                )
+            assert r.status_code == 200, r.text
+            pro = await db.users.find_one({"id": pro_uid})
+            assert (pro.get("branding") or {}).get("whitelabel_comp") is True
+        finally:
+            await _wipe([pid])
+    _run(_t())
+
+
+def test_partner_cannot_grant_wl_comp_on_pro_outside_their_tree():
+    async def _t():
+        p_a = await _mk_partner()
+        p_b = await _mk_partner()
+        # Pro belongs to Partner B.
+        pro_uid = str(uuid.uuid4())
+        await db.users.insert_one({
+            "id": pro_uid,
+            "email": f"pro-{uuid.uuid4().hex[:6]}@example.com",
+            "name": "Not In A's Tree", "password": hash_password("x"),
+            "role": "pro", "partner_id": p_b,
+        })
+        try:
+            tok_a = create_token(p_a, "partner")
+            async with await _client() as c:
+                r = await c.post(
+                    f"/api/admin/pros/{pro_uid}/whitelabel-comp",
+                    headers={"Authorization": f"Bearer {tok_a}"},
+                    json={"granted": True},
+                )
+            # 404 (enumeration guard) — never reveal that the pro exists
+            # under another partner.
+            assert r.status_code == 404
+            pro = await db.users.find_one({"id": pro_uid})
+            assert not (pro.get("branding") or {}).get("whitelabel_comp")
+        finally:
+            await _wipe([p_a, p_b])
+    _run(_t())
+
+
+def test_partner_grant_rejected_when_quota_exhausted():
+    async def _t():
+        pid = await _mk_partner()
+        # Two pros ALREADY comp'd — quota is full.
+        comped_ids = []
+        for _ in range(2):
+            u = str(uuid.uuid4())
+            await db.users.insert_one({
+                "id": u,
+                "email": f"c-{uuid.uuid4().hex[:6]}@example.com",
+                "name": "Comped", "password": hash_password("x"),
+                "role": "pro", "partner_id": pid,
+                "branding": {"whitelabel_comp": True},
+            })
+            comped_ids.append(u)
+        # Third pro in tree, NOT yet comped.
+        target = str(uuid.uuid4())
+        await db.users.insert_one({
+            "id": target,
+            "email": f"t-{uuid.uuid4().hex[:6]}@example.com",
+            "name": "Target", "password": hash_password("x"),
+            "role": "pro", "partner_id": pid,
+        })
+        try:
+            tok = create_token(pid, "partner")
+            async with await _client() as c:
+                r = await c.post(
+                    f"/api/admin/pros/{target}/whitelabel-comp",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"granted": True},
+                )
+            assert r.status_code == 400
+            tgt = await db.users.find_one({"id": target})
+            assert not (tgt.get("branding") or {}).get("whitelabel_comp")
+        finally:
+            await _wipe([pid])
+    _run(_t())
+
+
+def test_partner_can_revoke_wl_comp_even_at_quota():
+    """Revoking is unbounded — quota only gates GRANTS."""
+    async def _t():
+        pid = await _mk_partner()
+        # Two comp'd pros in the tree.
+        pros = []
+        for _ in range(2):
+            u = str(uuid.uuid4())
+            await db.users.insert_one({
+                "id": u,
+                "email": f"c-{uuid.uuid4().hex[:6]}@example.com",
+                "name": "Comped", "password": hash_password("x"),
+                "role": "pro", "partner_id": pid,
+                "branding": {"whitelabel_comp": True},
+            })
+            pros.append(u)
+        try:
+            tok = create_token(pid, "partner")
+            async with await _client() as c:
+                r = await c.post(
+                    f"/api/admin/pros/{pros[0]}/whitelabel-comp",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"granted": False},
+                )
+            assert r.status_code == 200, r.text
+            p = await db.users.find_one({"id": pros[0]})
+            assert (p.get("branding") or {}).get("whitelabel_comp") is False
+            # After revoke, quota is used=1/2.
+            async with await _client() as c:
+                r_q = await c.get("/api/partner/wl-comps",
+                                  headers={"Authorization": f"Bearer {tok}"})
+            assert r_q.json()["used"] == 1
+        finally:
+            await _wipe([pid])
+    _run(_t())
+
+
+def test_partner_enterprises_endpoint_returns_owner_wl_status():
+    """`GET /partner/enterprises` surfaces `owner_whitelabel_comp` on
+    each row so the frontend can render the toggle state."""
+    async def _t():
+        pid = await _mk_partner()
+        owner = str(uuid.uuid4())
+        await db.users.insert_one({
+            "id": owner,
+            "email": f"o-{uuid.uuid4().hex[:6]}@example.com",
+            "name": "Ent Owner", "password": hash_password("x"),
+            "role": "pro", "partner_id": pid,
+            "branding": {"whitelabel_comp": True},
+        })
+        eid = str(uuid.uuid4())
+        await db.enterprises.insert_one({
+            "id": eid, "name": "OwnerEnt", "slug": f"o-{uuid.uuid4().hex[:6]}",
+            "partner_id": pid, "owner_user_id": owner,
+        })
+        try:
+            tok = create_token(pid, "partner")
+            async with await _client() as c:
+                r = await c.get("/api/partner/enterprises",
+                                headers={"Authorization": f"Bearer {tok}"})
+            assert r.status_code == 200
+            rows = {e["id"]: e for e in r.json()["enterprises"]}
+            row = rows[eid]
+            assert row["owner_user_id"] == owner
+            assert row["owner_whitelabel_comp"] is True
+            assert row["owner_email"].startswith("o-")
+        finally:
+            await _wipe([pid])
+    _run(_t())

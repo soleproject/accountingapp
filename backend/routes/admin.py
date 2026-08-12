@@ -2144,12 +2144,21 @@ async def admin_list_pros(user: dict = Depends(require_role("superadmin"))):
 async def admin_toggle_whitelabel_comp(
     pro_id: str,
     inp: WhitelabelCompIn,
-    user: dict = Depends(require_role("superadmin")),
+    user: dict = Depends(require_role("superadmin", "partner")),
 ):
     """Flip ``branding.whitelabel_comp`` on for the target pro (or off
     when ``granted=False``). Stamps ``whitelabel_comp_at`` +
     ``whitelabel_comp_by`` for audit trail. Idempotent — repeated calls
-    with the same value just refresh the timestamp/actor."""
+    with the same value just refresh the timestamp/actor.
+
+    Role scoping:
+      * Superadmin — can flip any pro/partner/superadmin. No quota.
+      * Partner — can only flip pros in their own tree
+        (`target.partner_id == user.id`). Granting a new comp burns
+        one of the (max 2) partner WL-comp slots — same quota that
+        the create-time flag on `POST /admin/enterprises` uses.
+        Revoking is unbounded (partners can free slots back up).
+    """
     pro = await db.users.find_one({"id": pro_id})
     if not pro:
         raise HTTPException(404, "Pro not found")
@@ -2159,6 +2168,23 @@ async def admin_toggle_whitelabel_comp(
     # identical, so the same branding.whitelabel_comp flag works.
     if pro.get("role") not in {"pro", "superadmin", "partner"}:
         raise HTTPException(400, "Target user is not a Pro or Partner.")
+
+    # Partner scope + quota enforcement.
+    if user.get("role") == "partner":
+        if pro.get("partner_id") != user["id"]:
+            # 404 to avoid enumerating other partners' pros.
+            raise HTTPException(404, "Pro not found")
+        if inp.granted:
+            already = bool((pro.get("branding") or {}).get("whitelabel_comp"))
+            if not already:
+                used = await _partner_wl_comps_used(user["id"])
+                if used >= _PARTNER_MAX_WL_COMPS:
+                    raise HTTPException(
+                        400,
+                        f"You've already comp'd white-label for {used} of "
+                        f"{_PARTNER_MAX_WL_COMPS} allowed owners. Revoke one "
+                        f"before granting another.",
+                    )
     if inp.granted:
         await db.users.update_one(
             {"id": pro_id},
