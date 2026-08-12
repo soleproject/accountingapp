@@ -169,7 +169,9 @@ export default function ProSettings() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customEditTick]);
 
-  if (user && !["pro", "superadmin"].includes(user.role)) {
+  const isPartner = user?.role === "partner";
+
+  if (user && !["pro", "superadmin", "partner"].includes(user.role)) {
     return (
       <div className="max-w-2xl mx-auto py-8">
         <div className="rounded-xl border bg-white p-6 text-sm text-slate-600">
@@ -346,9 +348,13 @@ export default function ProSettings() {
   return (
     <div className="max-w-5xl mx-auto py-8 space-y-6" data-testid="pro-settings">
       <div>
-        <h1 className="font-heading text-3xl font-semibold">Enterprise settings</h1>
+        <h1 className="font-heading text-3xl font-semibold">
+          {isPartner ? "Partner settings" : "Enterprise settings"}
+        </h1>
         <p className="text-sm text-slate-500 mt-1">
-          Customize how your firm shows up to your team and your clients.
+          {isPartner
+            ? "Customize how your partner brand shows up to your enterprises and their clients — anything you set here cascades down UNLESS an enterprise has its own private-label turned on."
+            : "Customize how your firm shows up to your team and your clients."}
         </p>
       </div>
 
