@@ -694,6 +694,16 @@ class EnterpriseCreate(BaseModel):
     default_discount: bool = False
 
 
+# Feb 2026 policy — Partners get a per-enterprise Free-Spots cap. They
+# resell paid seats, so unlimited comp'ing would eat their margin. The
+# cap is enforced BOTH on create (`POST /admin/enterprises`) and on
+# subsequent edits (`PATCH /admin/enterprises/{eid}`) so a Partner can't
+# create an enterprise with 2 spots and then raise it to 100 later.
+# Superadmin bypass — they can raise the allotment to anything, so
+# comping past the cap remains a supported flow via the admin UI.
+_PARTNER_MAX_FREE_SPOTS = 2
+
+
 @router.post("/admin/enterprises")
 async def create_enterprise(
     payload: EnterpriseCreate,
@@ -710,6 +720,16 @@ async def create_enterprise(
     doesn't already exist, and dispatching a Resend magic-link
     welcome email so the new owner can log in and set their password.
     """
+    # Partner free-spots cap — reject before we do any DB work so
+    # the caller gets an immediate 400. UI clamps the input too but
+    # this is the defense-in-depth path against direct API calls.
+    if user.get("role") == "partner" and payload.free_user_allotment > _PARTNER_MAX_FREE_SPOTS:
+        raise HTTPException(
+            400,
+            f"Partners can allot at most {_PARTNER_MAX_FREE_SPOTS} free spots "
+            f"per enterprise. Ask a superadmin to raise the cap if the client "
+            f"needs more comp'd seats.",
+        )
     now = datetime.now(timezone.utc).isoformat()
     slug_base = _ent._slugify(payload.slug or payload.name)
     slug = await _ent._resolve_unique_slug(slug_base)
@@ -1750,7 +1770,18 @@ async def patch_enterprise(eid: str, inp: EnterprisePatch,
             raise HTTPException(400, "Enterprise name must be 80 characters or less.")
         updates["name"] = name
     if inp.free_user_allotment is not None:
-        updates["free_user_allotment"] = int(inp.free_user_allotment)
+        new_allot = int(inp.free_user_allotment)
+        # Same partner cap as `POST /admin/enterprises` — a partner
+        # can't lift the allotment past the enforced ceiling even on
+        # an enterprise they own, so the create-side cap actually
+        # sticks. Superadmin bypass is implicit (role check above).
+        if user.get("role") == "partner" and new_allot > _PARTNER_MAX_FREE_SPOTS:
+            raise HTTPException(
+                400,
+                f"Partners can allot at most {_PARTNER_MAX_FREE_SPOTS} free "
+                f"spots per enterprise. Ask a superadmin to raise the cap.",
+            )
+        updates["free_user_allotment"] = new_allot
     if inp.default_product is not None:
         if inp.default_product not in _ent.BILLING_PRODUCTS:
             raise HTTPException(
