@@ -53,7 +53,14 @@ const SERVICE_LABEL = {
   plaid_linked_item: "Plaid linked items",
 };
 
-export default function SuperadminUsage() {
+export default function SuperadminUsage({
+  // Override these to reuse this component for the partner-scoped
+  // view — same UI, different endpoint / breadcrumb / title.
+  endpoint = "/admin/usage",
+  title = "Usage & Costs",
+  breadcrumb = "SuperAdmin · Usage & Costs",
+  testId = "usage-page",
+} = {}) {
   const [range, setRange] = useState("month");
   const [category, setCategory] = useState("all");
   const [data, setData] = useState(null);
@@ -61,10 +68,11 @@ export default function SuperadminUsage() {
 
   useEffect(() => {
     setLoading(true);
-    api.get(`/admin/usage?range=${range}${category !== "all" ? `&category=${category}` : ""}`)
+    const sep = endpoint.includes("?") ? "&" : "?";
+    api.get(`${endpoint}${sep}range=${range}${category !== "all" ? `&category=${category}` : ""}`)
       .then(r => { setData(r.data); setLoading(false); })
       .catch(() => { setData({}); setLoading(false); });
-  }, [range, category]);
+  }, [range, category, endpoint]);
 
   const totals = data?.totals || {};
   const byFeature = data?.by_feature || [];
@@ -91,12 +99,12 @@ export default function SuperadminUsage() {
   }, [expected, byService]);
 
   return (
-    <div className="p-6 max-w-7xl mx-auto" data-testid="usage-page">
+    <div className="p-6 max-w-7xl mx-auto" data-testid={testId}>
       <div className="flex items-center gap-2 text-slate-500 text-sm mb-1">
-        <Activity size={14} /> SuperAdmin · Usage &amp; Costs
+        <Activity size={14} /> {breadcrumb}
       </div>
       <h1 className="text-2xl font-heading font-bold text-slate-900 mb-4">
-        Usage &amp; Costs
+        {title}
       </h1>
 
       {/* Date range chips */}

@@ -299,10 +299,9 @@ export default function PartnerDash() {
   async function load() {
     setErr("");
     try {
-      // Summary / clients / enterprises are essential and must all
-      // succeed. Financials + wl-comps are soft-required — if the
-      // endpoint fails (older backend, transient error) we still
-      // render the rest of the dashboard.
+      // Summary / clients / enterprises are essential; wl-comps
+      // quota is soft-required for the inline enterprise-row toggle.
+      // Financials moved to its own page (/partner/financials).
       const [s, c, e] = await Promise.all([
         api.get("/partner/summary"),
         api.get("/partner/clients"),
@@ -312,13 +311,11 @@ export default function PartnerDash() {
       setClients(c.data.clients || []);
       setEnterprises(e.data.enterprises || []);
       try {
-        const [f, w] = await Promise.all([
-          api.get("/partner/financials?months=3"),
-          api.get("/partner/wl-comps"),
-        ]);
-        // Piggy-back the wl-comp quota onto financials so a single
-        // state slot carries all the "meta" the UI needs.
-        setFinancials({ ...f.data, _wlComps: w.data });
+        const w = await api.get("/partner/wl-comps");
+        // `_wlComps` was previously piggy-backed on the financials
+        // state slot; keep the same shape so the EnterpriseRow
+        // toggle keeps reading `financials?._wlComps` unchanged.
+        setFinancials({ _wlComps: w.data });
       } catch {
         setFinancials(null);
       }
@@ -406,67 +403,8 @@ export default function PartnerDash() {
         />
       </div>
 
-      {/* Financials rollup — $-value Usage / Revenue / Margin scoped
-          to this Partner's tree. Loaded lazily; if the API errored we
-          still render the rest of the dashboard, this section just
-          stays absent so users aren't blocked. */}
-      {financials && (
-        <section
-          data-testid="partner-financials"
-          className="rounded-xl border border-slate-200 bg-white"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
-            <div>
-              <h2 className="text-xl font-semibold text-slate-900">
-                Financials
-              </h2>
-              <p className="text-xs text-slate-500">
-                Current month ({fmtMonth(financials.current_month_key)}) · {financials.tree_summary?.company_count || 0} companies · {financials.tree_summary?.enterprise_count || 0} enterprises
-              </p>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-3">
-            <MoneyTile
-              testid="partner-usage-tile"
-              label="Usage"
-              cents={financials.usage_cents_current}
-              sub="AI + service spend consumed by your tree"
-              Icon={Cpu}
-              tone="indigo"
-            />
-            <MoneyTile
-              testid="partner-revenue-tile"
-              label="Revenue"
-              cents={financials.revenue_cents_current}
-              sub="Consolidated invoices billed this month"
-              Icon={DollarSign}
-              tone="emerald"
-            />
-            <MoneyTile
-              testid="partner-margin-tile"
-              label="Margin"
-              cents={(financials.revenue_cents_current || 0) - (financials.usage_cents_current || 0)}
-              sub="Revenue − Usage (before Stripe / platform fees)"
-              Icon={TrendingUp}
-              tone={(financials.revenue_cents_current || 0) >= (financials.usage_cents_current || 0) ? "emerald" : "rose"}
-            />
-          </div>
-          <div className="grid grid-cols-1 gap-6 border-t border-slate-100 p-4 md:grid-cols-2">
-            <div>
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                Last 3 months
-              </div>
-              <TrendBars trend={financials.trend || []} />
-            </div>
-            <div>
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                Where usage went ({fmtMonth(financials.current_month_key)})
-              </div>
-              <ServiceBreakdown rows={financials.by_service_current || []} />
-            </div>
-          </div>
-        </section>
-      )}
+      {/* Financials moved to its own page — see `/partner/financials`
+          (Sidebar → "Partner Financials"). */}
 
       {/* Partner Books tile */}
       {s.has_partner_books && s.partner_books_company_id && (

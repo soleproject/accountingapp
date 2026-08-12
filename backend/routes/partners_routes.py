@@ -426,3 +426,39 @@ async def partner_wl_comps(user: dict = Depends(require_role("partner"))):
         "cap": _PARTNER_MAX_WL_COMPS,
         "remaining": max(0, _PARTNER_MAX_WL_COMPS - used),
     }
+
+
+@router.get("/partner/usage")
+async def partner_usage(
+    range: str = "month",
+    category: str | None = None,
+    user: dict = Depends(require_role("partner")),
+):
+    """Partner-scoped mirror of `/admin/usage` — same response shape
+    so the SuperadminUsage UI can be reused verbatim on the frontend.
+    Scoped to the partner's tree of companies (direct
+    `companies.partner_id` OR attached to an enterprise the partner
+    owns). Never leaks platform-wide spend.
+    """
+    if range not in {"7d", "30d", "90d", "month", "all"}:
+        range = "month"
+    if category not in {"all", "llm", "bank", "email", "ocr", None}:
+        category = None
+    # Reuse the same tree-walking helper the Financials rollup uses.
+    company_ids = await _p._partner_tree_company_ids(user["id"])
+    from ai_usage import get_summary, SERVICE_UNIT_PRICE_USD
+    summary = await get_summary(
+        range_key=range, category=category, company_ids=company_ids,
+    )
+    # Partners don't get the Plaid-live-count synthetic row — that's
+    # a platform-wide monthly-recurring line that only makes sense
+    # for the superadmin dashboard.
+    summary["expected_services"] = [
+        {"service": "openai_llm", "label": "OpenAI — LLM tokens", "unit": "token"},
+        {"service": "veryfi_ocr", "label": "Veryfi OCR", "unit": "document",
+         "unit_price_usd": SERVICE_UNIT_PRICE_USD.get("veryfi_ocr")},
+        {"service": "resend_email", "label": "Resend email", "unit": "email",
+         "unit_price_usd": SERVICE_UNIT_PRICE_USD.get("resend_email")},
+    ]
+    summary["tree_summary"] = {"company_count": len(company_ids)}
+    return summary
