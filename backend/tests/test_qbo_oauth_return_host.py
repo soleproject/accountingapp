@@ -61,7 +61,9 @@ async def _wipe(uids, cids):
     await db.qbo_oauth_states.delete_many({"company_id": {"$in": cids}})
 
 
-def test_oauth_start_captures_return_to_host_from_xforwarded_host():
+def test_oauth_start_captures_return_to_host_from_referer():
+    """The browser's Referer is the authoritative source — that's the
+    frontend page the user was on when they kicked off the flow."""
     async def _t():
         uid, tok, cid = await _mk_pro_and_company()
         try:
@@ -72,23 +74,24 @@ def test_oauth_start_captures_return_to_host_from_xforwarded_host():
                         f"/api/companies/{cid}/qbo/oauth/start",
                         headers={
                             "Authorization": f"Bearer {tok}",
-                            "x-forwarded-host": "enterprise.accountingapp.ai",
+                            "referer": "https://enterprise.accountingapp.ai/connections/qbo",
+                            # x-forwarded-host is `api.smartbookssoftware.ai`
+                            # here — the ingress may rewrite the host to the
+                            # flagship. Referer wins.
+                            "x-forwarded-host": "api.smartbookssoftware.ai",
                         },
                     )
             assert r.status_code == 200, r.text
             rec = await db.qbo_oauth_states.find_one({"company_id": cid})
             assert rec is not None
-            # The state record captures the frontend host so the
-            # callback knows where to send the user on success.
             assert rec.get("return_to_host") == "https://enterprise.accountingapp.ai"
         finally:
             await _wipe([uid], [cid])
     _run(_t())
 
 
-def test_oauth_start_strips_api_prefix_from_forwarded_host():
-    """If the label splits API onto `api.<label>`, the state should
-    still record the FRONTEND host (bare `<label>`)."""
+def test_oauth_start_uses_origin_when_referer_missing():
+    """Origin covers CORS POSTs that strip Referer."""
     async def _t():
         uid, tok, cid = await _mk_pro_and_company()
         try:
@@ -99,12 +102,40 @@ def test_oauth_start_strips_api_prefix_from_forwarded_host():
                         f"/api/companies/{cid}/qbo/oauth/start",
                         headers={
                             "Authorization": f"Bearer {tok}",
-                            "x-forwarded-host": "api.cypherpro.accountingapp.ai",
+                            "origin": "https://cypherpro.accountingapp.ai",
                         },
                     )
             assert r.status_code == 200
             rec = await db.qbo_oauth_states.find_one({"company_id": cid})
             assert rec.get("return_to_host") == "https://cypherpro.accountingapp.ai"
+        finally:
+            await _wipe([uid], [cid])
+    _run(_t())
+
+
+def test_oauth_start_skips_api_host_from_forwarded_host_fallback():
+    """When only `x-forwarded-host` is available AND it's an api.*
+    host, we return None rather than sending the user to a bare
+    non-app domain. The final redirect falls back to _APP_URL."""
+    async def _t():
+        uid, tok, cid = await _mk_pro_and_company()
+        try:
+            with patch("routes.qbo.Q.authorization_url",
+                       return_value="https://consent"):
+                async with await _client() as c:
+                    r = await c.post(
+                        f"/api/companies/{cid}/qbo/oauth/start",
+                        headers={
+                            "Authorization": f"Bearer {tok}",
+                            "x-forwarded-host": "api.smartbookssoftware.ai",
+                        },
+                    )
+            assert r.status_code == 200
+            rec = await db.qbo_oauth_states.find_one({"company_id": cid})
+            # No usable frontend host — stored as None so the callback
+            # falls through to the platform default rather than
+            # bouncing to bare `smartbookssoftware.ai`.
+            assert rec.get("return_to_host") is None
         finally:
             await _wipe([uid], [cid])
     _run(_t())
