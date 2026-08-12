@@ -1598,6 +1598,12 @@ export function NewEnterpriseModal({ onClose, onCreated }) {
     if (!name.trim()) { toast.error("Name is required"); return; }
     if (ownerEmail.trim() && !ownerEmailValid) { toast.error("Owner email looks invalid"); return; }
     if (ownerEmail.trim() && !ownerName.trim()) { toast.error("Owner name is required when you supply an email"); return; }
+    // Partner comp requires a target user — reject with a helpful
+    // toast if the checkbox is on but no owner was supplied.
+    if (isPartner && compOwnerWL && !ownerEmail.trim()) {
+      toast.error("Add an Owner login email — comps attach to a Pro user account.");
+      return;
+    }
     setBusy(true);
     try {
       const payload = {
@@ -1762,9 +1768,10 @@ export function NewEnterpriseModal({ onClose, onCreated }) {
           {/* Partner WL-comp toggle — burn one of the 2 available
               "comp white-label" slots to give this enterprise's owner
               a free private-label upgrade. Only rendered for
-              partners and only functional when an owner email was
-              supplied (there's no target user without one). Disabled
-              at the cap. */}
+              partners. The checkbox is enabled whenever the quota
+              still has room — the owner-email requirement is
+              validated at submit-time (inline warning) so the user
+              can check the box in any order they like. */}
           {isPartner && (
             <label
               data-testid="new-enterprise-comp-wl-label"
@@ -1778,10 +1785,7 @@ export function NewEnterpriseModal({ onClose, onCreated }) {
                 data-testid="new-enterprise-comp-wl"
                 type="checkbox"
                 checked={compOwnerWL}
-                disabled={
-                  !ownerEmail.trim() ||
-                  (wlComps && wlComps.remaining <= 0)
-                }
+                disabled={wlComps && wlComps.remaining <= 0}
                 onChange={(e) => setCompOwnerWL(e.target.checked)}
                 className="mt-0.5 rounded border-slate-300"
               />
@@ -1790,9 +1794,7 @@ export function NewEnterpriseModal({ onClose, onCreated }) {
                   Comp white-label for this enterprise owner
                 </div>
                 <div className="text-xs text-slate-500 mt-0.5">
-                  {!ownerEmail.trim()
-                    ? "Add an Owner login email above to enable this option — you can only comp an owner who has a user account."
-                    : wlComps
+                  {wlComps
                     ? (
                       <>
                         You've used{" "}
@@ -1811,6 +1813,15 @@ export function NewEnterpriseModal({ onClose, onCreated }) {
                     )
                     : "Checking your comp quota…"}
                 </div>
+                {compOwnerWL && !ownerEmail.trim() && (
+                  <div
+                    data-testid="new-enterprise-comp-wl-warn"
+                    className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1"
+                  >
+                    Add an Owner login email above — comps attach to a
+                    Pro user account, so we need someone to grant it to.
+                  </div>
+                )}
               </div>
             </label>
           )}
