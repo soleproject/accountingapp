@@ -373,9 +373,25 @@ export default function Sidebar({ collapsed, onToggle }) {
               <Sparkles size={16} />
             </div>
             {!showCollapsed && (
-              <div>
-                <div className="font-heading font-bold text-slate-900 leading-tight">SmartBooks</div>
-                <div className="text-[10px] tracking-widest uppercase text-slate-500 leading-tight">Ledger</div>
+              <div className="min-w-0">
+                {/* Firm name from branding.firm_name wins when the branding
+                    cascade returned an unlocked brand for this user (their
+                    own, or an inherited Partner / Enterprise). Falls back
+                    to the platform "SmartBooks / Ledger" wordmark. */}
+                {branding?.firm_name ? (
+                  <div
+                    className="font-heading font-bold text-slate-900 leading-tight truncate"
+                    title={branding.firm_name}
+                    data-testid="sidebar-firm-name"
+                  >
+                    {branding.firm_name}
+                  </div>
+                ) : (
+                  <>
+                    <div className="font-heading font-bold text-slate-900 leading-tight">SmartBooks</div>
+                    <div className="text-[10px] tracking-widest uppercase text-slate-500 leading-tight">Ledger</div>
+                  </>
+                )}
               </div>
             )}
           </>
