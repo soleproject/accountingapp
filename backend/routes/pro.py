@@ -651,8 +651,31 @@ async def get_effective_branding(user: dict = Depends(get_current_user)):
     brand, and everyone else sees SmartBooks.
     """
     if user.get("role") in {"pro", "superadmin", "partner"}:
-        doc = await db.users.find_one({"id": user["id"]})
-        return _branding_out(doc or {})
+        doc = await db.users.find_one({"id": user["id"]}) or {}
+        # Pros that live under a Partner cascade to the Partner's
+        # branding when their OWN white-label isn't unlocked. This
+        # matches the client-user cascade: "specific over general"
+        # (Pro's own → Partner → Platform), just for the tier one
+        # level up. Partners and Superadmins always return their own
+        # (they ARE the brand source).
+        if user.get("role") == "pro":
+            own_wl = _whitelabel_state(doc).get("whitelabel_unlocked")
+            if not own_wl:
+                # Two paths to a Partner: directly on the Pro
+                # (`partner_id`) or via the Enterprise the Pro owns
+                # (`enterprise.partner_id`). Both stamped at
+                # provisioning time.
+                partner_uid = doc.get("partner_id")
+                if not partner_uid and doc.get("enterprise_id"):
+                    ent = await db.enterprises.find_one({"id": doc["enterprise_id"]})
+                    partner_uid = (ent or {}).get("partner_id")
+                if partner_uid:
+                    partner_doc = await db.users.find_one({
+                        "id": partner_uid, "role": "partner",
+                    })
+                    if partner_doc and _whitelabel_state(partner_doc).get("whitelabel_unlocked"):
+                        return _branding_out(partner_doc)
+        return _branding_out(doc)
 
     # Owner / client-user — walk the cascade.
     memberships = await db.memberships.find({"user_id": user["id"]}).to_list(200)
