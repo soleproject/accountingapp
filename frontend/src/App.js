@@ -23,6 +23,7 @@ import SuperadminDash from "@/pages/SuperadminDash";
 import SuperadminUsage from "@/pages/SuperadminUsage";
 import SuperadminStripeWebhooks from "@/pages/SuperadminStripeWebhooks";
 import PartnerDash from "@/pages/PartnerDash";
+import PartnerFinancials from "@/pages/PartnerFinancials";
 import AdminPartnerDetail from "@/pages/AdminPartnerDetail";
 import ProClients from "@/pages/ProClients";
 import AdminEnterpriseDetail from "@/pages/AdminEnterpriseDetail";
@@ -123,6 +124,7 @@ function App() {
               <Route path="/admin/usage" element={<SuperadminUsage />} />
               <Route path="/admin/stripe-webhooks" element={<SuperadminStripeWebhooks />} />
               <Route path="/partner" element={<PartnerDash />} />
+              <Route path="/partner/financials" element={<PartnerFinancials />} />
               <Route path="/admin/partners/:pid" element={<AdminPartnerDetail />} />
               <Route path="/admin/enterprises/:eid" element={<AdminEnterpriseDetail />} />
               <Route path="/pro/clients" element={<ProClients />} />

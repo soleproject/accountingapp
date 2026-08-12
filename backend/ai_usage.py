@@ -355,17 +355,39 @@ def _range_start(range_key: str) -> str:
     return (now - timedelta(days=30)).isoformat()
 
 
-async def get_summary(range_key: str = "month", category: str | None = None) -> dict:
+async def get_summary(
+    range_key: str = "month",
+    category: str | None = None,
+    company_ids: list[str] | None = None,
+) -> dict:
     """Return the aggregated dashboard payload:
         totals { cost_cents, events, unique_users, avg_cost_cents }
         by_feature [{feature, events, cost_cents}]
         by_service [{service, quantity, unit, unit_price_usd, cost_cents}]
         by_category [{category, cost_cents}]  ← llm | bank | email | ocr
+
+    `company_ids` (optional) — restrict the rollup to events emitted
+    on companies in this list. Used by the partner-scoped
+    `/partner/usage` endpoint to keep partners from seeing platform-
+    wide spend. `None` = no filter (admin view).
     """
     since = _range_start(range_key)
     match: dict = {"ts": {"$gte": since}}
     if category and category != "all":
         match["category_key"] = category  # only used when we build category_key upstream
+    if company_ids is not None:
+        # Explicit empty-list guard — partners with zero tree companies
+        # should see zeros, not the whole platform (Mongo treats `$in: []`
+        # as "match nothing" already but this makes the intent explicit).
+        if not company_ids:
+            return {
+                "range": range_key, "since": since,
+                "totals": {"cost_cents": 0, "events": 0,
+                           "unique_users": 0, "avg_cost_cents": 0},
+                "by_feature": [], "by_service": [], "by_category": [],
+                "by_company": [], "by_user": [],
+            }
+        match["company_id"] = {"$in": company_ids}
 
     events = await db.ai_usage_events.find(match).to_list(50_000)
 

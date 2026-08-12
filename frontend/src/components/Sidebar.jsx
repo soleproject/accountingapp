@@ -448,6 +448,18 @@ export default function Sidebar({ collapsed, onToggle }) {
           }} />
         )}
 
+        {/* Partner Financials — sits directly under "Partner Clients"
+            as its own top-level nav. Superadmin has its own
+            "Usage & Costs" entry higher up; partners get a scoped
+            copy of that same page here. */}
+        {user?.role === "partner" && (
+          <Item item={{
+            to: "/partner/financials",
+            label: "Partner Financials",
+            icon: Activity,
+          }} />
+        )}
+
         {/* Dashboard */}
         {STANDALONE_TOP.map((it) => <Item key={it.label} item={it} />)}
 
