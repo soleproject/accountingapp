@@ -631,7 +631,7 @@ async def get_effective_branding(user: dict = Depends(get_current_user)):
     edit). Pros/superadmins see their own. Client-users (owners) inherit
     the branding of the pro who manages any company they belong to —
     that's how firm branding cascades into the client's app."""
-    if user.get("role") in {"pro", "superadmin"}:
+    if user.get("role") in {"pro", "superadmin", "partner"}:
         doc = await db.users.find_one({"id": user["id"]})
         return _branding_out(doc or {})
     # Owner / client-user: find a managing pro through shared company
