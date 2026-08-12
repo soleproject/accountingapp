@@ -4691,3 +4691,19 @@ The Partner Dashboard previously showed only entity counts (Clients / Enterprise
 **Tests**: `tests/test_partner_financials.py` — 5 tests covering direct-client usage sum, enterprise invoice revenue, enterprise-attached companies pulled via `enterprise_id`, 3-month trend window, and Partner-vs-Partner isolation. All 5/5 pass standalone; 24/24 pass alongside `test_partners.py` + `test_branding_cascade.py` (all three files now share a single event loop via `tests/_shared_loop.py` so Motor's cached-loop bug doesn't fire when xdist pins them to the same worker).
 
 **Verified end-to-end**: Seeded usage + revenue rows for `partner@axiom.ai`; Playwright screenshot confirmed tiles show `$58.60 Usage · $245.00 Revenue · $186.40 Margin` with per-service breakdown (`openai_llm $42.70`, `veryfi_ocr $12.50`, `resend_email $3.40`) and a 3-month trend.
+
+
+### Feb 2026 — QBO OAuth: Private-Label Return-to-Host Fix
+
+**Bug**: Client on `enterprise.accountingapp.ai` clicks "Connect to QuickBooks Online", completes Intuit consent, and gets bounced to `app.smartbookssoftware.ai/login` instead of back to `enterprise.accountingapp.ai/connections/qbo`.
+
+**Root cause**: The QBO callback's success `RedirectResponse` used the platform default `_APP_URL` (`app.smartbookssoftware.ai`) instead of the private-label host. Error paths already used `_label_app_url(rec)`, but success forgot. Also, `_label_app_url` only knew how to strip an `api.` prefix — it couldn't handle shared-host labels (`enterprise.accountingapp.ai` where the app and API run on the same subdomain) and the whitelist `_QBO_ALLOWED_HOSTS` gate meant `redirect_uri` was `None` for those labels, so we had NO record of where the user came from.
+
+**Fix** (`routes/qbo.py`):
+1. Introduced `_return_to_host_from_request(request)` which grabs the frontend host from `x-forwarded-host` (or falls back to `origin`/`referer`), strips any `api.` prefix, and returns `https://<host>`. Independent of the Intuit-registered redirect URI whitelist — every label captures a return host, even shared-host labels.
+2. `POST /companies/{cid}/qbo/oauth/start` now persists `return_to_host` alongside `redirect_uri` on the state record.
+3. `_label_app_url(rec)` now checks `return_to_host` FIRST, then falls back to the legacy `api.*` strip on `redirect_uri`, then to `_APP_URL`.
+4. **Success redirect fixed** — now uses `_label_app_url(rec)` (was hardcoded `_APP_URL`).
+5. Error early-exit (Intuit `error`, missing params) now peeks the state record before returning so "No thanks" also lands on the label's own frontend.
+
+**Tests**: `tests/test_qbo_oauth_return_host.py` — 5 tests: `x-forwarded-host` capture, `api.*` prefix strip, success-redirects-to-label, error-redirects-to-label, and legacy state without `return_to_host` falls back to platform default. All 5/5 pass; 29/29 pass alongside partner + branding suites.
