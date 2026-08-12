@@ -387,3 +387,19 @@ async def partner_financials(
     """
     months = max(1, min(int(months or 3), 12))
     return await _p.partner_financials(user["id"], months=months)
+
+
+@router.get("/partner/wl-comps")
+async def partner_wl_comps(user: dict = Depends(require_role("partner"))):
+    """Return the partner's remaining white-label comp quota so the
+    Add-Enterprise modal (and future partner UIs) can show
+    "X of 2 used" and disable the comp checkbox when exhausted."""
+    # `_partner_wl_comps_used` lives in `routes/admin.py` — import
+    # inline to avoid a circular dependency at module load.
+    from routes.admin import _partner_wl_comps_used, _PARTNER_MAX_WL_COMPS
+    used = await _partner_wl_comps_used(user["id"])
+    return {
+        "used": used,
+        "cap": _PARTNER_MAX_WL_COMPS,
+        "remaining": max(0, _PARTNER_MAX_WL_COMPS - used),
+    }

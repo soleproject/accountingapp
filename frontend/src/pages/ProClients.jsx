@@ -1578,6 +1578,16 @@ export function NewEnterpriseModal({ onClose, onCreated }) {
   const [defaultProduct, setDefaultProduct] = useState("simple_start");
   const [defaultDiscount, setDefaultDiscount] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Partner WL-comp quota — fetched on mount so the checkbox shows
+  // the accurate "X of 2 used" count and greys out at the cap. Only
+  // relevant when the caller is a partner.
+  const [compOwnerWL, setCompOwnerWL] = useState(false);
+  const [wlComps, setWlComps] = useState(null); // { used, cap, remaining }
+  useEffect(() => {
+    if (!isPartner) return;
+    api.get("/partner/wl-comps").then(r => setWlComps(r.data))
+      .catch(() => setWlComps({ used: 0, cap: 2, remaining: 2 }));
+  }, [isPartner]);
 
   const slugify = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   const effectiveSlug = slug.trim() || slugify(name);
@@ -1601,15 +1611,25 @@ export function NewEnterpriseModal({ onClose, onCreated }) {
         payload.owner_email = ownerEmail.trim();
         payload.owner_name = ownerName.trim();
       }
+      // Only ship the comp flag when partner AND owner is set AND
+      // quota allows — the server rechecks so this is UX, not
+      // enforcement.
+      if (isPartner && compOwnerWL && ownerEmail.trim()) {
+        payload.comp_owner_whitelabel = true;
+      }
       const r = await api.post("/admin/enterprises", payload);
       const emailStatus = r.data?.email_status;
       const ownerProvisioned = r.data?.owner_provisioned;
+      const compApplied = r.data?.comp_applied;
       if (ownerProvisioned && emailStatus === "sent") {
         toast.success(`Enterprise created — magic-link login sent to ${ownerEmail.trim()}`);
       } else if (ownerProvisioned) {
         toast.success(`Enterprise created — owner account provisioned (email dispatch: ${emailStatus || "unknown"})`);
       } else {
         toast.success(`Enterprise "${name.trim()}" created`);
+      }
+      if (compApplied) {
+        toast.success("White-label comp applied to the enterprise owner.");
       }
       onCreated && onCreated();
     } catch (e) {
@@ -1739,6 +1759,61 @@ export function NewEnterpriseModal({ onClose, onCreated }) {
               />
             </div>
           </div>
+          {/* Partner WL-comp toggle — burn one of the 2 available
+              "comp white-label" slots to give this enterprise's owner
+              a free private-label upgrade. Only rendered for
+              partners and only functional when an owner email was
+              supplied (there's no target user without one). Disabled
+              at the cap. */}
+          {isPartner && (
+            <label
+              data-testid="new-enterprise-comp-wl-label"
+              className={`flex items-start gap-2 text-sm rounded-md border p-3 ${
+                compOwnerWL
+                  ? "border-indigo-200 bg-indigo-50"
+                  : "border-slate-200 bg-slate-50"
+              }`}
+            >
+              <input
+                data-testid="new-enterprise-comp-wl"
+                type="checkbox"
+                checked={compOwnerWL}
+                disabled={
+                  !ownerEmail.trim() ||
+                  (wlComps && wlComps.remaining <= 0)
+                }
+                onChange={(e) => setCompOwnerWL(e.target.checked)}
+                className="mt-0.5 rounded border-slate-300"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-slate-800">
+                  Comp white-label for this enterprise owner
+                </div>
+                <div className="text-xs text-slate-500 mt-0.5">
+                  {!ownerEmail.trim()
+                    ? "Add an Owner login email above to enable this option — you can only comp an owner who has a user account."
+                    : wlComps
+                    ? (
+                      <>
+                        You've used{" "}
+                        <span className="font-mono-num font-semibold">
+                          {wlComps.used}
+                        </span>
+                        {" "}of{" "}
+                        <span className="font-mono-num font-semibold">
+                          {wlComps.cap}
+                        </span>
+                        {" "}partner comps.
+                        {wlComps.remaining <= 0
+                          ? " No comps remaining — revoke an existing one to grant another."
+                          : ` ${wlComps.remaining} left after this one is used.`}
+                      </>
+                    )
+                    : "Checking your comp quota…"}
+                </div>
+              </div>
+            </label>
+          )}
           <label className="inline-flex items-center gap-2 text-sm text-slate-700">
             <input
               data-testid="new-enterprise-discount"

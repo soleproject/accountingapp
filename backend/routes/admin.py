@@ -692,6 +692,33 @@ class EnterpriseCreate(BaseModel):
     free_user_allotment: int = Field(default=0, ge=0, le=10_000)
     default_product: str = "simple_start"
     default_discount: bool = False
+    # When a Partner creates an enterprise WITH an owner (email
+    # provided or an existing pro is attached), they can burn one of
+    # their (max 2) WL comps to give that owner white-label for free.
+    # Ignored for non-partner callers and for enterprises without an
+    # owner — the flag only takes effect when there's a target user
+    # to stamp. Enforced against the partner's remaining quota;
+    # rejects with 400 if the partner is at the cap already.
+    comp_owner_whitelabel: bool = False
+
+
+# Feb 2026 policy — a Partner can comp white-label for at most 2
+# owners in their tree (total across every enterprise they've
+# provisioned). Superadmin bypasses this via the existing
+# `POST /admin/pros/{pro_id}/whitelabel-comp` endpoint.
+_PARTNER_MAX_WL_COMPS = 2
+
+
+async def _partner_wl_comps_used(partner_id: str) -> int:
+    """Count of pros in the partner's tree currently holding a
+    non-revoked WL comp. Used both to gate the create-time toggle and
+    to surface the "X of 2 used" hint in the UI. A revoked comp
+    (`whitelabel_comp = False`) doesn't count — reinstating a
+    previously-revoked partner would just fill an empty slot."""
+    return await db.users.count_documents({
+        "partner_id": partner_id,
+        "branding.whitelabel_comp": True,
+    })
 
 
 # Feb 2026 policy — Partners get a per-enterprise Free-Spots cap. They
@@ -807,6 +834,52 @@ async def create_enterprise(
             update["partner_id"] = user["id"]
         await db.users.update_one({"id": owner_user_id}, {"$set": update})
 
+    # WL-comp burn (Feb 2026) — a Partner can flip on white-label for
+    # the enterprise owner in the same request they use to provision
+    # the enterprise. Cap at `_PARTNER_MAX_WL_COMPS` (2) across their
+    # entire tree. We enforce AFTER inserting the enterprise so that
+    # if the cap is exceeded we roll back the enterprise + provisioned
+    # owner rather than leaving a partially-configured record.
+    comp_applied = False
+    if (
+        payload.comp_owner_whitelabel
+        and user.get("role") == "partner"
+        and owner_user_id
+    ):
+        used = await _partner_wl_comps_used(user["id"])
+        # Don't double-count if the owner ALREADY has a WL comp
+        # (idempotent for the "attach existing pro" flow).
+        already_comped = False
+        target = await db.users.find_one(
+            {"id": owner_user_id},
+            {"branding.whitelabel_comp": 1, "_id": 0},
+        )
+        if target and (target.get("branding") or {}).get("whitelabel_comp"):
+            already_comped = True
+
+        if not already_comped and used >= _PARTNER_MAX_WL_COMPS:
+            # Roll back the enterprise + owner we just wrote.
+            await db.enterprises.delete_one({"id": ent["id"]})
+            if owner_provisioned:
+                await db.users.delete_one({"id": owner_user_id})
+            raise HTTPException(
+                400,
+                f"You've already comp'd white-label for {used} of "
+                f"{_PARTNER_MAX_WL_COMPS} allowed owners. Revoke one from "
+                f"an existing enterprise before granting another.",
+            )
+
+        if not already_comped:
+            await db.users.update_one(
+                {"id": owner_user_id},
+                {"$set": {
+                    "branding.whitelabel_comp": True,
+                    "branding.whitelabel_comp_at": now,
+                    "branding.whitelabel_comp_by": user["id"],
+                }},
+            )
+            comp_applied = True
+
     # Dispatch the welcome / invite email best-effort. Failure to email
     # never blocks the enterprise-create flow — the admin can hit
     # "Resend welcome link" from the enterprise detail page later.
@@ -849,6 +922,7 @@ async def create_enterprise(
         "owner_provisioned": owner_provisioned,
         "email_status": email_status,
         "email_error": email_error,
+        "comp_applied": comp_applied,
     }
 
 
