@@ -476,10 +476,11 @@ export default function PartnerDash() {
           ) : (
             <div className="divide-y divide-slate-100">
               {enterprises.map((e) => (
-                <div
+                <Link
                   key={e.id}
+                  to={`/admin/enterprises/${e.id}`}
                   data-testid={`partner-enterprise-row-${e.id}`}
-                  className="flex items-center gap-3 p-3"
+                  className="flex items-center gap-3 p-3 hover:bg-slate-50 rounded-md"
                 >
                   <Building className="h-4 w-4 text-slate-400" />
                   <div className="flex-1 min-w-0">
@@ -488,7 +489,8 @@ export default function PartnerDash() {
                       {e.slug || "—"}
                     </div>
                   </div>
-                </div>
+                  <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
+                </Link>
               ))}
             </div>
           )}

@@ -4716,3 +4716,29 @@ The Partner Dashboard previously showed only entity counts (Clients / Enterprise
 5. Error early-exit peeks the state record so "No thanks" also lands on the label host.
 
 **Tests**: `tests/test_qbo_oauth_return_host.py` — 6 tests now: Referer capture, Origin-fallback capture, api.* host in x-forwarded-host returns None (guards the bare-domain bug), success redirect to label, error redirect to label, and legacy state without `return_to_host` falls back to platform. All 6/6 pass; 30/30 pass alongside partner + branding suites.
+
+
+### Feb 2026 — Partners can Edit their own Enterprises
+
+Extended `GET` + `PATCH /admin/enterprises/{eid}` so Partners can view and edit the enterprises they've provisioned. Superadmins retain unrestricted access; every other role is 403; a Partner asking for another partner's enterprise gets **404** (deliberate enumeration guard — never reveals existence of rows in another partner's tree).
+
+**Backend** (`routes/admin.py`):
+- New `_require_enterprise_access(eid, user)` helper — fetches the enterprise, verifies role: `superadmin → any`, `partner → only ent.partner_id == user.id`, else 403.
+- Role gate on `GET /admin/enterprises/{eid}` and `PATCH /admin/enterprises/{eid}` widened to `("superadmin", "partner")`; both call the helper before touching data.
+- Response shape unchanged so the frontend detail view reuses the same component.
+
+**Frontend** (`pages/AdminEnterpriseDetail.jsx`):
+- Role gate widened to allow `partner`.
+- `WhitelabelCompToggle` and `EnterpriseBillingSection` conditionally rendered — only for `superadmin`. Partners see the name/allotment editor, pros list, and companies table, but not the superadmin-only comp toggle or Stripe billing controls (those endpoints are still superadmin-gated on the backend).
+
+**PartnerDash** (`pages/PartnerDash.jsx`): Enterprise rows are now clickable `<Link>`s to `/admin/enterprises/{eid}`. Clients rows already were.
+
+**Tests**: `tests/test_partner_enterprise_access.py` — 6 tests:
+- Partner GET own enterprise ✅ 200
+- Partner GET another partner's enterprise ✅ 404 (enumeration guard)
+- Partner PATCH own enterprise (rename) ✅ 200 + DB updated
+- Partner PATCH another partner's enterprise ✅ 404 + DB unchanged
+- Pro role still 403 on both GET + PATCH
+- Superadmin still gets any enterprise
+
+All 6/6 pass; 36/36 pass across partner + branding + QBO + enterprise-access suites. Verified end-to-end via Playwright: partner@axiom.ai clicked an enterprise row → landed on detail page with Edit button visible, WL toggle + Billing section correctly hidden.
