@@ -236,6 +236,21 @@ async def get_partner(
 
     return {
         "partner": _p.serialize(p, stats=stats),
+        # The partner's OWN whitelabel status — surfaced as its own
+        # block so the Superadmin can grant/revoke the partner's
+        # white-label without a Pro row to hang the toggle on. (The
+        # partner is a Pro-like user; the `/admin/pros/{id}/whitelabel-
+        # comp` endpoint works for them directly.)
+        "partner_wl": {
+            "unlocked": bool(
+                (p.get("branding") or {}).get("whitelabel_comp")
+                or (p.get("branding") or {}).get("whitelabel_paid")
+            ),
+            "source": (
+                "comp" if (p.get("branding") or {}).get("whitelabel_comp")
+                else ("paid" if (p.get("branding") or {}).get("whitelabel_paid") else None)
+            ),
+        },
         "pros": pros,
         "companies": companies,
     }

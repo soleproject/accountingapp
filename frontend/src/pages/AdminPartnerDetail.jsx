@@ -128,6 +128,45 @@ export default function AdminPartnerDetail() {
         />
       </div>
 
+      {/* Partner's own white-label — the Partner themselves is a
+          Pro-like user, so they get a comp toggle too. This is what
+          lets a Superadmin grant AxiomPartners (the reseller) free
+          white-label without them running the Stripe checkout. */}
+      <section className="rounded-xl border border-slate-200 bg-white">
+        <div className="flex items-center justify-between border-b border-slate-100 p-4">
+          <div className="flex items-center gap-2">
+            <Handshake size={16} className="text-fuchsia-500" />
+            <h2 className="text-lg font-semibold text-slate-900">
+              Partner white-label
+            </h2>
+          </div>
+          <div className="text-xs text-slate-500">
+            Grant this partner free white-label (comp) or revoke a prior comp
+          </div>
+        </div>
+        <div className="flex items-center gap-3 p-4" data-testid="partner-self-wl-row">
+          <div
+            className="flex h-8 w-8 items-center justify-center rounded font-semibold text-white text-xs"
+            style={{ backgroundColor: brandColor }}
+          >
+            {(p.display_name || p.name || "?").charAt(0).toUpperCase()}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold text-slate-900 truncate">
+              {p.display_name || p.name}
+            </div>
+            <div className="text-xs text-slate-500 truncate">{p.email}</div>
+          </div>
+          <WhitelabelCompToggle
+            proId={p.id}
+            initial={{
+              whitelabel_unlocked: !!(p.whitelabel_unlocked ?? data.partner_wl?.unlocked),
+              source: p.wl_source ?? data.partner_wl?.source ?? null,
+            }}
+          />
+        </div>
+      </section>
+
       {/* Pros — Comped / Revoke column reused from AdminEnterpriseDetail */}
       <section className="rounded-xl border border-slate-200 bg-white">
         <div className="flex items-center justify-between border-b border-slate-100 p-4">
