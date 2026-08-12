@@ -197,6 +197,15 @@ function ProfileMenu() {
   const name = user.name || user.email?.split("@")[0] || "User";
   const initials = name.split(/\s+/).map(s => s[0]).slice(0, 2).join("").toUpperCase();
   const isPro = ["pro", "superadmin"].includes(user.role);
+  const isPartner = user.role === "partner";
+  // Partners get the same profile-menu shape as Pros (Settings, Team,
+  // Change password, Sign out) because they inherit every Pro power.
+  // The Settings link routes to `/pro/settings` — that page already
+  // reads `branding.firm_name / subdomain / logo_url / primary_color`
+  // off the user doc, and Partners have the exact same shape, so it
+  // Just Works with a role-aware heading swap ("Partner settings"
+  // instead of "Enterprise settings").
+  const showProMenu = isPro || isPartner;
 
   return (
     <div className="relative" ref={ref}>
@@ -227,7 +236,7 @@ function ProfileMenu() {
               {user.role || "user"}
             </div>
           </div>
-          {isPro && (
+          {showProMenu && (
             <Link
               to="/pro/settings"
               onClick={() => setOpen(false)}
@@ -237,17 +246,17 @@ function ProfileMenu() {
               <Settings2 size={14} className="text-slate-500" /> Settings
             </Link>
           )}
-          {isPro && (
+          {showProMenu && (
             <Link
               to="/pro/team"
               onClick={() => setOpen(false)}
               data-testid="profile-menu-team"
               className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50"
             >
-              <User size={14} className="text-slate-500" /> Firm staff
+              <User size={14} className="text-slate-500" /> {isPartner ? "Partner staff" : "Firm staff"}
             </Link>
           )}
-          {!isPro && user?.role !== "superadmin" && (
+          {!showProMenu && user?.role !== "superadmin" && (
             <Link
               to="/team"
               onClick={() => setOpen(false)}
