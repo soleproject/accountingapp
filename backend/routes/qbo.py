@@ -67,6 +67,54 @@ def _redirect_uri_from_request(request: Request) -> str | None:
     return None
 
 
+def _return_to_host_from_request(request: Request) -> str | None:
+    """Capture the FRONTEND host the user is browsing when they kick
+    off the OAuth flow. This is stored on the state record so the
+    callback (which runs on whichever API host Intuit sends it to)
+    can bounce the user back to the correct label's frontend.
+
+    Independent of `_redirect_uri_from_request` — the Intuit callback
+    URL is constrained to hosts Intuit knows about, but the FINAL
+    redirect at the end of the flow can be ANY frontend host our app
+    serves. Sources checked (highest priority first):
+
+      1. `x-forwarded-host` — the label's public hostname as seen by
+         the edge proxy. This is the source of truth for private-label
+         subdomains that share a host with the API (i.e. no separate
+         `api.` split).
+      2. `origin` / `referer` — fallback if the proxy strips the
+         forwarding header for some reason.
+
+    Returns a scheme+host string like `https://enterprise.accountingapp.ai`
+    or `None` if we can't determine it (caller falls back to
+    `_APP_URL`)."""
+    host = (
+        request.headers.get("x-forwarded-host")
+        or request.headers.get("host")
+        or ""
+    ).split(":")[0].lower()
+    if host:
+        # Strip a leading `api.` — some deployments split API onto a
+        # separate subdomain, but the FRONTEND lives on the bare
+        # label subdomain. If there's no `api.` prefix, the host IS
+        # the frontend host (shared-host private labels like
+        # `<label>.accountingapp.ai`).
+        frontend_host = host[4:] if host.startswith("api.") else host
+        return f"https://{frontend_host}"
+    # Fallback — parse origin / referer headers.
+    for hdr in ("origin", "referer"):
+        raw = request.headers.get(hdr)
+        if raw:
+            try:
+                from urllib.parse import urlparse
+                p = urlparse(raw)
+                if p.scheme and p.netloc:
+                    return f"{p.scheme}://{p.netloc}"
+            except Exception:  # noqa: BLE001
+                continue
+    return None
+
+
 class OAuthStartOut(BaseModel):
     url: str
 
@@ -82,9 +130,17 @@ async def qbo_oauth_start(cid: str, request: Request,
     # record so the token-exchange callback can send Intuit the same
     # exact value (Intuit does a strict-equality check).
     redirect_uri = _redirect_uri_from_request(request)
+    # Separately capture the FRONTEND host the user came from. Even
+    # when the Intuit callback lands on the flagship API (because the
+    # label's API host isn't registered with Intuit), we want the
+    # user's final landing page to be their OWN label's app. This is
+    # what fixes the "click Connect in QBO consent → land on SmartBooks
+    # login" bug for enterprise/partner private labels.
+    return_to_host = _return_to_host_from_request(request)
     await db.qbo_oauth_states.insert_one({
         "state": state, "company_id": cid, "user_id": user["id"],
         "redirect_uri": redirect_uri,
+        "return_to_host": return_to_host,
         "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
         "created_at": now_iso(),
     })
@@ -111,10 +167,18 @@ async def qbo_oauth_callback(
     # Fallback to the standard SmartBooks app URL if the state record
     # doesn't carry a private-label return target.
     def _label_app_url(rec: dict | None) -> str:
-        # Derive the front-end app URL from the redirect_uri host —
-        # e.g. `https://api.cypherpro.accountingapp.ai/api/qbo/...` →
-        # `https://cypherpro.accountingapp.ai`. The `api.` sub-domain
-        # convention is baked into how private labels are configured.
+        # Priority 1: `return_to_host` — captured from the FRONTEND
+        # host on OAuth start. This is the authoritative source for
+        # "where did this user come from" and works for every private
+        # label, including shared-host labels (`enterprise.accountingapp.ai`)
+        # where the app and API run on the same subdomain.
+        rth = (rec or {}).get("return_to_host")
+        if rth:
+            return rth.rstrip("/")
+        # Priority 2 (legacy): derive from the Intuit-callback host by
+        # stripping the `api.` prefix. Only fires for labels that split
+        # API onto its own subdomain AND registered that host on the
+        # Intuit Developer app.
         uri = (rec or {}).get("redirect_uri")
         if uri:
             try:
@@ -122,6 +186,8 @@ async def qbo_oauth_callback(
                 host = urlparse(uri).netloc
                 if host.startswith("api."):
                     return f"https://{host[4:]}"
+                if host:
+                    return f"https://{host}"
             except Exception:  # noqa: BLE001
                 pass
         return _APP_URL
@@ -131,9 +197,20 @@ async def qbo_oauth_callback(
         return RedirectResponse(target, status_code=302)
 
     # Intuit itself returned an error (user hit "No thanks", scope
-    # rejected, invalid client, etc.). Bail early.
+    # rejected, invalid client, etc.). We still want the "No thanks"
+    # bounce to land on the LABEL's frontend so the user isn't dumped
+    # on the flagship. If `state` came through, peek at the record
+    # (without deleting — the exchange path below deletes it) to grab
+    # the recorded return-to-host. Any lookup failure silently falls
+    # back to the platform default.
     if error or not code or not state or not realmId:
-        return _err(error or "missing_params")
+        peek_rec = None
+        if state:
+            try:
+                peek_rec = await db.qbo_oauth_states.find_one({"state": state})
+            except Exception:  # noqa: BLE001
+                peek_rec = None
+        return _err(error or "missing_params", peek_rec)
 
     rec = await db.qbo_oauth_states.find_one_and_delete({"state": state})
     if not rec:
@@ -166,10 +243,13 @@ async def qbo_oauth_callback(
         )
         return _err(f"save_failed:{str(e)[:120]}", rec)
     # Success — land the user on the QBO Connect page (not the generic
-    # /connections page — that route doesn't refresh QBO status). Absolute
-    # URL so the browser lands on the FRONTEND service, not the API.
+    # /connections page — that route doesn't refresh QBO status). Use
+    # the label's own app host (recorded on the state at OAuth-start
+    # time) so private-label users don't get bounced onto the flagship
+    # SmartBooks login. Absolute URL so the browser lands on the
+    # FRONTEND service, not the API.
     return RedirectResponse(
-        f"{_APP_URL}/connections/qbo?qbo=connected&realm={realmId}",
+        f"{_label_app_url(rec)}/connections/qbo?qbo=connected&realm={realmId}",
         status_code=302,
     )
 
