@@ -435,7 +435,15 @@ export default function Sidebar({ collapsed, onToggle }) {
         {(user?.role === "pro" || user?.role === "superadmin" || user?.role === "partner") && (
           <Item item={{
             to: user?.role === "partner" ? "/partner" : "/pro/clients",
-            label: "Clients",
+            // Partner-context and enterprise-context users get a
+            // qualified label so the sidebar signals which "clients"
+            // list this is: their partner tree, an enterprise's client
+            // roster, or a plain Pro's book of business.
+            label: user?.role === "partner"
+              ? "Partner Clients"
+              : user?.enterprise_id
+                ? "Enterprise Clients"
+                : "Clients",
             icon: Briefcase,
           }} />
         )}

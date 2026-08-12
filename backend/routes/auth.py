@@ -140,7 +140,9 @@ async def login(request: Request, inp: Annotated[LoginIn, Body()]):
     except Exception:  # noqa: BLE001
         pass
     return {"token": token, "user": {"id": u["id"], "email": u["email"],
-            "name": u["name"], "role": u["role"]}}
+            "name": u["name"], "role": u["role"],
+            "enterprise_id": u.get("enterprise_id"),
+            "partner_id": u.get("partner_id")}}
 
 
 @router.post("/auth/signup")
@@ -488,7 +490,16 @@ async def affiliate_upgrade(user: dict = Depends(get_current_user)):
 
 @router.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
-    return {"user": {k: user[k] for k in ("id", "email", "name", "role")}}
+    # `enterprise_id` and `partner_id` are surfaced so the frontend
+    # can render role-context labels (e.g. sidebar "Enterprise Clients"
+    # vs "Partner Clients" vs plain "Clients") without a second DB
+    # round-trip. Missing values fall through to None — the sidebar
+    # treats null/undefined identically to "not set".
+    return {"user": {
+        **{k: user[k] for k in ("id", "email", "name", "role")},
+        "enterprise_id": user.get("enterprise_id"),
+        "partner_id": user.get("partner_id"),
+    }}
 
 
 # ----------------------------------------------------------------------
