@@ -157,6 +157,44 @@ async def startup():
                 "failed to create %s.id unique index: %s", _coll, e,
             )
 
+    # ── (Feb 2026) `is_firm_books` partial-unique index on companies.
+    # Guarantees at most ONE Firm Books row per Pro user, so any
+    # concurrent-boot race that used to spawn duplicates is now
+    # rejected at the database layer with a DuplicateKeyError (which
+    # the caller's `find_one`-first pattern recovers from cleanly).
+    # `partialFilterExpression` scopes uniqueness to firm-books rows
+    # only — regular client companies aren't constrained.
+    try:
+        await db.companies.create_index(
+            [("owner_user_id", 1), ("is_firm_books", 1)],
+            unique=True,
+            partialFilterExpression={"is_firm_books": True},
+            name="firm_books_uniq_per_pro",
+        )
+    except Exception as e:  # noqa: BLE001
+        import logging as _l
+        _l.getLogger("axiom.app").error(
+            "failed to create firm_books uniqueness index: %s. "
+            "Run enterprises.dedupe_firm_books_companies() first "
+            "to remove existing duplicates.", e,
+        )
+
+    # ── Dedupe any pre-existing Firm Books duplicates left behind by
+    # concurrent-boot races before the uniqueness index was added.
+    try:
+        from enterprises import dedupe_firm_books_companies
+        n = await dedupe_firm_books_companies()
+        if n:
+            import logging as _l
+            _l.getLogger("axiom.app").warning(
+                "startup dedupe removed %d duplicate Firm Books row(s)", n,
+            )
+    except Exception as e:  # noqa: BLE001
+        import logging as _l
+        _l.getLogger("axiom.app").exception(
+            "firm-books dedupe failed on startup: %s", e,
+        )
+
     # One-time backfill (Feb 2026) — elevate global role for any user
     # who has an active `role=pro` membership but is still flagged
     # `role=client` globally. Prior invites of *pre-existing* client

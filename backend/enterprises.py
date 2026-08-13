@@ -144,7 +144,21 @@ async def ensure_firm_books_company_for_pro(user_id: str) -> Optional[dict]:
         "onboarding_complete": True,
         "created_at": now, "updated_at": now,
     }
-    await db.companies.insert_one(company)
+    try:
+        await db.companies.insert_one(company)
+    except Exception as e:  # noqa: BLE001
+        # If a concurrent request beat us to it, the partial-unique
+        # index on `(owner_user_id, is_firm_books)` rejects our insert
+        # with DuplicateKeyError. Return the winning row instead of
+        # propagating — this call is idempotent by contract.
+        from pymongo.errors import DuplicateKeyError
+        if isinstance(e, DuplicateKeyError):
+            winner = await db.companies.find_one({
+                "owner_user_id": user_id, "is_firm_books": True,
+            })
+            if winner:
+                return winner
+        raise
     await db.memberships.insert_one({
         "id": str(uuid.uuid4()),
         "user_id": user_id, "company_id": cid,
@@ -304,6 +318,62 @@ async def ensure_default_enterprise() -> dict:
 async def ensure_indexes() -> None:
     await db.enterprises.create_index("slug", unique=True)
     await db.enterprises.create_index("is_default")
+
+
+async def dedupe_firm_books_companies() -> int:
+    """Startup housekeeping — collapse any duplicate Firm Books rows
+    down to one per Pro. The `ensure_firm_books_company_for_pro`
+    helper is idempotent, but historical concurrent-boot races
+    produced multi-row cases in production (user reported 3 dupes
+    for "Aquila Tax Services — Firm Books"). This pass keeps the
+    oldest row (lowest `created_at`) and deletes the rest along
+    with their orphaned memberships and accounts.
+
+    Returns the number of duplicate rows removed. Safe to run on
+    every boot — no-op when everything is already clean.
+    """
+    from pymongo import ASCENDING as ASC
+
+    removed = 0
+    # Group by owner_user_id where is_firm_books == True and >1 row.
+    pipeline = [
+        {"$match": {"is_firm_books": True,
+                    "owner_user_id": {"$ne": None}}},
+        {"$group": {
+            "_id": "$owner_user_id",
+            "count": {"$sum": 1},
+            "companies": {"$push": {"id": "$id", "created_at": "$created_at"}},
+        }},
+        {"$match": {"count": {"$gt": 1}}},
+    ]
+    async for row in db.companies.aggregate(pipeline):
+        cos = sorted(
+            row["companies"],
+            key=lambda c: c.get("created_at") or "",
+        )
+        keep_id = cos[0]["id"]
+        drop_ids = [c["id"] for c in cos[1:]]
+        if not drop_ids:
+            continue
+        # Remove the duplicates + their child rows (memberships,
+        # accounts, journal entries) so we don't leave orphans in
+        # the DB.
+        for _coll in ("memberships", "accounts", "transactions",
+                      "journal_entries", "invoices", "bills"):
+            try:
+                await getattr(db, _coll).delete_many(
+                    {"company_id": {"$in": drop_ids}},
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        res = await db.companies.delete_many({"id": {"$in": drop_ids}})
+        removed += res.deleted_count
+        import logging
+        logging.getLogger(__name__).info(
+            "Firm Books dedupe: kept %s for pro %s, removed %d dupe(s)",
+            keep_id, row["_id"], res.deleted_count,
+        )
+    return removed
 
 
 async def rollup_stats(enterprise_id: str) -> dict:
