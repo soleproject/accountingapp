@@ -133,7 +133,20 @@ async def ensure_partner_books_company_for_partner(user_id: str) -> Optional[dic
         "onboarding_complete": True,
         "created_at": now, "updated_at": now,
     }
-    await db.companies.insert_one(company)
+    try:
+        await db.companies.insert_one(company)
+    except Exception as e:  # noqa: BLE001
+        # DuplicateKeyError from the partial-unique index on
+        # `(partner_id, is_partner_books)` — a concurrent request won
+        # the race. Return the winning row instead of exploding.
+        from pymongo.errors import DuplicateKeyError
+        if isinstance(e, DuplicateKeyError):
+            winner = await db.companies.find_one(
+                {"partner_id": user_id, "is_partner_books": True},
+            )
+            if winner:
+                return winner
+        raise
     await db.memberships.insert_one({
         "id": str(uuid.uuid4()),
         "user_id": user_id, "company_id": cid,
@@ -217,6 +230,59 @@ async def rollup_stats(partner_id: str) -> dict:
 # --------------------------------------------------------------------------
 # Financial rollups — real $-value Usage / Costs / Revenue scoped to the
 # Partner's tree. Ties three sources together:
+
+
+async def dedupe_partner_books_companies() -> int:
+    """Startup housekeeping — collapse duplicate Partner Books rows
+    to one per Partner. Mirrors the Firm Books dedupe in
+    `enterprises.py`: keeps the oldest row (lowest `created_at`) and
+    deletes the rest plus their child memberships/accounts.
+
+    Concurrent-boot races were the historical source of dupes; the
+    new partial-unique index on `(partner_id, is_partner_books)`
+    prevents future occurrences, but any pre-existing dupes need
+    this one-time cleanup.
+
+    Returns the number of duplicate rows removed. Safe to run every
+    boot — no-op when clean.
+    """
+    removed = 0
+    pipeline = [
+        {"$match": {"is_partner_books": True,
+                    "partner_id": {"$ne": None}}},
+        {"$group": {
+            "_id": "$partner_id",
+            "count": {"$sum": 1},
+            "companies": {"$push": {"id": "$id", "created_at": "$created_at"}},
+        }},
+        {"$match": {"count": {"$gt": 1}}},
+    ]
+    async for row in db.companies.aggregate(pipeline):
+        cos = sorted(
+            row["companies"],
+            key=lambda c: c.get("created_at") or "",
+        )
+        keep_id = cos[0]["id"]
+        drop_ids = [c["id"] for c in cos[1:]]
+        if not drop_ids:
+            continue
+        for _coll in ("memberships", "accounts", "transactions",
+                      "journal_entries", "invoices", "bills"):
+            try:
+                await getattr(db, _coll).delete_many(
+                    {"company_id": {"$in": drop_ids}},
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        res = await db.companies.delete_many({"id": {"$in": drop_ids}})
+        removed += res.deleted_count
+        import logging
+        logging.getLogger(__name__).info(
+            "Partner Books dedupe: kept %s for partner %s, removed %d dupe(s)",
+            keep_id, row["_id"], res.deleted_count,
+        )
+    return removed
+
 #
 #   Usage  — sum of `ai_usage_events.cost_cents` where the event's
 #            company_id is in the Partner's tree of companies (any
