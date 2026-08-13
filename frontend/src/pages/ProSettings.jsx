@@ -468,56 +468,13 @@ export default function ProSettings() {
         </section>
       ) : null}
 
-      {/* ---------- Private Label Name ---------- */}
-      <LockedSection isLocked={isLocked} testId="branding-firm-name-card-locked">
-      <section className="rounded-xl border bg-white p-6" data-testid="branding-firm-name-card">
-        <div className="flex items-center gap-2 mb-2">
-          <Type size={16} className="text-slate-500" />
-          <h2 className="font-heading font-semibold">Private label name</h2>
-        </div>
-        <p className="text-sm text-slate-500 mb-4">
-          The name every part of the app uses when it shows your firm — browser tab title,
-          outbound email sender ("From" name), client sign-in header, and PDF footers.
-          Leave blank to fall back to your account name.
-        </p>
-        <div className="flex items-center gap-2 flex-wrap">
-          <input
-            value={firmName}
-            onChange={(e) => setFirmName(e.target.value)}
-            placeholder={branding?.firm_name_fallback || "e.g. Synergy AI CPAs"}
-            className="border rounded-md px-3 py-1.5 text-sm w-80"
-            data-testid="branding-firm-name-input"
-            maxLength={60}
-          />
-          <button
-            onClick={saveFirmName}
-            disabled={savingFirmName || firmName === (branding?.firm_name_raw || "")}
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-800 disabled:opacity-50"
-            data-testid="branding-firm-name-save"
-          >
-            {savingFirmName ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-            Save
-          </button>
-        </div>
-        <p className="text-[11px] text-slate-500 mt-2">
-          Currently branding as:{" "}
-          <span className="font-mono-num text-slate-700" data-testid="branding-firm-name-current">
-            {branding?.firm_name || "—"}
-          </span>
-          {!branding?.firm_name_raw && branding?.firm_name_fallback && (
-            <span className="text-slate-400"> (falling back to your account name)</span>
-          )}
-        </p>
-        <p className="text-[11px] text-slate-400 mt-1">
-          Up to 60 characters. Changes apply on next page load — no rebuild required.
-        </p>
-      </section>
-      </LockedSection>
-
       {/* ---------- Login email ---------- */}
       {/* Unlike branding, this section is NOT locked behind white-label
           — every enterprise / partner / pro needs to be able to rotate
-          the address that receives their login and magic-link emails. */}
+          the address that receives their login and magic-link emails.
+          Placed FIRST so identity/account controls sit above branding
+          controls — matches user's mental model (account first, then
+          how the account renders). */}
       <section
         className="rounded-xl border bg-white p-6"
         data-testid="account-email-card"
@@ -594,6 +551,52 @@ export default function ProSettings() {
           address; the old one stops working immediately.
         </p>
       </section>
+
+      {/* ---------- Private Label Name ---------- */}
+      <LockedSection isLocked={isLocked} testId="branding-firm-name-card-locked">
+      <section className="rounded-xl border bg-white p-6" data-testid="branding-firm-name-card">
+        <div className="flex items-center gap-2 mb-2">
+          <Type size={16} className="text-slate-500" />
+          <h2 className="font-heading font-semibold">Private label name</h2>
+        </div>
+        <p className="text-sm text-slate-500 mb-4">
+          The name every part of the app uses when it shows your firm — browser tab title,
+          outbound email sender ("From" name), client sign-in header, and PDF footers.
+          Leave blank to fall back to your account name.
+        </p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            value={firmName}
+            onChange={(e) => setFirmName(e.target.value)}
+            placeholder={branding?.firm_name_fallback || "e.g. Synergy AI CPAs"}
+            className="border rounded-md px-3 py-1.5 text-sm w-80"
+            data-testid="branding-firm-name-input"
+            maxLength={60}
+          />
+          <button
+            onClick={saveFirmName}
+            disabled={savingFirmName || firmName === (branding?.firm_name_raw || "")}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-800 disabled:opacity-50"
+            data-testid="branding-firm-name-save"
+          >
+            {savingFirmName ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+            Save
+          </button>
+        </div>
+        <p className="text-[11px] text-slate-500 mt-2">
+          Currently branding as:{" "}
+          <span className="font-mono-num text-slate-700" data-testid="branding-firm-name-current">
+            {branding?.firm_name || "—"}
+          </span>
+          {!branding?.firm_name_raw && branding?.firm_name_fallback && (
+            <span className="text-slate-400"> (falling back to your account name)</span>
+          )}
+        </p>
+        <p className="text-[11px] text-slate-400 mt-1">
+          Up to 60 characters. Changes apply on next page load — no rebuild required.
+        </p>
+      </section>
+      </LockedSection>
 
       {/* ---------- Sign-in address ---------- */}
       <LockedSection isLocked={isLocked} testId="branding-signin-card-locked">
