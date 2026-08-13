@@ -29,46 +29,111 @@ export default function Login() {
   const [firm, setFirm] = useState(null);
 
   useEffect(() => {
-    // 1. `?firm=acme` explicit override wins — great for previews and dev
-    //    where the host doesn't match the real private-label root.
+    // Fix (Feb 2026): URL host is now the SOURCE OF TRUTH for
+    // branding. Old logic let cached `axiom_firm_slug` in
+    // localStorage win when the backend said "platform" — which
+    // meant landing on `app.smartbookssoftware.ai/login` after a
+    // prior visit to `scarlett.accountingapp.ai` still showed
+    // ScarlettBooks branding (wrong). It also meant landing directly
+    // on `scarlett.accountingapp.ai/login` showed platform default
+    // when the backend didn't know that subdomain (also wrong).
+    //
+    // New priority chain:
+    //   1. `?firm=<slug>` explicit override — for previews / dev.
+    //   2. Subdomain from `window.location.hostname` — if the host
+    //      looks like `<slug>.accountingapp.ai` (or any 2+ label
+    //      pattern that isn't a known flagship / preview host), the
+    //      leftmost slug wins. Ignores cached state entirely.
+    //   3. `/branding/by-host` server-side resolve — for the flagship
+    //      host itself and any labels the backend knows.
+    //   4. Cached slug fallback — only when EVERYTHING else says
+    //      "platform" AND we're not on a flagship / preview host.
+    //   5. Platform default.
+    //
+    // On flagship / preview hosts we ALSO wipe the cached slug so a
+    // stale session from a prior firm doesn't linger.
+
+    // Hosts where we should NEVER show a firm brand — the platform
+    // itself, previews, and localhost. Anything else that reaches
+    // this branch is a candidate for subdomain-derived branding.
+    const host = window.location.hostname.toLowerCase();
+    const isFlagshipHost =
+      host === "app.smartbookssoftware.ai" ||
+      host === "smartbookssoftware.ai" ||
+      host === "www.smartbookssoftware.ai" ||
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host.endsWith(".preview.emergentagent.com") ||
+      host.endsWith(".emergentagent.com");
+
+    if (isFlagshipHost) {
+      // Kill any lingering firm-slug cache from a prior label
+      // session so this host stays platform-branded.
+      try { localStorage.removeItem("axiom_firm_slug"); } catch { /* ignore */ }
+    }
+
+    // 1. `?firm=<slug>` explicit override.
     const q = new URLSearchParams(window.location.search).get("firm");
     if (q) {
-      // Cache the successful lookup so future logouts on this device
-      // keep the firm brand (see #3 below).
       api.get(`/branding/by-subdomain/${encodeURIComponent(q.toLowerCase().trim())}`)
         .then(r => {
           setFirm(r.data);
           setMode("firm");
           try { localStorage.setItem("axiom_firm_slug", q); } catch { /* ignore */ }
         })
-        .catch(() => setMode("platform"));  // unknown ?firm → platform brand
+        .catch(() => setMode("platform"));
       return;
     }
-    // 2. Otherwise ask the backend to resolve the current host. The backend
-    //    knows PRIVATE_LABEL_ROOT + PRIMARY_HOST and returns one of
-    //    {platform, neutral, firm}. Doing this server-side means changing
-    //    the private-label root is an env-var flip, not a rebuild.
-    api.get(`/branding/by-host?host=${encodeURIComponent(window.location.hostname)}`)
-      .then(r => {
-        const m = r.data?.mode || "platform";
-        // 3. If the backend says "platform" but this device previously
-        //    signed in under a firm (SetPassword or explicit `?firm=`
-        //    query), keep that firm brand sticky — a private-label
-        //    client shouldn't see SmartBooks on their sign-in page just
-        //    because they visited the bare app URL.
-        if (m === "platform") {
-          const cached = (() => { try { return localStorage.getItem("axiom_firm_slug"); } catch { return null; } })();
-          if (cached) {
-            api.get(`/branding/by-subdomain/${encodeURIComponent(cached)}`)
-              .then(fr => { setFirm(fr.data); setMode("firm"); })
-              .catch(() => setMode("platform"));
-            return;
-          }
+
+    // 2. Subdomain-derived slug from the actual URL host. Any host
+    //    with 2+ dots that ISN'T flagship qualifies — first label is
+    //    the candidate slug (`scarlett.accountingapp.ai` → `scarlett`).
+    if (!isFlagshipHost) {
+      const parts = host.split(".");
+      if (parts.length >= 2) {
+        const slug = parts[0];
+        // Filter obvious non-brand labels.
+        if (!["api", "www", "app", "admin", "preview"].includes(slug)) {
+          api.get(`/branding/by-subdomain/${encodeURIComponent(slug)}`)
+            .then(r => {
+              setFirm(r.data);
+              setMode("firm");
+              try { localStorage.setItem("axiom_firm_slug", slug); } catch { /* ignore */ }
+            })
+            .catch(() => {
+              // Unknown subdomain — try the server-side resolver,
+              // then fall through to platform.
+              serverResolve();
+            });
+          return;
         }
-        setMode(m);
-        if (m === "firm") setFirm(r.data);
-      })
-      .catch(() => setMode("platform"));
+      }
+    }
+
+    // 3-5. Fallback to server-side host resolver + cached slug.
+    serverResolve();
+
+    function serverResolve() {
+      api.get(`/branding/by-host?host=${encodeURIComponent(window.location.hostname)}`)
+        .then(r => {
+          const m = r.data?.mode || "platform";
+          // Cached-slug fallback — but ONLY on non-flagship hosts.
+          // Flagship must ALWAYS render platform branding regardless
+          // of prior sessions.
+          if (m === "platform" && !isFlagshipHost) {
+            const cached = (() => { try { return localStorage.getItem("axiom_firm_slug"); } catch { return null; } })();
+            if (cached) {
+              api.get(`/branding/by-subdomain/${encodeURIComponent(cached)}`)
+                .then(fr => { setFirm(fr.data); setMode("firm"); })
+                .catch(() => setMode("platform"));
+              return;
+            }
+          }
+          setMode(m);
+          if (m === "firm") setFirm(r.data);
+        })
+        .catch(() => setMode("platform"));
+    }
   }, []);
 
   const submit = async (e) => {
