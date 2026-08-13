@@ -1995,6 +1995,159 @@ async def list_enterprise_invoices(
     return {"invoices": rows}
 
 
+# --------------------------------------------------------------------------
+# Enterprise archive / unarchive / hard-delete (Feb 2026)
+# --------------------------------------------------------------------------
+# Same shape as the partner-lifecycle endpoints, scoped to a single
+# enterprise. Partners can operate on enterprises they own
+# (via _require_enterprise_access); superadmins can operate on any.
+# --------------------------------------------------------------------------
+
+@router.post("/admin/enterprises/{eid}/archive")
+async def archive_enterprise(
+    eid: str,
+    user: dict = Depends(require_role("superadmin", "partner")),
+):
+    ent = await _require_enterprise_access(eid, user)
+    if ent.get("status") == "archived":
+        return {"ok": True, "already_archived": True}
+    await db.enterprises.update_one(
+        {"id": eid},
+        {"$set": {
+            "status": "archived",
+            "archived_at": datetime.now(timezone.utc).isoformat(),
+            "archived_by": user["id"],
+        }},
+    )
+    # Also archive the owner user so they can't log in while the
+    # enterprise is dormant. Descendant client-company users are
+    # left alone — they may still need read access for a wind-down.
+    if ent.get("owner_user_id"):
+        await db.users.update_one(
+            {"id": ent["owner_user_id"]},
+            {"$set": {
+                "status": "archived",
+                "archived_at": datetime.now(timezone.utc).isoformat(),
+                "archived_by": user["id"],
+            }},
+        )
+    return {"ok": True, "eid": eid, "status": "archived"}
+
+
+@router.post("/admin/enterprises/{eid}/unarchive")
+async def unarchive_enterprise(
+    eid: str,
+    user: dict = Depends(require_role("superadmin", "partner")),
+):
+    ent = await _require_enterprise_access(eid, user)
+    await db.enterprises.update_one(
+        {"id": eid},
+        {"$unset": {"status": "", "archived_at": "", "archived_by": ""}},
+    )
+    if ent.get("owner_user_id"):
+        await db.users.update_one(
+            {"id": ent["owner_user_id"]},
+            {"$unset": {"status": "", "archived_at": "", "archived_by": ""}},
+        )
+    return {"ok": True, "eid": eid, "status": "active"}
+
+
+@router.delete("/admin/enterprises/{eid}")
+async def delete_enterprise(
+    eid: str,
+    force: bool = False,
+    user: dict = Depends(require_role("superadmin", "partner")),
+):
+    """Hard-delete an enterprise + cascade to its owner Pro + every
+    client company attached to it. Refuses (409) if any client
+    company has recorded transactions unless `?force=true`.
+
+    Partner scope: same as `_require_enterprise_access` — 404 unless
+    the enterprise's `partner_id` matches the caller. Superadmin
+    unrestricted.
+    """
+    ent = await _require_enterprise_access(eid, user)
+
+    # Collect the tree.
+    company_ids: list[str] = [
+        c["id"] async for c in db.companies.find(
+            {"enterprise_id": eid}, {"id": 1, "_id": 0},
+        ) if c.get("id")
+    ]
+    user_ids: list[str] = []
+    if ent.get("owner_user_id"):
+        user_ids.append(ent["owner_user_id"])
+    # Any pro / client user stamped with THIS enterprise_id but not
+    # captured above (e.g. sub-users added later).
+    async for u in db.users.find(
+        {"enterprise_id": eid, "id": {"$nin": user_ids}},
+        {"id": 1, "_id": 0},
+    ):
+        if u.get("id"):
+            user_ids.append(u["id"])
+
+    if not force:
+        tx_count = 0
+        if company_ids:
+            tx_count = await db.transactions.count_documents(
+                {"company_id": {"$in": company_ids}}
+            )
+        if tx_count > 0:
+            raise HTTPException(
+                409,
+                detail={
+                    "message": (
+                        f"This enterprise has {tx_count} transactions across "
+                        f"{len(company_ids)} client compan"
+                        f"{'y' if len(company_ids) == 1 else 'ies'}. Pass "
+                        f"`force=true` to nuke anyway, or archive instead "
+                        f"to preserve data."
+                    ),
+                    "code": "cascade_blocked_active_data",
+                    "counts": {
+                        "companies": len(company_ids),
+                        "users": len(user_ids),
+                        "transactions": tx_count,
+                    },
+                },
+            )
+
+    # Cascade deletes — leaf tables first.
+    txn_del = 0
+    if company_ids:
+        res = await db.transactions.delete_many({"company_id": {"$in": company_ids}})
+        txn_del = res.deleted_count
+        for _coll in (
+            "invoices", "bills", "estimates", "receipts", "contacts",
+            "products", "categories", "memberships",
+            "ai_usage_events", "qbo_oauth_states", "qbo_connections",
+            "plaid_items", "veryfi_receipts", "chat_messages",
+        ):
+            try:
+                await getattr(db, _coll).delete_many({"company_id": {"$in": company_ids}})
+            except Exception:  # noqa: BLE001
+                pass
+        await db.companies.delete_many({"id": {"$in": company_ids}})
+
+    if user_ids:
+        await db.users.delete_many({"id": {"$in": user_ids}})
+
+    await db.enterprise_invoices.delete_many({"enterprise_id": eid})
+    await db.enterprises.delete_one({"id": eid})
+
+    return {
+        "ok": True,
+        "deleted": {
+            "enterprise_id": eid,
+            "companies": len(company_ids),
+            "users": len(user_ids),
+            "transactions": txn_del,
+            "forced": bool(force),
+        },
+    }
+
+
+
 class BillNowIn(BaseModel):
     """Optional overrides for the manual bill-now endpoint."""
     month_key: Optional[str] = None      # "YYYY-MM"; defaults to prior month

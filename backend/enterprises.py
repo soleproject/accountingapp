@@ -364,6 +364,11 @@ def serialize(ent: dict, *, stats: Optional[dict] = None) -> dict:
         "default_discount": bool(ent.get("default_discount")),
         "created_at": ent.get("created_at"),
         "updated_at": ent.get("updated_at"),
+        # Feb 2026 lifecycle fields — surfaces the archived state to
+        # the frontend's Danger Zone so the button reads "Restore"
+        # instead of "Archive" once flipped.
+        "status": ent.get("status"),  # "archived" | None (active)
+        "archived_at": ent.get("archived_at"),
     }
     if stats is not None:
         out.update({

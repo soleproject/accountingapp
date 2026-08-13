@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import {
   ArrowLeft, Loader2, Save, Shield, Users2, Building2, Ticket, Gift, Pencil,
   Sparkles, CheckCircle2, Clock, X, Receipt, Play, ChevronRight, ChevronDown,
-  Lock, Unlock,
+  Lock, Unlock, Archive, Trash2, AlertTriangle,
 } from "lucide-react";
 
 const PRODUCT_LABELS = {
@@ -53,6 +53,14 @@ export default function AdminEnterpriseDetail() {
   const [nameDraft, setNameDraft] = useState("");
   const [allotDraft, setAllotDraft] = useState(0);
   const [saving, setSaving] = useState(false);
+  // Danger-zone state — mirrors the partner-detail archive/delete UX
+  // so partners have a consistent way to wind down enterprises they
+  // own. Type-to-confirm required for hard-delete.
+  const [archiving, setArchiving] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [deleteForce, setDeleteForce] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -80,6 +88,56 @@ export default function AdminEnterpriseDetail() {
     } catch (e) {
       toast.error(e.response?.data?.detail || "Save failed");
     } finally { setSaving(false); }
+  };
+
+  const isArchived = data?.enterprise?.status === "archived";
+
+  const toggleArchive = async () => {
+    setArchiving(true);
+    try {
+      const url = isArchived
+        ? `/admin/enterprises/${eid}/unarchive`
+        : `/admin/enterprises/${eid}/archive`;
+      await api.post(url);
+      toast.success(
+        isArchived
+          ? "Enterprise restored."
+          : "Enterprise archived — owner login blocked, data preserved.",
+      );
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Action failed");
+    } finally { setArchiving(false); }
+  };
+
+  const hardDelete = async () => {
+    if (!data?.enterprise) return;
+    const expected = (data.enterprise.name || "").toLowerCase().trim();
+    if (deleteConfirm.trim().toLowerCase() !== expected) {
+      toast.error("Confirmation text doesn't match the enterprise name.");
+      return;
+    }
+    setDeleting(true);
+    try {
+      const { data: res } = await api.delete(
+        `/admin/enterprises/${eid}${deleteForce ? "?force=true" : ""}`,
+      );
+      const d = res.deleted || {};
+      toast.success(
+        `Deleted enterprise + ${d.companies || 0} compan${d.companies === 1 ? "y" : "ies"}, ` +
+        `${d.users || 0} user(s), ${d.transactions || 0} transaction(s).`,
+      );
+      // Route partners back to their dashboard; superadmins to the
+      // Enterprises list they came from.
+      nav(user?.role === "partner" ? "/partner" : "/pro/clients?tab=enterprises");
+    } catch (e) {
+      const detail = e?.response?.data?.detail;
+      if (detail?.code === "cascade_blocked_active_data") {
+        toast.error(detail.message);
+      } else {
+        toast.error(detail?.message || detail || "Delete failed");
+      }
+    } finally { setDeleting(false); }
   };
 
   if (user?.role !== "superadmin" && user?.role !== "partner") {
@@ -353,6 +411,129 @@ export default function AdminEnterpriseDetail() {
       {user?.role === "superadmin" && (
         <EnterpriseBillingSection eid={eid} />
       )}
+
+      {/* ---------- Danger zone ---------- */}
+      {/* Two destructive actions available to both superadmins AND
+          partners who own this enterprise. Archive is reversible;
+          hard delete cascades to owner Pro + client companies + txns
+          and is guarded by a `force=true` flag when active data
+          exists. Partner scope check happens on the backend via
+          `_require_enterprise_access`. */}
+      <section
+        data-testid="enterprise-danger-zone"
+        className="rounded-xl border border-rose-200 bg-rose-50/40 p-5"
+      >
+        <div className="flex items-center gap-2 mb-1">
+          <AlertTriangle className="h-4 w-4 text-rose-600" />
+          <h2 className="font-heading font-semibold text-rose-800">Danger zone</h2>
+        </div>
+        <p className="text-xs text-rose-700/80 mb-4">
+          Destructive actions. Archive is reversible; hard delete is not.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {/* Archive / Restore */}
+          <div className="rounded-md border border-amber-200 bg-white p-3">
+            <div className="flex items-center gap-2 text-amber-800 font-semibold text-sm">
+              <Archive className="h-4 w-4" />
+              {isArchived ? "Restore enterprise" : "Archive enterprise"}
+            </div>
+            <p className="text-xs text-slate-600 mt-1 mb-3">
+              {isArchived
+                ? "Enterprise is archived — owner login is blocked. Restore to re-enable access. The tree is intact."
+                : "Blocks the enterprise owner's login and marks the enterprise dormant. Client companies + data preserved. Reversible."}
+            </p>
+            <button
+              onClick={toggleArchive}
+              disabled={archiving}
+              data-testid="ent-archive-btn"
+              className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-3 py-1.5 text-white text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
+            >
+              {archiving ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Archive className="h-3.5 w-3.5" />
+              )}
+              {isArchived ? "Restore enterprise" : "Archive enterprise"}
+            </button>
+          </div>
+
+          {/* Hard delete */}
+          <div className="rounded-md border border-rose-300 bg-white p-3">
+            <div className="flex items-center gap-2 text-rose-800 font-semibold text-sm">
+              <Trash2 className="h-4 w-4" />
+              Delete enterprise (permanent)
+            </div>
+            <p className="text-xs text-slate-600 mt-1 mb-3">
+              Nukes the enterprise + its owner Pro + every client company
+              attached to it. If any company has transactions, you'll be
+              prompted to confirm the force flag.
+            </p>
+            {!showDelete ? (
+              <button
+                onClick={() => setShowDelete(true)}
+                data-testid="ent-delete-open-btn"
+                className="inline-flex items-center gap-2 rounded-md bg-rose-600 px-3 py-1.5 text-white text-sm font-medium hover:bg-rose-700"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete enterprise…
+              </button>
+            ) : (
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-slate-700">
+                  Type <span className="font-mono">{ent.name}</span> to confirm:
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirm}
+                  onChange={(e) => setDeleteConfirm(e.target.value)}
+                  className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  placeholder={ent.name}
+                  data-testid="ent-delete-confirm-input"
+                />
+                <label className="flex items-start gap-2 text-xs text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={deleteForce}
+                    onChange={(e) => setDeleteForce(e.target.checked)}
+                    data-testid="ent-delete-force-cb"
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="font-semibold">Force</span> — delete even
+                    if client companies still have transactions. Without this,
+                    the delete is blocked when active data is detected.
+                  </span>
+                </label>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={hardDelete}
+                    disabled={
+                      deleting ||
+                      deleteConfirm.trim().toLowerCase() !==
+                        (ent.name || "").toLowerCase()
+                    }
+                    data-testid="ent-delete-confirm-btn"
+                    className="inline-flex items-center gap-2 rounded-md bg-rose-600 px-3 py-1.5 text-white text-sm font-medium hover:bg-rose-700 disabled:opacity-40"
+                  >
+                    {deleting ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                    Delete forever
+                  </button>
+                  <button
+                    onClick={() => { setShowDelete(false); setDeleteConfirm(""); setDeleteForce(false); }}
+                    className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-slate-700 text-sm hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
