@@ -939,13 +939,32 @@ async def branding_by_subdomain(sub: str):
     ok, err, sub_norm = validate_subdomain(sub or "")
     if not ok:
         raise HTTPException(400, err)
-    owner = await db.users.find_one({"branding.signin_subdomain": sub_norm})
+    # Match either `signin_subdomain` (client sign-in slug) OR
+    # `subdomain` / `subdomain_slug` (partner-level firm slug). Both
+    # fields point at the same "who is this label?" concept — the
+    # older `signin_subdomain` came from the Pro-level sign-in flow,
+    # the newer `subdomain` from partner provisioning. Either should
+    # resolve to the same branding.
+    owner = await db.users.find_one({"$or": [
+        {"branding.signin_subdomain": sub_norm},
+        {"branding.subdomain": sub_norm},
+        {"branding.subdomain_slug": sub_norm},
+    ]})
     if not owner:
         raise HTTPException(404, "No firm registered on that subdomain.")
     b = _branding_out(owner)
     # Never leak owner PII — return only the visual bits + a friendly name.
+    # `branding.firm_name` (set by the partner white-label settings)
+    # wins over the top-level `name` field so the branded label sees
+    # its own name here, not the partner user's personal name.
+    friendly_name = (
+        (owner.get("branding") or {}).get("firm_name")
+        or owner.get("firm_name")
+        or owner.get("name")
+        or sub_norm.title()
+    )
     return {
-        "firm_name": owner.get("name") or owner.get("firm_name") or sub_norm.title(),
+        "firm_name": friendly_name,
         "logos": b["logos"],
         "theme_preset": b["theme_preset"],
         "theme_custom": b["theme_custom"],
