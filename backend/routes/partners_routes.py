@@ -518,12 +518,17 @@ async def partner_enterprises(user: dict = Depends(require_role("partner", "supe
     enterprise owner's white-label comp state so the Partner
     Dashboard can render an inline "Comp WL" toggle per row without
     a follow-up round-trip. Owners with no user account or without a
-    WL flag surface as `owner_whitelabel_comp: false`."""
+    WL flag surface as `owner_whitelabel_comp: false`. Also returns
+    `clients_count` (companies attached via `enterprise_id`) so the
+    dashboard can render "N clients" per row without another fetch.
+    """
     rows: list[dict] = []
-    # Pre-fetch owner branding in one query — otherwise this is an
-    # N+1 across every enterprise.
     ents = [e async for e in db.enterprises.find({"partner_id": user["id"]}).sort("name", 1)]
+    ent_ids = [e["id"] for e in ents if e.get("id")]
     owner_ids = [e.get("owner_user_id") for e in ents if e.get("owner_user_id")]
+
+    # Batch-fetch owner branding + companies-per-enterprise so this
+    # scales at O(1) queries regardless of enterprise count.
     owners: dict[str, dict] = {}
     if owner_ids:
         async for o in db.users.find(
@@ -532,6 +537,16 @@ async def partner_enterprises(user: dict = Depends(require_role("partner", "supe
              "branding.whitelabel_paid": 1, "_id": 0},
         ):
             owners[o["id"]] = o
+
+    company_counts: dict[str, int] = {}
+    if ent_ids:
+        pipeline = [
+            {"$match": {"enterprise_id": {"$in": ent_ids}}},
+            {"$group": {"_id": "$enterprise_id", "n": {"$sum": 1}}},
+        ]
+        async for row in db.companies.aggregate(pipeline):
+            company_counts[row["_id"]] = int(row.get("n") or 0)
+
     for e in ents:
         owner_id = e.get("owner_user_id")
         owner = owners.get(owner_id) if owner_id else None
@@ -540,11 +555,13 @@ async def partner_enterprises(user: dict = Depends(require_role("partner", "supe
             "id": e["id"],
             "name": e.get("name"),
             "slug": e.get("slug"),
+            "status": e.get("status"),
             "owner_user_id": owner_id,
             "owner_email": (owner or {}).get("email"),
             "owner_name": (owner or {}).get("name"),
             "owner_whitelabel_comp": bool(owner_b.get("whitelabel_comp")),
             "owner_whitelabel_paid": bool(owner_b.get("whitelabel_paid")),
+            "clients_count": company_counts.get(e["id"], 0),
             "created_at": e.get("created_at"),
         })
     return {"enterprises": rows, "count": len(rows)}
