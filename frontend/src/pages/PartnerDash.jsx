@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import {
@@ -29,18 +29,27 @@ import { toast } from "sonner";
  * on the created row so the scoping filters find them.
  */
 
-function StatCard({ label, value, Icon, tone = "indigo" }) {
+function StatCard({ label, value, Icon, tone = "indigo", onClick, active }) {
   const tones = {
     indigo: "bg-indigo-50 text-indigo-700 border-indigo-200",
     emerald: "bg-emerald-50 text-emerald-700 border-emerald-200",
     amber: "bg-amber-50 text-amber-700 border-amber-200",
     slate: "bg-slate-50 text-slate-700 border-slate-200",
   };
-  return (
-    <div
-      data-testid={`partner-stat-${label.toLowerCase().replace(/\s+/g, "-")}`}
-      className="rounded-xl border border-slate-200 bg-white p-4"
-    >
+  // When `onClick` is passed, render as a button (keyboard-focusable,
+  // announces role=button to screen readers) with a subtle ring on
+  // the currently-active card so the user can see which stat is
+  // driving the "My Clients" toggle below.
+  const isInteractive = typeof onClick === "function";
+  const base =
+    "rounded-xl border border-slate-200 bg-white p-4 text-left w-full";
+  const cls = isInteractive
+    ? `${base} transition-colors cursor-pointer hover:bg-slate-50 ${
+        active ? "ring-2 ring-indigo-500 border-indigo-300" : ""
+      }`
+    : base;
+  const inner = (
+    <>
       <div className="flex items-center gap-2">
         <div className={`inline-flex h-8 w-8 items-center justify-center rounded-md border ${tones[tone]}`}>
           <Icon className="h-4 w-4" />
@@ -52,6 +61,24 @@ function StatCard({ label, value, Icon, tone = "indigo" }) {
       <div className="mt-2 font-heading text-3xl font-bold text-slate-900">
         {value ?? 0}
       </div>
+    </>
+  );
+  return isInteractive ? (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={`partner-stat-${label.toLowerCase().replace(/\s+/g, "-")}`}
+      aria-pressed={!!active}
+      className={cls}
+    >
+      {inner}
+    </button>
+  ) : (
+    <div
+      data-testid={`partner-stat-${label.toLowerCase().replace(/\s+/g, "-")}`}
+      className={cls}
+    >
+      {inner}
     </div>
   );
 }
@@ -239,8 +266,27 @@ function EnterpriseRow({ ent, wlComps, onToggle }) {
           <div className="truncate text-sm font-medium text-slate-900">
             {ent.name}
           </div>
-          <div className="text-xs text-slate-500 font-mono">
-            {ent.slug || "—"}
+          {/* Owner + slug + client count — the three signals the
+              partner most likely wants to eyeball at a glance so
+              they don't have to open the detail page to answer
+              "who runs this?" and "how big is it?". */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500 mt-0.5">
+            {ent.owner_name && (
+              <span className="truncate">
+                <span className="text-slate-400">Owner:</span>{" "}
+                <span className="text-slate-700">{ent.owner_name}</span>
+              </span>
+            )}
+            {ent.owner_email && (
+              <span className="truncate font-mono-num text-slate-500">
+                {ent.owner_email}
+              </span>
+            )}
+            <span className="text-slate-400">
+              · {ent.clients_count || 0}{" "}
+              {ent.clients_count === 1 ? "client" : "clients"}
+            </span>
+            <span className="text-slate-400 font-mono">{ent.slug || "—"}</span>
           </div>
         </div>
       </Link>
@@ -295,6 +341,20 @@ export default function PartnerDash() {
   const [creatingClient, setCreatingClient] = useState(false);
   const [creatingEnterprise, setCreatingEnterprise] = useState(false);
   const nav = useNavigate();
+  // Ref for the "My Clients" section so clicking a stat card can
+  // scroll into view AND set the visible tab. Nice-to-have — small
+  // dashboards fit on one screen, but with a wide financials
+  // section the user might have to scroll.
+  const clientsRef = useRef(null);
+
+  const jumpToClients = (m) => {
+    setMode(m);
+    // Defer to the next frame so the toggle state re-renders before
+    // we scroll (otherwise the ref might be stale on first click).
+    requestAnimationFrame(() => {
+      clientsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
 
   async function load() {
     setErr("");
@@ -392,8 +452,16 @@ export default function PartnerDash() {
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Clients" value={s.clients} Icon={UsersIcon} tone="indigo" />
-        <StatCard label="Enterprises" value={s.enterprises} Icon={Building} tone="emerald" />
+        <StatCard
+          label="Clients" value={s.clients} Icon={UsersIcon} tone="indigo"
+          onClick={() => jumpToClients("clients")}
+          active={mode === "clients"}
+        />
+        <StatCard
+          label="Enterprises" value={s.enterprises} Icon={Building} tone="emerald"
+          onClick={() => jumpToClients("enterprises")}
+          active={mode === "enterprises"}
+        />
         <StatCard label="Users" value={s.linked_users} Icon={UsersIcon} tone="slate" />
         <StatCard
           label="Partner Books"
@@ -437,8 +505,9 @@ export default function PartnerDash() {
           `/pro/clients` pattern but drops the "Partners" toggle option
           (a Partner cannot create other Partners). */}
       <section
+        ref={clientsRef}
         data-testid="partner-my-clients"
-        className="rounded-xl border border-slate-200 bg-white"
+        className="rounded-xl border border-slate-200 bg-white scroll-mt-4"
       >
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
           <div>
