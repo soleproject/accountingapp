@@ -171,6 +171,8 @@ def serialize(partner_user: dict, *, stats: Optional[dict] = None) -> dict:
         "primary_color": branding.get("primary_color"),
         "logo_url": branding.get("logo_url"),
         "must_set_password": bool(partner_user.get("must_set_password")),
+        "status": partner_user.get("status"),  # "archived" | None (active)
+        "archived_at": partner_user.get("archived_at"),
         "created_at": partner_user.get("created_at"),
         "updated_at": partner_user.get("updated_at"),
         "stats": stats or {},

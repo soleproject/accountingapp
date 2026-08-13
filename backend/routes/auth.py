@@ -127,6 +127,21 @@ async def login(request: Request, inp: Annotated[LoginIn, Body()]):
     # eventually remembers their password isn't stuck.
     await _clear_login_failures(email)
 
+    # Archived / disabled accounts can't log in. We check AFTER the
+    # password verify so an attacker probing valid usernames can't
+    # discriminate archived from active accounts.
+    if u.get("status") == "archived":
+        raise HTTPException(
+            403,
+            detail={
+                "message": (
+                    "This account has been archived. Contact your platform "
+                    "administrator if you believe this is a mistake."
+                ),
+                "code": "account_archived",
+            },
+        )
+
     token = create_token(u["id"], u["role"])
     # Audit — successful login.
     try:
