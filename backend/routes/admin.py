@@ -890,15 +890,49 @@ async def create_enterprise(
             from routes.auth import mint_password_set_token
             from email_dispatcher import dispatch, public_base_url
             import email_templates as _tmpl
+
+            # Resolve the effective brand for the invitee. Priority:
+            # 1) The inviting partner's unlocked private label — the
+            #    email should feel like it's coming from THEIR firm.
+            # 2) Superadmin / non-branded caller → fall back to
+            #    SmartBooks (brand_name=None + platform base URL).
+            brand_name = None
+            brand_slug = None
+            if user.get("role") == "partner":
+                pb = user.get("branding") or {}
+                partner_wl_unlocked = bool(
+                    pb.get("whitelabel_comp")
+                    or pb.get("whitelabel_paid")
+                    or pb.get("whitelabel_unlocked")
+                )
+                if partner_wl_unlocked:
+                    brand_name = pb.get("firm_name") or user.get("name")
+                    # Partner subdomain — slug lives on the partner
+                    # user doc under branding.subdomain_slug (falls
+                    # back to a slugified firm name).
+                    brand_slug = (
+                        pb.get("subdomain_slug")
+                        or pb.get("slug")
+                        or None
+                    )
             magic_token = await mint_password_set_token(owner_user_id, purpose="welcome")
-            magic_url = f"{public_base_url()}/set-password/{magic_token}"
+            magic_url = f"{public_base_url(firm_slug=brand_slug)}/set-password/{magic_token}"
+            # Body copy — swap "SmartBooks" in the role blurb for the
+            # active brand so it reads consistently with subject/H1/
+            # footer.
+            active_brand = (brand_name or "SmartBooks").strip()
+            role_desc = (
+                f"you'll own the {ent['name']} enterprise on {active_brand} "
+                f"and can invite Pros, add clients, and manage billing."
+            )
             subject, html = _tmpl.team_invite(
                 invitee_name=(payload.owner_name or "there"),
-                inviter_name=user.get("name") or user.get("email") or "SmartBooks",
+                inviter_name=user.get("name") or user.get("email") or active_brand,
                 role_label="Enterprise owner",
-                role_description=f"you'll own the {ent['name']} enterprise on SmartBooks and can invite Pros, add clients, and manage billing.",
+                role_description=role_desc,
                 company_names=[],
                 magic_url=magic_url,
+                brand_name=brand_name,
             )
             result = await dispatch(
                 kind="team_invite",

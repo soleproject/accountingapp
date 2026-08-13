@@ -97,7 +97,15 @@ def password_reset(*, name: str, magic_url: str) -> tuple[str, str]:
 # --------------------------------------------------------------------------
 def team_invite(*, invitee_name: str, inviter_name: str,
                 role_label: str, role_description: str,
-                company_names: list[str], magic_url: str) -> tuple[str, str]:
+                company_names: list[str], magic_url: str,
+                brand_name: Optional[str] = None) -> tuple[str, str]:
+    """Team-invite email. When `brand_name` is provided (i.e. the
+    inviter has an unlocked private label), every hardcoded
+    "SmartBooks" swaps for the label's name and the footer strips the
+    platform disclaimer via `_wrap(brand_name=...)`. The magic-link
+    URL is expected to already be on the correct label host — the
+    caller builds it with `public_base_url(firm_slug=...)`."""
+    brand = (brand_name or "").strip() or "SmartBooks"
     if company_names:
         row_lines = "".join(
             f"<div style='padding:4px 0;color:#0f172a;font-size:13px;'>· {escape(n)}</div>"
@@ -116,10 +124,10 @@ def team_invite(*, invitee_name: str, inviter_name: str,
         companies_html = ""
 
     inner = f"""
-      <div style="{_H1}">You've been invited to SmartBooks</div>
+      <div style="{_H1}">You've been invited to {escape(brand)}</div>
       <div style="{_P}">
         Hi {escape(invitee_name)},<br><br>
-        <b>{escape(inviter_name)}</b> invited you to join SmartBooks as an
+        <b>{escape(inviter_name)}</b> invited you to join {escape(brand)} as an
         <b>{escape(role_label)}</b> — {escape(role_description)}
       </div>
       {companies_html}
@@ -134,7 +142,10 @@ def team_invite(*, invitee_name: str, inviter_name: str,
         {escape(inviter_name)} to re-send it.
       </div>
     """
-    return f"You're invited to SmartBooks — {role_label}", _wrap(inner)
+    return (
+        f"You're invited to {brand} — {role_label}",
+        _wrap(inner, brand_name=brand_name),
+    )
 
 
 # --------------------------------------------------------------------------
