@@ -226,6 +226,47 @@ async def startup():
             "partner-books dedupe failed on startup: %s", e,
         )
 
+    # ── (Feb 2026) QBO dual-env backfill.
+    # Every existing qbo_connection row that predates the dual-env
+    # rollout was minted against the SANDBOX Intuit app (that was the
+    # sole configured env). Stamp `env: "sandbox"` on those rows AND
+    # on the parent companies so:
+    #   1) The env-aware get_access_token / _get keep hitting the
+    #      sandbox API for those tokens.
+    #   2) The Company Settings toggle initialises to "sandbox" for
+    #      those companies (matching what the user actually connected).
+    # Idempotent — the `env: {$exists: false}` filter makes subsequent
+    # boots a no-op.
+    try:
+        cn_res = await db.qbo_connections.update_many(
+            {"env": {"$exists": False}},
+            {"$set": {"env": "sandbox"}},
+        )
+        # Companies with an active sandbox connection default to sandbox
+        # in the toggle. Companies with NO connection yet get the
+        # platform default (production) — leave `qbo_env` unset for
+        # them so the resolver picks up QBO_ENV_DEFAULT.
+        connected_cids = await db.qbo_connections.distinct(
+            "company_id", {"env": "sandbox"},
+        )
+        cp_res = await db.companies.update_many(
+            {"id": {"$in": connected_cids},
+             "qbo_env": {"$exists": False}},
+            {"$set": {"qbo_env": "sandbox"}},
+        )
+        if cn_res.modified_count or cp_res.modified_count:
+            import logging as _l
+            _l.getLogger("axiom.app").warning(
+                "QBO env backfill: %d connection(s), %d company(ies) "
+                "stamped sandbox",
+                cn_res.modified_count, cp_res.modified_count,
+            )
+    except Exception as e:  # noqa: BLE001
+        import logging as _l
+        _l.getLogger("axiom.app").exception(
+            "QBO env backfill failed on startup: %s", e,
+        )
+
     # One-time backfill (Feb 2026) — elevate global role for any user
     # who has an active `role=pro` membership but is still flagged
     # `role=client` globally. Prior invites of *pre-existing* client

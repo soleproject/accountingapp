@@ -32,16 +32,52 @@ from crypto_service import encrypt, decrypt
 
 logger = logging.getLogger(__name__)
 
-QBO_ENV = os.environ.get("QBO_ENV", "sandbox")
+QBO_ENV = os.environ.get("QBO_ENV", "sandbox")  # legacy — sandbox creds
 QBO_CLIENT_ID = os.environ.get("QBO_CLIENT_ID")
 QBO_CLIENT_SECRET = os.environ.get("QBO_CLIENT_SECRET")
+# Production credentials — separate Intuit app (Feb 2026 rollout).
+# When a company toggles its `qbo_env` to "production", OAuth + API
+# calls resolve against these instead of the sandbox pair above.
+QBO_CLIENT_ID_PROD = os.environ.get("QBO_CLIENT_ID_PROD")
+QBO_CLIENT_SECRET_PROD = os.environ.get("QBO_CLIENT_SECRET_PROD")
+# Platform-wide default for BRAND-NEW companies. Existing companies
+# keep whatever env is stamped on their record / their qbo_connection.
+QBO_ENV_DEFAULT = os.environ.get("QBO_ENV_DEFAULT", "production").lower()
 QBO_REDIRECT_URI = os.environ.get("QBO_REDIRECT_URI")
 QBO_MINOR_VERSION = os.environ.get("QBO_MINOR_VERSION", "75")
 
 QBO_APP_URL = os.environ.get("QBO_APP_URL", "https://app.smartbookssoftware.ai")
-API_BASE = ("https://sandbox-quickbooks.api.intuit.com/v3"
-            if QBO_ENV == "sandbox"
+
+
+def _norm_env(env: str | None) -> str:
+    """Coerce any env string to `sandbox` | `production`. Anything
+    unrecognised falls back to the platform default (production)."""
+    e = (env or "").strip().lower()
+    if e in ("sandbox", "production"):
+        return e
+    return QBO_ENV_DEFAULT if QBO_ENV_DEFAULT in ("sandbox", "production") else "production"
+
+
+def api_base_for(env: str | None) -> str:
+    """Return the correct Intuit API base URL for the given env."""
+    return ("https://sandbox-quickbooks.api.intuit.com/v3"
+            if _norm_env(env) == "sandbox"
             else "https://quickbooks.api.intuit.com/v3")
+
+
+def _creds_for(env: str | None) -> tuple[str | None, str | None]:
+    """Return `(client_id, client_secret)` for the given env. Sandbox
+    falls back to the legacy vars so nothing breaks for existing
+    connections stamped `sandbox`."""
+    if _norm_env(env) == "production":
+        return QBO_CLIENT_ID_PROD, QBO_CLIENT_SECRET_PROD
+    return QBO_CLIENT_ID, QBO_CLIENT_SECRET
+
+
+# Legacy alias — kept only so imports elsewhere (`from qbo_service
+# import API_BASE`) don't break. Actual routing uses api_base_for(env)
+# via _api_base_for_company below. Do not rely on this for new code.
+API_BASE = api_base_for(QBO_ENV_DEFAULT)
 
 # Deploy canary — bumped every time the mapper contract changes. The
 # diagnostics endpoint echoes this back so we can verify at a glance
@@ -51,21 +87,29 @@ API_BASE = ("https://sandbox-quickbooks.api.intuit.com/v3"
 MAPPER_VERSION = "v4-2026-02-08-capital-Id-null-safe-per-row-isolation"
 
 
-def _auth_client(redirect_uri: str | None = None) -> AuthClient:
+def _auth_client(redirect_uri: str | None = None,
+                 env: str | None = None) -> AuthClient:
     """Build an Intuit AuthClient. `redirect_uri` defaults to the
     platform-wide `QBO_REDIRECT_URI` env for the flagship SmartBooks
     domain, but private-label deployments (Cypher Pro, Proactive
     Books, etc.) pass their own callback URL so the consent flow
     returns the user to the label domain they came from.
 
+    `env` — "sandbox" | "production". Selects which Intuit app's
+    client_id/secret to use, and which environment string to pass to
+    the SDK (which internally picks the right token endpoint).
+
     Every URL passed here must ALSO be registered as a Redirect URI on
-    the Intuit Developer app — Intuit does an exact-match check both
-    on the outbound auth URL and the token-exchange call."""
+    the Intuit Developer app for the SELECTED ENV — Intuit does an
+    exact-match check both on the outbound auth URL and the
+    token-exchange call, per environment."""
+    e = _norm_env(env)
+    cid, csec = _creds_for(e)
     return AuthClient(
-        client_id=QBO_CLIENT_ID,
-        client_secret=QBO_CLIENT_SECRET,
+        client_id=cid,
+        client_secret=csec,
         redirect_uri=redirect_uri or QBO_REDIRECT_URI,
-        environment=QBO_ENV,
+        environment=e,
     )
 
 
@@ -73,29 +117,38 @@ def _auth_client(redirect_uri: str | None = None) -> AuthClient:
 # OAuth: URL, callback exchange, refresh, revoke
 # ------------------------------------------------------------------
 
-def authorization_url(state: str, redirect_uri: str | None = None) -> str:
+def authorization_url(state: str, redirect_uri: str | None = None,
+                      env: str | None = None) -> str:
     """Return the Intuit consent URL. `state` is a CSRF token bound to
     the caller's company_id, stored in db.qbo_oauth_states with a 10-min
     expiry and consumed exactly once on callback.
 
     `redirect_uri` overrides the default when a private-label domain
     kicks off the flow — pass the SAME value here that gets stored on
-    the state record so `exchange_code` can send it back verbatim."""
-    c = _auth_client(redirect_uri)
+    the state record so `exchange_code` can send it back verbatim.
+
+    `env` — the target QBO environment for THIS connection. Must be
+    persisted on the state row and passed back into `exchange_code`
+    so both legs of the OAuth dance hit the same Intuit app."""
+    c = _auth_client(redirect_uri, env=env)
     return c.get_authorization_url([Scopes.ACCOUNTING], state_token=state)
 
 
 async def exchange_code(code: str, realm_id: str,
-                        redirect_uri: str | None = None) -> dict[str, Any]:
+                        redirect_uri: str | None = None,
+                        env: str | None = None) -> dict[str, Any]:
     """Exchange an OAuth `code` for tokens. Wraps the sync SDK call in
     `run_in_executor` since it's blocking.
 
     `redirect_uri` MUST match the URI sent in the original
     authorization request — Intuit rejects the exchange otherwise
     with `invalid_grant`. Callers persist the URI on the oauth state
-    record so this round-trips correctly for every private label."""
+    record so this round-trips correctly for every private label.
+
+    `env` MUST match the env used in `authorization_url` — sandbox
+    codes cannot be exchanged on the production app and vice versa."""
     def _blocking() -> dict[str, Any]:
-        c = _auth_client(redirect_uri)
+        c = _auth_client(redirect_uri, env=env)
         c.get_bearer_token(code, realm_id=realm_id)
         return {
             "access_token": c.access_token,
@@ -121,9 +174,10 @@ def _lock_for(company_id: str) -> asyncio.Lock:
     return lk
 
 
-async def _refresh(company_id: str, refresh_token: str) -> dict[str, Any]:
+async def _refresh(company_id: str, refresh_token: str,
+                    env: str | None = None) -> dict[str, Any]:
     def _blocking() -> dict[str, Any]:
-        c = _auth_client()
+        c = _auth_client(env=env)
         c.refresh(refresh_token=refresh_token)
         return {
             "access_token": c.access_token,
@@ -133,9 +187,9 @@ async def _refresh(company_id: str, refresh_token: str) -> dict[str, Any]:
     return await asyncio.get_event_loop().run_in_executor(None, _blocking)
 
 
-async def revoke(refresh_token: str) -> None:
+async def revoke(refresh_token: str, env: str | None = None) -> None:
     def _blocking():
-        c = _auth_client()
+        c = _auth_client(env=env)
         try:
             c.revoke(token=refresh_token)
         except Exception as e:  # noqa: BLE001
@@ -147,12 +201,19 @@ async def revoke(refresh_token: str) -> None:
 # Connection persistence
 # ------------------------------------------------------------------
 
-async def save_connection(company_id: str, realm_id: str, tokens: dict) -> None:
+async def save_connection(company_id: str, realm_id: str, tokens: dict,
+                          env: str | None = None) -> None:
+    """Persist a QBO connection. `env` stamps the row so every future
+    refresh/API call resolves against the same Intuit app the token
+    was minted on. Existing sandbox connections keep their env after
+    the Feb 2026 backfill; new prod connections stamp "production"."""
     now = datetime.now(timezone.utc)
+    resolved_env = _norm_env(env)
     doc = {
         "company_id": company_id,
         "realm_id": realm_id,
-        "environment": QBO_ENV,
+        "environment": resolved_env,
+        "env": resolved_env,
         "access_token_enc": encrypt(tokens["access_token"]),
         "refresh_token_enc": encrypt(tokens["refresh_token"]),
         "access_expires_at": (now + timedelta(seconds=int(tokens["expires_in"]))).isoformat(),
@@ -172,9 +233,27 @@ async def get_connection(company_id: str) -> Optional[dict]:
     return await db.qbo_connections.find_one({"company_id": company_id})
 
 
+def env_from_connection(conn: Optional[dict]) -> str:
+    """Extract the env from a connection doc, defaulting to sandbox
+    for any legacy row that predates the Feb 2026 dual-env rollout
+    (so those rows keep hitting the sandbox API — see the startup
+    backfill in server.py)."""
+    if not conn:
+        return QBO_ENV_DEFAULT if QBO_ENV_DEFAULT in ("sandbox", "production") else "production"
+    return _norm_env(conn.get("env") or conn.get("environment") or "sandbox")
+
+
+async def _api_base_for_company(company_id: str) -> str:
+    """Look up the connection's env and return the matching API base."""
+    conn = await get_connection(company_id)
+    return api_base_for(env_from_connection(conn))
+
+
 async def get_access_token(company_id: str) -> str:
     """Return a valid access token, refreshing if within a 2-min expiry
-    window. Serialized per-company."""
+    window. Serialized per-company. Uses the env stamped on the
+    connection row so sandbox tokens refresh against the sandbox app
+    even after the platform's default flips to production."""
     async with _lock_for(company_id):
         conn = await get_connection(company_id)
         if not conn or conn.get("status") != "connected":
@@ -182,8 +261,10 @@ async def get_access_token(company_id: str) -> str:
         exp = datetime.fromisoformat(conn["access_expires_at"])
         if exp > datetime.now(timezone.utc) + timedelta(minutes=2):
             return decrypt(conn["access_token_enc"])
-        # Refresh
-        new = await _refresh(company_id, decrypt(conn["refresh_token_enc"]))
+        # Refresh against the SAME env the connection was minted on.
+        conn_env = env_from_connection(conn)
+        new = await _refresh(company_id, decrypt(conn["refresh_token_enc"]),
+                             env=conn_env)
         now = datetime.now(timezone.utc)
         await db.qbo_connections.update_one(
             {"company_id": company_id},
@@ -206,11 +287,12 @@ _gate = asyncio.Semaphore(8)
 
 async def _get(company_id: str, realm_id: str, path: str, params: dict) -> dict:
     tok = await get_access_token(company_id)
+    base = await _api_base_for_company(company_id)
     async with httpx.AsyncClient(timeout=60) as client:
         for attempt in range(6):
             async with _gate:
                 r = await client.get(
-                    f"{API_BASE}{path}",
+                    f"{base}{path}",
                     params={**params, "minorversion": QBO_MINOR_VERSION},
                     headers={
                         "Authorization": f"Bearer {tok}",

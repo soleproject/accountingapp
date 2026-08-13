@@ -156,14 +156,22 @@ async def qbo_oauth_start(cid: str, request: Request,
     # what fixes the "click Connect in QBO consent → land on SmartBooks
     # login" bug for enterprise/partner private labels.
     return_to_host = _return_to_host_from_request(request)
+    # Resolve target env from the company's `qbo_env` (Feb 2026 dual-
+    # env rollout). Persist on the state row so the callback exchanges
+    # against the same Intuit app the auth URL was minted on — Intuit
+    # rejects cross-env code exchange with `invalid_grant`.
+    comp = await db.companies.find_one({"id": cid}) or {}
+    target_env = Q._norm_env(comp.get("qbo_env") or Q.QBO_ENV_DEFAULT)
     await db.qbo_oauth_states.insert_one({
         "state": state, "company_id": cid, "user_id": user["id"],
         "redirect_uri": redirect_uri,
         "return_to_host": return_to_host,
+        "env": target_env,
         "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
         "created_at": now_iso(),
     })
-    return {"url": Q.authorization_url(state, redirect_uri=redirect_uri)}
+    return {"url": Q.authorization_url(state, redirect_uri=redirect_uri,
+                                       env=target_env)}
 
 
 @router.get("/qbo/oauth/callback")
@@ -246,8 +254,14 @@ async def qbo_oauth_callback(
     # rejects the exchange with `invalid_grant` otherwise. Persisted on
     # the state record for exactly this reason.
     stored_redirect_uri = rec.get("redirect_uri")
+    # Env stamped at OAuth-start time. Falls back to sandbox for any
+    # in-flight legacy state row that predates this feature — sandbox
+    # was the previous universal default.
+    stored_env = Q._norm_env(rec.get("env") or "sandbox")
     try:
-        tokens = await Q.exchange_code(code, realmId, redirect_uri=stored_redirect_uri)
+        tokens = await Q.exchange_code(code, realmId,
+                                        redirect_uri=stored_redirect_uri,
+                                        env=stored_env)
     except Exception as e:  # noqa: BLE001
         import logging
         logging.getLogger(__name__).exception(
@@ -255,7 +269,7 @@ async def qbo_oauth_callback(
         )
         return _err(f"exchange_failed:{str(e)[:120]}", rec)
     try:
-        await Q.save_connection(cid, realmId, tokens)
+        await Q.save_connection(cid, realmId, tokens, env=stored_env)
     except Exception as e:  # noqa: BLE001
         import logging
         logging.getLogger(__name__).exception(
@@ -278,12 +292,22 @@ async def qbo_oauth_callback(
 async def qbo_status(cid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     conn = await Q.get_connection(cid)
+    # Company's SELECTED env (drives the NEXT connect). Independent of
+    # any existing connection, which stays stamped on its original env.
+    comp = await db.companies.find_one({"id": cid}) or {}
+    selected_env = Q._norm_env(comp.get("qbo_env") or Q.QBO_ENV_DEFAULT)
     if not conn:
-        return {"connected": False}
+        return {"connected": False, "env": selected_env,
+                "connection_env": None}
     return {
         "connected": conn.get("status") == "connected",
         "realm_id": conn.get("realm_id"),
         "environment": conn.get("environment"),
+        # `env` is the SELECTED (next-connect) env; `connection_env`
+        # is what the CURRENT tokens are minted against. These diverge
+        # only when the user disconnects and flips the toggle.
+        "env": selected_env,
+        "connection_env": Q.env_from_connection(conn),
         "connected_at": conn.get("created_at"),
         "last_updated": conn.get("updated_at"),
     }
@@ -296,7 +320,9 @@ async def qbo_disconnect(cid: str, user: dict = Depends(get_current_user)):
     if conn and conn.get("refresh_token_enc"):
         try:
             from crypto_service import decrypt
-            await Q.revoke(decrypt(conn["refresh_token_enc"]))
+            # Revoke against the same Intuit app that minted the token.
+            await Q.revoke(decrypt(conn["refresh_token_enc"]),
+                           env=Q.env_from_connection(conn))
         except Exception:  # noqa: BLE001
             pass
     await db.qbo_connections.update_one(
@@ -309,6 +335,66 @@ async def qbo_disconnect(cid: str, user: dict = Depends(get_current_user)):
         {"$set": {"status": "cancelled", "finished_at": now_iso()}},
     )
     return {"ok": True}
+
+
+# ─── (Feb 2026) QBO Environment toggle ────────────────────────────────
+#
+# Per-company: sandbox vs production. Drives which Intuit app the NEXT
+# `Connect QuickBooks` click hits. New companies default to
+# `QBO_ENV_DEFAULT=production`. Existing sandbox-connected companies
+# were backfilled to `sandbox` at startup so they keep working
+# unchanged.
+#
+# Guardrail: the toggle is locked while a connection is active. Users
+# must disconnect first, then flip, then reconnect — this prevents
+# orphaned tokens (Intuit tokens are env-scoped and become invalid the
+# moment you point them at the wrong API base).
+
+
+class QboEnvIn(BaseModel):
+    env: str  # "sandbox" | "production"
+
+
+@router.get("/companies/{cid}/qbo/env")
+async def get_qbo_env(cid: str, user: dict = Depends(get_current_user)):
+    """Return the company's selected env + whether the toggle is
+    currently locked by an active connection."""
+    await require_company(user, cid)
+    comp = await db.companies.find_one({"id": cid}) or {}
+    conn = await Q.get_connection(cid)
+    active = bool(conn and conn.get("status") == "connected"
+                  and conn.get("refresh_token_enc"))
+    return {
+        "env": Q._norm_env(comp.get("qbo_env") or Q.QBO_ENV_DEFAULT),
+        "default": Q.QBO_ENV_DEFAULT,
+        "locked": active,
+        "lock_reason": ("QBO is currently connected — disconnect first "
+                        "to change environment.") if active else None,
+        "connection_env": Q.env_from_connection(conn) if conn else None,
+    }
+
+
+@router.patch("/companies/{cid}/qbo/env")
+async def set_qbo_env(cid: str, body: QboEnvIn,
+                     user: dict = Depends(get_current_user)):
+    """Flip the company's target env. Rejected while a connection is
+    active — the user must disconnect first."""
+    await require_company(user, cid)
+    new_env = Q._norm_env(body.env)
+    if new_env not in ("sandbox", "production"):
+        raise HTTPException(400, "env must be 'sandbox' or 'production'")
+    conn = await Q.get_connection(cid)
+    if conn and conn.get("status") == "connected" and conn.get("refresh_token_enc"):
+        raise HTTPException(
+            409,
+            "Disconnect QuickBooks before switching environment. "
+            "The active connection is tied to the current environment.",
+        )
+    await db.companies.update_one(
+        {"id": cid},
+        {"$set": {"qbo_env": new_env, "updated_at": now_iso()}},
+    )
+    return {"ok": True, "env": new_env}
 
 
 @router.get("/companies/{cid}/qbo/preview")

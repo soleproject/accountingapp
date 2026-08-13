@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/alert-dialog";
 
 import { BUSINESS_TYPES } from "@/constants/businessTypes";
+import QboEnvToggle from "@/components/QboEnvToggle";
 
 /**
  * Normalize a company-name string for comparison purposes.
@@ -397,6 +398,10 @@ export default function CompanySettings() {
           </button>
         </div>
       </div>
+
+      {/* --- QuickBooks environment (sandbox / production) — sits
+           immediately above Danger Zone per Feb 2026 rollout. --- */}
+      <QboEnvToggle companyId={currentId} />
 
       {/* --- Danger zone --- */}
       <div className="rounded-xl border border-red-200 bg-red-50/40 p-5 space-y-3">

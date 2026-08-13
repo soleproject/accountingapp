@@ -16,7 +16,7 @@ import logging
 from typing import Any
 
 from db import db, now_iso
-from qbo_service import get_access_token, API_BASE, QBO_MINOR_VERSION
+from qbo_service import get_access_token, QBO_MINOR_VERSION
 from qbo_mirror.settings import is_enabled, append_log
 from qbo_mirror.push import (
     _post, _acct_body, _contact_body, _item_body, _invoice_body,
