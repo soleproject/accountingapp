@@ -1091,3 +1091,29 @@ sibling.
   covering happy path, status mapping (both), missing refs, twin
   patches for both entities.
 - All 5 mirror test files: **35/35 pass**.
+
+---
+
+## Feb 2026 — Partner Books Deduplication (verified)
+
+Mirrors the Firm Books dedupe. Prevents Partners from ever ending up
+with duplicate "Partner Books" rows under concurrent-boot races.
+
+**Backend**
+- `partners.py::ensure_partner_books_company_for_partner` — swallows
+  DuplicateKeyError from the new partial-unique index and returns the
+  winning row (idempotent under races).
+- `partners.py::dedupe_partner_books_companies()` — startup pass that
+  keeps the oldest row per `partner_id`, deletes the rest plus child
+  memberships/accounts/transactions/journal_entries/invoices/bills.
+- `server.py` startup:
+  - Partial-unique index `partner_books_uniq_per_partner`
+    on `companies.(partner_id, is_partner_books)`.
+  - Calls `dedupe_partner_books_companies()` after Firm Books dedupe.
+
+**Regression coverage**
+- `tests/test_partner_books_dedupe.py` — 3 new tests (dedupe collapses
+  duplicates, ensure() swallows DuplicateKeyError, dedupe is noop).
+- Full suite: `test_partner_books_dedupe.py` (3), `test_firm_books_dedupe.py`
+  (3), `test_partners.py`, `test_partner_lifecycle.py` → **19/19 pass**.
+- Backend supervisor: clean boot, "Application startup complete".

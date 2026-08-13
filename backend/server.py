@@ -179,6 +179,22 @@ async def startup():
             "to remove existing duplicates.", e,
         )
 
+    # Same guard for Partner Books — at most one per Partner.
+    try:
+        await db.companies.create_index(
+            [("partner_id", 1), ("is_partner_books", 1)],
+            unique=True,
+            partialFilterExpression={"is_partner_books": True},
+            name="partner_books_uniq_per_partner",
+        )
+    except Exception as e:  # noqa: BLE001
+        import logging as _l
+        _l.getLogger("axiom.app").error(
+            "failed to create partner_books uniqueness index: %s. "
+            "Run partners.dedupe_partner_books_companies() first "
+            "to remove existing duplicates.", e,
+        )
+
     # ── Dedupe any pre-existing Firm Books duplicates left behind by
     # concurrent-boot races before the uniqueness index was added.
     try:
@@ -193,6 +209,21 @@ async def startup():
         import logging as _l
         _l.getLogger("axiom.app").exception(
             "firm-books dedupe failed on startup: %s", e,
+        )
+
+    # Same one-time dedupe pass for Partner Books.
+    try:
+        from partners import dedupe_partner_books_companies
+        n = await dedupe_partner_books_companies()
+        if n:
+            import logging as _l
+            _l.getLogger("axiom.app").warning(
+                "startup dedupe removed %d duplicate Partner Books row(s)", n,
+            )
+    except Exception as e:  # noqa: BLE001
+        import logging as _l
+        _l.getLogger("axiom.app").exception(
+            "partner-books dedupe failed on startup: %s", e,
         )
 
     # One-time backfill (Feb 2026) — elevate global role for any user
