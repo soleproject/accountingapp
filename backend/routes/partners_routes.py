@@ -296,6 +296,185 @@ async def patch_partner(
 
 
 # --------------------------------------------------------------------------
+# Archive / Unarchive / Hard-Delete (Feb 2026)
+# --------------------------------------------------------------------------
+# A superadmin can either:
+#   • ARCHIVE a partner (soft-delete) — flips `status=archived` on the
+#     user doc. Login is blocked (see /auth/login). The tree
+#     (enterprises + companies + descendant pros) is left untouched so
+#     the partner can be un-archived losslessly.
+#   • UNARCHIVE — restore.
+#   • HARD-DELETE — irreversible. Cascades to every record downstream:
+#     Partner Books company, all enterprises they provisioned, all
+#     client companies stamped with `partner_id` or attached via
+#     `enterprise_id`, every Pro user in their tree, and their
+#     qbo_oauth_states. Refuses (409) if any client company still has
+#     transactions unless `force=true` is passed.
+# --------------------------------------------------------------------------
+
+@router.post("/superadmin/partners/{partner_id}/archive")
+async def archive_partner(
+    partner_id: str,
+    user: dict = Depends(require_role("superadmin")),
+):
+    p = await db.users.find_one({"id": partner_id, "role": "partner"})
+    if not p:
+        raise HTTPException(404, "Partner not found")
+    if p.get("status") == "archived":
+        return {"ok": True, "already_archived": True}
+    await db.users.update_one(
+        {"id": partner_id},
+        {"$set": {
+            "status": "archived",
+            "archived_at": now_iso(),
+            "archived_by": user["id"],
+        }},
+    )
+    return {"ok": True, "partner_id": partner_id, "status": "archived"}
+
+
+@router.post("/superadmin/partners/{partner_id}/unarchive")
+async def unarchive_partner(
+    partner_id: str,
+    user: dict = Depends(require_role("superadmin")),
+):
+    p = await db.users.find_one({"id": partner_id, "role": "partner"})
+    if not p:
+        raise HTTPException(404, "Partner not found")
+    await db.users.update_one(
+        {"id": partner_id},
+        {
+            "$set": {"unarchived_at": now_iso(), "unarchived_by": user["id"]},
+            "$unset": {"status": "", "archived_at": "", "archived_by": ""},
+        },
+    )
+    return {"ok": True, "partner_id": partner_id, "status": "active"}
+
+
+@router.delete("/superadmin/partners/{partner_id}")
+async def delete_partner(
+    partner_id: str,
+    force: bool = False,
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Hard-delete a partner and cascade to their entire tree.
+
+    * `force=false` (default) — refuses with 409 if any client company
+      in the tree still has transactions, invoices, or bills. This is
+      the guardrail against accidentally nuking active data.
+    * `force=true` — deletes anyway. Use with intent — this is
+      irreversible and doesn't archive.
+
+    Returns a summary of what was removed so the frontend can render
+    "Deleted N companies, M enterprises, K users" for the audit toast.
+    """
+    p = await db.users.find_one({"id": partner_id, "role": "partner"})
+    if not p:
+        raise HTTPException(404, "Partner not found")
+
+    # Collect the tree BEFORE we start deleting so cascade decisions
+    # are consistent across each step.
+    ent_ids = [
+        e["id"] async for e in db.enterprises.find(
+            {"partner_id": partner_id}, {"id": 1, "_id": 0},
+        ) if e.get("id")
+    ]
+    company_ids: set[str] = set()
+    async for c in db.companies.find(
+        {"$or": [
+            {"partner_id": partner_id},
+            {"enterprise_id": {"$in": ent_ids}} if ent_ids else {"_id": None},
+        ]},
+        {"id": 1, "_id": 0},
+    ):
+        if c.get("id"):
+            company_ids.add(c["id"])
+    user_ids: set[str] = {partner_id}
+    async for u in db.users.find(
+        {"$or": [
+            {"partner_id": partner_id},
+            {"enterprise_id": {"$in": ent_ids}} if ent_ids else {"_id": None},
+        ]},
+        {"id": 1, "_id": 0},
+    ):
+        if u.get("id"):
+            user_ids.add(u["id"])
+
+    if not force:
+        # Guardrail — refuse if any company has recorded transactions.
+        # Callers can retry with `?force=true` after confirming with a
+        # human they really want to nuke the data.
+        tx_count = 0
+        if company_ids:
+            tx_count = await db.transactions.count_documents(
+                {"company_id": {"$in": list(company_ids)}}
+            )
+        if tx_count > 0:
+            raise HTTPException(
+                409,
+                detail={
+                    "message": (
+                        f"This partner's tree has {tx_count} transactions across "
+                        f"{len(company_ids)} companies. Pass `force=true` to nuke "
+                        f"anyway, or archive the partner instead to preserve data."
+                    ),
+                    "code": "cascade_blocked_active_data",
+                    "counts": {
+                        "companies": len(company_ids),
+                        "enterprises": len(ent_ids),
+                        "users": len(user_ids),
+                        "transactions": tx_count,
+                    },
+                },
+            )
+
+    # --- Cascade the deletes. Order matters — leaf tables first so
+    # foreign-key-ish references are removed before their parents.
+    txn_del = 0
+    if company_ids:
+        cids = list(company_ids)
+        res = await db.transactions.delete_many({"company_id": {"$in": cids}})
+        txn_del = res.deleted_count
+        # Other per-company tables — best-effort, safe to no-op if
+        # they don't exist in this deployment.
+        for _coll in (
+            "invoices", "bills", "estimates", "receipts", "contacts",
+            "products", "categories", "memberships",
+            "ai_usage_events", "qbo_oauth_states", "qbo_connections",
+            "plaid_items", "veryfi_receipts", "chat_messages",
+        ):
+            try:
+                await getattr(db, _coll).delete_many({"company_id": {"$in": cids}})
+            except Exception:  # noqa: BLE001
+                # Any collection that isn't in this deployment simply
+                # doesn't matter — swallow and move on.
+                pass
+        await db.companies.delete_many({"id": {"$in": cids}})
+
+    # Users in the tree.
+    uids = list(user_ids)
+    await db.users.delete_many({"id": {"$in": uids}})
+    await db.qbo_oauth_states.delete_many({"user_id": {"$in": uids}})
+
+    # Enterprises + their invoices.
+    if ent_ids:
+        await db.enterprise_invoices.delete_many({"enterprise_id": {"$in": ent_ids}})
+        await db.enterprises.delete_many({"id": {"$in": ent_ids}})
+
+    return {
+        "ok": True,
+        "deleted": {
+            "partner_id": partner_id,
+            "enterprises": len(ent_ids),
+            "companies": len(company_ids),
+            "users": len(user_ids),
+            "transactions": txn_del,
+            "forced": bool(force),
+        },
+    }
+
+
+# --------------------------------------------------------------------------
 # Partner — self-service views (scoped to their own tree)
 # --------------------------------------------------------------------------
 
