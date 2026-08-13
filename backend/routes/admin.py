@@ -898,6 +898,7 @@ async def create_enterprise(
             #    SmartBooks (brand_name=None + platform base URL).
             brand_name = None
             brand_slug = None
+            brand_signin_sub = None
             if user.get("role") == "partner":
                 pb = user.get("branding") or {}
                 partner_wl_unlocked = bool(
@@ -907,16 +908,42 @@ async def create_enterprise(
                 )
                 if partner_wl_unlocked:
                     brand_name = pb.get("firm_name") or user.get("name")
-                    # Partner subdomain — slug lives on the partner
-                    # user doc under branding.subdomain_slug (falls
-                    # back to a slugified firm name).
+                    # Two subdomain fields serve two purposes:
+                    #   • `subdomain_slug` — routes the *magic-link
+                    #     URL host* when `PRIVATE_LABEL_HOST_TEMPLATE`
+                    #     env is set (e.g. axiompartners.accountingapp.ai)
+                    #   • `signin_subdomain` — resolves the *branding
+                    #     visuals* on the set-password page via the
+                    #     public `/branding/by-subdomain/{sub}` lookup.
+                    # Not every partner has both; falling back through
+                    # them lets any single one drive the branding.
                     brand_slug = (
                         pb.get("subdomain_slug")
+                        or pb.get("signin_subdomain")
+                        or pb.get("subdomain")
                         or pb.get("slug")
                         or None
                     )
+                    brand_signin_sub = (
+                        pb.get("signin_subdomain")
+                        or pb.get("subdomain_slug")
+                        or pb.get("subdomain")
+                        or None
+                    )
             magic_token = await mint_password_set_token(owner_user_id, purpose="welcome")
-            magic_url = f"{public_base_url(firm_slug=brand_slug)}/set-password/{magic_token}"
+            magic_base = f"{public_base_url(firm_slug=brand_slug)}/set-password/{magic_token}"
+            # Append `?firm=<slug>` so the set-password frontend can
+            # look up the partner's branding via
+            # `/branding/by-subdomain/{slug}` and render THEIR logo/
+            # firm name instead of "SmartBooks" — this fires even
+            # when the host is still on `app.smartbookssoftware.ai`
+            # (e.g. `PRIVATE_LABEL_HOST_TEMPLATE` isn't configured
+            # yet in prod).
+            if brand_signin_sub:
+                from urllib.parse import quote
+                magic_url = f"{magic_base}?firm={quote(brand_signin_sub)}"
+            else:
+                magic_url = magic_base
             # Body copy — swap "SmartBooks" in the role blurb for the
             # active brand so it reads consistently with subject/H1/
             # footer.

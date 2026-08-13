@@ -205,5 +205,57 @@ def test_magic_link_uses_partner_slug_when_template_configured():
     _run(_t())
 
 
+def test_magic_link_appends_firm_query_param_for_branded_setpw_page():
+    """Even when `PRIVATE_LABEL_HOST_TEMPLATE` isn't configured (so
+    the link lands on `app.smartbookssoftware.ai`), we append
+    `?firm=<signin_subdomain>` so the set-password page can look up
+    the partner's brand via `/branding/by-subdomain/{sub}` and render
+    the partner's logo/name instead of the platform default."""
+    async def _t():
+        pid = str(uuid.uuid4())
+        await db.users.insert_one({
+            "id": pid, "email": f"p_{uid_hex()}@example.com",
+            "name": "AxiomPartners", "password": hash_password("x"),
+            "role": "partner",
+            "branding": {
+                "firm_name": "AxiomPartners",
+                "whitelabel_comp": True,
+                "signin_subdomain": "axiompartners",
+                # No `subdomain_slug` — so magic link stays on flagship
+                # host, but `?firm=axiompartners` should still be
+                # appended so the frontend can render branded visuals.
+            },
+        })
+        try:
+            captured: dict = {}
+
+            async def fake_dispatch(*, kind, to, subject, html, **kwargs):
+                captured["html"] = html
+                return {"status": "sent"}
+
+            with patch("email_dispatcher.dispatch", new=fake_dispatch):
+                tok = create_token(pid, "partner")
+                async with await _client() as c:
+                    r = await c.post(
+                        "/api/admin/enterprises",
+                        headers={"Authorization": f"Bearer {tok}"},
+                        json={
+                            "name": "NoTemplateCorp",
+                            "owner_email": f"o-{uuid.uuid4().hex[:6]}@example.com",
+                            "owner_name": "Owner",
+                        },
+                    )
+            assert r.status_code == 200
+            html = captured.get("html", "")
+            assert "/set-password/" in html
+            assert "?firm=axiompartners" in html, (
+                "magic link should carry the ?firm= query so the "
+                f"set-password page renders the partner brand. Got: {html[:500]!r}"
+            )
+        finally:
+            await _wipe([pid])
+    _run(_t())
+
+
 def uid_hex() -> str:
     return uuid.uuid4().hex[:6]
