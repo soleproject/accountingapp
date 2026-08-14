@@ -194,47 +194,73 @@ export default function Onboarding() {
   // step=0 while onboarding state is still being fetched from the server.
   const [loaded, setLoaded] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
+  // Track whether we've processed the ?qbo=connected return-from-Intuit
+  // handoff. Runs AFTER the onboarding-state load resolves so we can
+  // merge with the persisted answers instead of racing against them.
+  const qboReturnHandled = useRef(false);
 
-  // Handle the return trip from Intuit OAuth. When the callback lands
-  // the user here with `?qbo=connected` (or `?qbo_error=…`), snap
-  // them to step 1, stamp `answers.qbo=yes`, and toast the outcome.
-  // Idempotent — we strip the params right after so a refresh doesn't
-  // re-fire the toast.
+  // Toast the return-from-Intuit outcome, then strip the query
+  // params so a refresh doesn't repeat. State (answers.qbo="yes",
+  // step=1) is baked in by the load effect above, so we don't touch
+  // it here. The URL-strip via `setSearchParams` is what prevents
+  // this effect from double-firing — no ref-guard needed.
   useEffect(() => {
+    if (!loaded) return;
     const qbo = searchParams.get("qbo");
     const qboErr = searchParams.get("qbo_error");
     if (!qbo && !qboErr) return;
     if (qbo === "connected") {
       toast.success("QuickBooks connected — preview + migrate your books below");
-      setAnswers((prev) => ({ ...prev, qbo: "yes" }));
-      setStep(1);
     } else if (qboErr) {
       toast.error(`QuickBooks connection failed: ${qboErr}`, { duration: 15000 });
-      setAnswers((prev) => ({ ...prev, qbo: "yes" }));
-      setStep(1);
     }
-    // Strip the query params so a page refresh doesn't repeat the
-    // toast + step-jump — but keep the current step so `useSearchParams`
-    // doesn't fight the manual `setStep(1)` above.
     const next = new URLSearchParams(searchParams);
     next.delete("qbo");
     next.delete("qbo_error");
     next.delete("realm");
     setSearchParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loaded]);
 
   useEffect(() => {
     if (!currentId) return;
     api.get(`/companies/${currentId}/onboarding`).then(r => {
       let step0 = r.data.onboarding.step || 0;
-      const ans = r.data.onboarding.answers || {};
+      let ans = r.data.onboarding.answers || {};
       // If the persisted step is an AI-only step (2 or 3) but the mode is
       // Simple (the new default), hop forward past every AI-only step so
       // the user doesn't land on a page they can't see.
       const modeNow = ans.onboarding_mode === "guided" ? "guided" : "simple";
       if (modeNow === "simple") {
         while (AI_ONLY_STEPS.has(step0) && step0 < STEPS.length) step0 += 1;
+      }
+      // Return-from-Intuit shortcut. When the QBO OAuth callback lands
+      // us here with `?qbo=connected`, we KNOW the user picked "Yes"
+      // and successfully connected — bake that into the initial state
+      // instead of racing against a separate effect that gets clobbered
+      // by this very setAnswers below. Same treatment for the error
+      // path so the panel still opens and shows the failure.
+      const urlQbo = new URLSearchParams(window.location.search).get("qbo");
+      const urlQboErr = new URLSearchParams(window.location.search).get("qbo_error");
+      // If EITHER (a) the URL currently carries the return-from-Intuit
+      // flag OR (b) we already handled it this session (ref true) —
+      // bake qbo="yes" into the loaded state. The ref-guard survives
+      // load-effect refires (which happen when `currentId` briefly
+      // toggles at startup) that would otherwise clobber our stamp.
+      // We still persist to the backend once so subsequent full-page
+      // loads return the correct state without any refs at all.
+      if (urlQbo === "connected" || urlQboErr) {
+        qboReturnHandled.current = true;
+      }
+      if (qboReturnHandled.current) {
+        ans = { ...ans, qbo: "yes" };
+        step0 = 1;
+      }
+      if (urlQbo === "connected" || urlQboErr) {
+        api.patch(`/companies/${currentId}/onboarding`, {
+          answers: { ...ans },
+          step: 1,
+        }).catch(() => { /* non-fatal — panel state driven by conn status too */ });
       }
       setStep(step0);
       setAnswers(ans);
