@@ -422,11 +422,21 @@ async def qbo_disconnect(cid: str, user: dict = Depends(get_current_user)):
     await db.qbo_connections.update_one(
         {"company_id": cid},
         {"$set": {"status": "disconnected", "access_token_enc": None,
-                  "refresh_token_enc": None, "updated_at": now_iso()}},
+                  "refresh_token_enc": None, "updated_at": now_iso()},
+         # Wipe the cached preview + persistent old-job pointer so the
+         # UI shows a clean 3-step flow on the next Connect, not stale
+         # numbers from the last realm.
+         "$unset": {"preview_counts": "", "preview_at": ""}},
     )
     await db.qbo_jobs.update_many(
         {"company_id": cid, "status": {"$in": ["queued", "running"]}},
         {"$set": {"status": "cancelled", "finished_at": now_iso()}},
+    )
+    # Also mark any prior "done" jobs stale so refreshStatus doesn't
+    # hydrate a Complete state for a connection that no longer exists.
+    await db.qbo_jobs.update_many(
+        {"company_id": cid, "status": "done"},
+        {"$set": {"stale": True}},
     )
     return {"ok": True}
 
