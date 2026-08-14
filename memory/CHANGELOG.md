@@ -1333,3 +1333,48 @@ doesn't arrive, the failure is upstream of Resend, not env-specific.
   Post-consent OAuth bounce lands the user back on `/onboarding`
   with a success toast rather than redirecting to the standalone
   QBO connect page.
+
+---
+
+## Feb 2026 — QBO Connect Page: Persist Migration History
+
+**User request**: keep the "Migration complete" summary + preview
+counts visible on return visits to `/connections/qbo` — currently
+resets to a bare "Start migration" button on refresh.
+
+**Backend**
+- `routes/qbo.py::qbo_preview` — writes `preview_counts`,
+  `preview_total`, `preview_at` to the qbo_connection row on every
+  preview click so the cache stays fresh.
+- `routes/qbo.py::qbo_status` — enriched response with:
+  * `preview`: the cached preview counts + total from the connection
+    row. Lets the "Preview scope" card render with numbers on
+    revisit instead of just a button.
+  * `last_job`: the most recent terminal (`done` | `failed`) job
+    for this company, with its full stats payload. Lets the
+    "Migration complete" card render with everything intact —
+    progress bar at 100%, seeded/estimates/POs/opening-inventory
+    pills, action buttons. Excludes in-flight (queued / running)
+    and `stale`-marked jobs.
+
+**Frontend**
+- `pages/QboConnect.jsx::refreshStatus` — on mount, if backend
+  returns `preview` or `last_job`, seed local `preview` / `job`
+  state from them. Guards against clobbering in-flight polls.
+- `components/InlineQboConnect.jsx::refreshStatus` — same
+  rehydration inside the onboarding wizard's inline panel, so
+  navigating away and back keeps the state consistent.
+
+**Regression coverage**
+- `tests/test_qbo_status_persistence.py`: 4 new tests — preview
+  caches counts, status returns cached preview + latest terminal
+  job, in-flight jobs excluded from last_job, stale jobs excluded.
+  **All 4 pass. Full QBO suite: 32/32 pass.**
+
+**Verified end-to-end** by seeding a done job + preview cache and
+loading `/connections/qbo` — the page now renders exactly like the
+reference screenshot: Connected pill, 372 records across 14 types
+with per-object counts, "Migration complete" summary with stat
+pills, and the full action-button row (View CoA, View Contacts,
+Review Plaid Categories, Open Live Mirror, Re-run, Resend email,
+Rebuild account hierarchy, Categorize imported transactions).
