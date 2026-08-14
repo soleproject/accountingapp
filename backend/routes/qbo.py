@@ -448,6 +448,125 @@ async def qbo_migration_status(cid: str, job_id: str,
     return doc
 
 
+# ─── (Feb 2026) Migration email diagnostic ────────────────────────────
+#
+# One-shot introspection: for a given job, return everything we need
+# to answer "why didn't my email arrive?" without shell access to
+# production:
+#   * The job doc's initiating_user_id + status
+#   * The initiating user's email address on file
+#   * Every `communications` row tagged with `related.job_id == job_id`
+#     (each row shows kind, to, status, resend_id, error)
+#
+# If `communications` has ZERO rows for the job, either:
+#   (a) the notify helper never fired (backend not deployed with the
+#       initiating_user_id stamp) — check the job doc's
+#       `initiating_user_id` field. If MISSING, that's the reason.
+#   (b) the helper fired but crashed before reaching dispatch — check
+#       Railway logs for "QBO migration email FAILED".
+#
+# If `communications` has rows with status=failed, the `error` field
+# tells the whole story (Resend domain block, invalid recipient, etc.)
+
+
+@router.get("/companies/{cid}/qbo/migrations/{job_id}/email-diagnostic")
+async def qbo_migration_email_diagnostic(
+    cid: str, job_id: str, user: dict = Depends(get_current_user),
+):
+    await require_company(user, cid)
+    job = await db.qbo_jobs.find_one({"job_id": job_id, "company_id": cid})
+    if not job:
+        raise HTTPException(404, "Job not found")
+    uid = job.get("initiating_user_id")
+    init_user = None
+    if uid:
+        u = await db.users.find_one({"id": uid})
+        if u:
+            init_user = {
+                "id": u["id"],
+                "email": u.get("email"),
+                "name": u.get("name"),
+                "role": u.get("role"),
+                "branding_firm_name": (u.get("branding") or {}).get("firm_name"),
+            }
+    # All communications rows tagged with this job_id.
+    rows = []
+    async for c in db.communications.find(
+        {"related.job_id": job_id}, sort=[("sent_at", -1)],
+    ).limit(20):
+        c.pop("_id", None)
+        rows.append({
+            "sent_at": c.get("sent_at"),
+            "kind": c.get("kind"),
+            "to": c.get("to"),
+            "status": c.get("status"),
+            "resend_id": c.get("resend_id"),
+            "error": c.get("error"),
+        })
+    return {
+        "job_id": job_id,
+        "job_status": job.get("status"),
+        "job_finished_at": job.get("finished_at"),
+        "initiating_user_id": uid,
+        "initiating_user_id_present": bool(uid),
+        "initiating_user": init_user,
+        "communications_count": len(rows),
+        "communications": rows,
+        # A one-line human summary — makes the "why no email?"
+        # question answerable at a glance from the response body.
+        "diagnosis": _diagnose(job, uid, init_user, rows),
+    }
+
+
+def _diagnose(job: dict, uid: str | None,
+              init_user: dict | None, rows: list) -> str:
+    if not uid:
+        return (
+            "Job doc has NO initiating_user_id — the automatic email "
+            "won't fire. Root cause: the migration was created before "
+            "the notify-on-completion feature deployed. Use the "
+            "manual /resend-email endpoint with a `to` override to "
+            "send anyway."
+        )
+    if not init_user:
+        return (
+            f"initiating_user_id={uid} points at a user that no "
+            f"longer exists — the account was likely deleted after "
+            f"kicking off the migration. Use `to` override on the "
+            f"resend endpoint."
+        )
+    if not init_user.get("email"):
+        return (
+            f"Initiating user has no email address on file. Use "
+            f"`to` override on the resend endpoint."
+        )
+    if not rows:
+        return (
+            "No communications row exists for this job — the notify "
+            "helper never reached dispatch. Check Railway logs for "
+            "'QBO migration email FAILED'; the traceback will "
+            "identify the crash site."
+        )
+    sent = [r for r in rows if r.get("status") == "sent"]
+    if sent:
+        latest = sent[0]
+        return (
+            f"Email SENT to {latest.get('to')} at "
+            f"{latest.get('sent_at')} (Resend id "
+            f"{latest.get('resend_id')}). If it's not in the inbox, "
+            f"check spam and confirm the recipient really is "
+            f"{init_user.get('email')} (that's the initiating user's "
+            f"address — not the migrated company's owner)."
+        )
+    failed = rows[0]
+    return (
+        f"Email DISPATCH FAILED — status={failed.get('status')} "
+        f"error={failed.get('error') or 'unknown'}. Common causes: "
+        f"unverified recipient domain (Resend sandbox), invalid "
+        f"address, or Resend rate-limit."
+    )
+
+
 # ─── (Feb 2026) Manual "resend the migration completion email" ──────
 #
 # Purpose:
