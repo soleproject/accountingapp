@@ -134,12 +134,41 @@ def _return_to_host_from_request(request: Request) -> str | None:
     return f"https://{host}"
 
 
+class OAuthStartIn(BaseModel):
+    """Body for `POST /oauth/start`. All fields optional — the route
+    was originally a bare POST with no body and still supports that
+    for backward compatibility.
+
+    `return_path` — where to send the browser after Intuit bounces
+    the user back. Defaults to `/connections/qbo`. Used by the
+    onboarding wizard to keep the user inside the wizard after
+    consent instead of dumping them on the standalone connect page.
+    Must be a same-origin path (starts with `/`) — anything else is
+    silently ignored so a compromised frontend can't redirect users
+    to a phishing host.
+    """
+    return_path: str | None = None
+
+
 class OAuthStartOut(BaseModel):
     url: str
 
 
+def _safe_return_path(p: str | None) -> str | None:
+    """Whitelist a return path to same-origin only. Returns None if
+    the path is malformed or absolute (would allow open-redirect)."""
+    if not p or not isinstance(p, str):
+        return None
+    if not p.startswith("/") or p.startswith("//"):
+        return None
+    # Cap length to keep the DB row size sane and shrug off any
+    # attempt to smuggle a huge query string.
+    return p[:512]
+
+
 @router.post("/companies/{cid}/qbo/oauth/start", response_model=OAuthStartOut)
 async def qbo_oauth_start(cid: str, request: Request,
+                          body: OAuthStartIn = OAuthStartIn(),
                           user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     state = secrets.token_urlsafe(32)
@@ -180,6 +209,7 @@ async def qbo_oauth_start(cid: str, request: Request,
         "state": state, "company_id": cid, "user_id": user["id"],
         "redirect_uri": redirect_uri,
         "return_to_host": return_to_host,
+        "return_path": _safe_return_path(body.return_path),
         "env": target_env,
         "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
         "created_at": now_iso(),
@@ -233,8 +263,20 @@ async def qbo_oauth_callback(
                 pass
         return _APP_URL
 
+    def _return_path(rec: dict | None) -> str:
+        """Where to send the browser after Intuit bounces back.
+        `return_path` on the state row wins (used by onboarding wizard);
+        otherwise fall back to /connections/qbo. Same-origin safety
+        was enforced at OAuth-start time via `_safe_return_path`."""
+        rp = (rec or {}).get("return_path")
+        return rp if rp else "/connections/qbo"
+
     def _err(reason: str, rec: dict | None = None) -> RedirectResponse:
-        target = f"{_label_app_url(rec)}/connections/qbo?qbo_error={reason}"
+        path = _return_path(rec)
+        # Merge our error query param into the return path — preserve
+        # any existing querystring the caller supplied.
+        sep = "&" if "?" in path else "?"
+        target = f"{_label_app_url(rec)}{path}{sep}qbo_error={reason}"
         return RedirectResponse(target, status_code=302)
 
     # Intuit itself returned an error (user hit "No thanks", scope
@@ -289,14 +331,18 @@ async def qbo_oauth_callback(
             "QBO save_connection failed for cid=%s", cid
         )
         return _err(f"save_failed:{str(e)[:120]}", rec)
-    # Success — land the user on the QBO Connect page (not the generic
-    # /connections page — that route doesn't refresh QBO status). Use
-    # the label's own app host (recorded on the state at OAuth-start
-    # time) so private-label users don't get bounced onto the flagship
-    # SmartBooks login. Absolute URL so the browser lands on the
-    # FRONTEND service, not the API.
+    # Success — land the user on their configured `return_path` (the
+    # onboarding wizard sets this to `/onboarding?step=1&qbo=connected`
+    # so the user stays inside the wizard); default is
+    # `/connections/qbo` so nothing changes for the standalone flow.
+    # Use the label's own app host (recorded on the state at
+    # OAuth-start time) so private-label users don't get bounced onto
+    # the flagship SmartBooks login. Absolute URL so the browser lands
+    # on the FRONTEND service, not the API.
+    path = _return_path(rec)
+    sep = "&" if "?" in path else "?"
     return RedirectResponse(
-        f"{_label_app_url(rec)}/connections/qbo?qbo=connected&realm={realmId}",
+        f"{_label_app_url(rec)}{path}{sep}qbo=connected&realm={realmId}",
         status_code=302,
     )
 
