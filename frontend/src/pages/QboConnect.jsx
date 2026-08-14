@@ -3,10 +3,19 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   Link2, CheckCircle2, XCircle, Loader2, ChevronRight,
-  Sparkles, RefreshCw, Play, ShieldCheck,
+  Sparkles, RefreshCw, Play, ShieldCheck, Mail,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter,
+  DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 
 // Cadence of the migration-status poll while a job is running. QBO
 // migrations for a mid-size realm typically finish in 30-90s; the
@@ -40,6 +49,14 @@ export default function QboConnect() {
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [job, setJob] = useState(null);
+  // Two-step dialog flow for kicking off a migration:
+  //   1. `confirmOpen` — pre-flight modal that promises an email on
+  //      completion. Replaces the browser-native `confirm()` so the
+  //      copy actually reads like a product.
+  //   2. `startedOpen` — post-start modal that reassures the user
+  //      they can safely close the tab; the email is on its way.
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [startedOpen, setStartedOpen] = useState(false);
   const pollRef = useRef(null);
 
   const refreshStatus = async () => {
@@ -103,12 +120,14 @@ export default function QboConnect() {
   };
 
   const startMigration = async () => {
-    if (!confirm("Start migration?\n\nThis imports every listed record from QuickBooks Online into your ledger. Safe to re-run — records are matched by QBO ID.")) return;
+    setConfirmOpen(false);
     setBusy(true);
     try {
       const r = await api.post(`/companies/${currentId}/qbo/migrations`);
       setJob({ job_id: r.data.job_id, status: "queued", processed: 0 });
       startPolling(r.data.job_id);
+      // Follow-up "we've got it" modal — safe-to-close reassurance.
+      setStartedOpen(true);
     } catch (e) {
       toast.error(e.response?.data?.detail || "Migration failed to start");
     } finally { setBusy(false); }
@@ -269,7 +288,7 @@ export default function QboConnect() {
         </div>
         {!job ? (
           <button
-            onClick={startMigration}
+            onClick={() => setConfirmOpen(true)}
             disabled={busy || !preview}
             data-testid="qbo-migrate-btn"
             className={btnCls(3)}
@@ -515,6 +534,82 @@ export default function QboConnect() {
           you won't need to reconnect.
         </span>
       </div>
+
+      {/* Confirm-start dialog — replaces the native `confirm()` so the
+          copy can promise the completion email. */}
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent data-testid="qbo-migrate-confirm-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Play size={16} className="text-emerald-600" />
+              Start QuickBooks migration?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm text-slate-600">
+                <p>
+                  We&apos;ll import every listed record from QuickBooks Online
+                  into your ledger. Safe to re-run — records are matched by
+                  QBO ID, so duplicates won&apos;t stack up.
+                </p>
+                <div className="flex items-start gap-2 rounded-md bg-cyan-50 border border-cyan-200 p-3 text-cyan-900">
+                  <Mail size={14} className="mt-0.5 shrink-0" />
+                  <span className="text-xs leading-relaxed">
+                    Migrations can take a few minutes. You can safely close
+                    this tab — we&apos;ll <b>email you as soon as it&apos;s done</b>.
+                  </span>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="qbo-migrate-confirm-cancel">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="qbo-migrate-confirm-start"
+              onClick={startMigration}
+              className="bg-emerald-600 hover:bg-emerald-700"
+            >
+              Start migration
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Post-start dialog — reassures the user the email is coming so
+          they don't sit and watch the progress bar. */}
+      <Dialog open={startedOpen} onOpenChange={setStartedOpen}>
+        <DialogContent data-testid="qbo-migrate-started-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail size={16} className="text-cyan-600" />
+              We&apos;re migrating your QuickBooks data
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-3 text-sm text-slate-600 pt-1">
+                <p>
+                  Your import is running in the background — nothing to
+                  babysit. As soon as it wraps up, we&apos;ll send you an
+                  email with the final counts and a link back to your books.
+                </p>
+                <p className="text-xs text-slate-500">
+                  You can close this tab or keep it open to watch progress —
+                  either way works.
+                </p>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <button
+              data-testid="qbo-migrate-started-ack"
+              onClick={() => setStartedOpen(false)}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-cyan-600 text-white text-sm hover:bg-cyan-700"
+            >
+              Got it
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

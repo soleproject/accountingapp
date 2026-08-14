@@ -870,6 +870,106 @@ def payment_failed_pro(
 
 
 # --------------------------------------------------------------------------
+# QuickBooks migration completion / failure — sent when a
+# `qbo_service.run_migration` background task lands. Brand cascade
+# comes from the initiating user's white-label (via email_dispatcher),
+# so partners / enterprises see their own footer.
+# --------------------------------------------------------------------------
+def qbo_migration_complete(
+    *, name: str, company_name: str, dashboard_url: str,
+    stats: dict, brand_name: Optional[str] = None,
+) -> tuple[str, str]:
+    """Migration finished successfully. `stats` may contain any of:
+        transactions_posted, payments_linked, transactions_categorized,
+        mirror_estimates_pulled, mirror_pos_pulled,
+        mirror_inv_adj_pulled, opening_inventory_value.
+    Missing keys are quietly skipped — the template just renders what
+    was actually captured on the job doc."""
+    def _row(label: str, val) -> str:
+        if val in (None, 0, 0.0, ""):
+            return ""
+        return (f'<tr><td style="{_TABLE_KEY}">{escape(label)}</td>'
+                f'<td style="{_TABLE_VAL}">{escape(val)}</td></tr>')
+
+    rows = "".join([
+        _row("Transactions posted",       stats.get("transactions_posted")),
+        _row("Transactions categorized",  stats.get("transactions_categorized")),
+        _row("Payments linked",           stats.get("payments_linked")),
+        _row("Estimates pulled",          stats.get("mirror_estimates_pulled")),
+        _row("Purchase orders pulled",    stats.get("mirror_pos_pulled")),
+        _row("Inventory adjustments",     stats.get("mirror_inv_adj_pulled")),
+        _row("Opening inventory value ($)",
+             (f"{stats.get('opening_inventory_value'):,.2f}"
+              if stats.get("opening_inventory_value") else None)),
+    ])
+    stats_table = (
+        f'<table role="presentation" cellpadding="0" cellspacing="0" '
+        f'border="0" style="margin:8px 0 4px;border-collapse:collapse;">'
+        f'{rows}</table>'
+    ) if rows else ""
+
+    inner = f"""
+      <div style="{_H1}">Your QuickBooks migration is done</div>
+      <div style="{_P}">
+        Hi {escape(name)},<br><br>
+        Great news — we just finished importing every account,
+        contact, item, and transaction from
+        <b>{escape(company_name)}</b>'s QuickBooks Online company into
+        your ledger. Everything is ready to review.
+      </div>
+      {stats_table}
+      <div style="text-align:center;padding:14px 0 4px;">
+        <a href="{dashboard_url}" style="{_BTN}">Open your books →</a>
+      </div>
+      <div style="{_MUTE};padding-top:16px;">
+        Have questions or something looks off? Reply to this email —
+        we read every one.
+      </div>
+    """
+    subject_brand = brand_name or "your books"
+    return (
+        f"QuickBooks migration complete — {company_name}",
+        _wrap(inner, brand_name=brand_name),
+    )
+
+
+def qbo_migration_failed(
+    *, name: str, company_name: str, error: str, dashboard_url: str,
+    brand_name: Optional[str] = None,
+) -> tuple[str, str]:
+    """Migration failed mid-flight. Keeps the message calm — most
+    failures are transient (Intuit 5xx, rate-limit) and re-running is
+    the fix. We include the raw error string so support can grep the
+    dispatch log if the user forwards the email."""
+    inner = f"""
+      <div style="{_H1}">Your QuickBooks migration hit a snag</div>
+      <div style="{_P}">
+        Hi {escape(name)},<br><br>
+        We ran into an error while importing
+        <b>{escape(company_name)}</b>'s QuickBooks data. Most of these
+        are transient — re-running the migration usually clears it.
+      </div>
+      <div style="{_MUTE};background:#fef2f2;border:1px solid #fecaca;
+                   padding:10px 12px;border-radius:8px;margin:8px 0;
+                   font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+                   font-size:12px;color:#991b1b;">
+        {escape(error)[:400]}
+      </div>
+      <div style="text-align:center;padding:14px 0 4px;">
+        <a href="{dashboard_url}" style="{_BTN}">Retry migration →</a>
+      </div>
+      <div style="{_MUTE};padding-top:16px;">
+        Still stuck after a retry? Reply to this email and we'll dig
+        in with you.
+      </div>
+    """
+    return (
+        f"QuickBooks migration needs attention — {company_name}",
+        _wrap(inner, brand_name=brand_name),
+    )
+
+
+# --------------------------------------------------------------------------
 # Tiny local escape (avoid pulling markupsafe just for these).
 # --------------------------------------------------------------------------
 def escape(s) -> str:

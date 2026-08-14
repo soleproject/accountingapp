@@ -945,6 +945,79 @@ def map_generic_txn(cid: str, realm_id: str, obj: dict, txn_type: str) -> dict:
     }
 
 
+async def _notify_migration_result(
+    job_id: str, company_id: str, *, ok: bool, error: str | None = None,
+) -> None:
+    """Send the branded "migration complete" (or failed) email to the
+    user who kicked off the migration. Best-effort — any exception is
+    swallowed so the background task can still finalise the job doc.
+
+    Branding cascades automatically: `email_dispatcher.dispatch()`
+    reads the initiating user's `branding.firm_name` and drops the
+    "SmartBooks" footer in favor of the white-label firm name. For
+    partners / enterprises, that gives the client an email that looks
+    like it came from THEIR accountant, not us.
+    """
+    try:
+        # Job doc is the source of truth for "who started this" — we
+        # stamp `initiating_user_id` on job creation in the route.
+        job = await db.qbo_jobs.find_one({"job_id": job_id}) or {}
+        uid = job.get("initiating_user_id")
+        if not uid:
+            return
+        user = await db.users.find_one({"id": uid})
+        if not user or not user.get("email"):
+            return
+        company = await db.companies.find_one({"id": company_id}) or {}
+        company_name = company.get("name") or "your company"
+        brand_name = ((user.get("branding") or {}).get("firm_name") or "").strip() or None
+        # Build a landing URL the user can click straight from the
+        # email. Use the initiating user's private-label host if they
+        # have one; else the platform default.
+        from email_dispatcher import public_base_url, dispatch
+        base = public_base_url((user.get("branding") or {}).get("subdomain"))
+        dashboard_url = f"{base}/connections/qbo"
+
+        import email_templates as _et
+        if ok:
+            stats_keys = (
+                "transactions_posted", "transactions_categorized",
+                "payments_linked", "mirror_estimates_pulled",
+                "mirror_pos_pulled", "mirror_inv_adj_pulled",
+                "opening_inventory_value",
+            )
+            stats = {k: job.get(k) for k in stats_keys}
+            subject, html = _et.qbo_migration_complete(
+                name=user.get("name") or "there",
+                company_name=company_name,
+                dashboard_url=dashboard_url,
+                stats=stats,
+                brand_name=brand_name,
+            )
+            kind = "qbo_migration_complete"
+        else:
+            subject, html = _et.qbo_migration_failed(
+                name=user.get("name") or "there",
+                company_name=company_name,
+                error=error or "unknown error",
+                dashboard_url=dashboard_url,
+                brand_name=brand_name,
+            )
+            kind = "qbo_migration_failed"
+
+        await dispatch(
+            kind=kind,
+            to=user["email"], subject=subject, html=html,
+            initiating_user_id=uid, company_id=company_id,
+            related={"job_id": job_id, "ok": ok},
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "QBO migration email dispatch failed for job=%s cid=%s: %s",
+            job_id, company_id, e,
+        )
+
+
 async def run_migration(job_id: str, company_id: str) -> None:
     """Background migration entry point. Updates the qbo_jobs doc as
     it progresses; the frontend polls that doc for status."""
@@ -954,6 +1027,8 @@ async def run_migration(job_id: str, company_id: str) -> None:
             {"job_id": job_id},
             {"$set": {"status": "failed", "error": "QBO not connected"}},
         )
+        await _notify_migration_result(job_id, company_id, ok=False,
+                                        error="QBO not connected")
         return
     realm_id = conn["realm_id"]
     try:
@@ -1123,6 +1198,9 @@ async def run_migration(job_id: str, company_id: str) -> None:
                       "skipped_dupkey": skipped_dupkey,
                       "opening_inventory_value": opening_inv_value}},
         )
+        # Fire the branded "migration complete" email. Runs after the
+        # done write so the email body can pull the finalised stats.
+        await _notify_migration_result(job_id, company_id, ok=True)
     except Exception as e:  # noqa: BLE001
         logger.exception("QBO migration failed for %s", company_id)
         await db.qbo_jobs.update_one(
@@ -1130,6 +1208,8 @@ async def run_migration(job_id: str, company_id: str) -> None:
             {"$set": {"status": "failed", "error": str(e),
                       "finished_at": now_iso()}},
         )
+        await _notify_migration_result(job_id, company_id, ok=False,
+                                        error=str(e))
 
 
 async def _post_opening_inventory_je(company_id: str) -> float:
