@@ -531,9 +531,7 @@ async def preview_counts(company_id: str) -> dict[str, int]:
 
 
 # ------------------------------------------------------------------
-# Migration worker (v1: Foundation entities — Account, Customer,
-# Vendor, Item). Larger entities land in follow-ups; the framework
-# below is entity-agnostic so adding them is a one-liner in _PIPELINE.
+# Migration worker
 # ------------------------------------------------------------------
 
 async def _run_entity(job_id: str, company_id: str, realm_id: str,
@@ -609,29 +607,6 @@ async def _run_entity(job_id: str, company_id: str, realm_id: str,
     if tail:
         update["$inc"] = {"processed": tail}
     await db.qbo_jobs.update_one({"job_id": job_id}, update)
-
-
-_PIPELINE: list[tuple[str, callable, str]] = [
-    # Foundation — MUST run first, transactional records reference these.
-    ("Account",  map_account, "accounts"),
-    ("Customer", lambda c, r, o: map_contact(c, r, o, "customer"), "contacts"),
-    ("Vendor",   lambda c, r, o: map_contact(c, r, o, "vendor"),   "contacts"),
-    ("Item",     map_item,    "items"),
-    # Transactional — order doesn't matter for correctness, but we do
-    # invoices/bills first (largest volume typically) so progress bars
-    # feel snappier.
-    ("Invoice",       lambda c, r, o: map_invoice(c, r, o),      "invoices"),
-    ("Bill",          lambda c, r, o: map_bill(c, r, o),         "bills"),
-    ("Payment",       lambda c, r, o: map_payment(c, r, o, "in"),  "payments"),
-    ("BillPayment",   lambda c, r, o: map_payment(c, r, o, "out"), "payments"),
-    ("JournalEntry",  lambda c, r, o: map_journal_entry(c, r, o), "journal_entries"),
-    ("Deposit",       lambda c, r, o: map_generic_txn(c, r, o, "Deposit"),      "transactions"),
-    ("Transfer",      lambda c, r, o: map_generic_txn(c, r, o, "Transfer"),     "transactions"),
-    ("Purchase",      lambda c, r, o: map_generic_txn(c, r, o, "Purchase"),     "transactions"),
-    ("SalesReceipt",  lambda c, r, o: map_generic_txn(c, r, o, "SalesReceipt"), "transactions"),
-    ("RefundReceipt", lambda c, r, o: map_generic_txn(c, r, o, "RefundReceipt"),"transactions"),
-    ("CreditMemo",    lambda c, r, o: map_generic_txn(c, r, o, "CreditMemo"),   "transactions"),
-]
 
 
 # ------------------------------------------------------------------
@@ -1016,6 +991,27 @@ async def _notify_migration_result(
             "QBO migration email dispatch failed for job=%s cid=%s: %s",
             job_id, company_id, e,
         )
+_PIPELINE: list[tuple[str, callable, str]] = [
+    # Foundation — MUST run first, transactional records reference these.
+    ("Account",  map_account, "accounts"),
+    ("Customer", lambda c, r, o: map_contact(c, r, o, "customer"), "contacts"),
+    ("Vendor",   lambda c, r, o: map_contact(c, r, o, "vendor"),   "contacts"),
+    ("Item",     map_item,    "items"),
+    # Transactional — order doesn't matter for correctness, but we do
+    # invoices/bills first (largest volume typically) so progress bars
+    # feel snappier.
+    ("Invoice",       lambda c, r, o: map_invoice(c, r, o),      "invoices"),
+    ("Bill",          lambda c, r, o: map_bill(c, r, o),         "bills"),
+    ("Payment",       lambda c, r, o: map_payment(c, r, o, "in"),  "payments"),
+    ("BillPayment",   lambda c, r, o: map_payment(c, r, o, "out"), "payments"),
+    ("JournalEntry",  lambda c, r, o: map_journal_entry(c, r, o), "journal_entries"),
+    ("Deposit",       lambda c, r, o: map_generic_txn(c, r, o, "Deposit"),      "transactions"),
+    ("Transfer",      lambda c, r, o: map_generic_txn(c, r, o, "Transfer"),     "transactions"),
+    ("Purchase",      lambda c, r, o: map_generic_txn(c, r, o, "Purchase"),     "transactions"),
+    ("SalesReceipt",  lambda c, r, o: map_generic_txn(c, r, o, "SalesReceipt"), "transactions"),
+    ("RefundReceipt", lambda c, r, o: map_generic_txn(c, r, o, "RefundReceipt"),"transactions"),
+    ("CreditMemo",    lambda c, r, o: map_generic_txn(c, r, o, "CreditMemo"),   "transactions"),
+]
 
 
 async def run_migration(job_id: str, company_id: str) -> None:
