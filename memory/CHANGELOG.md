@@ -1233,3 +1233,55 @@ Two-step UX + branded completion notification for the QBO bulk import.
   `branding.firm_name` and swaps the From/footer to the white-label
   firm. Nothing extra needed — partners' clients see an email that
   looks like it came from their accountant, not SmartBooks.
+
+---
+
+## Feb 2026 — QBO Migration Email: Diagnostics + Manual Resend
+
+Clarification: **email is env-agnostic**. Sandbox vs Production only
+controls which Intuit API base the migration talks to — Resend is a
+single service that sends the same regardless. If a completion email
+doesn't arrive, the failure is upstream of Resend, not env-specific.
+
+**Backend**
+- `qbo_service.py::_notify_migration_result`:
+  - Swapped silent `logger.warning` for `logger.exception` so the
+    full traceback lands in Railway logs when a dispatch fails.
+  - Added `logger.info` on every skip path (missing
+    `initiating_user_id`, missing user email) so support can
+    distinguish "no email because we never captured a user" from
+    "no email because dispatch failed" at a glance.
+  - Logs the Resend ID + dispatch status on success — Resend
+    dashboard cross-reference becomes one grep away.
+- New endpoint `POST /api/companies/{cid}/qbo/migrations/{job_id}/resend-email`
+  — manually re-fires the same branded template that would have
+  fired at job completion. Rejects with 400 for jobs still in
+  `queued` / `running`. Accepts optional `to` body param to redirect
+  to any address without permanently editing the job doc
+  (synthetic user is created + torn down within the request).
+
+**Frontend**
+- `pages/QboConnect.jsx`: New "Resend email" button on the
+  post-migration action row (cyan pill, `data-testid=qbo-resend-email-btn`).
+  Fires the new endpoint and toasts success/failure.
+
+**Regression coverage**
+- `tests/test_qbo_migration_email.py`: 3 new tests — resend
+  dispatches again, rejects non-terminal jobs, `to` override
+  redirects without dirtying the job doc. **11/11 pass.**
+- End-to-end verified via curl against preview:
+  - Default recipient → 200, Resend ID captured.
+  - Override `to` → 200, email delivered to overridden address,
+    job doc `initiating_user_id` restored to original.
+
+**How to diagnose a missing production email**
+1. `journalctl | grep "QBO migration email"` on Railway — reveals
+   whether the notify helper fired, skipped, or errored.
+2. Query the `communications` collection for
+   `related.job_id == <the job id>` — shows the dispatch attempt +
+   Resend response.
+3. If neither exists, the code path never ran: the deployed backend
+   likely predates the `initiating_user_id` stamp on
+   `POST /qbo/migrations`. Re-deploy.
+4. As a last-resort recovery, the user can click "Resend email" on
+   the completed migration and the email will fire immediately.

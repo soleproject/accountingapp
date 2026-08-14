@@ -478,6 +478,101 @@ async def qbo_migration_status(cid: str, job_id: str,
     return doc
 
 
+# ─── (Feb 2026) Manual "resend the migration completion email" ──────
+#
+# Purpose:
+#   1. Recovery — if the automatic notify fires but the email gets
+#      lost (spam filter, wrong address on the account at the time,
+#      etc.), the user can trigger a fresh send without re-running the
+#      whole migration.
+#   2. Diagnostic — useful for verifying end-to-end that the branded
+#      email pipeline is wired correctly in production (independent
+#      of a live QBO run).
+#
+# Only allowed on jobs that reached a terminal state (`done` or
+# `failed`). Sends the same template that would have fired at job
+# completion, using the same `_notify_migration_result` helper so
+# behaviour is identical to the automatic path.
+#
+# Accepts an optional `to` override — if provided, sends to that
+# address instead of the initiating user's email. Handy when the
+# initiating user's account has since been archived.
+
+
+class ResendMigrationEmailIn(BaseModel):
+    to: str | None = None
+
+
+@router.post("/companies/{cid}/qbo/migrations/{job_id}/resend-email")
+async def qbo_resend_migration_email(
+    cid: str, job_id: str,
+    body: ResendMigrationEmailIn = ResendMigrationEmailIn(),
+    user: dict = Depends(get_current_user),
+):
+    await require_company(user, cid)
+    job = await db.qbo_jobs.find_one({"job_id": job_id, "company_id": cid})
+    if not job:
+        raise HTTPException(404, "Job not found")
+    status = job.get("status")
+    if status not in ("done", "failed"):
+        raise HTTPException(
+            400,
+            f"Job is still {status} — wait for it to finish before resending.",
+        )
+
+    # If caller supplied an override address, temporarily stamp a
+    # synthetic user on the job doc so the notifier uses that address
+    # without permanently altering the job record.
+    override_uid = None
+    if body.to:
+        # Create a throwaway "user" the notifier can look up. Same
+        # branding as the original initiator so the email still looks
+        # right. The user row is deleted at the end of this request.
+        import uuid as _uuid
+        override_uid = f"resend-override-{_uuid.uuid4()}"
+        orig_uid = job.get("initiating_user_id")
+        orig_user = (await db.users.find_one({"id": orig_uid}) or {}) if orig_uid else {}
+        await db.users.insert_one({
+            "id": override_uid,
+            "email": body.to,
+            "name": orig_user.get("name") or "there",
+            "role": orig_user.get("role") or "pro",
+            "branding": orig_user.get("branding") or {},
+            "password": "resend-override",  # never used
+        })
+        # Point the job at this synthetic user just for the notify call.
+        await db.qbo_jobs.update_one(
+            {"job_id": job_id},
+            {"$set": {"initiating_user_id": override_uid}},
+        )
+        try:
+            await Q._notify_migration_result(
+                job_id, cid, ok=(status == "done"),
+                error=job.get("error"),
+            )
+        finally:
+            # Restore the real initiator on the job doc so the audit
+            # trail stays accurate, and clean up the synthetic user.
+            if orig_uid:
+                await db.qbo_jobs.update_one(
+                    {"job_id": job_id},
+                    {"$set": {"initiating_user_id": orig_uid}},
+                )
+            else:
+                await db.qbo_jobs.update_one(
+                    {"job_id": job_id},
+                    {"$unset": {"initiating_user_id": ""}},
+                )
+            await db.users.delete_one({"id": override_uid})
+    else:
+        await Q._notify_migration_result(
+            job_id, cid, ok=(status == "done"),
+            error=job.get("error"),
+        )
+
+    return {"ok": True, "job_status": status}
+
+
 @router.post("/companies/{cid}/qbo/relink-payments")
 async def qbo_relink_payments(cid: str, user: dict = Depends(get_current_user)):
     """Backfill `linked_invoice_id` / `linked_bill_id` on already-

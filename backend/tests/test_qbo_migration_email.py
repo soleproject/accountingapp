@@ -258,3 +258,154 @@ def test_start_migration_stamps_initiating_user_id_on_job():
             await db.companies.delete_one({"id": cid})
             await db.memberships.delete_many({"user_id": uid})
     _run(_t())
+
+
+# ─── Manual resend endpoint ───────────────────────────────────────────
+
+def test_resend_migration_email_dispatches_again():
+    """Manual POST /qbo/migrations/{job_id}/resend-email fires the
+    same email pipeline as the automatic path."""
+    async def _t():
+        uid = str(uuid.uuid4())
+        cid = str(uuid.uuid4())
+        job_id = str(uuid.uuid4())
+        await db.users.insert_one({
+            "id": uid, "email": "u@example.com", "name": "Pro",
+            "password": hash_password("x"), "role": "pro",
+        })
+        await db.companies.insert_one({
+            "id": cid, "name": "Test Co", "owner_user_id": uid,
+            "business_type": "professional-services",
+            "reporting_basis": "accrual", "accounting_mode": "advanced",
+        })
+        await db.memberships.insert_one({
+            "id": str(uuid.uuid4()),
+            "user_id": uid, "company_id": cid, "role": "owner",
+        })
+        await db.qbo_jobs.insert_one({
+            "job_id": job_id, "company_id": cid, "status": "done",
+            "initiating_user_id": uid, "transactions_posted": 100,
+        })
+        try:
+            tok = create_token(uid, "pro")
+            with patch("email_dispatcher.dispatch",
+                        new_callable=AsyncMock) as dispatch_mock:
+                dispatch_mock.return_value = {"status": "sent",
+                                                "id": "x", "resend_id": "r"}
+                async with await _client() as c:
+                    r = await c.post(
+                        f"/api/companies/{cid}/qbo/migrations/{job_id}/resend-email",
+                        headers={"Authorization": f"Bearer {tok}"},
+                        json={},
+                    )
+                    assert r.status_code == 200, r.text
+                    assert r.json()["job_status"] == "done"
+                assert dispatch_mock.await_count == 1
+                assert dispatch_mock.await_args.kwargs["kind"] == "qbo_migration_complete"
+                assert dispatch_mock.await_args.kwargs["to"] == "u@example.com"
+        finally:
+            await db.qbo_jobs.delete_one({"job_id": job_id})
+            await db.users.delete_one({"id": uid})
+            await db.companies.delete_one({"id": cid})
+            await db.memberships.delete_many({"user_id": uid})
+    _run(_t())
+
+
+def test_resend_migration_email_rejects_non_terminal_jobs():
+    """Resending an email for a still-running job is nonsensical —
+    the stats aren't finalised. Endpoint should 400."""
+    async def _t():
+        uid = str(uuid.uuid4())
+        cid = str(uuid.uuid4())
+        job_id = str(uuid.uuid4())
+        await db.users.insert_one({
+            "id": uid, "email": "u@example.com", "name": "Pro",
+            "password": hash_password("x"), "role": "pro",
+        })
+        await db.companies.insert_one({
+            "id": cid, "name": "T", "owner_user_id": uid,
+            "business_type": "professional-services",
+            "reporting_basis": "accrual", "accounting_mode": "advanced",
+        })
+        await db.memberships.insert_one({
+            "id": str(uuid.uuid4()),
+            "user_id": uid, "company_id": cid, "role": "owner",
+        })
+        await db.qbo_jobs.insert_one({
+            "job_id": job_id, "company_id": cid, "status": "running",
+            "initiating_user_id": uid,
+        })
+        try:
+            tok = create_token(uid, "pro")
+            async with await _client() as c:
+                r = await c.post(
+                    f"/api/companies/{cid}/qbo/migrations/{job_id}/resend-email",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={},
+                )
+                assert r.status_code == 400
+                assert "running" in r.text.lower()
+        finally:
+            await db.qbo_jobs.delete_one({"job_id": job_id})
+            await db.users.delete_one({"id": uid})
+            await db.companies.delete_one({"id": cid})
+            await db.memberships.delete_many({"user_id": uid})
+    _run(_t())
+
+
+def test_resend_migration_email_supports_to_override():
+    """Passing `to` in the body redirects the email to that address
+    without permanently altering the job doc."""
+    async def _t():
+        uid = str(uuid.uuid4())
+        cid = str(uuid.uuid4())
+        job_id = str(uuid.uuid4())
+        await db.users.insert_one({
+            "id": uid, "email": "original@example.com", "name": "Pro",
+            "password": hash_password("x"), "role": "pro",
+        })
+        await db.companies.insert_one({
+            "id": cid, "name": "T", "owner_user_id": uid,
+            "business_type": "professional-services",
+            "reporting_basis": "accrual", "accounting_mode": "advanced",
+        })
+        await db.memberships.insert_one({
+            "id": str(uuid.uuid4()),
+            "user_id": uid, "company_id": cid, "role": "owner",
+        })
+        await db.qbo_jobs.insert_one({
+            "job_id": job_id, "company_id": cid, "status": "done",
+            "initiating_user_id": uid,
+        })
+        try:
+            tok = create_token(uid, "pro")
+            with patch("email_dispatcher.dispatch",
+                        new_callable=AsyncMock) as dispatch_mock:
+                dispatch_mock.return_value = {"status": "sent",
+                                                "id": "x", "resend_id": "r"}
+                async with await _client() as c:
+                    r = await c.post(
+                        f"/api/companies/{cid}/qbo/migrations/{job_id}/resend-email",
+                        headers={"Authorization": f"Bearer {tok}"},
+                        json={"to": "override@example.com"},
+                    )
+                    assert r.status_code == 200, r.text
+                # Email went to the override address, not the original.
+                assert dispatch_mock.await_args.kwargs["to"] == "override@example.com"
+
+            # Job doc was restored — initiating_user_id points at the
+            # original user, not the synthetic override user.
+            job = await db.qbo_jobs.find_one({"job_id": job_id})
+            assert job.get("initiating_user_id") == uid
+            # Synthetic user was cleaned up.
+            synths = await db.users.count_documents(
+                {"id": {"$regex": "^resend-override-"}},
+            )
+            assert synths == 0
+        finally:
+            await db.qbo_jobs.delete_one({"job_id": job_id})
+            await db.users.delete_one({"id": uid})
+            await db.users.delete_many({"id": {"$regex": "^resend-override-"}})
+            await db.companies.delete_one({"id": cid})
+            await db.memberships.delete_many({"user_id": uid})
+    _run(_t())

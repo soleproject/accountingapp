@@ -939,9 +939,23 @@ async def _notify_migration_result(
         job = await db.qbo_jobs.find_one({"job_id": job_id}) or {}
         uid = job.get("initiating_user_id")
         if not uid:
+            # This is diagnostic INFO not silent — helps distinguish
+            # "no email because we never captured a user" from
+            # "no email because dispatch failed" in production logs.
+            logger.info(
+                "QBO migration email SKIPPED for job=%s cid=%s — "
+                "no initiating_user_id on job doc (likely a legacy "
+                "job created before the notify feature landed).",
+                job_id, company_id,
+            )
             return
         user = await db.users.find_one({"id": uid})
         if not user or not user.get("email"):
+            logger.info(
+                "QBO migration email SKIPPED for job=%s cid=%s uid=%s "
+                "— user missing or has no email address.",
+                job_id, company_id, uid,
+            )
             return
         company = await db.companies.find_one({"id": company_id}) or {}
         company_name = company.get("name") or "your company"
@@ -980,15 +994,27 @@ async def _notify_migration_result(
             )
             kind = "qbo_migration_failed"
 
-        await dispatch(
+        resp = await dispatch(
             kind=kind,
             to=user["email"], subject=subject, html=html,
             initiating_user_id=uid, company_id=company_id,
             related={"job_id": job_id, "ok": ok},
         )
+        # Log the dispatch outcome so `journalctl | grep "QBO migration
+        # email"` gives an at-a-glance history in production. Resend
+        # ID lets support cross-reference with the Resend dashboard.
+        logger.info(
+            "QBO migration email %s for job=%s cid=%s to=%s "
+            "resend_id=%s status=%s",
+            kind, job_id, company_id, user["email"],
+            resp.get("resend_id"), resp.get("status"),
+        )
     except Exception as e:  # noqa: BLE001
-        logger.warning(
-            "QBO migration email dispatch failed for job=%s cid=%s: %s",
+        # Use .exception() so the full traceback lands in Railway
+        # logs. Historically .warning() dropped the frame info,
+        # making it impossible to tell WHICH line raised.
+        logger.exception(
+            "QBO migration email FAILED for job=%s cid=%s: %s",
             job_id, company_id, e,
         )
 _PIPELINE: list[tuple[str, callable, str]] = [

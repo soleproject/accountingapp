@@ -445,6 +445,33 @@ export default function QboConnect() {
                 >
                   <RefreshCw size={12} /> Re-run migration
                 </button>
+                {/* Escape valve — if the automatic "migration complete"
+                    email got lost (spam filter, wrong address on the
+                    account at the time), the user can fire it again
+                    without redoing the whole migration. Also useful
+                    for verifying the branded template renders as
+                    expected in production. */}
+                <button
+                  onClick={async () => {
+                    try {
+                      await api.post(
+                        `/companies/${currentId}/qbo/migrations/${job.job_id}/resend-email`,
+                        {},
+                      );
+                      toast.success("Completion email re-sent");
+                    } catch (e) {
+                      toast.error(
+                        e?.response?.data?.detail ||
+                          "Failed to resend the email",
+                      );
+                    }
+                  }}
+                  data-testid="qbo-resend-email-btn"
+                  className="px-3 py-1.5 text-xs rounded-md border border-cyan-200 bg-cyan-50 text-cyan-800 hover:bg-cyan-100 inline-flex items-center gap-1"
+                  title="Send the completion email again (useful if the original got lost)"
+                >
+                  <Mail size={12} /> Resend email
+                </button>
                 {/* Post-migration structural fix — unflattens colon-
                     joined account names (Landscaping Services:Job
                     Materials:Decks and Patios) into a proper parent
