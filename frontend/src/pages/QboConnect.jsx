@@ -91,7 +91,15 @@ export default function QboConnect() {
       const r = await api.post(`/companies/${currentId}/qbo/oauth/start`);
       window.location.href = r.data.url;
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Failed to start QBO connection");
+      // Cred-config failures come back as 500 with a detail like
+      // "QBO PRODUCTION credentials not configured — missing env
+      // var(s): QBO_CLIENT_ID_PROD". Surface for 20s so the admin
+      // can screenshot / act on it.
+      const detail = e.response?.data?.detail || "Failed to start QBO connection";
+      const isConfigError = /not configured/i.test(detail);
+      toast.error(detail, {
+        duration: isConfigError ? 20000 : 6000,
+      });
       setBusy(false);
     }
   };

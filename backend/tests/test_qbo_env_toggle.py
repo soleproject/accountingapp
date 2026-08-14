@@ -226,3 +226,77 @@ def test_disconnect_then_flip_env_succeeds():
         finally:
             await _wipe(uid, cid)
     _run(_t())
+
+
+# ─── Missing-cred guardrail ───────────────────────────────────────────
+
+def test_auth_client_raises_actionable_error_when_prod_creds_missing():
+    """When QBO_CLIENT_ID_PROD is unset (fresh deploy without env
+    vars), `_auth_client(env='production')` must raise a RuntimeError
+    naming the missing var — NOT silently build an AuthClient with
+    client_id=None (which sends the user to Intuit's cryptic error
+    page)."""
+    import qbo_service as Q
+    from unittest.mock import patch as _patch
+    with _patch.object(Q, "QBO_CLIENT_ID_PROD", None), \
+         _patch.object(Q, "QBO_CLIENT_SECRET_PROD", None):
+        try:
+            Q._auth_client(env="production")
+        except RuntimeError as e:
+            msg = str(e)
+            assert "QBO PRODUCTION credentials not configured" in msg
+            assert "QBO_CLIENT_ID_PROD" in msg
+            assert "QBO_CLIENT_SECRET_PROD" in msg
+            return
+        raise AssertionError(
+            "_auth_client should have raised RuntimeError with missing prod creds",
+        )
+
+
+def test_auth_client_raises_actionable_error_when_sandbox_creds_missing():
+    import qbo_service as Q
+    from unittest.mock import patch as _patch
+    with _patch.object(Q, "QBO_CLIENT_ID", None), \
+         _patch.object(Q, "QBO_CLIENT_SECRET", None):
+        try:
+            Q._auth_client(env="sandbox")
+        except RuntimeError as e:
+            msg = str(e)
+            assert "QBO SANDBOX credentials not configured" in msg
+            assert "QBO_CLIENT_ID" in msg  # sandbox var name has no _PROD suffix
+            assert "_PROD" not in msg      # must NOT reference prod vars
+            return
+        raise AssertionError(
+            "_auth_client should have raised RuntimeError with missing sandbox creds",
+        )
+
+
+def test_oauth_start_returns_500_with_actionable_detail_when_creds_missing():
+    """The route surfaces the RuntimeError as a 500 with the
+    'add these env vars' message — no dead state row created."""
+    async def _t():
+        uid, cid = await _mk_pro_with_company()
+        try:
+            # Force the target env to production, then null out its creds.
+            await db.companies.update_one(
+                {"id": cid}, {"$set": {"qbo_env": "production"}},
+            )
+            import qbo_service as Q
+            from unittest.mock import patch as _patch
+            tok = create_token(uid, "pro")
+            state_count_before = await db.qbo_oauth_states.count_documents({})
+            with _patch.object(Q, "QBO_CLIENT_ID_PROD", None), \
+                 _patch.object(Q, "QBO_CLIENT_SECRET_PROD", None):
+                async with await _client() as c:
+                    r = await c.post(
+                        f"/api/companies/{cid}/qbo/oauth/start",
+                        headers={"Authorization": f"Bearer {tok}"},
+                    )
+                    assert r.status_code == 500, r.text
+                    assert "QBO_CLIENT_ID_PROD" in r.text
+            # No dead state row was inserted.
+            state_count_after = await db.qbo_oauth_states.count_documents({})
+            assert state_count_after == state_count_before
+        finally:
+            await _wipe(uid, cid)
+    _run(_t())

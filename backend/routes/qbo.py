@@ -162,6 +162,20 @@ async def qbo_oauth_start(cid: str, request: Request,
     # rejects cross-env code exchange with `invalid_grant`.
     comp = await db.companies.find_one({"id": cid}) or {}
     target_env = Q._norm_env(comp.get("qbo_env") or Q.QBO_ENV_DEFAULT)
+    # Build the authorization URL first so a missing-cred failure
+    # (RuntimeError from qbo_service._auth_client) surfaces to the
+    # user with an actionable 500 detail — BEFORE we've inserted a
+    # dead oauth_states row that will just clutter the collection.
+    try:
+        auth_url = Q.authorization_url(state, redirect_uri=redirect_uri,
+                                        env=target_env)
+    except RuntimeError as e:
+        # Missing QBO_CLIENT_ID_PROD / _SECRET_PROD on the deploy —
+        # translate to a proper HTTP error so the frontend toast is
+        # useful ("QBO PRODUCTION credentials not configured …")
+        # instead of forwarding the user to Intuit's cryptic error
+        # page (`client_id=None` in the URL).
+        raise HTTPException(500, str(e)) from e
     await db.qbo_oauth_states.insert_one({
         "state": state, "company_id": cid, "user_id": user["id"],
         "redirect_uri": redirect_uri,
@@ -170,8 +184,7 @@ async def qbo_oauth_start(cid: str, request: Request,
         "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
         "created_at": now_iso(),
     })
-    return {"url": Q.authorization_url(state, redirect_uri=redirect_uri,
-                                       env=target_env)}
+    return {"url": auth_url}
 
 
 @router.get("/qbo/oauth/callback")
