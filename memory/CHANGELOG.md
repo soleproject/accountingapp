@@ -1117,3 +1117,66 @@ with duplicate "Partner Books" rows under concurrent-boot races.
 - Full suite: `test_partner_books_dedupe.py` (3), `test_firm_books_dedupe.py`
   (3), `test_partners.py`, `test_partner_lifecycle.py` → **19/19 pass**.
 - Backend supervisor: clean boot, "Application startup complete".
+
+---
+
+## Feb 2026 — QBO Sandbox / Production Toggle
+
+Per-company QBO environment picker on Company Settings (immediately
+above the Danger Zone). New companies default to **production**;
+existing sandbox-connected companies were backfilled to `sandbox` at
+startup so their tokens keep working.
+
+**Backend**
+- `.env`: added `QBO_CLIENT_ID_PROD`, `QBO_CLIENT_SECRET_PROD`,
+  `QBO_ENV_DEFAULT=production` alongside legacy sandbox creds.
+- `qbo_service.py`:
+  - `_norm_env`, `api_base_for(env)`, `_creds_for(env)` helpers.
+  - `_auth_client(redirect_uri, env)`, `authorization_url(state,
+    redirect_uri, env)`, `exchange_code(code, realm_id,
+    redirect_uri, env)`, `_refresh(company_id, refresh_token, env)`,
+    `revoke(refresh_token, env)` now all env-aware.
+  - `save_connection(company_id, realm_id, tokens, env)` stamps
+    `env` on every new row.
+  - `env_from_connection(conn)` — legacy rows without `env` fall back
+    to sandbox (matches the backfill).
+  - `_api_base_for_company(company_id)` async helper for API calls.
+  - `_get` reads per-company env before every request.
+- `qbo_mirror/push.py::_post` — uses `_api_base_for_company` so
+  autopush POSTs hit the correct Intuit base URL for each connection.
+- `routes/qbo.py`:
+  - `qbo_oauth_start` persists target env on the state row and passes
+    to `authorization_url`.
+  - `qbo_oauth_callback` reads env off state and passes to
+    `exchange_code` + `save_connection` (Intuit rejects cross-env
+    exchange with `invalid_grant`).
+  - `qbo_disconnect` revokes against the connection's original env.
+  - `qbo_status` returns `env` (selected) + `connection_env` (active).
+  - New endpoints: `GET /companies/{cid}/qbo/env`, `PATCH
+    /companies/{cid}/qbo/env`. The PATCH is rejected with 409 while a
+    connection is active (prevents orphaned tokens).
+- `server.py` startup: one-time backfill stamps existing
+  `qbo_connections` and their parent `companies` with `env: "sandbox"`
+  when the field is missing.
+
+**Frontend**
+- `components/QboEnvToggle.jsx` — 2-card radio (Production /
+  Sandbox), disabled + Lock pill when the company already has an
+  active connection.
+- `pages/CompanySettings.jsx` — slotted above the Danger Zone.
+
+**Regression coverage**
+- `tests/test_qbo_env_toggle.py` — 8 new tests (helpers, GET defaults,
+  PATCH flips, PATCH rejected while connected, invalid-value coercion,
+  disconnect-then-flip).
+- Full QBO suite: 31/31 pass. Backend boots cleanly with backfill
+  no-op'ing when no legacy rows exist.
+
+**Intuit Developer app — TODO for user**
+- Register these Redirect URIs on the PRODUCTION Intuit app
+  (in addition to whatever is already on the Sandbox app):
+  - `https://api.smartbookssoftware.ai/api/qbo/oauth/callback`
+  - `https://api.cypherpro.accountingapp.ai/api/qbo/oauth/callback`
+  - Any additional private-label callbacks the user adds later —
+    they must also be appended to `_QBO_ALLOWED_HOSTS` in
+    `routes/qbo.py`.

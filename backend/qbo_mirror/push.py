@@ -22,7 +22,7 @@ import httpx
 
 from db import db, now_iso
 from qbo_service import (
-    get_access_token, API_BASE, QBO_MINOR_VERSION,
+    get_access_token, _api_base_for_company, QBO_MINOR_VERSION,
 )
 from qbo_mirror.settings import append_log
 
@@ -35,6 +35,7 @@ async def _post(company_id: str, realm_id: str, path: str,
     """POST helper with 401-refresh + 429/5xx exponential backoff.
     Mirrors qbo_service._get behavior."""
     tok = await get_access_token(company_id)
+    base = await _api_base_for_company(company_id)
     params = {"minorversion": QBO_MINOR_VERSION}
     if operation:
         params["operation"] = operation
@@ -42,7 +43,7 @@ async def _post(company_id: str, realm_id: str, path: str,
         for attempt in range(6):
             async with _gate:
                 r = await client.post(
-                    f"{API_BASE}{path}",
+                    f"{base}{path}",
                     params=params,
                     json=body,
                     headers={
