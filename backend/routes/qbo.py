@@ -349,15 +349,48 @@ async def qbo_oauth_callback(
 
 @router.get("/companies/{cid}/qbo/status")
 async def qbo_status(cid: str, user: dict = Depends(get_current_user)):
+    """Returns connection state + a history payload the frontend uses
+    to rehydrate the Connect QBO page on revisit:
+      * `last_job` — the most recent terminal migration (done or
+        failed) with its full stats. Lets the "Migration complete"
+        summary card persist across page reloads instead of
+        vanishing when the local `job` state resets.
+      * `preview` — the cached entity counts from the last preview
+        click. Lets the "Preview scope" card show its counts + total
+        instead of just the button.
+    """
     await require_company(user, cid)
     conn = await Q.get_connection(cid)
-    # Company's SELECTED env (drives the NEXT connect). Independent of
-    # any existing connection, which stays stamped on its original env.
     comp = await db.companies.find_one({"id": cid}) or {}
     selected_env = Q._norm_env(comp.get("qbo_env") or Q.QBO_ENV_DEFAULT)
+
+    # Most-recent terminal job. Used to rehydrate the migration-
+    # complete card. Excludes jobs marked stale (a future field for
+    # invalidating history after a QBO re-connect to a different
+    # realm — not yet used but future-proofed).
+    last_job = await db.qbo_jobs.find_one(
+        {"company_id": cid, "status": {"$in": ["done", "failed"]},
+         "stale": {"$ne": True}},
+        sort=[("created_at", -1)],
+    )
+    if last_job:
+        last_job.pop("_id", None)
+
+    # Cached preview counts (written by GET /qbo/preview).
+    preview = None
+    if conn and conn.get("preview_counts"):
+        preview = {
+            "counts": conn["preview_counts"],
+            "total": conn.get("preview_total") or sum(
+                c for c in conn["preview_counts"].values() if c > 0
+            ),
+            "preview_at": conn.get("preview_at"),
+        }
+
     if not conn:
         return {"connected": False, "env": selected_env,
-                "connection_env": None}
+                "connection_env": None,
+                "last_job": last_job, "preview": preview}
     return {
         "connected": conn.get("status") == "connected",
         "realm_id": conn.get("realm_id"),
@@ -369,6 +402,8 @@ async def qbo_status(cid: str, user: dict = Depends(get_current_user)):
         "connection_env": Q.env_from_connection(conn),
         "connected_at": conn.get("created_at"),
         "last_updated": conn.get("updated_at"),
+        "last_job": last_job,
+        "preview": preview,
     }
 
 
@@ -459,13 +494,27 @@ async def set_qbo_env(cid: str, body: QboEnvIn,
 @router.get("/companies/{cid}/qbo/preview")
 async def qbo_preview(cid: str, user: dict = Depends(get_current_user)):
     """Cheap count(*) per entity so the user can preview scope
-    before committing to the full import."""
+    before committing to the full import.
+
+    Result is cached on the qbo_connection row (`preview_counts` +
+    `preview_at`) so the Connect QBO page can rehydrate on subsequent
+    visits without re-hitting Intuit. Fresh preview clicks always
+    re-fetch and update the cache."""
     await require_company(user, cid)
     try:
         counts = await Q.preview_counts(cid)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"QBO preview failed: {e}") from e
-    return {"counts": counts, "total": sum(c for c in counts.values() if c > 0)}
+    total = sum(c for c in counts.values() if c > 0)
+    await db.qbo_connections.update_one(
+        {"company_id": cid},
+        {"$set": {
+            "preview_counts": counts,
+            "preview_total": total,
+            "preview_at": now_iso(),
+        }},
+    )
+    return {"counts": counts, "total": total}
 
 
 @router.post("/companies/{cid}/qbo/migrations")

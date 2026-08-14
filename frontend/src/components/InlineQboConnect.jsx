@@ -62,6 +62,13 @@ export default function InlineQboConnect({
     try {
       const r = await api.get(`/companies/${currentId}/qbo/status`);
       setStatus(r.data);
+      // Same rehydration pattern as the standalone Connect QBO page:
+      // seed local `preview` + `job` from the cached history on the
+      // status doc so revisits (page refresh, wizard back-nav) keep
+      // the "Migration complete" state visible instead of resetting
+      // to the initial "Preview" button.
+      if (r.data.preview && !preview) setPreview(r.data.preview);
+      if (r.data.last_job && !job) setJob(r.data.last_job);
     } catch (e) {
       // Silent — the outer page can still function without status.
     }

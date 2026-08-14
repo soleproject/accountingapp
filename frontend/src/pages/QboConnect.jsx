@@ -63,6 +63,14 @@ export default function QboConnect() {
     if (!currentId) return;
     const r = await api.get(`/companies/${currentId}/qbo/status`);
     setStatus(r.data);
+    // Rehydrate the "Migration complete" summary + preview card on
+    // page revisit. Backend caches:
+    //   * `preview` — the last preview_counts click (survives refresh)
+    //   * `last_job` — the most recent terminal migration with stats
+    // Only populate LOCAL state if we haven't already got a job in-
+    // flight (avoids clobbering a live poll with a stale cached row).
+    if (r.data.preview && !preview) setPreview(r.data.preview);
+    if (r.data.last_job && !job) setJob(r.data.last_job);
   };
   useEffect(() => { refreshStatus(); }, [currentId]);
 
