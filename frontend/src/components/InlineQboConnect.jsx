@@ -24,9 +24,19 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   Link2, CheckCircle2, Loader2, Play, ShieldCheck, ExternalLink,
+  Mail,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter,
+  DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 
 const POLL_MS = 2000;
 
@@ -38,6 +48,13 @@ export default function InlineQboConnect({
   const [preview, setPreview] = useState(null);
   const [job, setJob] = useState(null);
   const [busy, setBusy] = useState(false);
+  // Two-stage migration UX (mirrors /connections/qbo): confirm modal
+  // that promises an email, then post-start modal that reassures the
+  // user they can safely close the tab. Users on onboarding are
+  // especially likely to sit and wait — so the "you can leave" nudge
+  // is worth its weight here.
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [startedOpen, setStartedOpen] = useState(false);
   const pollRef = useRef(null);
 
   const refreshStatus = async () => {
@@ -111,12 +128,14 @@ export default function InlineQboConnect({
   };
 
   const startMigration = async () => {
+    setConfirmOpen(false);
     setBusy(true);
     try {
       const r = await api.post(`/companies/${currentId}/qbo/migrations`);
       setJob({ job_id: r.data.job_id, status: "queued", processed: 0 });
       startPolling(r.data.job_id);
-      toast.success("Migration started — we'll email you when it's done");
+      // Follow-up "we've got it" modal — the safe-to-close reassurance.
+      setStartedOpen(true);
     } catch (e) {
       toast.error(e.response?.data?.detail || "Migration failed to start");
     } finally { setBusy(false); }
@@ -199,7 +218,7 @@ export default function InlineQboConnect({
           data-testid="inline-qbo-preview-btn"
           onClick={runPreview}
           disabled={busy}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-sm disabled:opacity-50"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-50 shadow-sm"
         >
           {busy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
           Preview what will import
@@ -215,7 +234,7 @@ export default function InlineQboConnect({
           </div>
           <button
             data-testid="inline-qbo-migrate-btn"
-            onClick={startMigration}
+            onClick={() => setConfirmOpen(true)}
             disabled={busy}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-50"
           >
@@ -268,6 +287,82 @@ export default function InlineQboConnect({
           </a>
         </div>
       )}
+
+      {/* Confirm-start dialog — mirrors the standalone /connections/qbo
+          page. Promises an email so users don't sit and watch. */}
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent data-testid="inline-qbo-migrate-confirm-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Play size={16} className="text-emerald-600" />
+              Start QuickBooks migration?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm text-slate-600">
+                <p>
+                  We&apos;ll import every listed record from QuickBooks Online
+                  into your ledger. Safe to re-run — records are matched by
+                  QBO ID, so duplicates won&apos;t stack up.
+                </p>
+                <div className="flex items-start gap-2 rounded-md bg-cyan-50 border border-cyan-200 p-3 text-cyan-900">
+                  <Mail size={14} className="mt-0.5 shrink-0" />
+                  <span className="text-xs leading-relaxed">
+                    Migrations can take a few minutes. You can safely close
+                    this tab — we&apos;ll <b>email you as soon as it&apos;s done</b>.
+                  </span>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="inline-qbo-migrate-confirm-cancel">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="inline-qbo-migrate-confirm-start"
+              onClick={startMigration}
+              className="bg-emerald-600 hover:bg-emerald-700"
+            >
+              Start migration
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Post-start dialog — reassures the user the email is coming so
+          they don't sit and watch the progress bar. */}
+      <Dialog open={startedOpen} onOpenChange={setStartedOpen}>
+        <DialogContent data-testid="inline-qbo-migrate-started-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail size={16} className="text-cyan-600" />
+              We&apos;re migrating your QuickBooks data
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-3 text-sm text-slate-600 pt-1">
+                <p>
+                  Your import is running in the background — nothing to
+                  babysit. As soon as it wraps up, we&apos;ll send you an
+                  email with the final counts and a link back to your books.
+                </p>
+                <p className="text-xs text-slate-500">
+                  You can close this tab or keep it open to watch progress —
+                  either way works.
+                </p>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <button
+              data-testid="inline-qbo-migrate-started-ack"
+              onClick={() => setStartedOpen(false)}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-cyan-600 text-white text-sm hover:bg-cyan-700"
+            >
+              Got it
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

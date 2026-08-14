@@ -927,7 +927,7 @@ export default function Onboarding() {
                 onClick={() => setAns("qbo", "no")}
                 className={`px-4 py-2 rounded-md border text-sm ${answers.qbo === "no" ? "bg-slate-900 text-white" : ""}`}
               >
-                No — set up fresh
+                No — next step
               </button>
             </div>
 
