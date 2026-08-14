@@ -1180,3 +1180,56 @@ startup so their tokens keep working.
   - Any additional private-label callbacks the user adds later —
     they must also be appended to `_QBO_ALLOWED_HOSTS` in
     `routes/qbo.py`.
+
+---
+
+## Feb 2026 — QBO Migration "You'll get an email" Flow
+
+Two-step UX + branded completion notification for the QBO bulk import.
+
+**Frontend (`pages/QboConnect.jsx`)**
+- Replaced browser-native `confirm()` with a shadcn AlertDialog
+  ("Start QuickBooks migration?") whose body promises an email on
+  completion — "safely close this tab, we'll email you as soon as
+  it's done".
+- Added a follow-up shadcn Dialog that fires immediately after the
+  migration is queued: "We're migrating your QuickBooks data" +
+  "you'll get an email as soon as it wraps up". Dismissible with
+  "Got it".
+- Added `data-testid`s: `qbo-migrate-confirm-dialog`,
+  `qbo-migrate-confirm-start`, `qbo-migrate-confirm-cancel`,
+  `qbo-migrate-started-dialog`, `qbo-migrate-started-ack`.
+
+**Backend**
+- `email_templates.py`: new `qbo_migration_complete()` +
+  `qbo_migration_failed()`. Both use `_wrap(brand_name=…)` so
+  Partner/Enterprise white-label branding cascades into the footer.
+  Complete-template renders a table of non-zero stats (transactions
+  posted / categorized, payments linked, estimates + POs + inventory
+  adjustments pulled, opening inventory value in USD).
+- `email_dispatcher.py`: registered `qbo_migration_complete` and
+  `qbo_migration_failed` in `DEFAULT_PREFS` (both opt-in by default).
+- `qbo_service.py`:
+  - New `_notify_migration_result(job_id, company_id, ok, error)`
+    helper — looks up the initiating user, picks the right template,
+    dispatches via `email_dispatcher.dispatch`. Best-effort — any
+    exception is swallowed so the background task can still finalise
+    the job doc.
+  - Called from `run_migration` after both the "done" and "failed"
+    branches (including the early "QBO not connected" bail-out).
+- `routes/qbo.py::qbo_start_migration` — stamps
+  `initiating_user_id: user["id"]` on every new job doc so the
+  background task can find who to email.
+
+**Regression coverage**
+- `tests/test_qbo_migration_email.py` — 8 new tests: template
+  rendering (stats + brand), zero-stat row drop, error truncation,
+  no-op when `initiating_user_id` missing (legacy jobs), dispatch
+  wiring (complete + failed paths), route stamps
+  `initiating_user_id`. **8/8 pass.**
+
+**Branding cascade**
+- Dispatcher already reads `initiating_user_id`'s
+  `branding.firm_name` and swaps the From/footer to the white-label
+  firm. Nothing extra needed — partners' clients see an email that
+  looks like it came from their accountant, not SmartBooks.

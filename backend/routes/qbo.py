@@ -456,6 +456,11 @@ async def qbo_start_migration(cid: str, user: dict = Depends(get_current_user)):
         "job_id": job_id, "company_id": cid,
         "status": "queued", "phase": "queued", "percent": 0,
         "processed": 0, "created_at": now_iso(),
+        # Persist WHO kicked off the migration so run_migration can
+        # send them a branded "we're done" email when the background
+        # task lands. Cannot resolve later from context — the task
+        # runs after the HTTP request completes.
+        "initiating_user_id": user["id"],
     })
     # Fire-and-forget task. The service updates the job doc as it runs.
     asyncio.create_task(Q.run_migration(job_id, cid))
