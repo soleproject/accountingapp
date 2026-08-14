@@ -413,126 +413,17 @@ export default function QboConnect() {
                 </div>
               </div>
             )}
-            {done && (
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  onClick={() => navigate("/accounting/chart-of-accounts")}
-                  className="px-3 py-1.5 text-xs rounded-md border bg-white hover:bg-slate-50"
-                  data-testid="qbo-view-coa-btn"
-                >
-                  View Chart of Accounts
-                </button>
-                <button
-                  onClick={() => navigate("/contacts")}
-                  className="px-3 py-1.5 text-xs rounded-md border bg-white hover:bg-slate-50"
-                  data-testid="qbo-view-contacts-btn"
-                >
-                  View Contacts
-                </button>
-                {/* Migration auto-builds the Plaid PFC → QBO account
-                    map — this link takes users straight to the review
-                    page. Highlighted (indigo) because reviewing the
-                    AI's mapping is the recommended next step. */}
-                <button
-                  onClick={() => navigate("/settings/pfc-map")}
-                  className="px-3 py-1.5 text-xs rounded-md bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1"
-                  data-testid="qbo-view-pfc-map-btn"
-                >
-                  <Sparkles size={12} /> Review Plaid Categories
-                  {typeof job?.pfc_mapped === "number" && (
-                    <span className="ml-1 opacity-80">({job.pfc_mapped} auto-mapped)</span>
-                  )}
-                </button>
-                <button
-                  onClick={() => navigate("/settings/qbo-mirror")}
-                  data-testid="qbo-mirror-btn"
-                  className="px-3 py-1.5 text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center gap-1"
-                  title="Bi-directional live sync between our app and QBO"
-                >
-                  <RefreshCw size={12} /> Open Live Mirror
-                </button>
-                {/* Re-run entry point — completed jobs otherwise had no
-                    way to trigger a fresh import. Clears the job pointer
-                    locally so the "Start migration" button re-appears. */}
-                <button
-                  onClick={async () => { setJob(null); await startMigration(); }}
-                  data-testid="qbo-rerun-btn"
-                  className="px-3 py-1.5 text-xs rounded-md border border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 inline-flex items-center gap-1"
-                >
-                  <RefreshCw size={12} /> Re-run migration
-                </button>
-                {/* Escape valve — if the automatic "migration complete"
-                    email got lost (spam filter, wrong address on the
-                    account at the time), the user can fire it again
-                    without redoing the whole migration. Also useful
-                    for verifying the branded template renders as
-                    expected in production. */}
-                <button
-                  onClick={async () => {
-                    try {
-                      await api.post(
-                        `/companies/${currentId}/qbo/migrations/${job.job_id}/resend-email`,
-                        {},
-                      );
-                      toast.success("Completion email re-sent");
-                    } catch (e) {
-                      toast.error(
-                        e?.response?.data?.detail ||
-                          "Failed to resend the email",
-                      );
-                    }
-                  }}
-                  data-testid="qbo-resend-email-btn"
-                  className="px-3 py-1.5 text-xs rounded-md border border-cyan-200 bg-cyan-50 text-cyan-800 hover:bg-cyan-100 inline-flex items-center gap-1"
-                  title="Send the completion email again (useful if the original got lost)"
-                >
-                  <Mail size={12} /> Resend email
-                </button>
-                {/* Post-migration structural fix — unflattens colon-
-                    joined account names (Landscaping Services:Job
-                    Materials:Decks and Patios) into a proper parent
-                    tree. Idempotent, so safe to click repeatedly. */}
-                <button
-                  onClick={async () => {
-                    try {
-                      const r = await api.post(`/companies/${currentId}/qbo/rebuild-account-hierarchy`);
-                      alert(`Re-linked ${r.data.updated} accounts into a proper parent-child tree.`);
-                    } catch (e) {
-                      alert(`Failed: ${e?.response?.data?.detail || e.message}`);
-                    }
-                  }}
-                  data-testid="qbo-rebuild-hierarchy-btn"
-                  className="px-3 py-1.5 text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center gap-1"
-                  title="Split colon-joined account names into parent/child tree"
-                >
-                  <RefreshCw size={12} /> Rebuild account hierarchy
-                </button>
-                {/* Post-migration category promotion — copies each QBO
-                    transaction's line-item AccountRef into a top-level
-                    category_account_id so the Transactions page
-                    displays the category instead of "pick a category". */}
-                <button
-                  onClick={async () => {
-                    try {
-                      const r = await api.post(`/companies/${currentId}/qbo/rebuild-transaction-categories`);
-                      alert(
-                        `Categorized ${r.data.updated} · ` +
-                        `signed ${r.data.signed} · ` +
-                        `linked ${r.data.banks} to bank/CC · ` +
-                        `posted ${r.data.posted} to ledger.`
-                      );
-                    } catch (e) {
-                      alert(`Failed: ${e?.response?.data?.detail || e.message}`);
-                    }
-                  }}
-                  data-testid="qbo-rebuild-txn-categories-btn"
-                  className="px-3 py-1.5 text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center gap-1"
-                  title="Assign categories + signed amount + bank account to QBO transactions"
-                >
-                  <RefreshCw size={12} /> Categorize imported transactions
-                </button>
-              </div>
-            )}
+            {/* NOTE (Feb 2026): The post-migration action button
+                row (View CoA / View Contacts / Review Plaid
+                Categories / Open Live Mirror / Re-run migration /
+                Resend email / Rebuild account hierarchy /
+                Categorize imported transactions) was intentionally
+                removed per user request. The endpoints still exist
+                and are reachable directly from the sidebar /
+                settings pages; only the inline shortcuts were
+                pulled from this card. Kept a placeholder here to
+                make the intent obvious to future readers so nobody
+                re-adds them without a design conversation. */}
           </div>
         )}
       </section>
