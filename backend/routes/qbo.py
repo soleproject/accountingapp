@@ -134,12 +134,41 @@ def _return_to_host_from_request(request: Request) -> str | None:
     return f"https://{host}"
 
 
+class OAuthStartIn(BaseModel):
+    """Body for `POST /oauth/start`. All fields optional — the route
+    was originally a bare POST with no body and still supports that
+    for backward compatibility.
+
+    `return_path` — where to send the browser after Intuit bounces
+    the user back. Defaults to `/connections/qbo`. Used by the
+    onboarding wizard to keep the user inside the wizard after
+    consent instead of dumping them on the standalone connect page.
+    Must be a same-origin path (starts with `/`) — anything else is
+    silently ignored so a compromised frontend can't redirect users
+    to a phishing host.
+    """
+    return_path: str | None = None
+
+
 class OAuthStartOut(BaseModel):
     url: str
 
 
+def _safe_return_path(p: str | None) -> str | None:
+    """Whitelist a return path to same-origin only. Returns None if
+    the path is malformed or absolute (would allow open-redirect)."""
+    if not p or not isinstance(p, str):
+        return None
+    if not p.startswith("/") or p.startswith("//"):
+        return None
+    # Cap length to keep the DB row size sane and shrug off any
+    # attempt to smuggle a huge query string.
+    return p[:512]
+
+
 @router.post("/companies/{cid}/qbo/oauth/start", response_model=OAuthStartOut)
 async def qbo_oauth_start(cid: str, request: Request,
+                          body: OAuthStartIn = OAuthStartIn(),
                           user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     state = secrets.token_urlsafe(32)
@@ -162,16 +191,30 @@ async def qbo_oauth_start(cid: str, request: Request,
     # rejects cross-env code exchange with `invalid_grant`.
     comp = await db.companies.find_one({"id": cid}) or {}
     target_env = Q._norm_env(comp.get("qbo_env") or Q.QBO_ENV_DEFAULT)
+    # Build the authorization URL first so a missing-cred failure
+    # (RuntimeError from qbo_service._auth_client) surfaces to the
+    # user with an actionable 500 detail — BEFORE we've inserted a
+    # dead oauth_states row that will just clutter the collection.
+    try:
+        auth_url = Q.authorization_url(state, redirect_uri=redirect_uri,
+                                        env=target_env)
+    except RuntimeError as e:
+        # Missing QBO_CLIENT_ID_PROD / _SECRET_PROD on the deploy —
+        # translate to a proper HTTP error so the frontend toast is
+        # useful ("QBO PRODUCTION credentials not configured …")
+        # instead of forwarding the user to Intuit's cryptic error
+        # page (`client_id=None` in the URL).
+        raise HTTPException(500, str(e)) from e
     await db.qbo_oauth_states.insert_one({
         "state": state, "company_id": cid, "user_id": user["id"],
         "redirect_uri": redirect_uri,
         "return_to_host": return_to_host,
+        "return_path": _safe_return_path(body.return_path),
         "env": target_env,
         "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
         "created_at": now_iso(),
     })
-    return {"url": Q.authorization_url(state, redirect_uri=redirect_uri,
-                                       env=target_env)}
+    return {"url": auth_url}
 
 
 @router.get("/qbo/oauth/callback")
@@ -220,8 +263,20 @@ async def qbo_oauth_callback(
                 pass
         return _APP_URL
 
+    def _return_path(rec: dict | None) -> str:
+        """Where to send the browser after Intuit bounces back.
+        `return_path` on the state row wins (used by onboarding wizard);
+        otherwise fall back to /connections/qbo. Same-origin safety
+        was enforced at OAuth-start time via `_safe_return_path`."""
+        rp = (rec or {}).get("return_path")
+        return rp if rp else "/connections/qbo"
+
     def _err(reason: str, rec: dict | None = None) -> RedirectResponse:
-        target = f"{_label_app_url(rec)}/connections/qbo?qbo_error={reason}"
+        path = _return_path(rec)
+        # Merge our error query param into the return path — preserve
+        # any existing querystring the caller supplied.
+        sep = "&" if "?" in path else "?"
+        target = f"{_label_app_url(rec)}{path}{sep}qbo_error={reason}"
         return RedirectResponse(target, status_code=302)
 
     # Intuit itself returned an error (user hit "No thanks", scope
@@ -276,14 +331,18 @@ async def qbo_oauth_callback(
             "QBO save_connection failed for cid=%s", cid
         )
         return _err(f"save_failed:{str(e)[:120]}", rec)
-    # Success — land the user on the QBO Connect page (not the generic
-    # /connections page — that route doesn't refresh QBO status). Use
-    # the label's own app host (recorded on the state at OAuth-start
-    # time) so private-label users don't get bounced onto the flagship
-    # SmartBooks login. Absolute URL so the browser lands on the
-    # FRONTEND service, not the API.
+    # Success — land the user on their configured `return_path` (the
+    # onboarding wizard sets this to `/onboarding?step=1&qbo=connected`
+    # so the user stays inside the wizard); default is
+    # `/connections/qbo` so nothing changes for the standalone flow.
+    # Use the label's own app host (recorded on the state at
+    # OAuth-start time) so private-label users don't get bounced onto
+    # the flagship SmartBooks login. Absolute URL so the browser lands
+    # on the FRONTEND service, not the API.
+    path = _return_path(rec)
+    sep = "&" if "?" in path else "?"
     return RedirectResponse(
-        f"{_label_app_url(rec)}/connections/qbo?qbo=connected&realm={realmId}",
+        f"{_label_app_url(rec)}{path}{sep}qbo=connected&realm={realmId}",
         status_code=302,
     )
 
@@ -476,6 +535,125 @@ async def qbo_migration_status(cid: str, job_id: str,
         raise HTTPException(404, "Job not found")
     doc.pop("_id", None)
     return doc
+
+
+# ─── (Feb 2026) Migration email diagnostic ────────────────────────────
+#
+# One-shot introspection: for a given job, return everything we need
+# to answer "why didn't my email arrive?" without shell access to
+# production:
+#   * The job doc's initiating_user_id + status
+#   * The initiating user's email address on file
+#   * Every `communications` row tagged with `related.job_id == job_id`
+#     (each row shows kind, to, status, resend_id, error)
+#
+# If `communications` has ZERO rows for the job, either:
+#   (a) the notify helper never fired (backend not deployed with the
+#       initiating_user_id stamp) — check the job doc's
+#       `initiating_user_id` field. If MISSING, that's the reason.
+#   (b) the helper fired but crashed before reaching dispatch — check
+#       Railway logs for "QBO migration email FAILED".
+#
+# If `communications` has rows with status=failed, the `error` field
+# tells the whole story (Resend domain block, invalid recipient, etc.)
+
+
+@router.get("/companies/{cid}/qbo/migrations/{job_id}/email-diagnostic")
+async def qbo_migration_email_diagnostic(
+    cid: str, job_id: str, user: dict = Depends(get_current_user),
+):
+    await require_company(user, cid)
+    job = await db.qbo_jobs.find_one({"job_id": job_id, "company_id": cid})
+    if not job:
+        raise HTTPException(404, "Job not found")
+    uid = job.get("initiating_user_id")
+    init_user = None
+    if uid:
+        u = await db.users.find_one({"id": uid})
+        if u:
+            init_user = {
+                "id": u["id"],
+                "email": u.get("email"),
+                "name": u.get("name"),
+                "role": u.get("role"),
+                "branding_firm_name": (u.get("branding") or {}).get("firm_name"),
+            }
+    # All communications rows tagged with this job_id.
+    rows = []
+    async for c in db.communications.find(
+        {"related.job_id": job_id}, sort=[("sent_at", -1)],
+    ).limit(20):
+        c.pop("_id", None)
+        rows.append({
+            "sent_at": c.get("sent_at"),
+            "kind": c.get("kind"),
+            "to": c.get("to"),
+            "status": c.get("status"),
+            "resend_id": c.get("resend_id"),
+            "error": c.get("error"),
+        })
+    return {
+        "job_id": job_id,
+        "job_status": job.get("status"),
+        "job_finished_at": job.get("finished_at"),
+        "initiating_user_id": uid,
+        "initiating_user_id_present": bool(uid),
+        "initiating_user": init_user,
+        "communications_count": len(rows),
+        "communications": rows,
+        # A one-line human summary — makes the "why no email?"
+        # question answerable at a glance from the response body.
+        "diagnosis": _diagnose(job, uid, init_user, rows),
+    }
+
+
+def _diagnose(job: dict, uid: str | None,
+              init_user: dict | None, rows: list) -> str:
+    if not uid:
+        return (
+            "Job doc has NO initiating_user_id — the automatic email "
+            "won't fire. Root cause: the migration was created before "
+            "the notify-on-completion feature deployed. Use the "
+            "manual /resend-email endpoint with a `to` override to "
+            "send anyway."
+        )
+    if not init_user:
+        return (
+            f"initiating_user_id={uid} points at a user that no "
+            f"longer exists — the account was likely deleted after "
+            f"kicking off the migration. Use `to` override on the "
+            f"resend endpoint."
+        )
+    if not init_user.get("email"):
+        return (
+            f"Initiating user has no email address on file. Use "
+            f"`to` override on the resend endpoint."
+        )
+    if not rows:
+        return (
+            "No communications row exists for this job — the notify "
+            "helper never reached dispatch. Check Railway logs for "
+            "'QBO migration email FAILED'; the traceback will "
+            "identify the crash site."
+        )
+    sent = [r for r in rows if r.get("status") == "sent"]
+    if sent:
+        latest = sent[0]
+        return (
+            f"Email SENT to {latest.get('to')} at "
+            f"{latest.get('sent_at')} (Resend id "
+            f"{latest.get('resend_id')}). If it's not in the inbox, "
+            f"check spam and confirm the recipient really is "
+            f"{init_user.get('email')} (that's the initiating user's "
+            f"address — not the migrated company's owner)."
+        )
+    failed = rows[0]
+    return (
+        f"Email DISPATCH FAILED — status={failed.get('status')} "
+        f"error={failed.get('error') or 'unknown'}. Common causes: "
+        f"unverified recipient domain (Resend sandbox), invalid "
+        f"address, or Resend rate-limit."
+    )
 
 
 # ─── (Feb 2026) Manual "resend the migration completion email" ──────

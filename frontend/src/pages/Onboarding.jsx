@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, BACKEND_URL } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
@@ -10,6 +10,7 @@ import { CheckCircle2, ChevronRight, Loader2, Sparkles, ArrowLeft, Upload } from
 import { toast } from "sonner";
 import PlaidLinkButton from "@/components/PlaidLinkButton";
 import StatementsTab from "@/components/StatementsTab";
+import InlineQboConnect from "@/components/InlineQboConnect";
 import { institutionLogoUrl } from "@/lib/institutionLogo";
 
 // AI onboarding coach — greetings posted into the chat on each step to make
@@ -63,7 +64,7 @@ const COACH_SCRIPTS = {
     ready: (fields) => fields.qbo === "yes" || fields.qbo === "no",
     confirm: (_bits, _ready, fields) =>
       fields.qbo === "yes"
-        ? `Perfect — I'll mock-link QuickBooks and sync your accounts + history in the background. Moving on…`
+        ? `Perfect — click "Connect to QuickBooks Online" below to link your account. I'll wait here while you go through the QBO consent screen.`
         : `Got it — we'll set up fresh together. Moving on…`,
   },
   2: {
@@ -192,6 +193,36 @@ export default function Onboarding() {
   // Guards the "greet on step change" effect from firing with the default
   // step=0 while onboarding state is still being fetched from the server.
   const [loaded, setLoaded] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Handle the return trip from Intuit OAuth. When the callback lands
+  // the user here with `?qbo=connected` (or `?qbo_error=…`), snap
+  // them to step 1, stamp `answers.qbo=yes`, and toast the outcome.
+  // Idempotent — we strip the params right after so a refresh doesn't
+  // re-fire the toast.
+  useEffect(() => {
+    const qbo = searchParams.get("qbo");
+    const qboErr = searchParams.get("qbo_error");
+    if (!qbo && !qboErr) return;
+    if (qbo === "connected") {
+      toast.success("QuickBooks connected — preview + migrate your books below");
+      setAnswers((prev) => ({ ...prev, qbo: "yes" }));
+      setStep(1);
+    } else if (qboErr) {
+      toast.error(`QuickBooks connection failed: ${qboErr}`, { duration: 15000 });
+      setAnswers((prev) => ({ ...prev, qbo: "yes" }));
+      setStep(1);
+    }
+    // Strip the query params so a page refresh doesn't repeat the
+    // toast + step-jump — but keep the current step so `useSearchParams`
+    // doesn't fight the manual `setStep(1)` above.
+    const next = new URLSearchParams(searchParams);
+    next.delete("qbo");
+    next.delete("qbo_error");
+    next.delete("realm");
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!currentId) return;
@@ -882,17 +913,40 @@ export default function Onboarding() {
         {step === 1 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Do you already use QuickBooks Online?</h2>
-            <p className="text-sm text-slate-500">We can link via QBO API and pull your existing chart of accounts and transactions. (Mocked in this MVP.)</p>
+            <p className="text-sm text-slate-500">We can link via QBO API and pull your existing chart of accounts and transactions.</p>
             <div className="flex gap-2">
-              <button onClick={() => { setAns("qbo", "yes"); toast.success("QBO mock-linked. Data will sync in background."); }}
-                      className={`px-4 py-2 rounded-md border text-sm ${answers.qbo === "yes" ? "bg-slate-900 text-white" : ""}`}>
-                Yes — link QuickBooks (mock)
+              <button
+                data-testid="onboarding-qbo-yes-btn"
+                onClick={() => setAns("qbo", "yes")}
+                className={`px-4 py-2 rounded-md border text-sm ${answers.qbo === "yes" ? "bg-slate-900 text-white" : ""}`}
+              >
+                Yes — link QuickBooks
               </button>
-              <button onClick={() => setAns("qbo", "no")}
-                      className={`px-4 py-2 rounded-md border text-sm ${answers.qbo === "no" ? "bg-slate-900 text-white" : ""}`}>
+              <button
+                data-testid="onboarding-qbo-no-btn"
+                onClick={() => setAns("qbo", "no")}
+                className={`px-4 py-2 rounded-md border text-sm ${answers.qbo === "no" ? "bg-slate-900 text-white" : ""}`}
+              >
                 No — set up fresh
               </button>
             </div>
+
+            {/* Inline connect wizard — appears the moment the user
+                picks "Yes". Reuses the same endpoints as the standalone
+                /connections/qbo page so nothing diverges. The return
+                path is stamped on the oauth state row, so after the
+                Intuit consent bounce the user lands back here on the
+                onboarding step rather than the /connections/qbo page. */}
+            {answers.qbo === "yes" && (
+              <div
+                data-testid="onboarding-qbo-inline-connect"
+                className="mt-4 pt-4 border-t border-slate-100"
+              >
+                <InlineQboConnect
+                  returnPath="/onboarding?step=1&qbo=connected"
+                />
+              </div>
+            )}
           </div>
         )}
 

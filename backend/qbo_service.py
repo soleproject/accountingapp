@@ -105,6 +105,24 @@ def _auth_client(redirect_uri: str | None = None,
     token-exchange call, per environment."""
     e = _norm_env(env)
     cid, csec = _creds_for(e)
+    if not cid or not csec:
+        # Fail loud here — otherwise the SDK builds a URL with
+        # `client_id=None` and Intuit renders a generic "undefined
+        # didn't connect" error page that gives zero indication of
+        # the actual misconfiguration. This exception surfaces to
+        # /qbo/oauth/start as a 500, at which point the frontend
+        # toast tells the user exactly which env var is missing.
+        env_label = e.upper()
+        missing = []
+        if not cid:
+            missing.append(f"QBO_CLIENT_ID{'_PROD' if e == 'production' else ''}")
+        if not csec:
+            missing.append(f"QBO_CLIENT_SECRET{'_PROD' if e == 'production' else ''}")
+        raise RuntimeError(
+            f"QBO {env_label} credentials not configured — missing "
+            f"env var(s): {', '.join(missing)}. Add them to the "
+            f"backend deploy and restart."
+        )
     return AuthClient(
         client_id=cid,
         client_secret=csec,

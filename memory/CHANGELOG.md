@@ -1285,3 +1285,51 @@ doesn't arrive, the failure is upstream of Resend, not env-specific.
    `POST /qbo/migrations`. Re-deploy.
 4. As a last-resort recovery, the user can click "Resend email" on
    the completed migration and the email will fire immediately.
+
+---
+
+## Feb 2026 — Onboarding Step 2 (QBO) — Inline Connect + Copy Cleanup
+
+**Frontend**
+- `pages/Onboarding.jsx`:
+  - Removed all "mock" copy from step 2:
+    - Button: "Yes — link QuickBooks (mock)" → "Yes — link QuickBooks"
+    - Card body: dropped "(Mocked in this MVP.)"
+    - Coach script confirm text: replaced mock-link line with an
+      instruction to click the Connect button now visible on-screen.
+  - Added `?qbo=connected` / `?qbo_error=` query-param handler that
+    snaps the wizard to step 1, toasts success/failure, then strips
+    the params so a refresh doesn't repeat.
+- New `components/InlineQboConnect.jsx` — compact connect + preview
+  + migrate flow. Reuses the same
+  `/api/companies/{cid}/qbo/{status,oauth/start,preview,migrations,disconnect}`
+  endpoints as the standalone /connections/qbo page (nothing
+  diverges). Passes `return_path` to `/oauth/start` so the callback
+  lands the user back inside the wizard.
+
+**Backend**
+- `routes/qbo.py::qbo_oauth_start` now accepts optional
+  `{return_path: str}` body. Persisted on the oauth_states row.
+  Backward-compatible with the legacy bare-POST caller.
+- `qbo_oauth_callback` honors the stored `return_path` for both
+  success (`?qbo=connected&realm=…`) and error
+  (`?qbo_error=…`) redirects — falls back to `/connections/qbo`.
+- New `_safe_return_path()` helper rejects absolute URLs and
+  protocol-relative paths (open-redirect guard). Silently downgrades
+  bad inputs to None; only same-origin rooted paths pass through.
+
+**Regression coverage**
+- `tests/test_qbo_oauth_return_path.py`: 6 new tests — helper
+  accepts valid paths, rejects open-redirects, truncates absurd
+  lengths, route persists path on state row, backward-compat with
+  no body, malicious input downgraded to None. **6/6 pass.**
+- Full QBO test surface: 28/28 pass.
+
+**Visual verified**
+- Onboarding step 1 now renders: "Do you already use QuickBooks
+  Online?" card with clean copy, "Yes — link QuickBooks" +
+  "No — set up fresh" pill buttons, and the "Connect QuickBooks
+  Online" panel appears immediately below when Yes is selected.
+  Post-consent OAuth bounce lands the user back on `/onboarding`
+  with a success toast rather than redirecting to the standalone
+  QBO connect page.
