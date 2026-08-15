@@ -63,6 +63,7 @@ DEFAULT_PREFS = {
     "feedback_new_submission":  True,   # New bug/rec landed in the superadmin inbox
     "feedback_status_update":   True,   # Reporter is notified when their ticket's status changes
     "feedback_reply_reporter":  True,   # Superadmin sent a public reply to the reporter
+    "feedback_new_reporter_reply": True, # Reporter posted a follow-up — superadmins get notified
 }
 
 

@@ -4886,3 +4886,35 @@ Verified end-to-end via Playwright:
 - Status flipped to Completed → toast "reporter notified" → `feedback_status_update` email delivered.
 - Toggled notify → pill flipped to "Muted"; subsequent status changes will not email.
 
+
+
+### Feb 2026 — Feedback: In-app Reporter Replies
+
+Reporters can now respond to superadmins directly from their `/feedback/mine` inbox — including attaching new screenshots — closing the loop without leaving the app.
+
+**Backend** (`routes/feedback.py`):
+- `POST /api/feedback/{fid}/reply` — auth'd endpoint scoped to the ticket's original submitter (anyone else → 404 to prevent enumeration). Accepts `{note, attachments[]}`, appends a `note` object to `admin_notes` with `author_role: "reporter"` + `visibility: "reporter"` (naturally in the shared thread), and best-effort emails every superadmin via a new `feedback_new_reporter_reply` kind.
+- `admin_notes` items now carry `author_role: "superadmin" | "reporter"` + a per-note `attachments[]` array. Existing entries lacking these fields degrade cleanly (default `author_role` = "superadmin", missing attachments = empty).
+- `_scrub_for_submitter` naturally returns reporter-authored notes (they're `visibility=reporter`), so the reporter sees their own follow-ups too.
+
+**Email** (`email_templates.py::feedback_new_reporter_reply`, `email_dispatcher.py`):
+- New template with 🐞/💡 icon, violet accent border, quoted reply text, attachment count line, and "Open feedback inbox →" CTA to `/admin/feedback`.
+- Registered in `DEFAULT_PREFS`.
+
+**Frontend**:
+- New `components/AttachmentPicker.jsx` — extracted the shared multi-image widget (file-picker + drag/drop + clipboard-paste, 5MB/img and 20MB/total caps) so both the initial `FeedbackModal` and the new reply-compose reuse identical UX + validation.
+- `pages/MyFeedback.jsx` rebuilt: each ticket is now a card with the original description + attachments, the full thread (color-coded by author — cyan for "Team", grey for "You" reporter follow-ups), and a per-card **"Reply to the team"** toggle that expands into a compact compose (textarea + AttachmentPicker + Send). Toast confirms + row auto-refreshes on post.
+- `pages/AdminFeedback.jsx` — notes thread now shows reporter-authored notes in a distinct violet card labeled "Reporter reply"; each note renders its attachments inline (clickable → same lightbox as the original submission's gallery).
+
+**Tests** (`tests/test_feedback.py`, 6 new cases → 26 total, all green):
+- Reporter posts a reply on their own ticket
+- Reporter reply appears in the superadmin's inbox
+- Non-submitter attempting to reply gets 404
+- Reply with attachments persists them correctly
+- Reporter reply triggers a `feedback_new_reporter_reply` communications row
+- Empty reply → 422 (Pydantic min_length guard)
+
+Verified end-to-end via Playwright:
+- `client@axiom.ai` opened My Feedback → clicked "Reply to the team" → composed message + attached screenshot → submitted → toast "the team's been notified" → note surfaced with "YOU · MICHAEL CHEN" badge and thumbnail inline.
+- `admin@axiom.ai` on `/admin/feedback` sees the reporter's follow-up appended to the same thread.
+

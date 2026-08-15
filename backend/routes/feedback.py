@@ -75,6 +75,12 @@ class FeedbackPatch(BaseModel):
     notify_submitter: Optional[bool] = None
 
 
+class FeedbackReporterReply(BaseModel):
+    """Reporter posts a follow-up in the thread from `/feedback/mine`."""
+    note: str = Field(..., min_length=1, max_length=2000)
+    attachments: List[FeedbackAttachment] = Field(default_factory=list)
+
+
 # --------------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------------
@@ -260,6 +266,38 @@ async def _notify_reporter_reply(item: dict, note: dict, author: dict) -> None:
         log.exception("Feedback reply-to-reporter notify failed")
 
 
+async def _notify_superadmins_of_reporter_reply(item: dict, note: dict, reporter: dict) -> None:
+    """Reporter posted a follow-up from `/feedback/mine`. Every superadmin
+    gets a heads-up so nothing stalls waiting on info that just came in."""
+    try:
+        from email_dispatcher import dispatch, public_base_url
+        import email_templates as _tmpl
+
+        admins = await db.users.find({"role": "superadmin"}).to_list(length=100)
+        if not admins:
+            return
+        subject, html = _tmpl.feedback_new_reporter_reply(
+            title=item["title"],
+            fb_type=item.get("type", "bug"),
+            message=note.get("note") or "",
+            reporter_name=reporter.get("name") or reporter.get("email") or "The reporter",
+            reporter_email=reporter.get("email") or "",
+            attachment_count=len(note.get("attachments") or []),
+            inbox_url=f"{public_base_url()}/admin/feedback",
+        )
+        for admin in admins:
+            if not admin.get("email"):
+                continue
+            await dispatch(
+                kind="feedback_new_reporter_reply",
+                to=admin["email"], subject=subject, html=html,
+                initiating_user_id=None,
+                related={"feedback_id": item["id"], "note_id": note.get("id")},
+            )
+    except Exception:
+        log.exception("Feedback reporter-reply notify to superadmins failed")
+
+
 # --------------------------------------------------------------------------
 # Routes
 # --------------------------------------------------------------------------
@@ -438,9 +476,11 @@ async def patch_feedback(
             "id": str(uuid.uuid4()),
             "author_id": user["id"],
             "author_name": user.get("name") or user.get("email") or "Superadmin",
+            "author_role": "superadmin",
             "note": patch.admin_note.strip()[:2000],
             "visibility": vis,
             "email_sent": False,  # set below if we actually dispatch
+            "attachments": [],
             "at": now_iso(),
         }
 
@@ -465,3 +505,41 @@ async def patch_feedback(
         fresh = await db.feedback_items.find_one({"id": fid})
 
     return _scrub(fresh)
+
+
+@router.post("/feedback/{fid}/reply")
+async def reporter_reply(
+    fid: str,
+    inp: FeedbackReporterReply,
+    user: dict = Depends(get_current_user),
+):
+    """Reporter follow-up from `/feedback/mine`. Only the original
+    submitter can post here — everyone else 404s (enumeration guard so
+    strangers can't fish for feedback IDs)."""
+    row = await db.feedback_items.find_one({"id": fid})
+    if not row or row.get("submitter_user_id") != user["id"]:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+
+    attachments = _validate_attachments(inp.attachments or [])
+    note = {
+        "id": str(uuid.uuid4()),
+        "author_id": user["id"],
+        "author_name": user.get("name") or user.get("email") or "Reporter",
+        "author_role": "reporter",
+        "note": inp.note.strip()[:2000],
+        "visibility": "reporter",   # reporter's own note is naturally in the shared thread
+        "email_sent": False,        # we email superadmins below; this bool tracks reporter-email dispatches only
+        "attachments": attachments,
+        "at": now_iso(),
+    }
+    await db.feedback_items.update_one(
+        {"id": fid},
+        {
+            "$push": {"admin_notes": note},
+            "$set": {"updated_at": now_iso()},
+        },
+    )
+    fresh = await db.feedback_items.find_one({"id": fid})
+    await _notify_superadmins_of_reporter_reply(fresh, note, user)
+    return _scrub_for_submitter(fresh)
+

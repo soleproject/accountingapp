@@ -679,3 +679,150 @@ def test_tenants_endpoint_and_filters():
             await db.companies.delete_one({"id": cid})
     _run(_t())
 
+
+
+# ------------------------------------------------------------------
+# Reporter reply from /feedback/mine
+# ------------------------------------------------------------------
+def test_reporter_can_reply_to_own_ticket():
+    async def _t():
+        uid, tok = await _mk_user("client")
+        try:
+            async with await _client() as c:
+                r = await c.post("/api/feedback",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"type": "bug", "title": "reply test"})
+                fid = r.json()["id"]
+                r = await c.post(f"/api/feedback/{fid}/reply",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"note": "Here's more info you asked for."})
+                assert r.status_code == 200, r.text
+                notes = r.json()["admin_notes"]
+                assert len(notes) == 1
+                assert notes[0]["note"] == "Here's more info you asked for."
+                assert notes[0]["author_role"] == "reporter"
+                assert notes[0]["visibility"] == "reporter"
+        finally:
+            await _wipe_users_and_feedback([uid])
+    _run(_t())
+
+
+def test_reporter_reply_appears_in_admin_view():
+    async def _t():
+        u_client, t_client = await _mk_user("client")
+        u_admin, t_admin = await _mk_user("superadmin")
+        try:
+            async with await _client() as c:
+                r = await c.post("/api/feedback",
+                    headers={"Authorization": f"Bearer {t_client}"},
+                    json={"type": "bug", "title": "cross-visibility"})
+                fid = r.json()["id"]
+                await c.post(f"/api/feedback/{fid}/reply",
+                    headers={"Authorization": f"Bearer {t_client}"},
+                    json={"note": "reporter says hi"})
+                # Superadmin fetches inbox — the reporter reply is present
+                r = await c.get("/api/feedback",
+                    headers={"Authorization": f"Bearer {t_admin}"})
+                match = next(i for i in r.json()["items"] if i["id"] == fid)
+                notes = match["admin_notes"]
+                assert len(notes) == 1
+                assert notes[0]["author_role"] == "reporter"
+                assert notes[0]["note"] == "reporter says hi"
+        finally:
+            await _wipe_users_and_feedback([u_client, u_admin])
+    _run(_t())
+
+
+def test_non_submitter_cannot_reply_404():
+    """Someone who isn't the original reporter gets 404 (enumeration guard)."""
+    async def _t():
+        u1, t1 = await _mk_user("client")
+        u2, t2 = await _mk_user("client")
+        try:
+            async with await _client() as c:
+                r = await c.post("/api/feedback",
+                    headers={"Authorization": f"Bearer {t1}"},
+                    json={"type": "bug", "title": "priv"})
+                fid = r.json()["id"]
+                r = await c.post(f"/api/feedback/{fid}/reply",
+                    headers={"Authorization": f"Bearer {t2}"},
+                    json={"note": "sneak"})
+                assert r.status_code == 404
+                # Confirm no note was added
+                row = await db.feedback_items.find_one({"id": fid})
+                assert row["admin_notes"] == []
+        finally:
+            await _wipe_users_and_feedback([u1, u2])
+    _run(_t())
+
+
+def test_reporter_reply_with_attachments():
+    async def _t():
+        uid, tok = await _mk_user("client")
+        try:
+            async with await _client() as c:
+                r = await c.post("/api/feedback",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"type": "bug", "title": "att-reply"})
+                fid = r.json()["id"]
+                r = await c.post(f"/api/feedback/{fid}/reply",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={
+                        "note": "with a screenshot",
+                        "attachments": [
+                            {"filename": "s.png", "mime": "image/png", "data_url": _PNG_URL},
+                        ],
+                    })
+                assert r.status_code == 200
+                notes = r.json()["admin_notes"]
+                assert len(notes[0]["attachments"]) == 1
+                assert notes[0]["attachments"][0]["mime"] == "image/png"
+        finally:
+            await _wipe_users_and_feedback([uid])
+    _run(_t())
+
+
+def test_reporter_reply_notifies_superadmins_via_comms():
+    async def _t():
+        u_client, t_client = await _mk_user("client")
+        u_admin, t_admin = await _mk_user("superadmin")
+        try:
+            async with await _client() as c:
+                r = await c.post("/api/feedback",
+                    headers={"Authorization": f"Bearer {t_client}"},
+                    json={"type": "bug", "title": "notify-admins"})
+                fid = r.json()["id"]
+                pre = await db.communications.count_documents({
+                    "kind": "feedback_new_reporter_reply",
+                    "related.feedback_id": fid,
+                })
+                await c.post(f"/api/feedback/{fid}/reply",
+                    headers={"Authorization": f"Bearer {t_client}"},
+                    json={"note": "ping"})
+                post = await db.communications.count_documents({
+                    "kind": "feedback_new_reporter_reply",
+                    "related.feedback_id": fid,
+                })
+                assert post > pre
+        finally:
+            await _wipe_users_and_feedback([u_client, u_admin])
+    _run(_t())
+
+
+def test_reporter_reply_empty_rejected():
+    async def _t():
+        uid, tok = await _mk_user("client")
+        try:
+            async with await _client() as c:
+                r = await c.post("/api/feedback",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"type": "bug", "title": "empty-reply"})
+                fid = r.json()["id"]
+                r = await c.post(f"/api/feedback/{fid}/reply",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"note": ""})
+                assert r.status_code == 422  # Pydantic min_length=1
+        finally:
+            await _wipe_users_and_feedback([uid])
+    _run(_t())
+
