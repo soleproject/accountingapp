@@ -153,3 +153,46 @@ def test_edit_without_subtype_leaves_detail_type_intact():
         finally:
             await _cleanup(uid, cid)
     _run(_t())
+
+
+def test_subtype_audit_reports_drift_and_canonical_states():
+    """The audit endpoint should count canonical / drifted / legacy
+    rows correctly and surface a bounded sample of drift examples."""
+    async def _t():
+        uid, tok, cid = await _mk_env()
+        try:
+            # Seed a mix: canonical, drifted (both canonical but disagree),
+            # legacy-only-subtype, missing detail_type
+            await db.accounts.insert_many([
+                {"id": "a1", "company_id": cid, "name": "Ops",
+                 "type": "expense", "subtype": "operating_expense",
+                 "detail_type": "operating_expense", "active": True},
+                # Both keys are canonical, but they disagree → true drift
+                {"id": "a2", "company_id": cid, "name": "Drifted",
+                 "type": "expense", "subtype": "operating_expense",
+                 "detail_type": "other_expense", "active": True},
+                # Legacy subtype ("Bank"), detail_type already canonical
+                {"id": "a3", "company_id": cid, "name": "AmEx",
+                 "type": "asset", "subtype": "Bank",
+                 "detail_type": "cash_and_bank", "active": True},
+                {"id": "a4", "company_id": cid, "name": "No DT",
+                 "type": "asset", "subtype": "cash_and_bank",
+                 "detail_type": "", "active": True},
+            ])
+            async with await _client() as c:
+                r = await c.get(
+                    f"/api/companies/{cid}/accounts/subtype-audit",
+                    headers={"Authorization": f"Bearer {tok}"},
+                )
+                assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["total"] == 4
+            assert body["canonical"] == 1        # a1
+            assert body["drifted"] == 1          # a2
+            assert body["legacy_only_subtype"] == 1  # a3
+            assert body["missing_detail_type"] == 1  # a4
+            assert len(body["sample_drift"]) == 1
+            assert body["sample_drift"][0]["id"] == "a2"
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
