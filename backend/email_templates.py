@@ -1119,6 +1119,51 @@ def feedback_reply_reporter(
     )
 
 
+
+def feedback_new_reporter_reply(
+    *,
+    title: str,
+    fb_type: str,
+    message: str,
+    reporter_name: str,
+    reporter_email: str,
+    attachment_count: int,
+    inbox_url: str,
+) -> tuple[str, str]:
+    is_bug = fb_type == "bug"
+    icon = "🐞" if is_bug else "💡"
+    kind_word = "bug report" if is_bug else "recommendation"
+    safe_msg = escape(message).replace("\n", "<br>")
+    attach_line = (
+        f'<div style="{_MUTE};padding-top:6px;">Attached {attachment_count} '
+        f'image{"s" if attachment_count != 1 else ""} — view them in the inbox.</div>'
+        if attachment_count else ""
+    )
+    inner = f"""
+      <div style="{_H1}">{icon} New reply from {escape(reporter_name)}</div>
+      <div style="{_P}">
+        Reporter replied on their {escape(kind_word)}
+        <b>"{escape(title)}"</b>:
+      </div>
+      <div style="{_P};margin-top:6px;padding:12px 14px;background:#f8fafc;
+                  border-left:3px solid #7c3aed;border-radius:6px;
+                  white-space:pre-wrap;">{safe_msg}</div>
+      {attach_line}
+      <table style="width:100%;border-collapse:collapse;margin-top:12px;">
+        <tr><td style="{_TABLE_KEY}">From</td>
+            <td style="{_TABLE_VAL}">{escape(reporter_name)} &lt;{escape(reporter_email)}&gt;</td></tr>
+      </table>
+      <div style="padding:18px 0 6px;">
+        <a href="{escape(inbox_url)}" style="{_BTN}">Open feedback inbox →</a>
+      </div>
+    """
+    return (
+        f"↩ Reply from {reporter_name}: {title}",
+        _wrap(inner, brand_name=None),
+    )
+
+
+
 # --------------------------------------------------------------------------
 # Tiny local escape (avoid pulling markupsafe just for these).
 # --------------------------------------------------------------------------

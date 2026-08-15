@@ -492,22 +492,44 @@ function FeedbackDetail({ item, onPatch, onBack }) {
         <div className="space-y-2">
           {(item.admin_notes || []).map((n) => {
             const isInternal = (n.visibility || "internal") === "internal";
+            const fromReporter = (n.author_role || "superadmin") === "reporter";
+            const boxColor = fromReporter
+              ? "bg-violet-50 border-violet-200"
+              : isInternal
+                ? "bg-slate-50 border-slate-200"
+                : "bg-cyan-50 border-cyan-200";
             return (
               <div
                 key={n.id}
-                className={`text-sm border rounded p-3 ${isInternal
-                  ? "bg-slate-50 border-slate-200"
-                  : "bg-cyan-50 border-cyan-200"}`}
+                className={`text-sm border rounded p-3 ${boxColor}`}
                 data-testid={`note-${n.id}`}
               >
                 <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest mb-1">
-                  {isInternal
-                    ? <span className="inline-flex items-center gap-1 text-slate-500"><Lock size={10}/> Internal</span>
-                    : <span className="inline-flex items-center gap-1 text-cyan-700"><Mail size={10}/> Reply to reporter{n.email_sent ? " · emailed" : ""}</span>}
+                  {fromReporter
+                    ? <span className="inline-flex items-center gap-1 text-violet-700"><Mail size={10}/> Reporter reply</span>
+                    : isInternal
+                      ? <span className="inline-flex items-center gap-1 text-slate-500"><Lock size={10}/> Internal</span>
+                      : <span className="inline-flex items-center gap-1 text-cyan-700"><Mail size={10}/> Reply to reporter{n.email_sent ? " · emailed" : ""}</span>}
+                  <span className="text-slate-400">· {n.author_name}</span>
                 </div>
                 <div className="whitespace-pre-wrap text-slate-700">{n.note}</div>
+                {Array.isArray(n.attachments) && n.attachments.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {n.attachments.map((a) => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        onClick={() => setLightbox(a)}
+                        className="block border border-slate-200 rounded overflow-hidden hover:ring-2 hover:ring-cyan-300"
+                        title={a.filename}
+                      >
+                        <img src={a.data_url} alt={a.filename} className="w-16 h-16 object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="text-[10px] text-slate-500 mt-1">
-                  {n.author_name} · {fmtWhen(n.at)}
+                  {fmtWhen(n.at)}
                 </div>
               </div>
             );

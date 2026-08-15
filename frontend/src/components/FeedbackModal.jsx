@@ -1,36 +1,22 @@
-import { useEffect, useRef, useState } from "react";
-import { X, Bug, Lightbulb, Loader2, Paperclip, ImagePlus } from "lucide-react";
+import { useState } from "react";
+import { X, Bug, Lightbulb, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
-
-const ALLOWED_MIMES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
-const MAX_ONE = 5 * 1024 * 1024;   // 5MB / image
-const MAX_TOTAL = 20 * 1024 * 1024; // 20MB / submission
-
-function readAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result);
-    r.onerror = reject;
-    r.readAsDataURL(file);
-  });
-}
+import AttachmentPicker from "./AttachmentPicker";
 
 /**
  * FeedbackModal — Bug/Recommendation compose. Supports multiple image
- * attachments (via file picker, drag/drop, or paste) capped at 5MB each
- * and 20MB total. Auto-captures active route + company + user-agent.
+ * attachments via the shared AttachmentPicker (file-picker / drag+drop /
+ * paste). Auto-captures active route + company + user-agent.
  */
 export default function FeedbackModal({ onClose, defaultType = "bug" }) {
   const { currentId } = useCompany() || {};
   const [type, setType] = useState(defaultType === "recommendation" ? "recommendation" : "bug");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [attachments, setAttachments] = useState([]); // [{id, filename, mime, size, data_url}]
+  const [attachments, setAttachments] = useState([]);
   const [busy, setBusy] = useState(false);
-  const [drag, setDrag] = useState(false);
-  const fileRef = useRef(null);
 
   const route = typeof window !== "undefined"
     ? (window.location.pathname + window.location.search)
@@ -38,78 +24,11 @@ export default function FeedbackModal({ onClose, defaultType = "bug" }) {
   const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "";
   const isBug = type === "bug";
 
-  const currentTotalBytes = attachments.reduce((a, b) => a + (b.size || 0), 0);
-
-  const addFiles = async (files) => {
-    const arr = Array.from(files || []);
-    if (!arr.length) return;
-    let total = currentTotalBytes;
-    const next = [...attachments];
-    for (const f of arr) {
-      if (!ALLOWED_MIMES.includes(f.type)) {
-        toast.error(`${f.name}: only PNG/JPG/GIF/WebP allowed`);
-        continue;
-      }
-      if (f.size > MAX_ONE) {
-        toast.error(`${f.name}: exceeds 5MB`);
-        continue;
-      }
-      if (total + f.size > MAX_TOTAL) {
-        toast.error("Attachments would exceed 20MB total");
-        break;
-      }
-      try {
-        const dataUrl = await readAsDataUrl(f);
-        next.push({
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          filename: f.name || "screenshot.png",
-          mime: f.type,
-          size: f.size,
-          data_url: dataUrl,
-        });
-        total += f.size;
-      } catch {
-        toast.error(`Could not read ${f.name}`);
-      }
-    }
-    setAttachments(next);
-  };
-
-  const onDrop = async (e) => {
-    e.preventDefault();
-    setDrag(false);
-    await addFiles(e.dataTransfer?.files);
-  };
-
-  // Paste-from-clipboard support — anywhere inside the modal
-  useEffect(() => {
-    const onPaste = async (e) => {
-      const items = e.clipboardData?.items || [];
-      const files = [];
-      for (const it of items) {
-        if (it.kind === "file") {
-          const f = it.getAsFile();
-          if (f) files.push(f);
-        }
-      }
-      if (files.length) {
-        e.preventDefault();
-        await addFiles(files);
-      }
-    };
-    window.addEventListener("paste", onPaste);
-    return () => window.removeEventListener("paste", onPaste);
-    // eslint-disable-next-line
-  }, [attachments]);
-
-  const removeAttachment = (id) => setAttachments((prev) => prev.filter((a) => a.id !== id));
-
   const submit = async (e) => {
     e.preventDefault();
     if (!title.trim()) { toast.error("Add a short title"); return; }
     setBusy(true);
     try {
-      // Server accepts only filename/mime/data_url — trim client-only fields
       const payload = {
         type,
         title: title.trim(),
@@ -118,9 +37,7 @@ export default function FeedbackModal({ onClose, defaultType = "bug" }) {
         user_agent: userAgent,
         company_id: currentId || null,
         attachments: attachments.map((a) => ({
-          filename: a.filename,
-          mime: a.mime,
-          data_url: a.data_url,
+          filename: a.filename, mime: a.mime, data_url: a.data_url,
         })),
       };
       await api.post("/feedback", payload);
@@ -142,20 +59,9 @@ export default function FeedbackModal({ onClose, defaultType = "bug" }) {
       <form
         onClick={(e) => e.stopPropagation()}
         onSubmit={submit}
-        onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-        onDragLeave={() => setDrag(false)}
-        onDrop={onDrop}
-        className={`bg-white rounded-lg shadow-xl w-full max-w-md relative ${drag ? "ring-2 ring-cyan-400" : ""}`}
+        className="bg-white rounded-lg shadow-xl w-full max-w-md"
         data-testid="feedback-modal"
       >
-        {drag && (
-          <div className="absolute inset-0 bg-cyan-50/80 border-2 border-dashed border-cyan-400 rounded-lg flex items-center justify-center z-10 pointer-events-none">
-            <div className="text-cyan-700 font-medium text-sm flex items-center gap-2">
-              <ImagePlus size={18} /> Drop images to attach
-            </div>
-          </div>
-        )}
-
         <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100">
           <div>
             <div className="font-heading font-semibold text-slate-900">
@@ -239,58 +145,12 @@ export default function FeedbackModal({ onClose, defaultType = "bug" }) {
             />
           </label>
 
-          {/* Attachments */}
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                Attachments
-              </span>
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
-                className="inline-flex items-center gap-1 text-[11px] text-cyan-700 hover:underline"
-                data-testid="feedback-add-image"
-              >
-                <Paperclip size={11} /> Add image
-              </button>
-              <input
-                ref={fileRef}
-                type="file"
-                accept={ALLOWED_MIMES.join(",")}
-                multiple
-                className="hidden"
-                onChange={(e) => addFiles(e.target.files)}
-                data-testid="feedback-file-input"
-              />
-            </div>
-            {attachments.length === 0 ? (
-              <div className="text-[11px] text-slate-400 border border-dashed border-slate-200 rounded p-2 text-center">
-                Drop, paste, or click "Add image" — PNG/JPG/GIF/WebP up to 5MB each.
-              </div>
-            ) : (
-              <div className="grid grid-cols-3 gap-2" data-testid="feedback-attachments-grid">
-                {attachments.map((a) => (
-                  <div key={a.id} className="relative group">
-                    <img
-                      src={a.data_url}
-                      alt={a.filename}
-                      className="w-full h-20 object-cover rounded border border-slate-200"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeAttachment(a.id)}
-                      data-testid={`feedback-remove-attachment-${a.id}`}
-                      className="absolute top-1 right-1 p-0.5 rounded-full bg-slate-900/80 text-white opacity-0 group-hover:opacity-100 transition"
-                      title="Remove"
-                    >
-                      <X size={11} />
-                    </button>
-                    <div className="text-[10px] text-slate-500 mt-0.5 truncate">{a.filename}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <AttachmentPicker
+            value={attachments}
+            onChange={setAttachments}
+            testIdPrefix="feedback-attach"
+            emptyHint="Drop, paste, or click 'Add image' — PNG/JPG/GIF/WebP up to 5MB each."
+          />
 
           <div className="text-[11px] text-slate-500">
             Submitted from{" "}
