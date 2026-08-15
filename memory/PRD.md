@@ -4994,3 +4994,26 @@ Verified end-to-end via Playwright — CoA renders sections cleanly under detail
 
 The Cliffs user can now retry their reclassification and it should stick. No one-off migration script needed — the fix is fully self-healing on the next edit.
 
+
+
+### Feb 2026 — CoA Import Preview: Section Landing + Group View
+
+Extends the CoA CSV/Excel/PDF import review with a section-preview so users spot misplaced accounts *before* commit — same taxonomy the renderer uses, so what you see is what you get.
+
+**Frontend** (`pages/ChartOfAccounts.jsx::ImportAccountsModal`):
+- New **`sectionFor(row)`** helper — resolves each parsed row to the exact `{key, label}` from `DETAIL_SECTIONS_BY_TYPE` for the row's `type`. When the row's `detail_type`/`subtype` doesn't match any section key, falls back to the type's first section (renderer's default bucket) and flags the row with `fallback: true`.
+- **Sticky "Section preview" summary bar** above the review table:
+  - Rollup pill per landing section with count (e.g. `Operating Expense · 2`, `Cash and Bank · 1`).
+  - Amber pills call out fallback buckets so users know which sections have accounts they meant to place elsewhere.
+  - Aggregate amber warning: `"⚠ N rows in a default bucket — fix sub-type to reclassify"` — only shows when N > 0.
+- **"Group by section" checkbox** — flips the table between flat and grouped rendering. Grouped mode inserts section-header rows (`Asset · Property, Plant & Equipment · 1`) so a 200-row import is scannable at a glance.
+- **New "Subtype" dropdown** in each row — replaces the free-text input with a select bound to `DETAIL_SECTIONS_BY_TYPE[type]`. Picking a value mirrors to BOTH `subtype` and `detail_type` on the row, so the row's "Will land under" pill updates live as the user reclassifies.
+- **New "Will land under" column** — colored badge showing the destination section per row (grey for confident matches, amber for fallback rows).
+
+**Backwards compatibility**:
+- Existing CSVs with mismatched subtype values (e.g. `cost_of_sales`, `property_plant_equipment`, or free-text like `widget_expense`) still parse — they just render with the amber fallback badge instead of silently landing in an unexpected section post-commit. Users fix the sub-type in-place before hitting Import.
+- Backend commit unchanged — already computes `detail_type` from row payload OR falls back to `_infer_detail_type(type, name, subtype)`.
+
+Verified end-to-end via Playwright:
+- Uploaded a mixed CSV (6 rows including one deliberate typo `widget_expense`) → summary pills rendered correctly, amber warning surfaced 3 fallback rows, per-row "Will land under" badges showed the actual destinations, "Group by section" toggle grouped rows under type · section headers with a `(default bucket — set sub-type to move)` inline hint on affected groups.
+

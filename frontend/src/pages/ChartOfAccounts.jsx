@@ -1747,8 +1747,56 @@ function ImportAccountsModal({ currentId, onClose }) {
   const [result, setResult] = useState(null);
   const [batches, setBatches] = useState([]);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [groupBySection, setGroupBySection] = useState(false);
   const inputRef = React.useRef(null);
   const lastFileRef = React.useRef(null);
+
+  // Where each row will land in the Chart of Accounts after commit.
+  // Returns `{key, label}` OR null if we can't confidently classify —
+  // in which case the row will end up in the type's default "Other"
+  // bucket and we surface an amber warning so the user can fix it now
+  // instead of hunting for the misplaced account later.
+  const sectionFor = React.useCallback((row) => {
+    const t = (row?.type || "expense").toLowerCase();
+    const sections = DETAIL_SECTIONS_BY_TYPE[t] || DETAIL_SECTIONS_BY_TYPE.expense;
+    if (!sections.length) return null;
+    const wanted = (row?.detail_type || row?.subtype || "").trim().toLowerCase();
+    if (wanted) {
+      const hit = sections.find(([k]) => k === wanted);
+      if (hit) return { key: hit[0], label: hit[1] };
+    }
+    // Fall back to first section (renderer's default bucket).
+    return { key: sections[0][0], label: sections[0][1], fallback: true };
+  }, []);
+
+  // Rollup for the "Group by section" mode + summary banner: how many
+  // rows will end up in each section, so a user importing 200 accounts
+  // can spot at a glance that 47 are landing in "Other" and something
+  // is wrong with their sheet.
+  const sectionRollup = React.useMemo(() => {
+    const bucket = {};
+    rows.forEach((row, i) => {
+      const s = sectionFor(row);
+      if (!s) return;
+      const key = `${row.type}::${s.key}`;
+      if (!bucket[key]) {
+        bucket[key] = {
+          type: row.type, sectionKey: s.key,
+          sectionLabel: s.label, fallback: !!s.fallback,
+          indices: [],
+        };
+      }
+      bucket[key].indices.push(i);
+    });
+    return Object.values(bucket).sort((a, b) => {
+      if (a.type !== b.type) return TYPES.indexOf(a.type) - TYPES.indexOf(b.type);
+      return a.sectionLabel.localeCompare(b.sectionLabel);
+    });
+  }, [rows, sectionFor]);
+
+  const fallbackCount = React.useMemo(() =>
+    rows.filter(r => (sectionFor(r) || {}).fallback).length,
+    [rows, sectionFor]);
 
   const loadHistory = async () => {
     try {
@@ -1985,6 +2033,50 @@ function ImportAccountsModal({ currentId, onClose }) {
             )}
 
             <div className="flex-1 overflow-auto">
+              {rows.length > 0 && (
+                <div
+                  className="sticky top-0 z-10 bg-white/95 backdrop-blur px-5 py-2 border-b border-slate-100 flex items-center gap-3 flex-wrap"
+                  data-testid="import-section-summary"
+                >
+                  <div className="text-[11px] font-semibold uppercase tracking-widest text-slate-500">
+                    Section preview
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {sectionRollup.map((s) => (
+                      <span
+                        key={`${s.type}-${s.sectionKey}`}
+                        className={`text-[10px] px-2 py-0.5 rounded-full border ${
+                          s.fallback
+                            ? "bg-amber-50 text-amber-800 border-amber-200"
+                            : "bg-slate-100 text-slate-700 border-slate-200"
+                        }`}
+                        title={s.fallback
+                          ? "No matching sub-type — accounts will land in this default bucket. Fix the sub-type below to move them."
+                          : `${s.indices.length} account${s.indices.length === 1 ? "" : "s"} will land under ${s.sectionLabel}`}
+                      >
+                        {s.sectionLabel} · {s.indices.length}
+                      </span>
+                    ))}
+                  </div>
+                  {fallbackCount > 0 && (
+                    <span
+                      className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-0.5 inline-flex items-center gap-1"
+                      data-testid="import-fallback-warning"
+                    >
+                      ⚠ {fallbackCount} row{fallbackCount === 1 ? "" : "s"} in a default bucket — fix sub-type to reclassify
+                    </span>
+                  )}
+                  <label className="ml-auto inline-flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={groupBySection}
+                      onChange={(e) => setGroupBySection(e.target.checked)}
+                      data-testid="import-group-by-section"
+                    />
+                    Group by section
+                  </label>
+                </div>
+              )}
               {!rows.length ? (
                 <div className="p-8 text-center text-slate-500 text-sm">No accounts extracted.</div>
               ) : (
@@ -1999,11 +2091,31 @@ function ImportAccountsModal({ currentId, onClose }) {
                       <th className="px-3 py-2 text-left">Type</th>
                       <th className="px-3 py-2 text-left">Subtype</th>
                       <th className="px-3 py-2 text-left w-20">Parent</th>
+                      <th className="px-3 py-2 text-left">Will land under</th>
                       <th className="px-3 py-2 text-left">Status</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((a, i) => (
+                    {(groupBySection ? sectionRollup.flatMap(s => [
+                      { __header: true, section: s },
+                      ...s.indices.map(i => ({ __row: true, i })),
+                    ]) : rows.map((_, i) => ({ __row: true, i }))).map((entry, k) => {
+                      if (entry.__header) {
+                        const s = entry.section;
+                        return (
+                          <tr key={`h-${s.type}-${s.sectionKey}`} className="bg-slate-50/70">
+                            <td colSpan={8} className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-600">
+                              {prettyLabel(s.type)} · {s.sectionLabel}
+                              {s.fallback && <span className="ml-2 text-amber-700 normal-case font-normal">(default bucket — set sub-type to move)</span>}
+                              <span className="ml-1 text-slate-400 normal-case font-normal">· {s.indices.length}</span>
+                            </td>
+                          </tr>
+                        );
+                      }
+                      const i = entry.i;
+                      const a = rows[i];
+                      const sec = sectionFor(a);
+                      return (
                       <tr key={i} className={`border-b border-slate-100 ${selected.has(i) ? "" : "opacity-40"}`}>
                         <td className="px-3 py-1.5">
                           <input type="checkbox" checked={selected.has(i)} onChange={() => toggleRow(i)} />
@@ -2030,10 +2142,41 @@ function ImportAccountsModal({ currentId, onClose }) {
                           </div>
                         </td>
                         <td className="px-3 py-1.5">
-                          <input value={a.subtype || ""} onChange={(e) => editRow(i, "subtype", e.target.value)} className="w-full bg-transparent border-0 focus:outline-none focus:border-b focus:border-slate-400 px-0 text-slate-600 text-[13px]" placeholder="—" />
+                          <select
+                            value={(a.subtype || "").trim()}
+                            onChange={(e) => {
+                              // Mirror sub-type → detail_type so the CoA
+                              // preview + eventual save both use the
+                              // same key — one taxonomy, one truth.
+                              editRow(i, "subtype", e.target.value);
+                              editRow(i, "detail_type", e.target.value);
+                            }}
+                            className="border rounded px-1.5 py-0.5 text-xs bg-white text-slate-700 w-full"
+                            data-testid={`import-subtype-${i}`}
+                          >
+                            <option value="">— unset —</option>
+                            {(DETAIL_SECTIONS_BY_TYPE[a.type] || DETAIL_SECTIONS_BY_TYPE.expense).map(([k, label]) => (
+                              <option key={k} value={k}>{label}</option>
+                            ))}
+                          </select>
                         </td>
                         <td className="px-3 py-1.5">
                           <input value={a.parent_code || ""} onChange={(e) => editRow(i, "parent_code", e.target.value)} className="w-full bg-transparent border-0 focus:outline-none focus:border-b focus:border-slate-400 px-0 font-mono-num text-[13px]" placeholder="—" />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          {sec ? (
+                            <span
+                              className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                                sec.fallback
+                                  ? "bg-amber-50 text-amber-800 border-amber-200"
+                                  : "bg-slate-50 text-slate-700 border-slate-200"
+                              }`}
+                              title={sec.fallback ? "Default bucket — pick a sub-type to move this account." : `Section: ${sec.label}`}
+                              data-testid={`import-landing-${i}`}
+                            >
+                              {sec.label}
+                            </span>
+                          ) : <span className="text-slate-400 text-xs">—</span>}
                         </td>
                         <td className="px-3 py-1.5">
                           {a.existing ? (
@@ -2043,7 +2186,7 @@ function ImportAccountsModal({ currentId, onClose }) {
                           )}
                         </td>
                       </tr>
-                    ))}
+                    );})}
                   </tbody>
                 </table>
               )}
