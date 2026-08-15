@@ -1518,7 +1518,7 @@ _CANONICAL_KEYS_BY_TYPE = {
     },
     "equity": {
         "owner_contribution_drawing", "retained_earnings",
-        "other_equity",
+        "opening_balance_equity", "other_equity",
     },
     "revenue": {
         "income", "discount", "other_income",
@@ -1582,7 +1582,16 @@ async def subtype_drift_audit(cid: str, user: dict = Depends(get_current_user)):
             totals["legacy_only_subtype"] += 1
             by_type[t]["legacy_only_subtype"] += 1
             continue
-        if st and dt and st != dt:
+        # True drift: BOTH values are canonical Wave keys AND they
+        # disagree. We deliberately require both sides to be canonical
+        # here — if either side is a legacy or specialty value we
+        # already know the classifier can't confidently call it drift
+        # (see Opening Balance Equity: subtype="equity" is legacy,
+        # detail_type="opening_balance_equity" is canonical but was
+        # not in the frontend's dropdown for months — flagging that as
+        # drift would be a false positive). Treat non-canonical-both
+        # rows as legacy_only for reporting purposes.
+        if st in canon and dt in canon and st != dt:
             totals["drifted"] += 1
             by_type[t]["drifted"] += 1
             if len(sample_drift) < 10:
@@ -1590,6 +1599,12 @@ async def subtype_drift_audit(cid: str, user: dict = Depends(get_current_user)):
                     "id": a.get("id"), "name": a.get("name"),
                     "type": t, "subtype": st, "detail_type": dt,
                 })
+            continue
+        # Both non-canonical or subtype legacy → silent legacy bucket
+        # (won't fire the amber/red banner).
+        if st and dt and st != dt:
+            totals["legacy_only_subtype"] += 1
+            by_type[t]["legacy_only_subtype"] += 1
             continue
         if st and st == dt and st in canon:
             totals["canonical"] += 1
