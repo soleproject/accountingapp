@@ -168,5 +168,61 @@ async def health_multi_worker_round_trip():
     }
 
 
+# ─── (Feb 2026) Thread + resource introspection ──────────────────────
+#
+# Purpose: give ops a way to answer "how many threads is this process
+# holding right now?" without shell access to the Railway container.
+# Prompted by a `RuntimeError: can't start new thread` incident where
+# the container hit its pids_limit and login started 500-ing.
+#
+# Numbers we surface:
+#   * `threading.active_count()` — total Python threads (main + all
+#     daemon monitor threads + anyio pool + asyncio default executor).
+#   * File descriptor count — a proxy for socket / connection leaks.
+#   * RSS memory — a sanity check.
+#   * The container's OS-level pids_max (RLIMIT_NPROC) — the ceiling.
+#     When active_count approaches this, a thread-limit crash is
+#     imminent. Set your alerting threshold to ~50% of nproc_max.
+#
+# Public (no auth) so a browser check works during an outage. Only
+# leaks a per-process counter — nothing sensitive.
+
+@router.get("/health/threads")
+async def health_threads():
+    import threading
+    import resource
+    out = {
+        "python_thread_count": threading.active_count(),
+        "python_thread_names": sorted(t.name for t in threading.enumerate())[:60],
+    }
+    try:
+        # RLIMIT_NPROC is the per-user process/thread cap. On Linux
+        # containers this maps to the effective PID limit for the
+        # container. Report both soft (in-effect) and hard (max) so
+        # we can tell whether the ceiling is negotiable.
+        soft, hard = resource.getrlimit(resource.RLIMIT_NPROC)
+        out["nproc_soft"] = soft
+        out["nproc_hard"] = hard
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        usage = resource.getrusage(resource.RUSAGE_SELF)
+        # ru_maxrss is KB on Linux, bytes on macOS. Report both raw and
+        # a MB-normalised value for quick human reading.
+        out["max_rss_kb"] = usage.ru_maxrss
+        out["max_rss_mb_approx"] = round(usage.ru_maxrss / 1024, 1)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        # File descriptor count — a proxy for socket / connection leaks.
+        # /proc/self/fd is Linux-only; wrapped so mac dev boxes don't
+        # 500 the endpoint.
+        import os as _os
+        out["open_fd_count"] = len(_os.listdir("/proc/self/fd"))
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
 
 
