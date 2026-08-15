@@ -970,6 +970,76 @@ def qbo_migration_failed(
 
 
 # --------------------------------------------------------------------------
+# Feedback / bug-report intake — internal notification to superadmins
+# when a user submits a bug or product recommendation via the in-app
+# feedback widget. Kept intentionally spartan — this is a triage tool,
+# not a customer-facing email — but still uses `_wrap` so branded logos
+# and footer stay consistent.
+# --------------------------------------------------------------------------
+def feedback_new_submission(
+    *,
+    fb_type: str,          # "bug" | "recommendation"
+    title: str,
+    description: str,
+    submitter_name: str,
+    submitter_email: str,
+    submitter_role: str,
+    route: str,
+    company_name: str,
+    inbox_url: str,
+) -> tuple[str, str]:
+    is_bug = fb_type == "bug"
+    label = "Bug report" if is_bug else "Product recommendation"
+    icon = "🐞" if is_bug else "💡"
+    accent = "#dc2626" if is_bug else "#0891b2"
+
+    ctx_rows = ""
+    for k, v in [
+        ("From", f"{submitter_name} &lt;{submitter_email}&gt;"),
+        ("Role", submitter_role or "—"),
+        ("Company", company_name or "—"),
+        ("Page", route or "—"),
+    ]:
+        ctx_rows += (
+            f'<tr><td style="{_TABLE_KEY}">{escape(k)}</td>'
+            f'<td style="{_TABLE_VAL}">{v}</td></tr>'
+        )
+
+    desc_block = ""
+    if (description or "").strip():
+        # Preserve line breaks the reporter used
+        safe = escape(description).replace("\n", "<br>")
+        desc_block = (
+            f'<div style="{_P};margin-top:14px;'
+            f'padding:12px 14px;background:#f8fafc;border-left:3px solid {accent};'
+            f'border-radius:6px;white-space:pre-wrap;">{safe}</div>'
+        )
+
+    inner = f"""
+      <div style="{_H1}">{icon} {escape(label)}</div>
+      <div style="{_P};font-size:15px;color:#0f172a;font-weight:600;">
+        {escape(title)}
+      </div>
+      {desc_block}
+      <table style="width:100%;border-collapse:collapse;margin-top:16px;">
+        {ctx_rows}
+      </table>
+      <div style="padding:18px 0 6px;">
+        <a href="{escape(inbox_url)}" style="{_BTN}">Open feedback inbox →</a>
+      </div>
+      <div style="{_MUTE}">
+        You're receiving this because you're a superadmin on this
+        instance. Manage status and reply in the inbox.
+      </div>
+    """
+    return (
+        f"[{'Bug' if is_bug else 'Idea'}] {title}",
+        _wrap(inner, brand_name=None),
+    )
+
+
+
+# --------------------------------------------------------------------------
 # Tiny local escape (avoid pulling markupsafe just for these).
 # --------------------------------------------------------------------------
 def escape(s) -> str:

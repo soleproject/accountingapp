@@ -27,6 +27,8 @@ import PartnerFinancials from "@/pages/PartnerFinancials";
 import AdminPartnerDetail from "@/pages/AdminPartnerDetail";
 import ProClients from "@/pages/ProClients";
 import AdminEnterpriseDetail from "@/pages/AdminEnterpriseDetail";
+import AdminFeedback from "@/pages/AdminFeedback";
+import MyFeedback from "@/pages/MyFeedback";
 import { BillingSuccess, BillingCancel } from "@/pages/BillingReturn";
 import Invoices from "@/pages/Invoices";
 import Estimates from "@/pages/Estimates";
@@ -127,6 +129,8 @@ function App() {
               <Route path="/partner/financials" element={<PartnerFinancials />} />
               <Route path="/admin/partners/:pid" element={<AdminPartnerDetail />} />
               <Route path="/admin/enterprises/:eid" element={<AdminEnterpriseDetail />} />
+              <Route path="/admin/feedback" element={<AdminFeedback />} />
+              <Route path="/feedback/mine" element={<MyFeedback />} />
               <Route path="/pro/clients" element={<ProClients />} />
               <Route path="/invoices" element={<Invoices />} />
               <Route path="/estimates" element={<Estimates />} />
