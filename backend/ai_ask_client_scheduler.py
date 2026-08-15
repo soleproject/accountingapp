@@ -107,7 +107,23 @@ async def _sent_today_to(client_email: str) -> int:
 async def _candidate_txns(cid: str) -> list[dict]:
     """Return recently-flagged transactions that have never been asked
     about, sorted so the most recent is first — we only send ONE per run
-    so the most recent flagged charge wins."""
+    so the most recent flagged charge wins.
+
+    Dedup layers (Feb 2026 fix — was sending 4 emails for the same
+    real-world payment when Plaid + QBO + manual imports created 4
+    duplicate transaction rows):
+
+      1. `client_question_id` already stamped → row itself was asked.
+      2. Row covered by a pending `client_questions` doc → race guard.
+      3. **Payment-signature dedup** — computed as
+         ``(date, rounded amount, counterparty label)``. If ANY prior
+         transaction (regardless of row id) with the same signature
+         has an ``client_question_id`` set OR any prior
+         `client_questions` doc matched a txn with that signature,
+         the current candidate is skipped. This catches
+         Plaid/QBO/manual duplicates that would otherwise each
+         generate their own email.
+    """
     cutoff = (datetime.now(timezone.utc).date() - timedelta(days=LOOKBACK_DAYS)).isoformat()
     txns = await db.transactions.find({
         "company_id": cid,
@@ -116,8 +132,8 @@ async def _candidate_txns(cid: str) -> list[dict]:
         "client_question_id": {"$in": [None, ""]},
         "date": {"$gte": cutoff},
     }).sort("date", -1).to_list(50)
-    # Exclude any txn already covered by a pending question in case the
-    # ``client_question_id`` write races with a concurrent Pro flow.
+
+    # Layer 2: pending client_questions cover set (row-id based).
     pending = await db.client_questions.find({
         "company_id": cid, "status": "pending",
     }, {"txn_ids": 1, "txn_id": 1}).to_list(500)
@@ -127,7 +143,49 @@ async def _candidate_txns(cid: str) -> list[dict]:
             covered.add(x)
         if q.get("txn_id"):
             covered.add(q["txn_id"])
-    return [t for t in txns if t["id"] not in covered]
+
+    def _sig(t: dict) -> str:
+        """Payment signature: date | rounded amount cents | counterparty.
+        Rounded to cents to swallow floating-point drift between
+        Plaid/QBO/manual imports of the same real payment."""
+        try:
+            cents = int(round(float(t.get("amount") or 0) * 100))
+        except Exception:  # noqa: BLE001
+            cents = 0
+        counterparty = (
+            t.get("contact_name")
+            or (t.get("merchant") or t.get("description") or "").strip().upper()[:40]
+            or ""
+        )
+        return f"{t.get('date','')}|{cents}|{counterparty}"
+
+    # Layer 3: collect every signature already asked-about for this
+    # company. Query the FULL set of prior transactions that carry a
+    # non-empty `client_question_id` — those are our historical
+    # "already emailed about this real-world payment" set. Cheap
+    # (indexed on company_id, bounded to ~months of history).
+    asked_signatures: set[str] = set()
+    async for prior in db.transactions.find(
+        {"company_id": cid,
+         "client_question_id": {"$nin": [None, ""]}},
+        {"date": 1, "amount": 1, "contact_name": 1, "merchant": 1,
+         "description": 1},
+    ):
+        asked_signatures.add(_sig(prior))
+
+    result: list[dict] = []
+    seen_this_run: set[str] = set()
+    for t in txns:
+        if t["id"] in covered:
+            continue
+        sig = _sig(t)
+        if sig in asked_signatures or sig in seen_this_run:
+            # Duplicate of something already emailed about (either
+            # historically or another candidate in this same batch).
+            continue
+        seen_this_run.add(sig)
+        result.append(t)
+    return result
 
 
 async def _draft_question(txn: dict, company_name: str) -> str:
@@ -207,14 +265,55 @@ async def process_company(cid: str) -> dict:
     }
     await db.client_questions.insert_one(q_doc)
 
+    # Stamp `client_question_id` onto EVERY duplicate row for this
+    # same real-world payment (same date + rounded amount + counterparty
+    # signature). Prevents a subsequent scheduler tick from re-asking
+    # about a Plaid/QBO/manual duplicate of the row we just emailed
+    # about — the same-payment-dedup was the 4-emails-for-one-charge
+    # bug we fixed in Feb 2026.
+    try:
+        cents = int(round(float(txn.get("amount") or 0) * 100))
+    except Exception:  # noqa: BLE001
+        cents = 0
+    counterparty = (
+        txn.get("contact_name")
+        or (txn.get("merchant") or txn.get("description") or "").strip().upper()[:40]
+        or ""
+    )
+    # Grab every candidate matching this signature and stamp them all.
+    dup_ids: list[str] = []
+    async for dup in db.transactions.find(
+        {"company_id": cid, "date": txn.get("date"),
+         "client_question_id": {"$in": [None, ""]}},
+        {"id": 1, "amount": 1, "contact_name": 1, "merchant": 1,
+         "description": 1},
+    ):
+        try:
+            dcents = int(round(float(dup.get("amount") or 0) * 100))
+        except Exception:  # noqa: BLE001
+            dcents = 0
+        dcp = (
+            dup.get("contact_name")
+            or (dup.get("merchant") or dup.get("description") or "").strip().upper()[:40]
+            or ""
+        )
+        if dcents == cents and dcp == counterparty:
+            dup_ids.append(dup["id"])
+    if dup_ids:
+        await db.transactions.update_many(
+            {"id": {"$in": dup_ids}, "company_id": cid},
+            {"$set": {
+                "needs_review": True,
+                "client_question_id": token,
+                "updated_at": now_iso(),
+            }},
+        )
+    # Preserve the original ai_comment update on the primary row.
     await db.transactions.update_one(
         {"id": txn["id"], "company_id": cid},
         {"$set": {
-            "needs_review": True,
             "ai_comment": (txn.get("ai_comment") or "")
                           + f"\n\n[AI asked client on {now_iso()[:10]}]: {question}",
-            "client_question_id": token,
-            "updated_at": now_iso(),
         }},
     )
 
