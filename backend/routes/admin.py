@@ -2087,6 +2087,60 @@ async def admin_coa_drift_summary(user: dict = Depends(require_role("superadmin"
     return {"summary": out}
 
 
+@router.post("/admin/coa-drift-backfill")
+async def admin_coa_drift_backfill(
+    force: bool = False,
+    user: dict = Depends(require_role("superadmin")),
+):
+    """One-shot sweep — populate `detail_type` on every legacy account
+    across every company using the same name+subtype inference the
+    per-company endpoint uses. Idempotent: accounts that already carry
+    a `detail_type` are skipped unless `?force=1` is passed (which
+    recomputes even set values — useful to fix mislabeled sub-types).
+
+    Returns aggregate + per-company breakdowns so the caller can render
+    a "backfilled 1,247 accounts across 89 companies" toast.
+    """
+    from routes.accounts import _infer_detail_type
+
+    per_company: dict[str, dict[str, int]] = {}
+    total_updated = 0
+    total_skipped = 0
+
+    async for a in db.accounts.find({}):
+        cid = a.get("company_id")
+        if not cid:
+            continue
+        bucket = per_company.setdefault(cid, {"updated": 0, "skipped": 0})
+        current = (a.get("detail_type") or "").strip()
+        if current and not force:
+            bucket["skipped"] += 1
+            total_skipped += 1
+            continue
+        t = a.get("type") or "expense"
+        detail = _infer_detail_type(t, a.get("name", ""), a.get("subtype", ""))
+        if current == detail:
+            bucket["skipped"] += 1
+            total_skipped += 1
+            continue
+        await db.accounts.update_one(
+            {"_id": a["_id"]},
+            {"$set": {"detail_type": detail, "updated_at": now_iso()}},
+        )
+        bucket["updated"] += 1
+        total_updated += 1
+
+    companies_touched = sum(1 for b in per_company.values() if b["updated"] > 0)
+    return {
+        "ok": True,
+        "updated": total_updated,
+        "skipped_already_set": total_skipped,
+        "companies_scanned": len(per_company),
+        "companies_touched": companies_touched,
+        "per_company": per_company,
+    }
+
+
 # ----------------------- Enterprise consolidated billing (Phase D) -----
 
 @router.get("/admin/enterprises/{eid}/invoices")
