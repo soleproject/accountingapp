@@ -4918,3 +4918,48 @@ Verified end-to-end via Playwright:
 - `client@axiom.ai` opened My Feedback → clicked "Reply to the team" → composed message + attached screenshot → submitted → toast "the team's been notified" → note surfaced with "YOU · MICHAEL CHEN" badge and thumbnail inline.
 - `admin@axiom.ai` on `/admin/feedback` sees the reporter's follow-up appended to the same thread.
 
+
+
+### Feb 2026 — Feedback: Unread Badges + Reporter Filters
+
+Two new user-facing surfaces:
+
+**1. Unread badges** on the profile-menu avatar (all users) + the "Feedback" button on the Superadmin dashboard.
+- Reporters see a red dot on their avatar whenever a superadmin has posted a **reporter-visible** note they haven't seen. Internal notes never count.
+- Superadmins see a red dot whenever a feedback item is brand-new to them or a reporter has posted a follow-up since their last visit. Per-admin read tracking (`admin_reads: {admin_uid: iso}`) — one admin marking read doesn't clear anyone else's badge.
+- Badge counts collapse at "9+" to keep the pill compact.
+- Auto mark-read on `/feedback/mine` and `/admin/feedback` visit — first the list loads (so per-row dots paint), THEN a background `POST .../mark-read` fires so the next unread-count poll returns 0. Poll interval: 60s via `lib/useFeedbackUnread.js`.
+
+**2. Reporter filters** on `/feedback/mine`:
+- Status pill row identical to the superadmin inbox: All / New / In progress / Completed / Won't do — each with its own count.
+- **"New replies"** pill in solid rose when active — flips `only_unread=1` on the GET call.
+- Per-row unread dot + rose ring highlight for tickets with fresh team activity.
+
+**Backend** (`routes/feedback.py`):
+- New fields on every item: `reporter_last_read_at` (iso) + `admin_reads: {uid: iso}`.
+- New helpers: `_is_unread_for_reporter(row)` (only counts superadmin-authored, reporter-visible notes) and `_is_unread_for_admin(row, admin_id)`.
+- New endpoints:
+  - `GET /api/feedback/mine?status=&only_unread=` — filters + returns per-status `counts` + `unread` total on the payload.
+  - `GET /api/feedback/mine/unread-count` — cheap poll endpoint for the reporter badge.
+  - `POST /api/feedback/mine/mark-read` — bumps `reporter_last_read_at` on every one of the caller's items.
+  - `GET /api/feedback/unread-count` (superadmin) — same shape as reporter's.
+  - `POST /api/feedback/mark-read` (superadmin) — sets `admin_reads.<caller_id>` on every item.
+- Every list item now carries an `unread` boolean scoped to the caller, so per-row indicators render without extra requests.
+
+**Frontend**:
+- `lib/useFeedbackUnread.js` — polling hook (60s + on-mount) that returns `{reporter, admin, refresh}`. Only calls the admin endpoint when `isSuperadmin=true`.
+- `components/Layout.jsx::ProfileMenu` — red count-dot on the avatar showing the total, plus a per-item count on "My feedback" and (for superadmins) a "Feedback inbox" shortcut with its own count.
+- `pages/SuperadminDash.jsx` — badge on the dashboard's "Feedback" toolbar link.
+- `pages/MyFeedback.jsx` — new status pill row + "New replies" toggle + per-row unread dot + rose ring; empty-state copy adjusts per active filter ("No unread replies right now.", etc.).
+- `pages/AdminFeedback.jsx` — per-row unread dot on the triage list.
+
+**Tests** (`tests/test_feedback.py`, 3 new cases → 29 total, all green):
+- Reporter unread lifecycle: 0 on file, +1 on admin reply, 0 after mark-read, +1 on next reply, internal notes never count.
+- Admin unread lifecycle: fresh item unread → mark-read clears → reporter reply re-marks unread for the admin who already read.
+- `mine` filters: `status=completed` narrows to matching titles; `only_unread=1` narrows to tickets with fresh admin activity; `counts` breakdown stays independent of the active filter.
+
+Verified end-to-end via Playwright:
+- Admin dashboard "Feedback" button showed `4` badge → after visiting inbox it cleared.
+- Admin posted a reporter-visible reply → client's profile-menu badge showed `1` on next poll.
+- `/feedback/mine` painted the affected row with the red dot + rose ring, and the status pills + "New replies (1)" filter behaved as expected. Revisiting cleared the badge.
+

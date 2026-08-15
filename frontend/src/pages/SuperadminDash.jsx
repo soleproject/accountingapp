@@ -11,12 +11,14 @@ import {
 } from "lucide-react";
 import TeamPanel from "@/components/TeamPanel";
 import { WhitelabelCompToggle } from "@/pages/AdminEnterpriseDetail";
+import { useFeedbackUnread } from "@/lib/useFeedbackUnread";
 
 export default function SuperadminDash() {
   const [data, setData] = useState(null);
   const [grantOpen, setGrantOpen] = useState(false);
   const [superadmins, setSuperadmins] = useState(null);
   const [ownerEmail, setOwnerEmail] = useState(null);
+  const { admin: feedbackUnread } = useFeedbackUnread({ isSuperadmin: true });
   useEffect(() => { api.get("/admin/overview").then(r => setData(r.data)); }, []);
   const refreshData = () => api.get("/admin/overview").then(r => setData(r.data));
   // The Grant / Revoke surface is fenced to the platform owner (typically
@@ -46,10 +48,18 @@ export default function SuperadminDash() {
           <Link
             to="/admin/feedback"
             data-testid="nav-admin-feedback"
-            className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            className="relative inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             title="Bug reports & product recommendations submitted by users"
           >
             <Inbox size={16} /> Feedback
+            {feedbackUnread > 0 && (
+              <span
+                data-testid="dash-feedback-badge"
+                className="min-w-[18px] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center leading-none"
+              >
+                {feedbackUnread > 9 ? "9+" : feedbackUnread}
+              </span>
+            )}
           </Link>
           <Link
             to="/admin/stripe-webhooks"
