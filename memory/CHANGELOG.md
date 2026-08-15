@@ -1,5 +1,23 @@
 # SmartBooks — Changelog
 
+## 2026-02-25 — Drift Audit Refinement (false-positive fix + inline drift list)
+
+### 🎯 Why
+User (as Superadmin) opened the drift diagnostic chip on Veryfi 351 LLC and saw "Opening Balance Equity" flagged as drift with `subtype: equity → detail_type: opening_balance_equity`. On investigation, this was a **false positive** — not real drift. The row was correctly labeled by Plaid's `ensure_opening_balance_equity` helper for reconciliation purposes. The audit was flagging it only because the frontend's `DETAIL_SECTIONS_BY_TYPE` for equity didn't include `opening_balance_equity`, so the audit's tightened canonical set (mirrored from the frontend) treated both `equity` and `opening_balance_equity` as non-canonical → fell through to the drift bucket.
+
+### ✅ Fixes
+- **Frontend `DETAIL_SECTIONS_BY_TYPE.equity`** — added `opening_balance_equity` → "Opening Balance Equity" (also added to the create/edit sub-type dropdown). Now proper GAAP grouping on PDFs and the CoA renders a dedicated "OPENING BALANCE EQUITY" section header.
+- **Backend `_CANONICAL_KEYS_BY_TYPE.equity`** — added `opening_balance_equity` to match.
+- **Tightened drift condition**. Was: `st != dt` (any two disagreeing values). Now: `st in canon AND dt in canon AND st != dt`. If either side is a legacy or specialty value, the row goes into the silent `legacy_only_subtype` bucket instead of firing the red banner. This eliminates a broad class of false positives on any account where the classifier can't confidently call drift.
+- **Applied the same tightening in `routes/admin.py::admin_coa_drift_summary`** so the Superadmin dashboard company badges stay in sync with the CoA page.
+- **Inline drift list in the CoA banner (visible to ALL users, not just Superadmin)**. When drift is present, the banner now lists up to 3 offending accounts inline with name + type + `subtype → detail_type`. Answers "which account is drifted?" without requiring Superadmin access or opening the diagnostics chip. Full list still lives in the Superadmin diagnostics.
+
+### 🧪 Tests
+- **`test_drift_requires_both_canonical_no_false_positive_on_opening_balance_equity`** — seeds an OBE row (`subtype=equity, detail_type=opening_balance_equity`) and asserts `drifted == 0`.
+- 11/11 tests green in `test_coa_subtype_unification.py`.
+
+---
+
 ## 2026-02-25 — QBO Sync Write-Path Fix (populate detail_type on QBO account import)
 
 ### 🎯 Why

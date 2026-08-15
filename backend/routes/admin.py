@@ -2067,8 +2067,14 @@ async def admin_coa_drift_summary(user: dict = Depends(require_role("superadmin"
         if st and st not in canon and dt in canon:
             bucket["legacy_only_subtype"] += 1
             continue
-        if st and dt and st != dt:
+        # True drift only when BOTH sides are canonical Wave keys —
+        # keeps in sync with `routes.accounts.subtype_drift_audit`
+        # (see the false-positive Opening Balance Equity case).
+        if st in canon and dt in canon and st != dt:
             bucket["drifted"] += 1
+            continue
+        if st and dt and st != dt:
+            bucket["legacy_only_subtype"] += 1
             continue
 
     # Attach severity and prune clean companies so the payload only

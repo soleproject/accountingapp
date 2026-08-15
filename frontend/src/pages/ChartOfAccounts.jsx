@@ -103,6 +103,7 @@ const DETAIL_SECTIONS_BY_TYPE = {
   equity: [
     ["owner_contribution_drawing",    "Owner Contribution & Drawing"],
     ["retained_earnings",             "Retained Earnings"],
+    ["opening_balance_equity",        "Opening Balance Equity"],
     ["other_equity",                  "Other Equity"],
   ],
   revenue: [
@@ -1557,6 +1558,7 @@ const DETAIL_TYPES = {
   equity: [
     { key: "owner_contribution_drawing",    label: "Owner Contribution & Drawing" },
     { key: "retained_earnings",             label: "Retained Earnings" },
+    { key: "opening_balance_equity",        label: "Opening Balance Equity" },
     { key: "other_equity",                  label: "Other Equity" },
   ],
   revenue: [

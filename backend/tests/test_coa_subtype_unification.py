@@ -342,6 +342,39 @@ def test_admin_coa_drift_backfill_forbidden_for_non_superadmin():
     _run(_t())
 
 
+
+def test_drift_requires_both_canonical_no_false_positive_on_opening_balance_equity():
+    """Regression: 3050 Opening Balance Equity has
+    subtype='equity' (legacy) and detail_type='opening_balance_equity'
+    (specialty — Plaid auto-creates this row for reconciliation).
+    Both values are legitimate. The audit MUST NOT flag it as drift —
+    that was a false-positive introduced when the audit was tightened
+    to only recognize the frontend's DETAIL_SECTIONS_BY_TYPE keys.
+    Drift should only fire when BOTH values are canonical Wave keys.
+    """
+    async def _t():
+        uid, tok, cid = await _mk_env()
+        try:
+            await db.accounts.insert_one({
+                "id": "obe1", "company_id": cid,
+                "name": "Opening Balance Equity",
+                "type": "equity", "subtype": "equity",
+                "detail_type": "opening_balance_equity", "active": True,
+            })
+            async with await _client() as c:
+                r = await c.get(
+                    f"/api/companies/{cid}/accounts/subtype-audit",
+                    headers={"Authorization": f"Bearer {tok}"},
+                )
+            body = r.json()
+            assert body["drifted"] == 0, (
+                f"OBE row incorrectly flagged as drift: {body.get('sample_drift')}"
+            )
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
 def test_qbo_map_account_populates_detail_type():
     """QBO Account → local shape must include a Wave-style detail_type
     inferred from account name + subtype. Regression: QBO sync used to
