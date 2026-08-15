@@ -1,5 +1,33 @@
 # SmartBooks — Changelog
 
+## 2026-02-25 — QBO Sync Write-Path Fix (populate detail_type on QBO account import)
+
+### 🎯 Why
+User linked a fresh company (Test 316 LLC) to a QBO sandbox → sync completed → CoA landed showing "89 accounts missing a sub-type" amber banner. Root cause: `qbo_service.map_account()` copies `AccountSubType` → `subtype` but never sets `detail_type`. Every QBO-imported account was landing without the Wave-style detail_type key, so PDFs would render flat and the drift audit lit up.
+
+Same gap already fixed for the CoA seed and Plaid earlier today — this closes the last remaining write-path.
+
+### ✅ Fix
+- **`qbo_service.py::map_account`** now populates `detail_type` using the same `_infer_detail_type` heuristic the CoA CSV import uses. QBO's `AccountSubType` vocabulary ("Checking", "CashOnHand", "AccountsReceivable", "CreditCard", "FixedAsset", etc.) doesn't line up 1:1 with our frontend's Wave keys, so name-based inference produces cleaner results than a verbatim copy.
+- **`qbo_mirror/pull.py`** picks up the fix for free — it calls `map_account` on both insert (line 78) and update (line 82 via `_UPDATE_FIELDS`). `_UPDATE_FIELDS["accounts"]` deliberately does NOT include `detail_type` so re-syncs won't clobber a user's manual reclassification.
+
+### 🧪 Test
+- **`test_qbo_map_account_populates_detail_type`** — asserts:
+  - `Checking / Bank / Checking` → `cash_and_bank`
+  - `Accounts Receivable (A/R) / Accounts Receivable / AccountsReceivable` → `expected_payments_from_customers`
+  - `Visa Credit Card / Credit Card / CreditCard` → `credit_card`
+  - `Truck / Fixed Asset / Vehicles` → `property_plant_equipment`
+- 10/10 tests green in `test_coa_subtype_unification.py`
+
+### 🔧 Cleaning up the 89 accounts on Test 316 LLC (post-deploy action)
+Existing rows imported before this fix still have blank `detail_type`. Two options:
+1. **Sweep sub-types button** on the Superadmin dashboard (batch — clears every legacy row across every company)
+2. **Backfill sub-types button** in the CoA page header for that specific company (per-company)
+
+Either one runs the same idempotent name+subtype heuristic. Once run, the amber banner disappears and the CoA renders with proper GAAP grouping.
+
+---
+
 ## 2026-02-25 — Sweep Existing Books (batch backfill + Superadmin sweep button)
 
 ### 🎯 New

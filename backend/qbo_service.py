@@ -385,7 +385,21 @@ def map_account(cid: str, realm_id: str, obj: dict) -> dict:
     a parent-child tree, not a flat name. `parent_qbo_id` captures the
     QBO parent id; `resolve_account_parents` translates it to a local
     `parent_account_id` in a second pass after the whole page is
-    ingested (so children imported before parents still resolve)."""
+    ingested (so children imported before parents still resolve).
+
+    `detail_type` is inferred from name+subtype using the same Wave-style
+    heuristic the CSV import uses — QBO's `AccountSubType` vocabulary
+    ("CashOnHand", "AccountsReceivable", "Inventory", "CreditCard",
+    "FixedAsset", "Prepayments", etc.) doesn't line up 1:1 with our
+    frontend's DETAIL_SECTIONS_BY_TYPE keys, so name-based inference
+    gives us cleaner results than a verbatim copy. Ensures QBO-imported
+    companies land with proper GAAP sub-section grouping instead of the
+    "89 accounts missing a sub-type" amber banner.
+    """
+    from routes.accounts import _infer_detail_type
+    name = obj.get("Name") or obj.get("FullyQualifiedName") or ""
+    acct_type = _ACCOUNT_TYPE_MAP.get(obj.get("AccountType") or "", "expense")
+    subtype = obj.get("AccountSubType") or ""
     return {
         "company_id": cid,
         "source": "qbo",
@@ -393,9 +407,10 @@ def map_account(cid: str, realm_id: str, obj: dict) -> dict:
         "id": f"qbo-{cid[:8]}-account-{obj['Id']}",   # company-scoped, satisfies `id_uniq`
         "realm_id": realm_id,
         "code": obj.get("AcctNum") or "",
-        "name": obj.get("Name") or obj.get("FullyQualifiedName") or "",
-        "type": _ACCOUNT_TYPE_MAP.get(obj.get("AccountType") or "", "expense"),
-        "subtype": obj.get("AccountSubType") or "",
+        "name": name,
+        "type": acct_type,
+        "subtype": subtype,
+        "detail_type": _infer_detail_type(acct_type, name, subtype),
         "active": bool(obj.get("Active", True)),
         "current_balance": round(float(obj.get("CurrentBalance") or 0), 2),
         "parent_qbo_id": (obj.get("ParentRef") or {}).get("value"),
