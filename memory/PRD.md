@@ -4742,3 +4742,15 @@ Extended `GET` + `PATCH /admin/enterprises/{eid}` so Partners can view and edit 
 - Superadmin still gets any enterprise
 
 All 6/6 pass; 36/36 pass across partner + branding + QBO + enterprise-access suites. Verified end-to-end via Playwright: partner@axiom.ai clicked an enterprise row → landed on detail page with Edit button visible, WL toggle + Billing section correctly hidden.
+
+
+### Feb 2026 — Auto-Switch to Newly Created Company
+
+**Change**: When a user creates a new business from `My Businesses`, the top-bar Company Selector immediately switches to the new company (no manual re-selection needed).
+
+**Frontend** (`pages/MyBusinesses.jsx`):
+- `BusinessFormModal.submit()` now captures `r.data.company_id` from the create response and passes it up through `onSaved(createdId)` (edit path passes `null`).
+- Parent `onSaved` handler is now async: after a create it calls `await refreshCompanies()` (from `useCompany`) so the new company is in the global list, then `switchCompany(newCompanyId)` to make it active before finally calling `load()` to refresh the local table.
+- Also fixed a latent 422 bug: `business_description` was being sent as `null`, but the Pydantic `CompanyCreate` model requires `str` (default `""`). Both create + edit now send `desc || ""`.
+
+**Verified end-to-end** via Playwright: logged in as `client@axiom.ai`, created "AutoSwitchCo …" from `/my-businesses`. Top-bar selector went from "TEST_dup" → "AutoSwitchCo …" immediately after the modal closed; `localStorage.axiom_company_id` matches the new company's UUID.
