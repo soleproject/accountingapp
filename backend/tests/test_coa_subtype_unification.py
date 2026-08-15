@@ -273,6 +273,75 @@ def test_admin_coa_drift_summary_forbidden_for_non_superadmin():
     _run(_t())
 
 
+def test_admin_coa_drift_backfill_sweeps_missing_detail_type():
+    """Superadmin sweep should populate detail_type on legacy accounts
+    across every company in one call, and be idempotent on re-run."""
+    async def _t():
+        sup_uid, sup_tok, sup_cid = await _mk_env(role="superadmin")
+        uid_a, _, cid_a = await _mk_env()
+        try:
+            # Legacy account rows across two different companies —
+            # missing detail_type entirely
+            await db.accounts.insert_many([
+                {"id": "sw1", "company_id": cid_a, "name": "Business Checking",
+                 "type": "asset", "subtype": "current_asset",
+                 "detail_type": "", "active": True},
+                {"id": "sw2", "company_id": cid_a, "name": "Credit Card Payable",
+                 "type": "liability", "subtype": "current_liability",
+                 "detail_type": "", "active": True},
+                {"id": "sw3", "company_id": sup_cid, "name": "Rent",
+                 "type": "expense", "subtype": "operating_expense",
+                 "detail_type": "", "active": True},
+            ])
+            async with await _client() as c:
+                r = await c.post(
+                    "/api/admin/coa-drift-backfill",
+                    headers={"Authorization": f"Bearer {sup_tok}"},
+                )
+                assert r.status_code == 200, r.text
+                body = r.json()
+            # 3 legacy rows updated across 2 companies
+            assert body["updated"] >= 3
+            assert body["companies_touched"] >= 2
+
+            # All three now have detail_type populated
+            fresh = await db.accounts.find({"id": {"$in": ["sw1", "sw2", "sw3"]}}).to_list(3)
+            assert all(a.get("detail_type") for a in fresh)
+            # Bank/card get their canonical Wave keys
+            by_id = {a["id"]: a for a in fresh}
+            assert by_id["sw1"]["detail_type"] == "cash_and_bank"
+            assert by_id["sw2"]["detail_type"] == "credit_card"
+
+            # Re-run is a no-op — everything skipped
+            async with await _client() as c:
+                r = await c.post(
+                    "/api/admin/coa-drift-backfill",
+                    headers={"Authorization": f"Bearer {sup_tok}"},
+                )
+                body2 = r.json()
+            assert body2["updated"] == 0
+        finally:
+            await _cleanup(uid_a, cid_a)
+            await _cleanup(sup_uid, sup_cid)
+    _run(_t())
+
+
+def test_admin_coa_drift_backfill_forbidden_for_non_superadmin():
+    """Sweep endpoint must be superadmin-only."""
+    async def _t():
+        uid, tok, cid = await _mk_env(role="pro")
+        try:
+            async with await _client() as c:
+                r = await c.post(
+                    "/api/admin/coa-drift-backfill",
+                    headers={"Authorization": f"Bearer {tok}"},
+                )
+                assert r.status_code in (401, 403), r.text
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
 def test_new_company_seeds_detail_type_on_every_account():
     """The default CoA seed (DEFAULT_COA) must set `detail_type` to a
     frontend-canonical Wave key on every row so brand new companies

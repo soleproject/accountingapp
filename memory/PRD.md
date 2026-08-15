@@ -5080,3 +5080,16 @@ Status: **DONE**. Awaiting user verification.
 
 Status: **DONE**. Awaiting user verification on production (fresh company creation should now come up clean).
 
+
+### Feb 25 2026 — Batch Sweep Endpoint + Superadmin One-Click Backfill
+
+**`POST /api/admin/coa-drift-backfill`** (superadmin-only) walks every account across every company and populates `detail_type` using the same name+subtype inference. Idempotent, `?force=1` recomputes even set values.
+
+**Superadmin Dashboard**: a "Sweep sub-types" button appears beside the Companies section header, with an inline aggregate chip ("N red · M amber"). One click → runs the batch → refreshes the drift map. The section is only rendered when there's any drift to report.
+
+**Why sweep is safe by default**: only touches accounts with blank `detail_type`. Won't overwrite user-chosen sub-types. Genuine "drift" cases (both fields canonical but disagreeing) stay flagged red until an operator makes an intentional force call.
+
+**Verified state on preview** after write-path fix + endpoint deploy: amber pills gone across the board (0 amber, 0 missing_detail_type). Only 11 truly-drifted rows across 6 companies remain flagged red — those are legitimate mismatches for Ops to review, not noise.
+
+Status: **DONE**. Sweep + summary chip live on Superadmin dashboard.
+

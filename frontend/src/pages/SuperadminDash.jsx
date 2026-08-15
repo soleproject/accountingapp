@@ -140,7 +140,14 @@ export default function SuperadminDash() {
           </table>
         </div>
         <div className="rounded-xl border bg-white overflow-hidden">
-          <div className="px-4 py-2 bg-slate-50 border-b text-xs uppercase font-semibold text-slate-600">Companies</div>
+          <div className="px-4 py-2 bg-slate-50 border-b text-xs uppercase font-semibold text-slate-600 flex items-center gap-2">
+            <span>Companies</span>
+            <CoaDriftSummaryChip driftMap={driftMap} onSwept={() => {
+              api.get("/admin/coa-drift-summary")
+                .then((r) => setDriftMap(r.data?.summary || {}))
+                .catch(() => {});
+            }} />
+          </div>
           <table className="w-full text-sm">
             <thead className="text-xs uppercase text-slate-500 border-b">
               <tr><th className="px-3 py-2 text-left">Name</th><th className="px-3 py-2 text-left">Type</th><th className="px-3 py-2">Onboarded</th></tr>
@@ -198,6 +205,80 @@ export default function SuperadminDash() {
     </div>
   );
 }
+
+
+// --------------------------------------------------------------------------
+// CoaDriftSummaryChip — inline summary + one-click sweep for the
+// sub-type drift Ops workflow. Renders as a compact chip beside the
+// Companies section header:
+//   • Nothing to show when driftMap is empty (all books clean)
+//   • Aggregate pill: "N red · M amber" when there's any drift
+//   • Wave-key backfill button that hits /admin/coa-drift-backfill and
+//     refreshes the driftMap via onSwept()
+// --------------------------------------------------------------------------
+function CoaDriftSummaryChip({ driftMap, onSwept }) {
+  const [busy, setBusy] = useState(false);
+  const entries = Object.values(driftMap || {});
+  if (!entries.length) return null;
+  const red = entries.filter(e => e.severity === "red").length;
+  const amber = entries.filter(e => e.severity === "amber").length;
+  const missingTotal = entries.reduce((s, e) => s + (e.missing_detail_type || 0), 0);
+  const driftedTotal = entries.reduce((s, e) => s + (e.drifted || 0), 0);
+  const runSweep = async () => {
+    if (busy) return;
+    if (!window.confirm(
+      `Backfill sub-types across all companies?\n\n` +
+      `This will run a safe name+subtype inference on every account with a missing sub-type ` +
+      `(${missingTotal} account${missingTotal === 1 ? "" : "s"}) and populate detail_type. ` +
+      `Idempotent — safe to re-run. Does NOT touch accounts that already have a sub-type.`
+    )) return;
+    setBusy(true);
+    try {
+      const r = await api.post("/admin/coa-drift-backfill");
+      const d = r.data || {};
+      toast.success(
+        `Backfilled ${d.updated || 0} account${d.updated === 1 ? "" : "s"} ` +
+        `across ${d.companies_touched || 0} compan${d.companies_touched === 1 ? "y" : "ies"}. ` +
+        `${d.skipped_already_set || 0} already had a sub-type.`
+      );
+      onSwept && onSwept();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Backfill failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="ml-auto flex items-center gap-2 normal-case tracking-normal" data-testid="admin-coa-drift-summary">
+      {red > 0 && (
+        <span
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-rose-50 text-rose-700 border-rose-200"
+          title={`${driftedTotal} drifted sub-type${driftedTotal === 1 ? "" : "s"} across ${red} compan${red === 1 ? "y" : "ies"}`}
+        >
+          <AlertCircle size={10} />{red} red
+        </span>
+      )}
+      {amber > 0 && (
+        <span
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-amber-50 text-amber-700 border-amber-200"
+          title={`${missingTotal} accounts missing sub-type across ${amber} compan${amber === 1 ? "y" : "ies"}`}
+        >
+          <AlertTriangle size={10} />{amber} amber
+        </span>
+      )}
+      <button
+        onClick={runSweep}
+        disabled={busy}
+        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-indigo-300 bg-indigo-50 text-indigo-800 text-[11px] font-medium hover:bg-indigo-100 disabled:opacity-60"
+        data-testid="admin-coa-drift-sweep"
+        title="Populate detail_type on every legacy account across all companies (idempotent)"
+      >
+        {busy ? <><Loader2 size={11} className="animate-spin" /> Sweeping…</> : <><Wrench size={11} /> Sweep sub-types</>}
+      </button>
+    </div>
+  );
+}
+
 
 
 // --------------------------------------------------------------------------

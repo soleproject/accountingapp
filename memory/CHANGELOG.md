@@ -1,5 +1,23 @@
 # SmartBooks — Changelog
 
+## 2026-02-25 — Sweep Existing Books (batch backfill + Superadmin sweep button)
+
+### 🎯 New
+- **`POST /api/admin/coa-drift-backfill`** — superadmin-only batch endpoint that walks every account across every company in one pass and populates `detail_type` using the same name+subtype inference the per-company endpoint uses. Idempotent — accounts that already carry `detail_type` are skipped. Accepts `?force=1` to recompute even set values (opt-in only, useful for fixing mislabeled sub-types).
+- **Superadmin Dashboard "Sweep sub-types" button** — inline chip beside the Companies section header showing aggregate "N red / M amber" counts + a one-click sweep. Renders only when the platform has any drift to report. After running, the dashboard's drift map auto-refreshes so the pills disappear immediately for cleaned companies. Uses `window.confirm` guard + toast feedback showing accounts touched and companies affected.
+
+### ✅ Behavior
+- Sweep is **safe by default** (no `force`): touches only accounts with a blank `detail_type`. Won't overwrite user-chosen sub-types.
+- Genuine **drift** rows (both `subtype` and `detail_type` set to canonical values that disagree) stay flagged red — requires manual review or an explicit `?force=1` call. Signal-to-noise on the Companies list is now excellent: only truly problematic tenants highlight.
+- Idempotent: re-running the sweep after a completed pass returns `updated=0, skipped_already_set=N`.
+
+### 🧪 Verified E2E (9/9 tests green)
+- `test_admin_coa_drift_backfill_sweeps_missing_detail_type` — seeds 3 legacy rows across 2 companies, asserts sweep populates canonical Wave keys (`cash_and_bank`, `credit_card`), and confirms re-run is no-op (idempotent).
+- `test_admin_coa_drift_backfill_forbidden_for_non_superadmin` — RBAC guard.
+- Live preview verification — sweep hit the admin API, returned `updated=0, skipped=2625, scanned=85` (write-path fix already handled everything), UI screenshot showed sweep button + summary chip rendering correctly with only genuine red-drift companies highlighted (no amber noise).
+
+---
+
 ## 2026-02-25 — Seed + Plaid Write-Path Fix (fresh companies land canonically clean)
 
 ### 🎯 Why
