@@ -168,10 +168,11 @@ async def ensure_firm_books_company_for_pro(user_id: str) -> Optional[dict]:
     # company gets on `POST /companies`, so the firm's books are usable
     # from second-one-of-existence.
     from seed import DEFAULT_COA
-    for code, name, atype, subtype in DEFAULT_COA:
+    for code, name, atype, subtype, detail_type in DEFAULT_COA:
         await db.accounts.insert_one({
             "id": str(uuid.uuid4()), "company_id": cid, "code": code, "name": name,
-            "type": atype, "subtype": subtype, "active": True, "balance": 0.0,
+            "type": atype, "subtype": subtype, "detail_type": detail_type,
+            "active": True, "balance": 0.0,
             "created_at": now, "updated_at": now,
         })
     return company

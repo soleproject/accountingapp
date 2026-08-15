@@ -5059,3 +5059,24 @@ Second half of the CoA sub-type drift work. The read-only `/subtype-audit` endpo
 
 Status: **DONE**. Awaiting user verification.
 
+
+### Feb 25 2026 — Seed + Plaid Write-Path Populate `detail_type`
+
+**Empirical trigger**: User reported that a brand new company created on production (`partners.accountingapp.ai / Post Detail Plaid LLC`) was showing 54 amber "missing_detail_type" pills. Investigation revealed both the default CoA seed (`DEFAULT_COA` in `seed.py`) and the Plaid auto-account creator write only `subtype` and leave `detail_type` blank. Same true for the shared statement_account_resolver used when Plaid provides a mask/institution.
+
+**What was fixed** (all additive, no existing data mutated):
+- `DEFAULT_COA` upgraded from 4-tuple to 5-tuple `(code, name, type, subtype, detail_type)` with frontend-canonical Wave keys.
+- 5 seed callers updated: `seed.py`, `routes/companies.py`, `routes/pro.py`, `enterprises.py`, `partners.py`.
+- `plaid_connect.py::_ensure_account` and `SUBTYPE_MAP` now carry `detail_type`.
+- `statement_account_resolver.py::resolve_or_create_bank_account` writes `credit_card` / `cash_and_bank` for the account it creates.
+- `liability_subaccounts.py` inherits `detail_type` from the parent account.
+- `routes/accounts.py::_CANONICAL_KEYS_BY_TYPE` corrected to match the frontend's `DETAIL_SECTIONS_BY_TYPE` keys (was using accounting-textbook labels; fixes a false-drift bug in the Feb 2026 audit endpoint).
+
+**Impact**:
+- **New companies** land amber-free from day one with proper GAAP sub-section grouping (Cash and Bank / Accounts Receivable / PP&E / Credit Card / Loan and Line of Credit / Accounts Payable / etc.) visible on both the CoA UI and Balance Sheet / Income Statement PDFs.
+- **Existing companies** are unchanged — they'll continue to show amber until an operator runs the idempotent `/accounts/backfill-detail-type` endpoint against them (deliberate, opt-in).
+
+**Tests**: New `test_new_company_seeds_detail_type_on_every_account` (7/7 green in file). Live preview verified end-to-end via API+screenshot.
+
+Status: **DONE**. Awaiting user verification on production (fresh company creation should now come up clean).
+

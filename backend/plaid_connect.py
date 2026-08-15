@@ -22,26 +22,29 @@ SOURCE_PRIORITY = {
 }
 
 
-# Plaid subtype (as returned by Plaid, string) → (ledger code, ledger name, type, subtype)
+# Plaid subtype (as returned by Plaid, string) → (ledger code, ledger name, type, subtype, detail_type)
+# `detail_type` uses frontend-canonical Wave keys so the CoA renders sub-sections
+# on PDFs. `subtype` stays as legacy value (downstream Cash Flow classifier reads
+# it directly).
 SUBTYPE_MAP = {
-    "AccountSubtype('checking')":     ("1010", "Business Checking", "asset", "current_asset"),
-    "checking":                       ("1010", "Business Checking", "asset", "current_asset"),
-    "AccountSubtype('savings')":      ("1020", "Business Savings", "asset", "current_asset"),
-    "savings":                        ("1020", "Business Savings", "asset", "current_asset"),
-    "AccountSubtype('money market')": ("1030", "Money Market", "asset", "current_asset"),
-    "money market":                   ("1030", "Money Market", "asset", "current_asset"),
-    "money_market":                   ("1030", "Money Market", "asset", "current_asset"),
-    "AccountSubtype('cd')":           ("1040", "Certificate of Deposit", "asset", "current_asset"),
-    "cd":                             ("1040", "Certificate of Deposit", "asset", "current_asset"),
-    "AccountSubtype('credit card')":  ("2100", "Credit Card Payable", "liability", "current_liability"),
-    "credit card":                    ("2100", "Credit Card Payable", "liability", "current_liability"),
-    "credit_card":                    ("2100", "Credit Card Payable", "liability", "current_liability"),
-    "AccountSubtype('paypal')":       ("1050", "PayPal Wallet", "asset", "current_asset"),
-    "paypal":                         ("1050", "PayPal Wallet", "asset", "current_asset"),
+    "AccountSubtype('checking')":     ("1010", "Business Checking", "asset", "current_asset", "cash_and_bank"),
+    "checking":                       ("1010", "Business Checking", "asset", "current_asset", "cash_and_bank"),
+    "AccountSubtype('savings')":      ("1020", "Business Savings", "asset", "current_asset", "cash_and_bank"),
+    "savings":                        ("1020", "Business Savings", "asset", "current_asset", "cash_and_bank"),
+    "AccountSubtype('money market')": ("1030", "Money Market", "asset", "current_asset", "cash_and_bank"),
+    "money market":                   ("1030", "Money Market", "asset", "current_asset", "cash_and_bank"),
+    "money_market":                   ("1030", "Money Market", "asset", "current_asset", "cash_and_bank"),
+    "AccountSubtype('cd')":           ("1040", "Certificate of Deposit", "asset", "current_asset", "cash_and_bank"),
+    "cd":                             ("1040", "Certificate of Deposit", "asset", "current_asset", "cash_and_bank"),
+    "AccountSubtype('credit card')":  ("2100", "Credit Card Payable", "liability", "current_liability", "credit_card"),
+    "credit card":                    ("2100", "Credit Card Payable", "liability", "current_liability", "credit_card"),
+    "credit_card":                    ("2100", "Credit Card Payable", "liability", "current_liability", "credit_card"),
+    "AccountSubtype('paypal')":       ("1050", "PayPal Wallet", "asset", "current_asset", "cash_and_bank"),
+    "paypal":                         ("1050", "PayPal Wallet", "asset", "current_asset", "cash_and_bank"),
 }
 
 
-async def _ensure_account(cid: str, code: str, name: str, acct_type: str, subtype: str) -> dict:
+async def _ensure_account(cid: str, code: str, name: str, acct_type: str, subtype: str, detail_type: str = "") -> dict:
     """Look up ledger account by code within company; create it if missing."""
     a = await db.accounts.find_one({"company_id": cid, "code": code})
     if a:
@@ -49,6 +52,7 @@ async def _ensure_account(cid: str, code: str, name: str, acct_type: str, subtyp
     doc = {
         "id": str(uuid.uuid4()), "company_id": cid,
         "code": code, "name": name, "type": acct_type, "subtype": subtype,
+        "detail_type": detail_type or subtype,
         "created_at": now_iso(), "updated_at": now_iso(),
     }
     await db.accounts.insert_one(doc)
@@ -57,7 +61,7 @@ async def _ensure_account(cid: str, code: str, name: str, acct_type: str, subtyp
 
 async def ensure_opening_balance_equity(cid: str) -> dict:
     """3050 Opening Balance Equity — auto-created per company on first use."""
-    return await _ensure_account(cid, "3050", "Opening Balance Equity", "equity", "equity")
+    return await _ensure_account(cid, "3050", "Opening Balance Equity", "equity", "equity", "opening_balance_equity")
 
 
 async def ensure_cc_payment_clearing(cid: str) -> dict:
@@ -77,21 +81,22 @@ async def ensure_cc_payment_clearing(cid: str) -> dict:
     """
     return await _ensure_account(
         cid, "1150", "Credit Card Payment Clearing", "asset", "current_asset",
+        "money_in_transit",
     )
 
 
-def resolve_ledger_for_plaid(plaid_account: dict) -> tuple[str, str, str, str]:
-    """Return (code, name, type, subtype) for the ledger account that should back
-    a given Plaid account. Falls back to a generic Other Bank Account (1090) when
-    the subtype is unknown.
+def resolve_ledger_for_plaid(plaid_account: dict) -> tuple[str, str, str, str, str]:
+    """Return (code, name, type, subtype, detail_type) for the ledger account
+    that should back a given Plaid account. Falls back to a generic Other
+    Bank Account (1090) when the subtype is unknown.
     """
     key = (plaid_account.get("subtype") or "").lower().strip()
     if key in SUBTYPE_MAP:
         return SUBTYPE_MAP[key]
     ptype = (plaid_account.get("type") or "").lower()
     if "credit" in ptype:
-        return ("2100", "Credit Card Payable", "liability", "current_liability")
-    return ("1090", "Other Bank Account", "asset", "current_asset")
+        return ("2100", "Credit Card Payable", "liability", "current_liability", "credit_card")
+    return ("1090", "Other Bank Account", "asset", "current_asset", "cash_and_bank")
 
 
 async def get_ledger_for_plaid_account(cid: str, plaid_account: dict,
@@ -134,8 +139,8 @@ async def get_ledger_for_plaid_account(cid: str, plaid_account: dict,
 
     if not account_number and not institution_name:
         # Nothing to match on → old behaviour (shared subtype-mapped row).
-        code, name, t, st = resolve_ledger_for_plaid(plaid_account)
-        return await _ensure_account(cid, code, name, t, st)
+        code, name, t, st, dt = resolve_ledger_for_plaid(plaid_account)
+        return await _ensure_account(cid, code, name, t, st, dt)
 
     from statement_account_resolver import resolve_or_create_bank_account
     resolved = await resolve_or_create_bank_account(
