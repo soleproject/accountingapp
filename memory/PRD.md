@@ -4754,3 +4754,14 @@ All 6/6 pass; 36/36 pass across partner + branding + QBO + enterprise-access sui
 - Also fixed a latent 422 bug: `business_description` was being sent as `null`, but the Pydantic `CompanyCreate` model requires `str` (default `""`). Both create + edit now send `desc || ""`.
 
 **Verified end-to-end** via Playwright: logged in as `client@axiom.ai`, created "AutoSwitchCo …" from `/my-businesses`. Top-bar selector went from "TEST_dup" → "AutoSwitchCo …" immediately after the modal closed; `localStorage.axiom_company_id` matches the new company's UUID.
+
+
+### Feb 2026 — Auto-Switch after "Add a new client" (Pro flow)
+
+Same auto-switch behavior extended to the Pro's "New Client" modal at `/pro/clients` — after a Pro creates a new client company, the top-bar Company Selector switches to that new company automatically.
+
+**Frontend** (`pages/ProClients.jsx`):
+- `NewClientModal.save()` now passes the created `company_id` up as `onCreated(newCid)`.
+- Parent handler at line 493 calls `switchCompany(newCid)` after `refresh()`, so the header dropdown flips to the new client immediately (unless the flow redirects to Stripe Checkout for client-card billing, in which case the redirect wins — `onCreated` is not called on that branch).
+
+**Verified via Playwright**: `pro@axiom.ai` → `/pro/clients` → "New Client" → filled name/owner/email → clicked "Create client". Header changed from `TEST_iter8_newclient` → `AutoSwitchClient …`, `localStorage.axiom_company_id` matches the new company's UUID.

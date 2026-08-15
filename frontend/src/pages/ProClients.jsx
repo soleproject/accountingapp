@@ -490,7 +490,7 @@ export default function ProClients() {
         </div>
       )}
 
-      {creating && <NewClientModal onClose={() => setCreating(false)} onCreated={async () => { await load(); await refresh(); setCreating(false); }} />}
+      {creating && <NewClientModal onClose={() => setCreating(false)} onCreated={async (newCid) => { await load(); await refresh(); if (newCid) switchCompany(newCid); setCreating(false); }} />}
       </>
       )}
       {/* Enterprise-create modal lives OUTSIDE the mode ternary so it
@@ -1430,7 +1430,7 @@ export function NewClientModal({ onClose, onCreated }) {
           );
         }
       }
-      onCreated();
+      onCreated(r.data.company_id);
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to create client");
     } finally { setBusy(false); }
