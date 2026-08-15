@@ -10,7 +10,7 @@ import uuid
 import json
 import random
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from typing import Optional, Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
@@ -646,21 +646,47 @@ async def onboarding_interview_apply(
 
 
 @router.post("/companies/{cid}/onboarding/plaid/link-token")
-async def plaid_link_token(cid: str, user: dict = Depends(get_current_user)):
-    """Create a Plaid Link token for the user to link a bank account."""
+async def plaid_link_token(cid: str, payload: dict | None = None,
+                            user: dict = Depends(get_current_user)):
+    """Create a Plaid Link token for the user to link a bank account.
+
+    Optional body: ``{"import_start_date": "YYYY-MM-DD"}`` — clamps the
+    Plaid ``transactions.days_requested`` window so we only pull
+    transactions on or after that date. Client picks this in the "How
+    far back?" modal before Link opens. Omitted → 730 days (max).
+    """
     await require_company(user, cid)
-    # Build the public webhook URL from the backend's own public host if available
     public_base = os.environ.get("PUBLIC_BACKEND_URL", "").rstrip("/")
     webhook_url = f"{public_base}/api/plaid/webhook" if public_base else None
+    days_requested = _days_from_start_date((payload or {}).get("import_start_date"))
     try:
         token = plaid_service.create_link_token(
             user_id=f"{user['id']}::{cid}",
             client_name="Axiom Ledger",
             webhook_url=webhook_url,
+            days_requested=days_requested,
         )
     except Exception as e:
         raise HTTPException(502, f"Plaid error: {e}")
-    return {"link_token": token}
+    return {"link_token": token, "days_requested": days_requested}
+
+
+def _days_from_start_date(iso_date: str | None) -> int:
+    """Convert an ISO ``YYYY-MM-DD`` client-supplied start date to a
+    Plaid ``days_requested`` count. Bounds:
+      * Returned value is clamped to [1, 730] — Plaid's own range.
+      * `None`, empty, or malformed → 730 (default = maximum history).
+    """
+    if not iso_date:
+        return 730
+    try:
+        d = date.fromisoformat(iso_date)
+    except (TypeError, ValueError):
+        return 730
+    delta = (date.today() - d).days
+    if delta < 1:
+        return 1  # picked today — pull today only
+    return min(730, delta)
 
 
 @router.post("/companies/{cid}/plaid/backfill-history-token")
@@ -701,6 +727,15 @@ async def plaid_exchange(cid: str, payload: dict, user: dict = Depends(get_curre
     public_token = payload.get("public_token")
     if not public_token:
         raise HTTPException(400, "public_token required")
+    # Optional cutoff from the "How far back?" modal. Persisted on the
+    # Plaid item so every subsequent sync uses it as a floor. `None` /
+    # unset = pull everything Plaid returns (existing behavior).
+    import_start_date = payload.get("import_start_date")
+    if import_start_date:
+        try:
+            date.fromisoformat(import_start_date)  # validate shape
+        except (TypeError, ValueError):
+            import_start_date = None
     try:
         ex = plaid_service.exchange_public_token(public_token)
         accounts = plaid_service.get_accounts(ex["access_token"])
@@ -708,8 +743,6 @@ async def plaid_exchange(cid: str, payload: dict, user: dict = Depends(get_curre
     except Exception as e:
         raise HTTPException(502, f"Plaid error: {e}")
     now = now_iso()
-    # Upsert on item_id — same Plaid item re-linked updates in place, a
-    # NEW institution insert a fresh doc.
     from crypto_service import encrypt as _enc
     await db.plaid_items.update_one(
         {"company_id": cid, "item_id": ex["item_id"]},
@@ -718,12 +751,14 @@ async def plaid_exchange(cid: str, payload: dict, user: dict = Depends(get_curre
             "item_id": ex["item_id"], "access_token": _enc(ex["access_token"]),
             "cursor": None, "accounts": accounts,
             "institution_name": institution_name,
+            "import_start_date": import_start_date,
             "created_at": now, "updated_at": now,
         }},
         upsert=True,
     )
     return {"accounts": accounts, "item_id": ex["item_id"],
-            "institution_name": institution_name}
+            "institution_name": institution_name,
+            "import_start_date": import_start_date}
 
 
 @router.get("/companies/{cid}/onboarding/plaid/items")

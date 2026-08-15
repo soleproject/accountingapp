@@ -45,20 +45,26 @@ def token_from_item(item: dict | None) -> str | None:
 
 
 def create_link_token(user_id: str, client_name: str = "SmartBooks", webhook_url: str | None = None,
-                      access_token_for_update: str | None = None) -> str:
+                      access_token_for_update: str | None = None,
+                      days_requested: int = 730) -> str:
     """Create a Plaid Link token. When `access_token_for_update` is provided,
     the token is generated in **update mode** for that existing Item — this
-    re-authenticates without changing the item_id and requests the extended
-    730-day transaction history (Plaid will then backfill older txns).
+    re-authenticates without changing the item_id.
+
+    `days_requested` (0–730) — how many days of transaction history to
+    ask Plaid to backfill during the initial sync. Passing a smaller
+    number when the user only wants "this year" cuts API cost and
+    means Plaid returns less data. Actual coverage per institution
+    can still be less if the bank doesn't retain that much history.
     """
+    # Plaid rejects days_requested < 1 or > 730; clamp defensively.
+    days_requested = max(1, min(730, int(days_requested)))
     kwargs = {
         "client_name": client_name,
         "country_codes": [CountryCode("US")],
         "language": "en",
         "user": LinkTokenCreateRequestUser(client_user_id=user_id),
-        # Request the maximum 730 days of transaction history. Actual coverage
-        # is capped by each institution (BofA/Chase/etc. all release ≥24 mo).
-        "transactions": LinkTokenTransactions(days_requested=730),
+        "transactions": LinkTokenTransactions(days_requested=days_requested),
     }
     if access_token_for_update:
         # Update mode: pass access_token, omit products.
