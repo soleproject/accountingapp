@@ -96,15 +96,37 @@ export default function PlaidItemStartDateEditor({ companyId }) {
       // Direction-specific messaging.
       if (direction === "unchanged") {
         toast.info("No change — same date as before");
-      } else if (direction === "cleared") {
-        toast.success("Cutoff removed — future syncs will pull everything Plaid offers");
       } else if (direction === "earlier") {
-        toast.success(
-          "New cutoff saved. Note: Plaid will only include older " +
-            "transactions on new syncs going forward — existing history " +
-            "isn't automatically re-pulled.",
-          { duration: 12000 },
-        );
+        // Backend auto-enqueued a full reset-and-resync job so Plaid
+        // will re-page the entire history and the writer's date-floor
+        // filter will now let the newly-in-range older transactions
+        // through. Message reflects that this is running in the
+        // background, not something the user needs to trigger.
+        if (r.data.backfill_job_id) {
+          toast.success(
+            "New cutoff saved. We started a background backfill — " +
+              "older transactions will appear as they come in.",
+            { duration: 12000 },
+          );
+        } else {
+          toast.success(
+            "New cutoff saved. Use the Backfill button to pull the " +
+              "older transactions Plaid is now willing to return.",
+            { duration: 12000 },
+          );
+        }
+      } else if (direction === "cleared") {
+        if (r.data.backfill_job_id) {
+          toast.success(
+            "Cutoff removed. We started a background backfill for " +
+              "everything Plaid offers.",
+            { duration: 12000 },
+          );
+        } else {
+          toast.success(
+            "Cutoff removed — future syncs will pull everything Plaid offers.",
+          );
+        }
       } else if (direction === "set" || direction === "later") {
         if (older > 0) {
           // Show confirm dialog with the count. Purely informational —

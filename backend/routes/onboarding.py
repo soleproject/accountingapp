@@ -928,12 +928,37 @@ async def update_plaid_item(cid: str, item_id: str,
             "updated_at": now_iso(),
         }},
     )
+
+    # (Feb 2026) When the user extends the range EARLIER (or clears
+    # the cutoff entirely to "everything Plaid offers"), auto-enqueue
+    # the same reset-and-resync job the PlaidBackfillButton fires.
+    # Plaid's cursor-based `transactions_sync` only returns new
+    # events past the cursor — it doesn't retroactively rewind for a
+    # bumped `days_requested`. A full reset+resync forces Plaid to
+    # re-page the entire history from scratch, which then respects
+    # the newly-lowered `import_start_date` in the sync writer's
+    # date-floor filter. Idempotent — the writer dedupes on
+    # (company_id, plaid_transaction_id) so nothing double-posts.
+    backfill_job_id: str | None = None
+    if direction in ("earlier", "cleared"):
+        try:
+            from job_queue import enqueue_job
+            backfill_job_id = await enqueue_job(
+                "plaid_reset_resync", cid, user_id=user["id"],
+            )
+        except Exception:  # noqa: BLE001
+            # Non-fatal — the PATCH succeeded, backfill will just
+            # need a manual "Backfill history" click from the UI.
+            # Silent so we don't error the settings save.
+            backfill_job_id = None
+
     return {
         "item_id": item_id,
         "import_start_date": new,
         "previous_import_start_date": prev,
         "direction": direction,
         "already_imported_older_count": older_count,
+        "backfill_job_id": backfill_job_id,
     }
 
 
