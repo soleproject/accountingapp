@@ -195,6 +195,20 @@ export default function AdminFeedback() {
                           <div className="text-[11px] text-slate-500 mt-0.5 truncate">
                             {r.submitter_email || "—"} · {fmtWhen(r.created_at)}
                           </div>
+                          {(r.partner_name || r.enterprise_name) && (
+                            <div className="mt-1 flex items-center gap-1 flex-wrap">
+                              {r.partner_name && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-100 truncate max-w-[140px]">
+                                  {r.partner_name}
+                                </span>
+                              )}
+                              {r.enterprise_name && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100 truncate max-w-[140px]">
+                                  {r.enterprise_name}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                         <ChevronRight size={14} className="text-slate-300 shrink-0" />
                       </div>
@@ -326,6 +340,22 @@ function FeedbackDetail({ item, onPatch, onBack }) {
         <div>
           <div className="text-slate-500">Filed</div>
           <div className="text-slate-800 mt-0.5">{fmtWhen(item.created_at)}</div>
+        </div>
+        <div>
+          <div className="text-slate-500">Partner</div>
+          <div className="text-slate-800 mt-0.5 break-all">
+            {item.partner_name
+              ? <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">{item.partner_name}</span>
+              : <span className="text-slate-400">—</span>}
+          </div>
+        </div>
+        <div>
+          <div className="text-slate-500">Enterprise</div>
+          <div className="text-slate-800 mt-0.5 break-all">
+            {item.enterprise_name
+              ? <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">{item.enterprise_name}</span>
+              : <span className="text-slate-400">—</span>}
+          </div>
         </div>
         <div>
           <div className="text-slate-500">Company</div>

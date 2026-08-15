@@ -260,3 +260,149 @@ def test_notify_no_admins_still_succeeds():
         finally:
             await _wipe_users_and_feedback([u])
     _run(_t())
+
+
+
+# ------------------------------------------------------------------
+# Partner + Enterprise resolution
+# ------------------------------------------------------------------
+def test_context_resolves_partner_for_partner_role():
+    """A user with role=='partner' is themself the partner."""
+    async def _t():
+        uid = str(uuid.uuid4())
+        await db.users.insert_one({
+            "id": uid, "email": f"p_{uid[:6]}@example.com", "role": "partner",
+            "password": hash_password("x"), "name": "The Partner",
+            "branding": {"firm_name": "PartnerFirm LLC"},
+        })
+        tok = create_token(uid, "partner")
+        try:
+            async with await _client() as c:
+                r = await c.post("/api/feedback",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"type": "bug", "title": "partner reports"})
+                assert r.status_code == 200
+                fid = r.json()["id"]
+                row = await db.feedback_items.find_one({"id": fid})
+                assert row["partner_id"] == uid
+                assert row["partner_name"] == "PartnerFirm LLC"
+                # No enterprise context for a bare partner
+                assert row["enterprise_id"] is None
+        finally:
+            await db.users.delete_one({"id": uid})
+            await db.feedback_items.delete_many({"submitter_user_id": uid})
+    _run(_t())
+
+
+def test_context_resolves_enterprise_via_pro():
+    """A pro with `enterprise_id` set attributes their feedback to that
+    enterprise, and the enterprise's `partner_id` fills in the partner slot."""
+    async def _t():
+        partner_uid = str(uuid.uuid4())
+        pro_uid = str(uuid.uuid4())
+        ent_id = str(uuid.uuid4())
+        await db.users.insert_one({
+            "id": partner_uid, "email": f"pt_{partner_uid[:6]}@example.com",
+            "role": "partner", "password": hash_password("x"),
+            "branding": {"firm_name": "MegaPartner"},
+        })
+        await db.users.insert_one({
+            "id": pro_uid, "email": f"pro_{pro_uid[:6]}@example.com",
+            "role": "pro", "password": hash_password("x"),
+            "name": "Pro Owner",
+            "enterprise_id": ent_id,
+        })
+        await db.enterprises.insert_one({
+            "id": ent_id, "name": "Northgate Advisory",
+            "owner_user_id": pro_uid, "partner_id": partner_uid,
+        })
+        tok = create_token(pro_uid, "pro")
+        try:
+            async with await _client() as c:
+                r = await c.post("/api/feedback",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"type": "recommendation", "title": "pro w/ ent"})
+                fid = r.json()["id"]
+                row = await db.feedback_items.find_one({"id": fid})
+                assert row["enterprise_id"] == ent_id
+                assert row["enterprise_name"] == "Northgate Advisory"
+                assert row["partner_id"] == partner_uid
+                assert row["partner_name"] == "MegaPartner"
+        finally:
+            for u in (partner_uid, pro_uid):
+                await db.users.delete_one({"id": u})
+                await db.feedback_items.delete_many({"submitter_user_id": u})
+            await db.enterprises.delete_one({"id": ent_id})
+    _run(_t())
+
+
+def test_context_resolves_via_client_company():
+    """A client submitting from within a company should get the company's
+    managing-pro's enterprise attached to the feedback item."""
+    async def _t():
+        partner_uid = str(uuid.uuid4())
+        pro_uid = str(uuid.uuid4())
+        client_uid = str(uuid.uuid4())
+        ent_id = str(uuid.uuid4())
+        cid = str(uuid.uuid4())
+
+        await db.users.insert_one({
+            "id": partner_uid, "email": f"pt_{partner_uid[:6]}@example.com",
+            "role": "partner", "password": hash_password("x"),
+            "branding": {"firm_name": "GammaPartner"},
+        })
+        await db.users.insert_one({
+            "id": pro_uid, "email": f"pro_{pro_uid[:6]}@example.com",
+            "role": "pro", "password": hash_password("x"),
+            "enterprise_id": ent_id,
+        })
+        await db.users.insert_one({
+            "id": client_uid, "email": f"cl_{client_uid[:6]}@example.com",
+            "role": "client", "password": hash_password("x"),
+        })
+        await db.enterprises.insert_one({
+            "id": ent_id, "name": "Delta Advisory",
+            "owner_user_id": pro_uid, "partner_id": partner_uid,
+        })
+        await db.companies.insert_one({
+            "id": cid, "name": "Client Co", "owner_user_id": client_uid,
+            "pro_user_id": pro_uid,
+        })
+        tok = create_token(client_uid, "client")
+        try:
+            async with await _client() as c:
+                r = await c.post("/api/feedback",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"type": "bug", "title": "client w/ mgr", "company_id": cid})
+                fid = r.json()["id"]
+                row = await db.feedback_items.find_one({"id": fid})
+                assert row["company_name"] == "Client Co"
+                assert row["enterprise_id"] == ent_id
+                assert row["enterprise_name"] == "Delta Advisory"
+                assert row["partner_id"] == partner_uid
+                assert row["partner_name"] == "GammaPartner"
+        finally:
+            for u in (partner_uid, pro_uid, client_uid):
+                await db.users.delete_one({"id": u})
+                await db.feedback_items.delete_many({"submitter_user_id": u})
+            await db.enterprises.delete_one({"id": ent_id})
+            await db.companies.delete_one({"id": cid})
+    _run(_t())
+
+
+def test_context_no_partner_no_enterprise():
+    """A bare client with no company context should have null partner / enterprise."""
+    async def _t():
+        uid, tok = await _mk_user("client")
+        try:
+            async with await _client() as c:
+                r = await c.post("/api/feedback",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"type": "bug", "title": "orphan client"})
+                fid = r.json()["id"]
+                row = await db.feedback_items.find_one({"id": fid})
+                assert row["partner_id"] is None
+                assert row["enterprise_id"] is None
+        finally:
+            await _wipe_users_and_feedback([uid])
+    _run(_t())

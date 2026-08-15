@@ -54,6 +54,71 @@ def _scrub(row: dict) -> dict:
     return row
 
 
+async def _resolve_context(user: dict, company: Optional[dict]) -> dict:
+    """Best-effort partner + enterprise attribution for a feedback item.
+
+    Resolution priority:
+      Partner:
+        1. `user.role == "partner"` → user is the partner
+        2. `user.partner_id` (fast-path stamp)
+        3. `company.partner_id` (companies partners provision are stamped)
+        4. `enterprise.partner_id` (if we resolve an enterprise below)
+      Enterprise:
+        1. `user.enterprise_id` (pros owned by an enterprise)
+        2. Managing pro of the reporter's company (`company.pro_user_id.enterprise_id`)
+
+    Never raises — a lookup failure just returns None for that slot.
+    """
+    partner_id = partner_name = None
+    enterprise_id = enterprise_name = None
+
+    def _brand(u: dict) -> str:
+        return (
+            ((u or {}).get("branding") or {}).get("firm_name")
+            or (u or {}).get("firm_name")
+            or (u or {}).get("name")
+            or (u or {}).get("email")
+            or "Partner"
+        )
+
+    # ----- Partner -----
+    if user.get("role") == "partner":
+        partner_id = user["id"]
+        partner_name = _brand(user)
+    else:
+        pid = user.get("partner_id") or (company or {}).get("partner_id")
+        if pid:
+            p = await db.users.find_one({"id": pid, "role": "partner"})
+            if p:
+                partner_id, partner_name = p["id"], _brand(p)
+
+    # ----- Enterprise -----
+    eid = user.get("enterprise_id")
+    if not eid and company:
+        pro_uid = company.get("pro_user_id")
+        if pro_uid:
+            pro = await db.users.find_one({"id": pro_uid})
+            if pro:
+                eid = pro.get("enterprise_id")
+    if eid:
+        ent = await db.enterprises.find_one({"id": eid})
+        if ent:
+            enterprise_id = ent["id"]
+            enterprise_name = ent.get("name")
+            # Enterprise's partner is our last fallback for partner attribution
+            if not partner_id and ent.get("partner_id"):
+                p = await db.users.find_one({"id": ent["partner_id"], "role": "partner"})
+                if p:
+                    partner_id, partner_name = p["id"], _brand(p)
+
+    return {
+        "partner_id": partner_id,
+        "partner_name": partner_name,
+        "enterprise_id": enterprise_id,
+        "enterprise_name": enterprise_name,
+    }
+
+
 async def _notify_superadmins(item: dict, submitter: dict) -> None:
     """Fire a branded email to every superadmin. Never raises — a failed
     email must not block the submission itself."""
@@ -74,6 +139,8 @@ async def _notify_superadmins(item: dict, submitter: dict) -> None:
             submitter_role=submitter.get("role") or "",
             route=item.get("route") or "",
             company_name=item.get("company_name") or "",
+            partner_name=item.get("partner_name") or "",
+            enterprise_name=item.get("enterprise_name") or "",
             inbox_url=f"{public_base_url()}/admin/feedback",
         )
         for admin in admins:
@@ -101,12 +168,15 @@ async def create_feedback(inp: FeedbackCreate, user: dict = Depends(get_current_
 
     now = now_iso()
 
-    # Resolve current company name for context (best-effort)
+    # Resolve company + partner + enterprise context for triage
+    company = None
     company_name = None
     if inp.company_id:
-        c = await db.companies.find_one({"id": inp.company_id}, {"name": 1})
-        if c:
-            company_name = c.get("name")
+        company = await db.companies.find_one({"id": inp.company_id})
+        if company:
+            company_name = company.get("name")
+
+    ctx = await _resolve_context(user, company)
 
     item = {
         "id": str(uuid.uuid4()),
@@ -120,6 +190,10 @@ async def create_feedback(inp: FeedbackCreate, user: dict = Depends(get_current_
         "submitter_role": user.get("role"),
         "company_id": inp.company_id,
         "company_name": company_name,
+        "partner_id": ctx["partner_id"],
+        "partner_name": ctx["partner_name"],
+        "enterprise_id": ctx["enterprise_id"],
+        "enterprise_name": ctx["enterprise_name"],
         "route": (inp.route or "").strip() or None,
         "user_agent": (inp.user_agent or "").strip() or None,
         "admin_notes": [],  # append-only journal, [{author_id, author_name, note, at}]
