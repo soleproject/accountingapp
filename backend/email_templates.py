@@ -986,6 +986,8 @@ def feedback_new_submission(
     submitter_role: str,
     route: str,
     company_name: str,
+    partner_name: str = "",
+    enterprise_name: str = "",
     inbox_url: str,
 ) -> tuple[str, str]:
     is_bug = fb_type == "bug"
@@ -994,12 +996,15 @@ def feedback_new_submission(
     accent = "#dc2626" if is_bug else "#0891b2"
 
     ctx_rows = ""
-    for k, v in [
+    context_pairs = [
         ("From", f"{submitter_name} &lt;{submitter_email}&gt;"),
         ("Role", submitter_role or "—"),
+        ("Partner", partner_name or "—"),
+        ("Enterprise", enterprise_name or "—"),
         ("Company", company_name or "—"),
         ("Page", route or "—"),
-    ]:
+    ]
+    for k, v in context_pairs:
         ctx_rows += (
             f'<tr><td style="{_TABLE_KEY}">{escape(k)}</td>'
             f'<td style="{_TABLE_VAL}">{v}</td></tr>'

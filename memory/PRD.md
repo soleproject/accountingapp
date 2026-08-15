@@ -4810,3 +4810,38 @@ Verified end-to-end via Playwright:
 - `admin@axiom.ai` opened `/admin/feedback` → both tickets visible with status counts → detail pane showed reporter, company, route, UA → flipped status to `In progress` → posted admin note "Assigned to eng team". Note surfaced in submitter's `/feedback/mine` immediately.
 - `communications` collection confirms `[Bug] Playwright bug …` emails delivered to real superadmins (`michael@bigsaas.ai`, `admin@axiom.ai`).
 
+
+
+### Feb 2026 — Feedback: Partner + Enterprise attribution
+
+Every feedback item + notification email now carries the Partner and/or Enterprise that the submitter belongs to, so a superadmin triaging in `/admin/feedback` can immediately tell whether a bug is coming out of Northgate Advisory's client base or a bare-metal SmartBooks user.
+
+**Backend** (`routes/feedback.py::_resolve_context`):
+Resolution priority — never raises, gracefully returns `None` if unresolvable:
+- **Partner**:
+  1. `user.role == "partner"` → self
+  2. `user.partner_id` (fast-path stamp on user doc)
+  3. `company.partner_id` (companies partners provision are stamped)
+  4. `enterprise.partner_id` (fallback via the enterprise we resolve below)
+- **Enterprise**:
+  1. `user.enterprise_id` (pros owned by an enterprise)
+  2. `company.pro_user_id.enterprise_id` — walks from the reporter's active company to its managing pro, so a **Client** submitting a bug still gets attributed to the Pro's Enterprise / Partner.
+
+Persisted alongside every feedback item: `partner_id`, `partner_name`, `enterprise_id`, `enterprise_name` (denormalized so counts + list previews don't need lookups).
+
+**Email** (`email_templates.py::feedback_new_submission`):
+- Added `Partner` and `Enterprise` rows to the context table (between Role and Company) — dashes render when unresolved.
+- Kept the icon + accent color + CTA button, so existing look holds.
+
+**Frontend** (`pages/AdminFeedback.jsx`):
+- List preview: partner (fuchsia) and enterprise (indigo) chips render under each row's timestamp, so triage is scannable without opening the ticket.
+- Detail pane: dedicated Partner + Enterprise cells (with chip styling) sit next to Company in the context grid.
+
+**Tests** (`tests/test_feedback.py`, 4 new cases → 13 total, all green):
+- Partner-role user attributes to themself and uses their `branding.firm_name`.
+- Pro user with `enterprise_id` set → enterprise + partner attribution walks to `enterprise.partner_id`.
+- Client submitting via `company_id` → company's managing pro's `enterprise_id` + partner cascade fills in both slots.
+- Bare client with no company context → both slots stay `None` (no false attribution).
+
+Verified end-to-end via Playwright: `pro@axiom.ai` submitted a bug → admin inbox row surfaces the "Northgate Advisory" indigo chip; detail pane shows `Enterprise: Northgate Advisory`; the outbound email HTML includes both the Partner and Enterprise context rows.
+
