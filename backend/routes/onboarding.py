@@ -798,6 +798,146 @@ async def onboarding_plaid_items(cid: str, user: dict = Depends(get_current_user
     return {"accounts": out}
 
 
+# ─── (Feb 2026) Per-item "Download from" editable field ───────────────
+#
+# Purpose: let clients change the transaction-history cutoff on an
+# already-linked Plaid item WITHOUT disconnecting + reconnecting.
+#
+# Two behaviors depending on direction of change (enforced by the
+# frontend via a confirm-dialog, plus a defense-in-depth flag on the
+# response for tooling / audit purposes):
+#
+#   * Making the date LATER (want less clutter): just update the
+#     field. Already-imported transactions are NOT deleted (they may
+#     be reconciled / categorized / matched already). The response
+#     `already_imported_older_count` tells the UI how many old rows
+#     the change WILL orphan so it can show a helpful "we'll keep
+#     the {N} you already have but won't pull anything older" note.
+#
+#   * Making the date EARLIER (want more history): update the field.
+#     The next Plaid sync will only pull NEW transactions after
+#     Plaid's cursor, though — Plaid doesn't rewind for a
+#     `days_requested` bump. A future "backfill" endpoint will
+#     handle re-pulling the gap. For now the UI just tells the user
+#     that.
+
+
+class PlaidItemUpdateIn(BaseModel):
+    import_start_date: str | None = None  # ISO YYYY-MM-DD, or null to clear
+
+
+def _safe_import_date(iso: str | None) -> str | None:
+    """Validate + clamp a client-supplied ISO date. Same-origin: we
+    only accept dates within Plaid's 24-month window and never a
+    future date. Anything else → None (treated as "no cutoff")."""
+    if not iso:
+        return None
+    try:
+        d = date.fromisoformat(iso)
+    except (TypeError, ValueError):
+        return None
+    today = date.today()
+    if d > today:
+        return None  # can't set a future cutoff
+    max_lookback = today - timedelta(days=730)
+    if d < max_lookback:
+        # Silently clamp instead of rejecting — the frontend already
+        # capped the picker; this is defense-in-depth.
+        return max_lookback.isoformat()
+    return d.isoformat()
+
+
+@router.get("/companies/{cid}/plaid/items")
+async def list_plaid_items(cid: str, user: dict = Depends(get_current_user)):
+    """List Plaid Items (institutions) with their editable settings.
+    Shape is intentionally different from the accounts-focused
+    onboarding endpoint above: one row per institution/item, showing
+    the cutoff + account count so the settings page can render a
+    compact per-connection list."""
+    await require_company(user, cid)
+    items = await db.plaid_items.find({"company_id": cid}).to_list(50)
+    out: list[dict] = []
+    for it in items:
+        out.append({
+            "item_id": it.get("item_id"),
+            "institution_name": it.get("institution_name") or "Bank",
+            "import_start_date": it.get("import_start_date"),
+            "account_count": len(it.get("accounts") or []),
+            "created_at": it.get("created_at"),
+            "updated_at": it.get("updated_at"),
+        })
+    # Newest first — most recently linked institution at the top so
+    # the client can find what they just added.
+    out.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    return {"items": out}
+
+
+@router.patch("/companies/{cid}/plaid/items/{item_id}")
+async def update_plaid_item(cid: str, item_id: str,
+                             body: PlaidItemUpdateIn,
+                             user: dict = Depends(get_current_user)):
+    """Update the "Download from" cutoff on a Plaid item.
+
+    Returns:
+      * `import_start_date` — the value now persisted
+      * `direction` — "earlier" | "later" | "unchanged", compared to
+        the previous value (or "set" if there was no prior value)
+      * `already_imported_older_count` — for "later" moves, how many
+        already-in-Mongo transactions predate the new cutoff. Lets
+        the UI surface an accurate "we'll keep the 47 you already
+        have but won't pull anything older" note.
+    """
+    await require_company(user, cid)
+    item = await db.plaid_items.find_one(
+        {"company_id": cid, "item_id": item_id},
+    )
+    if not item:
+        raise HTTPException(404, "Plaid item not found")
+    prev = item.get("import_start_date")
+    new = _safe_import_date(body.import_start_date)
+
+    if prev == new:
+        direction = "unchanged"
+    elif not prev and new:
+        direction = "set"
+    elif prev and not new:
+        direction = "cleared"  # "Everything Plaid offers" now
+    else:
+        direction = "later" if new > prev else "earlier"
+
+    older_count = 0
+    # Compute the "we'll keep the {N} you already have" count whenever
+    # the change installs a cutoff that could orphan old transactions —
+    # that includes "set" (was None, now has a date), and "later" (bumped
+    # forward). Not needed for "earlier" (nothing gets orphaned) or
+    # "cleared" (removing the cutoff includes MORE, not less).
+    if new and direction in ("set", "later"):
+        account_ids = [a.get("account_id") for a in (item.get("accounts") or [])
+                        if a.get("account_id")]
+        if account_ids:
+            older_count = await db.transactions.count_documents({
+                "company_id": cid,
+                "plaid_account_id": {"$in": account_ids},
+                "date": {"$lt": new},
+            })
+
+    await db.plaid_items.update_one(
+        {"company_id": cid, "item_id": item_id},
+        {"$set": {
+            "import_start_date": new,
+            "updated_at": now_iso(),
+        }},
+    )
+    return {
+        "item_id": item_id,
+        "import_start_date": new,
+        "previous_import_start_date": prev,
+        "direction": direction,
+        "already_imported_older_count": older_count,
+    }
+
+
+
 @router.post("/companies/{cid}/onboarding/plaid/import")
 async def plaid_import(cid: str, payload: dict, user: dict = Depends(get_current_user)):
     """Import transactions for the selected Plaid account IDs.

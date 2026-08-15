@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import PlaidLinkButton from "@/components/PlaidLinkButton";
 import PlaidBackfillButton from "@/components/PlaidBackfillButton";
+import PlaidItemStartDateEditor from "@/components/PlaidItemStartDateEditor";
 import StatementsTab from "@/components/StatementsTab";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
@@ -208,6 +209,12 @@ export default function Connections() {
         <SyncHistoryPanel companyId={currentId} refreshKey={activeJob?.status} />
 
         <PlaidLinkButton companyId={currentId} onSuccess={onLinked} />
+
+        {/* Per-item editable "Download from" cutoff. Renders one row
+            per linked institution with an inline date input. Feb 2026 —
+            lets clients change the transaction-history cutoff without
+            disconnecting + reconnecting. */}
+        <PlaidItemStartDateEditor companyId={currentId} />
 
         {accounts.length > 0 && (
           <>
