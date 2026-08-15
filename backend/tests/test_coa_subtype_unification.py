@@ -1,0 +1,155 @@
+"""Chart of Accounts sub-type unification (Feb 2026).
+
+Regression tests for the "changed the sub-type but the account didn't
+move" bug. The Chart of Accounts UI groups accounts by `detail_type`,
+NOT by `subtype`, so a PATCH that only sends `subtype` used to no-op
+visually.
+
+These tests exercise the safety net we added in `update_account` that
+mirrors `subtype -> detail_type` when the caller didn't provide one.
+"""
+from __future__ import annotations
+
+import sys
+import uuid
+
+sys.path.insert(0, "/app/backend")
+
+from server import app  # noqa: E402
+from db import db  # noqa: E402
+from auth import create_token, hash_password  # noqa: E402
+from tests._shared_loop import run as _run  # noqa: E402
+
+
+async def _client():
+    from httpx import AsyncClient, ASGITransport
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+async def _mk_env(role: str = "client"):
+    """Create a user and a company owned by them. Returns (user_id, token, cid)."""
+    uid = str(uuid.uuid4())
+    cid = str(uuid.uuid4())
+    await db.users.insert_one({
+        "id": uid, "email": f"coa_{uid[:6]}@example.com",
+        "password": hash_password("x"), "role": role,
+    })
+    await db.companies.insert_one({
+        "id": cid, "name": "CoA Test Co", "owner_user_id": uid,
+        "reporting_basis": "accrual",
+    })
+    # Membership required by require_company
+    await db.memberships.insert_one({
+        "company_id": cid, "user_id": uid, "role": "owner",
+    })
+    return uid, create_token(uid, role), cid
+
+
+async def _cleanup(uid: str, cid: str):
+    await db.accounts.delete_many({"company_id": cid})
+    await db.memberships.delete_many({"company_id": cid})
+    await db.companies.delete_one({"id": cid})
+    await db.users.delete_one({"id": uid})
+
+
+def test_subtype_patch_mirrors_to_detail_type():
+    """A PATCH sending only `subtype` (legacy client) must also flip
+    `detail_type` on the row — otherwise the account wouldn't visually
+    move to the new section."""
+    async def _t():
+        uid, tok, cid = await _mk_env()
+        try:
+            # Seed an expense account currently living in the COGS
+            # section (this mirrors the user's real bug: they moved an
+            # expense into COGS by mistake and need to move it back).
+            aid = str(uuid.uuid4())
+            await db.accounts.insert_one({
+                "id": aid, "company_id": cid, "code": "5100",
+                "name": "Client Meals", "type": "expense",
+                "subtype": "cost_of_sales",
+                "detail_type": "cost_of_goods_sold",
+            })
+            async with await _client() as c:
+                # Legacy-client PATCH: only sends subtype, no detail_type
+                r = await c.patch(
+                    f"/api/companies/{cid}/accounts/{aid}",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={
+                        "code": "5100", "name": "Client Meals",
+                        "type": "expense", "subtype": "other_expense",
+                    },
+                )
+                assert r.status_code == 200, r.text
+            fresh = await db.accounts.find_one({"id": aid})
+            assert fresh["subtype"] == "other_expense"
+            # The safety net copied subtype -> detail_type so the CoA
+            # renderer now puts the account in the "Other Expense"
+            # section instead of leaving it stuck in COGS.
+            assert fresh["detail_type"] == "other_expense"
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_explicit_detail_type_wins():
+    """When the modern client sends BOTH subtype and detail_type, we
+    respect what they sent — no clobbering."""
+    async def _t():
+        uid, tok, cid = await _mk_env()
+        try:
+            aid = str(uuid.uuid4())
+            await db.accounts.insert_one({
+                "id": aid, "company_id": cid, "code": "5100",
+                "name": "Bank Fees", "type": "expense",
+                "subtype": "operating_expense",
+                "detail_type": "operating_expense",
+            })
+            async with await _client() as c:
+                r = await c.patch(
+                    f"/api/companies/{cid}/accounts/{aid}",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={
+                        "code": "5100", "name": "Bank Fees",
+                        "type": "expense",
+                        "subtype": "payment_processing_fee",
+                        "detail_type": "payment_processing_fee",
+                    },
+                )
+                assert r.status_code == 200
+            fresh = await db.accounts.find_one({"id": aid})
+            assert fresh["subtype"] == "payment_processing_fee"
+            assert fresh["detail_type"] == "payment_processing_fee"
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_edit_without_subtype_leaves_detail_type_intact():
+    """A PATCH that doesn't touch subtype at all must NOT clobber the
+    existing detail_type — e.g. renaming an account or changing its
+    code shouldn't reset which section it lives in."""
+    async def _t():
+        uid, tok, cid = await _mk_env()
+        try:
+            aid = str(uuid.uuid4())
+            await db.accounts.insert_one({
+                "id": aid, "company_id": cid, "code": "1000",
+                "name": "AmEx Gold", "type": "asset",
+                "subtype": "current_asset",
+                "detail_type": "cash_and_bank",
+            })
+            async with await _client() as c:
+                r = await c.patch(
+                    f"/api/companies/{cid}/accounts/{aid}",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"name": "AmEx Gold Card (1009)"},
+                )
+                assert r.status_code == 200
+            fresh = await db.accounts.find_one({"id": aid})
+            assert fresh["name"] == "AmEx Gold Card (1009)"
+            # No subtype in payload → detail_type stays put
+            assert fresh["detail_type"] == "cash_and_bank"
+            assert fresh["subtype"] == "current_asset"
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())

@@ -4963,3 +4963,34 @@ Verified end-to-end via Playwright:
 - Admin posted a reporter-visible reply → client's profile-menu badge showed `1` on next poll.
 - `/feedback/mine` painted the affected row with the red dot + rose ring, and the status pills + "New replies (1)" filter behaved as expected. Revisiting cleared the badge.
 
+
+
+### Feb 2026 — Chart of Accounts: Sub-Type Unification (Option B)
+
+Fixes a long-standing user-visible bug: reclassifying an account by changing its sub-type (e.g. "Operating Expense" → "Other Expense", or moving an account accidentally saved under COGS back to Operating Expense) appeared to save cleanly but the account never moved to the new section. Reported first by the Cliffs at Indian Point Condo Owners Association user via CypherPro.
+
+**Root cause**: the accounts table carried three parallel classification fields — `type`, `subtype`, and `detail_type` — but the Edit dropdown only wrote `type` + `subtype`, while the Chart of Accounts renderer grouped rows by `detail_type`. The `SUBTYPES_BY_TYPE` list in the frontend and `DETAIL_SECTIONS_BY_TYPE` used by the renderer had **divergent keys** (`cost_of_sales` in the dropdown vs `cost_of_goods_sold` on the renderer — those never matched). For Asset / Liability / Income / Equity the two lists happened to overlap enough that changes appeared to work; for Expense/COGS they diverged sharply.
+
+**Fix — one taxonomy, one source of truth**:
+
+**Frontend** (`pages/ChartOfAccounts.jsx`):
+- `subtypesFor(type)` now derives from `DETAIL_SECTIONS_BY_TYPE` — the exact keys the renderer groups by. The dropdown is now WYSIWYG: pick "Other Expense", account jumps to the "Other Expense" section immediately.
+- The Edit-row PATCH now sends `subtype` AND `detail_type` mirrored. `subtype` stays populated for the one legacy consumer (`reports.py`'s fixed-asset check on the Balance Sheet). Cleanest possible migration — no data reshaping needed on existing accounts.
+- Old `SUBTYPES_BY_TYPE` constant left in the file as a reference-only comment block so anyone reading git blame sees the previous divergent list.
+
+**Backend safety net** (`routes/accounts.py::update_account`):
+- If a PATCH sends `subtype` without `detail_type` (older clients, direct API callers), the handler automatically mirrors `subtype → detail_type`. Only fires when subtype was in the payload, so unrelated edits (name change, code change) don't clobber an existing detail_type.
+
+**Audit of `subtype` consumers before shipping**:
+- `reports.py` — one reference, `subtype == "fixed_asset"` check in Balance Sheet. Preserved.
+- All other backend files reference `subtype` only in write paths (seed scripts, model definitions, mapper output) — no side-effects.
+
+**Tests** (`tests/test_coa_subtype_unification.py`, 3 new cases):
+- Legacy-client PATCH sending only `subtype` mirrors to `detail_type` — the exact user-reported COGS → Other Expense bug now works.
+- Modern-client PATCH sending explicit `detail_type` wins — no mirror clobbering.
+- Un-related edit (rename/code change) leaves `detail_type` intact — no side-effect regressions.
+
+Verified end-to-end via Playwright — CoA renders sections cleanly under detail_type-keyed headers ("Cash and Bank", "Money in Transit", "Cost of Goods Sold", "Operating Expense", "Other Expense" as applicable).
+
+The Cliffs user can now retry their reclassification and it should stick. No one-off migration script needed — the fix is fully self-healing on the next edit.
+

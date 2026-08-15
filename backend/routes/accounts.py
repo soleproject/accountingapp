@@ -770,6 +770,16 @@ async def update_account(cid: str, aid: str, payload: dict, user: dict = Depends
             if child_count:
                 raise HTTPException(400, "This account has sub-accounts of its own — flatten them before nesting.")
     payload["updated_at"] = now_iso()
+    # Sub-type unification safety net (Feb 2026) — if a caller sends
+    # `subtype` without a matching `detail_type`, mirror it. The Chart
+    # of Accounts renders by `detail_type`, so a subtype-only PATCH used
+    # to silently no-op visually (the account stayed in its old section
+    # forever). Only trip when the payload actually included subtype so
+    # we don't clobber an existing detail_type on unrelated edits.
+    if "subtype" in payload and "detail_type" not in payload:
+        st = (payload.get("subtype") or "").strip()
+        if st:
+            payload["detail_type"] = st
     before_acct = await db.accounts.find_one({"id": aid, "company_id": cid})
     await db.accounts.update_one({"id": aid, "company_id": cid}, {"$set": payload})
     # Auto-update on QBO if this account was already mirrored.
