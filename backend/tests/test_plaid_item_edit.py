@@ -221,3 +221,106 @@ def test_patch_returns_404_for_wrong_company():
         finally:
             await _wipe(uid, cid)
     _run(_t())
+
+
+def test_earlier_move_auto_enqueues_reset_resync_job():
+    """When the user extends the cutoff EARLIER, the PATCH handler
+    should auto-enqueue a `plaid_reset_resync` job so the historical
+    gap gets backfilled without the user needing to click a second
+    button."""
+    async def _t():
+        from unittest.mock import patch as _patch, AsyncMock
+        uid, cid, item_id = await _mk_setup()
+        try:
+            # Prime with a "later" cutoff — 10 days ago.
+            today = date.today()
+            prev = (today - timedelta(days=10)).isoformat()
+            await db.plaid_items.update_one(
+                {"company_id": cid, "item_id": item_id},
+                {"$set": {"import_start_date": prev}},
+            )
+
+            with _patch("job_queue.enqueue_job",
+                         new_callable=AsyncMock) as enqueue_mock:
+                enqueue_mock.return_value = "job-xyz"
+
+                tok = create_token(uid, "pro")
+                async with await _client() as c:
+                    # Move it EARLIER — 90 days ago.
+                    newer = (today - timedelta(days=90)).isoformat()
+                    r = await c.patch(
+                        f"/api/companies/{cid}/plaid/items/{item_id}",
+                        json={"import_start_date": newer},
+                        headers={"Authorization": f"Bearer {tok}"},
+                    )
+                    assert r.status_code == 200, r.text
+                    j = r.json()
+                    assert j["direction"] == "earlier"
+                    assert j["backfill_job_id"] == "job-xyz"
+
+                # Verify enqueue_job was called with the right task name.
+                assert enqueue_mock.await_count == 1
+                args = enqueue_mock.await_args
+                assert args.args[0] == "plaid_reset_resync"
+                assert args.args[1] == cid
+        finally:
+            await _wipe(uid, cid)
+    _run(_t())
+
+
+def test_later_move_does_NOT_auto_enqueue_backfill():
+    """Later moves and set-from-none don't need a backfill (no older
+    data to pull) — the PATCH should skip the enqueue."""
+    async def _t():
+        from unittest.mock import patch as _patch, AsyncMock
+        uid, cid, item_id = await _mk_setup()
+        try:
+            with _patch("job_queue.enqueue_job",
+                         new_callable=AsyncMock) as enqueue_mock:
+                tok = create_token(uid, "pro")
+                cutoff = (date.today() - timedelta(days=10)).isoformat()
+                async with await _client() as c:
+                    r = await c.patch(
+                        f"/api/companies/{cid}/plaid/items/{item_id}",
+                        json={"import_start_date": cutoff},
+                        headers={"Authorization": f"Bearer {tok}"},
+                    )
+                    assert r.status_code == 200
+                    assert r.json()["direction"] == "set"
+                    assert r.json()["backfill_job_id"] is None
+                assert enqueue_mock.await_count == 0
+        finally:
+            await _wipe(uid, cid)
+    _run(_t())
+
+
+def test_cleared_move_auto_enqueues_backfill():
+    """Removing the cutoff entirely ('everything Plaid offers') is
+    equivalent to extending the range to max — auto-enqueue the
+    backfill so the historical gap is pulled without a manual click."""
+    async def _t():
+        from unittest.mock import patch as _patch, AsyncMock
+        uid, cid, item_id = await _mk_setup()
+        try:
+            # Prime with a cutoff.
+            await db.plaid_items.update_one(
+                {"company_id": cid, "item_id": item_id},
+                {"$set": {"import_start_date": "2026-01-01"}},
+            )
+            with _patch("job_queue.enqueue_job",
+                         new_callable=AsyncMock) as enqueue_mock:
+                enqueue_mock.return_value = "cleared-job"
+                tok = create_token(uid, "pro")
+                async with await _client() as c:
+                    r = await c.patch(
+                        f"/api/companies/{cid}/plaid/items/{item_id}",
+                        json={"import_start_date": None},
+                        headers={"Authorization": f"Bearer {tok}"},
+                    )
+                    assert r.status_code == 200
+                    assert r.json()["direction"] == "cleared"
+                    assert r.json()["backfill_job_id"] == "cleared-job"
+                assert enqueue_mock.await_count == 1
+        finally:
+            await _wipe(uid, cid)
+    _run(_t())
