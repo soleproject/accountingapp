@@ -2007,6 +2007,85 @@ async def enterprises_report(user: dict = Depends(require_role("superadmin"))):
     return {"rows": out}
 
 
+# --------------------------------------------------------------------------
+# Batch Chart-of-Accounts sub-type drift summary (Feb 2026)
+#
+# Powers the amber/red warning badges on the Superadmin companies lists.
+# Rather than the frontend firing a per-company /subtype-audit request
+# (would light up Mongo for large tenants), we walk `accounts` once and
+# aggregate by company_id. Same classification rules as
+# `routes.accounts.subtype_drift_audit` — kept in sync via the shared
+# `_CANONICAL_KEYS_BY_TYPE` constant.
+# --------------------------------------------------------------------------
+
+@router.get("/admin/coa-drift-summary")
+async def admin_coa_drift_summary(user: dict = Depends(require_role("superadmin"))):
+    """Return per-company drift counts across the whole platform.
+
+    Response shape::
+        {"summary": {
+            "<company_id>": {
+                "missing_detail_type": int,
+                "drifted": int,
+                "legacy_only_subtype": int,
+                "severity": "red" | "amber" | null
+            }
+        }}
+
+    `severity` is a convenience field so the UI doesn't have to
+    duplicate the "red beats amber" rule:
+      • red   → drifted > 0
+      • amber → missing_detail_type > 0
+      • null  → neither (nothing to show)
+    Companies with zero drift are omitted from the map to keep the
+    payload small — the UI treats missing keys as "clean".
+    """
+    from routes.accounts import _CANONICAL_KEYS_BY_TYPE
+
+    summary: dict[str, dict[str, Any]] = {}
+    # Single scan across the full accounts collection. Only active rows
+    # participate in the audit (matches the per-company endpoint).
+    async for a in db.accounts.find(
+        {"active": {"$ne": False}},
+        {"_id": 0, "company_id": 1, "type": 1, "subtype": 1, "detail_type": 1},
+    ):
+        cid = a.get("company_id")
+        if not cid:
+            continue
+        t = (a.get("type") or "").lower()
+        st = (a.get("subtype") or "").strip()
+        dt = (a.get("detail_type") or "").strip()
+        canon = _CANONICAL_KEYS_BY_TYPE.get(t, set())
+        bucket = summary.setdefault(cid, {
+            "missing_detail_type": 0,
+            "drifted": 0,
+            "legacy_only_subtype": 0,
+        })
+        if not dt:
+            bucket["missing_detail_type"] += 1
+            continue
+        if st and st not in canon and dt in canon:
+            bucket["legacy_only_subtype"] += 1
+            continue
+        if st and dt and st != dt:
+            bucket["drifted"] += 1
+            continue
+
+    # Attach severity and prune clean companies so the payload only
+    # carries actionable rows.
+    out: dict[str, dict[str, Any]] = {}
+    for cid, b in summary.items():
+        if b["drifted"] > 0:
+            severity = "red"
+        elif b["missing_detail_type"] > 0:
+            severity = "amber"
+        else:
+            severity = None
+        if severity is None:
+            continue
+        out[cid] = {**b, "severity": severity}
+    return {"summary": out}
+
 
 # ----------------------- Enterprise consolidated billing (Phase D) -----
 

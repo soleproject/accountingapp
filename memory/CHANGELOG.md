@@ -1,5 +1,32 @@
 # SmartBooks — Changelog
 
+## 2026-02-25 — Drift Audit UI (Chart of Accounts sub-type drift banners + Superadmin badges)
+
+### 🎯 New
+Surface the read-only `/subtype-audit` endpoint output as actionable UI:
+- **Chart of Accounts page**: amber banner when accounts are missing a Wave-style `detail_type`; red banner when `subtype` and `detail_type` disagree (true drift). Both banners are hidden when there's nothing to report so clean books look clean.
+- **Superadmin-only diagnostics chip** on the CoA banner exposing every count (Total, Canonical, Legacy-only, Missing detail, Drifted) plus a bounded sample of drifted rows so ops can eyeball fixes before running Backfill.
+- **Superadmin companies lists**: warning badges on both the flat Companies table and the nested Enterprises → Clients → Companies report — amber "Missing N" or red "Drift N" pills so ops can spot problem tenants at a glance.
+
+### ✅ Changes
+- **`routes/admin.py`** — new `GET /api/admin/coa-drift-summary` superadmin batch endpoint. One scan across `accounts` collection returns per-company `{missing_detail_type, drifted, legacy_only_subtype, severity}`. Companies with no drift are omitted to keep the payload small. Reuses `_CANONICAL_KEYS_BY_TYPE` from `routes/accounts.py` so classification stays in sync with the per-company audit endpoint.
+- **`pages/ChartOfAccounts.jsx`** — `useAuth()` role check for the Superadmin diagnostic chip. New `driftAudit` state fetched inside `load()`. Amber/red banner rendered above the existing duplicate-detector banner (severity computed client-side: red beats amber).
+- **`pages/SuperadminDash.jsx`** — new `driftMap` state fetched once from `/admin/coa-drift-summary`. Threaded into `EnterprisesReport` via prop so both the flat Companies table and the nested per-client company list render the same warning pill.
+- **`tests/test_coa_subtype_unification.py`** — two new tests: `test_admin_coa_drift_summary_batch` (asserts red beats amber, clean companies omitted, per-company counts correct) and `test_admin_coa_drift_summary_forbidden_for_non_superadmin` (RBAC guard).
+
+### 🧪 Verified E2E
+- `pytest tests/test_coa_subtype_unification.py` → 6/6 passed
+- Screenshot as Superadmin on the dashboard: amber "Missing 42" pills on Bright Beans and other companies with legacy sub-types; red "Drift 25" pill on TEST_dup.
+- Screenshot on the Chart of Accounts page for Bright Beans (missing_detail_type=42): amber banner renders correctly; Superadmin diagnostics chip expands with all 5 counts.
+
+### 🔒 Design rules honored
+- `missing_detail_type > 0`: Amber banner (user actionable)
+- `drifted > 0`: Red banner (real integrity risk — overrides amber)
+- `legacy_only_subtype > 0`: NO banner for standard users (self-healing on edit)
+- Superadmins get the diagnostic chip revealing every count including `legacy_only_subtype`
+
+---
+
 ## 2026-02-24 — Partner demo button on Login page
 
 ### 🎯 New
