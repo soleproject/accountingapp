@@ -342,6 +342,43 @@ def test_admin_coa_drift_backfill_forbidden_for_non_superadmin():
     _run(_t())
 
 
+def test_qbo_map_account_populates_detail_type():
+    """QBO Account → local shape must include a Wave-style detail_type
+    inferred from account name + subtype. Regression: QBO sync used to
+    leave detail_type blank, causing every synced company to land with
+    the amber 'N accounts missing a sub-type' banner and flat PDFs.
+    """
+    from qbo_service import map_account
+
+    checking = map_account("test-cid", "test-realm", {
+        "Id": "1", "Name": "Checking", "AccountType": "Bank",
+        "AccountSubType": "Checking", "Active": True,
+    })
+    assert checking["detail_type"] == "cash_and_bank"
+
+    ar = map_account("test-cid", "test-realm", {
+        "Id": "2", "Name": "Accounts Receivable (A/R)",
+        "AccountType": "Accounts Receivable",
+        "AccountSubType": "AccountsReceivable", "Active": True,
+    })
+    assert ar["detail_type"] == "expected_payments_from_customers"
+
+    cc = map_account("test-cid", "test-realm", {
+        "Id": "3", "Name": "Visa Credit Card",
+        "AccountType": "Credit Card",
+        "AccountSubType": "CreditCard", "Active": True,
+    })
+    # "Visa Credit Card" hits the credit-card keyword rule under
+    # liability so detail_type infers to credit_card.
+    assert cc["detail_type"] == "credit_card"
+
+    truck = map_account("test-cid", "test-realm", {
+        "Id": "4", "Name": "Truck", "AccountType": "Fixed Asset",
+        "AccountSubType": "Vehicles", "Active": True,
+    })
+    assert truck["detail_type"] == "property_plant_equipment"
+
+
 def test_new_company_seeds_detail_type_on_every_account():
     """The default CoA seed (DEFAULT_COA) must set `detail_type` to a
     frontend-canonical Wave key on every row so brand new companies

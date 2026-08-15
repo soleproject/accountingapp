@@ -235,6 +235,14 @@ frontend/node_modules/.cache/default-development/185.pack
 frontend/node_modules/.cache/default-development/187.pack
 frontend/node_modules/.cache/default-development/181.pack
 frontend/node_modules/.cache/default-development/2.pack
+
+# NOTE: DO NOT add `.env`, `.env.*`, or `*.env` here — Emergent deployment
+# requires backend/.env and frontend/.env to be committed to the repo so
+# they can be auto-updated with production URLs at deploy time. Auto-hooks
+# that re-add these patterns must be neutralized by the explicit negations
+# below.
+!backend/.env
+!frontend/.env
 .env
 .env.*
 *.env
