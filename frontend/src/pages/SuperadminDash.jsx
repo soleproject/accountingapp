@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import {
   Users, Building, Briefcase, Shield, ChevronRight, ChevronDown,
   Ticket, ExternalLink, ShieldPlus, X, Loader2, Copy, ShieldMinus,
-  AlertTriangle, RefreshCw, Wrench, DollarSign, CheckCircle2, RotateCcw,
+  AlertTriangle, AlertCircle, RefreshCw, Wrench, DollarSign, CheckCircle2, RotateCcw,
   Inbox,
 } from "lucide-react";
 import TeamPanel from "@/components/TeamPanel";
@@ -18,9 +18,18 @@ export default function SuperadminDash() {
   const [grantOpen, setGrantOpen] = useState(false);
   const [superadmins, setSuperadmins] = useState(null);
   const [ownerEmail, setOwnerEmail] = useState(null);
+  // Chart-of-Accounts drift summary — keyed by company_id. Companies
+  // with no drift are omitted from the map (severity treated as
+  // "clean" client-side) so the payload stays small.
+  const [driftMap, setDriftMap] = useState({});
   const { admin: feedbackUnread } = useFeedbackUnread({ isSuperadmin: true });
   useEffect(() => { api.get("/admin/overview").then(r => setData(r.data)); }, []);
   const refreshData = () => api.get("/admin/overview").then(r => setData(r.data));
+  useEffect(() => {
+    api.get("/admin/coa-drift-summary")
+      .then((r) => setDriftMap(r.data?.summary || {}))
+      .catch(() => setDriftMap({}));
+  }, []);
   // The Grant / Revoke surface is fenced to the platform owner (typically
   // `michael@bigsaas.ai`, configurable server-side via OWNER_SUPERADMIN_EMAIL).
   // Every other superadmin still has full panel access, they just can't
@@ -137,19 +146,45 @@ export default function SuperadminDash() {
               <tr><th className="px-3 py-2 text-left">Name</th><th className="px-3 py-2 text-left">Type</th><th className="px-3 py-2">Onboarded</th></tr>
             </thead>
             <tbody>
-              {companies.map(c => (
-                <tr key={c.id} className="border-b">
-                  <td className="px-3 py-1.5">{c.name}</td>
+              {companies.map(c => {
+                const drift = driftMap[c.id];
+                return (
+                <tr key={c.id} className="border-b" data-testid={`admin-company-row-${c.id}`}>
+                  <td className="px-3 py-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <span>{c.name}</span>
+                      {drift && (
+                        <span
+                          title={
+                            drift.severity === "red"
+                              ? `${drift.drifted} drifted sub-type${drift.drifted === 1 ? "" : "s"} — reports may miscategorize`
+                              : `${drift.missing_detail_type} account${drift.missing_detail_type === 1 ? "" : "s"} missing a sub-type`
+                          }
+                          className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] uppercase tracking-wider border font-semibold ${
+                            drift.severity === "red"
+                              ? "bg-rose-50 text-rose-700 border-rose-200"
+                              : "bg-amber-50 text-amber-700 border-amber-200"
+                          }`}
+                          data-testid={`admin-company-drift-${c.id}`}
+                        >
+                          {drift.severity === "red"
+                            ? <><AlertCircle size={9} />Drift {drift.drifted}</>
+                            : <><AlertTriangle size={9} />Missing {drift.missing_detail_type}</>}
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-3 py-1.5 text-slate-500">{c.business_type}</td>
                   <td className="px-3 py-1.5 text-center">{c.onboarding_complete ? "✓" : "—"}</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
       </div>
 
-      <EnterprisesReport />
+      <EnterprisesReport driftMap={driftMap} />
 
       <AccountingProsCard />
 
@@ -171,7 +206,7 @@ export default function SuperadminDash() {
 // clients (owner users); each client row expands to show its companies.
 // One fetch of /admin/enterprises-report powers the whole thing.
 // --------------------------------------------------------------------------
-function EnterprisesReport() {
+function EnterprisesReport({ driftMap = {} }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [openEnts, setOpenEnts] = useState({});
@@ -256,10 +291,31 @@ function EnterprisesReport() {
                               </button>
                               {clOpen && cl.companies.length > 0 && (
                                 <ul className="bg-white border-t border-slate-100 divide-y divide-slate-50">
-                                  {cl.companies.map((c) => (
+                                  {cl.companies.map((c) => {
+                                    const drift = driftMap[c.id];
+                                    return (
                                     <li key={c.id} className="px-12 py-1.5 text-[12px] flex items-center gap-2">
                                       <Building size={10} className="text-slate-400" />
                                       <span className="font-medium">{c.name}</span>
+                                      {drift && (
+                                        <span
+                                          title={
+                                            drift.severity === "red"
+                                              ? `${drift.drifted} drifted sub-type${drift.drifted === 1 ? "" : "s"}`
+                                              : `${drift.missing_detail_type} account${drift.missing_detail_type === 1 ? "" : "s"} missing a sub-type`
+                                          }
+                                          className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] uppercase tracking-wider border font-semibold ${
+                                            drift.severity === "red"
+                                              ? "bg-rose-50 text-rose-700 border-rose-200"
+                                              : "bg-amber-50 text-amber-700 border-amber-200"
+                                          }`}
+                                          data-testid={`report-company-drift-${c.id}`}
+                                        >
+                                          {drift.severity === "red"
+                                            ? <><AlertCircle size={9} />{drift.drifted}</>
+                                            : <><AlertTriangle size={9} />{drift.missing_detail_type}</>}
+                                        </span>
+                                      )}
                                       <span className="text-slate-400 text-[10px]">{c.business_type || "—"}</span>
                                       {c.billing_product && (
                                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-50 text-cyan-700 border border-cyan-200">
@@ -278,7 +334,8 @@ function EnterprisesReport() {
                                         {c.billing_state}
                                       </span>
                                     </li>
-                                  ))}
+                                    );
+                                  })}
                                 </ul>
                               )}
                             </li>

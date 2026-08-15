@@ -5043,3 +5043,19 @@ Follow-up to the Option-B sub-type unification. Addresses one downstream reader 
 
 Verified via curl against the preview instance — real `client@axiom.ai` company returned 50 accounts with a mix of states, per-type breakdown accurate.
 
+
+### Feb 25 2026 — Drift Audit UI (banners + Superadmin badges)
+
+Second half of the CoA sub-type drift work. The read-only `/subtype-audit` endpoint is now surfaced in the UI so operators actually see when drift exists:
+- **Chart of Accounts page** — amber banner for `missing_detail_type > 0`, red banner for `drifted > 0`. `legacy_only_subtype` still self-heals silently (no banner for regular users). Superadmins get a diagnostic chip exposing every count + a bounded sample of drifted rows.
+- **Superadmin Dashboard** — batch endpoint `/api/admin/coa-drift-summary` walks the whole `accounts` collection once and returns `{company_id → {counts, severity}}` for every company with any drift. Rendered as amber/red pills next to the company name in both the flat Companies table and the nested Enterprises → Clients → Companies report.
+
+**Rules**:
+- `missing_detail_type > 0` → Amber
+- `drifted > 0` → Red (overrides amber)
+- `legacy_only_subtype > 0` → nothing shown to standard users (self-healing on edit)
+
+**Tests** (6/6 green): `test_admin_coa_drift_summary_batch` (severity precedence + clean company omission) and `test_admin_coa_drift_summary_forbidden_for_non_superadmin` (RBAC).
+
+Status: **DONE**. Awaiting user verification.
+

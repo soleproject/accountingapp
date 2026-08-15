@@ -196,3 +196,78 @@ def test_subtype_audit_reports_drift_and_canonical_states():
         finally:
             await _cleanup(uid, cid)
     _run(_t())
+
+
+def test_admin_coa_drift_summary_batch():
+    """Superadmin batch endpoint should return per-company drift +
+    severity, omitting clean companies to keep the payload small."""
+    async def _t():
+        # Superadmin caller
+        sup_uid, sup_tok, sup_cid = await _mk_env(role="superadmin")
+        # Two extra companies to test the batch aggregation
+        uid_a, _, cid_a = await _mk_env()
+        uid_b, _, cid_b = await _mk_env()
+        try:
+            # cid_sup → clean (should be omitted)
+            await db.accounts.insert_one({
+                "id": "s1", "company_id": sup_cid, "name": "Cash",
+                "type": "asset", "subtype": "cash_and_bank",
+                "detail_type": "cash_and_bank", "active": True,
+            })
+            # cid_a → 2 drifted → severity=red
+            await db.accounts.insert_many([
+                {"id": "aa1", "company_id": cid_a, "name": "D1",
+                 "type": "expense", "subtype": "operating_expense",
+                 "detail_type": "other_expense", "active": True},
+                {"id": "aa2", "company_id": cid_a, "name": "D2",
+                 "type": "expense", "subtype": "payroll_expense",
+                 "detail_type": "operating_expense", "active": True},
+            ])
+            # cid_b → 3 missing detail_type → severity=amber
+            await db.accounts.insert_many([
+                {"id": "bb1", "company_id": cid_b, "name": "M1",
+                 "type": "asset", "subtype": "cash", "detail_type": "",
+                 "active": True},
+                {"id": "bb2", "company_id": cid_b, "name": "M2",
+                 "type": "asset", "subtype": "cash", "detail_type": "",
+                 "active": True},
+                {"id": "bb3", "company_id": cid_b, "name": "M3",
+                 "type": "expense", "subtype": "expense", "detail_type": "",
+                 "active": True},
+            ])
+            async with await _client() as c:
+                r = await c.get(
+                    "/api/admin/coa-drift-summary",
+                    headers={"Authorization": f"Bearer {sup_tok}"},
+                )
+                assert r.status_code == 200, r.text
+            summary = r.json()["summary"]
+            # Clean company omitted
+            assert sup_cid not in summary
+            # Red beats amber when drifted > 0
+            assert summary[cid_a]["severity"] == "red"
+            assert summary[cid_a]["drifted"] == 2
+            # Amber when only missing_detail_type
+            assert summary[cid_b]["severity"] == "amber"
+            assert summary[cid_b]["missing_detail_type"] == 3
+        finally:
+            await _cleanup(uid_a, cid_a)
+            await _cleanup(uid_b, cid_b)
+            await _cleanup(sup_uid, sup_cid)
+    _run(_t())
+
+
+def test_admin_coa_drift_summary_forbidden_for_non_superadmin():
+    """Non-superadmins get 403 (or 401) from the batch endpoint."""
+    async def _t():
+        uid, tok, cid = await _mk_env(role="client")
+        try:
+            async with await _client() as c:
+                r = await c.get(
+                    "/api/admin/coa-drift-summary",
+                    headers={"Authorization": f"Bearer {tok}"},
+                )
+                assert r.status_code in (401, 403), r.text
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())

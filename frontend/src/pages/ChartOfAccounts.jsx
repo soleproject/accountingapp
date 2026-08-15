@@ -2,8 +2,9 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, Sparkles, Loader2, Pencil, Check, X, GitMerge, AlertTriangle, GripVertical, Eye, EyeOff, Upload, Download, FileSpreadsheet, FileText, ArrowLeft, History, Undo2 } from "lucide-react";
+import { Plus, Trash2, Sparkles, Loader2, Pencil, Check, X, GitMerge, AlertTriangle, AlertCircle, Info, GripVertical, Eye, EyeOff, Upload, Download, FileSpreadsheet, FileText, ArrowLeft, History, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 
@@ -190,6 +191,8 @@ function nextCodeForType(type, accounts) {
 
 export default function ChartOfAccounts() {
   const { currentId } = useCompany();
+  const { user } = useAuth();
+  const isSuperadmin = user?.role === "superadmin";
   const [accts, setAccts] = useState([]);
   // Per-account balance map — {aid: {balance, rollup, mode}}.
   // Fetched lazily after the accounts land so an empty CoA renders fast.
@@ -225,6 +228,11 @@ export default function ChartOfAccounts() {
   // once the drop lands (or is canceled). Just the source id, kept in
   // component state so hover targets can style themselves.
   const [dragSourceId, setDragSourceId] = useState(null);
+  // Sub-type drift audit — surfaces amber/red banners so operators can
+  // spot legacy accounts that need reclassification. Fetched alongside
+  // the accounts list. Advisory only — never blocks CoA render.
+  const [driftAudit, setDriftAudit] = useState(null);
+  const [driftDetailsOpen, setDriftDetailsOpen] = useState(false);
   const load = async () => {
     if (!currentId) return;
     const r = await api.get(`/companies/${currentId}/accounts`);
@@ -241,6 +249,11 @@ export default function ChartOfAccounts() {
       const d = await api.get(`/companies/${currentId}/accounts/duplicates`);
       setDupeGroups(d.data?.groups || []);
     } catch (_) { /* duplicates are advisory */ }
+    // Sub-type drift audit — advisory banner data.
+    try {
+      const s = await api.get(`/companies/${currentId}/accounts/subtype-audit`);
+      setDriftAudit(s.data || null);
+    } catch (_) { setDriftAudit(null); }
   };
   useEffect(() => { load(); }, [currentId, basis]);
 
@@ -513,6 +526,93 @@ export default function ChartOfAccounts() {
           </button>
         </div>
       </div>
+
+      {/* Sub-type drift audit — amber/red banner so operators can spot
+          legacy accounts that need reclassification. Hidden entirely
+          when there's nothing to warn about (severity computed on the
+          client so we don't need a separate call for regular users).
+          Superadmins also see a diagnostic pill exposing every count. */}
+      {driftAudit && (driftAudit.drifted > 0 || driftAudit.missing_detail_type > 0) && (
+        <div
+          className={`rounded-xl border-2 p-3 ${
+            driftAudit.drifted > 0
+              ? "border-rose-200 bg-rose-50/60"
+              : "border-amber-200 bg-amber-50/60"
+          }`}
+          data-testid="coa-drift-banner"
+        >
+          <div className="flex items-center gap-3">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+              driftAudit.drifted > 0 ? "bg-rose-100" : "bg-amber-100"
+            }`}>
+              {driftAudit.drifted > 0
+                ? <AlertCircle size={16} className="text-rose-700" />
+                : <AlertTriangle size={16} className="text-amber-700" />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className={`text-sm font-semibold ${
+                driftAudit.drifted > 0 ? "text-rose-900" : "text-amber-900"
+              }`}>
+                {driftAudit.drifted > 0
+                  ? `${driftAudit.drifted} account${driftAudit.drifted === 1 ? "" : "s"} with sub-type drift`
+                  : `${driftAudit.missing_detail_type} account${driftAudit.missing_detail_type === 1 ? "" : "s"} missing a sub-type`}
+              </div>
+              <div className={`text-xs ${driftAudit.drifted > 0 ? "text-rose-800/80" : "text-amber-800/80"}`}>
+                {driftAudit.drifted > 0
+                  ? "Sub-type and detail-type disagree — the account may render in the wrong section on reports. Use Backfill sub-types (Shift+Click to force re-classify) or edit each account to pick the correct sub-type."
+                  : "These accounts are missing a Wave-style sub-type and will land in an unclassified bucket. Click Backfill sub-types above for a one-shot guess."}
+              </div>
+            </div>
+            {isSuperadmin && (
+              <button
+                onClick={() => setDriftDetailsOpen(o => !o)}
+                className={`shrink-0 text-xs px-3 py-1.5 rounded-md border font-medium bg-white ${
+                  driftAudit.drifted > 0
+                    ? "border-rose-300 text-rose-800 hover:bg-rose-50"
+                    : "border-amber-300 text-amber-800 hover:bg-amber-50"
+                }`}
+                data-testid="coa-drift-toggle"
+              >
+                {driftDetailsOpen ? "Hide details" : "Diagnostics"}
+              </button>
+            )}
+          </div>
+          {isSuperadmin && driftDetailsOpen && (
+            <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-xs" data-testid="coa-drift-diagnostics">
+              <div className="flex items-center gap-2 mb-2 text-slate-600">
+                <Info size={12} />
+                <span className="font-semibold uppercase tracking-widest text-[10px]">Superadmin diagnostics</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-slate-700">
+                <div><div className="text-[10px] uppercase text-slate-500">Total</div><div className="font-mono-num">{driftAudit.total}</div></div>
+                <div><div className="text-[10px] uppercase text-slate-500">Canonical</div><div className="font-mono-num text-emerald-700">{driftAudit.canonical}</div></div>
+                <div><div className="text-[10px] uppercase text-slate-500">Legacy only</div><div className="font-mono-num text-slate-600">{driftAudit.legacy_only_subtype}</div></div>
+                <div><div className="text-[10px] uppercase text-slate-500">Missing detail</div><div className="font-mono-num text-amber-700">{driftAudit.missing_detail_type}</div></div>
+                <div><div className="text-[10px] uppercase text-slate-500">Drifted</div><div className="font-mono-num text-rose-700">{driftAudit.drifted}</div></div>
+              </div>
+              {driftAudit.sample_drift && driftAudit.sample_drift.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-slate-100">
+                  <div className="text-[10px] uppercase tracking-widest text-slate-500 mb-1.5">Sample drifted accounts</div>
+                  <ul className="space-y-1">
+                    {driftAudit.sample_drift.map((s) => (
+                      <li key={s.id} className="flex items-center gap-2 text-[11px]" data-testid={`coa-drift-sample-${s.id}`}>
+                        <span className="font-medium truncate">{s.name}</span>
+                        <span className="text-slate-400">·</span>
+                        <span className="text-slate-500">{s.type}</span>
+                        <span className="ml-auto flex items-center gap-1.5">
+                          <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-mono-num">{s.subtype || "—"}</span>
+                          <span className="text-slate-400">→</span>
+                          <span className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 font-mono-num">{s.detail_type || "—"}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Duplicate-detector banner — only rendered when the backend
           found 1+ likely dup groups. Expands into a per-group list with
