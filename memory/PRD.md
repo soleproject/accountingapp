@@ -4845,3 +4845,44 @@ Persisted alongside every feedback item: `partner_id`, `partner_name`, `enterpri
 
 Verified end-to-end via Playwright: `pro@axiom.ai` submitted a bug → admin inbox row surfaces the "Northgate Advisory" indigo chip; detail pane shows `Enterprise: Northgate Advisory`; the outbound email HTML includes both the Partner and Enterprise context rows.
 
+
+
+### Feb 2026 — Feedback v2: Filters, Attachments, Reporter Replies, Notify-Toggle
+
+Three big additions:
+
+**1. Partner + Enterprise filter dropdowns** (superadmin inbox)
+- New endpoint `GET /api/feedback/tenants` returns distinct partners + enterprises that have ever filed feedback, plus `has_no_partner` / `has_no_enterprise` booleans so ops can carve out orphan tickets with a `— No partner —` / `— No enterprise —` option.
+- `GET /api/feedback` now accepts `partner_id` and `enterprise_id` query params (with `__none__` sentinel for orphans). Filters compose safely with each other + the existing status/type/q filters via `$and` / `$or` guards.
+
+**2. Screenshot attachments**
+- `FeedbackCreate` payload accepts `attachments: [{filename, mime, data_url}]`. Server validates mime against `{png, jpeg, gif, webp}`, caps each at 5MB and total at 20MB. Stored inline (base64) on the feedback row — no S3 wiring needed at this scale.
+- `components/FeedbackModal.jsx`: multi-image support via **file picker + drag-and-drop overlay + clipboard-paste** (window `paste` listener). Removable thumbnail grid, inline size validation. Screenshots are the fastest way to close a bug — this feature is worth the extra 60 lines.
+- Admin detail pane renders a **3-col image gallery** with click-to-lightbox; row previews show a `📎 N` badge.
+- Submitter's `/feedback/mine` shows the same images inline for context.
+
+**3. Reporter communication + per-item notify toggle**
+- `admin_notes` items now carry `visibility: "internal" | "reporter"` and `email_sent: bool`. Superadmin picks per-note whether it's a private working note or a reply the reporter sees; if it's a reply, an optional **"Also email"** checkbox (default ON) triggers a branded `feedback_reply_reporter` email.
+- Feedback item carries `notify_submitter: bool` (default TRUE). A pill in the top-right of the detail pane toggles it between **"Notify submitter" (green)** and **"Muted" (grey)**. When status changes from e.g. `new → completed` and the item is unmuted, a branded `feedback_status_update` email fires to the reporter automatically.
+- `GET /feedback/mine` uses `_scrub_for_submitter` to strip internal notes — so the reporter's inbox stays clean.
+
+**Email**:
+- New kinds in `DEFAULT_PREFS`: `feedback_status_update`, `feedback_reply_reporter`.
+- Templates in `email_templates.py`: `feedback_status_update` (short "status is now X" nudge) and `feedback_reply_reporter` (renders the author's message in a quoted block with a "Open the thread →" CTA).
+
+**Tests** (`tests/test_feedback.py`, 20 total, all green):
+- Attachment persistence + bad-mime rejection
+- `notify_submitter` default true + togglable
+- Note visibility internal→hidden from `/mine`, reporter→visible
+- Bad visibility rejected
+- Reporter-email flow marks note's `email_sent=True` + dispatches to `communications`
+- `/feedback/tenants` returns partners + enterprises + `has_no_*` flags
+- `partner_id=<id>` filters correctly; `enterprise_id=__none__` catches orphans
+
+Verified end-to-end via Playwright:
+- Client submitted a bug with a screenshot → modal thumbnail grid → row `📎 1` badge → gallery in detail pane.
+- Superadmin filter dropdowns show real tenants (`Northgate Advisory`).
+- Internal note stayed hidden from client's `/feedback/mine`; reporter reply "Thanks for the report — fixed in v2.4" appeared as a blue card + arrived via email at `client@axiom.ai`.
+- Status flipped to Completed → toast "reporter notified" → `feedback_status_update` email delivered.
+- Toggled notify → pill flipped to "Muted"; subsequent status changes will not email.
+

@@ -61,6 +61,8 @@ DEFAULT_PREFS = {
     "qbo_migration_complete":   True,   # QBO bulk import finished — one-shot notice
     "qbo_migration_failed":     True,   # QBO bulk import errored out — heads-up
     "feedback_new_submission":  True,   # New bug/rec landed in the superadmin inbox
+    "feedback_status_update":   True,   # Reporter is notified when their ticket's status changes
+    "feedback_reply_reporter":  True,   # Superadmin sent a public reply to the reporter
 }
 
 
