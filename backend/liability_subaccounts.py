@@ -176,6 +176,11 @@ async def resolve_or_create_liability_subaccount(
         "name": clean,
         "type": parent_account["type"],
         "subtype": parent_account.get("subtype"),
+        # Inherit parent's Wave-style detail_type so the sub-account
+        # renders in the same CoA section as its parent (Credit Card,
+        # Loan and Line of Credit, etc.). Falls back to subtype for
+        # legacy parents that predate the unification.
+        "detail_type": parent_account.get("detail_type") or parent_account.get("subtype") or "",
         "parent_account_id": parent_account["id"],
         "active": True,
         "balance": 0.0,

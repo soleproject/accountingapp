@@ -329,6 +329,9 @@ async def resolve_or_create_bank_account(
     subtype = ("current_liability" if is_liability
                else ("Bank" if BANK_KEYWORDS.search(name)
                      else "current_asset"))
+    # detail_type uses frontend-canonical Wave keys so the CoA renders
+    # the new sub-account under the correct section.
+    detail_type = ("credit_card" if is_liability else "cash_and_bank")
     parent_id = await _pick_parent_account(
         company_id,
         _base_detail_from_type(account_type, is_liability=is_liability),
@@ -347,6 +350,7 @@ async def resolve_or_create_bank_account(
         "name": name,
         "type": kind_type,
         "subtype": subtype,
+        "detail_type": detail_type,
         "parent_account_id": parent_id,
         "active": True,
         "balance": 0.0,

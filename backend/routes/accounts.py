@@ -1504,22 +1504,24 @@ async def accounts_import_undo(
 # `ChartOfAccounts.jsx :: DETAIL_SECTIONS_BY_TYPE`.
 _CANONICAL_KEYS_BY_TYPE = {
     "asset": {
-        "cash_and_bank", "money_in_transit", "accounts_receivable",
-        "prepaid_expense", "inventory", "other_current_asset",
-        "property_plant_equipment", "accumulated_depreciation",
-        "intangible_asset", "other_asset", "fixed_asset",
+        "cash_and_bank", "money_in_transit",
+        "expected_payments_from_customers", "inventory",
+        "property_plant_equipment", "depreciation_and_amortization",
+        "vendor_prepayments", "other_short_term_asset",
+        "other_long_term_asset",
     },
     "liability": {
-        "accounts_payable", "credit_card", "current_liability",
-        "payroll_liability", "long_term_liability", "other_liability",
+        "credit_card", "loan_and_line_of_credit",
+        "expected_payments_to_vendors", "due_for_payroll",
+        "due_to_owners", "customer_prepayments", "sales_tax_payable",
+        "other_short_term_liability", "other_long_term_liability",
     },
     "equity": {
-        "equity", "retained_earnings", "owner_draw",
-        "owner_contribution", "opening_balance_equity",
+        "owner_contribution_drawing", "retained_earnings",
+        "other_equity",
     },
     "revenue": {
-        "operating_revenue", "other_revenue", "sales_revenue",
-        "service_revenue", "interest_income",
+        "income", "discount", "other_income",
     },
     "cogs": {"cost_of_goods_sold"},
     "expense": {

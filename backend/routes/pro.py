@@ -260,10 +260,11 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
     await db.memberships.insert_many(mems)
 
     from seed import DEFAULT_COA
-    for code, name, atype, subtype in DEFAULT_COA:
+    for code, name, atype, subtype, detail_type in DEFAULT_COA:
         await db.accounts.insert_one({
             "id": str(uuid.uuid4()), "company_id": company_id, "code": code, "name": name,
-            "type": atype, "subtype": subtype, "active": True, "balance": 0.0,
+            "type": atype, "subtype": subtype, "detail_type": detail_type,
+            "active": True, "balance": 0.0,
             "created_at": now, "updated_at": now,
         })
     await db.onboarding_state.insert_one({

@@ -8,48 +8,52 @@ from db import db, now_iso
 from auth import hash_password
 
 DEFAULT_COA = [
+    # (code, name, type, subtype, detail_type)
+    # `subtype` stays legacy — downstream (reports.py Cash Flow) reads specific
+    # legacy values like "fixed_asset". `detail_type` uses frontend-canonical
+    # Wave keys so PDFs group correctly and the CoA renders sub-sections.
     # Assets
-    ("1000", "Cash and Bank", "asset", "current_asset"),
-    ("1010", "Business Checking", "asset", "current_asset"),
-    ("1020", "Business Savings", "asset", "current_asset"),
-    ("1200", "Accounts Receivable", "asset", "current_asset"),
-    ("1300", "Inventory", "asset", "current_asset"),
-    ("1500", "Prepaid Expenses", "asset", "current_asset"),
-    ("1100", "Undeposited Funds", "asset", "current_asset"),
-    ("1600", "Equipment", "asset", "fixed_asset"),
-    ("1700", "Accumulated Depreciation", "asset", "fixed_asset"),
+    ("1000", "Cash and Bank", "asset", "current_asset", "cash_and_bank"),
+    ("1010", "Business Checking", "asset", "current_asset", "cash_and_bank"),
+    ("1020", "Business Savings", "asset", "current_asset", "cash_and_bank"),
+    ("1200", "Accounts Receivable", "asset", "current_asset", "expected_payments_from_customers"),
+    ("1300", "Inventory", "asset", "current_asset", "inventory"),
+    ("1500", "Prepaid Expenses", "asset", "current_asset", "vendor_prepayments"),
+    ("1100", "Undeposited Funds", "asset", "current_asset", "money_in_transit"),
+    ("1600", "Equipment", "asset", "fixed_asset", "property_plant_equipment"),
+    ("1700", "Accumulated Depreciation", "asset", "fixed_asset", "depreciation_and_amortization"),
     # Liabilities
-    ("2000", "Accounts Payable", "liability", "current_liability"),
-    ("2100", "Credit Card Payable", "liability", "current_liability"),
-    ("2200", "Sales Tax Payable", "liability", "current_liability"),
-    ("2500", "Loans Payable", "liability", "long_term_liability"),
+    ("2000", "Accounts Payable", "liability", "current_liability", "expected_payments_to_vendors"),
+    ("2100", "Credit Card Payable", "liability", "current_liability", "credit_card"),
+    ("2200", "Sales Tax Payable", "liability", "current_liability", "sales_tax_payable"),
+    ("2500", "Loans Payable", "liability", "long_term_liability", "loan_and_line_of_credit"),
     # Equity
-    ("3000", "Owner's Equity", "equity", "equity"),
-    ("3100", "Retained Earnings", "equity", "equity"),
-    ("3300", "Owner's Draw", "equity", "equity"),
-    ("3400", "Owner's Contribution", "equity", "equity"),
+    ("3000", "Owner's Equity", "equity", "equity", "owner_contribution_drawing"),
+    ("3100", "Retained Earnings", "equity", "equity", "retained_earnings"),
+    ("3300", "Owner's Draw", "equity", "equity", "owner_contribution_drawing"),
+    ("3400", "Owner's Contribution", "equity", "equity", "owner_contribution_drawing"),
     # Revenue
-    ("4000", "Service Revenue", "revenue", "operating_revenue"),
-    ("4100", "Product Sales", "revenue", "operating_revenue"),
-    ("4200", "Interest Income", "revenue", "other_revenue"),
+    ("4000", "Service Revenue", "revenue", "operating_revenue", "income"),
+    ("4100", "Product Sales", "revenue", "operating_revenue", "income"),
+    ("4200", "Interest Income", "revenue", "other_revenue", "other_income"),
     # Expenses
-    ("6000", "Meals", "expense", "operating_expense"),
-    ("6010", "Entertainment", "expense", "operating_expense"),
-    ("6100", "Travel", "expense", "operating_expense"),
-    ("6120", "Transportation", "expense", "operating_expense"),
-    ("6200", "Advertising & Marketing", "expense", "operating_expense"),
-    ("6250", "Dues & Subscriptions", "expense", "operating_expense"),
-    ("6300", "Office Supplies", "expense", "operating_expense"),
-    ("6400", "Insurance", "expense", "operating_expense"),
-    ("6500", "Legal & Professional Fees", "expense", "operating_expense"),
-    ("6600", "Utilities", "expense", "operating_expense"),
-    ("6700", "Rent", "expense", "operating_expense"),
-    ("6800", "Supplies & Materials", "expense", "operating_expense"),
-    ("6900", "Repairs & Maintenance", "expense", "operating_expense"),
-    ("7000", "Bank Fees", "expense", "operating_expense"),
-    ("7100", "Software & SaaS", "expense", "operating_expense"),
-    ("7200", "Payroll", "expense", "operating_expense"),
-    ("9999", "Uncategorized Expense", "expense", "operating_expense"),
+    ("6000", "Meals", "expense", "operating_expense", "operating_expense"),
+    ("6010", "Entertainment", "expense", "operating_expense", "operating_expense"),
+    ("6100", "Travel", "expense", "operating_expense", "operating_expense"),
+    ("6120", "Transportation", "expense", "operating_expense", "operating_expense"),
+    ("6200", "Advertising & Marketing", "expense", "operating_expense", "operating_expense"),
+    ("6250", "Dues & Subscriptions", "expense", "operating_expense", "operating_expense"),
+    ("6300", "Office Supplies", "expense", "operating_expense", "operating_expense"),
+    ("6400", "Insurance", "expense", "operating_expense", "operating_expense"),
+    ("6500", "Legal & Professional Fees", "expense", "operating_expense", "operating_expense"),
+    ("6600", "Utilities", "expense", "operating_expense", "operating_expense"),
+    ("6700", "Rent", "expense", "operating_expense", "operating_expense"),
+    ("6800", "Supplies & Materials", "expense", "operating_expense", "operating_expense"),
+    ("6900", "Repairs & Maintenance", "expense", "operating_expense", "operating_expense"),
+    ("7000", "Bank Fees", "expense", "payment_processing_fee", "payment_processing_fee"),
+    ("7100", "Software & SaaS", "expense", "operating_expense", "operating_expense"),
+    ("7200", "Payroll", "expense", "payroll_expense", "payroll_expense"),
+    ("9999", "Uncategorized Expense", "expense", "operating_expense", "operating_expense"),
 ]
 
 SAMPLE_MERCHANTS = [
@@ -155,10 +159,11 @@ async def seed():
 
     # Chart of accounts for both companies
     for cid in (company_id, company2_id):
-        for code, name, atype, subtype in DEFAULT_COA:
+        for code, name, atype, subtype, detail_type in DEFAULT_COA:
             await db.accounts.insert_one({
                 "id": str(uuid.uuid4()), "company_id": cid,
                 "code": code, "name": name, "type": atype, "subtype": subtype,
+                "detail_type": detail_type,
                 "active": True, "balance": 0.0,
                 "created_at": now, "updated_at": now,
             })

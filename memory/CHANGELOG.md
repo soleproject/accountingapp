@@ -1,5 +1,32 @@
 # SmartBooks — Changelog
 
+## 2026-02-25 — Seed + Plaid Write-Path Fix (fresh companies land canonically clean)
+
+### 🎯 Why
+Every fresh company was landing with 37+ amber "missing_detail_type" pills on the Superadmin dashboard because the default CoA seed and the Plaid auto-account creator only populated `subtype` and left `detail_type` blank. Result: PDFs rendered as flat lists without GAAP-appropriate sub-section headers (Cash and Bank, Accounts Receivable, PP&E, etc.). Accounting math was always correct, but professional presentation was degraded on every new tenant.
+
+### ✅ Fixes (all additive — no existing data touched)
+- **`seed.py`** — `DEFAULT_COA` is now a 5-tuple `(code, name, type, subtype, detail_type)`. Every seeded account carries a frontend-canonical Wave key in `detail_type` (`cash_and_bank`, `expected_payments_from_customers`, `property_plant_equipment`, `depreciation_and_amortization`, `credit_card`, `loan_and_line_of_credit`, `sales_tax_payable`, `owner_contribution_drawing`, `retained_earnings`, `income`, `operating_expense`, `payment_processing_fee`, `payroll_expense`, etc.). `subtype` stays as its legacy value (`current_asset`, `fixed_asset`, `current_liability`, etc.) so downstream readers that pin on specific subtype strings (e.g. `reports.py::_cash_flow_statement` checks `subtype == "fixed_asset"` to classify PP&E as investing activity) keep working.
+- **5 seed callers updated to unpack the 5-tuple**: `seed.py::seed()`, `routes/companies.py::create_company`, `routes/pro.py::provision_client_company`, `enterprises.py::provision_client_company_for_pro`, `partners.py::ensure_partner_books_company_for_partner`.
+- **`plaid_connect.py`** — `SUBTYPE_MAP` extended with `detail_type`. `_ensure_account` signature takes an optional `detail_type` (falls back to subtype). `resolve_ledger_for_plaid` returns 5-tuple. `ensure_opening_balance_equity` sets `opening_balance_equity`; the CC Payment Clearing helper uses `money_in_transit`.
+- **`statement_account_resolver.py::resolve_or_create_bank_account`** — the OTHER Plaid write-path (invoked from `get_ledger_for_plaid_account` when a mask/institution is present) now writes `detail_type = "credit_card"` for CC liabilities and `"cash_and_bank"` for bank assets on account creation.
+- **`liability_subaccounts.py::spawn_liability_subaccount`** — Plaid-imported credit card children (Best Buy, Capital One, Citi Card, etc.) and loan sub-accounts (Audi under Loans Payable, etc.) now inherit `detail_type` from their parent so they render in the same CoA section as the parent.
+- **`routes/accounts.py::_CANONICAL_KEYS_BY_TYPE`** — corrected to mirror the frontend's `DETAIL_SECTIONS_BY_TYPE` keys exactly (was using accounting-textbook labels like `accounts_receivable` while frontend + inference use Wave-style `expected_payments_from_customers`). Bug in the Feb 2026 audit patch that would have caused false-drift on new companies.
+
+### 🧪 Verified E2E (7/7 CoA tests + 39/39 across CoA/QBO/Feedback)
+- `test_new_company_seeds_detail_type_on_every_account` (new) — creates a fresh company via `POST /api/companies` and asserts every seeded account has `detail_type` populated + audit reports `missing_detail_type=0` and `drifted=0`.
+- Live preview verification — created `DetailType Verify Co` via the admin API; audit returned `missing=0, drifted=0`. CoA screenshot showed proper GAAP grouping: Cash and Bank → Money in Transit → Accounts Receivable → Inventory → PP&E → Depreciation → Vendor Prepayments; Credit Card → Loan and Line of Credit → Accounts Payable → Sales Tax Payable.
+
+### 🎨 What this looks like for the user
+A brand new company now lands with:
+- **Zero amber banner** on the Chart of Accounts page
+- **Zero "missing" pill** on the Superadmin Companies list
+- **GAAP-formatted Balance Sheet** with proper line-item classification instead of a flat list
+
+Existing companies (created before this fix) still show amber until the read-only `/accounts/backfill-detail-type` endpoint is run against them — that remains a separate, opt-in operator action.
+
+---
+
 ## 2026-02-25 — Drift Audit UI (Chart of Accounts sub-type drift banners + Superadmin badges)
 
 ### 🎯 New

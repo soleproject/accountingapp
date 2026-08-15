@@ -156,10 +156,11 @@ async def ensure_partner_books_company_for_partner(user_id: str) -> Optional[dic
     # on POST /companies. Keeps the partner's books usable from
     # second-one-of-existence.
     from seed import DEFAULT_COA
-    for code, name, atype, subtype in DEFAULT_COA:
+    for code, name, atype, subtype, detail_type in DEFAULT_COA:
         await db.accounts.insert_one({
             "id": str(uuid.uuid4()), "company_id": cid, "code": code, "name": name,
-            "type": atype, "subtype": subtype, "active": True, "balance": 0.0,
+            "type": atype, "subtype": subtype, "detail_type": detail_type,
+            "active": True, "balance": 0.0,
             "created_at": now, "updated_at": now,
         })
     logger.info("Provisioned Partner Books %s for partner %s", cid, user_id)

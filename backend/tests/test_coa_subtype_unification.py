@@ -271,3 +271,57 @@ def test_admin_coa_drift_summary_forbidden_for_non_superadmin():
         finally:
             await _cleanup(uid, cid)
     _run(_t())
+
+
+def test_new_company_seeds_detail_type_on_every_account():
+    """The default CoA seed (DEFAULT_COA) must set `detail_type` to a
+    frontend-canonical Wave key on every row so brand new companies
+    don't render as amber-flagged out of the box.
+
+    Regression for Feb 2026: legacy seed only populated `subtype`,
+    leaving `detail_type` blank → the drift audit lit up every fresh
+    company with "missing_detail_type" and PDFs rendered flat.
+    """
+    async def _t():
+        # Create a fresh company via the API so we hit the same seed
+        # path that `POST /companies` uses in production.
+        uid = str(uuid.uuid4())
+        await db.users.insert_one({
+            "id": uid, "email": f"seedtest_{uid[:6]}@example.com",
+            "password": hash_password("x"), "role": "client",
+        })
+        tok = create_token(uid, "client")
+        cid = None
+        try:
+            async with await _client() as c:
+                r = await c.post(
+                    "/api/companies",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"name": "Seed Test Co",
+                          "business_type": "SaaS",
+                          "reporting_basis": "accrual"},
+                )
+                assert r.status_code == 200, r.text
+                cid = r.json()["company_id"]
+            # Every seeded account must carry a detail_type
+            missing_dt = []
+            async for a in db.accounts.find({"company_id": cid}):
+                if not (a.get("detail_type") or "").strip():
+                    missing_dt.append(a.get("name"))
+            assert not missing_dt, f"Accounts still missing detail_type: {missing_dt}"
+
+            # And the audit endpoint should agree — zero missing, zero drift
+            async with await _client() as c:
+                r = await c.get(
+                    f"/api/companies/{cid}/accounts/subtype-audit",
+                    headers={"Authorization": f"Bearer {tok}"},
+                )
+                body = r.json()
+            assert body["missing_detail_type"] == 0
+            assert body["drifted"] == 0
+        finally:
+            if cid:
+                await _cleanup(uid, cid)
+            else:
+                await db.users.delete_one({"id": uid})
+    _run(_t())
