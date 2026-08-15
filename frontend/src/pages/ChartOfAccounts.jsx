@@ -736,6 +736,13 @@ export default function ChartOfAccounts() {
 
         {grouped
           .filter(g => COA_TABS.find(t => t.key === activeTab)?.types.includes(g.type))
+          // Hide the COGS section when there are no COGS accounts. The
+          // empty "COGS · 0" header on the All tab was confusing users
+          // ("what's this doing here?") — many businesses (SaaS,
+          // service, condo assocs) never post to COGS. When a company
+          // does have COGS accounts (restaurant/inventory/retail),
+          // the section reappears automatically.
+          .filter(g => g.type !== "cogs" || g.items.length > 0)
           .map(g => (
           <div key={g.type} className="rounded-xl border bg-white overflow-hidden">
             <div className="px-4 py-2 bg-slate-50 border-b text-xs uppercase tracking-widest text-slate-600 font-semibold flex items-center justify-between">
