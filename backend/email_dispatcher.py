@@ -60,6 +60,7 @@ DEFAULT_PREFS = {
     "customer_statement":       True,   # AR statement email — outstanding invoices list
     "qbo_migration_complete":   True,   # QBO bulk import finished — one-shot notice
     "qbo_migration_failed":     True,   # QBO bulk import errored out — heads-up
+    "feedback_new_submission":  True,   # New bug/rec landed in the superadmin inbox
 }
 
 

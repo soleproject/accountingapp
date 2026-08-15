@@ -4765,3 +4765,48 @@ Same auto-switch behavior extended to the Pro's "New Client" modal at `/pro/clie
 - Parent handler at line 493 calls `switchCompany(newCid)` after `refresh()`, so the header dropdown flips to the new client immediately (unless the flow redirects to Stripe Checkout for client-card billing, in which case the redirect wins — `onCreated` is not called on that branch).
 
 **Verified via Playwright**: `pro@axiom.ai` → `/pro/clients` → "New Client" → filled name/owner/email → clicked "Create client". Header changed from `TEST_iter8_newclient` → `AutoSwitchClient …`, `localStorage.axiom_company_id` matches the new company's UUID.
+
+
+### Feb 2026 — Feedback / Bug-Report Widget + Superadmin Triage Inbox
+
+Every signed-in user (client / pro / partner / superadmin) can now file a bug report or product recommendation from the profile-menu dropdown. Superadmins triage them in a dedicated inbox at `/admin/feedback` with a 4-state workflow (New → In Progress → Completed, plus Won't Do as terminal alt). Every new submission emails every superadmin. Product decision: no status-change emails to submitters — they see updates in-app at `/feedback/mine` (kept per user's 3b choice).
+
+**Backend** (`routes/feedback.py`, new module):
+- `POST /api/feedback` — any auth'd user submits `{type, title, description, route, user_agent, company_id}`. Persists to new `feedback_items` collection with `status="new"`, `admin_notes: []`, timestamps, and best-effort `_notify_superadmins()` fires branded emails to every user with `role=="superadmin"`.
+- `GET /api/feedback/mine` — submitter's own tickets, newest first.
+- `GET /api/feedback?status=&type=&q=` — **superadmin-only**; returns items + a `counts` breakdown per status (always across the whole inbox so the tab pills stay accurate).
+- `PATCH /api/feedback/{id}` — **superadmin-only**; updates `status` and/or appends an admin note (`admin_notes` is a `$push`-only journal preserving prior notes).
+- Enum guards on `type` (`bug` / `recommendation`) and `status` (`new` / `in_progress` / `completed` / `wont_do`) — invalid values return `400`.
+
+**Email** (`email_templates.py::feedback_new_submission`, `email_dispatcher.py`):
+- New `feedback_new_submission` kind registered in `DEFAULT_PREFS`.
+- Branded template with icon + accent color (🐞 rose for bugs, 💡 cyan for ideas), reporter / role / company / page context table, description block with preserved line breaks, and CTA button linking to `/admin/feedback`.
+- Sent with `initiating_user_id=None` (system-initiated) so it bypasses per-user opt-out prefs — this is an internal ops signal, not a marketing send.
+
+**Frontend**:
+- `components/FeedbackModal.jsx` — the modal from the sketch: Bug/Recommendation toggle chips, Title + Description, "Submitted from `<route>`" footer, Cancel + Submit. Auto-captures active `currentId`, `window.location.pathname + search`, and `navigator.userAgent`.
+- `pages/MyFeedback.jsx` — every submitter can revisit their own tickets, see the status pill (New / In progress / Completed / Won't do), and read superadmin notes as they land. "New feedback" button on this page too, so users don't need to hunt for the profile menu.
+- `pages/AdminFeedback.jsx` — 2-column triage view: filterable list (status tabs w/ counts, type filter, debounced search) + detail pane with inline status buttons and an append-only notes thread.
+- `components/Layout.jsx::ProfileMenu` — new "Send feedback" + "My feedback" items sit between "Change password" and "Sign out".
+- `pages/SuperadminDash.jsx` — new **Feedback** button in the top-right toolbar next to Stripe Webhooks.
+
+**Routes** (`App.js`):
+- `/admin/feedback` → `<AdminFeedback />` (superadmin-only via backend gate; the page is behind `<Protected>` so unauth'd users hit /login).
+- `/feedback/mine` → `<MyFeedback />`.
+
+**Tests** (`backend/tests/test_feedback.py`, 9 tests, all green):
+- Create, trim, and default status verification
+- Invalid `type` → 400
+- `/mine` scoping (u1 never sees u2's rows)
+- `/feedback` admin-only (client / pro / partner → 403)
+- Admin list + PATCH round-trip (status change + append two notes without wiping the first)
+- Client cannot PATCH (403)
+- Invalid status → 400
+- Filters: status, type, and free-text `q` matching title/description
+- Zero-admin sanity: submission still 200 even if notify path is degraded
+
+Verified end-to-end via Playwright:
+- `client@axiom.ai` opened profile menu → Send feedback → filed "Playwright bug …" → toast confirmed → landed in `/feedback/mine` visible with `New` badge.
+- `admin@axiom.ai` opened `/admin/feedback` → both tickets visible with status counts → detail pane showed reporter, company, route, UA → flipped status to `In progress` → posted admin note "Assigned to eng team". Note surfaced in submitter's `/feedback/mine` immediately.
+- `communications` collection confirms `[Bug] Playwright bug …` emails delivered to real superadmins (`michael@bigsaas.ai`, `admin@axiom.ai`).
+

@@ -7,6 +7,7 @@ import {
   Users, Building, Briefcase, Shield, ChevronRight, ChevronDown,
   Ticket, ExternalLink, ShieldPlus, X, Loader2, Copy, ShieldMinus,
   AlertTriangle, RefreshCw, Wrench, DollarSign, CheckCircle2, RotateCcw,
+  Inbox,
 } from "lucide-react";
 import TeamPanel from "@/components/TeamPanel";
 import { WhitelabelCompToggle } from "@/pages/AdminEnterpriseDetail";
@@ -42,6 +43,14 @@ export default function SuperadminDash() {
         <Shield className="text-indigo-500" size={22} />
         <h1 className="font-heading text-3xl font-bold tracking-tight">Superadmin</h1>
         <div className="ml-auto flex items-center gap-2">
+          <Link
+            to="/admin/feedback"
+            data-testid="nav-admin-feedback"
+            className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            title="Bug reports & product recommendations submitted by users"
+          >
+            <Inbox size={16} /> Feedback
+          </Link>
           <Link
             to="/admin/stripe-webhooks"
             data-testid="nav-stripe-webhooks"

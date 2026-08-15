@@ -9,11 +9,12 @@ import ImpersonatePill from "./ImpersonateBanner";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
-import { ChevronDown, LogOut, MessageSquare, Settings2, User, KeyRound, Loader2, X, Search, Building2 } from "lucide-react";
+import { ChevronDown, LogOut, MessageSquare, Settings2, User, KeyRound, Loader2, X, Search, Building2, MessageCircle, Inbox } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { AiFocusProvider } from "@/lib/aiFocus";
 import { useActionListener } from "@/lib/createBus";
 import { api } from "@/lib/api";
+import FeedbackModal from "./FeedbackModal";
 
 function CompanySwitcher() {
   const { companies, current, switchCompany } = useCompany();
@@ -178,6 +179,7 @@ function ProfileMenu() {
   const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const [pwOpen, setPwOpen] = useState(false);
+  const [fbOpen, setFbOpen] = useState(false);
   const ref = useRef(null);
 
   // Close on outside-click / Escape — cheap dropdown ergonomics.
@@ -273,6 +275,23 @@ function ProfileMenu() {
           >
             <KeyRound size={14} className="text-slate-500" /> Change password
           </button>
+          <div className="my-1 border-t border-slate-100" />
+          <button
+            onClick={() => { setOpen(false); setFbOpen(true); }}
+            data-testid="profile-menu-feedback"
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50"
+          >
+            <MessageCircle size={14} className="text-slate-500" /> Send feedback
+          </button>
+          <Link
+            to="/feedback/mine"
+            onClick={() => setOpen(false)}
+            data-testid="profile-menu-my-feedback"
+            className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50"
+          >
+            <Inbox size={14} className="text-slate-500" /> My feedback
+          </Link>
+          <div className="my-1 border-t border-slate-100" />
           <button
             data-testid={TID.signoutBtn}
             onClick={logout}
@@ -283,6 +302,7 @@ function ProfileMenu() {
         </div>
       )}
       {pwOpen && <ChangePasswordModal onClose={() => setPwOpen(false)} />}
+      {fbOpen && <FeedbackModal onClose={() => setFbOpen(false)} />}
     </div>
   );
 }
