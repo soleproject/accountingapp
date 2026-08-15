@@ -25,7 +25,7 @@ const REPORTING_BASES = [
 
 export default function MyBusinesses() {
   const { user } = useAuth();
-  const { switchCompany } = useCompany();
+  const { switchCompany, refresh: refreshCompanies } = useCompany();
   const [rows, setRows] = useState(null);
   const [q, setQ] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -176,7 +176,17 @@ export default function MyBusinesses() {
       {createOpen && (
         <BusinessFormModal
           onClose={() => setCreateOpen(false)}
-          onSaved={() => { setCreateOpen(false); load(); }}
+          onSaved={async (newCompanyId) => {
+            setCreateOpen(false);
+            // Refresh the global company list so the new company is
+            // present in the top-level Company Selector, then auto-switch
+            // so the user lands directly in the company they just made.
+            if (newCompanyId) {
+              await refreshCompanies();
+              switchCompany(newCompanyId);
+            }
+            load();
+          }}
         />
       )}
       {editing && (
@@ -214,12 +224,13 @@ function BusinessFormModal({ initial, onClose, onSaved }) {
     if (!name.trim()) { toast.error("Name required"); return; }
     setBusy(true);
     try {
+      let createdId = null;
       if (isEdit) {
         await api.patch(`/companies/${initial.id}`, {
           name: name.trim(),
           business_type: type,
           reporting_basis: basis,
-          business_description: desc || null,
+          business_description: desc || "",
         });
         toast.success("Business updated");
       } else {
@@ -227,8 +238,9 @@ function BusinessFormModal({ initial, onClose, onSaved }) {
           name: name.trim(),
           business_type: type,
           reporting_basis: basis,
-          business_description: desc || null,
+          business_description: desc || "",
         });
+        createdId = r.data?.company_id || null;
         const status = r.data?.email_status;
         const err = r.data?.email_error;
         if (status === "sent") {
@@ -246,7 +258,7 @@ function BusinessFormModal({ initial, onClose, onSaved }) {
           );
         }
       }
-      onSaved();
+      onSaved(createdId);
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Save failed");
     } finally {
