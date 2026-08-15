@@ -227,8 +227,19 @@ async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool,
         return 0
     mappings = item.get("account_mappings") or {}
 
+    # Belt-and-suspenders date-floor filter. `days_requested` at
+    # link-token time SHOULD keep Plaid from returning txns older
+    # than the user's chosen start date, but some institutions
+    # occasionally over-serve. Drop anything under the floor here
+    # so a Plaid inconsistency can't sneak old data past the cutoff.
+    import_start_date = item.get("import_start_date")
+    added = synced["added"]
+    if import_start_date:
+        added = [t for t in added
+                  if (t.get("date") or "") >= import_start_date]
+
     by_bank: dict[str, list[dict]] = {}
-    for t in synced["added"]:
+    for t in added:
         mapping = mappings.get(t["account_id"])
         ledger_bank = (
             next((a for a in accts if a["id"] == mapping["ledger_account_id"]),
@@ -236,7 +247,7 @@ async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool,
         )
         by_bank.setdefault(ledger_bank["id"], []).append(t)
 
-    total_target = len(synced["added"])
+    total_target = len(added)
     await _emit("categorizing", 0, total_target)
 
     imported = 0
