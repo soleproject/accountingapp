@@ -36,6 +36,13 @@ const fmtMoney = (n) => {
 // what the AI seed / Suggest-with-AI generator already writes, so a Pro
 // editing a row never sees a mismatch between the pill on the read-only
 // view and the option they picked in the dropdown.
+// Feb 2026 — Chart of Accounts sub-type unification.
+// The edit dropdown NOW pulls from DETAIL_SECTIONS_BY_TYPE (defined
+// below), the exact same keys the renderer groups by. Before this,
+// SUBTYPES_BY_TYPE was a parallel list; keys like `cost_of_sales` in
+// the dropdown never matched `cost_of_goods_sold` on the renderer, so
+// users would change the sub-type and the account visibly wouldn't
+// move. See PRD.md — subtype writes now mirror to `detail_type` too.
 const SUBTYPES_BY_TYPE = {
   asset:     ["current_asset", "fixed_asset", "other_asset", "intangible_asset", "accumulated_depreciation", "clearing"],
   liability: ["current_liability", "long_term_liability", "other_liability", "credit_card"],
@@ -45,7 +52,16 @@ const SUBTYPES_BY_TYPE = {
   expense:   ["operating_expense", "cost_of_sales", "payroll_expense", "rent_expense", "utilities_expense", "advertising_expense", "office_expense", "professional_fees", "tax_expense", "interest_expense", "depreciation_expense", "other_expense"],
 };
 
-const subtypesFor = (t) => SUBTYPES_BY_TYPE[t] || SUBTYPES_BY_TYPE.expense;
+// `subtypesFor(t)` returns the ordered list of sub-type keys that the
+// edit dropdown should offer for a given `type`. Sourced from
+// DETAIL_SECTIONS_BY_TYPE (defined below) — the same keys the renderer
+// groups by — so a user picking "Other Expense" writes the exact key
+// the renderer needs to move the account into the "Other Expense"
+// section. No more parallel-taxonomy drift.
+const subtypesFor = (t) => {
+  const list = DETAIL_SECTIONS_BY_TYPE[t] || DETAIL_SECTIONS_BY_TYPE.expense;
+  return list.map(([k]) => k);
+};
 
 // Wave-style tabs — each tab maps to one or more `type` values so
 // e.g. "Expenses" folds cogs + expense together (matching how Wave
@@ -772,7 +788,14 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
         code: effectiveCode,
         name: trimmedName,
         type,
+        // Sub-type unification (Feb 2026) — the dropdown now offers the
+        // exact DETAIL_SECTIONS_BY_TYPE keys the renderer groups by, so
+        // we mirror the pick to BOTH `subtype` and `detail_type`. This
+        // makes reclassifying (esp. Operating Expense ↔ Other Expense ↔
+        // COGS) WYSIWYG. `subtype` stays populated for legacy consumers
+        // (reports.py's fixed_asset check).
         subtype: subtype.trim(),
+        detail_type: subtype.trim(),
         parent_account_id: nextParentId,
       });
       toast.success("Account updated.");
