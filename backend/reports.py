@@ -301,10 +301,12 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
         return rows
 
     revenue_rows = _emit("revenue")
+    cogs_rows    = _emit("cogs")
     expense_rows = _emit("expense")
 
     # Section totals — count TOP-LEVEL rows only (parent_code missing).
     total_revenue = round(sum(r["amount"] for r in revenue_rows if not r.get("parent_code")), 2)
+    total_cogs    = round(sum(r["amount"] for r in cogs_rows    if not r.get("parent_code")), 2)
     total_expense = round(sum(r["amount"] for r in expense_rows if not r.get("parent_code")), 2)
 
     # Accrual adjustments: add change in A/R to revenue, change in A/P to expense.
@@ -328,13 +330,20 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
             })
             total_expense = round(total_expense + accrual_adj_exp, 2)
 
-    net_income = round(total_revenue - total_expense, 2)
+    # Gross Profit = Revenue − COGS. Emitted as a subtotal above
+    # Operating Expenses whenever there's any COGS activity.
+    gross_profit = round(total_revenue - total_cogs, 2)
+    net_income   = round(gross_profit - total_expense, 2)
 
     return {
         "company_name": company["name"] if company else "",
         "period_start": start, "period_end": end, "basis": basis,
-        "revenue": revenue_rows, "expenses": expense_rows,
+        "revenue": revenue_rows,
+        "cogs": cogs_rows,
+        "expenses": expense_rows,
         "total_revenue": total_revenue,
+        "total_cogs": total_cogs,
+        "gross_profit": gross_profit,
         "total_expense": total_expense,
         "net_income": net_income,
         "accrual_ar_adjustment": accrual_adj_rev,
@@ -1095,6 +1104,22 @@ def build_income_statement_pdf(data: dict) -> bytes:
         Paragraph("REVENUE", s["Section"]),
         _money_table_grouped(data["revenue"], "Total Revenue", data["total_revenue"]),
         Spacer(1, 8),
+    ]
+    # COGS + Gross Profit only render when there's activity in the
+    # cogs bucket. Companies without cost of sales (service, SaaS,
+    # condo assocs) keep a clean two-section P&L; inventory / restaurant
+    # / retail businesses get a proper GAAP-style Gross Profit line.
+    cogs_rows = data.get("cogs") or []
+    total_cogs = data.get("total_cogs") or 0
+    if cogs_rows or abs(total_cogs) >= 0.005:
+        story += [
+            Paragraph("COST OF GOODS SOLD", s["Section"]),
+            _money_table_grouped(cogs_rows, "Total Cost of Goods Sold", total_cogs),
+            Spacer(1, 8),
+            _money_table([], "GROSS PROFIT", data.get("gross_profit") or 0),
+            Spacer(1, 12),
+        ]
+    story += [
         Paragraph("OPERATING EXPENSES", s["Section"]),
         _money_table_grouped(data["expenses"], "Total Expenses", data["total_expense"]),
         Spacer(1, 12),

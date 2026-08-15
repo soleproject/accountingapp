@@ -1,5 +1,33 @@
 # SmartBooks — Changelog
 
+## 2026-02-25 — Income Statement COGS + Gross Profit (Option B — proper GAAP P&L)
+
+### 🎯 Why
+Pre-fix, `reports.py::compute_income_statement` only emitted `revenue` and `expense` rows. Any account with `type=cogs` was silently DROPPED from the P&L — its dollars were invisible on reports and didn't reduce Net Income. This was a genuine data-integrity bug that was hidden because:
+- The seed doesn't create any COGS accounts by default
+- Most SMB customers (SaaS, service, condo association) don't post to COGS
+- Only surfaces when QBO import brings in `AccountType: "Cost of Goods Sold"` rows (mapped to `type: "cogs"` in `qbo_service.py`)
+
+User caught this while adding a new CoA entry — the "COGS" type option in the type dropdown produced an empty sub-type list AND an auto-populated "COGS · 0" section on the CoA render. User (a CPA) opted for the proper GAAP fix rather than collapsing COGS into Expenses as a subtype.
+
+### ✅ Changes
+- **`reports.py::compute_income_statement`** — now emits `cogs = _emit("cogs")` alongside revenue/expense. New response fields: `cogs`, `total_cogs`, `gross_profit`. Formula: `gross_profit = total_revenue − total_cogs`; `net_income = gross_profit − total_expense`. **Backwards compatible**: for companies without COGS activity, `total_cogs=0`, `gross_profit=total_revenue`, and `net_income` computes identically to pre-fix (Revenue − Expense).
+- **`reports.py::build_income_statement_pdf`** — emits "COST OF GOODS SOLD" section header + "Total Cost of Goods Sold" subtotal + a distinct "GROSS PROFIT" subtotal line above Operating Expenses, but only when there's COGS activity. Service/SaaS books get the classic two-section P&L; inventory/restaurant/retail books get proper GAAP presentation.
+- **`ReportView.jsx::IncomeStatementBody`** — conditionally renders the COGS section + Gross Profit row when `total_cogs != 0`. Uses the same 0.5¢ threshold as `fmtMoney` to decide.
+- **`ChartOfAccounts.jsx`** — hides the auto-populated "COGS · 0" section when a company has zero COGS accounts. Section reappears the moment a COGS account exists (from QBO import or manual create). Removes the "what's this doing here?" UX friction while preserving the type option for businesses that need it.
+
+### 🧪 Tests (14/14 green across CoA + IS-COGS suites)
+- **`test_income_statement_cogs.py`** (new file, 3 tests):
+  - `test_income_statement_emits_cogs_and_gross_profit` — seeds a balanced JE with $10k revenue / $3k COGS / $2k operating expense → asserts `total_revenue=10k`, `total_cogs=3k`, `gross_profit=7k`, `total_expense=2k`, `net_income=5k`
+  - `test_income_statement_backwards_compatible_no_cogs` — seeds a service company (no COGS) → asserts `total_cogs=0`, `gross_profit=total_revenue`, `net_income=8k` (matches pre-fix arithmetic)
+  - `test_income_statement_pdf_builds_with_cogs_activity` — PDF renderer doesn't KeyError on the new fields
+
+### ✋ What did NOT change
+- Downstream consumers (`routes/chat.py`, `routes/firm_glance.py`) continue to read `total_revenue`, `total_expense`, `net_income` — those still refer to Operating Expenses only (not COGS), so cash-burn KPIs and per-expense breakdowns are unaffected. `total_cogs`/`gross_profit` are opt-in additions that downstream can adopt when ready.
+- The `cogs` top-level type remains valid on `POST /accounts`, in the AI type enum, and in the QBO import mapper — the fix restores its P&L visibility rather than removing it.
+
+---
+
 ## 2026-02-25 — Drift Audit Refinement (false-positive fix + inline drift list)
 
 ### 🎯 Why

@@ -718,11 +718,37 @@ function Row({ id, code, name, amount, bold, parent_code, onClick, expandable, e
 }
 
 function IncomeStatementBody({ data, onDrilldown }) {
+  // COGS + Gross Profit only render when there's activity in the cogs
+  // bucket — service/SaaS companies without cost of sales keep the
+  // classic two-section P&L; inventory/restaurant/retail businesses
+  // get proper GAAP-style Gross Profit reporting. Threshold is 0.5¢
+  // (same as fmtMoney's "$0.00 shows as —" boundary).
+  const cogsRows = data.cogs || [];
+  const totalCogs = Number(data.total_cogs || 0);
+  const hasCogs = cogsRows.length > 0 || Math.abs(totalCogs) >= 0.005;
   return (
     <div className="text-sm">
       <Section title="Revenue" />
       <RolledUpRows rows={data.revenue} onDrilldown={onDrilldown} />
       <Row code="" name="Total Revenue" amount={data.total_revenue} bold />
+      {hasCogs && (
+        <>
+          <Section title="Cost of Goods Sold" />
+          <RolledUpRows rows={cogsRows} onDrilldown={onDrilldown} />
+          <Row code="" name="Total Cost of Goods Sold" amount={totalCogs} bold />
+          <div
+            className="mt-2 mb-3 grid grid-cols-12 gap-2 px-3 py-1.5 border-y border-slate-300 bg-slate-50/70"
+            data-testid="income-gross-profit-row"
+          >
+            <div className="col-span-9 font-heading font-semibold uppercase text-xs tracking-wider text-slate-700">
+              Gross Profit
+            </div>
+            <div className="col-span-3 text-right font-mono-num font-semibold">
+              {fmtMoney(data.gross_profit)}
+            </div>
+          </div>
+        </>
+      )}
       <Section title="Operating Expenses" />
       <RolledUpRows rows={data.expenses} onDrilldown={onDrilldown} />
       <Row code="" name="Total Expenses" amount={data.total_expense} bold />
