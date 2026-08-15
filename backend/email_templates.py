@@ -988,6 +988,7 @@ def feedback_new_submission(
     company_name: str,
     partner_name: str = "",
     enterprise_name: str = "",
+    attachment_count: int = 0,
     inbox_url: str,
 ) -> tuple[str, str]:
     is_bug = fb_type == "bug"
@@ -1004,6 +1005,11 @@ def feedback_new_submission(
         ("Company", company_name or "—"),
         ("Page", route or "—"),
     ]
+    if attachment_count:
+        context_pairs.append((
+            "Attachments",
+            f"{attachment_count} image{'s' if attachment_count != 1 else ''} — view in inbox",
+        ))
     for k, v in context_pairs:
         ctx_rows += (
             f'<tr><td style="{_TABLE_KEY}">{escape(k)}</td>'
@@ -1042,6 +1048,75 @@ def feedback_new_submission(
         _wrap(inner, brand_name=None),
     )
 
+
+
+
+# --------------------------------------------------------------------------
+# Feedback → reporter — status change / direct reply
+# --------------------------------------------------------------------------
+def feedback_status_update(
+    *,
+    title: str,
+    fb_type: str,
+    new_status_label: str,
+    submitter_name: str,
+    my_feedback_url: str,
+) -> tuple[str, str]:
+    is_bug = fb_type == "bug"
+    icon = "🐞" if is_bug else "💡"
+    kind_word = "bug report" if is_bug else "recommendation"
+    inner = f"""
+      <div style="{_H1}">{icon} Update on your {escape(kind_word)}</div>
+      <div style="{_P}">
+        Hi {escape(submitter_name)},<br><br>
+        Quick update — the status of your {escape(kind_word)}
+        <b>"{escape(title)}"</b> just changed to
+        <b>{escape(new_status_label)}</b>.
+      </div>
+      <div style="padding:14px 0 6px;">
+        <a href="{escape(my_feedback_url)}" style="{_BTN}">View in your inbox →</a>
+      </div>
+      <div style="{_MUTE}">
+        Not expecting these emails? A superadmin can turn off automatic
+        status notifications for this ticket from the triage inbox.
+      </div>
+    """
+    return (
+        f"Update on your {kind_word}: {title}",
+        _wrap(inner, brand_name=None),
+    )
+
+
+def feedback_reply_reporter(
+    *,
+    title: str,
+    fb_type: str,
+    message: str,
+    author_name: str,
+    submitter_name: str,
+    my_feedback_url: str,
+) -> tuple[str, str]:
+    is_bug = fb_type == "bug"
+    kind_word = "bug report" if is_bug else "recommendation"
+    safe_msg = escape(message).replace("\n", "<br>")
+    inner = f"""
+      <div style="{_H1}">A reply on your {escape(kind_word)}</div>
+      <div style="{_P}">
+        Hi {escape(submitter_name)},<br><br>
+        <b>{escape(author_name)}</b> just replied on your ticket
+        <b>"{escape(title)}"</b>:
+      </div>
+      <div style="{_P};margin-top:6px;padding:12px 14px;background:#f8fafc;
+                  border-left:3px solid #0891b2;border-radius:6px;
+                  white-space:pre-wrap;">{safe_msg}</div>
+      <div style="padding:18px 0 6px;">
+        <a href="{escape(my_feedback_url)}" style="{_BTN}">Open the thread →</a>
+      </div>
+    """
+    return (
+        f"Reply on your {kind_word}: {title}",
+        _wrap(inner, brand_name=None),
+    )
 
 
 # --------------------------------------------------------------------------

@@ -107,13 +107,29 @@ export default function MyFeedback() {
                         Filed {fmtWhen(r.created_at)}
                         {r.route ? <> · <code className="bg-slate-100 rounded px-1">{r.route}</code></> : null}
                       </div>
+                      {Array.isArray(r.attachments) && r.attachments.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-2" data-testid={`mine-attachments-${r.id}`}>
+                          {r.attachments.map((a) => (
+                            <a
+                              key={a.id}
+                              href={a.data_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block border border-slate-200 rounded overflow-hidden hover:ring-2 hover:ring-cyan-300"
+                              title={a.filename}
+                            >
+                              <img src={a.data_url} alt={a.filename} className="w-20 h-20 object-cover" />
+                            </a>
+                          ))}
+                        </div>
+                      )}
                       {Array.isArray(r.admin_notes) && r.admin_notes.length > 0 && (
                         <div className="mt-3 space-y-2">
                           {r.admin_notes.map((n) => (
-                            <div key={n.id} className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded px-3 py-2">
-                              <span className="font-semibold text-slate-700">{n.author_name || "Team"}:</span>{" "}
-                              {n.note}
-                              <div className="text-[10px] text-slate-400 mt-0.5">{fmtWhen(n.at)}</div>
+                            <div key={n.id} className="text-xs text-slate-700 bg-cyan-50 border border-cyan-200 rounded px-3 py-2">
+                              <span className="font-semibold text-cyan-800">{n.author_name || "Team"}:</span>{" "}
+                              <span className="whitespace-pre-wrap">{n.note}</span>
+                              <div className="text-[10px] text-cyan-700/70 mt-0.5">{fmtWhen(n.at)}</div>
                             </div>
                           ))}
                         </div>

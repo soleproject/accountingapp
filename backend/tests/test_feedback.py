@@ -406,3 +406,276 @@ def test_context_no_partner_no_enterprise():
         finally:
             await _wipe_users_and_feedback([uid])
     _run(_t())
+
+
+# ------------------------------------------------------------------
+# Attachments
+# ------------------------------------------------------------------
+# Smallest valid PNG (1x1 transparent) — well under 5MB
+_TINY_PNG = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgAAIA"
+             "AAUAAeImBZsAAAAASUVORK5CYII=")
+_PNG_URL = f"data:image/png;base64,{_TINY_PNG}"
+
+
+def test_attachments_persisted_and_returned():
+    async def _t():
+        uid, tok = await _mk_user("client")
+        try:
+            async with await _client() as c:
+                r = await c.post("/api/feedback",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={
+                        "type": "bug", "title": "with images",
+                        "attachments": [
+                            {"filename": "one.png", "mime": "image/png", "data_url": _PNG_URL},
+                            {"filename": "two.png", "mime": "image/png", "data_url": _PNG_URL},
+                        ],
+                    })
+                assert r.status_code == 200, r.text
+                fid = r.json()["id"]
+                row = await db.feedback_items.find_one({"id": fid})
+                assert len(row["attachments"]) == 2
+                for a in row["attachments"]:
+                    assert a["mime"] == "image/png"
+                    assert a["data_url"].startswith("data:image/png;base64,")
+                    assert a["size"] > 0
+        finally:
+            await _wipe_users_and_feedback([uid])
+    _run(_t())
+
+
+def test_attachment_bad_mime_rejected():
+    async def _t():
+        uid, tok = await _mk_user("client")
+        try:
+            async with await _client() as c:
+                r = await c.post("/api/feedback",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={
+                        "type": "bug", "title": "bad mime",
+                        "attachments": [
+                            {"filename": "x.pdf", "mime": "application/pdf",
+                             "data_url": "data:application/pdf;base64,JVBERi0xLjQK"},
+                        ],
+                    })
+                assert r.status_code == 400
+        finally:
+            await _wipe_users_and_feedback([uid])
+    _run(_t())
+
+
+# ------------------------------------------------------------------
+# Notify-submitter toggle + status change email
+# ------------------------------------------------------------------
+def test_notify_submitter_default_true_and_togglable():
+    async def _t():
+        u_client, t_client = await _mk_user("client")
+        u_admin, t_admin = await _mk_user("superadmin")
+        try:
+            async with await _client() as c:
+                r = await c.post("/api/feedback",
+                    headers={"Authorization": f"Bearer {t_client}"},
+                    json={"type": "bug", "title": "notify me"})
+                fid = r.json()["id"]
+                row = await db.feedback_items.find_one({"id": fid})
+                assert row["notify_submitter"] is True
+
+                r = await c.patch(f"/api/feedback/{fid}",
+                    headers={"Authorization": f"Bearer {t_admin}"},
+                    json={"notify_submitter": False})
+                assert r.status_code == 200
+                assert r.json()["notify_submitter"] is False
+        finally:
+            await _wipe_users_and_feedback([u_client, u_admin])
+    _run(_t())
+
+
+# ------------------------------------------------------------------
+# Note visibility — internal vs reporter, /mine filtering
+# ------------------------------------------------------------------
+def test_note_visibility_internal_hidden_from_submitter():
+    async def _t():
+        u_client, t_client = await _mk_user("client")
+        u_admin, t_admin = await _mk_user("superadmin")
+        try:
+            async with await _client() as c:
+                r = await c.post("/api/feedback",
+                    headers={"Authorization": f"Bearer {t_client}"},
+                    json={"type": "bug", "title": "vis-test"})
+                fid = r.json()["id"]
+
+                # Post internal + reporter notes
+                await c.patch(f"/api/feedback/{fid}",
+                    headers={"Authorization": f"Bearer {t_admin}"},
+                    json={"admin_note": "internal secret", "note_visibility": "internal"})
+                await c.patch(f"/api/feedback/{fid}",
+                    headers={"Authorization": f"Bearer {t_admin}"},
+                    json={"admin_note": "public reply", "note_visibility": "reporter"})
+
+                # Superadmin sees both
+                r = await c.get("/api/feedback",
+                    headers={"Authorization": f"Bearer {t_admin}"})
+                admin_row = next(i for i in r.json()["items"] if i["id"] == fid)
+                notes = admin_row["admin_notes"]
+                assert len(notes) == 2
+                assert {n["visibility"] for n in notes} == {"internal", "reporter"}
+
+                # Submitter only sees the reporter-visible one
+                r = await c.get("/api/feedback/mine",
+                    headers={"Authorization": f"Bearer {t_client}"})
+                mine_row = next(i for i in r.json()["items"] if i["id"] == fid)
+                notes = mine_row["admin_notes"]
+                assert len(notes) == 1
+                assert notes[0]["note"] == "public reply"
+                assert notes[0]["visibility"] == "reporter"
+        finally:
+            await _wipe_users_and_feedback([u_client, u_admin])
+    _run(_t())
+
+
+def test_bad_note_visibility_rejected():
+    async def _t():
+        u_client, t_client = await _mk_user("client")
+        u_admin, t_admin = await _mk_user("superadmin")
+        try:
+            async with await _client() as c:
+                r = await c.post("/api/feedback",
+                    headers={"Authorization": f"Bearer {t_client}"},
+                    json={"type": "bug", "title": "vis-bad"})
+                fid = r.json()["id"]
+                r = await c.patch(f"/api/feedback/{fid}",
+                    headers={"Authorization": f"Bearer {t_admin}"},
+                    json={"admin_note": "n", "note_visibility": "public"})
+                assert r.status_code == 400
+        finally:
+            await _wipe_users_and_feedback([u_client, u_admin])
+    _run(_t())
+
+
+def test_email_reporter_flag_marks_note_and_dispatches():
+    """When posting a reporter-visible note with email_reporter=True, the
+    note's `email_sent` flag flips to True and a `feedback_reply_reporter`
+    row is written to `communications`."""
+    async def _t():
+        u_client, t_client = await _mk_user("client")
+        u_admin, t_admin = await _mk_user("superadmin")
+        try:
+            async with await _client() as c:
+                r = await c.post("/api/feedback",
+                    headers={"Authorization": f"Bearer {t_client}"},
+                    json={"type": "bug", "title": "email-reply"})
+                fid = r.json()["id"]
+                # Snapshot pre-count of reply emails to compare later
+                pre_count = await db.communications.count_documents({
+                    "kind": "feedback_reply_reporter",
+                    "related.feedback_id": fid,
+                })
+                await c.patch(f"/api/feedback/{fid}",
+                    headers={"Authorization": f"Bearer {t_admin}"},
+                    json={
+                        "admin_note": "thanks for the report!",
+                        "note_visibility": "reporter",
+                        "email_reporter": True,
+                    })
+                row = await db.feedback_items.find_one({"id": fid})
+                notes = row["admin_notes"]
+                assert len(notes) == 1
+                assert notes[0]["visibility"] == "reporter"
+                assert notes[0]["email_sent"] is True
+                # A comms row was inserted (status may be sent OR failed for
+                # test example.com emails, both are valid — we just want the
+                # dispatch to have been attempted).
+                post_count = await db.communications.count_documents({
+                    "kind": "feedback_reply_reporter",
+                    "related.feedback_id": fid,
+                })
+                assert post_count == pre_count + 1
+        finally:
+            await _wipe_users_and_feedback([u_client, u_admin])
+    _run(_t())
+
+
+# ------------------------------------------------------------------
+# /feedback/tenants + Partner/Enterprise filters
+# ------------------------------------------------------------------
+def test_tenants_endpoint_and_filters():
+    async def _t():
+        # Build a small tenant tree
+        partner_uid = str(uuid.uuid4())
+        pro_uid = str(uuid.uuid4())
+        client_uid = str(uuid.uuid4())
+        ent_id = str(uuid.uuid4())
+        cid = str(uuid.uuid4())
+        u_admin, t_admin = await _mk_user("superadmin")
+
+        await db.users.insert_one({
+            "id": partner_uid, "email": f"pt_{partner_uid[:6]}@example.com",
+            "role": "partner", "password": hash_password("x"),
+            "branding": {"firm_name": "Zeta Partners"},
+        })
+        await db.users.insert_one({
+            "id": pro_uid, "email": f"pro_{pro_uid[:6]}@example.com",
+            "role": "pro", "password": hash_password("x"),
+            "enterprise_id": ent_id,
+        })
+        await db.users.insert_one({
+            "id": client_uid, "email": f"cl_{client_uid[:6]}@example.com",
+            "role": "client", "password": hash_password("x"),
+        })
+        await db.enterprises.insert_one({
+            "id": ent_id, "name": "Zeta Enterprise",
+            "owner_user_id": pro_uid, "partner_id": partner_uid,
+        })
+        await db.companies.insert_one({
+            "id": cid, "name": "Zeta Co", "owner_user_id": client_uid,
+            "pro_user_id": pro_uid,
+        })
+        t_client = create_token(client_uid, "client")
+
+        try:
+            async with await _client() as c:
+                # Two feedback items: one attributed to Zeta (via company),
+                # one bare (no partner/enterprise).
+                await c.post("/api/feedback",
+                    headers={"Authorization": f"Bearer {t_client}"},
+                    json={"type": "bug", "title": "zeta bug", "company_id": cid})
+                bare_uid, bare_tok = await _mk_user("client")
+                try:
+                    await c.post("/api/feedback",
+                        headers={"Authorization": f"Bearer {bare_tok}"},
+                        json={"type": "bug", "title": "bare bug"})
+
+                    r = await c.get("/api/feedback/tenants",
+                        headers={"Authorization": f"Bearer {t_admin}"})
+                    assert r.status_code == 200
+                    body = r.json()
+                    partner_ids = {p["id"] for p in body["partners"]}
+                    ent_ids = {e["id"] for e in body["enterprises"]}
+                    assert partner_uid in partner_ids
+                    assert ent_id in ent_ids
+                    assert body["has_no_partner"] is True
+                    assert body["has_no_enterprise"] is True
+
+                    # Filter by partner_id → only zeta
+                    r = await c.get(f"/api/feedback?partner_id={partner_uid}",
+                        headers={"Authorization": f"Bearer {t_admin}"})
+                    titles = {i["title"] for i in r.json()["items"]}
+                    assert "zeta bug" in titles
+                    assert "bare bug" not in titles
+
+                    # Filter by enterprise_id=__none__ → only bare
+                    r = await c.get("/api/feedback?enterprise_id=__none__",
+                        headers={"Authorization": f"Bearer {t_admin}"})
+                    titles = {i["title"] for i in r.json()["items"] if i["submitter_user_id"] in (bare_uid, client_uid)}
+                    assert "bare bug" in titles
+                    assert "zeta bug" not in titles
+                finally:
+                    await _wipe_users_and_feedback([bare_uid])
+        finally:
+            for u in (partner_uid, pro_uid, client_uid, u_admin):
+                await db.users.delete_one({"id": u})
+                await db.feedback_items.delete_many({"submitter_user_id": u})
+            await db.enterprises.delete_one({"id": ent_id})
+            await db.companies.delete_one({"id": cid})
+    _run(_t())
+

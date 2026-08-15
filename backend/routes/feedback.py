@@ -1,17 +1,25 @@
 """Feedback (bug reports + product recommendations).
 
-Any signed-in user can `POST /api/feedback` to file a bug or recommendation.
-Every submission emails every user with `role == "superadmin"` so the
-platform team never misses one. Superadmins triage via `/admin/feedback`
+Any signed-in user can `POST /api/feedback` to file a bug or recommendation
+— optionally with screenshot attachments. Every submission emails every
+user with `role == "superadmin"`. Superadmins triage via `/admin/feedback`
 using a 4-state workflow (new / in_progress / completed / wont_do).
-Submitters get an in-app list at `/feedback/mine` — no status-change
-emails (product decision: keep noise low).
+
+Communication model (Feb 2026):
+  • Notes have `visibility: "internal" | "reporter"`.
+      - Internal notes are only ever visible to superadmins.
+      - Reporter notes appear on the submitter's `/feedback/mine`.
+  • A note posted with `visibility=reporter` may optionally trigger an
+    email to the reporter (`send_email=True`).
+  • Every item has `notify_submitter: bool` (default TRUE). When true,
+    status changes email the reporter automatically.
 """
 from __future__ import annotations
 
 import logging
+import re
 import uuid
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -25,24 +33,46 @@ router = APIRouter(prefix="/api", tags=["feedback"])
 
 
 # --------------------------------------------------------------------------
-# Payloads
+# Constants + payloads
 # --------------------------------------------------------------------------
 VALID_TYPES = {"bug", "recommendation"}
 VALID_STATUSES = {"new", "in_progress", "completed", "wont_do"}
+VALID_VISIBILITIES = {"internal", "reporter"}
+STATUS_LABELS = {
+    "new": "New",
+    "in_progress": "In progress",
+    "completed": "Completed",
+    "wont_do": "Won't do",
+}
+
+# 5 MB per image, 20 MB per submission — cheap Mongo doc-size guardrail.
+MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
+MAX_TOTAL_ATTACHMENT_BYTES = 20 * 1024 * 1024
+ALLOWED_MIMES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+
+
+class FeedbackAttachment(BaseModel):
+    filename: str = Field(..., max_length=200)
+    mime: str = Field(..., max_length=100)
+    data_url: str = Field(..., description="base64 data URL: data:image/png;base64,...")
 
 
 class FeedbackCreate(BaseModel):
-    type: str = Field(..., description="'bug' or 'recommendation'")
+    type: str
     title: str = Field(..., min_length=1, max_length=200)
     description: str = Field("", max_length=5000)
-    route: Optional[str] = Field(None, max_length=500, description="Frontend path the user was on")
+    route: Optional[str] = Field(None, max_length=500)
     user_agent: Optional[str] = Field(None, max_length=500)
-    company_id: Optional[str] = Field(None, description="Currently-active company, if any")
+    company_id: Optional[str] = None
+    attachments: List[FeedbackAttachment] = Field(default_factory=list)
 
 
 class FeedbackPatch(BaseModel):
     status: Optional[str] = None
-    admin_note: Optional[str] = None  # append-only
+    admin_note: Optional[str] = None
+    note_visibility: Optional[str] = None  # "internal" | "reporter"
+    email_reporter: bool = False           # if note_visibility==reporter, also email
+    notify_submitter: Optional[bool] = None
 
 
 # --------------------------------------------------------------------------
@@ -54,21 +84,50 @@ def _scrub(row: dict) -> dict:
     return row
 
 
+def _scrub_for_submitter(row: dict) -> dict:
+    """Return a copy safe to send to the submitter: internal notes stripped."""
+    row = _scrub(row)
+    notes = row.get("admin_notes") or []
+    row["admin_notes"] = [n for n in notes if (n.get("visibility") or "internal") == "reporter"]
+    return row
+
+
+_DATA_URL_RE = re.compile(r"^data:(?P<mime>[\w./+-]+);base64,(?P<b64>[A-Za-z0-9+/=\s]+)$")
+
+
+def _validate_attachments(atts: List[FeedbackAttachment]) -> List[dict]:
+    """Accept only image data-URLs; strip anything oversized. Returns the
+    persisted dict-form (with an id + timestamp)."""
+    out: list[dict] = []
+    total = 0
+    for a in atts:
+        m = _DATA_URL_RE.match(a.data_url.strip())
+        if not m:
+            raise HTTPException(status_code=400, detail=f"Bad attachment format ({a.filename})")
+        mime = m.group("mime").lower()
+        if mime not in ALLOWED_MIMES:
+            raise HTTPException(status_code=400, detail=f"Only image uploads allowed ({a.filename})")
+        b64 = m.group("b64")
+        # Approximate decoded size: len(b64) * 3/4 minus padding
+        approx = int(len(b64) * 0.75)
+        if approx > MAX_ATTACHMENT_BYTES:
+            raise HTTPException(status_code=400, detail=f"Attachment too large ({a.filename}, max 5MB)")
+        total += approx
+        if total > MAX_TOTAL_ATTACHMENT_BYTES:
+            raise HTTPException(status_code=400, detail="Attachments over 20MB total")
+        out.append({
+            "id": str(uuid.uuid4()),
+            "filename": (a.filename or "attachment").strip()[:200],
+            "mime": mime,
+            "data_url": a.data_url.strip(),
+            "size": approx,
+            "at": now_iso(),
+        })
+    return out
+
+
 async def _resolve_context(user: dict, company: Optional[dict]) -> dict:
-    """Best-effort partner + enterprise attribution for a feedback item.
-
-    Resolution priority:
-      Partner:
-        1. `user.role == "partner"` → user is the partner
-        2. `user.partner_id` (fast-path stamp)
-        3. `company.partner_id` (companies partners provision are stamped)
-        4. `enterprise.partner_id` (if we resolve an enterprise below)
-      Enterprise:
-        1. `user.enterprise_id` (pros owned by an enterprise)
-        2. Managing pro of the reporter's company (`company.pro_user_id.enterprise_id`)
-
-    Never raises — a lookup failure just returns None for that slot.
-    """
+    """Partner + Enterprise attribution — never raises."""
     partner_id = partner_name = None
     enterprise_id = enterprise_name = None
 
@@ -81,7 +140,6 @@ async def _resolve_context(user: dict, company: Optional[dict]) -> dict:
             or "Partner"
         )
 
-    # ----- Partner -----
     if user.get("role") == "partner":
         partner_id = user["id"]
         partner_name = _brand(user)
@@ -92,7 +150,6 @@ async def _resolve_context(user: dict, company: Optional[dict]) -> dict:
             if p:
                 partner_id, partner_name = p["id"], _brand(p)
 
-    # ----- Enterprise -----
     eid = user.get("enterprise_id")
     if not eid and company:
         pro_uid = company.get("pro_user_id")
@@ -105,7 +162,6 @@ async def _resolve_context(user: dict, company: Optional[dict]) -> dict:
         if ent:
             enterprise_id = ent["id"]
             enterprise_name = ent.get("name")
-            # Enterprise's partner is our last fallback for partner attribution
             if not partner_id and ent.get("partner_id"):
                 p = await db.users.find_one({"id": ent["partner_id"], "role": "partner"})
                 if p:
@@ -120,8 +176,6 @@ async def _resolve_context(user: dict, company: Optional[dict]) -> dict:
 
 
 async def _notify_superadmins(item: dict, submitter: dict) -> None:
-    """Fire a branded email to every superadmin. Never raises — a failed
-    email must not block the submission itself."""
     try:
         from email_dispatcher import dispatch, public_base_url
         import email_templates as _tmpl
@@ -141,6 +195,7 @@ async def _notify_superadmins(item: dict, submitter: dict) -> None:
             company_name=item.get("company_name") or "",
             partner_name=item.get("partner_name") or "",
             enterprise_name=item.get("enterprise_name") or "",
+            attachment_count=len(item.get("attachments") or []),
             inbox_url=f"{public_base_url()}/admin/feedback",
         )
         for admin in admins:
@@ -148,14 +203,61 @@ async def _notify_superadmins(item: dict, submitter: dict) -> None:
                 continue
             await dispatch(
                 kind="feedback_new_submission",
-                to=admin["email"],
-                subject=subject,
-                html=html,
-                initiating_user_id=None,  # system-initiated — skips per-user pref check
+                to=admin["email"], subject=subject, html=html,
+                initiating_user_id=None,
                 related={"feedback_id": item["id"], "type": item["type"]},
             )
     except Exception:
         log.exception("Feedback superadmin notify failed (submission still saved)")
+
+
+async def _notify_reporter_status_change(item: dict, new_status: str) -> None:
+    """Fires only when `notify_submitter` is True on the item."""
+    try:
+        if not item.get("submitter_email"):
+            return
+        from email_dispatcher import dispatch, public_base_url
+        import email_templates as _tmpl
+        subject, html = _tmpl.feedback_status_update(
+            title=item["title"],
+            fb_type=item.get("type", "bug"),
+            new_status_label=STATUS_LABELS.get(new_status, new_status),
+            submitter_name=item.get("submitter_name") or "there",
+            my_feedback_url=f"{public_base_url()}/feedback/mine",
+        )
+        await dispatch(
+            kind="feedback_status_update",
+            to=item["submitter_email"], subject=subject, html=html,
+            initiating_user_id=None,
+            related={"feedback_id": item["id"], "new_status": new_status},
+        )
+    except Exception:
+        log.exception("Feedback status-change notify failed")
+
+
+async def _notify_reporter_reply(item: dict, note: dict, author: dict) -> None:
+    """Superadmin posted a note visible to the reporter and asked to email it."""
+    try:
+        if not item.get("submitter_email"):
+            return
+        from email_dispatcher import dispatch, public_base_url
+        import email_templates as _tmpl
+        subject, html = _tmpl.feedback_reply_reporter(
+            title=item["title"],
+            fb_type=item.get("type", "bug"),
+            message=note.get("note") or "",
+            author_name=note.get("author_name") or "Team",
+            submitter_name=item.get("submitter_name") or "there",
+            my_feedback_url=f"{public_base_url()}/feedback/mine",
+        )
+        await dispatch(
+            kind="feedback_reply_reporter",
+            to=item["submitter_email"], subject=subject, html=html,
+            initiating_user_id=author.get("id"),
+            related={"feedback_id": item["id"], "note_id": note.get("id")},
+        )
+    except Exception:
+        log.exception("Feedback reply-to-reporter notify failed")
 
 
 # --------------------------------------------------------------------------
@@ -166,9 +268,9 @@ async def create_feedback(inp: FeedbackCreate, user: dict = Depends(get_current_
     if inp.type not in VALID_TYPES:
         raise HTTPException(status_code=400, detail=f"type must be one of {sorted(VALID_TYPES)}")
 
+    attachments = _validate_attachments(inp.attachments or [])
     now = now_iso()
 
-    # Resolve company + partner + enterprise context for triage
     company = None
     company_name = None
     if inp.company_id:
@@ -196,7 +298,9 @@ async def create_feedback(inp: FeedbackCreate, user: dict = Depends(get_current_
         "enterprise_name": ctx["enterprise_name"],
         "route": (inp.route or "").strip() or None,
         "user_agent": (inp.user_agent or "").strip() or None,
-        "admin_notes": [],  # append-only journal, [{author_id, author_name, note, at}]
+        "admin_notes": [],
+        "attachments": attachments,
+        "notify_submitter": True,  # default ON — reporter gets pings on status changes
         "created_at": now,
         "updated_at": now,
     }
@@ -207,21 +311,57 @@ async def create_feedback(inp: FeedbackCreate, user: dict = Depends(get_current_
 
 @router.get("/feedback/mine")
 async def list_my_feedback(user: dict = Depends(get_current_user)):
-    """Every submitter can see their own tickets + statuses."""
     rows = await db.feedback_items.find(
         {"submitter_user_id": user["id"]}
     ).sort("created_at", -1).to_list(length=500)
-    return {"items": [_scrub(r) for r in rows]}
+    return {"items": [_scrub_for_submitter(r) for r in rows]}
+
+
+@router.get("/feedback/tenants")
+async def feedback_tenants(user: dict = Depends(require_role("superadmin"))):
+    """Distinct partners + enterprises that have ever filed feedback,
+    used by the superadmin inbox filter dropdowns."""
+    partners: dict[str, str] = {}
+    enterprises: dict[str, str] = {}
+    has_no_partner = False
+    has_no_enterprise = False
+    async for r in db.feedback_items.find(
+        {},
+        {"partner_id": 1, "partner_name": 1, "enterprise_id": 1, "enterprise_name": 1},
+    ):
+        pid, pname = r.get("partner_id"), r.get("partner_name")
+        eid, ename = r.get("enterprise_id"), r.get("enterprise_name")
+        if pid:
+            partners[pid] = pname or pid
+        else:
+            has_no_partner = True
+        if eid:
+            enterprises[eid] = ename or eid
+        else:
+            has_no_enterprise = True
+    return {
+        "partners": sorted(
+            [{"id": pid, "name": pname} for pid, pname in partners.items()],
+            key=lambda x: (x["name"] or "").lower(),
+        ),
+        "enterprises": sorted(
+            [{"id": eid, "name": ename} for eid, ename in enterprises.items()],
+            key=lambda x: (x["name"] or "").lower(),
+        ),
+        "has_no_partner": has_no_partner,
+        "has_no_enterprise": has_no_enterprise,
+    }
 
 
 @router.get("/feedback")
 async def list_all_feedback(
     status: Optional[str] = Query(None),
     type: Optional[str] = Query(None),
-    q: Optional[str] = Query(None, description="Search title/description"),
+    q: Optional[str] = Query(None),
+    partner_id: Optional[str] = Query(None, description="'__none__' for orphan"),
+    enterprise_id: Optional[str] = Query(None, description="'__none__' for orphan"),
     user: dict = Depends(require_role("superadmin")),
 ):
-    """Superadmin-only inbox."""
     query: dict = {}
     if status:
         if status not in VALID_STATUSES:
@@ -231,16 +371,32 @@ async def list_all_feedback(
         if type not in VALID_TYPES:
             raise HTTPException(status_code=400, detail=f"type must be one of {sorted(VALID_TYPES)}")
         query["type"] = type
+    if partner_id == "__none__":
+        query["$or"] = [{"partner_id": None}, {"partner_id": {"$exists": False}}]
+    elif partner_id:
+        query["partner_id"] = partner_id
+    if enterprise_id == "__none__":
+        ex = [{"enterprise_id": None}, {"enterprise_id": {"$exists": False}}]
+        # Preserve any prior $or (unlikely to collide but be safe)
+        if "$or" in query:
+            query["$and"] = [{"$or": query.pop("$or")}, {"$or": ex}]
+        else:
+            query["$or"] = ex
+    elif enterprise_id:
+        query["enterprise_id"] = enterprise_id
     if q:
-        import re
         rx = {"$regex": re.escape(q.strip()), "$options": "i"}
-        query["$or"] = [{"title": rx}, {"description": rx}, {"submitter_email": rx}]
+        search = [{"title": rx}, {"description": rx}, {"submitter_email": rx}]
+        if "$and" in query:
+            query["$and"].append({"$or": search})
+        elif "$or" in query:
+            query["$and"] = [{"$or": query.pop("$or")}, {"$or": search}]
+        else:
+            query["$or"] = search
 
     rows = await db.feedback_items.find(query).sort("created_at", -1).to_list(length=1000)
     items = [_scrub(r) for r in rows]
 
-    # Also return per-status counts (over the WHOLE inbox, ignoring filters)
-    # so the tab pills always show accurate totals.
     counts = {s: 0 for s in VALID_STATUSES}
     async for r in db.feedback_items.find({}, {"status": 1}):
         s = r.get("status") or "new"
@@ -259,26 +415,53 @@ async def patch_feedback(
     if not row:
         raise HTTPException(status_code=404, detail="Feedback not found")
 
+    old_status = row.get("status")
     updates: dict = {"updated_at": now_iso()}
+    trigger_status_email = False
+
     if patch.status is not None:
         if patch.status not in VALID_STATUSES:
             raise HTTPException(status_code=400, detail=f"status must be one of {sorted(VALID_STATUSES)}")
         updates["status"] = patch.status
+        if patch.status != old_status and row.get("notify_submitter") is not False:
+            trigger_status_email = True
 
-    push = None
+    if patch.notify_submitter is not None:
+        updates["notify_submitter"] = bool(patch.notify_submitter)
+
+    push_note = None
     if patch.admin_note and patch.admin_note.strip():
-        push = {
+        vis = patch.note_visibility or "internal"
+        if vis not in VALID_VISIBILITIES:
+            raise HTTPException(status_code=400, detail=f"note_visibility must be one of {sorted(VALID_VISIBILITIES)}")
+        push_note = {
             "id": str(uuid.uuid4()),
             "author_id": user["id"],
             "author_name": user.get("name") or user.get("email") or "Superadmin",
             "note": patch.admin_note.strip()[:2000],
+            "visibility": vis,
+            "email_sent": False,  # set below if we actually dispatch
             "at": now_iso(),
         }
 
     ops: dict = {"$set": updates}
-    if push:
-        ops["$push"] = {"admin_notes": push}
+    if push_note:
+        ops["$push"] = {"admin_notes": push_note}
     await db.feedback_items.update_one({"id": fid}, ops)
 
     fresh = await db.feedback_items.find_one({"id": fid})
+
+    # Fire post-write side-effects (never blocks the patch response)
+    if trigger_status_email:
+        await _notify_reporter_status_change(fresh, patch.status)
+
+    if push_note and push_note["visibility"] == "reporter" and patch.email_reporter:
+        await _notify_reporter_reply(fresh, push_note, user)
+        # Persist email_sent=True on that note
+        await db.feedback_items.update_one(
+            {"id": fid, "admin_notes.id": push_note["id"]},
+            {"$set": {"admin_notes.$.email_sent": True}},
+        )
+        fresh = await db.feedback_items.find_one({"id": fid})
+
     return _scrub(fresh)
