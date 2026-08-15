@@ -1108,6 +1108,13 @@ async def run_migration(job_id: str, company_id: str) -> None:
         # `bank_account_id` so the Account column stops falling back to
         # the company default.
         banks_resolved = await resolve_transaction_banks(company_id)
+        # Post-import: translate each transaction's `contact_qbo_id`
+        # into a local `contact_id` so the Contact column resolves
+        # Vendor/Customer names instead of showing the "?" placeholder.
+        # Only fills contacts where QBO actually attached an entity —
+        # bank-feed records with no EntityRef stay unassigned (handled
+        # separately by the AI Cleanup Review pass).
+        contacts_resolved = await resolve_transaction_contacts(company_id)
         # Post-import: flip `posted=True` on every QBO transaction so
         # they immediately populate the P&L, Balance Sheet, and General
         # Ledger. QBO already committed these on Intuit's side.
@@ -1229,6 +1236,7 @@ async def run_migration(job_id: str, company_id: str) -> None:
                       "transactions_categorized": categorized,
                       "transactions_signed": signed,
                       "transactions_banks_resolved": banks_resolved,
+                      "transactions_contacts_resolved": contacts_resolved,
                       "transactions_posted": posted_count,
                       "pfc_mapped": pfc_mapped,
                       "seeded_deactivated": seeded_deactivated,
@@ -1471,6 +1479,57 @@ async def resolve_transaction_banks(company_id: str) -> int:
         )
         updated += 1
     return updated
+
+
+
+async def resolve_transaction_contacts(company_id: str) -> int:
+    """Translate each QBO transaction's `contact_qbo_id` into a local
+    `contact_id` so the Transactions UI's Contact column resolves the
+    Vendor/Customer/Employee name automatically instead of showing the
+    "?" placeholder.
+
+    Only touches docs where `contact_qbo_id` is populated but
+    `contact_id` is still empty — this is the class of Purchase /
+    Deposit / Transfer / SalesReceipt / RefundReceipt records that were
+    imported via `map_generic_txn`, where the mapper stored the QBO id
+    but the resolve step was previously missing.
+
+    Idempotent — safe to re-run and returns the number of transactions
+    that got a `contact_id` on this pass.
+    """
+    qbo_to_local: dict[str, str] = {}
+    async for c in db.contacts.find(
+        {"company_id": company_id, "qbo_id": {"$exists": True, "$ne": None}},
+        {"id": 1, "qbo_id": 1, "_id": 0},
+    ):
+        qid = c.get("qbo_id")
+        if qid:
+            qbo_to_local[str(qid)] = c["id"]
+
+    if not qbo_to_local:
+        return 0
+
+    updated = 0
+    async for t in db.transactions.find(
+        {"company_id": company_id, "source": "qbo",
+         "contact_qbo_id": {"$exists": True, "$ne": None},
+         "$or": [{"contact_id": {"$in": [None, ""]}},
+                 {"contact_id": {"$exists": False}}]},
+        {"id": 1, "contact_qbo_id": 1},
+    ):
+        cqid = t.get("contact_qbo_id")
+        if not cqid:
+            continue
+        local_id = qbo_to_local.get(str(cqid))
+        if not local_id:
+            continue
+        await db.transactions.update_one(
+            {"id": t["id"]},
+            {"$set": {"contact_id": local_id, "updated_at": now_iso()}},
+        )
+        updated += 1
+    return updated
+
 
 
 

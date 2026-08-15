@@ -977,13 +977,29 @@ async def qbo_rebuild_transaction_categories(cid: str, user: dict = Depends(get_
     from qbo_service import (resolve_transaction_categories,
                              resolve_transaction_signs,
                              resolve_transaction_banks,
+                             resolve_transaction_contacts,
                              resolve_transaction_posted)
     categorized = await resolve_transaction_categories(cid)
     signed = await resolve_transaction_signs(cid)
     banks = await resolve_transaction_banks(cid)
+    contacts = await resolve_transaction_contacts(cid)
     posted = await resolve_transaction_posted(cid)
     return {"updated": categorized, "signed": signed, "banks": banks,
-            "posted": posted}
+            "contacts": contacts, "posted": posted}
+
+
+@router.post("/companies/{cid}/qbo/resolve-contacts")
+async def qbo_resolve_contacts(cid: str, user: dict = Depends(get_current_user)):
+    """Standalone re-run of `resolve_transaction_contacts` — targeted at
+    companies whose Purchase/Deposit/Transfer imports carry a
+    `contact_qbo_id` but no `contact_id` (the class the "?" placeholder
+    in the Transactions UI's Contact column comes from). Idempotent —
+    only touches docs missing a `contact_id`. Returns the number of
+    transactions this pass linked to a local contact."""
+    await require_company(user, cid)
+    from qbo_service import resolve_transaction_contacts
+    updated = await resolve_transaction_contacts(cid)
+    return {"updated": updated}
 
 
 @router.get("/companies/{cid}/qbo/diagnostics")
