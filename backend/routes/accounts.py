@@ -1478,3 +1478,123 @@ async def accounts_import_undo(
     )
     return {"ok": True, "deleted": deleted, "restored": restored}
 
+
+
+# --------------------------------------------------------------------------
+# Sub-type / detail-type drift audit (Feb 2026)
+#
+# After the CoA sub-type unification (Option B), account rows can be in
+# one of three states:
+#   • CANONICAL — subtype == detail_type == a key present in the
+#     frontend's DETAIL_SECTIONS_BY_TYPE[type] list. New rows and any
+#     row edited through the new dropdown look like this.
+#   • LEGACY    — subtype is a pre-unification value ("Bank", "Fixed
+#     Asset", "Current Asset", "Operating Expense", etc.). detail_type
+#     may or may not be set. Downstream readers that still hard-code
+#     legacy strings may or may not match these.
+#   • DRIFTED   — subtype and detail_type disagree.
+#
+# The endpoint below is READ-ONLY. It reports counts + a sample of drifted
+# accounts so we can decide whether a backfill is justified without
+# actually touching any data.
+# --------------------------------------------------------------------------
+
+# Mirror of the frontend's DETAIL_SECTIONS_BY_TYPE keys — used only to
+# classify rows as canonical vs legacy. Keep in sync with
+# `ChartOfAccounts.jsx :: DETAIL_SECTIONS_BY_TYPE`.
+_CANONICAL_KEYS_BY_TYPE = {
+    "asset": {
+        "cash_and_bank", "money_in_transit", "accounts_receivable",
+        "prepaid_expense", "inventory", "other_current_asset",
+        "property_plant_equipment", "accumulated_depreciation",
+        "intangible_asset", "other_asset", "fixed_asset",
+    },
+    "liability": {
+        "accounts_payable", "credit_card", "current_liability",
+        "payroll_liability", "long_term_liability", "other_liability",
+    },
+    "equity": {
+        "equity", "retained_earnings", "owner_draw",
+        "owner_contribution", "opening_balance_equity",
+    },
+    "revenue": {
+        "operating_revenue", "other_revenue", "sales_revenue",
+        "service_revenue", "interest_income",
+    },
+    "cogs": {"cost_of_goods_sold"},
+    "expense": {
+        "operating_expense", "cost_of_goods_sold",
+        "payment_processing_fee", "payroll_expense", "other_expense",
+    },
+}
+
+
+@router.get("/companies/{cid}/accounts/subtype-audit")
+async def subtype_drift_audit(cid: str, user: dict = Depends(get_current_user)):
+    """READ-ONLY drift report — no data changes. Lets us watch whether
+    the CoA sub-type unification is self-healing over time (rows migrate
+    to canonical values organically as users edit them) or whether a
+    manual backfill would be justified.
+
+    Returns:
+      total: total account count for the company
+      canonical: count of rows whose subtype AND detail_type are both
+        canonical keys AND match each other
+      legacy_only_subtype: count where subtype is a pre-unification
+        value (e.g. "Bank", "Current Asset")
+      drifted: count where subtype and detail_type disagree
+      missing_detail_type: count where detail_type is missing entirely
+      by_type: per-account-type breakdown of the four states above
+      sample_drift: up to 10 example drifted rows (id, name, type,
+        subtype, detail_type) so an operator can eyeball what a backfill
+        would touch
+    """
+    await require_company(user, cid)
+
+    totals = {"total": 0, "canonical": 0, "legacy_only_subtype": 0,
+              "drifted": 0, "missing_detail_type": 0}
+    by_type: dict[str, dict[str, int]] = {}
+    sample_drift: list[dict] = []
+
+    async for a in db.accounts.find({"company_id": cid, "active": {"$ne": False}}):
+        totals["total"] += 1
+        t = (a.get("type") or "").lower()
+        st = (a.get("subtype") or "").strip()
+        dt = (a.get("detail_type") or "").strip()
+        canon = _CANONICAL_KEYS_BY_TYPE.get(t, set())
+        by_type.setdefault(t, {"total": 0, "canonical": 0,
+                               "legacy_only_subtype": 0, "drifted": 0,
+                               "missing_detail_type": 0})
+        by_type[t]["total"] += 1
+
+        if not dt:
+            totals["missing_detail_type"] += 1
+            by_type[t]["missing_detail_type"] += 1
+            continue
+        # Legacy-only-subtype: subtype is pre-unification, but
+        # detail_type is already canonical. Downstream readers keying
+        # off detail_type work fine; self-heals on next edit. Check
+        # this BEFORE the plain-drift bucket so the two states don't
+        # collide.
+        if st and st not in canon and dt in canon:
+            totals["legacy_only_subtype"] += 1
+            by_type[t]["legacy_only_subtype"] += 1
+            continue
+        if st and dt and st != dt:
+            totals["drifted"] += 1
+            by_type[t]["drifted"] += 1
+            if len(sample_drift) < 10:
+                sample_drift.append({
+                    "id": a.get("id"), "name": a.get("name"),
+                    "type": t, "subtype": st, "detail_type": dt,
+                })
+            continue
+        if st and st == dt and st in canon:
+            totals["canonical"] += 1
+            by_type[t]["canonical"] += 1
+
+    return {
+        **totals,
+        "by_type": by_type,
+        "sample_drift": sample_drift,
+    }

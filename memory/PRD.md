@@ -5017,3 +5017,29 @@ Extends the CoA CSV/Excel/PDF import review with a section-preview so users spot
 Verified end-to-end via Playwright:
 - Uploaded a mixed CSV (6 rows including one deliberate typo `widget_expense`) → summary pills rendered correctly, amber warning surfaced 3 fallback rows, per-row "Will land under" badges showed the actual destinations, "Group by section" toggle grouped rows under type · section headers with a `(default bucket — set sub-type to move)` inline hint on affected groups.
 
+
+
+### Feb 2026 — CoA Sub-Type Unification: PFC Fix + Drift Audit
+
+Follow-up to the Option-B sub-type unification. Addresses one downstream reader that was going to silently miss edited bank accounts, and adds observability so we can decide later whether a bulk backfill is justified without touching data now.
+
+**PFC prompt fix** (`pfc_ai_builder.py`):
+- Line ~77 hard-coded `subtype='Bank'` in the AI prompt's "never map to a bank account" rule. Widened to also match `subtype='cash_and_bank'` and `detail_type='cash_and_bank'`. Prevents the PFC AI from incorrectly categorizing bank-account edits as spendable line items once a user reclassifies a bank row through the new CoA dropdown.
+
+**Read-only drift audit** (`routes/accounts.py::GET /companies/{cid}/accounts/subtype-audit`):
+- Classifies every account row into one of five states:
+  - **canonical** — `subtype == detail_type` and both are in the frontend's `DETAIL_SECTIONS_BY_TYPE` for that type
+  - **legacy_only_subtype** — `subtype` is a pre-unification label (e.g. `"Bank"`, `"Fixed Asset"`) but `detail_type` is already canonical. Self-heal candidate — will normalize on next edit through the dropdown.
+  - **drifted** — both fields are canonical keys but they disagree with each other (real data-integrity concern, warrants closer look).
+  - **missing_detail_type** — no `detail_type` at all.
+- Returns totals + per-type breakdown + up to 10 example drifted rows so an operator can eyeball what a backfill would actually touch.
+- No writes anywhere — a pure diagnostic.
+- Available to any company member (mirrors the CoA read permissions) so Pros / Enterprise owners can spot drift on their own books, not just superadmins.
+
+**Purpose**: Lets us watch the self-healing property of the new sub-type unification work over time. If after 60-90 days the `legacy_only_subtype` counts have drained to near-zero organically, no backfill needed. If they stall, we know the manual migration is worth the risk.
+
+**Tests** (`tests/test_coa_subtype_unification.py`, +1 case → 4 total, all green):
+- Audit endpoint counts each classification state correctly given a seeded mix of canonical / drifted / legacy / missing rows, and surfaces the drifted rows in `sample_drift`.
+
+Verified via curl against the preview instance — real `client@axiom.ai` company returned 50 accounts with a mix of states, per-type breakdown accurate.
+
