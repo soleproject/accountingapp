@@ -243,3 +243,6 @@ frontend/node_modules/.cache/default-development/2.pack
 # below.
 !backend/.env
 !frontend/.env
+.env
+.env.*
+*.env
