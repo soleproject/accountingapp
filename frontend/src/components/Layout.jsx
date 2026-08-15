@@ -14,6 +14,7 @@ import { Toaster, toast } from "sonner";
 import { AiFocusProvider } from "@/lib/aiFocus";
 import { useActionListener } from "@/lib/createBus";
 import { api } from "@/lib/api";
+import { useFeedbackUnread } from "@/lib/useFeedbackUnread";
 import FeedbackModal from "./FeedbackModal";
 
 function CompanySwitcher() {
@@ -181,6 +182,10 @@ function ProfileMenu() {
   const [pwOpen, setPwOpen] = useState(false);
   const [fbOpen, setFbOpen] = useState(false);
   const ref = useRef(null);
+  const { reporter: unreadReporter, admin: unreadAdmin } = useFeedbackUnread({
+    isSuperadmin: user?.role === "superadmin",
+  });
+  const totalUnread = (unreadReporter || 0) + (unreadAdmin || 0);
 
   // Close on outside-click / Escape — cheap dropdown ergonomics.
   useEffect(() => {
@@ -214,12 +219,21 @@ function ProfileMenu() {
       <button
         data-testid="profile-menu-trigger"
         onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 px-2 py-1 rounded-full hover:bg-slate-100 transition"
+        className="flex items-center gap-2 px-2 py-1 rounded-full hover:bg-slate-100 transition relative"
         title={user.email}
       >
         <span className="w-8 h-8 rounded-full bg-slate-900 text-white text-xs font-semibold flex items-center justify-center">
           {initials || <User size={14} />}
         </span>
+        {totalUnread > 0 && (
+          <span
+            data-testid="profile-menu-unread-dot"
+            className="absolute -top-0.5 -left-0.5 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center leading-none"
+            title={`${totalUnread} unread`}
+          >
+            {totalUnread > 9 ? "9+" : totalUnread}
+          </span>
+        )}
         <span className="hidden md:flex flex-col items-start leading-tight">
           <span className="text-xs font-semibold text-slate-900">{name}</span>
           <span className="text-[10px] text-slate-500">{user.email}</span>
@@ -290,7 +304,33 @@ function ProfileMenu() {
             className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50"
           >
             <Inbox size={14} className="text-slate-500" /> My feedback
+            {unreadReporter > 0 && (
+              <span
+                data-testid="profile-menu-my-feedback-count"
+                className="ml-auto min-w-[18px] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center leading-none"
+              >
+                {unreadReporter > 9 ? "9+" : unreadReporter}
+              </span>
+            )}
           </Link>
+          {user.role === "superadmin" && (
+            <Link
+              to="/admin/feedback"
+              onClick={() => setOpen(false)}
+              data-testid="profile-menu-admin-feedback"
+              className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50"
+            >
+              <Inbox size={14} className="text-slate-500" /> Feedback inbox
+              {unreadAdmin > 0 && (
+                <span
+                  data-testid="profile-menu-admin-feedback-count"
+                  className="ml-auto min-w-[18px] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center leading-none"
+                >
+                  {unreadAdmin > 9 ? "9+" : unreadAdmin}
+                </span>
+              )}
+            </Link>
+          )}
           <div className="my-1 border-t border-slate-100" />
           <button
             data-testid={TID.signoutBtn}

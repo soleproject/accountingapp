@@ -90,11 +90,46 @@ def _scrub(row: dict) -> dict:
     return row
 
 
+def _is_unread_for_reporter(row: dict) -> bool:
+    """A ticket is unread for the reporter if any superadmin-authored,
+    reporter-visible note has landed after their `reporter_last_read_at`
+    marker. Internal-only notes never count."""
+    last = row.get("reporter_last_read_at")
+    for n in row.get("admin_notes") or []:
+        if (n.get("author_role") or "superadmin") != "superadmin":
+            continue
+        if (n.get("visibility") or "internal") != "reporter":
+            continue
+        if not last or (n.get("at") or "") > last:
+            return True
+    return False
+
+
+def _is_unread_for_admin(row: dict, admin_id: str) -> bool:
+    """A ticket is unread for a given admin if it's brand-new (never seen)
+    or has a reporter follow-up newer than that admin's last read."""
+    reads = row.get("admin_reads") or {}
+    last = reads.get(admin_id)
+    if not last:
+        return True  # never opened
+    # Reporter follow-ups after last read?
+    for n in row.get("admin_notes") or []:
+        if (n.get("author_role") or "superadmin") != "reporter":
+            continue
+        if (n.get("at") or "") > last:
+            return True
+    return False
+
+
 def _scrub_for_submitter(row: dict) -> dict:
     """Return a copy safe to send to the submitter: internal notes stripped."""
+    unread = _is_unread_for_reporter(row)
     row = _scrub(row)
     notes = row.get("admin_notes") or []
     row["admin_notes"] = [n for n in notes if (n.get("visibility") or "internal") == "reporter"]
+    row["unread"] = unread
+    # Drop the admin_reads dict from the reporter's view — it's admin-only
+    row.pop("admin_reads", None)
     return row
 
 
@@ -339,6 +374,9 @@ async def create_feedback(inp: FeedbackCreate, user: dict = Depends(get_current_
         "admin_notes": [],
         "attachments": attachments,
         "notify_submitter": True,  # default ON — reporter gets pings on status changes
+        # Read tracking: nulls until each side visits their inbox.
+        "reporter_last_read_at": None,
+        "admin_reads": {},   # {admin_user_id: iso}
         "created_at": now,
         "updated_at": now,
     }
@@ -348,11 +386,60 @@ async def create_feedback(inp: FeedbackCreate, user: dict = Depends(get_current_
 
 
 @router.get("/feedback/mine")
-async def list_my_feedback(user: dict = Depends(get_current_user)):
+async def list_my_feedback(
+    status: Optional[str] = Query(None),
+    only_unread: bool = Query(False),
+    user: dict = Depends(get_current_user),
+):
+    query: dict = {"submitter_user_id": user["id"]}
+    if status:
+        if status not in VALID_STATUSES:
+            raise HTTPException(status_code=400, detail=f"status must be one of {sorted(VALID_STATUSES)}")
+        query["status"] = status
+    rows = await db.feedback_items.find(query).sort("created_at", -1).to_list(length=500)
+    items = [_scrub_for_submitter(r) for r in rows]
+    if only_unread:
+        items = [i for i in items if i.get("unread")]
+    # Counts across the whole user's inbox (ignoring filters) drive the
+    # filter pills on the frontend.
+    all_rows = await db.feedback_items.find(
+        {"submitter_user_id": user["id"]},
+    ).to_list(length=500)
+    counts = {s: 0 for s in VALID_STATUSES}
+    unread_total = 0
+    for r in all_rows:
+        s = r.get("status") or "new"
+        if s in counts:
+            counts[s] += 1
+        if _is_unread_for_reporter(r):
+            unread_total += 1
+    return {
+        "items": items,
+        "counts": counts,
+        "unread": unread_total,
+    }
+
+
+@router.get("/feedback/mine/unread-count")
+async def my_unread_count(user: dict = Depends(get_current_user)):
+    """Lightweight endpoint the layout polls to render the profile-menu
+    badge without pulling the full list."""
     rows = await db.feedback_items.find(
-        {"submitter_user_id": user["id"]}
-    ).sort("created_at", -1).to_list(length=500)
-    return {"items": [_scrub_for_submitter(r) for r in rows]}
+        {"submitter_user_id": user["id"]},
+    ).to_list(length=500)
+    total = sum(1 for r in rows if _is_unread_for_reporter(r))
+    return {"unread": total}
+
+
+@router.post("/feedback/mine/mark-read")
+async def mark_mine_read(user: dict = Depends(get_current_user)):
+    """Called on visit to /feedback/mine — clears the reporter's badge."""
+    now = now_iso()
+    await db.feedback_items.update_many(
+        {"submitter_user_id": user["id"]},
+        {"$set": {"reporter_last_read_at": now}},
+    )
+    return {"ok": True, "at": now}
 
 
 @router.get("/feedback/tenants")
@@ -433,14 +520,43 @@ async def list_all_feedback(
             query["$or"] = search
 
     rows = await db.feedback_items.find(query).sort("created_at", -1).to_list(length=1000)
-    items = [_scrub(r) for r in rows]
+    items = []
+    for r in rows:
+        scrubbed = _scrub(r)
+        scrubbed["unread"] = _is_unread_for_admin(r, user["id"])
+        items.append(scrubbed)
 
     counts = {s: 0 for s in VALID_STATUSES}
-    async for r in db.feedback_items.find({}, {"status": 1}):
+    unread_total = 0
+    async for r in db.feedback_items.find({}, {"status": 1, "admin_notes": 1, "admin_reads": 1}):
         s = r.get("status") or "new"
         if s in counts:
             counts[s] += 1
-    return {"items": items, "counts": counts}
+        if _is_unread_for_admin(r, user["id"]):
+            unread_total += 1
+    return {"items": items, "counts": counts, "unread": unread_total}
+
+
+@router.get("/feedback/unread-count")
+async def admin_unread_count(user: dict = Depends(require_role("superadmin"))):
+    """Superadmin's global unread count — polled by the layout badge."""
+    total = 0
+    async for r in db.feedback_items.find({}, {"admin_notes": 1, "admin_reads": 1}):
+        if _is_unread_for_admin(r, user["id"]):
+            total += 1
+    return {"unread": total}
+
+
+@router.post("/feedback/mark-read")
+async def admin_mark_read(user: dict = Depends(require_role("superadmin"))):
+    """Called on visit to /admin/feedback — clears the admin's badge for
+    every ticket in one shot."""
+    now = now_iso()
+    await db.feedback_items.update_many(
+        {},
+        {"$set": {f"admin_reads.{user['id']}": now}},
+    )
+    return {"ok": True, "at": now}
 
 
 @router.patch("/feedback/{fid}")

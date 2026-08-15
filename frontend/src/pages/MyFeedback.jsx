@@ -14,6 +14,7 @@ const STATUS_META = {
   completed:   { label: "Completed",   color: "bg-emerald-50 text-emerald-700 border-emerald-200", Icon: CheckCircle2 },
   wont_do:     { label: "Won't do",    color: "bg-slate-50 text-slate-500 border-slate-200",     Icon: XCircle },
 };
+const STATUS_ORDER = ["new", "in_progress", "completed", "wont_do"];
 
 function fmtWhen(iso) {
   if (!iso) return "";
@@ -21,29 +22,54 @@ function fmtWhen(iso) {
 }
 
 /**
- * MyFeedback — every submitter's read/reply thread. Notes from the
- * superadmin appear next to the reporter's own follow-ups (both live in
- * the same `admin_notes` array server-side; the API filters out internal
- * notes for us). Each ticket has a compact reply compose so reporters
- * can send additional context (with screenshots) without leaving.
+ * MyFeedback — every submitter's read/reply thread. Reporters can filter
+ * by status or "unread only" (new replies from the team). Visiting this
+ * page auto-marks everything as read.
  */
 export default function MyFeedback() {
   const [rows, setRows] = useState(null);
+  const [counts, setCounts] = useState({});
+  const [unread, setUnread] = useState(0);
+  const [statusFilter, setStatusFilter] = useState(null);
+  const [onlyUnread, setOnlyUnread] = useState(false);
   const [openNew, setOpenNew] = useState(false);
 
   const load = async () => {
     try {
-      const r = await api.get("/feedback/mine");
+      const params = {};
+      if (statusFilter) params.status = statusFilter;
+      if (onlyUnread) params.only_unread = 1;
+      const r = await api.get("/feedback/mine", { params });
       setRows(r.data.items || []);
+      setCounts(r.data.counts || {});
+      setUnread(r.data.unread || 0);
     } catch {
       toast.error("Couldn't load your feedback.");
       setRows([]);
     }
   };
-  useEffect(() => { load(); }, []);
+
+  // On mount: fetch the list FIRST so unread badges paint, then mark-read
+  // so the profile-menu badge clears on the next poll.
+  useEffect(() => {
+    (async () => {
+      await load();
+      api.post("/feedback/mine/mark-read").catch(() => {});
+    })();
+    // eslint-disable-next-line
+  }, []);
+
+  useEffect(() => {
+    // Skip the very first mount (handled above); re-load when filters change.
+    if (rows === null) return;
+    load();
+    // eslint-disable-next-line
+  }, [statusFilter, onlyUnread]);
 
   const replaceRow = (updated) =>
     setRows((prev) => (prev || []).map((r) => (r.id === updated.id ? updated : r)));
+
+  const totalAll = Object.values(counts).reduce((a, b) => a + b, 0);
 
   return (
     <div className="max-w-4xl mx-auto p-6" data-testid="my-feedback-page">
@@ -69,6 +95,58 @@ export default function MyFeedback() {
         </button>
       </div>
 
+      {/* Filter pills */}
+      <div className="flex items-center gap-2 flex-wrap mb-4">
+        <button
+          onClick={() => setStatusFilter(null)}
+          data-testid="mine-filter-all"
+          className={`px-3 py-1.5 rounded-full text-xs font-medium border ${
+            statusFilter === null
+              ? "bg-slate-900 text-white border-slate-900"
+              : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+          }`}
+        >
+          All <span className="opacity-70 ml-1">{totalAll}</span>
+        </button>
+        {STATUS_ORDER.map((s) => {
+          const meta = STATUS_META[s];
+          const active = statusFilter === s;
+          const Icon = meta.Icon;
+          return (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(active ? null : s)}
+              data-testid={`mine-filter-status-${s}`}
+              className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border ${
+                active
+                  ? "bg-slate-900 text-white border-slate-900"
+                  : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+              }`}
+            >
+              <Icon size={11} /> {meta.label}
+              <span className="opacity-70">{counts[s] || 0}</span>
+            </button>
+          );
+        })}
+        <div className="mx-1 h-5 w-px bg-slate-200" />
+        <button
+          onClick={() => setOnlyUnread((v) => !v)}
+          data-testid="mine-filter-unread"
+          className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium border ${
+            onlyUnread
+              ? "bg-rose-600 text-white border-rose-600"
+              : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+          }`}
+        >
+          New replies
+          <span className={`ml-1 min-w-[18px] px-1 rounded-full text-[10px] font-bold ${
+            onlyUnread ? "bg-white text-rose-600" : "bg-rose-100 text-rose-700"
+          }`}>
+            {unread}
+          </span>
+        </button>
+      </div>
+
       {rows === null ? (
         <div className="bg-white rounded-lg border border-slate-200 p-10 text-center text-slate-400 text-sm">
           <Loader2 size={16} className="inline animate-spin mr-2" /> Loading…
@@ -76,14 +154,20 @@ export default function MyFeedback() {
       ) : rows.length === 0 ? (
         <div className="bg-white rounded-lg border border-slate-200 p-10 text-center text-slate-500">
           <Inbox size={24} className="mx-auto text-slate-300 mb-2" />
-          <div className="text-sm">You haven't filed any feedback yet.</div>
-          <button
-            onClick={() => setOpenNew(true)}
-            className="mt-3 text-sm text-cyan-700 hover:underline"
-            data-testid="my-feedback-empty-create"
-          >
-            Report your first bug or idea →
-          </button>
+          <div className="text-sm">
+            {onlyUnread ? "No unread replies right now." :
+             statusFilter ? `Nothing matches “${STATUS_META[statusFilter].label}.”` :
+             "You haven't filed any feedback yet."}
+          </div>
+          {!statusFilter && !onlyUnread && (
+            <button
+              onClick={() => setOpenNew(true)}
+              className="mt-3 text-sm text-cyan-700 hover:underline"
+              data-testid="my-feedback-empty-create"
+            >
+              Report your first bug or idea →
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-4">
@@ -105,7 +189,7 @@ function TicketCard({ item, onUpdated }) {
 
   return (
     <div
-      className="bg-white rounded-lg border border-slate-200 overflow-hidden"
+      className={`bg-white rounded-lg border ${item.unread ? "border-rose-200 ring-1 ring-rose-100" : "border-slate-200"} overflow-hidden`}
       data-testid={`my-feedback-row-${item.id}`}
     >
       <div className="p-4 flex items-start gap-3">
@@ -114,6 +198,13 @@ function TicketCard({ item, onUpdated }) {
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
+            {item.unread && (
+              <span
+                className="w-2 h-2 rounded-full bg-rose-500"
+                title="New reply from the team"
+                data-testid={`my-feedback-unread-${item.id}`}
+              />
+            )}
             <div className="font-medium text-slate-900 truncate">{item.title}</div>
             <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border ${meta.color}`}>
               <Icon size={10} /> {meta.label}

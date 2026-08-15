@@ -826,3 +826,152 @@ def test_reporter_reply_empty_rejected():
             await _wipe_users_and_feedback([uid])
     _run(_t())
 
+
+
+# ------------------------------------------------------------------
+# Unread tracking + filters
+# ------------------------------------------------------------------
+def test_reporter_unread_lifecycle():
+    async def _t():
+        u_client, t_client = await _mk_user("client")
+        u_admin, t_admin = await _mk_user("superadmin")
+        try:
+            async with await _client() as c:
+                # File a ticket — the initial submission itself isn't
+                # "unread activity" for the reporter (they wrote it), so
+                # the badge should be 0 until an admin responds.
+                r = await c.post("/api/feedback",
+                    headers={"Authorization": f"Bearer {t_client}"},
+                    json={"type": "bug", "title": "unread-flow"})
+                fid = r.json()["id"]
+                r = await c.get("/api/feedback/mine/unread-count",
+                    headers={"Authorization": f"Bearer {t_client}"})
+                assert r.json()["unread"] == 0
+
+                # Admin posts a reporter-visible reply → unread ticks up
+                await c.patch(f"/api/feedback/{fid}",
+                    headers={"Authorization": f"Bearer {t_admin}"},
+                    json={"admin_note": "hi", "note_visibility": "reporter"})
+                r = await c.get("/api/feedback/mine/unread-count",
+                    headers={"Authorization": f"Bearer {t_client}"})
+                assert r.json()["unread"] == 1
+
+                # Reporter visits inbox (marks read) → count clears
+                await c.post("/api/feedback/mine/mark-read",
+                    headers={"Authorization": f"Bearer {t_client}"})
+                r = await c.get("/api/feedback/mine/unread-count",
+                    headers={"Authorization": f"Bearer {t_client}"})
+                assert r.json()["unread"] == 0
+
+                # Another admin reply → unread again
+                await c.patch(f"/api/feedback/{fid}",
+                    headers={"Authorization": f"Bearer {t_admin}"},
+                    json={"admin_note": "another", "note_visibility": "reporter"})
+                r = await c.get("/api/feedback/mine/unread-count",
+                    headers={"Authorization": f"Bearer {t_client}"})
+                assert r.json()["unread"] == 1
+
+                # Internal notes should NEVER count toward reporter unread
+                await c.post("/api/feedback/mine/mark-read",
+                    headers={"Authorization": f"Bearer {t_client}"})
+                await c.patch(f"/api/feedback/{fid}",
+                    headers={"Authorization": f"Bearer {t_admin}"},
+                    json={"admin_note": "internal only", "note_visibility": "internal"})
+                r = await c.get("/api/feedback/mine/unread-count",
+                    headers={"Authorization": f"Bearer {t_client}"})
+                assert r.json()["unread"] == 0
+        finally:
+            await _wipe_users_and_feedback([u_client, u_admin])
+    _run(_t())
+
+
+def test_admin_unread_lifecycle():
+    async def _t():
+        u_client, t_client = await _mk_user("client")
+        u_admin, t_admin = await _mk_user("superadmin")
+        try:
+            async with await _client() as c:
+                # Freshly-created ticket is unread for every admin who hasn't
+                # visited yet.
+                await c.post("/api/feedback",
+                    headers={"Authorization": f"Bearer {t_client}"},
+                    json={"type": "bug", "title": "admin-unread"})
+                r = await c.get("/api/feedback/unread-count",
+                    headers={"Authorization": f"Bearer {t_admin}"})
+                assert r.json()["unread"] >= 1
+
+                # Mark-read clears it
+                await c.post("/api/feedback/mark-read",
+                    headers={"Authorization": f"Bearer {t_admin}"})
+                r = await c.get("/api/feedback/unread-count",
+                    headers={"Authorization": f"Bearer {t_admin}"})
+                # This admin has now read everything; count must be 0
+                # (other admins in the DB don't count against us).
+                assert r.json()["unread"] == 0
+
+                # Reporter follow-up must re-mark that ticket as unread for
+                # the admin who already read it.
+                r2 = await c.get("/api/feedback",
+                    headers={"Authorization": f"Bearer {t_admin}"})
+                fid = next(i["id"] for i in r2.json()["items"] if i["title"] == "admin-unread")
+                await c.post(f"/api/feedback/{fid}/reply",
+                    headers={"Authorization": f"Bearer {t_client}"},
+                    json={"note": "reporter says more"})
+                r = await c.get("/api/feedback/unread-count",
+                    headers={"Authorization": f"Bearer {t_admin}"})
+                assert r.json()["unread"] == 1
+        finally:
+            await _wipe_users_and_feedback([u_client, u_admin])
+    _run(_t())
+
+
+def test_mine_filters_status_and_only_unread():
+    async def _t():
+        u_client, t_client = await _mk_user("client")
+        u_admin, t_admin = await _mk_user("superadmin")
+        try:
+            async with await _client() as c:
+                # 3 items — one in each of new / in_progress / completed
+                for i, title in enumerate(["A", "B", "C"]):
+                    await c.post("/api/feedback",
+                        headers={"Authorization": f"Bearer {t_client}"},
+                        json={"type": "bug", "title": title})
+                r = await c.get("/api/feedback/mine",
+                    headers={"Authorization": f"Bearer {t_client}"})
+                by_title = {i["title"]: i["id"] for i in r.json()["items"]}
+                # Flip B → in_progress, A → completed
+                await c.patch(f"/api/feedback/{by_title['B']}",
+                    headers={"Authorization": f"Bearer {t_admin}"},
+                    json={"status": "in_progress"})
+                await c.patch(f"/api/feedback/{by_title['A']}",
+                    headers={"Authorization": f"Bearer {t_admin}"},
+                    json={"status": "completed"})
+                # Also add an admin reply on B → B becomes unread
+                await c.patch(f"/api/feedback/{by_title['B']}",
+                    headers={"Authorization": f"Bearer {t_admin}"},
+                    json={"admin_note": "hi B", "note_visibility": "reporter"})
+
+                # Filter by status=completed → only 1
+                r = await c.get("/api/feedback/mine?status=completed",
+                    headers={"Authorization": f"Bearer {t_client}"})
+                titles = {i["title"] for i in r.json()["items"]}
+                assert titles == {"A"}
+
+                # only_unread=1 → only B
+                r = await c.get("/api/feedback/mine?only_unread=1",
+                    headers={"Authorization": f"Bearer {t_client}"})
+                titles = {i["title"] for i in r.json()["items"]}
+                assert titles == {"B"}
+
+                # Counts breakdown is present + independent of filters
+                r = await c.get("/api/feedback/mine?status=completed",
+                    headers={"Authorization": f"Bearer {t_client}"})
+                counts = r.json()["counts"]
+                assert counts["completed"] == 1
+                assert counts["in_progress"] == 1
+                assert counts["new"] == 1
+                assert r.json()["unread"] == 1
+        finally:
+            await _wipe_users_and_feedback([u_client, u_admin])
+    _run(_t())
+

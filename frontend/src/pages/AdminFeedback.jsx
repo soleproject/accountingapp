@@ -63,8 +63,20 @@ export default function AdminFeedback() {
     } catch { /* non-fatal */ }
   };
   useEffect(() => { loadTenants(); }, []);
-  useEffect(() => { load(); /* eslint-disable-next-line */ },
-    [statusFilter, typeFilter, partnerFilter, enterpriseFilter]);
+  useEffect(() => {
+    // Load list first (so per-row unread dots paint), then mark-read
+    // so the profile-menu / dash badges clear on the next poll.
+    (async () => {
+      await load();
+      api.post("/feedback/mark-read").catch(() => {});
+    })();
+    // eslint-disable-next-line
+  }, []);
+  useEffect(() => {
+    if (items === null) return;
+    load();
+    // eslint-disable-next-line
+  }, [statusFilter, typeFilter, partnerFilter, enterpriseFilter]);
   useEffect(() => {
     const h = setTimeout(load, 300);
     return () => clearTimeout(h);
@@ -236,6 +248,13 @@ export default function AdminFeedback() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
+                            {r.unread && (
+                              <span
+                                className="w-2 h-2 rounded-full bg-rose-500 shrink-0"
+                                title="Unread activity"
+                                data-testid={`row-unread-${r.id}`}
+                              />
+                            )}
                             <div className="font-medium text-slate-900 truncate">{r.title}</div>
                             <span className={`text-[10px] px-2 py-0.5 rounded-full ${meta.color}`}>{meta.label}</span>
                             {attCount > 0 && (
