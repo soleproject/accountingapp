@@ -562,6 +562,32 @@ export default function ChartOfAccounts() {
                   ? "Sub-type and detail-type disagree — the account may render in the wrong section on reports. Use Backfill sub-types (Shift+Click to force re-classify) or edit each account to pick the correct sub-type."
                   : "These accounts are missing a Wave-style sub-type and will land in an unclassified bucket. Click Backfill sub-types above for a one-shot guess."}
               </div>
+              {/* Inline list of drifted accounts — visible to every user
+                  (not just superadmin) so Pros can see WHICH account is
+                  the problem without opening a diagnostics panel. Caps
+                  at 3 in the summary; full list still lives in the
+                  Superadmin diagnostics chip below. */}
+              {driftAudit.drifted > 0 && driftAudit.sample_drift?.length > 0 && (
+                <ul className="mt-2 space-y-1" data-testid="coa-drift-list">
+                  {driftAudit.sample_drift.slice(0, 3).map((s) => (
+                    <li key={s.id} className="flex items-center gap-1.5 text-[11px] text-rose-900" data-testid={`coa-drift-row-${s.id}`}>
+                      <span className="w-1 h-1 rounded-full bg-rose-500 shrink-0" />
+                      <span className="font-medium truncate max-w-[220px]">{s.name}</span>
+                      <span className="text-rose-500/70">·</span>
+                      <span className="text-rose-700/70">{s.type}</span>
+                      <span className="text-rose-500/70">·</span>
+                      <span className="px-1 py-px rounded bg-white/70 text-rose-700 font-mono-num">{s.subtype || "—"}</span>
+                      <span className="text-rose-500/70">→</span>
+                      <span className="px-1 py-px rounded bg-white/70 text-rose-700 font-mono-num">{s.detail_type || "—"}</span>
+                    </li>
+                  ))}
+                  {driftAudit.sample_drift.length > 3 && (
+                    <li className="text-[10px] text-rose-700/70 pl-2.5">
+                      +{driftAudit.sample_drift.length - 3} more
+                    </li>
+                  )}
+                </ul>
+              )}
             </div>
             {isSuperadmin && (
               <button
