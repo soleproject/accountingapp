@@ -783,27 +783,41 @@ def test_reporter_reply_with_attachments():
 
 
 def test_reporter_reply_notifies_superadmins_via_comms():
+    """When a NON-test reporter (real customer email) posts a follow-up,
+    the fanout to superadmins should log a comms row per admin. Uses a
+    real-looking `@fbtest-real.io` email so the Feb 25 2026 test-domain
+    suppression guard doesn't short-circuit the fanout, and mocks
+    send_email so no actual Resend fires."""
+    from unittest.mock import AsyncMock, patch as _patch
     async def _t():
+        # Reporter with a real-looking email (guard must not skip).
         u_client, t_client = await _mk_user("client")
+        await db.users.update_one({"id": u_client},
+            {"$set": {"email": f"reporter_{u_client[:6]}@fbtest-real.io"}})
+        # Admin with a real-looking email too.
         u_admin, t_admin = await _mk_user("superadmin")
+        await db.users.update_one({"id": u_admin},
+            {"$set": {"email": f"admin_{u_admin[:6]}@fbtest-real.io"}})
         try:
-            async with await _client() as c:
-                r = await c.post("/api/feedback",
-                    headers={"Authorization": f"Bearer {t_client}"},
-                    json={"type": "bug", "title": "notify-admins"})
-                fid = r.json()["id"]
-                pre = await db.communications.count_documents({
-                    "kind": "feedback_new_reporter_reply",
-                    "related.feedback_id": fid,
-                })
-                await c.post(f"/api/feedback/{fid}/reply",
-                    headers={"Authorization": f"Bearer {t_client}"},
-                    json={"note": "ping"})
-                post = await db.communications.count_documents({
-                    "kind": "feedback_new_reporter_reply",
-                    "related.feedback_id": fid,
-                })
-                assert post > pre
+            with _patch("email_service.send_email", new_callable=AsyncMock) as m:
+                m.return_value = {"id": "mocked-resend-id"}
+                async with await _client() as c:
+                    r = await c.post("/api/feedback",
+                        headers={"Authorization": f"Bearer {t_client}"},
+                        json={"type": "bug", "title": "notify-admins"})
+                    fid = r.json()["id"]
+                    pre = await db.communications.count_documents({
+                        "kind": "feedback_new_reporter_reply",
+                        "related.feedback_id": fid,
+                    })
+                    await c.post(f"/api/feedback/{fid}/reply",
+                        headers={"Authorization": f"Bearer {t_client}"},
+                        json={"note": "ping"})
+                    post = await db.communications.count_documents({
+                        "kind": "feedback_new_reporter_reply",
+                        "related.feedback_id": fid,
+                    })
+                    assert post > pre
         finally:
             await _wipe_users_and_feedback([u_client, u_admin])
     _run(_t())
