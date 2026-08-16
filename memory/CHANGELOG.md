@@ -1,5 +1,56 @@
 # SmartBooks — Changelog
 
+## 2026-02-26 — QBO Deposit Splits + Credit-Card-Credit Sign Fixes
+
+### 🐛 Bug — Checking/Undep/Mastercard drifting by $3,700 on every QBO-migrated company
+Side-by-side vs QBO's own BS report for two different sandboxes (`Sandbox Company US a026` and `US 2457`) showed **identical deltas** on both realms:
+- Checking off by +$1,876.90
+- Undeposited Funds off by +$1,694.90
+- Mastercard off by +$1,800
+
+Deterministic identical drift across two realms proved these were mapper bugs, not data quirks.
+
+### 🔬 Root causes (two stacked bugs)
+
+**Bug A — Deposits with `LinkedTxn`-only lines have their source-side dropped.**
+A QBO Deposit line comes in one of two shapes:
+- `DepositLineDetail.AccountRef` — direct income booked straight to the destination bank (e.g. an interest deposit)
+- `LinkedTxn: [{TxnType:"Payment"}]` — a sweep from Undeposited Funds to the destination bank, no explicit AccountRef because QBO knows the source is Undep
+
+Our `_map_lines` had `if DetailType in (None, "SubTotalLineDetail"): continue`, silently discarding every LinkedTxn-only line. Result: multi-payment deposits DR'd the bank (via `bank_account_qbo_id`) but never CR'd Undep. Undep sat inflated by every payment amount, and the destination bank got its debit without an offsetting credit.
+
+**Bug B — QBO "Credit Card Credit" transactions came through as Purchase with `Credit: true`, but our mapper ignored the credit flag.**
+QBO's `Purchase` entity doubles as both a normal expense (`Credit` missing/false) AND a refund back to a CC (`Credit: true`, `PaymentType: CreditCard`). In the refund case, direction reverses: DR Checking / CR Mastercard $900 (money moving FROM the CC balance TO Checking as a refund). Our `_signed_amount` only looked at `txn_type` — it saw "Purchase" and signed as outflow (`-900`). Combined with `bank_account_id=Mastercard` and `category_account_id=Checking`, `_signed_balances` ended up posting:
+- Mastercard raw −900 → display +900 (CC liability inflated)
+- Checking raw +900 (Checking also inflated)
+
+Because both sides moved the wrong way, the sheet still balanced internally but every CC-credit inflated Mastercard AND Checking by the same amount. Craig's sample data has one $900 CC-credit → Mastercard off by exactly $900 (times a factor of 2 for the sign inversion — hence the observed $1,800 delta).
+
+### ✅ Fix
+1. **`qbo_service.py::_map_lines`** — accepts `DepositLineDetail` explicitly. Keeps LinkedTxn-only lines (no DetailType, no AccountRef, but non-zero Amount + LinkedTxn ref). Preserves `linked_txns` on the line for downstream resolvers.
+2. **`qbo_service.py::resolve_deposit_splits` (new)** — post-migration resolver that walks each Deposit's line_items and populates `splits[]` with the credit-side attribution:
+    - Line has `account_qbo_id` (DepositLineDetail.AccountRef) → split to that account
+    - Line is LinkedTxn-only → split falls back to the company's Undeposited Funds account
+    - `_signed_balances` reads `splits[]` and CR-s each source account, balancing the DR on the destination bank.
+3. **`qbo_service.py::map_generic_txn`** — inverts `amount` and `direction` for `Purchase` transactions with `Credit: true`. The CC-credit refund now DR-s Checking (via category) and CR-s Mastercard (via bank), matching QBO's actual GL entry exactly.
+4. **`qbo_service.py::qbo_migrate`** — wires `resolve_deposit_splits` into the migration flow right after payment linking, and stores `deposit_splits` stats on the job row.
+
+### 🧪 Verified E2E on BOTH sandboxes (Sandbox Company US a026 + US 2457, distinct realms)
+Identical results on both — proving the fixes generalize, not overfit to one realm:
+- Total Assets: pre-fix $27,375.59 → post-fix **$23,880.69** vs QBO $23,436.29 (gap closed from $3,939.30 to $444.40 — **89% reduction**)
+- Undeposited Funds: was +$1,694.90 → **✓ exact match** $2,062.52
+- Mastercard: was +$1,800 → **✓ exact match** $157.72
+- Checking: was +$1,876.90 → down to +$76.90 (remaining = 3 unhandled QBO `SalesTaxPayment` entities we don't import)
+- BS still balances at $0.00 imbalance ✓
+
+### 📝 Remaining known drift ($444)
+- **~$77** — 3 QBO `SalesTaxPayment` entities not imported (small entity, low priority)
+- **$200** — Savings opening balance predating Deposit-5 (opening-balances JE only handles zero-activity accounts today)
+- **~$150** — phantom internal "Inventory" account still receiving item-purchase line items and one SalesReceipt discount line ($17.50) dropped by the mapper
+- All three tracked as follow-up items, none affect the balance-sheet integrity (still ties internally).
+
+---
+
 ## 2026-02-26 — QBO Opening Balance JE + Sub-Account Total Double-Count Fix
 
 ### 🐛 Bug — Fixed Assets and Long-Term Liabilities read $0 on migrated companies
