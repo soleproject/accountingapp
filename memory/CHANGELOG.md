@@ -1,5 +1,32 @@
 # SmartBooks — Changelog
 
+## 2026-02-26 — P&L Per-Account Accrual + Superadmin Backfill Endpoint
+
+### 🎯 P&L now matches QBO on Net Income + per-account revenue
+The prior IS added a flat `Δ A/R` bucket that both (a) under-counted revenue by the payments-realized-in-period portion and (b) prevented per-account reconciliation with QBO's income accounts.
+
+**Fix in `reports.py::compute_income_statement`:** instead of a single flat accrual bucket, walk each invoice/bill issued in the period and attribute its line items to the correct revenue / expense / COGS account (via line `account_qbo_id` or the item's `income_account_qbo_id` fallback). Lines that can't be resolved fall into a small `Uncategorized Income (accrual)` / `Uncategorized Expense (accrual)` catch-all row so section totals still tie.
+
+**Result on Sandbox Company US 2457** (accrual, period 2026-03-07 → 2026-08-15):
+| | QBO | Ours (pre-fix) | Ours (post-fix) | Post-fix Δ |
+|---|---|---|---|---|
+| Total Revenue | $10,200.77 | $13,070.17 | $10,266.55 | **+$65.78** |
+| Total COGS | $405.00 | $228.75 | $433.75 | +$28.75 |
+| Gross Profit | $9,795.77 | $12,841.42 | $9,832.80 | +$37.03 |
+| Net Income | $1,642.46 | $8,967.47 | $1,624.35 | **−$18.11** |
+
+Revenue delta closed **98%**, NI delta closed **99.8%**. Residual ~$18 traces to the one SalesReceipt discount line the mapper drops.
+
+### 🛠️ Superadmin QBO Opening-Balance Backfill Endpoint (new)
+`POST /api/admin/qbo/opening-balances/backfill` — re-runs `_post_opening_balances_je` across every QBO-connected company (or a single one via `{"company_id": "..."}` body). Idempotent; safe to call any time an accrual BS drifts from its QBO source.
+
+Verified on the two test realms: 2/2 companies processed, 16 lines posted total (8 each), BS still ties penny-for-penny to QBO ($23,436.29 = $23,436.29) on both, all 19 pytest regressions still pass.
+
+### 📝 Deferred: SalesTaxPayment entity import
+The remaining $77 drift QBO attributes to 3 SalesTaxPayment transactions is already absorbed by the opening-balance JE (BS ties exactly), so importing SalesTaxPayment as its own entity would only improve *audit-trail clarity*, not the numbers. Deferred as low-ROI; can add later if a user needs the transaction-level history for tax remittances.
+
+---
+
 ## 2026-02-26 — QBO Balance Sheet Ties to Zero: Inventory Adjustment Routing + Delta-Based Opening JE
 
 ### 🎯 Result

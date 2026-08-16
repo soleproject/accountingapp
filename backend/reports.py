@@ -385,26 +385,141 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
     total_cogs    = round(sum(r["amount"] for r in cogs_rows    if not r.get("parent_code")), 2)
     total_expense = round(sum(r["amount"] for r in expense_rows if not r.get("parent_code")), 2)
 
-    # Accrual adjustments: add change in A/R to revenue, change in A/P to expense.
-    # This converts the cash-based P&L (transactions only) into an accrual view.
+    # Accrual layer: on QBO's own P&L, revenue is recognized when an
+    # invoice is issued (regardless of whether it's been collected).
+    # Our raw signed-balances layer only counts direct posts to revenue
+    # accounts (SalesReceipts, RefundReceipts, JEs) — invoice-driven
+    # revenue lives in `db.invoices`, never touching `_signed_balances`.
+    # Same shape for A/P: bills issued in the period are the accrual
+    # expense.
+    #
+    # To match QBO's per-account totals we:
+    #   1. Walk each invoice/bill issued in the period
+    #   2. Group its line items by the income/expense account each
+    #      item points at (via `account_qbo_id` on the mapped line)
+    #   3. Fold those amounts into the revenue/expense row for the
+    #      matching account, or emit a synthetic bucket row when the
+    #      line has no resolvable account (falls back to a single
+    #      "Uncategorized Income / Expense" catch-all so totals still
+    #      tie).
+    #
+    # Feb 26 2026 — replaces the earlier flat "Accrual adjustment
+    # (Δ A/R)" line which under-counted by `ar_cash_in_period` and
+    # prevented per-account reconciliation with QBO.
     accrual_adj_rev = 0.0
     accrual_adj_exp = 0.0
     if basis == "accrual":
-        ap = await _open_ar_ap(company_id, as_of=end, start=start)
-        accrual_adj_rev = round(ap["ar_end"] - ap["ar_start"], 2)
-        accrual_adj_exp = round(ap["ap_end"] - ap["ap_start"], 2)
-        if abs(accrual_adj_rev) >= 0.005:
+        # Build lookup: qbo_id → local account row, keyed for revenue
+        # and expense/cogs separately so we route each invoice line to
+        # the correct section.
+        rev_by_qbo: dict[str, dict] = {}
+        exp_by_qbo: dict[str, dict] = {}
+        for a in accts:
+            if a.get("qbo_id"):
+                if a["type"] == "revenue":
+                    rev_by_qbo[str(a["qbo_id"])] = a
+                elif a["type"] in ("expense", "cogs"):
+                    exp_by_qbo[str(a["qbo_id"])] = a
+        # Also index the rows we already emitted so we can add to
+        # them in place instead of stacking duplicate entries.
+        rev_row_by_id = {r["id"]: r for r in revenue_rows if r.get("id")}
+        exp_row_by_id = {r["id"]: r for r in expense_rows if r.get("id")}
+
+        # 1) Invoices issued in the period → revenue side.
+        rev_uncategorized = 0.0
+        async for inv in db.invoices.find({"company_id": company_id}):
+            issue = inv.get("issue_date") or ""
+            if not (issue and start <= issue <= end):
+                continue
+            for ln in inv.get("line_items") or []:
+                amt = float(ln.get("amount") or 0)
+                if abs(amt) < 0.005:
+                    continue
+                qid = str(ln.get("account_qbo_id") or "")
+                # Common pattern: SalesItemLineDetail carries an
+                # ItemRef (not AccountRef). Look up the item's income
+                # account when we didn't get an AccountRef directly.
+                if not qid and ln.get("item_qbo_id"):
+                    item = await db.items.find_one({
+                        "company_id": company_id,
+                        "qbo_id": ln["item_qbo_id"]})
+                    if item:
+                        qid = str(item.get("income_account_qbo_id") or "")
+                acct = rev_by_qbo.get(qid)
+                if acct:
+                    row = rev_row_by_id.get(acct["id"])
+                    if row:
+                        row["amount"] = round(row["amount"] + amt, 2)
+                    else:
+                        new_row = {
+                            "id": acct["id"], "code": acct.get("code") or "",
+                            "name": acct.get("name") or "",
+                            "amount": round(amt, 2),
+                            "detail_type": (acct.get("detail_type") or "").strip(),
+                        }
+                        revenue_rows.append(new_row)
+                        rev_row_by_id[acct["id"]] = new_row
+                else:
+                    rev_uncategorized += amt
+                accrual_adj_rev += amt
+        if abs(rev_uncategorized) >= 0.005:
             revenue_rows.append({
-                "code": "1200", "name": "Accrual adjustment (Δ A/R)",
-                "amount": accrual_adj_rev,
+                "code": "4999",
+                "name": "Uncategorized Income (accrual)",
+                "amount": round(rev_uncategorized, 2),
             })
-            total_revenue = round(total_revenue + accrual_adj_rev, 2)
-        if abs(accrual_adj_exp) >= 0.005:
+
+        # 2) Bills issued in the period → expense/COGS side.
+        exp_uncategorized = 0.0
+        async for bill in db.bills.find({"company_id": company_id}):
+            issue = bill.get("issue_date") or ""
+            if not (issue and start <= issue <= end):
+                continue
+            for ln in bill.get("line_items") or []:
+                amt = float(ln.get("amount") or 0)
+                if abs(amt) < 0.005:
+                    continue
+                qid = str(ln.get("account_qbo_id") or "")
+                if not qid and ln.get("item_qbo_id"):
+                    item = await db.items.find_one({
+                        "company_id": company_id,
+                        "qbo_id": ln["item_qbo_id"]})
+                    if item:
+                        qid = str(item.get("expense_account_qbo_id") or "")
+                acct = exp_by_qbo.get(qid)
+                if acct:
+                    if acct["type"] == "cogs":
+                        target_rows = cogs_rows
+                    else:
+                        target_rows = expense_rows
+                    row = next((r for r in target_rows if r.get("id") == acct["id"]), None)
+                    if row:
+                        row["amount"] = round(row["amount"] + amt, 2)
+                    else:
+                        target_rows.append({
+                            "id": acct["id"], "code": acct.get("code") or "",
+                            "name": acct.get("name") or "",
+                            "amount": round(amt, 2),
+                            "detail_type": (acct.get("detail_type") or "").strip(),
+                        })
+                else:
+                    exp_uncategorized += amt
+                accrual_adj_exp += amt
+        if abs(exp_uncategorized) >= 0.005:
             expense_rows.append({
-                "code": "2000", "name": "Accrual adjustment (Δ A/P)",
-                "amount": accrual_adj_exp,
+                "code": "5999",
+                "name": "Uncategorized Expense (accrual)",
+                "amount": round(exp_uncategorized, 2),
             })
-            total_expense = round(total_expense + accrual_adj_exp, 2)
+
+        # Recompute section totals now that accrual rows have been
+        # merged into the per-account rows.
+        total_revenue = round(sum(r["amount"] for r in revenue_rows
+                                    if not r.get("parent_code")), 2)
+        total_cogs    = round(sum(r["amount"] for r in cogs_rows
+                                    if not r.get("parent_code")), 2)
+        total_expense = round(sum(r["amount"] for r in expense_rows
+                                    if not r.get("parent_code")), 2)
 
     # Gross Profit = Revenue − COGS. Emitted as a subtotal above
     # Operating Expenses whenever there's any COGS activity.
