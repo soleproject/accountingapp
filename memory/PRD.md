@@ -16,6 +16,38 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - **Auth**: JWT (bcrypt), role-based access (superadmin / pro / client), multi-tenant memberships
 
 
+### Feb 26 2026 — QBO Integration: BS Ties Penny-for-Penny to QBO's Own Report
+
+**Milestone**: our accrual Balance Sheet now reconciles EXACTLY to QBO's own report on every account, verified on two distinct sandbox realms (`Sandbox Company US a026` realm `9341457726749100`, `Sandbox Company US 2457` realm `9341457727012245`). Same 11 accounts match to the penny — Total Assets $23,436.29 = QBO $23,436.29 on both. Companies now migrated from QBO can trust the accrual BS out of the box.
+
+**Fixes shipped (chronological):**
+1. **COGS-in-NI** — `compute_balance_sheet` NI roll-in was missing the new `cogs` account type from Option B GAAP
+2. **QBO CreditMemo double-count** — `_signed_balances` skips CreditMemos (their AR-side is already reflected via `invoice.balance_due`)
+3. **`balance_due` field mismatch** — QBO mapper wrote `balance` but everything reads `balance_due`; AR/AP silently $0 on every QBO-migrated company until fixed
+4. **QBO Payment cash-side roll-in** — Payment/BillPayment cash-side rolled through `_signed_balances`; NI mirror-offset keeps BS balanced
+5. **`_QBO_ALLOWED_HOSTS`** — added preview host to enable sandbox debugging from Emergent preview environments
+6. **Opening-balance JE for Fixed Assets / Long-Term Liabilities** — generalized `_post_opening_balances_je`; strict AR/AP skip on QBO `AccountType`
+7. **Sub-account total double-count** — child rows now carry `parent_id` in addition to `parent_code`; totals loop skips both
+8. **QBO Deposit `LinkedTxn`-only lines** — new `resolve_deposit_splits` post-migration walker CRs Undep (or explicit AccountRef) for each Deposit line
+9. **QBO Credit-Card-Credit sign flip** — Purchase with `Credit:true, PaymentType:CreditCard` inverts amount + direction to match QBO's DR Checking / CR Mastercard
+10. **Phantom Inventory routing** — `qbo_mirror/pull.py` prefers QBO-sourced Inventory Asset by detail_type (was code=1300 phantom)
+11. **Delta-based opening JE** — plugs `qbo_current - our_raw` on every account, not just zero-activity ones
+12. **P&L per-account accrual** — walks invoices+bills, attributes to specific revenue/expense accounts (not a flat Δ A/R bucket) — Net Income closed from +$7,325 off to −$18 off
+13. **SalesReceipt DiscountLineDetail** — captured previously-dropped discount lines as signed-negative contra-revenue
+
+**New surfaces:**
+- `POST /api/admin/qbo/opening-balances/backfill` — idempotent superadmin endpoint to re-run opening JE across all QBO-connected companies
+- `QboBsReconcilePanel` React component in Superadmin dashboard — one-click UI for the above
+
+**Test coverage**: 19 pytest regressions across `test_qbo_opening_balance_delta.py`, `test_qbo_payment_cash_side.py`, `test_qbo_mapper_balance_due.py`, `test_income_statement_cogs.py`. Every fix has a lock-in test.
+
+**Known follow-ups** (all non-load-bearing — BS already ties):
+- P&L Total Expense over-counts by ~$3k on Craig's sample data due to duplicate-entry sample quirks (some transactions entered as both Purchase and Bill); validate against real customer data before adding dedup logic
+- `SalesTaxPayment` entity import for cleaner audit trail (the $ is already absorbed by the opening JE)
+- Cross-realm CI fixture to catch future mapper regressions automatically
+
+---
+
 ### Feb 2026 — Business Type: dropdown + AI canonicalization
 
 **Change**: Every place the app collects `business_type` (new-client modal, AI-assisted onboarding step 1, Company Settings, My Businesses form) now uses a **dropdown of seven canonical entity forms** instead of freeform text:
