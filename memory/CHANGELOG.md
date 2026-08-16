@@ -1,5 +1,54 @@
 # SmartBooks — Changelog
 
+## 2026-02-26 — QBO Payment Cash-Side Roll-In
+
+### 🐛 Bug
+QBO `Payment` and `BillPayment` entities were imported into `db.payments` (25+ per test company), but no report ever read from that collection. Cash accounts (Checking, Undeposited Funds, credit cards) under-reported every customer receipt and vendor payout — a $4,752 collected total on the Craig's-Design test company was completely invisible to the ledger, and the balance sheet only *appeared* balanced because our accrual layer used `ar_end` (post-payment open AR) as "revenue accrued", which incidentally cancelled the missing cash movement on both sides.
+
+### ✅ Fix
+1. **`reports.py::_signed_balances`** — added a `db.payments` roll-in phase after the JE loop:
+    - Payment IN (`direction=in`) → DR the deposit account (Undep / bank)
+    - BillPayment OUT (`direction=out`) → CR the funding account (bank for check payments, credit-card liability for CC payments)
+    - Falls back to raw QBO payload (`CheckPayment.BankAccountRef` / `CreditCardPayment.CCAccountRef`) when `deposit_account_qbo_id` isn't populated (BillPayments frequently miss that top-level field).
+2. **`reports.py::compute_balance_sheet`** — mirrored the total payment cash movement into Net Income as a "realized-revenue" adjustment: `net_income += pay_in_total - pay_out_total`. This offsets the new cash-side postings so the Assets = L + E identity still holds — necessary because `_open_ar_ap` returns *open* AR (already post-payment), not billed AR, and the realized portion had no other home in NI.
+3. **`qbo_service.py::map_payment`** — updated the mapper so future imports populate `deposit_account_qbo_id` from `CheckPayment.BankAccountRef` / `CreditCardPayment.CCAccountRef` in addition to the previous `DepositToAccountRef` / `APAccountRef` fallback. Existing rows still work via the `raw`-payload fallback in the reports layer, so no backfill is required.
+
+### 🧪 Verified E2E (Test QBO Balance LLC — Craig's Design sandbox, 26 payments)
+- BS balanced pre-fix: Assets $13,533.06 = L+E $13,533.06 (but cash figures were wrong)
+- BS balanced post-fix: Assets $13,980.59 = L+E $13,980.59 ✓ still balanced, and cash now reflects reality:
+    - Checking $6,169.04 → $3,077.90 (Δ −$3,091.14 = +$1,213.95 IN − $4,305.09 OUT of check-funded BillPayments) ✓
+    - Undeposited Funds $218.75 → $3,757.42 (Δ +$3,538.67 = customer receipts to Undep) ✓
+    - Mastercard $1,723.31 → $1,957.72 (Δ +$234.41 = CC-funded BillPayments increasing CC liability) ✓
+- 4/4 pytest regressions pass in `tests/test_qbo_payment_cash_side.py` (payment IN DR, check BillPayment CR bank, CC BillPayment CR liability, end-to-end BS-still-balanced).
+
+### 📝 Known limitation
+For payments that create a standalone customer credit balance (Payment with no `applied_to`), NI is over-adjusted by that amount because there's no invoice to reduce. Real-world impact is low — such standalone credits are rare in QBO flows. A future fix would track those as a negative-AR entry.
+
+---
+
+## 2026-02-26 — Balance Sheet: COGS-in-NI + QBO CreditMemo Double-Count Fixes
+
+### 🐛 Bug — Balance Sheet not balancing after QBO sandbox connection
+User connected the Emergent preview environment to a QuickBooks sandbox and noticed the Balance Sheet was off by **$128.75** (Total Assets $8,151.54 vs L+E $8,280.29 on a small test company; and by $100 on the larger accrual view).
+
+### 🔬 Root causes (two stacked bugs)
+1. **`reports.py::compute_balance_sheet` — NI calculation missed COGS.** Line 436 rolled up Net Income from `revenue` + `expense` account types only, forgetting the new `cogs` type introduced by the Feb 2026 Option B GAAP Income Statement. Result: BS overstated equity by the period's COGS total.
+2. **`reports.py::_signed_balances` — QBO CreditMemos double-counted the revenue reduction.** A QBO CreditMemo's AR-reduction side is already reflected via `invoice.balance_due` (the linked invoice's remaining balance is dropped by the applied credit, which `_open_ar_ap` reads for the accrual AR roll-in). Posting the CM's DR-to-Revenue line ALSO through `_signed_balances` cut revenue a second time and unbalanced the ledger by the CM total.
+
+### ✅ Fix
+- **`compute_balance_sheet`** — added `cogs` to the NI roll-in tuple: any `type in ("revenue","expense","cogs")` participates, with `cogs` subtracted like a regular expense.
+- **`_signed_balances`** — early `continue` on `txn_type == "CreditMemo"`. The entity still shows up in transaction lists and any report that reads `db.transactions` directly; only the double-entry ledger sum ignores it.
+
+### 🧪 Verified E2E (Test QBO Balance LLC — Craig's Design sandbox)
+Before: Assets $13,533.06 vs L+E $13,433.06 (imbalance $100.00). After: Assets $13,533.06 = L+E $13,533.06 (imbalance $0.00). ✓
+
+Also confirmed as a side effect: "Pest Control Services" — which had displayed as -$108.75 on the Income Statement because of the CreditMemo double-count — now displays as -$8.75 (attributable to the single RefundReceipt that legitimately reduces the account), and its type=`revenue` classification is correct for a landscaping company that sells pest control services (no reclassification needed).
+
+### ⚠️ Known limitation
+For companies where QBO CreditMemos are issued **without** being applied against an invoice (standalone customer credit balances), the current approach undercounts the revenue reduction. The proper long-term fix is to import QBO Payment entities and compute AR from the ledger rather than from `invoice.balance_due`. Tracked as a future enhancement.
+
+---
+
 ## 2026-02-26 — STT Disambig "Create an invoice" Prefill Passthrough
 
 ### 🐛 Follow-up bug

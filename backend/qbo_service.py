@@ -745,8 +745,20 @@ def map_payment(cid: str, realm_id: str, obj: dict, direction: str) -> dict:
                 "txn_type": linked.get("TxnType"),
                 "txn_qbo_id": linked.get("TxnId"),
             })
-    deposit_ref = (obj.get("DepositToAccountRef")
-                   or obj.get("APAccountRef") or {})
+    # QBO uses different fields depending on direction and pay-type:
+    #   Payment (in)  → `DepositToAccountRef` (bank or Undeposited Funds)
+    #   BillPayment (out, check)       → `CheckPayment.BankAccountRef`
+    #   BillPayment (out, credit-card) → `CreditCardPayment.CCAccountRef`
+    # Fall through all three so the local `deposit_account_qbo_id` is
+    # populated for every payment we import — the reports layer relies
+    # on it to post the cash-side movement to `_signed_balances`.
+    deposit_ref = obj.get("DepositToAccountRef") or {}
+    if not deposit_ref.get("value"):
+        cp = obj.get("CheckPayment") or {}
+        cc = obj.get("CreditCardPayment") or {}
+        deposit_ref = (cp.get("BankAccountRef")
+                       or cc.get("CCAccountRef")
+                       or obj.get("APAccountRef") or {})
     return {
         "company_id": cid, "source": "qbo",
         "qbo_id": obj["Id"],

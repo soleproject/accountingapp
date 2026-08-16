@@ -91,6 +91,20 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
     txns = await db.transactions.find(txn_q).to_list(100000)
 
     for t in txns:
+        # QBO CreditMemos are a special case: their AR-reduction side is
+        # tracked implicitly via `invoice.balance_due` (the linked invoice's
+        # remaining balance is already reduced by the applied credit).
+        # `_open_ar_ap` reads those reduced balances, so the CM's effect on
+        # AR is already in NI via the accrual layer. Also posting the CM's
+        # DR-to-Revenue line here would double-count the revenue reduction
+        # (once via lower AR contribution to NI, once via direct signed
+        # balance on the revenue account) and unbalance the BS by exactly
+        # the CM total. Skip them here — the entity still shows up in
+        # transaction lists / reports that read db.transactions directly.
+        # Feb 26 2026 — see CHANGELOG QBO CM double-count fix.
+        if t.get("txn_type") == "CreditMemo":
+            continue
+
         amt = float(t.get("amount", 0) or 0)
         bank = t.get("bank_account_id")
         if bank:
@@ -128,6 +142,68 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
             c = float(line.get("credit", 0) or 0)
             if aid:
                 by[aid] += (d - c)
+
+    # ------------------------------------------------------------------
+    # QBO Payment / BillPayment cash-side roll-in.
+    #
+    # Payments live in `db.payments` (not `db.transactions`) and QBO
+    # tracks their AR/AP-reduction side implicitly by decrementing the
+    # linked invoice/bill's `balance_due`. `_open_ar_ap` reads those
+    # reduced balances so the AR/AP asset/liability figure is correct
+    # post-payment — but the CASH side was previously never posted to
+    # the ledger, so cash accounts under-reported all customer receipts
+    # and vendor payouts.
+    #
+    # We roll payments in here so `_signed_balances` (and every report
+    # built on top of it — BS/IS/GL/Cash Flow) sees the cash movement.
+    # `compute_balance_sheet` mirrors the same total into Net Income
+    # via a "realized-revenue" adjustment so the balance-sheet identity
+    # (Assets = L + E) is preserved — see the payments_realized block
+    # in compute_balance_sheet.
+    # Feb 26 2026.
+    # ------------------------------------------------------------------
+    pay_q = {"company_id": company_id, "date": {"$lte": end}}
+    if start and not include_pre_period:
+        pay_q["date"] = {"$gte": start, "$lte": end}
+    # Prefetch account-by-qbo_id lookup for fast deposit-account resolution.
+    acct_by_qbo_id: dict[str, str] = {}
+    async for a in db.accounts.find({"company_id": company_id, "qbo_id": {"$ne": None}}):
+        acct_by_qbo_id[str(a["qbo_id"])] = a["id"]
+
+    def _pay_account_id(p: dict) -> str | None:
+        """Resolve which local account this payment moves cash on. For
+        Payment IN, that's `deposit_account_qbo_id` (Undeposited Funds
+        or a bank). For BillPayment OUT the field is often unset in the
+        mapper, so fall back to the raw QBO payload's `CheckPayment` /
+        `CreditCardPayment` account refs."""
+        qid = p.get("deposit_account_qbo_id")
+        if not qid:
+            raw = p.get("raw") or {}
+            cp = raw.get("CheckPayment") or {}
+            cc = raw.get("CreditCardPayment") or {}
+            qid = ((cp.get("BankAccountRef") or {}).get("value")
+                   or (cc.get("CCAccountRef") or {}).get("value"))
+        if not qid:
+            return None
+        return acct_by_qbo_id.get(str(qid))
+
+    async for p in db.payments.find(pay_q):
+        amt = float(p.get("amount") or 0)
+        if amt <= 0.005:
+            continue
+        aid = _pay_account_id(p)
+        if not aid:
+            continue
+        direction = p.get("direction") or "in"
+        if direction == "in":
+            # DR the deposit account (bank/undep) — cash goes up.
+            by[aid] += amt
+        else:
+            # BillPayment OUT: CR the funding account — cash goes down
+            # (or, for CC-funded bill payments, the CC liability goes up
+            # because raw signed balance on a credit-card LIABILITY
+            # account is stored negative; `_display_amount` inverts it).
+            by[aid] += -amt
 
     return by
 
@@ -430,10 +506,14 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
     liabilities, total_liabilities_raw = _emit_section("liability")
     equity, total_equity_raw = _emit_section("equity")
 
-    # Net income roll-in from revenue/expense accounts (unchanged).
+    # Net income roll-in from revenue/expense/COGS accounts. `cogs` is
+    # its own account type (Option B GAAP Income Statement, Feb 2026)
+    # but still reduces Net Income exactly like a regular expense —
+    # otherwise the BS overstates equity by the period's COGS total
+    # and the sheet doesn't balance.
     net_income_current = 0.0
     for a in accts:
-        if a["type"] in ("revenue", "expense"):
+        if a["type"] in ("revenue", "expense", "cogs"):
             disp = _display_amount(a, by.get(a["id"], 0.0))
             if a["type"] == "revenue":
                 net_income_current += disp
@@ -456,6 +536,30 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
         net_income_current += ar_open - ap_open
         assets.sort(key=lambda x: (x["code"], x.get("parent_code", "")))
         liabilities.sort(key=lambda x: (x.get("parent_code", "") or x["code"], x["code"]))
+
+    # ------------------------------------------------------------------
+    # Payment cash-side offset. `_signed_balances` now rolls QBO
+    # Payments (customer receipts) and BillPayments (vendor payouts)
+    # into cash accounts, but their AR/AP-reduction side stays in
+    # `invoice.balance_due` / `bill.balance_due` (already reflected via
+    # `_open_ar_ap` above). To keep Assets = L + E, mirror the cash
+    # movement into NI as a "realized" adjustment: money that shifted
+    # from AR to Cash on the asset side needs a matching Revenue-side
+    # recognition, since `ar_end` alone under-counts total billed by
+    # the collected amount. Same idea for BillPayments in reverse.
+    # ------------------------------------------------------------------
+    pay_in_total = 0.0
+    pay_out_total = 0.0
+    async for _p in db.payments.find({"company_id": company_id,
+                                      "date": {"$lte": as_of}}):
+        amt = float(_p.get("amount") or 0)
+        if amt <= 0.005:
+            continue
+        if (_p.get("direction") or "in") == "in":
+            pay_in_total += amt
+        else:
+            pay_out_total += amt
+    net_income_current += pay_in_total - pay_out_total
 
     net_income_current = round(net_income_current, 2)
     equity.append({
