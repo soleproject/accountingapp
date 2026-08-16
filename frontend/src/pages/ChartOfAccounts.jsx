@@ -1580,6 +1580,9 @@ const DETAIL_TYPES = {
     { key: "payroll_expense",               label: "Payroll Expense" },
     { key: "other_expense",                 label: "Other Expense" },
   ],
+  cogs: [
+    { key: "cost_of_goods_sold",            label: "Cost of Goods Sold" },
+  ],
 };
 
 const ASSET_TYPE_OPTIONS = [
