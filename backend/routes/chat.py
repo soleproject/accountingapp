@@ -522,6 +522,33 @@ async def ai_parse_intent(cid: str, inp: IntentIn, user: dict = Depends(get_curr
     await require_company(user, cid)
     parsed = await parse_voice_intent(inp.text)
 
+    # ------------------------------------------------------------------
+    # STT collision guard — "credit invoice" ≈ "create an invoice".
+    # Speech-to-text often mishears "create" as "credit" (near-identical
+    # phonemes). When the utterance contains "credit invoice", the parser
+    # can route to categorize/JE intents and silently miss what the user
+    # actually meant. Return a `disambiguate_credit_or_create` intent so
+    # the frontend can prompt the user to clarify instead of guessing.
+    # Feb 25 2026 fix — see CHANGELOG.
+    # ------------------------------------------------------------------
+    utter = (inp.text or "").lower().strip()
+    _credit_invoice_re = re.compile(r"\bcredit(?:ing)?\s+(?:an?|the)?\s*invoice\b")
+    if _credit_invoice_re.search(utter):
+        return {
+            "intent": "disambiguate_credit_or_create",
+            "confidence": 0.99,
+            "original_utterance": inp.text,
+            "options": [
+                {"key": "create_invoice",
+                 "label": "Create an invoice",
+                 "hint": "I probably misheard 'create'"},
+                {"key": "credit_memo_unsupported",
+                 "label": "Add a credit invoice (customer refund)",
+                 "hint": "Credit memos aren't supported yet"},
+            ],
+            "prefill": parsed.get("prefill") or {},
+        }
+
     prefill = parsed.get("prefill") or {}
     intent = parsed.get("intent") or "none"
 
