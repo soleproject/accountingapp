@@ -1283,6 +1283,21 @@ async def run_migration(job_id: str, company_id: str) -> None:
                 "post the opening balance manually if needed.",
                 company_id, e)
 
+        # General opening-balance JE for Fixed Assets, Long-Term
+        # Liabilities, and other accounts QBO carries a `CurrentBalance`
+        # on but whose activity isn't surfaced through Invoice / Bill /
+        # Payment / Purchase entities. Runs AFTER the inventory-specific
+        # opener above so it can see the inventory JE's ledger effect
+        # and skip Inventory Asset.
+        opening_bal_stats: dict = {}
+        try:
+            opening_bal_stats = await _post_opening_balances_je(company_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Opening balances JE failed for %s: %s — Truck / Notes "
+                "Payable / etc. will read $0 on the BS until backfilled.",
+                company_id, e)
+
         await db.qbo_jobs.update_one(
             {"job_id": job_id},
             {"$set": {"status": "done", "phase": "done",
@@ -1300,7 +1315,8 @@ async def run_migration(job_id: str, company_id: str) -> None:
                       "mirror_pos_pulled": mirror_pulled["purchase_orders"],
                       "mirror_inv_adj_pulled": mirror_pulled["inventory_adjustments"],
                       "skipped_dupkey": skipped_dupkey,
-                      "opening_inventory_value": opening_inv_value}},
+                      "opening_inventory_value": opening_inv_value,
+                      "opening_balances_je": opening_bal_stats}},
         )
         # Fire the branded "migration complete" email. Runs after the
         # done write so the email body can pull the finalised stats.
@@ -1332,8 +1348,28 @@ async def _post_opening_inventory_je(company_id: str) -> float:
     Idempotent: rewrites the previously-posted `qbo-opening-inv-<cid>`
     JE on re-migration instead of stacking a second one. Returns the
     total dollar value posted (or 0.0 if there was nothing to post).
+
+    Yields to `_post_opening_balances_je` when QBO already carries a
+    non-zero `CurrentBalance` on its own Inventory Asset account — the
+    general opener will post that authoritative balance directly, and
+    running both would double-count inventory (once from the QBO
+    balance, once from items × qty). Feb 26 2026.
     """
     from datetime import date
+
+    # Yield to the general opener when QBO's Inventory Asset carries
+    # its own CurrentBalance. Delete any prior version of this JE so
+    # a re-run cleanly hands ownership over.
+    je_id = f"qbo-opening-inv-{company_id[:8]}"
+    async for qbo_inv in db.accounts.find({"company_id": company_id,
+                                             "source": "qbo",
+                                             "detail_type": "inventory"}):
+        raw = qbo_inv.get("raw") or {}
+        if abs(float(raw.get("CurrentBalance") or 0)) > 0.005:
+            await db.journal_entries.delete_many(
+                {"id": je_id, "company_id": company_id})
+            return 0.0
+
     # Gather inventory items with real on-hand value.
     total = 0.0
     lines: list[dict] = []
@@ -1409,6 +1445,199 @@ async def _post_opening_inventory_je(company_id: str) -> float:
         {"$set": je_doc}, upsert=True,
     )
     return total
+
+
+async def _post_opening_balances_je(company_id: str) -> dict:
+    """Post opening-balance journal entries for QBO accounts whose
+    `CurrentBalance` at migration time is non-zero but which have no
+    imported transaction activity establishing that balance.
+
+    Why this exists
+    ---------------
+    QBO auto-generates hidden "opening balance" system entries when a
+    user first sets a balance on a Fixed Asset, Long-Term Liability, or
+    similar account. Those entries are NOT surfaced through the standard
+    JournalEntry endpoint, so a straight-through migration of Invoices +
+    Bills + Payments + Purchases leaves Truck, Notes Payable, Loan
+    Payable, etc. at $0 on our books. QBO's own Balance Sheet reports
+    them via the account's stored `CurrentBalance`, and the offsetting
+    side is inside `Opening Balance Equity`.
+
+    We reproduce that here: for every account with a non-zero QBO
+    CurrentBalance and zero ledger activity, post a single JE dated
+    2000-01-01 (well before any imported txn) that DR/CRs the account
+    for its opening amount, offset by Opening Balance Equity. This is
+    the industry-standard "QBD → QBO" opening-balance migration
+    pattern and produces the same OBE plug QBO itself carries.
+
+    We deliberately DO NOT touch accounts that already have ledger
+    activity — a mismatch between QBO's `CurrentBalance` and our
+    computed balance on Checking / Undep / etc. points to an import gap
+    (Deposit lines lost, SalesReceipt discount lines dropped, etc.),
+    not a missing opening balance. Those get fixed at the mapper level.
+
+    We also skip Accounts Receivable and Accounts Payable — those are
+    computed accrual-side from `db.invoices` / `db.bills` open balances
+    (see `_open_ar_ap`), not from the ledger, and their QBO balance is
+    already reflected in the reports layer.
+
+    Idempotent: writes one JE per company keyed by a deterministic id.
+    Re-running the migration replaces the row instead of stacking.
+
+    Returns {"posted_je_id", "line_count", "gross_debits", "gross_credits"}
+    or {"posted_je_id": None, ...} when there was nothing to post.
+    """
+    import reports as _R
+
+    # Bookmark id — used to both write and pre-clear any prior version
+    # of this JE before we recompute `_signed_balances`. Without the
+    # pre-clear the second run sees Truck / Notes Payable / etc. as
+    # "already has ledger activity" (from the previous opening JE) and
+    # skips them, leaving the second-run JE incomplete.
+    je_id = f"qbo-opening-balances-{company_id[:8]}"
+    await db.journal_entries.delete_many({"id": je_id,
+                                            "company_id": company_id})
+
+    # 1) Compute current signed-balance map (post all imports, minus
+    # the previous opening JE we just cleared).
+    by = await _R._signed_balances(company_id, start=None,
+                                    end="2099-12-31",
+                                    include_pre_period=True)
+
+    # 2) Find OBE. Auto-create if missing so newer QBO companies that
+    # never had one at connect time still get plugged correctly.
+    opening_eq = await db.accounts.find_one(
+        {"company_id": company_id,
+          "$or": [{"code": "3900"},
+                   {"name": {"$regex": "^Opening Balance Equity$",
+                              "$options": "i"}}]})
+    if not opening_eq:
+        from pfc_resolver import _ensure_transfer_clearing_account
+        opening_eq = await _ensure_transfer_clearing_account(company_id)
+    if not opening_eq:
+        return {"posted_je_id": None, "line_count": 0,
+                "gross_debits": 0.0, "gross_credits": 0.0}
+
+    # 3) Collect accounts that need an opening balance line. Skip
+    # AR/AP (computed off-ledger via `_open_ar_ap`) and OBE itself
+    # (it IS the offset). Distinguish AR/AP *strictly* by QBO's own
+    # `AccountType` string — our internal `detail_type` taxonomy maps
+    # both real Accounts Payable and generic Long-Term / Other Current
+    # Liabilities to `expected_payments_to_vendors`, so filtering on
+    # detail_type wrongly excludes Notes Payable, Loan Payable, and
+    # Board of Equalization Payable (bug in first cut, Feb 26 2026).
+    _AR_AP_QBO_TYPES = {"Accounts Receivable", "Accounts Payable"}
+
+    lines: list[dict] = []
+    dr_total = 0.0
+    cr_total = 0.0
+
+    async for acc in db.accounts.find({"company_id": company_id,
+                                        "source": "qbo"}):
+        if acc["id"] == opening_eq["id"]:
+            continue
+        raw = acc.get("raw") or {}
+        qcb = float(raw.get("CurrentBalance") or 0)
+        if abs(qcb) < 0.005:
+            continue
+        # Strict AR/AP skip — use QBO's AccountType, not detail_type.
+        if str(raw.get("AccountType") or "") in _AR_AP_QBO_TYPES:
+            continue
+
+        current_raw = float(by.get(acc["id"], 0.0) or 0.0)
+        if abs(current_raw) > 0.005:
+            # Account already has imported ledger activity. Any
+            # QBO-vs-ours delta here is a mapper gap, not an opening
+            # balance — don't paper over it with an OBE plug.
+            continue
+
+        # QBO's `CurrentBalance` sign convention:
+        #   - Debit-normal accounts (Asset / Expense / COGS): positive
+        #     value means "positive balance in natural direction".
+        #   - Credit-normal accounts (Liability / Equity / Revenue):
+        #     stored as NEGATIVE when the account has a positive
+        #     natural balance (e.g. Notes Payable owed = -25000).
+        # Our raw ledger uses `debit - credit` = signed. So for a
+        # credit-normal account we need to flip the sign to get the
+        # amount to place on the CR side.
+        typ = acc.get("type")
+        if typ in ("asset", "expense", "cogs"):
+            debit = qcb; credit = 0.0
+        else:  # liability, equity, revenue
+            debit = 0.0; credit = -qcb  # flip: QBO CB is negative for credit-normal
+
+        # If we ended up with a negative debit or credit, the account
+        # has an unusual (contra) balance — flip to the other side.
+        if debit < 0:
+            credit = -debit; debit = 0.0
+        if credit < 0:
+            debit = -credit; credit = 0.0
+
+        if debit > 0:
+            dr_total += debit
+        if credit > 0:
+            cr_total += credit
+
+        lines.append({
+            "account_id": acc["id"],
+            "account_code": acc.get("code"),
+            "account_name": acc.get("name"),
+            "debit": round(debit, 2),
+            "credit": round(credit, 2),
+            "description": f"Opening balance from QBO CurrentBalance",
+        })
+
+    if not lines:
+        return {"posted_je_id": None, "line_count": 0,
+                "gross_debits": 0.0, "gross_credits": 0.0}
+
+    # 4) Balance the JE with a single OBE line for the net delta.
+    net = round(dr_total - cr_total, 2)
+    if abs(net) >= 0.005:
+        if net > 0:
+            # More debits than credits — OBE takes the credit side.
+            lines.append({
+                "account_id": opening_eq["id"],
+                "account_code": opening_eq.get("code"),
+                "account_name": opening_eq.get("name"),
+                "debit": 0.0, "credit": abs(net),
+                "description": "Opening Balance Equity — balancing entry",
+            })
+            cr_total += abs(net)
+        else:
+            lines.append({
+                "account_id": opening_eq["id"],
+                "account_code": opening_eq.get("code"),
+                "account_name": opening_eq.get("name"),
+                "debit": abs(net), "credit": 0.0,
+                "description": "Opening Balance Equity — balancing entry",
+            })
+            dr_total += abs(net)
+
+    je_id_check = f"qbo-opening-balances-{company_id[:8]}"
+    assert je_id_check == je_id, "je_id must match the pre-clear key"
+    now = now_iso()
+    je_doc = {
+        "id": je_id,
+        "company_id": company_id,
+        "date": "2000-01-01",  # well before any real activity
+        "description": "QBO migration — opening balances (Fixed Assets, "
+                        "Long-Term Liabilities, Other Current Liabilities)",
+        "source": "qbo_migration",
+        "posted": True,
+        "human_reviewed": True,
+        "lines": lines,
+        "total": round(max(dr_total, cr_total), 2),
+        "created_at": now, "updated_at": now,
+    }
+    await db.journal_entries.update_one(
+        {"id": je_id, "company_id": company_id},
+        {"$set": je_doc}, upsert=True,
+    )
+    return {"posted_je_id": je_id,
+             "line_count": len(lines),
+             "gross_debits": round(dr_total, 2),
+             "gross_credits": round(cr_total, 2)}
 
 
 
