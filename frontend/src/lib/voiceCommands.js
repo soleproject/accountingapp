@@ -380,7 +380,7 @@ function extractPeriod(text) {
 }
 
 
-const CREATE_INTENT_RE = /\b(create|make|new|draft|add|start)\s+(?:an?\s+)?(invoice|bill|contact|customer|vendor|account|chart of account|payment|receipt)\b/i;
+const CREATE_INTENT_RE = /\b(create|make|new|draft|add|start|credit)\s+(?:an?|the)?\s*(invoice|bill|contact|customer|vendor|account|chart of account|payment|receipt)\b/i;
 
 // Explicit "open <entity> <name>" (contact/invoice/bill lookup by name/number)
 const OPEN_ENTITY_RE = /^(?:open|show|find|pull up|bring up|view)\s+(?:the\s+)?(contact|customer|vendor|invoice|bill)\s+(?:#|number\s+)?(.+)$/i;
