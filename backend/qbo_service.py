@@ -694,6 +694,34 @@ def _map_lines(qbo_lines: list) -> list[dict]:
         dtype = ln.get("DetailType")
         if dtype == "SubTotalLineDetail":
             continue
+
+        # QBO discount lines carry their own detail type with a
+        # `DiscountAccountRef` (typically the "Discounts given" contra-
+        # revenue account). Their Amount is stored POSITIVE — we sign
+        # it negative here so it reduces revenue on the P&L, matching
+        # QBO's own report where the discount line brings the net
+        # SalesReceipt total below the sub-total. Without this the
+        # SalesReceipt header total ($78.75) didn't reconcile with
+        # the sum of the item lines ($87.50). Feb 26 2026.
+        if dtype == "DiscountLineDetail":
+            ddet = ln.get("DiscountLineDetail") or {}
+            acct_ref = ddet.get("DiscountAccountRef") or {}
+            damt = float(ln.get("Amount") or 0)
+            if abs(damt) < 0.005:
+                continue
+            out.append({
+                "description": ln.get("Description") or "Discount",
+                "quantity": 1,
+                "rate": -round(damt, 2),
+                "amount": -round(damt, 2),
+                "item_qbo_id": None, "item_name": None,
+                "account_qbo_id": acct_ref.get("value"),
+                "account_name": acct_ref.get("name"),
+                "linked_txns": [],
+                "is_discount": True,
+            })
+            continue
+
         detail = (ln.get("SalesItemLineDetail")
                   or ln.get("AccountBasedExpenseLineDetail")
                   or ln.get("ItemBasedExpenseLineDetail")

@@ -10,6 +10,7 @@ import {
   Inbox,
 } from "lucide-react";
 import TeamPanel from "@/components/TeamPanel";
+import QboBsReconcilePanel from "@/components/QboBsReconcilePanel";
 import { WhitelabelCompToggle } from "@/pages/AdminEnterpriseDetail";
 import { useFeedbackUnread } from "@/lib/useFeedbackUnread";
 
@@ -192,6 +193,8 @@ export default function SuperadminDash() {
       </div>
 
       <EnterprisesReport driftMap={driftMap} />
+
+      <QboBsReconcilePanel />
 
       <AccountingProsCard />
 

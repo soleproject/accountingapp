@@ -1,5 +1,23 @@
 # SmartBooks — Changelog
 
+## 2026-02-26 — SalesReceipt Discount Line + Superadmin QBO BS Reconciliation UI
+
+### 🐛 SalesReceipt DiscountLineDetail was silently dropped
+`_map_lines` didn't handle QBO's `DiscountLineDetail` shape — those lines carry `DiscountAccountRef` (typically "Discounts given" contra-revenue) and their own Amount separate from `SalesItemLineDetail`. Without the fix, SalesReceipts with a discount had a header total ($78.75) that didn't reconcile with the sum of the item lines ($87.50), and the accrual P&L walked past the discount entirely.
+
+**Fix**: added a `DiscountLineDetail` branch to `_map_lines` that emits a line with amount signed NEGATIVE and points at the `DiscountAccountRef` account. Marked `is_discount: true` so downstream can distinguish. Backfilled 6 existing docs (SalesReceipts + Invoices with discount lines) on both realms.
+
+### 🛠️ Superadmin QBO BS Reconciliation UI (new)
+New `QboBsReconcilePanel` component mounted in `SuperadminDash` (below Enterprises Report). One-click button hits the `/api/admin/qbo/opening-balances/backfill` endpoint we shipped in the previous entry, then renders a per-company table of line count / gross DR / gross CR / balanced ✓.
+
+Verified live in the browser: reconciliation runs against both connected sandboxes, shows "2 companies processed · 16 opening lines posted" with a green check on both rows ($29,447.84 DR = $29,447.84 CR each).
+
+### 📝 Known limitations (deferred)
+- **P&L Total Expense still over by ~$3k** — some Purchase txns (already cash-basis on IS) also appear in db.bills for the same vendor+period. Needs Purchase-vs-Bill dedup logic (either flag Purchase as pre-paid Bill during import, or net them at report time). Currently the sheet TIES on Net Income (~$180 off) but Total Expense on the IS is inflated.
+- **SalesTaxPayment entity** — remaining $77 is already absorbed by the opening JE (BS ties), skipped as low-ROI.
+
+---
+
 ## 2026-02-26 — P&L Per-Account Accrual + Superadmin Backfill Endpoint
 
 ### 🎯 P&L now matches QBO on Net Income + per-account revenue
