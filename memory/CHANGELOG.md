@@ -1,5 +1,27 @@
 # SmartBooks — Changelog
 
+## 2026-02-26 — QBO Mapper `balance_due` Field-Name Fix (AR/AP always $0 on migrated companies)
+
+### 🐛 Bug
+On any freshly-migrated QBO company (repro: `Test QBO Balance 2 LLC` connected to Craig's sandbox), the accrual Balance Sheet reported **AR $0 and AP $0** even though 31 open invoices and 15 open bills existed in `db.invoices` / `db.bills`.
+
+### 🔬 Root cause
+`qbo_service.map_invoice` / `map_bill` stored the remaining open amount under a field named **`balance`**. Every other consumer in the codebase — `reports._open_ar_ap`, `routes/invoices.py`, `routes/bills.py`, the aging reports — reads **`balance_due`**. The two names silently diverged, so `_open_ar_ap`'s `bal = float(i.get("balance_due", 0) or 0)` always resolved to `0.0` for QBO rows.
+
+The first test company (`Test QBO Balance LLC`) worked only because its data was seeded by a different code path that happened to write `balance_due`. Anything imported through the current QBO mapper was broken.
+
+### ✅ Fix
+- **`qbo_service.py::map_invoice`** — writes both `balance_due` (canonical) and `balance` (alias, retained for any legacy consumer). Also derives a proper `status`: `paid` when balance ≤ 0, `partial` when 0 < balance < total, `sent` when nothing collected. Previously all non-zero-balance invoices collapsed to `sent`, so the UI showed partially-paid invoices as "just emailed".
+- **`qbo_service.py::map_bill`** — same fix, symmetric. Bills use `open` (not `sent`) for the fully-unpaid case, matching the manual-bill UI convention.
+- **DB backfill script** — set `balance_due = balance` and re-derived `status` on all pre-existing QBO-imported invoices (31) and bills (15). No re-migration required.
+
+### 🧪 Verified E2E on Test QBO Balance 2 LLC (Craig's sandbox)
+- Before backfill: BS balanced at $8,599.07 but AR = $0.00, AP = $0.00 (silently under-reporting $6,884.19 of assets + liabilities)
+- After backfill: BS balanced at $13,880.59 with **AR $5,281.52** ✓ **AP $1,602.67** ✓
+- 8/8 pytest regressions pass in `tests/test_qbo_mapper_balance_due.py` (both mappers write `balance_due`, all four status branches — paid / partial / sent / open).
+
+---
+
 ## 2026-02-26 — QBO Payment Cash-Side Roll-In
 
 ### 🐛 Bug
