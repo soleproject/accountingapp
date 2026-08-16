@@ -91,6 +91,20 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
     txns = await db.transactions.find(txn_q).to_list(100000)
 
     for t in txns:
+        # QBO CreditMemos are a special case: their AR-reduction side is
+        # tracked implicitly via `invoice.balance_due` (the linked invoice's
+        # remaining balance is already reduced by the applied credit).
+        # `_open_ar_ap` reads those reduced balances, so the CM's effect on
+        # AR is already in NI via the accrual layer. Also posting the CM's
+        # DR-to-Revenue line here would double-count the revenue reduction
+        # (once via lower AR contribution to NI, once via direct signed
+        # balance on the revenue account) and unbalance the BS by exactly
+        # the CM total. Skip them here — the entity still shows up in
+        # transaction lists / reports that read db.transactions directly.
+        # Feb 26 2026 — see CHANGELOG QBO CM double-count fix.
+        if t.get("txn_type") == "CreditMemo":
+            continue
+
         amt = float(t.get("amount", 0) or 0)
         bank = t.get("bank_account_id")
         if bank:

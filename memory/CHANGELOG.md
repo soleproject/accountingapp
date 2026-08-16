@@ -1,5 +1,28 @@
 # SmartBooks — Changelog
 
+## 2026-02-26 — Balance Sheet: COGS-in-NI + QBO CreditMemo Double-Count Fixes
+
+### 🐛 Bug — Balance Sheet not balancing after QBO sandbox connection
+User connected the Emergent preview environment to a QuickBooks sandbox and noticed the Balance Sheet was off by **$128.75** (Total Assets $8,151.54 vs L+E $8,280.29 on a small test company; and by $100 on the larger accrual view).
+
+### 🔬 Root causes (two stacked bugs)
+1. **`reports.py::compute_balance_sheet` — NI calculation missed COGS.** Line 436 rolled up Net Income from `revenue` + `expense` account types only, forgetting the new `cogs` type introduced by the Feb 2026 Option B GAAP Income Statement. Result: BS overstated equity by the period's COGS total.
+2. **`reports.py::_signed_balances` — QBO CreditMemos double-counted the revenue reduction.** A QBO CreditMemo's AR-reduction side is already reflected via `invoice.balance_due` (the linked invoice's remaining balance is dropped by the applied credit, which `_open_ar_ap` reads for the accrual AR roll-in). Posting the CM's DR-to-Revenue line ALSO through `_signed_balances` cut revenue a second time and unbalanced the ledger by the CM total.
+
+### ✅ Fix
+- **`compute_balance_sheet`** — added `cogs` to the NI roll-in tuple: any `type in ("revenue","expense","cogs")` participates, with `cogs` subtracted like a regular expense.
+- **`_signed_balances`** — early `continue` on `txn_type == "CreditMemo"`. The entity still shows up in transaction lists and any report that reads `db.transactions` directly; only the double-entry ledger sum ignores it.
+
+### 🧪 Verified E2E (Test QBO Balance LLC — Craig's Design sandbox)
+Before: Assets $13,533.06 vs L+E $13,433.06 (imbalance $100.00). After: Assets $13,533.06 = L+E $13,533.06 (imbalance $0.00). ✓
+
+Also confirmed as a side effect: "Pest Control Services" — which had displayed as -$108.75 on the Income Statement because of the CreditMemo double-count — now displays as -$8.75 (attributable to the single RefundReceipt that legitimately reduces the account), and its type=`revenue` classification is correct for a landscaping company that sells pest control services (no reclassification needed).
+
+### ⚠️ Known limitation
+For companies where QBO CreditMemos are issued **without** being applied against an invoice (standalone customer credit balances), the current approach undercounts the revenue reduction. The proper long-term fix is to import QBO Payment entities and compute AR from the ledger rather than from `invoice.balance_due`. Tracked as a future enhancement.
+
+---
+
 ## 2026-02-26 — STT Disambig "Create an invoice" Prefill Passthrough
 
 ### 🐛 Follow-up bug
