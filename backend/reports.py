@@ -448,7 +448,8 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
         if pid:
             children_of.setdefault(pid, []).append(a)
 
-    def _row(a: dict, direct_amount: float, parent_code: str | None = None):
+    def _row(a: dict, direct_amount: float, parent_code: str | None = None,
+              parent_id: str | None = None):
         r = {
             "id": a["id"], "code": a["code"], "name": a["name"],
             "amount": round(direct_amount, 2),
@@ -458,8 +459,16 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
             # Loan and Line of Credit, etc.).
             "detail_type": (a.get("detail_type") or "").strip(),
         }
+        # `parent_code` is optional context for the UI's indentation.
+        # `parent_id` (below) is the AUTHORITATIVE child-marker used by
+        # the totals loop — some QBO-imported parents have an empty
+        # `code`, and using `parent_code` alone caused Original Cost
+        # (Truck's child) to lose its is-child flag and get counted a
+        # second time toward Total Assets. Feb 26 2026.
         if parent_code:
             r["parent_code"] = parent_code
+        if parent_id:
+            r["parent_id"] = parent_id
         return r
 
     def _emit_section(section_type: str) -> tuple[list[dict], float]:
@@ -484,7 +493,9 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
                 kd = _display_amount(k, by.get(k["id"], 0.0))
                 if abs(kd) < 0.005:
                     continue
-                kids_rows.append(_row(k, kd, parent_code=a["code"]))
+                kids_rows.append(_row(k, kd,
+                                       parent_code=a["code"],
+                                       parent_id=a["id"]))
                 kids_total += kd
             rolled = direct + kids_total
             # Only emit the parent if it has ANY value (own or via children)
@@ -567,10 +578,15 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
         "amount": net_income_current,
     })
 
-    # Totals: sum only TOP-LEVEL rows (children carry parent_code).
-    total_assets = round(sum(x["amount"] for x in assets if not x.get("parent_code")), 2)
-    total_liabilities = round(sum(x["amount"] for x in liabilities if not x.get("parent_code")), 2)
-    total_equity = round(sum(x["amount"] for x in equity if not x.get("parent_code")), 2)
+    # Totals: sum only TOP-LEVEL rows. Children carry `parent_id`
+    # (authoritative) and/or `parent_code` (may be empty when the
+    # parent has no chart code — very common for QBO-imported parents).
+    total_assets = round(sum(x["amount"] for x in assets
+                              if not x.get("parent_id") and not x.get("parent_code")), 2)
+    total_liabilities = round(sum(x["amount"] for x in liabilities
+                                   if not x.get("parent_id") and not x.get("parent_code")), 2)
+    total_equity = round(sum(x["amount"] for x in equity
+                              if not x.get("parent_id") and not x.get("parent_code")), 2)
     total_le = round(total_liabilities + total_equity, 2)
     balanced = abs(total_assets - total_le) < 0.02
 

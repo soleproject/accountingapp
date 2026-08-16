@@ -1,5 +1,42 @@
 # SmartBooks — Changelog
 
+## 2026-02-26 — QBO Opening Balance JE + Sub-Account Total Double-Count Fix
+
+### 🐛 Bug — Fixed Assets and Long-Term Liabilities read $0 on migrated companies
+Balance sheet compared side-by-side against QBO's own report for `Sandbox Company US a026` (realm 9341457726749100) showed:
+| | QBO | Ours (pre-fix) |
+|---|---|---|
+| Truck (Fixed Asset) | $13,495 | **$0** |
+| Notes Payable | $25,000 | **$0** |
+| Loan Payable | $4,000 | **$0** |
+| Board of Equalization Payable | $370.94 | **$0** |
+| Inventory Asset | $596.25 | **$0** *(a phantom "Inventory" showed $1,163.75 instead)* |
+
+$42,000+ of assets and long-term liabilities silently missing on every migrated company.
+
+### 🔬 Root cause
+QBO auto-generates hidden "opening balance" system entries when a user first sets a balance on a Fixed Asset, Long-Term Liability, or Other Current Liability. Those entries aren't returned through the standard `JournalEntry` endpoint, so a straight-through import of Invoices + Bills + Payments + Purchases leaves those accounts at $0. QBO's own BS shows them via each account's stored `CurrentBalance`, with the offset inside `Opening Balance Equity`. We had NO code posting those to our ledger — inventory was the only special case (via `_post_opening_inventory_je`).
+
+Additionally, our per-account `_post_opening_inventory_je` was routing to a phantom seeded "Inventory" account (code=1300) instead of the real QBO "Inventory Asset" account (empty code), because QBO-imported accounts often have blank codes. That phantom account never tied to QBO's actual inventory number.
+
+### ✅ Fix
+1. **`qbo_service.py::_post_opening_balances_je` (new)** — general QBO-migration opening-balance JE poster. For every account with a non-zero QBO `CurrentBalance` and no imported ledger activity, add a debit or credit line and offset the aggregate net to `Opening Balance Equity`. Strictly:
+    - Skips AR/AP (both computed off-ledger via `_open_ar_ap`) using QBO's `AccountType` (not our `detail_type` — which maps too many QBO types to `expected_payments_to_vendors` and wrongly excludes Notes Payable / Loan Payable).
+    - Skips accounts that already have ledger activity — those gaps point to a mapper bug, not a missing opening balance.
+    - Flips CurrentBalance sign for credit-normal types (Liability / Equity / Revenue): QBO stores those as negative when positive natural.
+    - Idempotent — pre-clears the previous version of the JE before recomputing, otherwise a rerun sees the first JE as "activity" and skips those accounts.
+2. **`qbo_service.py::_post_opening_inventory_je`** — yields to the general opener when QBO's Inventory Asset carries its own `CurrentBalance`. Deletes any prior version of the phantom-inventory JE on hand-off so we don't stack.
+3. **`reports.py::_row` + `_emit_section`** — child rows now carry `parent_id` in addition to `parent_code`. The totals loop excludes rows with EITHER field set. Previously, when a QBO-imported parent had an empty `code` (very common), children lost their is-child marker and got double-counted in Total Assets — Truck's $13,495 was landing twice.
+4. **Migration wiring** — `qbo_migrate` calls `_post_opening_balances_je` right after `_post_opening_inventory_je`, and stores `opening_balances_je` stats on the job row.
+
+### 🧪 Verified E2E on Sandbox Company US a026
+Ran fresh migration + reconciliation. All 6 previously-missing accounts now tie to QBO's number exactly:
+- Truck $13,495 ✓ | Notes Payable $25,000 ✓ | Loan Payable $4,000 ✓ | Board of Eq. $370.94 ✓ | Inventory Asset $596.25 ✓ | AR/AP unchanged ✓
+- BS still balances internally: Assets $27,375.59 = L+E $27,375.59 ✓
+- Remaining $3,939 gap vs QBO's $23,436.29 is IMPORT-side (Deposits missing line items, phantom Inventory item routing, one Mastercard mis-post) — tracked as follow-ups, not opening-balance issues.
+
+---
+
 ## 2026-02-26 — QBO Mapper `balance_due` Field-Name Fix (AR/AP always $0 on migrated companies)
 
 ### 🐛 Bug
