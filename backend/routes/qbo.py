@@ -42,6 +42,9 @@ router = APIRouter(prefix="/api")
 _QBO_ALLOWED_HOSTS = {
     "api.smartbookssoftware.ai",
     "api.cypherpro.accountingapp.ai",
+    # Emergent preview host — used by the dev team to connect the
+    # preview environment to the QBO sandbox for debugging. Feb 2026.
+    "aifinance-hub-6.preview.emergentagent.com",
     # Additional private labels appended as they onboard. Keep in sync
     # with the Redirect URIs list on the Intuit app.
 }
