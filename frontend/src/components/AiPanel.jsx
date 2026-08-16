@@ -2824,21 +2824,21 @@ export default function AiPanel({ collapsed, onToggle }) {
               <div className="mt-2 flex flex-col sm:flex-row gap-2" data-testid="chat-disambig-credit-or-create">
                 <button
                   data-testid="disambig-create-invoice"
-                  onClick={async () => {
-                    // Route the "create an invoice" branch — replay
-                    // through the normal parser as if the user had
-                    // clearly said "create". Strip the disambig payload
-                    // off the bubble first so it can't be double-clicked.
+                  onClick={() => {
+                    // Strip the disambig payload off the bubble first
+                    // so it can't be double-clicked.
                     setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, disambigCreditOrCreate: null } : mm2));
-                    const original = m.disambigCreditOrCreate.originalUtterance || "";
-                    const rewritten = original.replace(/\bcredit(?:ing)?\s+(?:an?\s+)?invoice\b/gi, "create an invoice");
-                    try {
-                      const r = await api.post(`/companies/${currentId}/ai/parse-intent`, { text: rewritten });
-                      const parsed = r.data || {};
-                      handleParsedIntent(rewritten, parsed);
-                    } catch (e) {
-                      setMessages(mm => [...mm, { role: "assistant", content: "Sorry — couldn't create the invoice. Try again?" }]);
-                    }
+                    // Route directly through handleParsedIntent using
+                    // the prefill the server already parsed on the
+                    // original utterance — no re-parse needed. This
+                    // preserves customer_name / amount / due_days that
+                    // would otherwise get lost if we replayed the
+                    // rewritten text through the parser again.
+                    const prefill = m.disambigCreditOrCreate.prefill || {};
+                    handleParsedIntent(
+                      m.disambigCreditOrCreate.originalUtterance || "create an invoice",
+                      { intent: "create_invoice", confidence: 0.99, prefill },
+                    );
                   }}
                   className="px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs font-medium hover:bg-slate-800"
                 >
