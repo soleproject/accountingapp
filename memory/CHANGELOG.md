@@ -1,5 +1,37 @@
 # SmartBooks — Changelog
 
+## 2026-02-26 — QBO Balance Sheet Ties to Zero: Inventory Adjustment Routing + Delta-Based Opening JE
+
+### 🎯 Result
+Balance Sheet now ties to QBO's own report **penny-for-penny on every account, on both test sandboxes** (`Sandbox Company US a026` realm 9341457726749100 AND `Sandbox Company US 2457` realm 9341457727012245). 11 of 11 accounts ✅. $0.00 gap. $0.00 imbalance.
+
+### 🐛 Bugs — remaining $444 drift after previous fixes
+Two stacked bugs kept us from tying the last mile:
+
+**Bug A — QBO InventoryAdjustment JEs routed to the wrong account.**
+`qbo_mirror/pull.py` looked up the Inventory Asset account by `code = "1300"`, which is the code of our internally-seeded account — not the QBO-imported one (QBO accounts often have no chart code). So every inventory adjustment JE posted to a phantom "Inventory" account totaling $567.50, while QBO's real "Inventory Asset" account sat with only its opening balance activity. Two accounts on our BS where QBO had one.
+
+**Bug B — Opening-balance JE skipped accounts with any activity.**
+`_post_opening_balances_je` had `if abs(current_raw) > 0.005: continue`, treating any imported activity as "opening balance already handled." But QBO's `CurrentBalance` is a snapshot of the current balance, which for accounts with activity = opening + activity. Skipping meant Savings-with-Deposit ($200 opening + $600 Deposit) reported only $600 (Deposit) — missed the $200 opening completely. And Inventory Asset ($28.75 opening + $567.50 InventoryAdjust JEs) reported $567.50 instead of $596.25.
+
+### ✅ Fix
+1. **`qbo_mirror/pull.py`** — inventory-asset lookup prefers a QBO account with `source="qbo"` AND `detail_type="inventory"`. Falls back to seeded `code="1300"` only when no QBO account is available (non-QBO companies).
+2. **`qbo_service.py::_post_opening_balances_je`** — always compute delta = `qcb - current_raw` and post the plug. Zero delta → skip. Non-zero delta → DR if positive, CR if negative. Removed the "skip on any activity" guard entirely. Correct sign math because QBO's `CurrentBalance` and our raw ledger use the SAME signed convention for both debit- and credit-normal accounts (both store liability balances as negative).
+3. **DB backfill** — rewrote 4 InventoryAdjustment JE lines per company (8 total) to point at the QBO Inventory Asset account, then regenerated `_post_opening_balances_je` for both companies with the new delta math.
+
+### 🧪 Verified E2E on BOTH sandboxes
+Every account on both realms ties to QBO **exactly**:
+- Checking $1,201.00 ✅ | Savings $800.00 ✅ | AR $5,281.52 ✅
+- Inventory Asset $596.25 ✅ | Undeposited Funds $2,062.52 ✅ | Truck $13,495.00 ✅
+- AP $1,602.67 ✅ | Mastercard $157.72 ✅ | Board of Equalization $370.94 ✅
+- Loan Payable $4,000.00 ✅ | Notes Payable $25,000.00 ✅
+- Total Assets $23,436.29 vs QBO $23,436.29 (Δ $0.00) ✅
+- Total L+E $23,436.29 vs QBO $23,436.29 ✅
+- 4 new pytest regressions in `test_qbo_opening_balance_delta.py` covering zero-activity asset, zero-activity liability, activity-plus-opening delta plug, and zero-delta skip
+- All 16 prior QBO regression tests still pass
+
+---
+
 ## 2026-02-26 — QBO Deposit Splits + Credit-Card-Credit Sign Fixes
 
 ### 🐛 Bug — Checking/Undep/Mastercard drifting by $3,700 on every QBO-migrated company

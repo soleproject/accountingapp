@@ -1595,26 +1595,27 @@ async def _post_opening_balances_je(company_id: str) -> dict:
             continue
 
         current_raw = float(by.get(acc["id"], 0.0) or 0.0)
-        if abs(current_raw) > 0.005:
-            # Account already has imported ledger activity. Any
-            # QBO-vs-ours delta here is a mapper gap, not an opening
-            # balance — don't paper over it with an OBE plug.
+        typ = acc.get("type")
+
+        # QBO's `CurrentBalance` and our raw ledger balance use the
+        # SAME signing convention for both debit- and credit-normal
+        # accounts:
+        #   Asset  positive balance → stored positive on both sides
+        #   Liab   positive balance → stored NEGATIVE on both sides
+        #     (QBO shows Notes Payable CurrentBalance = -25000 when
+        #      the account has a credit balance of $25000 natural)
+        # So delta = qcb - current_raw can be compared directly.
+        delta = round(qcb - current_raw, 2)
+        if abs(delta) < 0.005:
             continue
 
-        # QBO's `CurrentBalance` sign convention:
-        #   - Debit-normal accounts (Asset / Expense / COGS): positive
-        #     value means "positive balance in natural direction".
-        #   - Credit-normal accounts (Liability / Equity / Revenue):
-        #     stored as NEGATIVE when the account has a positive
-        #     natural balance (e.g. Notes Payable owed = -25000).
-        # Our raw ledger uses `debit - credit` = signed. So for a
-        # credit-normal account we need to flip the sign to get the
-        # amount to place on the CR side.
-        typ = acc.get("type")
-        if typ in ("asset", "expense", "cogs"):
-            debit = qcb; credit = 0.0
-        else:  # liability, equity, revenue
-            debit = 0.0; credit = -qcb  # flip: QBO CB is negative for credit-normal
+        # `delta` is signed like our raw ledger:
+        #   positive delta → we need MORE DEBIT (or less credit)
+        #   negative delta → we need MORE CREDIT (or less debit)
+        if delta > 0:
+            debit = delta; credit = 0.0
+        else:
+            debit = 0.0; credit = -delta
 
         # If we ended up with a negative debit or credit, the account
         # has an unusual (contra) balance — flip to the other side.
