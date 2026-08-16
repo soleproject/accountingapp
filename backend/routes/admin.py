@@ -442,6 +442,73 @@ async def admin_ai_spend_backfill(
     return await backfill_ai_spend_counters()
 
 
+class QboOpeningBalanceBackfillIn(BaseModel):
+    """Optional filters — leave `company_id` unset to run against every
+    QBO-connected company in the workspace."""
+    company_id: str | None = Field(default=None,
+        description="Restrict backfill to a single company. Null = all "
+                    "QBO-connected companies.")
+
+
+@router.post("/admin/qbo/opening-balances/backfill")
+async def admin_qbo_opening_balances_backfill(
+    inp: QboOpeningBalanceBackfillIn | None = None,
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Re-run the delta-based opening-balance JE poster across QBO-
+    migrated companies without triggering a full re-migration.
+
+    Use this any time the accrual balance sheet of a legacy QBO-migrated
+    company doesn't tie to that company's actual QBO Balance Sheet
+    (e.g. companies migrated before Feb 26 2026 when Fixed Assets +
+    Long-Term Liabilities silently read $0 on the BS, or when the
+    opening balance was over-plugged on accounts with pre-existing
+    imported activity).
+
+    The poster is fully idempotent — it clears the previous version
+    of `qbo-opening-balances-<cid>` before recomputing, so running
+    this repeatedly on the same company always converges to the same
+    answer. See `_post_opening_balances_je` for the delta math.
+    """
+    from qbo_service import _post_opening_balances_je
+    from db import db as _db
+
+    inp = inp or QboOpeningBalanceBackfillIn()
+    if inp.company_id:
+        target_cids = [inp.company_id]
+    else:
+        target_cids = await _db.qbo_connections.distinct(
+            "company_id", {"status": "connected"})
+
+    results: list[dict] = []
+    total_lines_posted = 0
+    for cid in target_cids:
+        c = await _db.companies.find_one({"id": cid})
+        try:
+            stats = await _post_opening_balances_je(cid)
+            results.append({
+                "company_id": cid,
+                "company_name": c.get("name") if c else None,
+                "posted_je_id": stats.get("posted_je_id"),
+                "line_count": stats.get("line_count", 0),
+                "gross_debits": stats.get("gross_debits", 0.0),
+                "gross_credits": stats.get("gross_credits", 0.0),
+            })
+            total_lines_posted += stats.get("line_count", 0)
+        except Exception as err:  # noqa: BLE001
+            results.append({
+                "company_id": cid,
+                "company_name": c.get("name") if c else None,
+                "error": str(err),
+            })
+
+    return {"companies_processed": len(target_cids),
+             "total_lines_posted": total_lines_posted,
+             "results": results}
+
+
+
+
 class AiCapOverrideIn(BaseModel):
     """One-click override — used from the admin UI to raise/lower a
     specific company's cap without a deploy. Cap is stored in CENTS on

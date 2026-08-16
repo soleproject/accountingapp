@@ -466,12 +466,24 @@ async def _pull_inventory_adjustments(
     existing = await _existing_qbo_ids(
         company_id, "journal_entries",
         extra={"source": "qbo_inv_adj"})
-    # Load 1300 Inventory Asset up front — every adjustment posts
-    # against it, no point re-fetching per row.
-    inv_asset = await db.accounts.find_one(
-        {"company_id": company_id, "code": "1300"})
+    # Locate the Inventory Asset account — prefer QBO's own account
+    # (source=qbo, detail_type=inventory) so InventoryAdjustment lines
+    # land on the same account QBO's reports use. Fall back to our
+    # seeded 1300 only when a QBO account isn't available (e.g. a
+    # non-QBO company). Feb 26 2026 — before this fix, the QBO
+    # inventory-adjustment JEs posted to the phantom seeded account
+    # and inflated Total Assets by the adjustment net (~$567.50 on
+    # Craig's sample data) while QBO's real Inventory Asset stayed at
+    # its opening $596.25 with no adjustment activity.
+    inv_asset = await db.accounts.find_one({
+        "company_id": company_id, "source": "qbo",
+        "detail_type": "inventory",
+    })
     if not inv_asset:
-        return {"error": "No 1300 Inventory Asset account seeded",
+        inv_asset = await db.accounts.find_one(
+            {"company_id": company_id, "code": "1300"})
+    if not inv_asset:
+        return {"error": "No Inventory Asset account available",
                 "inserted": 0, "updated": 0}
     inserted = 0
     updated = 0

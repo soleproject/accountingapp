@@ -648,20 +648,74 @@ async def _run_entity(job_id: str, company_id: str, realm_id: str,
 
 def _map_lines(qbo_lines: list) -> list[dict]:
     """Flatten QBO SalesItemLineDetail / AccountBasedExpenseLineDetail
-    into our unified {description, quantity, rate, amount} shape."""
+    / DepositLineDetail into our unified {description, quantity, rate,
+    amount} shape.
+
+    Deposit lines are structured differently from invoice/expense lines:
+      - Direct-income deposits carry `DepositLineDetail.AccountRef`
+        (e.g. an interest deposit landing straight to Interest Income).
+      - Payment-sweep deposits carry only `LinkedTxn` (a Payment or
+        SalesReceipt originally deposited to Undeposited Funds — the
+        Deposit sweeps that money out to the destination bank). No
+        explicit AccountRef because QBO knows the source is Undep.
+
+    We capture both forms so the post-import resolver can populate
+    the transaction's `splits[]` with proper credit-side legs (was:
+    silently dropped, leaving Deposits with no offset → Checking +
+    Undep both inflated on the BS by the total swept amount).
+    """
     out = []
     for ln in qbo_lines or []:
-        if ln.get("DetailType") in ("SubTotalLineDetail", None):
+        dtype = ln.get("DetailType")
+        if dtype == "SubTotalLineDetail":
             continue
+
+        # QBO discount lines carry their own detail type with a
+        # `DiscountAccountRef` (typically the "Discounts given" contra-
+        # revenue account). Their Amount is stored POSITIVE — we sign
+        # it negative here so it reduces revenue on the P&L, matching
+        # QBO's own report where the discount line brings the net
+        # SalesReceipt total below the sub-total. Without this the
+        # SalesReceipt header total ($78.75) didn't reconcile with
+        # the sum of the item lines ($87.50). Feb 26 2026.
+        if dtype == "DiscountLineDetail":
+            ddet = ln.get("DiscountLineDetail") or {}
+            acct_ref = ddet.get("DiscountAccountRef") or {}
+            damt = float(ln.get("Amount") or 0)
+            if abs(damt) < 0.005:
+                continue
+            out.append({
+                "description": ln.get("Description") or "Discount",
+                "quantity": 1,
+                "rate": -round(damt, 2),
+                "amount": -round(damt, 2),
+                "item_qbo_id": None, "item_name": None,
+                "account_qbo_id": acct_ref.get("value"),
+                "account_name": acct_ref.get("name"),
+                "linked_txns": [],
+                "is_discount": True,
+            })
+            continue
+
         detail = (ln.get("SalesItemLineDetail")
                   or ln.get("AccountBasedExpenseLineDetail")
                   or ln.get("ItemBasedExpenseLineDetail")
+                  or ln.get("DepositLineDetail")
                   or {})
         item_ref = (detail.get("ItemRef") or {})
         acct_ref = (detail.get("AccountRef") or {})
         qty = float(detail.get("Qty") or 1) or 1
         rate = float(detail.get("UnitPrice") or 0)
         amt = float(ln.get("Amount") or 0)
+        # A LinkedTxn-only Deposit line has no DetailType and no
+        # AccountRef but DOES have an amount + LinkedTxn reference.
+        # Preserve it so the deposit-splits resolver can attribute it
+        # to Undeposited Funds later. Same for MISSING amount lines —
+        # skip only if the line is completely empty (no amount AND no
+        # linked txn reference AND no detail).
+        linked = ln.get("LinkedTxn") or []
+        if dtype is None and not detail and not linked and amt == 0:
+            continue
         if not rate and qty:
             rate = round(amt / qty, 4)
         out.append({
@@ -673,6 +727,10 @@ def _map_lines(qbo_lines: list) -> list[dict]:
             "item_name": item_ref.get("name"),
             "account_qbo_id": acct_ref.get("value"),
             "account_name": acct_ref.get("name"),
+            # LinkedTxn refs — carried through for post-migration
+            # resolvers (Deposit split attribution to Undep, invoice
+            # apply-link resolution, etc.). Empty list is fine.
+            "linked_txns": linked,
         })
     return out
 
@@ -958,6 +1016,19 @@ def map_generic_txn(cid: str, realm_id: str, obj: dict, txn_type: str) -> dict:
     ref = (obj.get("CustomerRef") or obj.get("VendorRef")
            or obj.get("EntityRef") or {})
     magnitude = round(float(obj.get("TotalAmt") or 0), 2)
+    # QBO's `Purchase` object doubles as both a normal expense (Credit
+    # missing / false) AND a "Credit Card Credit" refund back to the
+    # source account (Credit=true, PaymentType=CreditCard). In the
+    # refund case the money flow reverses — Mastercard is CREDITED (CC
+    # balance goes down), Checking / expense is DEBITED — so we flip
+    # the signed amount from outflow to inflow. Without this, the
+    # $900 CC-Credit on Craig's sample data DR'd Checking AND DR'd
+    # Mastercard, over-stating both by $900. Feb 26 2026.
+    signed = _signed_amount(txn_type, magnitude)
+    direction = _direction_for(txn_type)
+    if txn_type == "Purchase" and obj.get("Credit"):
+        signed = -signed
+        direction = "in" if direction == "out" else "out"
     return {
         "company_id": cid, "source": "qbo",
         "qbo_id": obj["Id"],
@@ -968,8 +1039,8 @@ def map_generic_txn(cid: str, realm_id: str, obj: dict, txn_type: str) -> dict:
         "date": obj.get("TxnDate") or "",
         "contact_qbo_id": ref.get("value"),
         "contact_name": ref.get("name") or "",
-        "amount": _signed_amount(txn_type, magnitude),
-        "direction": _direction_for(txn_type),
+        "amount": signed,
+        "direction": direction,
         # QBO id of the bank/asset account this transaction moved money
         # in or out of. Translated to a local `bank_account_id` by
         # `resolve_transaction_banks` post-migration (once Account
@@ -1137,6 +1208,12 @@ async def run_migration(job_id: str, company_id: str) -> None:
         # id lookups succeed. Direct writes (no PATCH cascade) since
         # QBO already gave us the correct balance on each doc.
         linked = await resolve_payment_links(company_id)
+        # Post-import: build the Deposit `splits[]` so multi-source
+        # deposits credit their line sources (Undep sweeps or direct
+        # income accounts) instead of only DR-ing the bank. Without
+        # this, every LinkedTxn Deposit leaves Undep + destination
+        # bank both inflated on the BS. Must run AFTER Account import.
+        deposit_splits_stats = await resolve_deposit_splits(company_id)
         # Post-import: translate each QBO account's `parent_qbo_id` into
         # our internal `parent_account_id` so the CoA sidebar can render
         # nested trees. Also unflattens any pre-existing colon-joined
@@ -1312,7 +1389,8 @@ async def run_migration(job_id: str, company_id: str) -> None:
                       "mirror_inv_adj_pulled": mirror_pulled["inventory_adjustments"],
                       "skipped_dupkey": skipped_dupkey,
                       "opening_inventory_value": opening_inv_value,
-                      "opening_balances_je": opening_bal_stats}},
+                      "opening_balances_je": opening_bal_stats,
+                      "deposit_splits": deposit_splits_stats}},
         )
         # Fire the branded "migration complete" email. Runs after the
         # done write so the email body can pull the finalised stats.
@@ -1541,26 +1619,27 @@ async def _post_opening_balances_je(company_id: str) -> dict:
             continue
 
         current_raw = float(by.get(acc["id"], 0.0) or 0.0)
-        if abs(current_raw) > 0.005:
-            # Account already has imported ledger activity. Any
-            # QBO-vs-ours delta here is a mapper gap, not an opening
-            # balance — don't paper over it with an OBE plug.
+        typ = acc.get("type")
+
+        # QBO's `CurrentBalance` and our raw ledger balance use the
+        # SAME signing convention for both debit- and credit-normal
+        # accounts:
+        #   Asset  positive balance → stored positive on both sides
+        #   Liab   positive balance → stored NEGATIVE on both sides
+        #     (QBO shows Notes Payable CurrentBalance = -25000 when
+        #      the account has a credit balance of $25000 natural)
+        # So delta = qcb - current_raw can be compared directly.
+        delta = round(qcb - current_raw, 2)
+        if abs(delta) < 0.005:
             continue
 
-        # QBO's `CurrentBalance` sign convention:
-        #   - Debit-normal accounts (Asset / Expense / COGS): positive
-        #     value means "positive balance in natural direction".
-        #   - Credit-normal accounts (Liability / Equity / Revenue):
-        #     stored as NEGATIVE when the account has a positive
-        #     natural balance (e.g. Notes Payable owed = -25000).
-        # Our raw ledger uses `debit - credit` = signed. So for a
-        # credit-normal account we need to flip the sign to get the
-        # amount to place on the CR side.
-        typ = acc.get("type")
-        if typ in ("asset", "expense", "cogs"):
-            debit = qcb; credit = 0.0
-        else:  # liability, equity, revenue
-            debit = 0.0; credit = -qcb  # flip: QBO CB is negative for credit-normal
+        # `delta` is signed like our raw ledger:
+        #   positive delta → we need MORE DEBIT (or less credit)
+        #   negative delta → we need MORE CREDIT (or less debit)
+        if delta > 0:
+            debit = delta; credit = 0.0
+        else:
+            debit = 0.0; credit = -delta
 
         # If we ended up with a negative debit or credit, the account
         # has an unusual (contra) balance — flip to the other side.
@@ -1634,6 +1713,106 @@ async def _post_opening_balances_je(company_id: str) -> dict:
              "line_count": len(lines),
              "gross_debits": round(dr_total, 2),
              "gross_credits": round(cr_total, 2)}
+
+
+async def resolve_deposit_splits(company_id: str) -> dict:
+    """Populate `splits[]` on QBO-imported Deposit transactions so the
+    credit-side of each Deposit line hits the correct source account.
+
+    Why this exists
+    ---------------
+    A QBO Deposit is a bank-side inflow that can group multiple sources.
+    Each `Line` on the Deposit is either:
+      A. `DepositLineDetail.AccountRef` — direct income posted straight
+         to the bank (e.g. an interest deposit → CR Interest Income).
+      B. `LinkedTxn` (Payment / SalesReceipt) — a sweep from Undep to
+         the destination bank. QBO doesn't spell out the source account
+         because "everything with a LinkedTxn is coming from Undep."
+
+    Without this resolver, our ledger only records the DR-to-bank side
+    of every Deposit — the offsetting credit (either to Undep or to the
+    direct-income account) is silently dropped. Result: Checking and
+    Undeposited Funds are BOTH inflated on the BS by the total swept
+    amount, because Deposits DR Checking without CRing Undep, and the
+    upstream Payment IN sits in Undep with no offset. Regression seen
+    on both Craig's-Design realms (a026 and 2457): Checking +$1,876.90
+    and Undep +$1,694.90 in identical amounts. Feb 26 2026.
+
+    What we write
+    -------------
+    For each Deposit txn with line_items and no existing splits, we
+    build a `splits[]` list with one entry per line:
+      - `account_id`: local account id of the credit side
+      - `amount`: line amount (positive)
+    `_signed_balances` then subtracts each split from the source
+    account (CR side), balancing the DR to the bank account already
+    posted from `bank_account_id`.
+
+    Returns {"txns_updated": N, "splits_added": M, "undep_fallbacks": K}.
+    Idempotent — re-running is safe; transactions with existing
+    `splits` are skipped.
+    """
+    # Cache the company's Undeposited Funds and account-by-qbo_id map.
+    undep = await db.accounts.find_one({
+        "company_id": company_id,
+        "$or": [{"detail_type": "money_in_transit"},
+                {"name": {"$regex": "^Undeposited Funds$",
+                          "$options": "i"}}],
+    })
+    undep_id = undep["id"] if undep else None
+    acct_by_qbo_id: dict[str, str] = {}
+    async for a in db.accounts.find({"company_id": company_id,
+                                       "qbo_id": {"$ne": None}}):
+        acct_by_qbo_id[str(a["qbo_id"])] = a["id"]
+
+    txns_updated = 0
+    splits_added = 0
+    undep_fallbacks = 0
+
+    async for t in db.transactions.find({"company_id": company_id,
+                                           "source": "qbo",
+                                           "txn_type": "Deposit"}):
+        if t.get("splits"):
+            continue
+        lines = t.get("line_items") or []
+        if not lines:
+            continue
+        splits: list[dict] = []
+        for ln in lines:
+            amt = float(ln.get("amount") or 0)
+            if abs(amt) < 0.005:
+                continue
+            src_qbo = ln.get("account_qbo_id")
+            src_id = acct_by_qbo_id.get(str(src_qbo)) if src_qbo else None
+            if not src_id:
+                # LinkedTxn-only line → sweep from Undep. Fall back to
+                # the company's Undeposited Funds account.
+                if not undep_id:
+                    continue  # nothing sane we can do without an Undep
+                src_id = undep_id
+                undep_fallbacks += 1
+            splits.append({
+                "account_id": src_id,
+                "category_account_id": src_id,  # legacy alias
+                "amount": round(amt, 2),
+                "source": "qbo_deposit_line",
+            })
+        if not splits:
+            continue
+        await db.transactions.update_one(
+            {"_id": t["_id"]},
+            {"$set": {"splits": splits,
+                       "updated_at": now_iso()}},
+        )
+        txns_updated += 1
+        splits_added += len(splits)
+
+    return {"txns_updated": txns_updated,
+             "splits_added": splits_added,
+             "undep_fallbacks": undep_fallbacks}
+
+
+
 
 
 

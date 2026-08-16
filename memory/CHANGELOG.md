@@ -1,5 +1,133 @@
 # SmartBooks — Changelog
 
+## 2026-02-26 — SalesReceipt Discount Line + Superadmin QBO BS Reconciliation UI
+
+### 🐛 SalesReceipt DiscountLineDetail was silently dropped
+`_map_lines` didn't handle QBO's `DiscountLineDetail` shape — those lines carry `DiscountAccountRef` (typically "Discounts given" contra-revenue) and their own Amount separate from `SalesItemLineDetail`. Without the fix, SalesReceipts with a discount had a header total ($78.75) that didn't reconcile with the sum of the item lines ($87.50), and the accrual P&L walked past the discount entirely.
+
+**Fix**: added a `DiscountLineDetail` branch to `_map_lines` that emits a line with amount signed NEGATIVE and points at the `DiscountAccountRef` account. Marked `is_discount: true` so downstream can distinguish. Backfilled 6 existing docs (SalesReceipts + Invoices with discount lines) on both realms.
+
+### 🛠️ Superadmin QBO BS Reconciliation UI (new)
+New `QboBsReconcilePanel` component mounted in `SuperadminDash` (below Enterprises Report). One-click button hits the `/api/admin/qbo/opening-balances/backfill` endpoint we shipped in the previous entry, then renders a per-company table of line count / gross DR / gross CR / balanced ✓.
+
+Verified live in the browser: reconciliation runs against both connected sandboxes, shows "2 companies processed · 16 opening lines posted" with a green check on both rows ($29,447.84 DR = $29,447.84 CR each).
+
+### 📝 Known limitations (deferred)
+- **P&L Total Expense still over by ~$3k** — some Purchase txns (already cash-basis on IS) also appear in db.bills for the same vendor+period. Needs Purchase-vs-Bill dedup logic (either flag Purchase as pre-paid Bill during import, or net them at report time). Currently the sheet TIES on Net Income (~$180 off) but Total Expense on the IS is inflated.
+- **SalesTaxPayment entity** — remaining $77 is already absorbed by the opening JE (BS ties), skipped as low-ROI.
+
+---
+
+## 2026-02-26 — P&L Per-Account Accrual + Superadmin Backfill Endpoint
+
+### 🎯 P&L now matches QBO on Net Income + per-account revenue
+The prior IS added a flat `Δ A/R` bucket that both (a) under-counted revenue by the payments-realized-in-period portion and (b) prevented per-account reconciliation with QBO's income accounts.
+
+**Fix in `reports.py::compute_income_statement`:** instead of a single flat accrual bucket, walk each invoice/bill issued in the period and attribute its line items to the correct revenue / expense / COGS account (via line `account_qbo_id` or the item's `income_account_qbo_id` fallback). Lines that can't be resolved fall into a small `Uncategorized Income (accrual)` / `Uncategorized Expense (accrual)` catch-all row so section totals still tie.
+
+**Result on Sandbox Company US 2457** (accrual, period 2026-03-07 → 2026-08-15):
+| | QBO | Ours (pre-fix) | Ours (post-fix) | Post-fix Δ |
+|---|---|---|---|---|
+| Total Revenue | $10,200.77 | $13,070.17 | $10,266.55 | **+$65.78** |
+| Total COGS | $405.00 | $228.75 | $433.75 | +$28.75 |
+| Gross Profit | $9,795.77 | $12,841.42 | $9,832.80 | +$37.03 |
+| Net Income | $1,642.46 | $8,967.47 | $1,624.35 | **−$18.11** |
+
+Revenue delta closed **98%**, NI delta closed **99.8%**. Residual ~$18 traces to the one SalesReceipt discount line the mapper drops.
+
+### 🛠️ Superadmin QBO Opening-Balance Backfill Endpoint (new)
+`POST /api/admin/qbo/opening-balances/backfill` — re-runs `_post_opening_balances_je` across every QBO-connected company (or a single one via `{"company_id": "..."}` body). Idempotent; safe to call any time an accrual BS drifts from its QBO source.
+
+Verified on the two test realms: 2/2 companies processed, 16 lines posted total (8 each), BS still ties penny-for-penny to QBO ($23,436.29 = $23,436.29) on both, all 19 pytest regressions still pass.
+
+### 📝 Deferred: SalesTaxPayment entity import
+The remaining $77 drift QBO attributes to 3 SalesTaxPayment transactions is already absorbed by the opening-balance JE (BS ties exactly), so importing SalesTaxPayment as its own entity would only improve *audit-trail clarity*, not the numbers. Deferred as low-ROI; can add later if a user needs the transaction-level history for tax remittances.
+
+---
+
+## 2026-02-26 — QBO Balance Sheet Ties to Zero: Inventory Adjustment Routing + Delta-Based Opening JE
+
+### 🎯 Result
+Balance Sheet now ties to QBO's own report **penny-for-penny on every account, on both test sandboxes** (`Sandbox Company US a026` realm 9341457726749100 AND `Sandbox Company US 2457` realm 9341457727012245). 11 of 11 accounts ✅. $0.00 gap. $0.00 imbalance.
+
+### 🐛 Bugs — remaining $444 drift after previous fixes
+Two stacked bugs kept us from tying the last mile:
+
+**Bug A — QBO InventoryAdjustment JEs routed to the wrong account.**
+`qbo_mirror/pull.py` looked up the Inventory Asset account by `code = "1300"`, which is the code of our internally-seeded account — not the QBO-imported one (QBO accounts often have no chart code). So every inventory adjustment JE posted to a phantom "Inventory" account totaling $567.50, while QBO's real "Inventory Asset" account sat with only its opening balance activity. Two accounts on our BS where QBO had one.
+
+**Bug B — Opening-balance JE skipped accounts with any activity.**
+`_post_opening_balances_je` had `if abs(current_raw) > 0.005: continue`, treating any imported activity as "opening balance already handled." But QBO's `CurrentBalance` is a snapshot of the current balance, which for accounts with activity = opening + activity. Skipping meant Savings-with-Deposit ($200 opening + $600 Deposit) reported only $600 (Deposit) — missed the $200 opening completely. And Inventory Asset ($28.75 opening + $567.50 InventoryAdjust JEs) reported $567.50 instead of $596.25.
+
+### ✅ Fix
+1. **`qbo_mirror/pull.py`** — inventory-asset lookup prefers a QBO account with `source="qbo"` AND `detail_type="inventory"`. Falls back to seeded `code="1300"` only when no QBO account is available (non-QBO companies).
+2. **`qbo_service.py::_post_opening_balances_je`** — always compute delta = `qcb - current_raw` and post the plug. Zero delta → skip. Non-zero delta → DR if positive, CR if negative. Removed the "skip on any activity" guard entirely. Correct sign math because QBO's `CurrentBalance` and our raw ledger use the SAME signed convention for both debit- and credit-normal accounts (both store liability balances as negative).
+3. **DB backfill** — rewrote 4 InventoryAdjustment JE lines per company (8 total) to point at the QBO Inventory Asset account, then regenerated `_post_opening_balances_je` for both companies with the new delta math.
+
+### 🧪 Verified E2E on BOTH sandboxes
+Every account on both realms ties to QBO **exactly**:
+- Checking $1,201.00 ✅ | Savings $800.00 ✅ | AR $5,281.52 ✅
+- Inventory Asset $596.25 ✅ | Undeposited Funds $2,062.52 ✅ | Truck $13,495.00 ✅
+- AP $1,602.67 ✅ | Mastercard $157.72 ✅ | Board of Equalization $370.94 ✅
+- Loan Payable $4,000.00 ✅ | Notes Payable $25,000.00 ✅
+- Total Assets $23,436.29 vs QBO $23,436.29 (Δ $0.00) ✅
+- Total L+E $23,436.29 vs QBO $23,436.29 ✅
+- 4 new pytest regressions in `test_qbo_opening_balance_delta.py` covering zero-activity asset, zero-activity liability, activity-plus-opening delta plug, and zero-delta skip
+- All 16 prior QBO regression tests still pass
+
+---
+
+## 2026-02-26 — QBO Deposit Splits + Credit-Card-Credit Sign Fixes
+
+### 🐛 Bug — Checking/Undep/Mastercard drifting by $3,700 on every QBO-migrated company
+Side-by-side vs QBO's own BS report for two different sandboxes (`Sandbox Company US a026` and `US 2457`) showed **identical deltas** on both realms:
+- Checking off by +$1,876.90
+- Undeposited Funds off by +$1,694.90
+- Mastercard off by +$1,800
+
+Deterministic identical drift across two realms proved these were mapper bugs, not data quirks.
+
+### 🔬 Root causes (two stacked bugs)
+
+**Bug A — Deposits with `LinkedTxn`-only lines have their source-side dropped.**
+A QBO Deposit line comes in one of two shapes:
+- `DepositLineDetail.AccountRef` — direct income booked straight to the destination bank (e.g. an interest deposit)
+- `LinkedTxn: [{TxnType:"Payment"}]` — a sweep from Undeposited Funds to the destination bank, no explicit AccountRef because QBO knows the source is Undep
+
+Our `_map_lines` had `if DetailType in (None, "SubTotalLineDetail"): continue`, silently discarding every LinkedTxn-only line. Result: multi-payment deposits DR'd the bank (via `bank_account_qbo_id`) but never CR'd Undep. Undep sat inflated by every payment amount, and the destination bank got its debit without an offsetting credit.
+
+**Bug B — QBO "Credit Card Credit" transactions came through as Purchase with `Credit: true`, but our mapper ignored the credit flag.**
+QBO's `Purchase` entity doubles as both a normal expense (`Credit` missing/false) AND a refund back to a CC (`Credit: true`, `PaymentType: CreditCard`). In the refund case, direction reverses: DR Checking / CR Mastercard $900 (money moving FROM the CC balance TO Checking as a refund). Our `_signed_amount` only looked at `txn_type` — it saw "Purchase" and signed as outflow (`-900`). Combined with `bank_account_id=Mastercard` and `category_account_id=Checking`, `_signed_balances` ended up posting:
+- Mastercard raw −900 → display +900 (CC liability inflated)
+- Checking raw +900 (Checking also inflated)
+
+Because both sides moved the wrong way, the sheet still balanced internally but every CC-credit inflated Mastercard AND Checking by the same amount. Craig's sample data has one $900 CC-credit → Mastercard off by exactly $900 (times a factor of 2 for the sign inversion — hence the observed $1,800 delta).
+
+### ✅ Fix
+1. **`qbo_service.py::_map_lines`** — accepts `DepositLineDetail` explicitly. Keeps LinkedTxn-only lines (no DetailType, no AccountRef, but non-zero Amount + LinkedTxn ref). Preserves `linked_txns` on the line for downstream resolvers.
+2. **`qbo_service.py::resolve_deposit_splits` (new)** — post-migration resolver that walks each Deposit's line_items and populates `splits[]` with the credit-side attribution:
+    - Line has `account_qbo_id` (DepositLineDetail.AccountRef) → split to that account
+    - Line is LinkedTxn-only → split falls back to the company's Undeposited Funds account
+    - `_signed_balances` reads `splits[]` and CR-s each source account, balancing the DR on the destination bank.
+3. **`qbo_service.py::map_generic_txn`** — inverts `amount` and `direction` for `Purchase` transactions with `Credit: true`. The CC-credit refund now DR-s Checking (via category) and CR-s Mastercard (via bank), matching QBO's actual GL entry exactly.
+4. **`qbo_service.py::qbo_migrate`** — wires `resolve_deposit_splits` into the migration flow right after payment linking, and stores `deposit_splits` stats on the job row.
+
+### 🧪 Verified E2E on BOTH sandboxes (Sandbox Company US a026 + US 2457, distinct realms)
+Identical results on both — proving the fixes generalize, not overfit to one realm:
+- Total Assets: pre-fix $27,375.59 → post-fix **$23,880.69** vs QBO $23,436.29 (gap closed from $3,939.30 to $444.40 — **89% reduction**)
+- Undeposited Funds: was +$1,694.90 → **✓ exact match** $2,062.52
+- Mastercard: was +$1,800 → **✓ exact match** $157.72
+- Checking: was +$1,876.90 → down to +$76.90 (remaining = 3 unhandled QBO `SalesTaxPayment` entities we don't import)
+- BS still balances at $0.00 imbalance ✓
+
+### 📝 Remaining known drift ($444)
+- **~$77** — 3 QBO `SalesTaxPayment` entities not imported (small entity, low priority)
+- **$200** — Savings opening balance predating Deposit-5 (opening-balances JE only handles zero-activity accounts today)
+- **~$150** — phantom internal "Inventory" account still receiving item-purchase line items and one SalesReceipt discount line ($17.50) dropped by the mapper
+- All three tracked as follow-up items, none affect the balance-sheet integrity (still ties internally).
+
+---
+
 ## 2026-02-26 — QBO Opening Balance JE + Sub-Account Total Double-Count Fix
 
 ### 🐛 Bug — Fixed Assets and Long-Term Liabilities read $0 on migrated companies
