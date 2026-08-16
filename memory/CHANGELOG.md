@@ -1,5 +1,40 @@
 # SmartBooks — Changelog
 
+## 2026-02-25 — AI Ask Client: Cross-Company Recipient-Signature Cooldown
+
+### 🚨 Incident
+User received **7 emails** for the same $340 "Online Banking transfer to CHK 6278" transaction:
+- **Burst 1 (3:50 AM UTC)** — 4 emails from separate test companies (Plaid Date 1 LLC, others). Nightly scheduler tick fired one email per company because the underlying Plaid sandbox had the same $340 charge duplicated into each company as a separate row.
+- **Burst 2 (1:26 PM UTC)** — 3 more emails from additional companies (Post Detail Plaid LLC). Same root cause on a later scheduler run.
+
+The Feb 2026 dedup fix only prevented duplicates **within a single company**. It did not catch the case where the same real person owns multiple companies (common in bookkeeper sandbox testing, and also a real production edge case).
+
+### 🔎 Root cause
+1. `_candidate_txns` dedup is company-scoped (correct — different companies own different money).
+2. `DAILY_CAP_PER_CLIENT=3` counts by `to` email address. Gmail plus-tag aliases (`michael+companyA@`, `michael+companyB@`, …) are treated as distinct addresses by the counter, so the same real inbox never triggers the cap.
+3. No cross-company recipient guard existed.
+
+### ✅ Fix — normalized-email + cross-company payment-signature cooldown
+- **`_normalize_email(addr)`** — new helper that strips Gmail plus-tag suffixes AND dots-in-localpart (Gmail-specific); other domains only get case+trim. `michael+companyA@gmail.com` and `mi.chael+testco@gmail.com` both normalize to `michael@gmail.com`.
+- **`_payment_signature(txn)`** — extracted the existing `(date, cents, counterparty)` signature into a shared helper.
+- **`_recently_asked_same_payment(client_email, signature)`** — queries `client_questions` for any prior ask to the same normalized recipient about the same payment signature within `RECIPIENT_SIGNATURE_COOLDOWN_HOURS` (default 72h). Cross-company by design.
+- **`process_company`** — after the daily-cap check and candidate selection, calls the cooldown lookup. If a prior ask is found, returns `status: "recipient_signature_dedup"` with the prior question id + prior company id (great for ops debugging without firing an email).
+- **`client_questions` documents** now stamp `normalized_to_email` and `payment_signature` at insert time so the cooldown query is a single-index hit.
+
+### 🧪 Tests (13/13 in ai_ask_client suites)
+- **`test_ai_ask_client_cross_company_dedup.py`** (4 new tests):
+  - `test_normalize_email_gmail_plus_tag_and_dots` — Gmail plus-tag, dots collapse, non-Gmail behavior, case/whitespace, empty safety
+  - `test_recently_asked_same_payment_finds_cross_company_ask` — normalization actually matches across plus-tag aliases
+  - `test_recently_asked_ignores_asks_outside_cooldown_window` — 30-day-old ask does NOT block fresh ask (cooldown is forward-looking)
+  - `test_process_company_skips_when_recipient_signature_already_asked` — end-to-end: seed prior ask from Co A, run process_company on Co B → returns `recipient_signature_dedup`, no email fires
+
+### 📬 What this means for the user
+- **Going forward**: fresh scheduler runs will populate `normalized_to_email` + `payment_signature` on new asks. Any repeat charges (Gmail plus-tag or otherwise) to the same normalized recipient within 72h are silently skipped.
+- **Existing 7 email burst**: those old asks pre-date this fix so they don't have `payment_signature` populated. They won't block future asks. Backfilling is optional — the cooldown catches new asks going forward.
+- **Real production case (multi-company real client managed by one pro)**: still works correctly. The cooldown protects real inboxes from spam AND legitimately different money on different companies from the same vendor on the same day gets a single ask (batching effect). If Ops wants both emails to fire, set `AI_ASK_CLIENT_RECIPIENT_COOLDOWN_HOURS=0`.
+
+---
+
 ## 2026-02-25 — Feedback Email Leak Guard (Feb 25 incident — pytest firing real Resend to ops inbox)
 
 ### 🚨 Incident

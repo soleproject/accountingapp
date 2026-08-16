@@ -48,6 +48,18 @@ SEND_END_HOUR = int(os.environ.get("AI_ASK_CLIENT_END_HOUR", "20"))
 # Auto-archive answered AI Ask Client conversations older than N days so
 # the default view stays crisp without pros manually archiving each week.
 AUTO_ARCHIVE_DAYS = int(os.environ.get("AI_ASK_CLIENT_AUTO_ARCHIVE_DAYS", "30"))
+# Cross-company recipient-signature cooldown. When we've already asked
+# a given normalized recipient about a `(date, amount, counterparty)`
+# payment signature within this window, we skip re-asking — even if
+# a different company independently has an unaskedd row with the same
+# signature. Protects real inboxes (Gmail plus-tag aliases like
+# `michael+postplaid@`, `michael+plaidtest1@` normalize to the same
+# base address, so a bookkeeper testing many sandbox companies won't
+# get 7 emails for one $340 charge). Feb 25 2026 incident — see
+# CHANGELOG.
+RECIPIENT_SIGNATURE_COOLDOWN_HOURS = int(
+    os.environ.get("AI_ASK_CLIENT_RECIPIENT_COOLDOWN_HOURS", "72")
+)
 KIND = "ai_ask_client"
 
 # Module-level marker for "when did we last auto-archive". Updated in
@@ -102,6 +114,69 @@ async def _sent_today_to(client_email: str) -> int:
         "kind": KIND, "to": client_email, "status": "sent",
         "sent_at": {"$gte": today},
     })
+
+
+def _normalize_email(addr: str | None) -> str:
+    """Normalize an email for cross-company recipient dedup.
+
+    Handles:
+      • Gmail plus-tag aliases: `michael+postplaid@gmail.com` →
+        `michael@gmail.com`. Prevents a bookkeeper who plus-tags a
+        separate address per test company from bypassing the
+        recipient-signature cooldown.
+      • Case-normalize + strip whitespace.
+      • Gmail dots-in-localpart are also collapsed (`m.i.c@gmail.com`
+        == `mic@gmail.com`) since Gmail treats them identically.
+    Non-Gmail domains only get the case+trim treatment (dot handling
+    is Gmail-specific).
+    """
+    if not addr:
+        return ""
+    local, _, domain = addr.strip().lower().partition("@")
+    local = local.split("+", 1)[0]
+    if domain in ("gmail.com", "googlemail.com"):
+        local = local.replace(".", "")
+    return f"{local}@{domain}" if domain else local
+
+
+def _payment_signature(txn: dict) -> str:
+    """(date, amount cents, counterparty) — matches `_candidate_txns`."""
+    try:
+        cents = int(round(float(txn.get("amount") or 0) * 100))
+    except Exception:  # noqa: BLE001
+        cents = 0
+    counterparty = (
+        txn.get("contact_name")
+        or (txn.get("merchant") or txn.get("description") or "").strip().upper()[:40]
+        or ""
+    )
+    return f"{txn.get('date','')}|{cents}|{counterparty}"
+
+
+async def _recently_asked_same_payment(
+    client_email: str, signature: str,
+) -> dict | None:
+    """Return the most recent `client_questions` row where a matching
+    normalized recipient was already asked about the SAME payment
+    signature within the cooldown window. None = safe to send.
+
+    Cross-company by design — this catches the scenario where the same
+    real person owns multiple test companies (sandbox Plaid setups)
+    and would otherwise get N emails for the same real-world charge.
+    """
+    if not client_email or not signature:
+        return None
+    normalized = _normalize_email(client_email)
+    cutoff = (datetime.now(timezone.utc)
+              - timedelta(hours=RECIPIENT_SIGNATURE_COOLDOWN_HOURS)).isoformat()
+    return await db.client_questions.find_one(
+        {
+            "normalized_to_email": normalized,
+            "payment_signature": signature,
+            "sent_at": {"$gte": cutoff},
+        },
+        sort=[("sent_at", -1)],
+    )
 
 
 async def _candidate_txns(cid: str) -> list[dict]:
@@ -241,6 +316,20 @@ async def process_company(cid: str) -> dict:
         return {"cid": cid, "status": "no_candidates"}
 
     txn = candidates[0]
+    # Cross-company recipient-signature cooldown. Prevents the
+    # multi-sandbox-companies inbox-spam case where the same real
+    # person is client-owner of N test companies (Gmail plus-tag
+    # variants normalize to the same base address). Feb 25 2026 fix.
+    signature = _payment_signature(txn)
+    prior = await _recently_asked_same_payment(client_email, signature)
+    if prior:
+        return {
+            "cid": cid, "status": "recipient_signature_dedup",
+            "signature": signature,
+            "prior_question_id": prior.get("id"),
+            "prior_company_id": prior.get("company_id"),
+        }
+
     question = await _draft_question(txn, company_name=company.get("name") or "")
 
     # Materialize the client_question record BEFORE dispatching the email
@@ -261,6 +350,11 @@ async def process_company(cid: str) -> dict:
         "sent_at": now_iso(),
         "expires_at": expires,
         "to_email": client_email,
+        # Cooldown-lookup key: computed once at insert so the query in
+        # `_recently_asked_same_payment` is a single-index hit rather
+        # than a per-doc counterparty derivation.
+        "normalized_to_email": _normalize_email(client_email),
+        "payment_signature": signature,
         "counterparty_label": txn.get("contact_name") or "",
     }
     await db.client_questions.insert_one(q_doc)
