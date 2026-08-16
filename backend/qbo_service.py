@@ -711,6 +711,16 @@ def map_invoice(cid: str, realm_id: str, obj: dict) -> dict:
     total = float(obj.get("TotalAmt") or 0)
     tax = float(tax_detail.get("TotalTax") or 0)
     balance = float(obj.get("Balance") or 0)
+    # Status resolution: fully-paid → paid, partial payment → partial,
+    # nothing collected yet → sent. Prior versions collapsed partial
+    # into 'sent', which downstream reports read as "still unpaid"
+    # but the UI misrendered as "just emailed".
+    if balance <= 0.005:
+        status = "paid"
+    elif balance + 0.005 < total:
+        status = "partial"
+    else:
+        status = "sent"
     return {
         "company_id": cid, "source": "qbo",
         "qbo_id": obj["Id"], "id": f"qbo-{cid[:8]}-invoice-{obj['Id']}",
@@ -724,8 +734,12 @@ def map_invoice(cid: str, realm_id: str, obj: dict) -> dict:
         "subtotal": round(total - tax, 2),
         "tax": round(tax, 2),
         "total": round(total, 2),
+        # `balance_due` is the canonical field the rest of the app reads
+        # (routes/invoices.py, reports._open_ar_ap, AR aging, dashboards).
+        # `balance` kept as an alias for any legacy consumers.
+        "balance_due": round(balance, 2),
         "balance": round(balance, 2),
-        "status": "paid" if balance == 0 else "sent",
+        "status": status,
         "currency": (obj.get("CurrencyRef") or {}).get("value", "USD"),
         "raw": obj,
         "created_at": now_iso(), "updated_at": now_iso(),
@@ -734,6 +748,14 @@ def map_invoice(cid: str, realm_id: str, obj: dict) -> dict:
 
 def map_bill(cid: str, realm_id: str, obj: dict) -> dict:
     vend = obj.get("VendorRef") or {}
+    total = float(obj.get("TotalAmt") or 0)
+    balance = float(obj.get("Balance") or 0)
+    if balance <= 0.005:
+        status = "paid"
+    elif balance + 0.005 < total:
+        status = "partial"
+    else:
+        status = "open"
     return {
         "company_id": cid, "source": "qbo",
         "qbo_id": obj["Id"], "id": f"qbo-{cid[:8]}-bill-{obj['Id']}",
@@ -744,9 +766,12 @@ def map_bill(cid: str, realm_id: str, obj: dict) -> dict:
         "issue_date": obj.get("TxnDate") or "",
         "due_date": obj.get("DueDate") or "",
         "line_items": _map_lines(obj.get("Line") or []),
-        "total": round(float(obj.get("TotalAmt") or 0), 2),
-        "balance": round(float(obj.get("Balance") or 0), 2),
-        "status": "paid" if float(obj.get("Balance") or 0) == 0 else "open",
+        "total": round(total, 2),
+        # Canonical name is `balance_due` — matches invoices, matches
+        # `_open_ar_ap`'s AP calculation. `balance` retained as alias.
+        "balance_due": round(balance, 2),
+        "balance": round(balance, 2),
+        "status": status,
         "currency": (obj.get("CurrencyRef") or {}).get("value", "USD"),
         "raw": obj,
         "created_at": now_iso(), "updated_at": now_iso(),
