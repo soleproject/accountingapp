@@ -1,5 +1,18 @@
 # SmartBooks — Changelog
 
+## 2026-02-26 — STT Disambig "Create an invoice" Prefill Passthrough
+
+### 🐛 Follow-up bug
+After the STT collision guard shipped (2026-02-25), users who clicked the disambiguation card's "Create an invoice" button got an empty invoice modal — `contact_name` and `amount` extracted from the original utterance were dropped on the floor. User feedback: *"created it with no information on the actual invoice itself."*
+
+### ✅ Fix
+- **`AiPanel.jsx` disambig button `onClick`** — instead of replaying the utterance through the parser (which loses the already-extracted prefill), pass the server's parsed `prefill` payload (stashed on `m.disambigCreditOrCreate.prefill`) directly into `handleParsedIntent` as a synthetic `create_invoice` intent with `confidence: 0.99`. This preserves `contact_name` + `amount` + `due_days` end-to-end.
+
+### 🧪 Verified E2E
+Logged in as `pro@axiom.ai`, opened AI panel, typed "credit invoice for John Melton for $5,000 due today" → disambig card renders → clicked **Create an invoice** → invoice modal opens on `/invoices` with line item `Services × $5,000 = $5,000.00` and pending-intent pill reads `create invoice · John Melton · $5000`. ✓
+
+---
+
 ## 2026-02-25 — Voice STT Collision Guard ("credit invoice" ≈ "create an invoice")
 
 ### 🐛 Bug
