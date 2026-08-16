@@ -216,10 +216,38 @@ async def _resolve_context(user: dict, company: Optional[dict]) -> dict:
     }
 
 
+# Reserved test-domain suffixes (RFC 2606 / RFC 6761). Any email
+# address ending in one of these is treated as a synthetic pytest
+# fixture and MUST NOT trigger real Resend fanout — see the Feb 25
+# 2026 incident where a pytest run flooded the ops inbox.
+_TEST_EMAIL_SUFFIXES = (
+    "@example.com", "@example.org", "@example.net",
+    ".test", ".invalid", ".localhost",
+)
+
+
+def _is_test_email(addr: str | None) -> bool:
+    """True when `addr` ends with a reserved test domain."""
+    if not addr:
+        return False
+    a = addr.strip().lower()
+    return any(a.endswith(sfx) for sfx in _TEST_EMAIL_SUFFIXES)
+
+
 async def _notify_superadmins(item: dict, submitter: dict) -> None:
     try:
         from email_dispatcher import dispatch, public_base_url
         import email_templates as _tmpl
+
+        # Belt-and-suspenders: if the submitter is a test-shaped user
+        # (e.g. `fb_XXXXXX@example.com` seeded by pytest), never fan
+        # out to real superadmins. Feb 25 2026 incident — the test
+        # suite ran against a shared DB and this fanout emailed the
+        # real ops inbox 15+ times in one pytest sweep.
+        if _is_test_email(submitter.get("email")):
+            log.info("Feedback submitted by test user %s — superadmin "
+                     "notification suppressed", submitter.get("email"))
+            return
 
         admins = await db.users.find({"role": "superadmin"}).to_list(length=100)
         if not admins:
@@ -240,11 +268,12 @@ async def _notify_superadmins(item: dict, submitter: dict) -> None:
             inbox_url=f"{public_base_url()}/admin/feedback",
         )
         for admin in admins:
-            if not admin.get("email"):
+            email = admin.get("email")
+            if not email or _is_test_email(email):
                 continue
             await dispatch(
                 kind="feedback_new_submission",
-                to=admin["email"], subject=subject, html=html,
+                to=email, subject=subject, html=html,
                 initiating_user_id=None,
                 related={"feedback_id": item["id"], "type": item["type"]},
             )
@@ -308,6 +337,13 @@ async def _notify_superadmins_of_reporter_reply(item: dict, note: dict, reporter
         from email_dispatcher import dispatch, public_base_url
         import email_templates as _tmpl
 
+        # Skip fanout when the reporter is a test-shaped user — same
+        # protection as `_notify_superadmins`.
+        if _is_test_email(reporter.get("email")):
+            log.info("Reporter reply from test user %s — superadmin "
+                     "notification suppressed", reporter.get("email"))
+            return
+
         admins = await db.users.find({"role": "superadmin"}).to_list(length=100)
         if not admins:
             return
@@ -321,11 +357,12 @@ async def _notify_superadmins_of_reporter_reply(item: dict, note: dict, reporter
             inbox_url=f"{public_base_url()}/admin/feedback",
         )
         for admin in admins:
-            if not admin.get("email"):
+            email = admin.get("email")
+            if not email or _is_test_email(email):
                 continue
             await dispatch(
                 kind="feedback_new_reporter_reply",
-                to=admin["email"], subject=subject, html=html,
+                to=email, subject=subject, html=html,
                 initiating_user_id=None,
                 related={"feedback_id": item["id"], "note_id": note.get("id")},
             )

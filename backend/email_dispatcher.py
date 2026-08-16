@@ -145,6 +145,31 @@ async def dispatch(
         })
         return {"status": "failed", "id": log_id, "error": f"Unknown email kind: {kind}"}
 
+    # ---- Safety guard: never dispatch to test-shaped recipients.
+    # Reserved test domains (per RFC 2606) sneak in when pytest suites
+    # seed users with `fb_XXXXXX@example.com`, and code paths iterate
+    # DB rows to notify (e.g. `_notify_superadmins`). Without this
+    # guard, real Resend fires against a temp user's synthetic
+    # address AND — more dangerously — mixes with real superadmin
+    # accounts in the same DB row set, so a real inbox gets flooded.
+    # See Feb 25 2026 incident: 15+ [Bug] emails landed in the ops
+    # inbox during a pytest run.
+    _RESERVED_DOMAINS = ("example.com", "example.org", "example.net",
+                         "test", "invalid", "localhost")
+    def _is_test_recipient(addr: str) -> bool:
+        addr = (addr or "").strip().lower()
+        return any(addr.endswith("@" + d) or addr.endswith("." + d)
+                   for d in _RESERVED_DOMAINS)
+    recipients = [to] if isinstance(to, str) else list(to or [])
+    if recipients and all(_is_test_recipient(r) for r in recipients):
+        log_id = await _log({
+            "kind": kind, "to": to, "subject": subject,
+            "status": "skipped_test_recipient",
+            "user_id": initiating_user_id, "company_id": company_id,
+            "contact_id": contact_id, "related": related or {},
+        })
+        return {"status": "skipped_test_recipient", "id": log_id}
+
     # Check pref — but only if we know who's initiating the send. System-
     # level flows (e.g. daily cron) may pass None; skip the pref check in
     # that case since there's no user to have opted out.

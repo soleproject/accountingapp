@@ -1,5 +1,34 @@
 # SmartBooks — Changelog
 
+## 2026-02-25 — Feedback Email Leak Guard (Feb 25 incident — pytest firing real Resend to ops inbox)
+
+### 🚨 Incident
+Overnight after yesterday's session, the ops Gmail inbox received a **15+ email burst** of `[Bug] admin-unread`, `[Bug] unread-flow`, `[Bug] notify-admins`, `[Bug] att-reply`, `[Bug] priv`, `[Bug] cross-visibility`, `[Bug] reply test`, etc. — all timestamped within the same minute. Every email was a real Resend delivery of a real `feedback_new_submission` template. Root: the pytest suite fired during a CI/deploy run and flooded the real ops inbox.
+
+### 🔎 Root cause (two-layer)
+1. **`test_feedback.py` doesn't mock the email dispatcher.** Tests seed `fb_XXXXXX@example.com` users and call `POST /api/feedback`, which triggers `_notify_superadmins`.
+2. **`_notify_superadmins` iterates ALL superadmins** in the shared MongoDB — including production superadmins seeded there — and calls `dispatch()` per admin.
+3. **`email_dispatcher.dispatch()` had no test-domain safety guard** — it unconditionally called Resend even when the recipient's address was a reserved test domain (RFC 2606: example.com/org/net, RFC 6761: .test/.invalid/.localhost).
+
+### ✅ Fix — defense in depth
+1. **`email_dispatcher.dispatch()` reserved-domain guard** — any call where all recipients end in `@example.com`, `@example.org`, `@example.net`, `.test`, `.invalid`, or `.localhost` is short-circuited with a `skipped_test_recipient` audit-log row. `send_email` (Resend) is never called.
+2. **`_notify_superadmins` and `_notify_superadmins_of_reporter_reply`** now (a) short-circuit at the top when the submitter/reporter has a test-shaped email, and (b) filter out test-shaped admin rows from the fanout loop. Belt-and-suspenders — prevents even the audit log row from spawning.
+3. **Refactored to shared helper** `_is_test_email(addr)` so every future fanout can use the same check.
+
+### 🧪 Tests (34/34 in feedback suites)
+- **New `test_feedback_email_leak_guard.py`** (5 tests):
+  - `test_feedback_submission_from_example_com_does_not_email_real_superadmins` — the exact incident scenario: real superadmin seeded, test client submits bug, asserts `send_email.call_count == 0`.
+  - `test_dispatcher_skips_all_test_recipient_addresses` — direct unit test on the dispatcher.
+  - `test_dispatcher_skips_reserved_domains_variety` — covers all 6 RFC-reserved domain shapes.
+  - `test_dispatcher_still_sends_to_real_addresses` — sanity: guard doesn't break real deliveries.
+  - `test_reporter_reply_from_test_user_does_not_email_real_superadmins` — same guarantee for the reporter-reply fanout.
+- **Updated `test_reporter_reply_notifies_superadmins_via_comms`** — now uses non-reserved `@fbtest-real.io` emails + mocks `send_email` so it can still verify the fanout writes comms rows without firing real Resend.
+
+### 📬 Immediate cleanup
+No cleanup needed on production — the delivered emails are just noise, no data damage. Once the deploy of this fix lands, future pytest runs will not repeat the incident. If it happens again before the deploy, ops can filter/delete the `[Bug]` subject-line burst in Gmail.
+
+---
+
 ## 2026-02-25 — Income Statement COGS + Gross Profit (Option B — proper GAAP P&L)
 
 ### 🎯 Why
