@@ -430,10 +430,14 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
     liabilities, total_liabilities_raw = _emit_section("liability")
     equity, total_equity_raw = _emit_section("equity")
 
-    # Net income roll-in from revenue/expense accounts (unchanged).
+    # Net income roll-in from revenue/expense/COGS accounts. `cogs` is
+    # its own account type (Option B GAAP Income Statement, Feb 2026)
+    # but still reduces Net Income exactly like a regular expense —
+    # otherwise the BS overstates equity by the period's COGS total
+    # and the sheet doesn't balance.
     net_income_current = 0.0
     for a in accts:
-        if a["type"] in ("revenue", "expense"):
+        if a["type"] in ("revenue", "expense", "cogs"):
             disp = _display_amount(a, by.get(a["id"], 0.0))
             if a["type"] == "revenue":
                 net_income_current += disp
