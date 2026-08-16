@@ -833,6 +833,40 @@ export default function AiPanel({ collapsed, onToggle }) {
     const { intent, prefill = {}, say, confidence = 0 } = parsed || {};
     if (!intent || intent === "none" || confidence < 0.4) return false;
 
+    // ---------------------------------------------------------------
+    // STT collision: "credit invoice" ≈ "create an invoice". Show a
+    // clarification card in the chat with two clickable buttons — one
+    // routes to the standard create_invoice flow (probably what the
+    // user actually said), the other explains credit memos aren't
+    // supported yet (Option 1 — polite no-op).
+    // ---------------------------------------------------------------
+    if (intent === "disambiguate_credit_or_create") {
+      const clarifyMsg = {
+        role: "assistant",
+        content: (
+          `I heard "credit invoice" — did you mean:\n\n` +
+          `• **Create an invoice** — I probably misheard "create"\n` +
+          `• **Add a credit invoice** — a customer refund/credit memo`
+        ),
+        disambigCreditOrCreate: {
+          originalUtterance: parsed.original_utterance || userMsg,
+          prefill,
+        },
+      };
+      setMessages(m => {
+        const copy = [...m];
+        const last = copy[copy.length - 1];
+        if (last && last.role === "assistant" && last.content === "Parsing…") {
+          copy[copy.length - 1] = clarifyMsg;
+        } else {
+          copy.push(clarifyMsg);
+        }
+        return copy;
+      });
+      if (voiceOnRef.current) speakOne("Did you mean create an invoice, or add a credit invoice?");
+      return true;
+    }
+
     const routeFor = (i) => {
       if (i === "create_invoice" || i === "open_invoice") return "/invoices";
       if (i === "create_bill" || i === "open_bill") return "/bills";
@@ -2785,6 +2819,52 @@ export default function AiPanel({ collapsed, onToggle }) {
                   setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, splitHint: null } : mm2));
                 }}
               />
+            )}
+            {m.disambigCreditOrCreate && (
+              <div className="mt-2 flex flex-col sm:flex-row gap-2" data-testid="chat-disambig-credit-or-create">
+                <button
+                  data-testid="disambig-create-invoice"
+                  onClick={async () => {
+                    // Route the "create an invoice" branch — replay
+                    // through the normal parser as if the user had
+                    // clearly said "create". Strip the disambig payload
+                    // off the bubble first so it can't be double-clicked.
+                    setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, disambigCreditOrCreate: null } : mm2));
+                    const original = m.disambigCreditOrCreate.originalUtterance || "";
+                    const rewritten = original.replace(/\bcredit(?:ing)?\s+(?:an?\s+)?invoice\b/gi, "create an invoice");
+                    try {
+                      const r = await api.post(`/companies/${currentId}/ai/parse-intent`, { text: rewritten });
+                      const parsed = r.data || {};
+                      handleParsedIntent(rewritten, parsed);
+                    } catch (e) {
+                      setMessages(mm => [...mm, { role: "assistant", content: "Sorry — couldn't create the invoice. Try again?" }]);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs font-medium hover:bg-slate-800"
+                >
+                  Create an invoice
+                </button>
+                <button
+                  data-testid="disambig-credit-memo"
+                  onClick={() => {
+                    // Option 1 — polite no-op. Explain credit memos
+                    // aren't supported yet and offer the manual
+                    // workflow / regular-invoice fallback.
+                    setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, disambigCreditOrCreate: null } : mm2)
+                      .concat([{
+                        role: "assistant",
+                        content:
+                          "Credit memos aren't supported yet — I can only create regular invoices right now. " +
+                          "Want me to create a regular invoice instead? Or you can add a customer credit manually from " +
+                          "**Sales & Payments → Payments**.",
+                      }]));
+                    if (voiceOnRef.current) speakOne("Credit memos aren't supported yet.");
+                  }}
+                  className="px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 text-xs font-medium hover:bg-slate-50"
+                >
+                  Add a credit invoice
+                </button>
+              </div>
             )}
             {m.showSkip && (
               <div className="mt-1.5" data-testid="cleanup-skip-hint">

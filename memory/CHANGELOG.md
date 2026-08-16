@@ -1,5 +1,27 @@
 # SmartBooks — Changelog
 
+## 2026-02-25 — Voice STT Collision Guard ("credit invoice" ≈ "create an invoice")
+
+### 🐛 Bug
+User's voice assistant said "create an invoice for John Melton for $1,000" — the STT mis-transcribed as "credit invoice for John Melton for $1,000". The intent classifier then routed to the categorize-transaction flow, responded "On it — categorizing to Uncategorized Income", and neither created the invoice nor produced a visible action pill. User confirmed the transcript, expected an invoice, got nothing.
+
+### ✅ Fix — clarify instead of guess
+- **Backend `routes/chat.py::ai_parse_intent`** — new STT-collision guard at the top: when the utterance contains `credit(?:ing)?\s+(?:an?|the)?\s*invoice`, return `intent: "disambiguate_credit_or_create"` with two options (`create_invoice`, `credit_memo_unsupported`) and the original utterance for replay.
+- **Frontend `AiPanel.jsx::handleParsedIntent`** — new branch that renders a two-button clarification card in the chat:
+  - **"Create an invoice"** → replays the utterance with `credit invoice` rewritten to `create an invoice` through the parser, then routes through the existing `create_invoice` flow (same as the working screenshot 1 case)
+  - **"Add a credit invoice (customer refund)"** → Option 1 polite no-op: explains credit memos aren't supported yet and points to the manual customer-credit workflow on the Payments page
+
+### 🎯 Design goal
+Never silently guess intent on an STT-ambiguous phrase. Every confirmable intent must produce visible feedback (pending pill or clarification card). If a legitimate accounting concept ("credit memo") isn't supported, say so directly rather than silently categorizing to Uncategorized Income.
+
+### 🧪 Tests (4/4 in `test_voice_credit_invoice_disambig.py`)
+- `test_credit_invoice_returns_disambiguate_intent` — the exact bug repro fires the guard
+- `test_credit_invoice_variations_all_caught` — 5 phrasings including "credit an invoice", "credit the invoice", "crediting an invoice", uppercase — all catch
+- `test_create_invoice_still_works_no_disambig` — legit "create an invoice" utterances flow through unchanged (no false-positives)
+- `test_credit_alone_does_not_trigger_guard` — "credit card fee", "credit the equity account" don't fire (regex requires `credit` + `invoice` adjacent)
+
+---
+
 ## 2026-02-25 — AI Ask Client: Cross-Company Recipient-Signature Cooldown
 
 ### 🚨 Incident
