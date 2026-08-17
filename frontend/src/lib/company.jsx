@@ -44,10 +44,19 @@ export function CompanyProvider({ children }) {
   const accountingMode = (current?.accounting_mode || "simple");
   const isAdvancedMode = accountingMode === "advanced";
 
+  // Region + derived display prefs. Every field US-defaults so legacy
+  // companies (pre-Phase-0, no `region` on the doc) render identically
+  // to how they always have. Phase 1 consumers pass these into
+  // `fmtMoney(v, region)` / `fmtDate(s, region)` for UK companies.
+  const region = current?.region || "US";
+  const currency = current?.currency || "USD";
+  const dateFormat = current?.date_format || "MM/DD/YYYY";
+
   return (
     <CompanyCtx.Provider value={{
       companies, currentId, current, switchCompany, refresh, loading,
       accountingMode, isAdvancedMode,
+      region, currency, dateFormat,
     }}>
       {children}
     </CompanyCtx.Provider>

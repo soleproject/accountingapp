@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
 from db import db, now_iso, coerce
+from regions import defaults_for as _region_defaults_for
 
 
 _WS_RE = re.compile(r"\s+")
@@ -120,6 +121,12 @@ async def create_company(inp: CompanyCreate, user: dict = Depends(get_current_us
         # entity editors. CPAs flip this to "advanced" per-client as
         # needed via Settings.
         "accounting_mode": "simple",
+        # Region + derived defaults (currency, date_format). `inp.region`
+        # is None from every existing UI call, so this resolves to US —
+        # zero behavior change for US customers. Kept as an unpacked
+        # dict so a future Phase-1 UI can pass region="UK" and get GBP
+        # + DD/MM/YYYY in one shot.
+        **_region_defaults_for(inp.region),
         "owner_user_id": user["id"], "onboarding_complete": False,
         "created_at": now, "updated_at": now,
     })

@@ -1,5 +1,14 @@
 # SmartBooks — Changelog
 
+## 2026-02-27 — Phase 0: UK Region Foundation (invisible / US-safe)
+
+- **Data model**: added `region`, `currency`, `date_format` to `companies`. Backfill migration stamped all 170 existing companies as US. Idempotent — re-runs are no-ops.
+- **New backend**: `regions.py` (registry), `feature_flags.py` (10s-TTL cache), `routes/feature_flags.py` (`GET /api/feature-flags`), `scripts/backfill_region.py`.
+- **New frontend**: `lib/regions.js`, `lib/i18n.js` (US-only strings; UK map deliberately empty), `lib/featureFlags.js` (`useFeatureFlag` hook, fail-closed).
+- **Modified**: `models.py::CompanyCreate` accepts optional `region`; `routes/companies.py::create_company` persists region defaults via `regions.defaults_for()`; `lib/api.js::fmtMoney`/`fmtDate` gain optional region arg (US-default → identical output); `lib/company.jsx::useCompany()` exposes `region`/`currency`/`dateFormat`; `server.py` adds unique index on `feature_flags`.
+- **Regression lock-in**: 7-case pytest suite in `tests/test_region_defaults.py` — passes.
+- **Verified end-to-end**: 170 companies backfilled, login unchanged, `/api/feature-flags` returns `{"flags":{}}`, new US company defaults to US, new company with `region:"UK"` gets GBP + DD/MM/YYYY. Frontend Pro dashboard renders bit-identically for US users.
+
 ## 2026-02-27 — Migration Verify: Profit & Loss support
 
 - Backend `/api/companies/{company_id}/qbo/verify-migration` now

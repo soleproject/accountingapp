@@ -36,6 +36,10 @@ class CompanyCreate(BaseModel):
     business_type: str = ""
     business_description: str = ""
     reporting_basis: str = "accrual"
+    # Region: "US" (default) or "UK". Phase 0 accepts the field but
+    # every existing UI keeps sending nothing here → backend derives
+    # US defaults, preserving today's behavior identically.
+    region: Optional[str] = None
 
 
 class TransactionUpdate(BaseModel):

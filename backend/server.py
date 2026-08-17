@@ -134,6 +134,18 @@ async def startup():
     )
     await db.memberships.create_index([("user_id", 1), ("company_id", 1)])
 
+    # (Feb 2026 — Phase 0 UK region groundwork.) One unique index on
+    # feature_flags.key + scope. Global scope has one row per key;
+    # company scope has one row per (key, company_id). Guards against
+    # duplicate flag rows drifting the read result.
+    try:
+        await db.feature_flags.create_index(
+            [("key", 1), ("scope", 1), ("company_id", 1)],
+            unique=True, name="feature_flag_scope_uniq",
+        )
+    except Exception:  # noqa: BLE001 — may already exist
+        pass
+
     # ── (Feb 2026) `id` unique indexes on every application-primary-key
     # collection. Audited via count-of-duplicates before landing; safe
     # to create as unique. Mongo 4.2+ builds these online without a
