@@ -1,5 +1,36 @@
 # SmartBooks — Changelog
 
+## 2026-02-27 — Migration Verify: Profit & Loss support
+
+- Backend `/api/companies/{company_id}/qbo/verify-migration` now
+  accepts a `report_type` form field (`balance_sheet` | `profit_loss`)
+  and auto-detects from PDF header text when omitted.
+- New `_PL_SYSTEM` LLM prompt extracts revenue / cogs / expense leaves
+  with a `{period_start, period_end}` window.
+- P&L path reconciles against `compute_income_statement(...)` and
+  returns the same diff-row schema plus `our_net_income` /
+  `qbo_net_income` chips.
+- `QboMigrationVerify.jsx` gets a Balance Sheet / Profit & Loss tab
+  toggle, dynamic copy, and a period label (`start → end`) on the
+  P&L result card. Testids: `qbo-verify-report-type-bs`,
+  `qbo-verify-report-type-pl`, `qbo-verify-net-income`,
+  `qbo-verify-result-type`.
+- Wizard Step 4 copy updated to mention both report types.
+
+
+## 2026-02-27 — QBO Migration Verify UI Mounted (Wizard Step 4)
+
+- Mounted `QboMigrationVerify` component into `pages/QboConnect.jsx` as Step 4
+  (between Migrate and Open Live Mirror). Optional badge; gated on `done`.
+- Renumbered "Open Live Mirror" from Step 4 → Step 5.
+- Updated `activeStep` progression: 1 connect → 2 preview → 3 migrate →
+  4 verify (post-migration nudge) → 5 mirror.
+- Component uses existing backend endpoint
+  `POST /api/companies/{company_id}/qbo/verify-migration` (AI PDF → BS diff).
+- Verified via Playwright: `qbo-step-verify`, `qbo-step-mirror`, and
+  `qbo-verify-migration-panel` testids all render.
+
+
 ## 2026-02-26 — SalesReceipt Discount Line + Superadmin QBO BS Reconciliation UI
 
 ### 🐛 SalesReceipt DiscountLineDetail was silently dropped
