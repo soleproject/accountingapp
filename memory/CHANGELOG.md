@@ -1,5 +1,14 @@
 # SmartBooks — Changelog
 
+## 2026-02-27 — Phase 1.1: Sample UK Ltd demo seeder
+
+- **New**: `/app/backend/uk_demo_seed.py` — `seed_uk_demo(owner_user_id)` creates "Northgate Advisory Ltd" with 76-row FRS 102 CoA, 10 UK contacts, £10k opening share-capital JE, 35 bank transactions, 8 VAT-coded invoices (mix of 20%/zero-rate/services), 6 bills with recoverable input VAT, AI activity + rules. Deterministic (seed=42) so every run produces bit-identical demo data.
+- **Idempotency**: repeat calls wipe any prior UK demo owned by the same superadmin (`is_uk_demo: True` marker) and re-seed with fresh IDs — always current, screenshot-ready.
+- **New endpoint**: `POST /api/admin/seed-uk-demo` in `routes/admin.py` (superadmin only).
+- **New UI**: `UkDemoSeedCard` on `SuperadminDash.jsx` with one-click "Spin up UK demo" button + confirm dialog. Testids: `uk-demo-seed-card`, `uk-demo-seed-btn`, `uk-demo-last-result`.
+- **Region-aware report H1 title**: backend `resolve_report_label` now emits `report_label_customized` boolean so frontend can honor customer overrides but fall back to region-aware defaults. UK demo's Balance Sheet now renders under the correct H1 "Statement of Financial Position" instead of the US default.
+- **Verified**: BS balances perfectly (Assets £29,697.30 = L+E £29,697.30, imbalance 0.00). Frontend renders UK statutory layout with £ throughout and correct title.
+
 ## 2026-02-27 — Phase 1: UK Look-and-Feel (feature-flag gated)
 
 - **FRS 102 UK Chart of Accounts** — 76-row starter template in `seed.py::UK_COA`, structured for Companies Act 2006 Schedule 1 Format 1 (Fixed Assets → Current Assets → Creditors <1y → Creditors >1y → Capital and Reserves). New `coa_for(region)` helper picks US or UK CoA on company creation. Wired into both `/api/companies` and `/api/pro/clients`.

@@ -535,8 +535,11 @@ export default function ReportView() {
   // Prefer the server-resolved label (per-company override from
   // Company Settings → Report Styling) so a renamed report ("Profit &
   // Loss") shows the same string in the on-screen H1, the report body
-  // heading, and the downloaded PDF.
-  const title = data?.report_label || defaultTitle;
+  // heading, and the downloaded PDF. When the customer HAS NOT
+  // renamed the report, the region-aware `defaultTitle` wins so a
+  // UK company sees "Statement of Financial Position" instead of the
+  // US default "Balance Sheet".
+  const title = (data?.report_label_customized ? data?.report_label : null) || defaultTitle;
 
   // Report styling from Company Settings. Falls back to sane defaults
   // if the server didn't send anything (e.g. legacy company row).
