@@ -1,5 +1,18 @@
 # SmartBooks — Changelog
 
+## 2026-02-27 — QBO Migration Verify UI Mounted (Wizard Step 4)
+
+- Mounted `QboMigrationVerify` component into `pages/QboConnect.jsx` as Step 4
+  (between Migrate and Open Live Mirror). Optional badge; gated on `done`.
+- Renumbered "Open Live Mirror" from Step 4 → Step 5.
+- Updated `activeStep` progression: 1 connect → 2 preview → 3 migrate →
+  4 verify (post-migration nudge) → 5 mirror.
+- Component uses existing backend endpoint
+  `POST /api/companies/{company_id}/qbo/verify-migration` (AI PDF → BS diff).
+- Verified via Playwright: `qbo-step-verify`, `qbo-step-mirror`, and
+  `qbo-verify-migration-panel` testids all render.
+
+
 ## 2026-02-26 — SalesReceipt Discount Line + Superadmin QBO BS Reconciliation UI
 
 ### 🐛 SalesReceipt DiscountLineDetail was silently dropped

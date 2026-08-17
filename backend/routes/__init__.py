@@ -37,6 +37,7 @@ from routes.estimates_pos import router as estimates_pos_router  # noqa: F401
 from routes.audit_routes import router as audit_router  # noqa: F401
 from routes.partners_routes import router as partners_router  # noqa: F401
 from routes.feedback import router as feedback_router  # noqa: F401
+from routes.qbo_verify import router as qbo_verify_router  # noqa: F401
 from routes.root import router as root_router  # noqa: F401
 
 ALL_ROUTERS = [
@@ -77,5 +78,6 @@ ALL_ROUTERS = [
     audit_router,
     partners_router,
     feedback_router,
+    qbo_verify_router,
     root_router,
 ]
