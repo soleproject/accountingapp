@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
-import { api, fmtMoney, BACKEND_URL } from "@/lib/api";
-import { useCompany } from "@/lib/company";
+import { api, BACKEND_URL } from "@/lib/api";
+import { useCompany, useMoneyFmt } from "@/lib/company";
+import { t as tr } from "@/lib/i18n";
 import { TID } from "@/constants/testIds";
 import { Download, Loader2, ArrowRightCircle, ChevronLeft, ChevronDown, ChevronRight, Search, SlidersHorizontal, X } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
@@ -17,6 +18,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 // capability (checkboxes + Move-to-account).
 
 function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchParams, navigate }) {
+  const fmtMoney = useMoneyFmt();
   const rows = data.rows || [];
   const account = data.account || {};
   const [selected, setSelected] = useState(() => new Set(rows.map(r => r.id)));
@@ -345,7 +347,8 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
 export default function ReportView() {
   const { kind } = useParams();
   const navigate = useNavigate();
-  const { currentId, current } = useCompany();
+  const { currentId, current, region } = useCompany();
+  const fmtMoney = useMoneyFmt();
   const [searchParams, setSearchParams] = useSearchParams();
   const urlBasis = searchParams.get("basis");
   const urlStart = searchParams.get("start");
@@ -520,12 +523,12 @@ export default function ReportView() {
   };
 
   const defaultTitle = {
-    "trial-balance": "Trial Balance",
-    "balance-sheet": "Balance Sheet",
-    "income-statement": "Income Statement",
+    "trial-balance": tr("trial_balance", region),
+    "balance-sheet": tr("balance_sheet", region),
+    "income-statement": tr("income_statement", region),
     "general-ledger": "General Ledger",
     "cash-flow": "Statement of Cash Flows",
-    "sales-tax": "Sales Tax Liability",
+    "sales-tax": region === "UK" ? "VAT Liability" : "Sales Tax Liability",
     "1099-summary": "1099 Summary",
     "account-detail": "Account Detail",
   }[kind] || kind;
@@ -683,6 +686,7 @@ function Section({ title }) {
   );
 }
 function Row({ id, code, name, amount, bold, parent_code, onClick, expandable, expanded, onToggleExpand, childCount }) {
+  const fmtMoney = useMoneyFmt();
   const isChild = !!parent_code;
   const clickable = !!(onClick && id);
   return (
@@ -718,6 +722,7 @@ function Row({ id, code, name, amount, bold, parent_code, onClick, expandable, e
 }
 
 function IncomeStatementBody({ data, onDrilldown }) {
+  const fmtMoney = useMoneyFmt();
   // COGS + Gross Profit only render when there's activity in the cogs
   // bucket — service/SaaS companies without cost of sales keep the
   // classic two-section P&L; inventory/restaurant/retail businesses
@@ -761,6 +766,91 @@ function IncomeStatementBody({ data, onDrilldown }) {
 }
 
 function BalanceSheetBody({ data, onDrilldown, onDrilldownGroup }) {
+  const fmtMoney = useMoneyFmt();
+  const { region } = useCompany();
+
+  // ── UK statutory layout — Companies Act 2006 Schedule 1 Format 1.
+  // Renders the FRC-mandated section order:
+  //   Fixed Assets → Current Assets → Creditors: <1y → Net Current
+  //   Assets → Total Assets Less Current Liabilities → Creditors: >1y
+  //   → Net Assets → Capital and Reserves.
+  //
+  // Uses the (Phase 1) `subtype` field on each row to bucket into
+  // fixed vs current on the asset side, and short-term vs long-term
+  // on the liability side. Falls back to detail_type when subtype is
+  // missing (defensive: some QBO-imported rows didn't carry a
+  // subtype pre-Feb-2026).
+  if (region === "UK") {
+    const isFixed = (r) =>
+      r.subtype === "fixed_asset"
+      || r.detail_type === "property_plant_equipment"
+      || r.detail_type === "depreciation_and_amortization";
+    const isLongTerm = (r) =>
+      r.subtype === "long_term_liability"
+      || r.detail_type === "loan_and_line_of_credit";
+
+    const fixedAssets = (data.assets || []).filter(isFixed);
+    const currentAssets = (data.assets || []).filter((r) => !isFixed(r));
+    const shortTermCreditors = (data.liabilities || []).filter((r) => !isLongTerm(r));
+    const longTermCreditors = (data.liabilities || []).filter(isLongTerm);
+
+    // Sum only top-level (non-child) rows so we don't double-count
+    // parent/child pairs. Mirrors the backend's total calculation.
+    const sumTop = (rows) =>
+      rows.filter((r) => !r.parent_id && !r.parent_code)
+          .reduce((s, r) => s + (r.amount || 0), 0);
+    const fixedTotal = sumTop(fixedAssets);
+    const currentAssetsTotal = sumTop(currentAssets);
+    const shortTermTotal = sumTop(shortTermCreditors);
+    const longTermTotal = sumTop(longTermCreditors);
+    const netCurrent = currentAssetsTotal - shortTermTotal;
+    const totalAssetsLessCurrentLiabs = fixedTotal + netCurrent;
+    const netAssets = totalAssetsLessCurrentLiabs - longTermTotal;
+
+    return (
+      <div className="text-sm" data-testid="bs-uk-statutory">
+        <Section title="Fixed Assets" />
+        <RolledUpRows rows={fixedAssets} onDrilldown={onDrilldown} onDrilldownGroup={onDrilldownGroup} />
+        <Row code="" name="Total Fixed Assets" amount={fixedTotal} bold />
+
+        <Section title="Current Assets" />
+        <RolledUpRows rows={currentAssets} onDrilldown={onDrilldown} onDrilldownGroup={onDrilldownGroup} />
+        <Row code="" name="Total Current Assets" amount={currentAssetsTotal} bold />
+
+        <Section title="Creditors: amounts falling due within one year" />
+        <RolledUpRows rows={shortTermCreditors} onDrilldown={onDrilldown} onDrilldownGroup={onDrilldownGroup} />
+        <Row code="" name="Total Current Creditors" amount={shortTermTotal} bold />
+
+        <div className="mt-2 grid grid-cols-12 gap-2 px-3 py-2 bg-slate-50 rounded">
+          <div className="col-span-9 font-heading font-semibold text-sm">Net Current Assets / (Liabilities)</div>
+          <div className="col-span-3 text-right font-mono-num font-semibold">{fmtMoney(netCurrent)}</div>
+        </div>
+        <div className="mt-1 grid grid-cols-12 gap-2 px-3 py-2 border-t border-slate-300 bg-slate-50 rounded">
+          <div className="col-span-9 font-heading font-semibold text-sm">Total Assets Less Current Liabilities</div>
+          <div className="col-span-3 text-right font-mono-num font-semibold">{fmtMoney(totalAssetsLessCurrentLiabs)}</div>
+        </div>
+
+        {longTermCreditors.length > 0 && (
+          <>
+            <Section title="Creditors: amounts falling due after more than one year" />
+            <RolledUpRows rows={longTermCreditors} onDrilldown={onDrilldown} onDrilldownGroup={onDrilldownGroup} />
+            <Row code="" name="Total Long-Term Creditors" amount={longTermTotal} bold />
+          </>
+        )}
+
+        <div className="mt-3 grid grid-cols-12 gap-2 px-3 py-2 border-t-2 border-slate-800 bg-slate-100 rounded">
+          <div className="col-span-9 font-heading font-bold uppercase text-sm">Net Assets</div>
+          <div className="col-span-3 text-right font-mono-num font-bold">{fmtMoney(netAssets)}</div>
+        </div>
+
+        <Section title="Capital and Reserves" />
+        <RolledUpRows rows={data.equity} onDrilldown={onDrilldown} onDrilldownGroup={onDrilldownGroup} />
+        <Row code="" name="Total Capital and Reserves" amount={data.total_equity} bold />
+      </div>
+    );
+  }
+
+  // US layout — unchanged from the pre-Phase-1 rendering.
   return (
     <div className="text-sm">
       <Section title="Assets" />
@@ -896,6 +986,7 @@ function RolledUpRows({ rows, onDrilldown, onDrilldownGroup }) {
 }
 
 function TrialBalanceBody({ data }) {
+  const fmtMoney = useMoneyFmt();
   return (
     <div className="text-sm">
       <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-slate-50 rounded text-xs uppercase tracking-wider font-semibold text-slate-600">
@@ -920,6 +1011,7 @@ function TrialBalanceBody({ data }) {
 }
 
 function GeneralLedgerBody({ data }) {
+  const fmtMoney = useMoneyFmt();
   const nav = useNavigate();
   const map = {
     Txn:   "bg-indigo-100 text-indigo-700 hover:bg-indigo-200",
@@ -978,6 +1070,7 @@ function GeneralLedgerBody({ data }) {
 }
 
 function CashFlowBody({ data, onDrilldown }) {
+  const fmtMoney = useMoneyFmt();
   const sections = [
     ["Operating Activities", data.operating, data.operating_rows || []],
     ["Investing Activities", data.investing, data.investing_rows || []],
@@ -1014,6 +1107,7 @@ function CashFlowBody({ data, onDrilldown }) {
 }
 
 function SalesTaxBody({ data }) {
+  const fmtMoney = useMoneyFmt();
   return (
     <div className="text-sm space-y-1">
       {data.rows.map((r, i) => (
@@ -1034,6 +1128,7 @@ function SalesTaxBody({ data }) {
 }
 
 function Form1099Body({ data }) {
+  const fmtMoney = useMoneyFmt();
   if (!data.rows.length) {
     return (
       <div className="text-sm text-slate-500 py-6 text-center">

@@ -34,6 +34,7 @@ import veryfi_service
 import merchant_cache
 import contact_resolver
 from infra import get_cache
+from regions import defaults_for as _region_defaults_for
 
 from models import (
     LoginIn, SignupIn, CompanyCreate, TransactionUpdate, TransactionCreate,
@@ -239,6 +240,9 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
         # find it. Pros/Superadmins never set this so their clients
         # remain in the platform-wide bucket.
         **({"partner_id": user["id"]} if user.get("role") == "partner" else {}),
+        # Region defaults (US when inp.region is None). Preserves every
+        # existing Pro's client-creation behaviour identically.
+        **_region_defaults_for(inp.region),
         "onboarding_complete": False,
         # Enterprise + billing intent. `billing_state` starts pending;
         # Phase C's Stripe webhook flips it to active/past_due/canceled.
@@ -259,8 +263,8 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
     ]
     await db.memberships.insert_many(mems)
 
-    from seed import DEFAULT_COA
-    for code, name, atype, subtype, detail_type in DEFAULT_COA:
+    from seed import coa_for
+    for code, name, atype, subtype, detail_type in coa_for(inp.region):
         await db.accounts.insert_one({
             "id": str(uuid.uuid4()), "company_id": company_id, "code": code, "name": name,
             "type": atype, "subtype": subtype, "detail_type": detail_type,

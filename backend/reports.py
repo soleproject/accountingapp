@@ -573,6 +573,12 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
             # sub-headers (Cash and Bank, Property Plant & Equipment,
             # Loan and Line of Credit, etc.).
             "detail_type": (a.get("detail_type") or "").strip(),
+            # (Feb 2026 — Phase 1 UK region.) Carry `subtype` too so
+            # the UK statutory Balance Sheet renderer can split fixed
+            # vs current, and long-term vs short-term creditors. US
+            # frontend ignores this field, so the payload stays 100%
+            # backward-compatible.
+            "subtype": (a.get("subtype") or "").strip(),
         }
         # `parent_code` is optional context for the UI's indentation.
         # `parent_id` (below) is the AUTHORITATIVE child-marker used by

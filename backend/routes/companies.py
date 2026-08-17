@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
 from db import db, now_iso, coerce
+from regions import defaults_for as _region_defaults_for
 
 
 _WS_RE = re.compile(r"\s+")
@@ -120,6 +121,12 @@ async def create_company(inp: CompanyCreate, user: dict = Depends(get_current_us
         # entity editors. CPAs flip this to "advanced" per-client as
         # needed via Settings.
         "accounting_mode": "simple",
+        # Region + derived defaults (currency, date_format). `inp.region`
+        # is None from every existing UI call, so this resolves to US —
+        # zero behavior change for US customers. Kept as an unpacked
+        # dict so a future Phase-1 UI can pass region="UK" and get GBP
+        # + DD/MM/YYYY in one shot.
+        **_region_defaults_for(inp.region),
         "owner_user_id": user["id"], "onboarding_complete": False,
         "created_at": now, "updated_at": now,
     })
@@ -127,9 +134,12 @@ async def create_company(inp: CompanyCreate, user: dict = Depends(get_current_us
         "id": str(uuid.uuid4()), "user_id": user["id"], "company_id": cid,
         "role": "owner", "created_at": now,
     })
-    # Auto-provision default CoA
-    from seed import DEFAULT_COA
-    for code, name, atype, subtype, detail_type in DEFAULT_COA:
+    # Auto-provision default CoA — branches on region. US companies
+    # get the same 40-row starter CoA they've always had; UK companies
+    # get the FRS 102 Section 1A layout (Fixed Assets → Current Assets
+    # → Creditors <1y → Creditors >1y → Capital & Reserves).
+    from seed import coa_for
+    for code, name, atype, subtype, detail_type in coa_for(inp.region):
         await db.accounts.insert_one({
             "id": str(uuid.uuid4()), "company_id": cid, "code": code, "name": name,
             "type": atype, "subtype": subtype, "detail_type": detail_type,

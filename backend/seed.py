@@ -56,6 +56,130 @@ DEFAULT_COA = [
     ("9999", "Uncategorized Expense", "expense", "operating_expense", "operating_expense"),
 ]
 
+
+# ---------------------------------------------------------------------------
+# UK Chart of Accounts — FRS 102 Section 1A (small company) shape.
+#
+# Feb 2026, Phase 1 of the UK region rollout. Modelled to satisfy the
+# Companies Act 2006 Schedule 1 Format 1 Balance Sheet layout:
+#
+#   Fixed Assets                       (7xxx range, Intangible/Tangible/Investment)
+#   Current Assets                     (1xxx range, Stock/Debtors/Bank)
+#   Creditors falling due < 1 year     (2xxx range, Trade Creditors/Tax/Bank OD)
+#   Creditors falling due > 1 year     (2500-2599 range, Long-term loans)
+#   Capital and Reserves               (3xxx range, Called-up capital / Profit & Loss reserve)
+#
+# `type`/`subtype`/`detail_type` reuse the SAME legacy enum values as the
+# US CoA on purpose — the entire ledger engine (transactions, JEs,
+# reports.py) is jurisdiction-agnostic downstream. Only the CoA rows +
+# their display names carry the UK vs US flavor. This means every
+# report we already ship (Balance Sheet math, P&L math, Trial Balance,
+# Cash Flow) works for UK books with zero backend changes.
+#
+# VAT plumbing (Phase 2) will add dedicated VAT control account rows;
+# for now `2200 VAT Control` is present as a placeholder so bookkeepers
+# have somewhere to code the VAT liability before the automated engine
+# ships.
+UK_COA = [
+    # ── Fixed Assets — Intangible (7000-7099)
+    ("7000", "Goodwill", "asset", "fixed_asset", "property_plant_equipment"),
+    ("7010", "Patents, Trademarks & Licences", "asset", "fixed_asset", "property_plant_equipment"),
+    ("7020", "Amortisation — Intangibles", "asset", "fixed_asset", "depreciation_and_amortization"),
+    # ── Fixed Assets — Tangible (7100-7199)
+    ("7100", "Freehold Property", "asset", "fixed_asset", "property_plant_equipment"),
+    ("7110", "Leasehold Improvements", "asset", "fixed_asset", "property_plant_equipment"),
+    ("7120", "Plant & Machinery", "asset", "fixed_asset", "property_plant_equipment"),
+    ("7130", "Motor Vehicles", "asset", "fixed_asset", "property_plant_equipment"),
+    ("7140", "Office Equipment", "asset", "fixed_asset", "property_plant_equipment"),
+    ("7150", "Fixtures & Fittings", "asset", "fixed_asset", "property_plant_equipment"),
+    ("7200", "Accumulated Depreciation", "asset", "fixed_asset", "depreciation_and_amortization"),
+    # ── Current Assets — Bank & Cash (1000-1099)
+    ("1000", "Cash in Hand", "asset", "current_asset", "cash_and_bank"),
+    ("1010", "Business Current Account", "asset", "current_asset", "cash_and_bank"),
+    ("1020", "Business Savings Account", "asset", "current_asset", "cash_and_bank"),
+    ("1030", "Deposit Account", "asset", "current_asset", "cash_and_bank"),
+    ("1100", "Undeposited Funds", "asset", "current_asset", "money_in_transit"),
+    # ── Current Assets — Debtors & Stock (1200-1599)
+    ("1200", "Trade Debtors", "asset", "current_asset", "expected_payments_from_customers"),
+    ("1210", "Other Debtors", "asset", "current_asset", "expected_payments_from_customers"),
+    ("1220", "Prepayments & Accrued Income", "asset", "current_asset", "vendor_prepayments"),
+    ("1230", "VAT Recoverable", "asset", "current_asset", "vendor_prepayments"),
+    ("1300", "Stock (Raw Materials)", "asset", "current_asset", "inventory"),
+    ("1310", "Stock (Work in Progress)", "asset", "current_asset", "inventory"),
+    ("1320", "Stock (Finished Goods)", "asset", "current_asset", "inventory"),
+    # ── Creditors: falling due within one year (2000-2299)
+    ("2000", "Trade Creditors", "liability", "current_liability", "expected_payments_to_vendors"),
+    ("2010", "Other Creditors", "liability", "current_liability", "expected_payments_to_vendors"),
+    ("2020", "Accruals & Deferred Income", "liability", "current_liability", "expected_payments_to_vendors"),
+    ("2100", "Credit Card Control", "liability", "current_liability", "credit_card"),
+    ("2110", "Bank Overdraft", "liability", "current_liability", "credit_card"),
+    ("2200", "VAT Control", "liability", "current_liability", "sales_tax_payable"),
+    ("2210", "PAYE & NIC Control", "liability", "current_liability", "sales_tax_payable"),
+    ("2220", "Corporation Tax Liability", "liability", "current_liability", "sales_tax_payable"),
+    ("2230", "Directors' Loan (Current)", "liability", "current_liability", "expected_payments_to_vendors"),
+    # ── Creditors: falling due after more than one year (2500-2599)
+    ("2500", "Long-Term Loans", "liability", "long_term_liability", "loan_and_line_of_credit"),
+    ("2510", "Hire Purchase Creditors", "liability", "long_term_liability", "loan_and_line_of_credit"),
+    ("2520", "Directors' Loan (Long-Term)", "liability", "long_term_liability", "loan_and_line_of_credit"),
+    # ── Capital and Reserves (3000-3299)
+    ("3000", "Called-Up Share Capital", "equity", "equity", "owner_contribution_drawing"),
+    ("3050", "Share Premium Account", "equity", "equity", "owner_contribution_drawing"),
+    ("3100", "Profit & Loss Reserve", "equity", "equity", "retained_earnings"),
+    ("3200", "Dividends Paid", "equity", "equity", "owner_contribution_drawing"),
+    # ── Turnover (4000-4299) — UK term for Revenue
+    ("4000", "Sales — Standard Rate", "revenue", "operating_revenue", "income"),
+    ("4010", "Sales — Reduced Rate", "revenue", "operating_revenue", "income"),
+    ("4020", "Sales — Zero Rate", "revenue", "operating_revenue", "income"),
+    ("4030", "Sales — Exempt", "revenue", "operating_revenue", "income"),
+    ("4100", "Services Rendered", "revenue", "operating_revenue", "income"),
+    ("4200", "Interest Received", "revenue", "other_revenue", "other_income"),
+    ("4210", "Other Income", "revenue", "other_revenue", "other_income"),
+    # ── Cost of Sales (5000-5299)
+    ("5000", "Purchases — Materials", "expense", "cost_of_goods_sold", "cost_of_goods_sold"),
+    ("5010", "Purchases — Goods for Resale", "expense", "cost_of_goods_sold", "cost_of_goods_sold"),
+    ("5100", "Subcontractor Costs", "expense", "cost_of_goods_sold", "cost_of_goods_sold"),
+    ("5200", "Carriage on Purchases", "expense", "cost_of_goods_sold", "cost_of_goods_sold"),
+    ("5300", "Opening Stock", "expense", "cost_of_goods_sold", "cost_of_goods_sold"),
+    ("5310", "Closing Stock", "expense", "cost_of_goods_sold", "cost_of_goods_sold"),
+    # ── Administrative Expenses (6000-6999) — UK term
+    ("6000", "Staff Salaries", "expense", "payroll_expense", "payroll_expense"),
+    ("6010", "Employer's NIC", "expense", "payroll_expense", "payroll_expense"),
+    ("6020", "Pension Contributions", "expense", "payroll_expense", "payroll_expense"),
+    ("6030", "Staff Welfare", "expense", "operating_expense", "operating_expense"),
+    ("6100", "Rent & Rates", "expense", "operating_expense", "operating_expense"),
+    ("6110", "Utilities (Light & Heat)", "expense", "operating_expense", "operating_expense"),
+    ("6200", "Motor Expenses", "expense", "operating_expense", "operating_expense"),
+    ("6210", "Travelling & Subsistence", "expense", "operating_expense", "operating_expense"),
+    ("6220", "Entertaining (Non-Deductible)", "expense", "operating_expense", "operating_expense"),
+    ("6300", "Telephone & Internet", "expense", "operating_expense", "operating_expense"),
+    ("6310", "Software & Subscriptions", "expense", "operating_expense", "operating_expense"),
+    ("6320", "Printing, Postage & Stationery", "expense", "operating_expense", "operating_expense"),
+    ("6400", "Insurance", "expense", "operating_expense", "operating_expense"),
+    ("6500", "Accountancy Fees", "expense", "operating_expense", "operating_expense"),
+    ("6510", "Legal & Professional Fees", "expense", "operating_expense", "operating_expense"),
+    ("6520", "Consultancy Fees", "expense", "operating_expense", "operating_expense"),
+    ("6600", "Repairs & Maintenance", "expense", "operating_expense", "operating_expense"),
+    ("6700", "Advertising & Marketing", "expense", "operating_expense", "operating_expense"),
+    ("6800", "Bank Charges", "expense", "payment_processing_fee", "payment_processing_fee"),
+    ("6810", "Interest Payable", "expense", "operating_expense", "operating_expense"),
+    ("6900", "Depreciation Charge", "expense", "operating_expense", "operating_expense"),
+    ("6910", "Amortisation Charge", "expense", "operating_expense", "operating_expense"),
+    ("6920", "Bad Debts Written Off", "expense", "operating_expense", "operating_expense"),
+    ("6990", "Sundry Expenses", "expense", "operating_expense", "operating_expense"),
+    ("9999", "Uncategorised Expense", "expense", "operating_expense", "operating_expense"),
+]
+
+
+def coa_for(region: str | None) -> list:
+    """Return the appropriate starter Chart of Accounts for a region.
+    US-safe fallback: unknown / missing region → US CoA (this preserves
+    every existing US customer's seeding behavior exactly).
+    """
+    if region and str(region).upper() == "UK":
+        return UK_COA
+    return DEFAULT_COA
+
+
 SAMPLE_MERCHANTS = [
     ("Starbucks", 6000, -14.50, "high"),
     ("Uber", 6120, -32.10, "high"),

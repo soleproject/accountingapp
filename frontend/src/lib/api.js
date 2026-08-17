@@ -31,12 +31,21 @@ api.interceptors.response.use(
   }
 );
 
-export const fmtMoney = (n) => {
+import { getRegion } from "./regions";
+
+/**
+ * Format a number as money. Region-aware but US-defaulting: callers
+ * that omit the second arg get the exact same output as before
+ * ("$1,234.50"), which preserves every existing US screen bit-for-bit.
+ * A future Phase-1 caller can pass `region="UK"` and get "£1,234.50".
+ */
+export const fmtMoney = (n, region = "US") => {
   const v = Number(n || 0);
-  return `${v < 0 ? "-" : ""}$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const { currencySymbol } = getRegion(region);
+  return `${v < 0 ? "-" : ""}${currencySymbol}${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
-export const fmtDate = (s) => {
+export const fmtDate = (s, region = "US") => {
   if (!s) return "";
   try {
     // Bare `YYYY-MM-DD` strings (invoice.due_date, invoice.issue_date, etc.)
@@ -48,6 +57,10 @@ export const fmtDate = (s) => {
     const d = m
       ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
       : new Date(s);
-    return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    // Locale-aware short date. Passing `undefined` uses the browser's
+    // locale (matches today's US behavior); an explicit UK caller
+    // gets the UK locale explicitly for DD/MM/YYYY ordering.
+    const locale = region === "UK" ? "en-GB" : undefined;
+    return d.toLocaleDateString(locale, { year: "numeric", month: "short", day: "numeric" });
   } catch { return s; }
 };
