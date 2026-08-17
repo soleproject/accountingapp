@@ -514,6 +514,10 @@ async def me(user: dict = Depends(get_current_user)):
         **{k: user[k] for k in ("id", "email", "name", "role")},
         "enterprise_id": user.get("enterprise_id"),
         "partner_id": user.get("partner_id"),
+        # Surface the demo-visitor marker so the frontend can show the
+        # read-only pill + signup CTA on every screen (see
+        # `components/DemoVisitorPill.jsx`).
+        "is_demo_visitor": bool(user.get("is_demo_visitor")),
     }}
 
 

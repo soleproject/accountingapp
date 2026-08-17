@@ -28,11 +28,19 @@ def verify_password(p: str, hashed: str) -> bool:
         return False
 
 
-def create_token(user_id: str, role: str) -> str:
+def create_token(user_id: str, role: str, ttl_seconds: int | None = None) -> str:
+    """Mint a JWT for a user. `ttl_seconds` overrides the default
+    `JWT_EXPIRY_HOURS` window — used by the public UK demo endpoint
+    to issue short-lived (30-minute) tokens so a leaked demo token
+    can't be reused for a persistent unauthorised session."""
+    if ttl_seconds is not None:
+        exp = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+    else:
+        exp = datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS)
     payload = {
         "sub": user_id,
         "role": role,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
+        "exp": exp,
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
 

@@ -541,6 +541,7 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
         "accrual_ap_adjustment": accrual_adj_exp,
         "report_style": resolve_report_style(company),
         "report_label": resolve_report_label(company, "income-statement"),
+        "report_label_customized": is_report_label_customized(company, "income-statement"),
     }
 
 
@@ -724,6 +725,7 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
         "ap_open": round(ap_open, 2),
         "report_style": resolve_report_style(company),
         "report_label": resolve_report_label(company, "balance-sheet"),
+        "report_label_customized": is_report_label_customized(company, "balance-sheet"),
     }
 
 
@@ -1240,6 +1242,16 @@ def resolve_report_label(company: dict | None, kind: str) -> str:
     """Return the user-facing label for a given report kind."""
     rs = resolve_report_style(company)
     return rs["labels"].get(kind) or DEFAULT_REPORT_LABELS.get(kind, kind)
+
+
+def is_report_label_customized(company: dict | None, kind: str) -> bool:
+    """True iff the customer explicitly renamed this report via Company
+    Settings. Used by the frontend to decide whether to honour the
+    backend `report_label` (customer choice) or apply a region-aware
+    default like "Statement of Financial Position" for UK companies."""
+    rs = resolve_report_style(company)
+    label = rs["labels"].get(kind)
+    return bool(label) and label != DEFAULT_REPORT_LABELS.get(kind)
 
 
 def _money_table(rows, totals_label, totals_amount):

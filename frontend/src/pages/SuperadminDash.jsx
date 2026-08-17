@@ -202,8 +202,69 @@ export default function SuperadminDash() {
 
       <AffiliatePayoutsCard />
 
+      <UkDemoSeedCard />
+
       <div className="rounded-xl border bg-white p-5">
         <TeamPanel mode="admin" />
+      </div>
+    </div>
+  );
+}
+
+
+// --------------------------------------------------------------------------
+// UkDemoSeedCard — one-click "Sample UK Ltd" spinup.
+//
+// Superadmins use this to create Northgate Advisory Ltd — a fully
+// populated FRS 102 company with realistic VAT-coded invoices and
+// bills — for the UK landing-page screenshots, sales demos, and
+// design-partner walkthroughs. Re-clicking wipes and re-seeds so the
+// data is always fresh and matches the current schema.
+// --------------------------------------------------------------------------
+function UkDemoSeedCard() {
+  const [busy, setBusy] = useState(false);
+  const [lastResult, setLastResult] = useState(null);
+  const spin = async () => {
+    if (!window.confirm("Create (or refresh) the Sample UK Ltd demo company under your login? This wipes any previous UK demo you created.")) return;
+    setBusy(true);
+    try {
+      const r = await api.post("/admin/seed-uk-demo");
+      setLastResult(r.data);
+      toast.success(
+        `Created "${r.data.company_name}" — switch to it from the company selector.`,
+        { duration: 8000 },
+      );
+    } catch (e) {
+      toast.error(`Seed failed: ${e.response?.data?.detail || e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="rounded-xl border bg-white p-5" data-testid="uk-demo-seed-card">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 className="font-heading font-semibold text-slate-900 flex items-center gap-2">
+            🇬🇧 Sample UK Ltd — demo seed
+          </h3>
+          <p className="mt-1 text-sm text-slate-600 max-w-2xl">
+            Spin up <b>Northgate Advisory Ltd</b> — a fully-populated UK consultancy with FRS 102 chart of accounts, VAT-coded invoices &amp; bills, and a balanced statutory Balance Sheet. Use it for landing-page screenshots, sales demos, and design-partner walkthroughs. Re-clicking wipes and re-seeds so the data is always current.
+          </p>
+          {lastResult && (
+            <div className="mt-2 text-xs text-slate-500" data-testid="uk-demo-last-result">
+              Last created: <span className="font-medium text-slate-700">{lastResult.company_name}</span> · id <code className="bg-slate-100 px-1 py-0.5 rounded">{lastResult.company_id.slice(0, 8)}…</code>
+            </div>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={spin}
+          disabled={busy}
+          data-testid="uk-demo-seed-btn"
+          className="shrink-0 inline-flex items-center gap-2 rounded-md bg-slate-900 px-3.5 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+        >
+          {busy ? <><Loader2 className="h-4 w-4 animate-spin" /> Seeding…</> : "Spin up UK demo"}
+        </button>
       </div>
     </div>
   );

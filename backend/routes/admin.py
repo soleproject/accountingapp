@@ -2714,3 +2714,25 @@ async def admin_set_feature_flag(
     _ff._clear_cache()
     return {"key": key, "enabled": bool(inp.enabled)}
 
+
+
+# ---------------------------------------------------------------------------
+# UK demo company seeder (superadmin only)
+#
+# Spins up a fully-populated "Northgate Advisory Ltd" — FRS 102 CoA,
+# realistic VAT-coded invoices/bills, balanced Balance Sheet — for
+# marketing screenshots and design-partner demos. Idempotent: calling
+# twice from the same superadmin wipes and re-seeds so screenshots
+# always match the latest data.
+# ---------------------------------------------------------------------------
+
+@router.post("/admin/seed-uk-demo")
+async def admin_seed_uk_demo(user: dict = Depends(require_role("superadmin"))):
+    from uk_demo_seed import seed_uk_demo, DEMO_COMPANY_NAME
+    cid = await seed_uk_demo(user["id"])
+    return {
+        "company_id": cid,
+        "company_name": DEMO_COMPANY_NAME,
+        "region": "UK",
+        "message": "UK demo company created — switch to it from the top-left company selector.",
+    }

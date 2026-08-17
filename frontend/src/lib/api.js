@@ -23,7 +23,22 @@ api.interceptors.response.use(
     if (err.response?.status === 401) {
       localStorage.removeItem("axiom_token");
       localStorage.removeItem("axiom_user");
-      if (window.location.pathname !== "/login") {
+      // Pages that either bootstrap their own session (public demo,
+      // set-password magic links, accept-invite) or are the login
+      // page itself must NOT be interrupted by an auto-redirect on
+      // 401 — otherwise the demo-visitor auto-login racing against
+      // CompanyProvider's initial /companies fetch would boot the
+      // visitor straight to /login before their token can install.
+      const p = window.location.pathname;
+      const isAuthlessPage =
+        p === "/login" ||
+        p.startsWith("/demo/") ||
+        p.startsWith("/signup") ||
+        p.startsWith("/set-password/") ||
+        p.startsWith("/invite/") ||
+        p.startsWith("/q/") ||
+        p.startsWith("/billing/");
+      if (!isAuthlessPage) {
         window.location.href = "/login";
       }
     }
