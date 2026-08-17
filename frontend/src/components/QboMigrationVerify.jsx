@@ -5,17 +5,23 @@ import { Upload, Loader2, CheckCircle2, AlertTriangle, XCircle } from "lucide-re
 
 /**
  * Post-migration verification widget — customer uploads their QBO
- * Balance Sheet PDF, we extract each account balance with an LLM,
- * then diff against our computed BS and render a side-by-side table.
+ * Balance Sheet OR Profit & Loss PDF, we extract each account with
+ * an LLM, then diff against our computed report and render a
+ * side-by-side table.
  *
- * v1 = read-only diff (CPA reviews and posts any adjustments via the
- * existing superadmin backfill panel). Feb 26 2026.
+ * v1  Feb 26 2026 — BS-only, read-only diff.
+ * v1.1 Feb 27 2026 — P&L support (report type toggle; backend also
+ *                     auto-detects from the PDF header).
  */
 export default function QboMigrationVerify({ companyId }) {
   const [file, setFile] = useState(null);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  // Report type sent as an override. Backend auto-detects when the
+  // hint disagrees, but the user-facing chip makes intent explicit
+  // and gives us a cleaner label on the result card.
+  const [reportType, setReportType] = useState("balance_sheet");
 
   const upload = async () => {
     if (!file) return;
@@ -25,6 +31,7 @@ export default function QboMigrationVerify({ companyId }) {
     try {
       const fd = new FormData();
       fd.append("file", file);
+      fd.append("report_type", reportType);
       const r = await api.post(
         `/companies/${companyId}/qbo/verify-migration`,
         fd,
@@ -56,6 +63,23 @@ export default function QboMigrationVerify({ companyId }) {
     return "bg-red-50";
   };
 
+  // Human label for the report type — used in the intro copy, the
+  // file-picker CTA, and the toast/toolbar chips.
+  const rtLabel =
+    reportType === "profit_loss" ? "Profit & Loss" : "Balance Sheet";
+  const resultTypeLabel =
+    result?.report_type === "profit_loss" ? "Profit & Loss" : "Balance Sheet";
+  const periodLabel = result
+    ? result.report_type === "profit_loss"
+      ? `${result.period_start} → ${result.period_end}`
+      : `As of ${result.as_of}`
+    : "";
+
+  const tabBase =
+    "px-3 py-1.5 text-xs font-medium rounded-md border transition-colors";
+  const tabOn = "bg-slate-900 text-white border-slate-900";
+  const tabOff = "bg-white text-slate-700 border-slate-300 hover:bg-slate-50";
+
   return (
     <div
       className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
@@ -66,11 +90,39 @@ export default function QboMigrationVerify({ companyId }) {
           Verify migration against QuickBooks
         </h3>
         <p className="mt-1 text-sm text-slate-600">
-          Export your Balance Sheet from QuickBooks Online, upload it
-          here, and we'll show a per-account side-by-side. Green rows
-          tie to the penny; yellow rows are within 5%; red rows need
-          a bookkeeper's eye.
+          Export your {rtLabel} from QuickBooks Online, upload it here,
+          and we'll show a per-account side-by-side. Green rows tie to
+          the penny; yellow rows are within 5%; red rows need a
+          bookkeeper's eye.
         </p>
+      </div>
+
+      {/* Report-type toggle. Kept small and understated — power users
+          will notice, novices can ignore since backend auto-detects. */}
+      <div
+        className="mb-3 inline-flex gap-1 rounded-lg bg-slate-100 p-1"
+        data-testid="qbo-verify-report-type-toggle"
+      >
+        <button
+          type="button"
+          onClick={() => setReportType("balance_sheet")}
+          className={`${tabBase} ${
+            reportType === "balance_sheet" ? tabOn : tabOff
+          }`}
+          data-testid="qbo-verify-report-type-bs"
+        >
+          Balance Sheet
+        </button>
+        <button
+          type="button"
+          onClick={() => setReportType("profit_loss")}
+          className={`${tabBase} ${
+            reportType === "profit_loss" ? tabOn : tabOff
+          }`}
+          data-testid="qbo-verify-report-type-pl"
+        >
+          Profit & Loss
+        </button>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -79,7 +131,7 @@ export default function QboMigrationVerify({ companyId }) {
           data-testid="qbo-verify-file-label"
         >
           <Upload className="h-4 w-4" />
-          {file ? file.name : "Choose Balance Sheet PDF"}
+          {file ? file.name : `Choose ${rtLabel} PDF`}
           <input
             type="file"
             accept=".pdf,application/pdf"
@@ -117,10 +169,14 @@ export default function QboMigrationVerify({ companyId }) {
 
       {result && (
         <div className="mt-5" data-testid="qbo-verify-result">
-          <div className="mb-3 flex flex-wrap items-center gap-4 text-sm">
-            <span className="font-medium text-slate-700">
-              As of {result.as_of}
+          <div className="mb-3 flex flex-wrap items-center gap-3 text-sm">
+            <span
+              className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-700"
+              data-testid="qbo-verify-result-type"
+            >
+              {resultTypeLabel}
             </span>
+            <span className="font-medium text-slate-700">{periodLabel}</span>
             <span
               className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
                 result.match_pct >= 90
@@ -133,6 +189,19 @@ export default function QboMigrationVerify({ companyId }) {
               {result.match_count}/{result.row_count} accounts tie ·{" "}
               {result.match_pct}%
             </span>
+            {result.report_type === "profit_loss" &&
+              typeof result.our_net_income === "number" && (
+                <span
+                  className="rounded-full bg-slate-50 px-2.5 py-0.5 text-xs text-slate-600"
+                  data-testid="qbo-verify-net-income"
+                >
+                  NI: QBO ${result.qbo_net_income?.toLocaleString(undefined, {
+                    minimumFractionDigits: 2, maximumFractionDigits: 2,
+                  })} · Ours ${result.our_net_income?.toLocaleString(undefined, {
+                    minimumFractionDigits: 2, maximumFractionDigits: 2,
+                  })}
+                </span>
+              )}
           </div>
           <div className="overflow-hidden rounded-md border border-slate-200">
             <table className="w-full text-sm">

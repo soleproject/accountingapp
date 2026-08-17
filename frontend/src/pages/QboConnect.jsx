@@ -446,10 +446,11 @@ export default function QboConnect() {
           </span>
         </div>
         <p className="text-sm text-slate-500 mb-4">
-          Prove your books tie to QuickBooks. Export a Balance Sheet PDF from
-          QBO and drop it in — we'll parse it with AI and show a per-account
-          side-by-side against our computed report. Green rows tie to the
-          penny; yellow are within 5%; red need a bookkeeper's eye.
+          Prove your books tie to QuickBooks. Export a Balance Sheet or
+          Profit &amp; Loss PDF from QBO and drop it in — we'll parse it
+          with AI and show a per-account side-by-side against our
+          computed report. Green rows tie to the penny; yellow are
+          within 5%; red need a bookkeeper's eye.
         </p>
         {currentId && <QboMigrationVerify companyId={currentId} />}
       </section>
