@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, fmtMoney } from "@/lib/api";
+import { api } from "@/lib/api";
+import { useMoneyFmt } from "@/lib/company";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
@@ -126,6 +127,11 @@ export default function Dashboard() {
     if (!user?.id) return;
     // Restrict to client role — Pros already know the app.
     if (user.role !== "client") return;
+    // Skip every onboarding overlay for public demo visitors. First
+    // impression on `/demo/uk` needs to be the actual dashboard —
+    // not a "Congratulations, UK!" modal that makes zero sense to
+    // someone who arrived from a landing page.
+    if (user.is_demo_visitor) return;
     if (!hasSeenWelcome(user.id)) {
       // Delay a beat so the dashboard has painted first — reveals the
       // real UI briefly before the overlay drops (matches RocketBooks).
@@ -139,6 +145,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (!user?.id) return;
     if (user.role !== "client") return;
+    if (user.is_demo_visitor) return;  // demo visitors skip every tour
     if (!current?.id || !current?.onboarding_complete) return;
     if (welcomeOpen) return;
     // Wait for the welcome tour to be fully complete before firing the
@@ -388,6 +395,7 @@ function ClassicDashboard({
   todos,
   welcomeOpen, onCloseWelcome, onReplayWelcome, showWelcomeReplay,
 }) {
+  const fmtMoney = useMoneyFmt();
   // During Setup mode we move the "highlight" rainbow off the Needs-your-
   // attention section and onto the checklist itself (that's where the user
   // should look first). In Close mode we leave the Needs-your-attention

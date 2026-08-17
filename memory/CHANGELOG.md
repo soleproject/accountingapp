@@ -1,5 +1,18 @@
 # SmartBooks — Changelog
 
+## 2026-02-27 — Phase 1.2: Public "Live UK demo" landing (`/demo/uk`)
+
+- **New public URL `smartbookssoftware.ai/demo/uk`** — cold traffic auto-logs into a read-only view of Northgate Advisory Ltd. Zero friction, zero signup, zero card. 30-min JWT, 30/min IP rate-limit.
+- **Read-only guaranteed**: demo visitor has `viewer` MEMBERSHIP on Northgate → `RoleWriteGuardMiddleware` blocks every `/api/companies/{cid}/*` write with a clear 403 "Your role on this company (viewer) is read-only" (curl-verified for accounts + transactions endpoints).
+- **New backend files**: `routes/public_demo.py` (public endpoint), auto-provisions demo user + membership + on-demand company seeding via cold-start fallback.
+- **New frontend files**: `pages/PublicDemoUK.jsx` (tasteful "Opening Northgate Advisory Ltd…" loading landing), `components/DemoVisitorPill.jsx` (indigo "Live UK demo · read-only · Sign up" pill in topbar).
+- **`create_token` signature**: added optional `ttl_seconds` — used only by the public endpoint for 30-min tokens; existing callers unchanged.
+- **`/api/auth/me` payload**: added `is_demo_visitor` so the pill can hydrate across route changes.
+- **Dashboard.jsx region sweep**: switched to `useMoneyFmt()` hook — all 11 fmtMoney callsites (Revenue/Expenses/Net Income/Cash/A-R/A-P/Cash activity) now render `£` for UK companies while remaining bit-identical for US companies.
+- **Onboarding tour suppression**: Dashboard tour + welcome modal skip firing when `user.is_demo_visitor` — clean first impression for cold traffic.
+- **Axios 401 interceptor**: no longer force-redirects to `/login` when the visitor is on `/demo/*`, `/signup*`, `/set-password/*`, `/invite/*`, or `/billing/*`. Fixes a race where CompanyProvider's initial fetch (401 pre-auth) was kicking demo visitors to login before their token could install.
+- **Verified end-to-end**: cold visit to `/demo/uk` → auto-login → dashboard renders with `£26,930` / `£10,041.70` / `£16,888.30`, zero `$` characters, "Live UK demo" pill visible, no tour modals.
+
 ## 2026-02-27 — Phase 1.1: Sample UK Ltd demo seeder
 
 - **New**: `/app/backend/uk_demo_seed.py` — `seed_uk_demo(owner_user_id)` creates "Northgate Advisory Ltd" with 76-row FRS 102 CoA, 10 UK contacts, £10k opening share-capital JE, 35 bank transactions, 8 VAT-coded invoices (mix of 20%/zero-rate/services), 6 bills with recoverable input VAT, AI activity + rules. Deterministic (seed=42) so every run produces bit-identical demo data.

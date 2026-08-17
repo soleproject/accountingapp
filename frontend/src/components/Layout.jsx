@@ -6,6 +6,7 @@ import InsightsChatWidget from "./InsightsChatWidget";
 import BillingLockedModal from "./BillingLockedModal";
 import ProAlertsBell from "./ProAlertsBell";
 import ImpersonatePill from "./ImpersonateBanner";
+import DemoVisitorPill from "./DemoVisitorPill";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
@@ -477,6 +478,7 @@ export default function Layout() {
             </div>
             <div className="ml-auto flex items-center gap-3">
               <ImpersonatePill />
+              <DemoVisitorPill />
               {aiCollapsed && (
                 <button
                   data-testid={TID.aiPanelToggle + "-header"}

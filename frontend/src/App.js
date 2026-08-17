@@ -7,6 +7,7 @@ import Layout from "@/components/Layout";
 import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
 import Share from "@/pages/Share";
+import PublicDemoUK from "@/pages/PublicDemoUK";
 import Dashboard from "@/pages/Dashboard";
 import Transactions from "@/pages/Transactions";
 import AICleanupReview from "@/pages/AICleanupReview";
@@ -110,6 +111,7 @@ function App() {
             <HostTitle />
             <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/demo/uk" element={<PublicDemoUK />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/signup/affiliate" element={<Signup />} />
             <Route path="/signup/enterprise" element={<Signup />} />
