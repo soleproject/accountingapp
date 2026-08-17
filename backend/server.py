@@ -77,6 +77,16 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"],
 )
 
+# Infra wiring — rate-limiter exception handler, request-context
+# middleware, structured logging, optional Sentry. MUST run so
+# `request.state.view_rate_limit` gets pre-seeded to `None` on every
+# request; otherwise slowapi's `swallow_errors=True` swallows a Redis
+# hiccup silently, its async_wrapper then raises `AttributeError` when
+# it tries to inject rate-limit headers, and the endpoint 500s with no
+# CORS headers (browser reports "Network Error"). See infra.py notes.
+from infra import init_infra  # noqa: E402
+init_infra(app)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
