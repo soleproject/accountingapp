@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { CreatePartnerModal } from "@/components/PartnersCard";
+import { useFeatureFlag } from "@/lib/featureFlags";
+import { REGIONS } from "@/lib/regions";
 
 export default function ProClients() {
   const [clients, setClients] = useState([]);
@@ -1303,10 +1305,16 @@ function BillingSection({ billing, form, update }) {
 
 
 export function NewClientModal({ onClose, onCreated }) {
+  const ukEnabled = useFeatureFlag("regions.uk_enabled");
   const [form, setForm] = useState({
     company_name: "", business_type: "", business_description: "",
     client_name: "", client_email: "", client_password: "",
     reporting_basis: "accrual",
+    // Region — US default. Only exposed in the UI when the UK flag is
+    // on, so US-only Pros never see it and every existing test/
+    // regression flow submits without the field, which the backend
+    // resolves to US (identical to pre-Phase-1 behaviour).
+    region: "US",
     // Phase B billing intent — populated once billing context lands.
     billing_payer: "client_email",
     billing_product: "simple_start",
@@ -1445,6 +1453,30 @@ export function NewClientModal({ onClose, onCreated }) {
         </div>
         <div className="p-5 space-y-3 text-sm">
           <div className="text-xs uppercase tracking-wider text-slate-500 border-b pb-1">Company</div>
+          {/* Region selector — only rendered when the UK region is
+              enabled cluster-wide via the `regions.uk_enabled` feature
+              flag. US-only firms literally never see this control, so
+              their New Client experience is bit-identical to before. */}
+          {ukEnabled && (
+            <div data-testid="new-client-region-block">
+              <label className="text-xs text-slate-600">Country</label>
+              <select
+                data-testid="new-client-region"
+                value={form.region}
+                onChange={(e) => update("region", e.target.value)}
+                className="w-full mt-1 border rounded px-2 py-1.5 bg-white"
+              >
+                {Object.values(REGIONS).map((r) => (
+                  <option key={r.code} value={r.code}>
+                    {r.displayName} ({r.currency})
+                  </option>
+                ))}
+              </select>
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                Determines the starter chart of accounts, currency, and tax treatment. Change later via Company Settings.
+              </div>
+            </div>
+          )}
           <div>
             <label className="text-xs text-slate-600">Company name</label>
             <input data-testid="new-client-company-name" value={form.company_name}

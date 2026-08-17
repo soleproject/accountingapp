@@ -2632,3 +2632,85 @@ async def admin_toggle_whitelabel_comp(
         "whitelabel_unlocked": comp or paid,
         "whitelabel_source": "comp" if comp else ("paid" if paid else None),
     }
+
+
+
+# ---------------------------------------------------------------------------
+# Feature-flag toggles (superadmin only)
+#
+# Phase 0 shipped the read side (`GET /api/feature-flags`). Phase 1 adds
+# the write side so a superadmin can flip `regions.uk_enabled` (or any
+# future flag) without SSHing into Mongo. Deliberately scoped-tight:
+# only global scope for now; company-scoped overrides land alongside
+# the Company Settings UI in a later phase.
+# ---------------------------------------------------------------------------
+
+class FeatureFlagUpdate(BaseModel):
+    enabled: bool
+
+
+@router.get("/admin/feature-flags")
+async def admin_list_feature_flags(user: dict = Depends(require_role("superadmin"))):
+    """Return every global flag row so the superadmin UI can render a
+    table. Also includes the small set of *known* flag keys we expect
+    exist so ops sees an "off" row even if the DB has never been
+    written to."""
+    docs = await db.feature_flags.find({"scope": "global"}).to_list(200)
+    have = {d["key"] for d in docs}
+    known = {
+        "regions.uk_enabled": {
+            "description": "Show UK region UI (region dropdown, GBP formatting, FRS 102 CoA seed).",
+        },
+    }
+    rows = [
+        {
+            "key": d["key"],
+            "enabled": bool(d.get("enabled", False)),
+            "updated_at": d.get("updated_at"),
+            "description": known.get(d["key"], {}).get("description", ""),
+        }
+        for d in docs
+    ]
+    # Pad in known flags that don't have a row yet, so the UI shows the
+    # full menu of togglables.
+    for k, meta in known.items():
+        if k not in have:
+            rows.append({
+                "key": k, "enabled": False, "updated_at": None,
+                "description": meta["description"],
+            })
+    return {"flags": rows}
+
+
+@router.put("/admin/feature-flags/{key}")
+async def admin_set_feature_flag(
+    key: str,
+    inp: FeatureFlagUpdate,
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Upsert a global-scope flag row. Company-scoped overrides go
+    through a different endpoint (deferred to Phase 1.1)."""
+    now = now_iso()
+    await db.feature_flags.update_one(
+        {"key": key, "scope": "global", "company_id": None},
+        {
+            "$set": {
+                "enabled": bool(inp.enabled),
+                "updated_at": now,
+                "updated_by": user["id"],
+            },
+            "$setOnInsert": {
+                "id": str(uuid.uuid4()),
+                "key": key,
+                "scope": "global",
+                "company_id": None,
+            },
+        },
+        upsert=True,
+    )
+    # Invalidate the in-process cache so the next `is_enabled(key)`
+    # read sees the new value within one request instead of one TTL.
+    import feature_flags as _ff
+    _ff._clear_cache()
+    return {"key": key, "enabled": bool(inp.enabled)}
+

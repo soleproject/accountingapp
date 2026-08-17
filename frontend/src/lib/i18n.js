@@ -25,8 +25,19 @@ const STRINGS = {
     sales_tax: "Sales Tax",
   },
   UK: {
-    // Phase 1 populates. Deliberately empty in Phase 0 so every
-    // string resolves to the US default via the fallback below.
+    // Report titles — matches Companies Act 2006 / FRS 102 conventions.
+    balance_sheet: "Statement of Financial Position",
+    profit_and_loss: "Profit & Loss Account",
+    income_statement: "Profit & Loss Account",
+    trial_balance: "Trial Balance",
+    // Ledger nouns — UK terminology
+    accounts_receivable: "Trade Debtors",
+    accounts_payable: "Trade Creditors",
+    inventory: "Stock",
+    revenue: "Turnover",
+    fiscal_year: "Financial Year",
+    // Tax nouns
+    sales_tax: "VAT",
   },
 };
 

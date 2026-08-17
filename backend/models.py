@@ -312,6 +312,11 @@ class NewClientIn(BaseModel):
     business_type: str = ""
     business_description: str = ""
     reporting_basis: str = "accrual"
+    # Region defaults to None → backend resolves to US, matching pre-Phase-1
+    # behavior byte-for-byte. Pros running UK books pass "UK" explicitly
+    # from the New Client modal dropdown → backend seeds the FRS 102 CoA
+    # and stamps `region: "UK"` on the company doc.
+    region: Optional[str] = None
     # Phase B billing intent — persists on the resulting company doc so
     # Phase C's Stripe checkout knows which price to charge. All optional
     # for backwards-compat with any pre-billing modal.

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { api } from "./api";
+import { api, fmtMoney as _fmtMoneyBase, fmtDate as _fmtDateBase } from "./api";
 import { useAuth } from "./auth";
 
 const CompanyCtx = createContext(null);
@@ -64,3 +64,30 @@ export function CompanyProvider({ children }) {
 }
 
 export const useCompany = () => useContext(CompanyCtx);
+
+/**
+ * Region-aware money formatter. Drop-in replacement for `fmtMoney`
+ * that reads the region off the currently-selected company, so a
+ * UK company renders £1,234.50 and a US company renders $1,234.50
+ * with zero call-site changes downstream.
+ *
+ * Usage inside any component that has access to CompanyProvider:
+ *   const fmtMoney = useMoneyFmt();
+ *   ...
+ *   {fmtMoney(row.amount)}
+ *
+ * Falls back to US formatting if the hook is called outside the
+ * provider (e.g. Storybook / test harness) — safe default.
+ */
+export const useMoneyFmt = () => {
+  const ctx = useContext(CompanyCtx);
+  const region = ctx?.region || "US";
+  return (n) => _fmtMoneyBase(n, region);
+};
+
+/** Region-aware date formatter — same pattern as `useMoneyFmt`. */
+export const useDateFmt = () => {
+  const ctx = useContext(CompanyCtx);
+  const region = ctx?.region || "US";
+  return (s) => _fmtDateBase(s, region);
+};

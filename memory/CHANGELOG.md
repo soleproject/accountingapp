@@ -1,5 +1,15 @@
 # SmartBooks — Changelog
 
+## 2026-02-27 — Phase 1: UK Look-and-Feel (feature-flag gated)
+
+- **FRS 102 UK Chart of Accounts** — 76-row starter template in `seed.py::UK_COA`, structured for Companies Act 2006 Schedule 1 Format 1 (Fixed Assets → Current Assets → Creditors <1y → Creditors >1y → Capital and Reserves). New `coa_for(region)` helper picks US or UK CoA on company creation. Wired into both `/api/companies` and `/api/pro/clients`.
+- **UK terminology i18n** — `lib/i18n.js` populated with 11 UK strings (Statement of Financial Position, Trade Debtors, Trade Creditors, Turnover, VAT, Stock, Financial Year, Profit & Loss Account, …). `t(key, region)` reads region-aware; US falls back automatically.
+- **Region-aware money & date formatting** — `useMoneyFmt()` / `useDateFmt()` hooks in `lib/company.jsx`; ReportView.jsx shadows `fmtMoney` inside every sub-body (AccountDetail, IncomeStatement, BalanceSheet, TrialBalance, GeneralLedger, CashFlow, SalesTax, 1099, Row). UK companies render `£1,234.50`, US companies render `$1,234.50` — same call sites.
+- **UK statutory Balance Sheet layout** — new `BalanceSheetBody` UK branch in `pages/ReportView.jsx` splits on `subtype` (backend now includes `subtype` on every BS row): Fixed Assets → Current Assets → Creditors <1y → Net Current Assets → Total Assets Less Current Liabilities → Creditors >1y → Net Assets → Capital and Reserves. US layout untouched.
+- **Region dropdown in New Client modal** — `pages/ProClients.jsx::NewClientModal` gains a "Country" selector, gated behind `useFeatureFlag("regions.uk_enabled")`. US-only firms never see it.
+- **Superadmin flag toggle endpoints** — new `GET/PUT /api/admin/feature-flags[/{key}]` in `routes/admin.py` so ops can flip UK visibility cluster-wide without Mongo shell access. Cache-invalidated on write.
+- **Verified**: 7/7 pytest cases green, US company still gets 37-row US CoA + US markers, UK company gets 76-row FRS 102 CoA with all 6 UK markers (Trade Debtors/Creditors, VAT Control, PAYE & NIC, Called-Up Share Capital, Stock — Finished Goods). Flag OFF → modal identical to pre-Phase-1; flag ON → Country dropdown appears with US/UK options.
+
 ## 2026-02-27 — Phase 0: UK Region Foundation (invisible / US-safe)
 
 - **Data model**: added `region`, `currency`, `date_format` to `companies`. Backfill migration stamped all 170 existing companies as US. Idempotent — re-runs are no-ops.
