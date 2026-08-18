@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { api, fmtMoney } from "@/lib/api";
-import { useCompany } from "@/lib/company";
+import { api } from "@/lib/api";
+import { useCompany, useMoneyFmt } from "@/lib/company";
 import {
   Popover, PopoverContent, PopoverTrigger,
 } from "@/components/ui/popover";
@@ -69,6 +69,7 @@ function DonutChart({ slices, size = 148, thickness = 22 }) {
 
 // --------------- Firm at a Glance view ---------------
 export default function FirmAtAGlance({ userName }) {
+  const fmtMoney = useMoneyFmt();
   const { currentId, current } = useCompany();
   const [month, setMonth] = useState(() => monthKey(0));
   const [data, setData] = useState(null);
@@ -369,6 +370,8 @@ function MonthPicker({ value, onChange, options }) {
 }
 
 function FunnelCol({ title, amount, stripe, badgeIcon, badgeText, badgeTone, loading, testId, footer }) {
+
+  const fmtMoney = useMoneyFmt();
   const toneMap = {
     amber:   "bg-amber-50 text-amber-700",
     rose:    "bg-rose-50 text-rose-700",
@@ -394,6 +397,7 @@ function FunnelCol({ title, amount, stripe, badgeIcon, badgeText, badgeTone, loa
 
 // ------- Overdue-invoices popover with inline "Send reminder" ---------
 function OverduePopover({ overdueCount, invoices, onReminderSent }) {
+  const fmtMoney = useMoneyFmt();
   const { currentId } = useCompany();
   const [open, setOpen] = useState(false);
   const [sending, setSending] = useState({}); // id → boolean
@@ -533,6 +537,8 @@ function QuarterDelta({ pct, label, invert = false }) {
 }
 
 function PLBar({ label, amount, max, color, reviewCount, testId }) {
+
+  const fmtMoney = useMoneyFmt();
   const w = Math.min(100, Math.max(0, ((amount || 0) / (max || 1)) * 100));
   return (
     <div data-testid={testId}>

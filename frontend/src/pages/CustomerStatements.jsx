@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, fmtMoney, fmtDate } from "@/lib/api";
-import { useCompany } from "@/lib/company";
+import { api } from "@/lib/api";
+import { useCompany, useMoneyFmt, useDateFmt } from "@/lib/company";
 import { toast } from "sonner";
 import {
   Send, Printer, Eye, ChevronDown, FileText, RefreshCw, ExternalLink,
@@ -201,6 +201,10 @@ function EmptyState() {
 }
 
 function StatementPreview({ preview }) {
+
+  const fmtMoney = useMoneyFmt();
+
+  const fmtDate = useDateFmt();
   const { customer, company, summary, rows, kind, as_of } = preview;
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-8 shadow-sm max-w-4xl mx-auto print:shadow-none print:border-0 print:p-0" data-testid="cs-preview">

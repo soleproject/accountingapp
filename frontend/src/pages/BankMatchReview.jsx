@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, fmtMoney } from "@/lib/api";
-import { useCompany } from "@/lib/company";
+import { api } from "@/lib/api";
+import { useCompany, useMoneyFmt } from "@/lib/company";
 import { toast } from "sonner";
 import {
   CheckCircle2, Unlink, Link2, RefreshCw, ArrowRight,
@@ -21,6 +21,7 @@ import {
  * Route: `/accounting/bank-matches` (guarded by AdvancedModeRoute).
  */
 export default function BankMatchReview() {
+  const fmtMoney = useMoneyFmt();
   const { currentId: cid } = useCompany();
   const nav = useNavigate();
   const [status, setStatus] = useState("unconfirmed"); // unconfirmed | confirmed | all
@@ -343,6 +344,9 @@ function PairRow({ pair, busy, onConfirm, onUnlink, onOpenEditor }) {
 
 
 function Side({ label, badgeClass, row, onOpen }) {
+
+
+  const fmtMoney = useMoneyFmt();
   const amt = Number(row?.amount || 0);
   const isOut = amt < 0;
   return (

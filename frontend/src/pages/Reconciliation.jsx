@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { api, fmtMoney } from "@/lib/api";
-import { useCompany } from "@/lib/company";
+import { api } from "@/lib/api";
+import { useCompany, useMoneyFmt } from "@/lib/company";
 import { toast } from "sonner";
 import {
   CheckCircle2, Loader2, Upload, FileText, Sparkles, ArrowRight,
@@ -15,6 +15,7 @@ import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
 // is the checkable list on the left with a live difference readout. R3
 // (statement-PDF fuzzy matching) is behind the "Match statement PDF" upload.
 export default function Reconciliation() {
+  const fmtMoney = useMoneyFmt();
   const { currentId } = useCompany();
   const [banks, setBanks] = useState([]);
   const [acctId, setAcctId] = useState("");
@@ -670,6 +671,8 @@ export default function Reconciliation() {
 }
 
 function ScoreboardCard({ preview, clearedCount, clearedSum, opening, closing, diff, isBalanced, onFinish, busy }) {
+
+  const fmtMoney = useMoneyFmt();
   return (
     <div className={`rounded-xl border bg-white p-5 space-y-3 ${isBalanced ? "ring-2 ring-emerald-200" : ""}`} data-testid="recon-scoreboard">
       <div className="text-xs uppercase tracking-widest text-slate-500 mb-1">Reconciliation summary</div>
@@ -703,6 +706,8 @@ function ScoreboardCard({ preview, clearedCount, clearedSum, opening, closing, d
 }
 
 function Row({ label, value, muted }) {
+
+  const fmtMoney = useMoneyFmt();
   return (
     <div className="flex items-center justify-between text-sm">
       <span className={muted ? "text-slate-500" : "text-slate-700"}>{label}</span>
@@ -807,6 +812,8 @@ function MatchResultModal({ result, onClose, onApply }) {
 }
 
 function Tier({ title, rows, picked, onToggle, locked, manual }) {
+
+  const fmtMoney = useMoneyFmt();
   return (
     <div>
       <div className="text-xs font-semibold uppercase tracking-widest mb-2">{title}</div>

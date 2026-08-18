@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, fmtMoney } from "@/lib/api";
-import { useCompany } from "@/lib/company";
+import { api } from "@/lib/api";
+import { useCompany, useMoneyFmt } from "@/lib/company";
 import { toast } from "sonner";
 import { HelpCircle, Send, X, Sparkles } from "lucide-react";
 
@@ -22,6 +22,7 @@ export default function AskClientButton({
 }) {
   const controlled = controlledOpen !== undefined;
   const { currentId } = useCompany();
+  const fmtMoney = useMoneyFmt();
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlled ? controlledOpen : internalOpen;
   const setOpen = (v) => (controlled ? (!v && onClose?.()) : setInternalOpen(v));

@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { api, fmtMoney, fmtDate } from "@/lib/api";
-import { useCompany } from "@/lib/company";
+import { api } from "@/lib/api";
+import { useCompany, useMoneyFmt, useDateFmt } from "@/lib/company";
 import { TID } from "@/constants/testIds";
 import { Plus, Trash2, X, Upload, Loader2, Check, ArrowLeft, History, Undo2, FileSpreadsheet, FileText, Sparkles, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
 export default function JournalEntries() {
+
+  const fmtMoney = useMoneyFmt();
+
+  const fmtDate = useDateFmt();
   const { currentId } = useCompany();
   const [entries, setEntries] = useState([]);
   const [accts, setAccts] = useState([]);
@@ -116,6 +120,8 @@ export default function JournalEntries() {
 }
 
 function NewJE({ currentId, accts, onClose }) {
+
+  const fmtMoney = useMoneyFmt();
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [memo, setMemo] = useState("");
   const [lines, setLines] = useState([
@@ -184,6 +190,7 @@ function NewJE({ currentId, accts, onClose }) {
  * CPA can fix them in the source file and re-upload.
  */
 function ImportGLModal({ currentId, onClose }) {
+  const fmtMoney = useMoneyFmt();
   const [step, setStep] = useState("upload"); // upload | review | done
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState(null);

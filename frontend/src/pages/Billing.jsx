@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { api, fmtMoney, fmtDate } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { useCompany } from "@/lib/company";
+import { useCompany, useMoneyFmt, useDateFmt } from "@/lib/company";
 import { toast } from "sonner";
 import {
   CreditCard, DollarSign, TrendingUp, Users, ExternalLink, Loader2,
@@ -60,6 +60,7 @@ export default function Billing() {
 /*  subscription state and payment history (no more aggregated totals).*/
 /* ---------------------------------------------------------------- */
 function MyBillingSection() {
+  const fmtDate = useDateFmt();
   const { currentId, current } = useCompany();
   const [data, setData] = useState(null);
 
@@ -234,6 +235,7 @@ function ProClientBillingSection() {
 /*  Superadmin — platform revenue                                    */
 /* ---------------------------------------------------------------- */
 function SuperadminBillingSection() {
+  const fmtDate = useDateFmt();
   const [data, setData] = useState(null);
   const [selected, setSelected] = useState(new Set());
 

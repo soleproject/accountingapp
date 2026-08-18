@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { api, fmtMoney, fmtDate } from "@/lib/api";
+import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { X, Loader2, ExternalLink, Users, Truck, Eye, Mail, Send } from "lucide-react";
 
+import { useMoneyFmt, useDateFmt } from "@/lib/company";
 /**
  * Drill-down for one vendor or one customer. Shows every bill/invoice
  * in the period plus every transaction the pros already linked back
@@ -10,6 +11,8 @@ import { X, Loader2, ExternalLink, Users, Truck, Eye, Mail, Send } from "lucide-
  * report stays visible for context.
  */
 export default function ContactDetailModal({ currentId, kind, row, start, end, onClose }) {
+  const fmtMoney = useMoneyFmt();
+  const fmtDate = useDateFmt();
   const isVendor = kind === "vendor";
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);

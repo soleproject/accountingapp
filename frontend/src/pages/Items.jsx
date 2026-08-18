@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, fmtMoney } from "@/lib/api";
-import { useCompany } from "@/lib/company";
+import { api } from "@/lib/api";
+import { useCompany, useMoneyFmt } from "@/lib/company";
 import { Plus, Trash2, X, Loader2, Pencil, Package, Check, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 import ItemImportModal from "@/components/ItemImportModal";
 import SearchableAccountPicker from "@/components/SearchableAccountPicker";
 
 export default function Items() {
+
+  const fmtMoney = useMoneyFmt();
   const { currentId } = useCompany();
   const [sp] = useSearchParams();
   const initialUsage = (["all", "sales", "purchases", "both"].includes(sp.get("usage")) ? sp.get("usage") : "all");

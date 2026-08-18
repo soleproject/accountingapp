@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { fmtMoney, api } from "@/lib/api";
+import { api } from "@/lib/api";
 import { Plus, Pencil, X, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PaymentModal } from "@/pages/Payments";
 
+import { useMoneyFmt } from "@/lib/company";
 const METHOD_LABEL = {
   check: "Check",
   ach: "ACH Transfer",
@@ -52,10 +53,15 @@ export default function PaymentHistoryBlock({ payments, original, kind = "invoic
     return () => { cancelled = true; };
   }, [openRecord, currentId]);
   const canRecord = !!(docId && currentId);
-  return renderBlock({ payments, original, kind, docId, docLabel, contactId, currentId, openRecord, setOpenRecord, editingPayment, setEditingPayment, ctx, canRecord, onPaymentRecorded });
+  // Hook must live in the component (uppercase caller). We compute
+  // the formatter here and pass it into renderBlock as a closure so
+  // the react-hooks/rules-of-hooks check stays happy.
+  const fmtMoney = useMoneyFmt();
+  return renderBlock({ fmtMoney, payments, original, kind, docId, docLabel, contactId, currentId, openRecord, setOpenRecord, editingPayment, setEditingPayment, ctx, canRecord, onPaymentRecorded });
 }
 
-function renderBlock({ payments, original, kind, docId, docLabel, contactId, currentId, openRecord, setOpenRecord, editingPayment, setEditingPayment, ctx, canRecord, onPaymentRecorded }) {
+function renderBlock({ fmtMoney, payments, original, kind, docId, docLabel, contactId, currentId, openRecord, setOpenRecord, editingPayment, setEditingPayment, ctx, canRecord, onPaymentRecorded }) {
+
   const hasPayments = payments && payments.length > 0;
   // Even when there are 0 payments we still render the header + record
   // button so pros can log the first payment. When payments==0 we
