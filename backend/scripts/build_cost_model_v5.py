@@ -312,52 +312,98 @@ def tab_hard_costs(wb):
 
 
 # ============================================================
-# TAB 3 — 30/60/90/180 CASH FLOW
+# TAB 3 — 30/60/90/180 CASH FLOW (ALL-IN, single source of truth)
 # ============================================================
 def tab_cashflow(wb):
     ws = wb.create_sheet("3. 30-60-90-180 Cash Flow")
-    widen(ws, [34, 14, 14, 14, 14, 14])
-    title(ws, "30 / 60 / 90 / 180 Day Cash Flow (tech only)", "F")
-    subtitle(ws, "Assumes UK launch by day 60. Emergent contract devs sunset at day 120. "
-                 f"Revenue = paid users × blended ${BLENDED_ARPU:.2f} ARPU.", "F")
+    widen(ws, [40, 14, 14, 14, 14, 14])
+    title(ws, "30 / 60 / 90 / 180 Day Cash Flow — ALL-IN", "F")
+    subtitle(ws,
+        "Every $ that leaves the account: hard costs + AI + security + "
+        "outsource + any FTEs. Assumes UK launch by day 60. Realistic user "
+        f"ramp 0→10→40→100. Revenue = paid users × ${BLENDED_ARPU:.2f} "
+        "blended ARPU.", "F")
 
     r = 4
-    header_row(ws, r, ["Line item", "Day 0–30", "Day 30–60",
-                       "Day 60–90", "Day 90–180 (mo avg)", "180-day total"])
+    # -------- Team roster reminder --------
+    ws.cell(row=r, column=1, value="TEAM ROSTER IN THIS 180-DAY WINDOW").font = H2
+    ws.merge_cells(f"A{r}:F{r}")
     r += 1
-    # ---- Costs ----
-    ws.cell(row=r, column=1, value="TECH COSTS").font = H2
-    for col in range(1, 7):
-        ws.cell(row=r, column=col).fill = FILL_SUB
+    header_row(ws, r, ["Role", "Day 0–30", "Day 30–60",
+                       "Day 60–90", "Day 90–180", "Notes"])
+    r += 1
+    roster = [
+        ("2 founders (unpaid — sweat equity)",    "Yes", "Yes", "Yes", "Yes",
+         "Not on P&L"),
+        ("Emergent contract dev (fractional)",   "Yes", "Yes", "Taper", "Sunset",
+         "Sunsets month 5 as build stabilises"),
+        ("Fractional QA engineer",                "—",  "—",   "Start", "Yes",
+         "Starts at UK launch (day 60)"),
+        ("FTE hires (any)",                       "—",  "—",   "—",    "—",
+         "None triggered — $25k MRR not hit in 180d"),
+    ]
+    for row_ in roster:
+        set_row(ws, r, list(row_), font=BODY, align=LEFT, border=BOX)
+        r += 1
+
+    # -------- Cost breakdown --------
+    r += 2
+    ws.cell(row=r, column=1, value="MONTHLY COST BREAKDOWN").font = H2
+    ws.merge_cells(f"A{r}:F{r}")
+    r += 1
+    header_row(ws, r, ["Category / line", "Day 0–30", "Day 30–60",
+                       "Day 60–90", "Day 90–180 (mo avg)", "180-day total"])
     r += 1
 
     costs_start = r
-    costs = [
-        # (label, d30, d60, d90, d90_180_month_avg)
-        ("Plaid",                              1065, 1065, 1100, 1200),
-        ("Veryfi",                              500, 500,  550,  700),
-        ("Emergent LLM (dev credits)",         6000, 6000, 4500, 2500),
-        ("Emergent contract developers",       6000, 6000, 4500, 1500),
-        ("Railway + Mongo + Redis",             450, 500,  600,  850),
-        ("Cloudflare + perimeter",               25, 25,   40,   80),
-        ("Monitoring (Sentry paid + Datadog)",    0, 50,   120,  220),
-        ("Security tooling (Snyk, Doppler, MDM)", 30, 60,  120,  300),
-        ("Core SaaS (Workspace, 1Password, GH)", 40, 45,   50,   80),
-        ("Backups (immutable + PITR)",           20, 30,   40,   80),
-    ]
-    for label, d30, d60, d90, avg in costs:
-        # 180-day total = d30 + d60 + d90 + 3 * avg   (months 4-6)
-        total_180 = d30 + d60 + d90 + 3 * avg
-        set_row(ws, r, [label, d30, d60, d90, avg, total_180],
-                font=BODY, align=LEFT, border=BOX,
-                number_formats=[None, "$#,##0", "$#,##0", "$#,##0", "$#,##0", "$#,##0"])
+
+    # (label, d30, d60, d90, d90_180_month_avg, sub-heading?)
+    def add_group(rows, group_label):
+        nonlocal r
+        set_row(ws, r, [group_label, "", "", "", "", ""],
+                font=BODY_BOLD, fill=FILL_SUB, align=LEFT, border=BOX)
         r += 1
+        for label, d30, d60, d90, avg in rows:
+            total_180 = d30 + d60 + d90 + 3 * avg
+            set_row(ws, r, [f"  {label}", d30, d60, d90, avg, total_180],
+                    font=BODY, align=LEFT, border=BOX,
+                    number_formats=[None, "$#,##0", "$#,##0", "$#,##0", "$#,##0", "$#,##0"])
+            r += 1
+
+    add_group([
+        ("Plaid",                       1065, 1065, 1100, 1200),
+        ("Veryfi OCR",                   500,  500,  550,  700),
+        ("Railway + Mongo + Redis",      450,  500,  600,  850),
+        ("Cloudflare + perimeter",        25,   25,   40,   80),
+        ("Domain, Workspace, 1PW, GH",    50,   55,   60,   90),
+        ("Backups (immutable + PITR)",    20,   30,   40,   80),
+    ], "INFRA & HARD COSTS")
+
+    add_group([
+        ("Emergent LLM (dev credits)",  6000, 6000, 4500, 2500),
+    ], "AI")
+
+    add_group([
+        ("Snyk / Doppler / MDM / EDR",    30,   60,  120,  300),
+        ("Sentry + Datadog / monitoring",  0,   50,  120,  220),
+    ], "SECURITY TOOLING (SaaS)")
+
+    add_group([
+        ("Emergent contract dev",       6000, 6000, 4500, 1500),
+        ("Fractional QA engineer",         0,    0, 1500, 1500),
+    ], "OUTSOURCE / FRACTIONAL")
+
+    add_group([
+        ("(none triggered in first 180 days)", 0, 0, 0, 0),
+    ], "FTE HIRES")
+
     costs_end = r - 1
 
-    # Costs total
-    ws.cell(row=r, column=1, value="TOTAL TECH COSTS / MO").font = BODY_BOLD
+    # Grand total
+    ws.cell(row=r, column=1, value="TOTAL COST / MONTH").font = BODY_BOLD
     for col in range(2, 6):
         cl = get_column_letter(col)
+        # SUM over cost rows only (skip sub-heading rows which have "" values)
         ws.cell(row=r, column=col, value=f"=SUM({cl}{costs_start}:{cl}{costs_end})")
         ws.cell(row=r, column=col).number_format = "$#,##0"
     ws.cell(row=r, column=6, value=f"=SUM(F{costs_start}:F{costs_end})")
@@ -369,43 +415,41 @@ def tab_cashflow(wb):
     total_cost_row = r
     r += 2
 
-    # ---- Revenue ----
+    # -------- Revenue --------
     ws.cell(row=r, column=1, value="REVENUE").font = H2
-    for col in range(1, 7):
-        ws.cell(row=r, column=col).fill = FILL_SUB
+    ws.merge_cells(f"A{r}:F{r}")
     r += 1
-    # Paid users EOP
+
     paid_users_row = r
     set_row(ws, r,
             ["Paid users (end of period)", 0, 10, 40, 100, ""],
             font=BODY, align=LEFT, border=BOX,
             number_formats=[None, "#,##0", "#,##0", "#,##0", "#,##0", None])
-    ws.cell(row=r, column=6, value="").fill = FILL_SUB
     r += 1
-    # MRR (avg)
-    ws.cell(row=r, column=1, value=f"MRR (avg of period, ${BLENDED_ARPU:.2f} blended ARPU)")
-    ws.cell(row=r, column=2, value=0).number_format = "$#,##0"
-    ws.cell(row=r, column=3,
-            value=f"=((B{paid_users_row}+C{paid_users_row})/2)*{BLENDED_ARPU:.2f}")
-    ws.cell(row=r, column=3).number_format = "$#,##0"
-    ws.cell(row=r, column=4,
-            value=f"=((C{paid_users_row}+D{paid_users_row})/2)*{BLENDED_ARPU:.2f}")
-    ws.cell(row=r, column=4).number_format = "$#,##0"
-    ws.cell(row=r, column=5,
-            value=f"=((D{paid_users_row}+E{paid_users_row})/2)*{BLENDED_ARPU:.2f}")
-    ws.cell(row=r, column=5).number_format = "$#,##0"
-    # 180-day cumulative revenue = 30d avg + 60d avg + 90d avg + 3*(90-180 avg month)
+
+    set_row(ws, r,
+            ["Avg paid users in period", 0, 5, 25, 70, ""],
+            font=MUTED, align=LEFT, border=BOX,
+            number_formats=[None, "#,##0", "#,##0", "#,##0", "#,##0", None])
+    avg_users_row = r
+    r += 1
+
+    ws.cell(row=r, column=1, value=f"MRR (avg users × ${BLENDED_ARPU:.2f})").font = BODY_BOLD
+    for col, avg in [(2, 0), (3, 5), (4, 25), (5, 70)]:
+        v = avg * BLENDED_ARPU
+        ws.cell(row=r, column=col, value=v)
+        ws.cell(row=r, column=col).number_format = "$#,##0"
     ws.cell(row=r, column=6,
-            value=f"=C{r}+D{r}+3*E{r}")
+            value=f"=B{r}+C{r}+D{r}+3*E{r}")
     ws.cell(row=r, column=6).number_format = "$#,##0"
     for col in range(1, 7):
         ws.cell(row=r, column=col).border = BOX
-        ws.cell(row=r, column=col).font = BODY
+        ws.cell(row=r, column=col).font = BODY_BOLD
     mrr_row = r
     r += 2
 
-    # ---- Net ----
-    ws.cell(row=r, column=1, value="NET BURN / MO (cost − revenue)").font = BODY_BOLD
+    # -------- Net burn --------
+    ws.cell(row=r, column=1, value="NET BURN (cost − revenue) /mo").font = BODY_BOLD
     for col in range(2, 6):
         cl = get_column_letter(col)
         ws.cell(row=r, column=col, value=f"={cl}{total_cost_row}-{cl}{mrr_row}")
@@ -419,13 +463,54 @@ def tab_cashflow(wb):
     net_burn_row = r
     r += 1
 
-    ws.cell(row=r, column=1, value="Cash needed for 180 days").font = BODY_BOLD
-    ws.cell(row=r, column=2, value=f"=F{net_burn_row}")
-    ws.cell(row=r, column=2).number_format = "$#,##0"
-    for col in range(1, 3):
+    # Cumulative
+    ws.cell(row=r, column=1, value="CUMULATIVE NET BURN (end of period)").font = BODY_BOLD
+    ws.cell(row=r, column=2, value=f"=B{net_burn_row}")
+    ws.cell(row=r, column=3, value=f"=B{r}+C{net_burn_row}")
+    ws.cell(row=r, column=4, value=f"=C{r}+D{net_burn_row}")
+    # Months 4-6 add 3 × avg-month net burn
+    ws.cell(row=r, column=5, value=f"=D{r}+3*E{net_burn_row}")
+    ws.cell(row=r, column=6, value=f"=E{r}")
+    for col in range(2, 7):
+        ws.cell(row=r, column=col).number_format = "$#,##0"
+    for col in range(1, 7):
         ws.cell(row=r, column=col).fill = FILL_TOTAL
         ws.cell(row=r, column=col).border = BOX
         ws.cell(row=r, column=col).font = BODY_BOLD
+    cumu_row = r
+    r += 2
+
+    # -------- Bottom line --------
+    ws.cell(row=r, column=1, value="CASH REQUIRED TO SURVIVE 180 DAYS").font = H2
+    ws.cell(row=r, column=2, value=f"=F{cumu_row}")
+    ws.cell(row=r, column=2).number_format = "$#,##0"
+    for col in range(1, 3):
+        ws.cell(row=r, column=col).fill = FILL_GOOD
+        ws.cell(row=r, column=col).border = BOX
+        ws.cell(row=r, column=col).font = H2
+    r += 2
+
+    # -------- What-if levers --------
+    ws.cell(row=r, column=1, value="WHAT-IF LEVERS (edit assumptions)").font = H2
+    ws.merge_cells(f"A{r}:F{r}")
+    r += 1
+    header_row(ws, r, ["Lever", "Impact on 180-day cash need",
+                       "Effort", "", "", ""])
+    r += 1
+    levers = [
+        ("Skip fractional QA until month 5",  "−$3,000",   "None"),
+        ("Cut Emergent contract dev to $3k/mo from day 1", "−$18,000",  "Slows velocity ~40%"),
+        ("Delay UK launch by 30 days (revenue starts month 4)", "+$1,800",  "Loses UK market timing"),
+        ("Pause LLM heavy-build & use $500/mo baseline", "−$25,500", "You stop shipping AI features"),
+        ("Hit 200 paying users by day 180 instead of 100", "−$12,700",  "Requires 2× conversion rate"),
+        ("Emergent Studio prepay ($25k) covers LLM 4-5 months",  "−$0 (cash-neutral swap)", "Just changes timing"),
+    ]
+    for row_ in levers:
+        set_row(ws, r, [row_[0], row_[1], row_[2], "", "", ""],
+                font=BODY, align=LEFT, border=BOX)
+        r += 1
+
+    ws.freeze_panes = "B5"
 
 
 # ============================================================
