@@ -181,26 +181,32 @@ hero.setStyle(TableStyle([
 story.append(hero)
 story.append(spacer(30))
 
-# 3 stat callouts
+# 3 stat callouts — two-row table, generous padding, MIDDLE valign so
+# nothing overlaps regardless of font metrics
 stats = Table([
     ["$349", "$15", "100%"],
     ["Firm license / month", "Per client / month", "Your brand, your clients"],
 ], colWidths=[2.33*inch]*3)
 stats.setStyle(TableStyle([
-    ("BACKGROUND",  (0,0), (-1,0), NAVY),
+    ("BACKGROUND",  (0,0), (-1,-1), NAVY),
+    # Number row
     ("TEXTCOLOR",   (0,0), (-1,0), WHITE),
     ("FONTNAME",    (0,0), (-1,0), "Helvetica-Bold"),
     ("FONTSIZE",    (0,0), (-1,0), 32),
-    ("ALIGN",       (0,0), (-1,-1), "CENTER"),
-    ("TOPPADDING",  (0,0), (-1,0), 20),
-    ("BOTTOMPADDING", (0,0), (-1,0), 4),
-
-    ("BACKGROUND",  (0,1), (-1,1), NAVY),
+    ("LEADING",     (0,0), (-1,0), 38),
+    ("VALIGN",      (0,0), (-1,0), "MIDDLE"),
+    ("TOPPADDING",  (0,0), (-1,0), 22),
+    ("BOTTOMPADDING", (0,0), (-1,0), 8),
+    # Label row
     ("TEXTCOLOR",   (0,1), (-1,1), CYAN_LT),
     ("FONTNAME",    (0,1), (-1,1), "Helvetica"),
     ("FONTSIZE",    (0,1), (-1,1), 10),
-    ("BOTTOMPADDING", (0,1), (-1,-1), 20),
-
+    ("LEADING",     (0,1), (-1,1), 12),
+    ("VALIGN",      (0,1), (-1,1), "MIDDLE"),
+    ("TOPPADDING",  (0,1), (-1,1), 2),
+    ("BOTTOMPADDING", (0,1), (-1,1), 20),
+    # Column separators
+    ("ALIGN",       (0,0), (-1,-1), "CENTER"),
     ("LINEBEFORE",  (1,0), (1,-1), 1, WHITE),
     ("LINEBEFORE",  (2,0), (2,-1), 1, WHITE),
 ]))
@@ -272,15 +278,23 @@ story.append(Paragraph("How it works", styles["H1"]))
 story.append(rule_line())
 story.append(spacer(14))
 
+step_body_st = ParagraphStyle("StepBody", parent=styles["Body"],
+                              fontSize=10.5, leading=14,
+                              spaceAfter=0, textColor=NAVY)
 steps = Table([
-    ["1", "SIGN UP", "$349/mo or $3,700/yr. Firm license activates instantly. "
-                    "Configure your brand: logo, colours, domain (annual)."],
-    ["2", "INVITE CLIENTS", "Send each client a branded invite. They see your firm, "
-                            "not ours. $15/mo per active client seat, billed to you monthly."],
-    ["3", "KEEP THE DELTA", "Charge your clients whatever you want. Common range: "
-                            "$40–$100/mo. You keep 100% of the difference — recurring, "
-                            "life-of-account."],
-], colWidths=[0.5*inch, 1.5*inch, 5*inch])
+    ["1", "SIGN UP",
+     Paragraph("$349/mo or $3,700/yr. Firm license activates instantly. "
+               "Configure your brand: logo, colours, domain (annual).",
+               step_body_st)],
+    ["2", "INVITE CLIENTS",
+     Paragraph("Send each client a branded invite. They see your firm, "
+               "not ours. $15/mo per active client seat, billed to you "
+               "monthly.", step_body_st)],
+    ["3", "KEEP THE DELTA",
+     Paragraph("Charge your clients whatever you want. Common range: "
+               "$40&ndash;$100/mo. You keep 100% of the difference "
+               "&mdash; recurring, life-of-account.", step_body_st)],
+], colWidths=[0.5*inch, 1.4*inch, 5.1*inch])
 steps.setStyle(TableStyle([
     ("BACKGROUND",  (0,0), (0,-1), CYAN),
     ("TEXTCOLOR",   (0,0), (0,-1), WHITE),
@@ -550,15 +564,20 @@ story.append(spacer(60))
 story.append(Paragraph("Ready to start?", styles["Cover"]))
 story.append(spacer(20))
 
+cta_body_st = ParagraphStyle("CtaBody", parent=styles["Body"],
+                             fontSize=11, leading=15,
+                             spaceAfter=0, textColor=NAVY)
 cta = Table([
     ["1. Free 14-day trial",
-     "Start with full white-label access. No credit card required until day 15."],
+     Paragraph("Start with full white-label access. No credit card required "
+               "until day 15.", cta_body_st)],
     ["2. Live 15-min demo",
-     "See the QBO migration flow, the client-invite flow, and the "
-     "affiliate dashboard walkthrough."],
+     Paragraph("See the QBO migration flow, the client-invite flow, and the "
+               "affiliate dashboard walkthrough.", cta_body_st)],
     ["3. Pilot cohort",
-     "Design-partner spots available for firms 30+ clients — includes "
-     "60 days free and a direct feedback line to our product team."],
+     Paragraph("Design-partner spots available for firms 30+ clients "
+               "&mdash; includes 60 days free and a direct feedback line "
+               "to our product team.", cta_body_st)],
 ], colWidths=[2*inch, 5*inch])
 cta.setStyle(TableStyle([
     ("BACKGROUND",   (0,0), (0,-1), NAVY),
