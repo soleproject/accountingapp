@@ -202,11 +202,99 @@ export default function SuperadminDash() {
 
       <AffiliatePayoutsCard />
 
+      <FeatureFlagsCard />
+
       <UkDemoSeedCard />
 
       <div className="rounded-xl border bg-white p-5">
         <TeamPanel mode="admin" />
       </div>
+    </div>
+  );
+}
+
+
+
+// --------------------------------------------------------------------------
+// FeatureFlagsCard — superadmin toggle for platform-wide feature flags.
+//
+// Backed by GET/PUT /api/admin/feature-flags. Phase 1 ships with a
+// single flag (`regions.uk_enabled`) that reveals the UK region
+// dropdown in the New Client modal and unlocks every UK-specific
+// code path. Future phases add flags here as they land.
+// --------------------------------------------------------------------------
+function FeatureFlagsCard() {
+  const [flags, setFlags] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(null);  // holds key currently being toggled
+
+  const load = async () => {
+    try {
+      const r = await api.get("/admin/feature-flags");
+      setFlags(r.data.flags || []);
+    } catch (e) {
+      toast.error(`Load failed: ${e.response?.data?.detail || e.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { load(); }, []);
+
+  const toggle = async (key, next) => {
+    setSaving(key);
+    try {
+      await api.put(`/admin/feature-flags/${encodeURIComponent(key)}`, { enabled: next });
+      setFlags((cur) => cur.map((f) => f.key === key ? { ...f, enabled: next } : f));
+      toast.success(`${key} ${next ? "enabled" : "disabled"}`);
+    } catch (e) {
+      toast.error(`Toggle failed: ${e.response?.data?.detail || e.message}`);
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border bg-white p-5" data-testid="feature-flags-card">
+      <div className="mb-3">
+        <h3 className="font-heading font-semibold text-slate-900">Feature flags</h3>
+        <p className="mt-1 text-sm text-slate-500 max-w-2xl">
+          Cluster-wide toggles for beta features. Changes take effect within ~10 seconds thanks to the read-through cache.
+        </p>
+      </div>
+      {loading ? (
+        <div className="text-sm text-slate-500">Loading…</div>
+      ) : flags.length === 0 ? (
+        <div className="text-sm text-slate-500">No feature flags registered.</div>
+      ) : (
+        <div className="divide-y divide-slate-100 border rounded-lg">
+          {flags.map((f) => (
+            <div key={f.key} className="flex items-start justify-between gap-4 px-4 py-3" data-testid={`feature-flag-row-${f.key}`}>
+              <div className="min-w-0">
+                <div className="font-mono text-sm text-slate-900">{f.key}</div>
+                {f.description && (
+                  <div className="text-xs text-slate-500 mt-0.5">{f.description}</div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => toggle(f.key, !f.enabled)}
+                disabled={saving === f.key}
+                data-testid={`feature-flag-toggle-${f.key}`}
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 ${
+                  f.enabled ? "bg-emerald-600" : "bg-slate-300"
+                } ${saving === f.key ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                aria-label={`Toggle ${f.key}`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform ${
+                    f.enabled ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -221,6 +309,7 @@ export default function SuperadminDash() {
 // design-partner walkthroughs. Re-clicking wipes and re-seeds so the
 // data is always fresh and matches the current schema.
 // --------------------------------------------------------------------------
+
 function UkDemoSeedCard() {
   const [busy, setBusy] = useState(false);
   const [lastResult, setLastResult] = useState(null);
