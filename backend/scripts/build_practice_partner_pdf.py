@@ -415,7 +415,7 @@ comp = data_table(
     header=["Feature", "QBO ProAdvisor", "Xero Partner", "Practice Partner"],
     rows=[
         ["Cost to accountant",       "Free",             "Free",             "$349/mo flat"],
-        ["Per-client cost",          "$15–100 tiered",   "£14–£65 tiered",   "$15 flat"],
+        ["Per-client cost",          "$15–100 tiered",   "$18–80 tiered",   "$15 flat"],
         ["White-label branding",     "Not available",    "Limited",          "Full white-label"],
         ["Custom domain",            "Not available",    "Not available",    "Included (annual)"],
         ["AI categorisation",        "Limited",          "Basic",            "Built-in, all tiers"],
@@ -548,7 +548,7 @@ faqs = [
 
     ("What integrations are included?",
      "Plaid (US bank feeds), Open Banking (UK), Veryfi (receipt OCR), "
-     "QuickBooks Online (bi-directional sync), Stripe, Sage, Xero. "
+     "QuickBooks Online (bi-directional sync), and Stripe. "
      "Full integration list in the client dashboard."),
 ]
 
