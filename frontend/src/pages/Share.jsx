@@ -237,6 +237,7 @@ function OverviewTab({ data, onChanged }) {
                   ["$79 plan", "$15"],
                   ["$95 plan", "$20"],
                   ["$149 plan", "$30"],
+                  ["$349 plan", "$125"],
                 ].map(([svc, payout]) => (
                   <tr key={svc}>
                     <td className="pr-4 py-1 text-slate-500">{svc}</td>
