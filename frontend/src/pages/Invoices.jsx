@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { api, fmtMoney, fmtDate } from "@/lib/api";
+import { api } from "@/lib/api";
+import { useMoneyFmt, useDateFmt } from "@/lib/company";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
 import { Plus, Trash2, X, AlertTriangle, Pencil, Repeat, Check, Package, Sparkles, Send, Loader2, MailWarning, Clock, ChevronDown, ChevronRight } from "lucide-react";
@@ -34,6 +35,8 @@ const BG = {
 
 export default function Invoices() {
   const { currentId } = useCompany();
+  const fmtMoney = useMoneyFmt();
+  const fmtDate = useDateFmt();
   const navigate = useNavigate();
   const [items, setItems] = useState([]);
   const [contacts, setContacts] = useState([]);
@@ -247,6 +250,7 @@ export default function Invoices() {
 }
 
 function InvoiceModal({ contacts, itemsCatalog, currentId, invoice, prefill, onClose }) {
+  const fmtMoney = useMoneyFmt();
   const editMode = !!invoice;
   const p = prefill || {};
   const initLines = () => {
@@ -470,6 +474,7 @@ function InvoiceModal({ contacts, itemsCatalog, currentId, invoice, prefill, onC
  *   due within 30 days = the "current" bucket (not yet due, Net 30 default)
  */
 function ArAgingCard({ aging, navigate }) {
+  const fmtMoney = useMoneyFmt();
   const [view, setView] = useState(() => {
     try { return localStorage.getItem("ar_aging_view") || "highlights"; }
     catch { return "highlights"; }
@@ -608,6 +613,7 @@ function ArAgingCard({ aging, navigate }) {
  * summary so the pro can act on them.
  */
 function AIFollowupModal({ currentId, onClose }) {
+  const fmtMoney = useMoneyFmt();
   const [loading, setLoading] = useState(true);
   const [drafts, setDrafts] = useState([]);
   const [selected, setSelected] = useState({});        // idx -> bool

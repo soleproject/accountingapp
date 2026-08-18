@@ -12,7 +12,8 @@
  */
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { api, fmtMoney } from "@/lib/api";
+import { api } from "@/lib/api";
+import { useMoneyFmt } from "@/lib/company";
 import { useCompany } from "@/lib/company";
 import { getRegisteredChartIds } from "@/hooks/useRegisterChart";
 import { toast } from "sonner";
@@ -567,6 +568,7 @@ const compactMoney = (v) => {
 
 
 function ChartVisual({ chartId, data }) {
+  const fmtMoney = useMoneyFmt();
   if (!data) return null;
 
   if (chartId === "income_trend") {
@@ -1169,6 +1171,7 @@ function ChartVisual({ chartId, data }) {
 /** Text-summary renderer — stays under each visual as a numeric
  *  reference so users get both the graph and the actual numbers. */
 function ChartRenderer({ chartId, data }) {
+  const fmtMoney = useMoneyFmt();
   if (!data) return <div className="text-xs text-slate-400 italic">No data.</div>;
   if (chartId === "income_trend") {
     const rows = data.months || [];
@@ -1466,6 +1469,7 @@ function ChartRenderer({ chartId, data }) {
 
 
 function Row({ label, value, bold = false, small = false, accent, subtext }) {
+  const fmtMoney = useMoneyFmt();
   const accentCls = {
     emerald: "text-emerald-700",
     rose: "text-rose-700",

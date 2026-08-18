@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { api, fmtMoney, fmtDate } from "@/lib/api";
+import { api } from "@/lib/api";
+import { useMoneyFmt, useDateFmt } from "@/lib/company";
 import { useCompany } from "@/lib/company";
 import { useAiFocus } from "@/lib/aiFocus";
 import { TID } from "@/constants/testIds";
@@ -275,6 +276,8 @@ function ConfidenceChip({ conf, needs_review }) {
 
 export default function Transactions() {
   const { currentId, isAdvancedMode } = useCompany();
+  const fmtMoney = useMoneyFmt();
+  const fmtDate = useDateFmt();
   const { setFocus } = useAiFocus();
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -1980,6 +1983,7 @@ function Modal({ title, children, onClose, wide }) {
 // row in Inter-Account Transfer). Clicking a category row expands inline
 // to show the underlying transactions — no navigation, no page change.
 function ContactRollup({ data, busy, currentId }) {
+  const fmtMoney = useMoneyFmt();
   const contacts = data?.contacts || [];
   // Cache expanded rows: key = `${contactKey}||${categoryKey}` → txn list.
   const [expanded, setExpanded] = useState({});   // key → true/false
@@ -2107,6 +2111,7 @@ function ContactRollup({ data, busy, currentId }) {
 }
 
 function ManualTxnModal({ accts, currentId, contactOptions = [], invoices = [], bills = [], initialTxn = null, onClose }) {
+  const fmtMoney = useMoneyFmt();
   const isEdit = Boolean(initialTxn);
   const [date, setDate] = useState(initialTxn?.date || new Date().toISOString().slice(0, 10));
   const [description, setDescription] = useState(initialTxn?.description || "");
@@ -2547,6 +2552,7 @@ function ManualTxnModal({ accts, currentId, contactOptions = [], invoices = [], 
 }
 
 function SplitModal({ txn, accts, currentId, onClose }) {
+  const fmtMoney = useMoneyFmt();
   const [rows, setRows] = useState([
     { amount: (txn.amount / 2).toFixed(2), category_account_id: txn.category_account_id, description: "" },
     { amount: (txn.amount / 2).toFixed(2), category_account_id: "", description: "" },
@@ -2591,6 +2597,7 @@ function SplitModal({ txn, accts, currentId, onClose }) {
 }
 
 function LinkModal({ txn, invoices, bills, currentId, onClose }) {
+  const fmtMoney = useMoneyFmt();
   const [kind, setKind] = useState(txn.amount > 0 ? "invoice" : "bill");
   const [selId, setSelId] = useState("");
   const save = async () => {
