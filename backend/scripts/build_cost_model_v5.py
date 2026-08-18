@@ -104,7 +104,7 @@ def header_row(ws, row, headers):
 def tab_summary(wb):
     ws = wb.create_sheet("1. Summary")
     widen(ws, [26, 18, 30, 16, 22, 18])
-    title(ws, "SmartBooks — Tech-Only Cost Model (v5, Feb 2026)", "F")
+    title(ws, "Business Software — Tech-Only Cost Model (v5, Feb 2026)", "F")
     subtitle(ws, "Engineering, infra, AI, security and dev tooling only. "
                  "No payroll, HR, recruiting, legal, or GTM content.", "F")
 
@@ -171,7 +171,7 @@ def tab_summary(wb):
     ws.merge_cells(f"A{r}:F{r}")
     r += 1
     ws.cell(row=r, column=1, value=(
-        f"At 1,500 paid users on a blended ${BLENDED_ARPU:.0f} ARPU, SmartBooks "
+        f"At 1,500 paid users on a blended ${BLENDED_ARPU:.0f} ARPU, Business Software "
         f"runs ~$11k/mo of pure tech cost against ~$106k MRR — 90% gross margin "
         f"on the infra layer. Today's pre-revenue burn is ~$15.5k/mo of which "
         f"$12k is temporary build velocity that tapers by month 6."
