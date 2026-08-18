@@ -6,6 +6,7 @@ import { useHostTitle } from "@/lib/useHostTitle";
 import Layout from "@/components/Layout";
 import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
+import EnterReferral from "@/pages/EnterReferral";
 import Share from "@/pages/Share";
 import PublicDemoUK from "@/pages/PublicDemoUK";
 import Dashboard from "@/pages/Dashboard";
@@ -29,6 +30,7 @@ import AdminPartnerDetail from "@/pages/AdminPartnerDetail";
 import ProClients from "@/pages/ProClients";
 import AdminEnterpriseDetail from "@/pages/AdminEnterpriseDetail";
 import AdminFeedback from "@/pages/AdminFeedback";
+import AdminLeads from "@/pages/AdminLeads";
 import MyFeedback from "@/pages/MyFeedback";
 import { BillingSuccess, BillingCancel } from "@/pages/BillingReturn";
 import Invoices from "@/pages/Invoices";
@@ -115,6 +117,8 @@ function App() {
             <Route path="/signup" element={<Signup />} />
             <Route path="/signup/affiliate" element={<Signup />} />
             <Route path="/signup/enterprise" element={<Signup />} />
+            <Route path="/refer" element={<EnterReferral />} />
+            <Route path="/refer/:slug" element={<EnterReferral />} />
             <Route path="/set-password/:token" element={<SetPassword />} />
             <Route path="/invite/:token" element={<AcceptInvite />} />
             <Route path="/q/:token" element={<AskClientAnswer />} />
@@ -132,6 +136,7 @@ function App() {
               <Route path="/admin/partners/:pid" element={<AdminPartnerDetail />} />
               <Route path="/admin/enterprises/:eid" element={<AdminEnterpriseDetail />} />
               <Route path="/admin/feedback" element={<AdminFeedback />} />
+              <Route path="/admin/leads" element={<AdminLeads />} />
               <Route path="/feedback/mine" element={<MyFeedback />} />
               <Route path="/pro/clients" element={<ProClients />} />
               <Route path="/invoices" element={<Invoices />} />

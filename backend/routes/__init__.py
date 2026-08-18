@@ -40,6 +40,7 @@ from routes.feedback import router as feedback_router  # noqa: F401
 from routes.qbo_verify import router as qbo_verify_router  # noqa: F401
 from routes.feature_flags import router as feature_flags_router  # noqa: F401
 from routes.public_demo import router as public_demo_router  # noqa: F401
+from routes.leads import router as leads_router  # noqa: F401
 from routes.root import router as root_router  # noqa: F401
 
 ALL_ROUTERS = [
@@ -83,5 +84,6 @@ ALL_ROUTERS = [
     qbo_verify_router,
     feature_flags_router,
     public_demo_router,
+    leads_router,
     root_router,
 ]

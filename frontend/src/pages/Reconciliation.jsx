@@ -857,6 +857,7 @@ function Tier({ title, rows, picked, onToggle, locked, manual }) {
 }
 
 function MissingTier({ rows }) {
+  const fmtMoney = useMoneyFmt();
   // Ledger transactions with no matching line on the statement.
   // For a client using Axiom this usually means either:
   //   1. The transaction was posted to the books but never actually hit the bank

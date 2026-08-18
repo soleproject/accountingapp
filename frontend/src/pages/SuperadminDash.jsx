@@ -56,6 +56,14 @@ export default function SuperadminDash() {
         <h1 className="font-heading text-3xl font-bold tracking-tight">Superadmin</h1>
         <div className="ml-auto flex items-center gap-2">
           <Link
+            to="/admin/leads"
+            data-testid="nav-admin-leads"
+            className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            title="Referral leads captured from the /refer landing page"
+          >
+            <Inbox size={16} /> Leads
+          </Link>
+          <Link
             to="/admin/feedback"
             data-testid="nav-admin-feedback"
             className="relative inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
