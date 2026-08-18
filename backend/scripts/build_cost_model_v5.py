@@ -1263,6 +1263,204 @@ def tab_hire_timeline(wb):
 
 
 # ============================================================
+# TAB 10 — EXIT VALUATION (editable model)
+# ============================================================
+def tab_exit_valuation(wb):
+    ws = wb.create_sheet("10. Exit Valuation")
+    widen(ws, [32, 16, 16, 16, 16, 16, 16])
+    title(ws, "Exit Valuation — editable model", "G")
+    subtitle(ws,
+        "Edit the yellow cells to change users, growth rate, NRR, or "
+        "multiples. Everything below re-computes live in Excel.", "G")
+
+    # -------- Section A: EDITABLE INPUTS --------
+    r = 4
+    ws.cell(row=r, column=1, value="A. EDITABLE INPUTS  (yellow cells)").font = H2
+    ws.merge_cells(f"A{r}:G{r}")
+    r += 1
+    inputs_start = r
+    editable_rows = [
+        ("Total paid users at exit",          5000,   "#,##0",       "Baseline plan target"),
+        ("Blended ARPU ($/mo)",               70.60,  "$#,##0.00",   "From Summary tab tier mix"),
+        ("Monthly growth rate (MoM %)",       0.08,   "0.0%",        "8% MoM = healthy SaaS growth"),
+        ("Net Revenue Retention (annual)",    1.05,   "0.0%",        ">110% = premium; <90% = discount"),
+        ("Monthly logo churn",                0.03,   "0.0%",        ">5% = downside multiple"),
+        ("Gross margin (all-in, at exit)",    0.63,   "0.0%",        "From Profit Breakdown tab"),
+    ]
+    for label, val, fmt, note in editable_rows:
+        c1 = ws.cell(row=r, column=1, value=label); c1.font = BODY_BOLD
+        c2 = ws.cell(row=r, column=2, value=val)
+        c2.number_format = fmt
+        c2.fill = FILL_GOOD   # yellow-ish highlight for editable
+        c2.font = BODY_BOLD
+        c3 = ws.cell(row=r, column=3, value=note); c3.font = MUTED
+        for col in range(1, 4):
+            ws.cell(row=r, column=col).border = BOX
+        r += 1
+    # Named row indices
+    users_r  = inputs_start
+    arpu_r   = inputs_start + 1
+    growth_r = inputs_start + 2
+    nrr_r    = inputs_start + 3
+    churn_r  = inputs_start + 4
+    margin_r = inputs_start + 5
+
+    # -------- Section B: DERIVED METRICS --------
+    r += 1
+    ws.cell(row=r, column=1, value="B. DERIVED METRICS").font = H2
+    ws.merge_cells(f"A{r}:G{r}")
+    r += 1
+    ws.cell(row=r, column=1, value="MRR at exit").font = BODY_BOLD
+    ws.cell(row=r, column=2, value=f"=B{users_r}*B{arpu_r}")
+    ws.cell(row=r, column=2).number_format = "$#,##0"
+    ws.cell(row=r, column=2).fill = FILL_TOTAL
+    mrr_r = r
+    r += 1
+    ws.cell(row=r, column=1, value="ARR at exit").font = BODY_BOLD
+    ws.cell(row=r, column=2, value=f"=B{mrr_r}*12")
+    ws.cell(row=r, column=2).number_format = "$#,##0"
+    ws.cell(row=r, column=2).fill = FILL_TOTAL
+    arr_r = r
+    r += 1
+    ws.cell(row=r, column=1, value="Annualised growth rate").font = BODY_BOLD
+    ws.cell(row=r, column=2, value=f"=(1+B{growth_r})^12-1")
+    ws.cell(row=r, column=2).number_format = "0.0%"
+    r += 1
+    ws.cell(row=r, column=1, value="Rule of 40 score (growth% + margin%)").font = BODY_BOLD
+    ws.cell(row=r, column=2, value=f"=((1+B{growth_r})^12-1)+B{margin_r}")
+    ws.cell(row=r, column=2).number_format = "0.0%"
+    rule40_r = r
+    for col in [1, 2]:
+        ws.cell(row=r, column=col).border = BOX
+    r += 2
+
+    # -------- Section C: BUYER-TYPE MULTIPLES --------
+    ws.cell(row=r, column=1, value="C. VALUATION BY BUYER TYPE").font = H2
+    ws.merge_cells(f"A{r}:G{r}")
+    r += 1
+    header_row(ws, r, ["Buyer type", "× ARR (low)", "× ARR (high)",
+                       "Valuation (low)", "Valuation (high)",
+                       "Realistic mid", ""])
+    r += 1
+    # (buyer, low_mult, high_mult)
+    buyers = [
+        ("Distressed / flat growth / high churn",    2.0,  3.0),
+        ("Bootstrapped roll-up (Constellation, Tiny, Valsoft)", 3.0,  5.0),
+        ("Vertical SaaS PE (Vista sub-scale tier)",  5.0,  7.0),
+        ("Strategic — accounting ecosystem (Intuit, Xero, Sage)", 7.0, 12.0),
+        ("Strategic + AI premium (right buyer, right time)", 10.0, 15.0),
+    ]
+    for label, low, high in buyers:
+        c = ws.cell(row=r, column=1, value=label); c.font = BODY
+        ws.cell(row=r, column=2, value=low).number_format = "0.0\"×\""
+        ws.cell(row=r, column=3, value=high).number_format = "0.0\"×\""
+        ws.cell(row=r, column=4, value=f"=B{r}*B{arr_r}").number_format = "$#,##0"
+        ws.cell(row=r, column=5, value=f"=C{r}*B{arr_r}").number_format = "$#,##0"
+        ws.cell(row=r, column=6, value=f"=(D{r}+E{r})/2").number_format = "$#,##0"
+        for col in range(1, 7):
+            ws.cell(row=r, column=col).border = BOX
+            if col > 1: ws.cell(row=r, column=col).font = BODY
+        r += 1
+
+    # -------- Section D: SENSITIVITY GRID (growth × NRR) --------
+    r += 2
+    ws.cell(row=r, column=1,
+            value="D. SENSITIVITY GRID — growth × NRR (uses 6× base multiple, then adjusts)").font = H2
+    ws.merge_cells(f"A{r}:G{r}")
+    r += 1
+    ws.cell(row=r, column=1, value=(
+        "Adjustment logic: base multiple = 6× ARR. Growth MoM adds ±0.5× per "
+        "2pp above/below 8%. NRR adds ±1× per 10pp above/below 100%."
+    )).font = MUTED
+    ws.merge_cells(f"A{r}:G{r}")
+    r += 1
+
+    # Header row: NRR values across
+    growth_labels = [0.02, 0.05, 0.08, 0.12, 0.18]
+    nrr_labels    = [0.85, 0.95, 1.05, 1.15, 1.25]
+
+    ws.cell(row=r, column=1, value="MoM growth ↓  /  NRR →").font = BODY_BOLD
+    ws.cell(row=r, column=1).fill = FILL_HEAD
+    ws.cell(row=r, column=1).font = H_TABLE
+    ws.cell(row=r, column=1).border = BOX
+    ws.cell(row=r, column=1).alignment = CENTER
+
+    for j, nrr_v in enumerate(nrr_labels):
+        c = ws.cell(row=r, column=2 + j, value=nrr_v)
+        c.number_format = "0%"
+        c.fill = FILL_HEAD
+        c.font = H_TABLE
+        c.border = BOX
+        c.alignment = CENTER
+    r += 1
+
+    for g in growth_labels:
+        c = ws.cell(row=r, column=1, value=g)
+        c.number_format = "0%"
+        c.fill = FILL_SUB
+        c.font = BODY_BOLD
+        c.border = BOX
+        c.alignment = CENTER
+        for j, nrr_v in enumerate(nrr_labels):
+            # Adjustment formula: base 6× + (growth-8%)/2% * 0.5 + (NRR-100%)/10% * 1
+            mult = 6.0 + ((g - 0.08) / 0.02) * 0.5 + ((nrr_v - 1.0) / 0.10) * 1.0
+            mult = max(mult, 1.5)   # floor
+            cell = ws.cell(row=r, column=2 + j,
+                           value=f"={mult:.2f}*B{arr_r}")
+            cell.number_format = "$#,##0"
+            cell.border = BOX
+            # Colour bands
+            if mult >= 8:      cell.fill = FILL_GOOD
+            elif mult >= 5:    cell.fill = FILL_TOTAL
+            elif mult >= 3:    cell.fill = FILL_ACCENT
+            else:              cell.fill = FILL_SUB
+        r += 1
+
+    # -------- Section E: WHAT MOVES YOU UP --------
+    r += 2
+    ws.cell(row=r, column=1, value="E. LEVERS THAT MOVE YOU UP THE STACK").font = H2
+    ws.merge_cells(f"A{r}:G{r}")
+    r += 1
+    header_row(ws, r, ["Lever", "Multiple impact", "Effort / timing",
+                       "", "", "", ""])
+    r += 1
+    levers = [
+        ("Grow 10%+ MoM in the 6 months before exit",   "+1-2× ARR",  "Push growth marketing months 8-14"),
+        ("Push NRR above 110% (expansion revenue)",      "+1-2× ARR",  "Add Enterprise upsells + usage-based add-ons"),
+        ("Cut monthly churn under 3%",                   "+0.5-1× ARR", "Onboarding + activation + CS ownership"),
+        ("Land 1-2 marquee Partner (WL) accounts",       "+1× ARR",    "Strategic story validates the platform"),
+        ("Ship SOC 2 Type II before diligence",          "+0.5× ARR",  "Removes a diligence blocker; 6-9 mo lead"),
+        ("Reach $5M+ ARR (institutional bar)",           "+1× ARR",    "Above $5M ARR the buyer pool 3× larger"),
+        ("Prove AI IP is proprietary (own the model)",   "+1-3× ARR",  "Strategic AI-premium buyers only"),
+        ("Have 2+ term sheets in parallel (competitive)","+1-2× ARR",  "Banker-run process at exit"),
+    ]
+    for row_ in levers:
+        set_row(ws, r, [row_[0], row_[1], row_[2], "", "", "", ""],
+                font=BODY, align=LEFT, border=BOX)
+        r += 1
+
+    # -------- Section F: HEADLINE --------
+    r += 2
+    ws.cell(row=r, column=1, value="F. HEADLINE").font = H2
+    ws.merge_cells(f"A{r}:G{r}")
+    r += 1
+    headline_rows = [
+        ("Downside floor (2× ARR)",           f"=2*B{arr_r}",   "Flat growth, average churn, financial buyer only"),
+        ("Base case (6-7× ARR)",              f"=6.5*B{arr_r}", "8% MoM growth, ~105% NRR, PE or roll-up buyer"),
+        ("Upside strategic (10× ARR)",        f"=10*B{arr_r}",  "Intuit/Xero threat model or AI IP premium"),
+        ("Best case competitive process (12× ARR)", f"=12*B{arr_r}", "Two term sheets + growth + NRR all firing"),
+    ]
+    for label, formula, note in headline_rows:
+        ws.cell(row=r, column=1, value=label).font = BODY_BOLD
+        ws.cell(row=r, column=2, value=formula).number_format = "$#,##0"
+        ws.cell(row=r, column=3, value=note).font = MUTED
+        for col in range(1, 4):
+            ws.cell(row=r, column=col).border = BOX
+        ws.cell(row=r, column=2).fill = FILL_TOTAL
+        r += 1
+
+
+# ============================================================
 # Build workbook
 # ============================================================
 def main():
@@ -1279,6 +1477,7 @@ def main():
     tab_security(wb)
     tab_profit(wb)
     tab_hire_timeline(wb)
+    tab_exit_valuation(wb)
 
     XLSX.parent.mkdir(parents=True, exist_ok=True)
     wb.save(XLSX)
