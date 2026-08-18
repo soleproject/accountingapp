@@ -12,14 +12,14 @@ Tabs:
   6. AI Deep Dive           — LLM cost + optimisation levers
   7. Security               — WAF, SSO, SIEM, bug bounty, etc.
   8. Profit Breakdown       — MRR / gross margin / monthly profit
-                              using $38/$75/$95/$149 tiers
+                              using $38/$79/$95/$149 tiers
 
 STRICT: no payroll, HR, recruiting, legal, insurance, marketing, sales,
 CFO, or bookkeeping content — tech spend only.
 
-Pricing:  $38 / $75 / $95 / $149
+Pricing:  $38 / $79 / $95 / $149
 Mix:      40% / 35% / 15% / 10%
-Blended:  0.40*38 + 0.35*75 + 0.15*95 + 0.10*149 = $70.60
+Blended:  0.40*38 + 0.35*79 + 0.15*95 + 0.10*149 = $72.00
 """
 from pathlib import Path
 from openpyxl import Workbook
@@ -59,11 +59,11 @@ BOX = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 # ---------------- Pricing constants ----------------
 TIERS = [
     ("Solo / Starter", 38,  0.40, "Sole trader / 1 client"),
-    ("Standard",       75,  0.35, "Bookkeeper w/ up to 5 clients"),
+    ("Standard",       79,  0.35, "Bookkeeper w/ up to 5 clients"),
     ("Pro",            95,  0.15, "Firm w/ 10-30 clients"),
     ("Enterprise",     149, 0.10, "Partner / 50+ clients / SSO"),
 ]
-BLENDED_ARPU = sum(p * m for _, p, m, _ in TIERS)  # 70.60
+BLENDED_ARPU = sum(p * m for _, p, m, _ in TIERS)  # 72.00
 
 
 # ---------------- Helpers ----------------
@@ -879,6 +879,8 @@ def tab_security(wb):
         ("Backup / DR",     "Cross-region MongoDB backup + PITR",         20, 40,  80, 120, 200, 400),
         ("Backup / DR",     "Immutable off-site backup (Wasabi/S3 lock)", 10, 20,  40,  60, 120, 240),
         ("Compliance Ops",  "Vanta / Drata (SOC 2 automation)",            0,  0,   0, 800,1250,1250),
+        ("Compliance Ops",  "SOC 2 Type I auditor (one-time, amortised)",  0,  0,   0,1250,1670,1670),
+        ("Compliance Ops",  "SOC 2 Type II auditor (annual, amortised)",   0,  0,   0,   0,2100,3750),
         ("Compliance Ops",  "Annual pen-test (amortised /mo)",             0,  0,   0, 500, 750,1000),
         ("Compliance Ops",  "IR retainer (Kroll / Mandiant)",              0,  0,   0,   0, 400, 800),
         ("Fraud / Abuse",   "reCAPTCHA Enterprise + IP intel",             0, 20,  40,  80, 150, 300),
@@ -967,7 +969,7 @@ def tab_profit(wb):
     widen(ws, [16, 14, 14, 14, 14, 14, 14, 14, 16])
     title(ws, "Profit Breakdown — infra-only vs. ALL-IN (with team)", "I")
     subtitle(ws, f"Blended ARPU = ${BLENDED_ARPU:.2f} (40/35/15/10 mix of "
-                 "$38/$75/$95/$149). All-in adds outsource + FTE loaded costs.", "I")
+                 "$38/$79/$95/$149). All-in adds outsource + FTE loaded costs.", "I")
 
     # --- Section A: MRR by tier per user count ---
     r = 4
@@ -975,13 +977,13 @@ def tab_profit(wb):
     ws.merge_cells(f"A{r}:I{r}")
     r += 1
     header_row(ws, r, ["Total users",
-                       "Solo $38 (40%)", "Standard $75 (35%)",
+                       "Solo $38 (40%)", "Standard $79 (35%)",
                        "Pro $95 (15%)", "Enterprise $149 (10%)",
                        "Total MRR", "Total ARR", "", ""])
     r += 1
     for u, *_ in COST_STACK:
         solo  = u * 0.40 * 38
-        std   = u * 0.35 * 75
+        std   = u * 0.35 * 79
         pro   = u * 0.15 * 95
         ent   = u * 0.10 * 149
         mrr   = solo + std + pro + ent
@@ -1040,7 +1042,7 @@ def tab_profit(wb):
     ws.merge_cells(f"A{r}:I{r}")
     r += 1
     header_row(ws, r, ["Scenario", "Total burn /mo",
-                       "Break-even @ blended", "@ $75 Std", "@ $95 Pro",
+                       "Break-even @ blended", "@ $79 Std", "@ $95 Pro",
                        "", "", "", ""])
     r += 1
     scenarios = [
@@ -1055,7 +1057,7 @@ def tab_profit(wb):
         set_row(ws, r,
                 [label, burn,
                  round(burn / BLENDED_ARPU),
-                 round(burn / 75),
+                 round(burn / 79),
                  round(burn / 95), "", "", "", ""],
                 font=BODY, align=LEFT, border=BOX,
                 number_formats=[None, "$#,##0", "#,##0", "#,##0", "#,##0",
@@ -1079,7 +1081,7 @@ def tab_profit(wb):
         ("Enterprise-heavy (Partners)", 0.10, 0.25, 0.30, 0.35),
     ]
     for label, s, std, pro, ent in mixes:
-        arpu = s * 38 + std * 75 + pro * 95 + ent * 149
+        arpu = s * 38 + std * 79 + pro * 95 + ent * 149
         set_row(ws, r,
                 [label, s, std, pro, ent, arpu, 1500 * arpu, "", ""],
                 font=BODY, align=LEFT, border=BOX,
