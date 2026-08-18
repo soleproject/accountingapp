@@ -33,7 +33,7 @@ SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 SLUG_MIN, SLUG_MAX = 3, 40
 _RESERVED_SLUGS = {
     "admin", "api", "app", "billing", "help", "login", "logout", "pricing",
-    "public", "pro", "share", "signup", "smartbooks", "superadmin",
+    "public", "pro", "r", "refer", "share", "signup", "smartbooks", "superadmin",
     "support", "www",
 }
 

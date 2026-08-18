@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import uuid
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
@@ -216,3 +216,48 @@ async def resolve_slug(slug: str):
     u = await db.users.find_one({"id": user_id}, {"_id": 0, "name": 1, "email": 1})
     display = (u or {}).get("name") or ((u or {}).get("email", "").split("@")[0])
     return {"slug": slug, "referrer": display}
+
+
+# ---- Public: log referral link click -----------------------------------
+class ClickIn(BaseModel):
+    slug: str = Field(..., max_length=40)
+
+
+@router.post("/public/refer-click")
+async def log_click(payload: ClickIn, request: Request):
+    """Log a click on a shared referral link. Fired by the ``/r/:slug``
+    frontend route right before it forwards the visitor to the actual
+    lead-capture page. Cheap insert into ``referral_clicks``.
+
+    Idempotent-ish: we de-dupe by (slug, IP) within a rolling 30-minute
+    window so a page reload doesn't inflate click counts.
+    """
+    slug = payload.slug.strip().lower()
+    referrer_id = await resolve_referrer_id(slug)
+    if not referrer_id:
+        # Still record the click so we can see "wasted" traffic to bad slugs
+        pass
+
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent", "")[:400]
+
+    # De-dupe 30-min window on (slug, ip)
+    if ip:
+        cutoff = (datetime.now(timezone.utc)
+                  .replace(microsecond=0) - timedelta(minutes=30)).isoformat()
+        recent = await db.referral_clicks.find_one({
+            "slug": slug, "ip": ip,
+            "created_at": {"$gte": cutoff},
+        })
+        if recent:
+            return {"ok": True, "deduped": True}
+
+    await db.referral_clicks.insert_one({
+        "id": str(uuid.uuid4()),
+        "slug": slug,
+        "referrer_user_id": referrer_id,
+        "ip": ip,
+        "user_agent": ua,
+        "created_at": _now_iso(),
+    })
+    return {"ok": True, "deduped": False}

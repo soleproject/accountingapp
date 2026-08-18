@@ -475,7 +475,13 @@ function ReferralsTab() {
   return (
     <div data-testid="referrals-pipeline">
       {/* Funnel stat tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
+        <FunnelTile
+          label="Clicks"
+          value={t.clicks || 0}
+          hint={t.unique_clicks ? `${t.unique_clicks} unique` : null}
+          accent="violet"
+        />
         <FunnelTile label="Total prospects" value={t.total} accent="slate" />
         <FunnelTile label="Leads" value={t.counts?.lead || 0} accent="amber"
                     active={filter === "lead"} onClick={() => setFilter(filter === "lead" ? "" : "lead")} />
@@ -488,7 +494,12 @@ function ReferralsTab() {
       </div>
 
       {/* Conversion rate summary */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-6">
+        <ConvTile
+          label="Click → Prospect"
+          value={t.clicks ? `${t.click_to_lead_pct || 0}%` : "—"}
+          hint={t.clicks ? `${t.total || 0} of ${t.clicks} clicks became prospects` : "No clicks tracked yet"}
+        />
         <ConvTile
           label="Lead → Signup"
           value={`${t.lead_to_signup_pct || 0}%`}
@@ -552,13 +563,14 @@ function ReferralsTab() {
   );
 }
 
-function FunnelTile({ label, value, accent = "slate", active, onClick }) {
+function FunnelTile({ label, value, hint, accent = "slate", active, onClick }) {
   const accents = {
     slate:   "border-slate-200 bg-white",
     amber:   "border-amber-200 bg-amber-50",
     blue:    "border-blue-200 bg-blue-50",
     cyan:    "border-cyan-200 bg-cyan-50",
     emerald: "border-emerald-200 bg-emerald-50",
+    violet:  "border-violet-200 bg-violet-50",
   };
   const clickable = onClick ? "cursor-pointer hover:shadow-sm" : "";
   const activeRing = active ? "ring-2 ring-cyan-500" : "";
@@ -572,6 +584,7 @@ function FunnelTile({ label, value, accent = "slate", active, onClick }) {
     >
       <div className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">{label}</div>
       <div className="text-2xl font-bold text-slate-900 leading-tight mt-0.5 tabular-nums">{value}</div>
+      {hint && <div className="text-[10px] text-slate-500 mt-0.5">{hint}</div>}
     </button>
   );
 }

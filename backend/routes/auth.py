@@ -286,15 +286,15 @@ def _share_link_for(user: dict, slug: str) -> tuple[str, str]:
       1. Firm's custom "buy page URL" (``branding.buy_page_url``) —
          referrer's site or a dedicated pricing page. Ref param appended
          as ``?ref=`` (or ``&ref=`` if the URL already has a query).
-      2. Firm's private-label subdomain + ``/refer/<slug>`` — when the
+      2. Firm's private-label subdomain + ``/r/<slug>`` — when the
          pro has ``branding.signin_subdomain`` set and the platform has
          a ``PRIVATE_LABEL_HOST_TEMPLATE`` env var.
-      3. Platform ``/refer/<slug>`` on ``PRIMARY_HOST``.
+      3. Platform ``/r/<slug>`` on ``PRIMARY_HOST``.
 
-    Note: link now lands on the ``/refer/<slug>`` lead-capture page
-    which forwards to ``/signup?ref=<slug>`` after submission. This
-    lets us drop the visitor into a drip campaign even if they don't
-    complete signup on the first visit.
+    Note: link lands on the ``/r/<slug>`` click-tracker route which
+    logs the click and forwards to ``/refer/<slug>`` (lead-capture),
+    which itself forwards to ``/signup?ref=<slug>`` after submission.
+    Full funnel is trackable end-to-end: click → lead → signup → pay.
     """
     b = (user or {}).get("branding") or {}
     buy_url = (b.get("buy_page_url") or "").strip()
@@ -305,9 +305,9 @@ def _share_link_for(user: dict, slug: str) -> tuple[str, str]:
     template = os.environ.get("PRIVATE_LABEL_HOST_TEMPLATE")
     if firm_slug and template:
         host_url = template.replace("{slug}", firm_slug).rstrip("/")
-        return f"{host_url}/refer/{slug}", "firm_subdomain"
+        return f"{host_url}/r/{slug}", "firm_subdomain"
     host = os.environ.get("PRIMARY_HOST", "app.smartbookssoftware.ai")
-    return f"https://{host}/refer/{slug}", "platform"
+    return f"https://{host}/r/{slug}", "platform"
 
 
 @router.get("/share")
@@ -545,6 +545,17 @@ async def share_pipeline(user: dict = Depends(get_current_user)):
 
     total_earned = sum(int(e.get("earned_cents") or 0) for e in entries)
 
+    # ---- 7. Click stats (top-of-funnel) ----
+    click_total = 0
+    click_unique_ips = 0
+    click_to_lead_pct = 0.0
+    if my_slug:
+        click_total = await db.referral_clicks.count_documents({"slug": my_slug})
+        unique_ips = await db.referral_clicks.distinct("ip", {"slug": my_slug})
+        click_unique_ips = len(unique_ips)
+        if click_total > 0:
+            click_to_lead_pct = round(total / click_total * 100.0, 1)
+
     return {
         "entries": entries,
         "totals": {
@@ -554,6 +565,9 @@ async def share_pipeline(user: dict = Depends(get_current_user)):
             "lead_to_signup_pct": round(lead_to_signup, 1),
             "signup_to_paying_pct": round(signup_to_paying, 1),
             "total_earned_cents": total_earned,
+            "clicks": click_total,
+            "unique_clicks": click_unique_ips,
+            "click_to_lead_pct": click_to_lead_pct,
         },
         "slug": my_slug,
     }
