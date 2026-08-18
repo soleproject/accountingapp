@@ -833,106 +833,159 @@ def tab_security(wb):
 
 
 # ============================================================
-# TAB 8 — PROFIT BREAKDOWN
+# COST STACK per user count (used by Profit + Hire Timeline)
+# ============================================================
+# (users, infra, fractional/outsource, FTE loaded /mo)
+# FTE ramp keyed to MRR trigger (see Tech Outsource tab):
+#   Sr SWE #1     hired at ~$25k MRR  (~355 users)
+#   Platform Eng  hired at 1,500 users
+#   Sr SWE #2     hired at 3,000 users OR $60k MRR
+#   Security Eng  hired at 3,000+ users (SOC 2 Type II)
+#   QA Lead       hired at 3,000 users
+# Loaded FTE monthly cost = annual loaded /12:
+FTE_MO = {
+    "Sr SWE #1":     195_000 / 12,  # ~$16,250
+    "Sr SWE #2":     195_000 / 12,
+    "Platform Eng":  210_000 / 12,  # ~$17,500
+    "Security Eng":  220_000 / 12,  # ~$18,333
+    "QA Lead":       165_000 / 12,  # ~$13,750
+}
+
+COST_STACK = [
+    # users, infra, outsource, list of FTE names on payroll at that stage
+    (100,   3500,  3000,  []),                                             # 1 contract dev only
+    (250,   4000,  4000,  []),                                             # + light QA fractional
+    (500,   4000,  6000,  []),                                             # dev + QA fractional
+    (1000,  8500,  7000,  ["Sr SWE #1"]),                                  # first FTE
+    (1500, 11000,  9000,  ["Sr SWE #1", "Platform Eng"]),                  # + Platform hire
+    (3000, 26000, 10000,  ["Sr SWE #1", "Sr SWE #2", "Platform Eng",
+                            "Security Eng", "QA Lead"]),                    # full core team
+    (5000, 42000,  8000,  ["Sr SWE #1", "Sr SWE #2", "Platform Eng",
+                            "Security Eng", "QA Lead"]),                    # same team, scale infra
+]
+
+
+def _stack_costs(users):
+    """Return (infra, outsource, fte_cost, fte_list) for the given stage."""
+    for u, infra, outs, ftes in COST_STACK:
+        if u == users:
+            fte_cost = sum(FTE_MO[n] for n in ftes)
+            return infra, outs, fte_cost, ftes
+    raise KeyError(users)
+
+
+# ============================================================
+# TAB 8 — PROFIT BREAKDOWN (all-in)
 # ============================================================
 def tab_profit(wb):
     ws = wb.create_sheet("8. Profit Breakdown")
-    widen(ws, [22, 16, 16, 16, 16, 16, 16, 16])
-    title(ws, "Profit Breakdown — using $38 / $75 / $95 / $149 tiers", "H")
-    subtitle(ws, f"Blended ARPU = ${BLENDED_ARPU:.2f} (mix: 40% Solo / 35% Standard "
-                 "/ 15% Pro / 10% Enterprise). Tech costs from the Scale Costs tab.", "H")
+    widen(ws, [16, 14, 14, 14, 14, 14, 14, 14, 16])
+    title(ws, "Profit Breakdown — infra-only vs. ALL-IN (with team)", "I")
+    subtitle(ws, f"Blended ARPU = ${BLENDED_ARPU:.2f} (40/35/15/10 mix of "
+                 "$38/$75/$95/$149). All-in adds outsource + FTE loaded costs.", "I")
 
-    # --- Section A: MRR by tier per user count
+    # --- Section A: MRR by tier per user count ---
     r = 4
     ws.cell(row=r, column=1, value="A. MRR contribution per tier (users × price × mix%)").font = H2
-    ws.merge_cells(f"A{r}:H{r}")
+    ws.merge_cells(f"A{r}:I{r}")
     r += 1
     header_row(ws, r, ["Total users",
                        "Solo $38 (40%)", "Standard $75 (35%)",
                        "Pro $95 (15%)", "Enterprise $149 (10%)",
-                       "Total MRR", "Total ARR", ""])
+                       "Total MRR", "Total ARR", "", ""])
     r += 1
-    user_counts = [100, 250, 500, 1000, 1500, 3000, 5000]
-    for u in user_counts:
+    for u, *_ in COST_STACK:
         solo  = u * 0.40 * 38
         std   = u * 0.35 * 75
         pro   = u * 0.15 * 95
         ent   = u * 0.10 * 149
         mrr   = solo + std + pro + ent
-        arr   = mrr * 12
-        set_row(ws, r, [u, solo, std, pro, ent, mrr, arr, ""],
+        set_row(ws, r, [u, solo, std, pro, ent, mrr, mrr * 12, "", ""],
                 font=BODY, align=LEFT, border=BOX,
                 number_formats=[None, "$#,##0", "$#,##0", "$#,##0",
-                                "$#,##0", "$#,##0", "$#,##0", None])
+                                "$#,##0", "$#,##0", "$#,##0", None, None])
         r += 1
 
-    # --- Section B: Profit at each user count
-    r += 2
-    ws.cell(row=r, column=1, value="B. Gross profit at blended $70.60 ARPU").font = H2
-    ws.merge_cells(f"A{r}:H{r}")
-    r += 1
-    header_row(ws, r, ["Total users", "MRR", "Tech COGS /mo",
-                       "Gross profit /mo", "Gross margin",
-                       "Annual profit", "Cost/user", ""])
-    r += 1
-    # (users, cost/mo from Scale Costs tab midpoint)
-    cost_map = [
-        (100,   3500),   # near pre-launch cost
-        (250,   4000),
-        (500,   4000),
-        (1000,  8500),
-        (1500, 11000),
-        (3000, 26000),
-        (5000, 42000),
-    ]
-    for u, cost in cost_map:
-        mrr = u * BLENDED_ARPU
-        gp = mrr - cost
-        margin = gp / mrr if mrr else 0
-        cpu = cost / u if u else 0
-        set_row(ws, r, [u, mrr, cost, gp, margin, gp * 12, cpu, ""],
-                font=BODY, align=LEFT, border=BOX,
-                number_formats=[None, "$#,##0", "$#,##0", "$#,##0",
-                                "0.0%", "$#,##0", "$#,##0.00", None])
-        r += 1
-
-    # --- Section C: Break-even scenarios
+    # --- Section B: INFRA-ONLY margin (unit economics narrative) ---
     r += 2
     ws.cell(row=r, column=1,
-            value="C. Break-even user count by cost scenario").font = H2
-    ws.merge_cells(f"A{r}:H{r}")
+            value="B. INFRA-ONLY gross profit — the unit-economics number").font = H2
+    ws.merge_cells(f"A{r}:I{r}")
     r += 1
-    header_row(ws, r, ["Scenario", "Tech burn /mo", f"Break-even users @ ${BLENDED_ARPU:.0f} blended",
-                       "Break-even @ $75 (Standard)", "Break-even @ $95 (Pro)",
-                       "", "", ""])
+    header_row(ws, r, ["Users", "MRR", "Infra + SaaS + AI", "Gross profit",
+                       "Gross margin", "Annual profit", "Cost/user", "", ""])
+    r += 1
+    for u, infra, _, _ in COST_STACK:
+        mrr = u * BLENDED_ARPU
+        gp = mrr - infra
+        margin = gp / mrr if mrr else 0
+        set_row(ws, r, [u, mrr, infra, gp, margin, gp * 12, infra / u, "", ""],
+                font=BODY, align=LEFT, border=BOX,
+                number_formats=[None, "$#,##0", "$#,##0", "$#,##0",
+                                "0.0%", "$#,##0", "$#,##0.00", None, None])
+        r += 1
+
+    # --- Section C: ALL-IN margin (with outsource + FTEs) ---
+    r += 2
+    ws.cell(row=r, column=1,
+            value="C. ALL-IN monthly cost + margin (infra + outsource + FTE loaded)").font = H2
+    ws.merge_cells(f"A{r}:I{r}")
+    r += 1
+    header_row(ws, r, ["Users", "MRR", "Infra", "Outsource",
+                       "FTE loaded", "All-in cost", "All-in profit",
+                       "All-in margin", "Annual profit"])
+    r += 1
+    for u, infra, outs, ftes in COST_STACK:
+        mrr = u * BLENDED_ARPU
+        fte_cost = sum(FTE_MO[n] for n in ftes)
+        allin = infra + outs + fte_cost
+        gp = mrr - allin
+        margin = gp / mrr if mrr else 0
+        set_row(ws, r,
+                [u, mrr, infra, outs, fte_cost, allin, gp, margin, gp * 12],
+                font=BODY, align=LEFT, border=BOX,
+                number_formats=[None, "$#,##0", "$#,##0", "$#,##0",
+                                "$#,##0", "$#,##0", "$#,##0", "0.0%", "$#,##0"])
+        r += 1
+
+    # --- Section D: Break-even users under different burn scenarios ---
+    r += 2
+    ws.cell(row=r, column=1,
+            value="D. Break-even users by cost scenario (blended $70.60 ARPU)").font = H2
+    ws.merge_cells(f"A{r}:I{r}")
+    r += 1
+    header_row(ws, r, ["Scenario", "Total burn /mo",
+                       "Break-even @ blended", "@ $75 Std", "@ $95 Pro",
+                       "", "", "", ""])
     r += 1
     scenarios = [
-        ("Bare-minimum floor (paused build)",  2100),
-        ("Steady state (1 fractional dev)",    5500),
-        ("Current heavy-build burn",          15500),
-        ("Post-launch @ 500-user infra",       4000),
-        ("Post-launch @ 1,500-user infra",    11000),
+        ("Bare-minimum floor (paused build)",         2100),
+        ("Steady state (1 fractional dev)",           5500),
+        ("Pre-launch today (heavy build)",           15500),
+        ("Post-launch, no FTE (500u infra + outs)",  10000),
+        ("1 FTE hired (1,000u stage)",               31750),
+        ("Full core team (3,000u stage)",            86083),
     ]
     for label, burn in scenarios:
         set_row(ws, r,
                 [label, burn,
                  round(burn / BLENDED_ARPU),
                  round(burn / 75),
-                 round(burn / 95), "", "", ""],
+                 round(burn / 95), "", "", "", ""],
                 font=BODY, align=LEFT, border=BOX,
                 number_formats=[None, "$#,##0", "#,##0", "#,##0", "#,##0",
-                                None, None, None])
+                                None, None, None, None])
         r += 1
 
-    # --- Section D: Enterprise-heavy vs Solo-heavy sensitivity
+    # --- Section E: ARPU sensitivity by mix ---
     r += 2
     ws.cell(row=r, column=1,
-            value="D. Blended-ARPU sensitivity by tier mix").font = H2
-    ws.merge_cells(f"A{r}:H{r}")
+            value="E. Blended-ARPU sensitivity by tier mix").font = H2
+    ws.merge_cells(f"A{r}:I{r}")
     r += 1
     header_row(ws, r, ["Mix scenario", "Solo %", "Standard %",
                        "Pro %", "Ent %", "Blended ARPU",
-                       "MRR @ 1,500 users", ""])
+                       "MRR @ 1,500u", "", ""])
     r += 1
     mixes = [
         ("Solo-heavy (Freemium bleed)", 0.60, 0.30, 0.08, 0.02),
@@ -942,20 +995,186 @@ def tab_profit(wb):
     ]
     for label, s, std, pro, ent in mixes:
         arpu = s * 38 + std * 75 + pro * 95 + ent * 149
-        mrr_1500 = 1500 * arpu
-        set_row(ws, r, [label, s, std, pro, ent, arpu, mrr_1500, ""],
+        set_row(ws, r,
+                [label, s, std, pro, ent, arpu, 1500 * arpu, "", ""],
                 font=BODY, align=LEFT, border=BOX,
                 number_formats=[None, "0%", "0%", "0%", "0%",
-                                "$#,##0.00", "$#,##0", None])
+                                "$#,##0.00", "$#,##0", None, None])
         r += 1
 
     r += 2
     ws.cell(row=r, column=1, value=(
-        "Takeaway: at 1,500 users on the baseline mix, MRR ~$106k against "
-        "~$11k/mo tech cost = ~90% infra margin. Enterprise-heavy mix pushes "
-        "MRR past $180k at the same user count."
+        "Takeaway: infra-only margin stays ~87-89% through the whole ramp. "
+        "All-in margin dips to ~49% at 1,500u (post-Platform-Eng hire) and "
+        "~44% at 3,000u as the core team fills out, then rebounds to ~63% at "
+        "5,000u once revenue outpaces headcount. This is the classic "
+        "SaaS S-curve — the pitch is: infra margin proves the model, all-in "
+        "margin proves you can operate it."
     )).font = BODY
-    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=9)
+
+
+# ============================================================
+# TAB 9 — HIRE TIMELINE
+# ============================================================
+def tab_hire_timeline(wb):
+    ws = wb.create_sheet("9. Hire Timeline")
+    widen(ws, [30, 14, 16, 20, 16, 16, 30])
+    title(ws, "Outsource & Hire Timeline — what, when, why", "G")
+    subtitle(ws, "Chronological plan tied to user milestones. Each row shows "
+                 "the trigger (users or MRR), monthly cost impact, cumulative "
+                 "team spend, and the MRR available at that point.", "G")
+
+    # --- Section A: Immediate outsourcing (pre-launch / day 1) ---
+    r = 4
+    ws.cell(row=r, column=1, value="A. IMMEDIATE — active or start within 30 days").font = H2
+    ws.merge_cells(f"A{r}:G{r}")
+    r += 1
+    header_row(ws, r, ["Engagement", "Type", "Monthly cost",
+                       "Trigger", "Users at trigger", "MRR at trigger", "Notes"])
+    r += 1
+    immediate = [
+        ("Emergent contract dev (current)", "Outsource",  3000,
+         "Active today",  0,     0,
+         "Extra hands during heavy build; scales up to $8k/mo as needed"),
+
+        ("Fractional QA engineer",          "Outsource",  1500,
+         "Post-launch",   50,    3530,
+         "Playwright smoke suite once users hit the app"),
+
+        ("Cybersecurity vendor SaaS (Snyk, Doppler, Cloudflare Zero Trust)",
+         "SaaS",         100,
+         "Day 1",         0,     0,
+         "Not a person — set up before first paying user"),
+    ]
+    for row_ in immediate:
+        set_row(ws, r, list(row_), font=BODY, align=LEFT, border=BOX,
+                number_formats=[None, None, "$#,##0", None,
+                                "#,##0", "$#,##0", None])
+        r += 1
+
+    # --- Section B: Growth-stage outsourcing (250-1,500 users) ---
+    r += 2
+    ws.cell(row=r, column=1,
+            value="B. GROWTH STAGE — 250 to 1,500 users").font = H2
+    ws.merge_cells(f"A{r}:G{r}")
+    r += 1
+    header_row(ws, r, ["Engagement", "Type", "Monthly cost",
+                       "Trigger", "Users at trigger", "MRR at trigger", "Notes"])
+    r += 1
+    growth = [
+        ("Fractional Platform / DevOps engineer", "Outsource", 3500,
+         "1,000 users",   1000,  70600,
+         "SRE, IaC, cost tuning; keep until Platform FTE hired"),
+
+        ("Sr Full-Stack Eng #1 (FTE)", "FTE",   16250,
+         "$25k MRR OR UK launch",  355, 25063,
+         "Second permanent code owner — kills bus factor"),
+
+        ("Fractional Security engineer", "Outsource", 4000,
+         "SOC 2 kickoff / 1,000 users", 1000, 70600,
+         "Threat model, IAM review, SIEM tuning, IR playbooks"),
+
+        ("Annual pen-test (amortised)", "Outsource", 750,
+         "SOC 2 Type I readiness (1,500u)", 1500, 105900,
+         "$6-12k one-shot; required for SOC 2"),
+
+        ("HackerOne / Intigriti bug bounty program", "Outsource", 1300,
+         "1,500 users",   1500, 105900,
+         "Platform fee + budgeted bounty pool"),
+
+        ("Platform / DevOps Eng (FTE)", "FTE", 17500,
+         "1,500 users OR SOC 2 Type II", 1500, 105900,
+         "Convert fractional to FTE; on-call ownership"),
+    ]
+    for row_ in growth:
+        set_row(ws, r, list(row_), font=BODY, align=LEFT, border=BOX,
+                number_formats=[None, None, "$#,##0", None,
+                                "#,##0", "$#,##0", None])
+        r += 1
+
+    # --- Section C: Scale-stage outsourcing + FTEs (1,500-5,000 users) ---
+    r += 2
+    ws.cell(row=r, column=1,
+            value="C. SCALE STAGE — 1,500 to 5,000 users").font = H2
+    ws.merge_cells(f"A{r}:G{r}")
+    r += 1
+    header_row(ws, r, ["Engagement", "Type", "Monthly cost",
+                       "Trigger", "Users at trigger", "MRR at trigger", "Notes"])
+    r += 1
+    scale_rows = [
+        ("Fractional Data / Analytics engineer", "Outsource", 3000,
+         "1,500 users",   1500, 105900,
+         "Feature analytics, categorisation ML, churn model"),
+
+        ("Fractional Product Designer", "Outsource", 2500,
+         "Marketing site + brand refresh", 1000, 70600,
+         "Design system + marketing site + pitch materials"),
+
+        ("Incident Response retainer (Kroll / Mandiant)", "Outsource", 600,
+         "1,500 users",   1500, 105900,
+         "Pre-paid breach response hours"),
+
+        ("Sr Full-Stack Eng #2 (FTE)", "FTE", 16250,
+         "3,000 users OR $60k MRR",  850, 60010,
+         "Split frontend/backend; on-call rotation"),
+
+        ("Security Engineer (FTE)", "FTE", 18333,
+         "SOC 2 Type II + first enterprise deal", 3000, 211800,
+         "Full-time threat model, IR ownership, SSO reviews"),
+
+        ("QA / Test Automation Lead (FTE)", "FTE", 13750,
+         "3,000 users",   3000, 211800,
+         "Convert fractional QA; Playwright + performance suites"),
+    ]
+    for row_ in scale_rows:
+        set_row(ws, r, list(row_), font=BODY, align=LEFT, border=BOX,
+                number_formats=[None, None, "$#,##0", None,
+                                "#,##0", "$#,##0", None])
+        r += 1
+
+    # --- Section D: Cumulative team cost at each user milestone ---
+    r += 2
+    ws.cell(row=r, column=1,
+            value="D. Cumulative team cost at each milestone").font = H2
+    ws.merge_cells(f"A{r}:G{r}")
+    r += 1
+    header_row(ws, r, ["Milestone", "Outsource /mo", "FTEs on payroll",
+                       "FTE /mo", "Team total /mo", "MRR at milestone",
+                       "Team % of MRR"])
+    r += 1
+    for u, infra, outs, ftes in COST_STACK:
+        fte_cost = sum(FTE_MO[n] for n in ftes)
+        team = outs + fte_cost
+        mrr = u * BLENDED_ARPU
+        pct = team / mrr if mrr else 0
+        fte_names = ", ".join(ftes) if ftes else "—"
+        set_row(ws, r,
+                [f"{u} users", outs, fte_names, fte_cost, team, mrr, pct],
+                font=BODY, align=LEFT, border=BOX,
+                number_formats=[None, "$#,##0", None, "$#,##0", "$#,##0",
+                                "$#,##0", "0.0%"])
+        r += 1
+
+    # --- Section E: Decision rules ---
+    r += 2
+    ws.cell(row=r, column=1, value="E. Decision rules").font = H2
+    ws.merge_cells(f"A{r}:G{r}")
+    r += 1
+    rules = [
+        "• Rule of thumb: total team cost should stay below 50% of MRR at every milestone. First FTE breaks this rule intentionally — it's the classic S-curve dip.",
+        "• Never hire a FTE for something a fractional does <20 hrs/week. Wait until the role is genuinely full-time.",
+        "• Prefer converting a fractional to FTE only after 3+ months working together. That's the cheapest de-risked hire path.",
+        "• Every outsource line above has a SaaS or automation alternative — try that first for one quarter (Snyk instead of security consultant, GitHub Actions instead of DevOps).",
+        "• Delay Security FTE until first enterprise deal is signed; before that, fractional + SaaS covers 90%.",
+        "• Emergent contract dev is functionally the cheapest fractional SWE on market — use it until $25k MRR before hiring FTE #1.",
+    ]
+    for rule in rules:
+        c = ws.cell(row=r, column=1, value=rule)
+        c.font = BODY
+        c.alignment = LEFT
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=7)
+        r += 1
 
 
 # ============================================================
@@ -974,6 +1193,7 @@ def main():
     tab_ai(wb)
     tab_security(wb)
     tab_profit(wb)
+    tab_hire_timeline(wb)
 
     XLSX.parent.mkdir(parents=True, exist_ok=True)
     wb.save(XLSX)
