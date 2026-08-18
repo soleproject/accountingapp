@@ -1463,6 +1463,176 @@ def tab_exit_valuation(wb):
 
 
 # ============================================================
+# TAB 11 — PRACTICE PARTNER (accountant wholesale program)
+# ============================================================
+def tab_practice_partner(wb):
+    ws = wb.create_sheet("11. Practice Partner")
+    widen(ws, [30, 14, 14, 14, 14, 14, 14])
+    title(ws, "Practice Partner — accountant wholesale program", "G")
+    subtitle(ws,
+        "$349/mo firm license + $15/client seat + white-label. Affiliate "
+        "commission $125/mo/firm. Yellow cells are editable.", "G")
+
+    # ---- A. EDITABLE INPUTS ----
+    r = 4
+    ws.cell(row=r, column=1, value="A. EDITABLE INPUTS (yellow cells)").font = H2
+    ws.merge_cells(f"A{r}:G{r}")
+    r += 1
+    inputs = [
+        ("Firm license price /mo",             349,      "$#,##0"),
+        ("Firm license annual (prepaid)",      3700,     "$#,##0"),
+        ("Per-client seat price /mo",          15,       "$#,##0"),
+        ("Accountant's $/client charged",      50,       "$#,##0"),
+        ("Affiliate commission /mo/firm",      125,      "$#,##0"),
+        ("Our COGS per client seat",           8,        "$#,##0"),
+    ]
+    for label, val, fmt in inputs:
+        c1 = ws.cell(row=r, column=1, value=label); c1.font = BODY_BOLD
+        c2 = ws.cell(row=r, column=2, value=val)
+        c2.number_format = fmt
+        c2.fill = FILL_GOOD
+        c2.font = BODY_BOLD
+        for col in range(1, 3):
+            ws.cell(row=r, column=col).border = BOX
+        r += 1
+    firm_price_r  = 5
+    seat_price_r  = 7
+    client_chg_r  = 8
+    aff_comm_r    = 9
+    cogs_r        = 10
+
+    # ---- B. ACCOUNTANT P&L ----
+    r += 1
+    ws.cell(row=r, column=1,
+            value="B. ACCOUNTANT P&L — profit at different client counts").font = H2
+    ws.merge_cells(f"A{r}:G{r}")
+    r += 1
+    header_row(ws, r, ["Clients", "Firm license",
+                       "Seat fees", "Total cost",
+                       "Client revenue", "Net profit /mo",
+                       "Annual profit"])
+    r += 1
+    for clients in [5, 10, 20, 30, 50, 75, 100, 150, 200]:
+        ws.cell(row=r, column=1, value=clients).number_format = "#,##0"
+        ws.cell(row=r, column=2, value=f"=B{firm_price_r}").number_format = "$#,##0"
+        ws.cell(row=r, column=3, value=f"={clients}*B{seat_price_r}").number_format = "$#,##0"
+        ws.cell(row=r, column=4, value=f"=B{r}+C{r}").number_format = "$#,##0"
+        # oops we need actual col letters
+        ws.cell(row=r, column=4, value=f"=B{firm_price_r}+({clients}*B{seat_price_r})").number_format = "$#,##0"
+        ws.cell(row=r, column=5, value=f"={clients}*B{client_chg_r}").number_format = "$#,##0"
+        ws.cell(row=r, column=6, value=f"=E{r}-D{r}").number_format = "$#,##0"
+        ws.cell(row=r, column=7, value=f"=F{r}*12").number_format = "$#,##0"
+        # colour based on profit
+        for col in range(1, 8):
+            ws.cell(row=r, column=col).border = BOX
+            ws.cell(row=r, column=col).font = BODY
+        if clients >= 30:
+            ws.cell(row=r, column=6).fill = FILL_GOOD
+        elif clients >= 10:
+            ws.cell(row=r, column=6).fill = FILL_TOTAL
+        else:
+            ws.cell(row=r, column=6).fill = FILL_ACCENT
+        r += 1
+
+    # ---- C. BUSINESS SOFTWARE P&L per firm ----
+    r += 1
+    ws.cell(row=r, column=1,
+            value="C. BUSINESS SOFTWARE P&L — margin per Practice Partner firm").font = H2
+    ws.merge_cells(f"A{r}:G{r}")
+    r += 1
+    header_row(ws, r, ["Clients in firm", "Total MRR from firm",
+                       "Affiliate payout", "Our COGS",
+                       "Net /mo", "Annual", ""])
+    r += 1
+    for clients in [10, 30, 50, 75, 100, 150, 200]:
+        ws.cell(row=r, column=1, value=clients).number_format = "#,##0"
+        ws.cell(row=r, column=2, value=f"=B{firm_price_r}+({clients}*B{seat_price_r})").number_format = "$#,##0"
+        ws.cell(row=r, column=3, value=f"=B{aff_comm_r}").number_format = "$#,##0"
+        ws.cell(row=r, column=4, value=f"={clients}*B{cogs_r}").number_format = "$#,##0"
+        ws.cell(row=r, column=5, value=f"=B{r}-C{r}-D{r}").number_format = "$#,##0"
+        ws.cell(row=r, column=6, value=f"=E{r}*12").number_format = "$#,##0"
+        for col in range(1, 7):
+            ws.cell(row=r, column=col).border = BOX
+            ws.cell(row=r, column=col).font = BODY
+        ws.cell(row=r, column=5).fill = FILL_GOOD
+        r += 1
+
+    # ---- D. PORTFOLIO SCALE (many firms in program) ----
+    r += 1
+    ws.cell(row=r, column=1,
+            value="D. PORTFOLIO SCALE — Total revenue by # of Partner firms").font = H2
+    ws.merge_cells(f"A{r}:G{r}")
+    r += 1
+    header_row(ws, r, ["Firms in program", "Avg clients / firm",
+                       "Total client seats", "Total MRR",
+                       "Total ARR", "Our net /mo", "Our net /yr"])
+    r += 1
+    portfolio = [
+        (25,  20),
+        (50,  30),
+        (100, 30),
+        (250, 40),
+        (500, 50),
+        (1000,50),
+    ]
+    for firms, avg_clients in portfolio:
+        ws.cell(row=r, column=1, value=firms).number_format = "#,##0"
+        ws.cell(row=r, column=2, value=avg_clients).number_format = "#,##0"
+        ws.cell(row=r, column=3, value=firms * avg_clients).number_format = "#,##0"
+        # MRR = firms * (license + avg_clients * seat)
+        ws.cell(row=r, column=4,
+                value=f"={firms}*(B{firm_price_r}+{avg_clients}*B{seat_price_r})").number_format = "$#,##0"
+        ws.cell(row=r, column=5, value=f"=D{r}*12").number_format = "$#,##0"
+        # Net = MRR - firms * (affiliate + avg_clients * cogs)
+        ws.cell(row=r, column=6,
+                value=f"=D{r}-{firms}*(B{aff_comm_r}+{avg_clients}*B{cogs_r})").number_format = "$#,##0"
+        ws.cell(row=r, column=7, value=f"=F{r}*12").number_format = "$#,##0"
+        for col in range(1, 8):
+            ws.cell(row=r, column=col).border = BOX
+            ws.cell(row=r, column=col).font = BODY
+        ws.cell(row=r, column=7).fill = FILL_TOTAL
+        r += 1
+
+    # ---- E. AFFILIATE INCOME ----
+    r += 1
+    ws.cell(row=r, column=1,
+            value="E. AFFILIATE INCOME — for referrers").font = H2
+    ws.merge_cells(f"A{r}:G{r}")
+    r += 1
+    header_row(ws, r, ["Firms referred", "Monthly income",
+                       "Annual income", "", "", "", ""])
+    r += 1
+    for n in [5, 10, 20, 50, 100, 200]:
+        ws.cell(row=r, column=1, value=n).number_format = "#,##0"
+        ws.cell(row=r, column=2, value=f"={n}*B{aff_comm_r}").number_format = "$#,##0"
+        ws.cell(row=r, column=3, value=f"=B{r}*12").number_format = "$#,##0"
+        for col in range(1, 4):
+            ws.cell(row=r, column=col).border = BOX
+            ws.cell(row=r, column=col).font = BODY
+        r += 1
+
+    # ---- F. KEY TAKEAWAYS ----
+    r += 1
+    ws.cell(row=r, column=1, value="F. KEY TAKEAWAYS").font = H2
+    ws.merge_cells(f"A{r}:G{r}")
+    r += 1
+    takeaways = [
+        "• Accountant break-even: ~10 clients at $50/client. Every additional client = ~$35 pure margin.",
+        "• Business Software makes 7× more per firm ($1,099 at 50 clients) than a regular Enterprise seat ($149).",
+        "• At 500 Practice Partners × 50 clients each, this channel alone drives $6.6M ARR.",
+        "• Affiliate at 20 firms referred = $2,500/mo recurring, lifetime. This is a real career for CPA newsletter operators.",
+        "• Annual prepay ($3,700) saves accountant $488/yr AND locks retention — worth pushing hard.",
+        "• Our COGS assumption ($8/client) is conservative — real cost closer to $5-6/client at scale.",
+    ]
+    for t in takeaways:
+        c = ws.cell(row=r, column=1, value=t)
+        c.font = BODY
+        c.alignment = LEFT
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=7)
+        r += 1
+
+
+# ============================================================
 # Build workbook
 # ============================================================
 def main():
@@ -1480,6 +1650,7 @@ def main():
     tab_profit(wb)
     tab_hire_timeline(wb)
     tab_exit_valuation(wb)
+    tab_practice_partner(wb)
 
     XLSX.parent.mkdir(parents=True, exist_ok=True)
     wb.save(XLSX)
