@@ -1959,3 +1959,58 @@ with per-object counts, "Migration complete" summary with stat
 pills, and the full action-button row (View CoA, View Contacts,
 Review Plaid Categories, Open Live Mirror, Re-run, Resend email,
 Rebuild account hierarchy, Categorize imported transactions).
+
+## Referral lead-capture page + Superadmin > Leads — Feb 18, 2026
+
+**Motivation**
+Refer & earn links previously dropped visitors straight onto
+`/signup?ref=<slug>` — so if they didn't complete signup, we lost
+them completely. Now every referral link routes through a lead-
+capture landing page first, so we own the contact record even when
+the visitor bounces from Stripe.
+
+**Backend**
+- New route module `routes/leads.py` (mounted under `/api`):
+  * `POST /api/public/leads` — public form submission
+    (name, email, role, ref_slug, optional phone/company/notes).
+    De-dupes on (email, ref_slug) within 24h. Persists to new
+    `leads` collection with source=`referral|direct`, status=`new`.
+  * `GET /api/public/refer/{slug}` — resolves a slug into the
+    referrer's display name so the landing page can show
+    "Referred by …" trust badge.
+  * `GET /api/admin/leads` — superadmin list with status/role/
+    free-text filters + total/new counts.
+  * `PATCH /api/admin/leads/{id}` — superadmin update status/notes.
+  * `DELETE /api/admin/leads/{id}` — superadmin delete.
+- `routes/auth.py::_share_link_for` — swapped `/signup?ref=<slug>`
+  → `/refer/<slug>` for both platform and firm-subdomain paths.
+  Custom firm buy_page_url unchanged.
+
+**Frontend**
+- `pages/EnterReferral.jsx` — public referral capture form at
+  `/refer/:slug` (and `/refer` without slug). 4 role cards
+  (Accounting Pro, Business Owner, Enterprise, Other), name/email
+  required, phone/company/notes optional, forwards to
+  `/signup?ref=<slug>` on submit so revenue-share attribution
+  still fires.
+- `pages/AdminLeads.jsx` — superadmin table at `/admin/leads`
+  with search + status/role filters, inline row expansion for
+  status pills + notes editor + contact info + delete.
+- `SuperadminDash.jsx` — added Leads button in header (with Inbox
+  icon) next to Feedback.
+- `App.js` — new public routes `/refer` and `/refer/:slug`, new
+  protected route `/admin/leads`.
+
+**Verified**
+- `curl POST /api/public/leads` — 200, returns id + duplicate flag.
+- `curl GET /api/admin/leads` (superadmin token) — returns items
+  with referrer_name enrichment when slug resolves.
+- Frontend screenshots: public referral page + superadmin leads
+  page + expanded row (status pills, notes editor) all render
+  cleanly.
+
+**Follow-up (out of scope this pass)**
+- Templated branded drip emails per Enterprise/Partner
+- Calendar link (Cal.com / Calendly integration) for accounting
+  pros on the drip
+- Auto-graduate lead → `converted` when they finish `/signup`

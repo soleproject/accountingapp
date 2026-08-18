@@ -286,10 +286,15 @@ def _share_link_for(user: dict, slug: str) -> tuple[str, str]:
       1. Firm's custom "buy page URL" (``branding.buy_page_url``) —
          referrer's site or a dedicated pricing page. Ref param appended
          as ``?ref=`` (or ``&ref=`` if the URL already has a query).
-      2. Firm's private-label subdomain + ``/signup?ref=…`` — when the
+      2. Firm's private-label subdomain + ``/refer/<slug>`` — when the
          pro has ``branding.signin_subdomain`` set and the platform has
          a ``PRIVATE_LABEL_HOST_TEMPLATE`` env var.
-      3. Platform ``/signup?ref=…`` on ``PRIMARY_HOST``.
+      3. Platform ``/refer/<slug>`` on ``PRIMARY_HOST``.
+
+    Note: link now lands on the ``/refer/<slug>`` lead-capture page
+    which forwards to ``/signup?ref=<slug>`` after submission. This
+    lets us drop the visitor into a drip campaign even if they don't
+    complete signup on the first visit.
     """
     b = (user or {}).get("branding") or {}
     buy_url = (b.get("buy_page_url") or "").strip()
@@ -300,9 +305,9 @@ def _share_link_for(user: dict, slug: str) -> tuple[str, str]:
     template = os.environ.get("PRIVATE_LABEL_HOST_TEMPLATE")
     if firm_slug and template:
         host_url = template.replace("{slug}", firm_slug).rstrip("/")
-        return f"{host_url}/signup?ref={slug}", "firm_subdomain"
+        return f"{host_url}/refer/{slug}", "firm_subdomain"
     host = os.environ.get("PRIMARY_HOST", "app.smartbookssoftware.ai")
-    return f"https://{host}/signup?ref={slug}", "platform"
+    return f"https://{host}/refer/{slug}", "platform"
 
 
 @router.get("/share")
