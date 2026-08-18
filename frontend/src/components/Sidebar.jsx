@@ -469,8 +469,6 @@ export default function Sidebar({ collapsed, onToggle }) {
         <Group group={GROUPS[1]} />
         {/* Receipts (single, between purchases and banking) */}
         {AFTER_PURCHASES.map((it) => <Item key={it.label} item={it} />)}
-        {/* Grouped: Banking */}
-        <Group group={GROUPS[2]} />
         {/* Reports (single, between banking and accounting) */}
         {AFTER_BANKING.map((it) => <Item key={it.label} item={it} />)}
         {/* Grouped: Accounting */}
@@ -478,6 +476,12 @@ export default function Sidebar({ collapsed, onToggle }) {
 
         {/* Communications kept discoverable (previously top-level) */}
         <Item item={{ to: "/communications", label: "Communications", icon: Inbox }} />
+
+        {/* Grouped: Banking — moved BELOW Communications so daily
+            workflows (transactions, reports, comms) sit at the top of
+            the nav and the connection-management group lives closer
+            to Settings, matching how often each is actually used. */}
+        <Group group={GROUPS[2]} />
 
         <div className="my-2 border-t" />
 
