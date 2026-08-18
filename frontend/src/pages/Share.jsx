@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import {
   Share2, Copy, Check, Users, DollarSign, Loader2, Pencil, Save,
   ExternalLink, Calendar, Download, X, Sparkles,
+  Briefcase, User, Building2, HelpCircle, Send,
 } from "lucide-react";
 
 /**
@@ -47,7 +48,8 @@ export default function Share() {
 
       <div className="mb-5 border-b border-slate-200 flex gap-1">
         {[
-          { id: "overview", label: "Overview" },
+          { id: "overview",  label: "Overview" },
+          { id: "enter",     label: "Enter referral" },
           { id: "referrals", label: "Referrals" },
           { id: "payouts",   label: "Payouts" },
         ].map(t => (
@@ -68,6 +70,7 @@ export default function Share() {
       </div>
 
       {tab === "overview"  && <OverviewTab data={data} onChanged={load} />}
+      {tab === "enter"     && <EnterReferralTab slug={data.slug} />}
       {tab === "referrals" && <ReferralsTab />}
       {tab === "payouts"   && <PayoutsTab />}
     </div>
@@ -246,6 +249,187 @@ function OverviewTab({ data, onChanged }) {
         </div>
       </div>
     </>
+  );
+}
+
+// --------------------------------------------------------------------------
+// ENTER REFERRAL — affiliate submits a lead on someone's behalf. Uses the
+// same /api/public/leads endpoint the /refer/:slug landing page hits, but
+// pre-fills the affiliate's own slug so the lead is attributed correctly.
+// --------------------------------------------------------------------------
+const ROLE_OPTIONS = [
+  { value: "accounting_pro", label: "Accounting professional",
+    hint: "CPA, bookkeeper, or firm", icon: Briefcase },
+  { value: "business_owner", label: "Business owner",
+    hint: "End user / small business",  icon: User },
+  { value: "enterprise",     label: "Enterprise / multi-firm",
+    hint: "Partner network or 50+ shop",  icon: Building2 },
+  { value: "other",          label: "Something else",
+    hint: "Investor, journalist, curious",  icon: HelpCircle },
+];
+
+function EnterReferralTab({ slug }) {
+  const [role, setRole] = useState("accounting_pro");
+  const [form, setForm] = useState({
+    name: "", email: "", phone: "", company_name: "", notes: "",
+  });
+  const [busy, setBusy] = useState(false);
+
+  const update = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
+  const reset = () => setForm({ name: "", email: "", phone: "", company_name: "", notes: "" });
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!form.name.trim() || !form.email.trim()) {
+      toast.error("Name and email are required");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.post("/public/leads", {
+        name: form.name.trim(),
+        email: form.email.trim(),
+        role,
+        ref_slug: slug || null,
+        phone: form.phone.trim() || null,
+        company_name: form.company_name.trim() || null,
+        notes: form.notes.trim() || null,
+      });
+      toast.success("Lead submitted — it's in your Referrals + the admin queue.");
+      reset();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Submission failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div data-testid="share-enter-tab">
+      <div className="rounded-lg border border-cyan-200 bg-cyan-50/40 p-4 mb-6 text-sm text-cyan-900">
+        <div className="font-semibold mb-1 flex items-center gap-2">
+          <Send size={14} /> Submit a referral on someone's behalf
+        </div>
+        <div className="text-cyan-800/90 text-xs leading-relaxed">
+          Use this when you've talked to a prospect directly and want to
+          log them without having them click your link. They'll be
+          attributed to your slug (<code className="bg-white/70 px-1 rounded">{slug || "—"}</code>)
+          and show up in your Referrals tab plus the admin lead queue.
+        </div>
+      </div>
+
+      <form onSubmit={submit} className="space-y-6 max-w-3xl">
+        {/* Role selector */}
+        <div>
+          <label className="block text-sm font-semibold text-slate-800 mb-3">
+            Who is this person?
+          </label>
+          <div className="grid sm:grid-cols-2 gap-3">
+            {ROLE_OPTIONS.map((opt) => {
+              const Icon = opt.icon;
+              const active = role === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  data-testid={`enter-role-${opt.value}`}
+                  onClick={() => setRole(opt.value)}
+                  className={
+                    "text-left p-3 rounded-lg border-2 transition-all " +
+                    (active
+                      ? "border-cyan-600 bg-cyan-50 shadow-sm"
+                      : "border-slate-200 bg-white hover:border-slate-300")
+                  }
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={
+                      "h-8 w-8 rounded-md grid place-items-center shrink-0 " +
+                      (active ? "bg-cyan-600 text-white" : "bg-slate-100 text-slate-600")
+                    }>
+                      <Icon size={14} />
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-slate-900">{opt.label}</div>
+                      <div className="text-xs text-slate-500 mt-0.5">{opt.hint}</div>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <FieldRow label="Name *">
+            <input
+              type="text" required value={form.name} onChange={update("name")}
+              data-testid="enter-name-input"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200 outline-none"
+            />
+          </FieldRow>
+          <FieldRow label="Email *">
+            <input
+              type="email" required value={form.email} onChange={update("email")}
+              data-testid="enter-email-input"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200 outline-none"
+            />
+          </FieldRow>
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <FieldRow label="Phone (optional)">
+            <input
+              type="tel" value={form.phone} onChange={update("phone")}
+              data-testid="enter-phone-input"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200 outline-none"
+            />
+          </FieldRow>
+          <FieldRow label={role === "accounting_pro" ? "Firm name (optional)" : "Business name (optional)"}>
+            <input
+              type="text" value={form.company_name} onChange={update("company_name")}
+              data-testid="enter-company-input"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200 outline-none"
+            />
+          </FieldRow>
+        </div>
+
+        <FieldRow label="Notes (optional — context for the follow-up)">
+          <textarea
+            rows={3} value={form.notes} onChange={update("notes")}
+            data-testid="enter-notes-input"
+            placeholder="Where you met, what they're looking for, any timing constraints…"
+            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200 outline-none resize-none"
+          />
+        </FieldRow>
+
+        <div className="pt-2 flex items-center gap-3">
+          <button
+            type="submit" disabled={busy}
+            data-testid="enter-submit-btn"
+            className="inline-flex items-center gap-2 rounded-md bg-cyan-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {busy ? <><Loader2 size={16} className="animate-spin" /> Sending…</> : <><Send size={16} /> Submit referral</>}
+          </button>
+          <button
+            type="button" onClick={reset}
+            data-testid="enter-reset-btn"
+            className="text-xs text-slate-500 hover:text-slate-700 underline underline-offset-2"
+          >
+            Reset
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function FieldRow({ label, children }) {
+  return (
+    <label className="block">
+      <span className="block text-sm font-semibold text-slate-800 mb-1.5">{label}</span>
+      {children}
+    </label>
   );
 }
 
