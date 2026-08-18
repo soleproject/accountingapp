@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, fmtMoney } from "@/lib/api";
-import { useCompany } from "@/lib/company";
+import { api } from "@/lib/api";
+import { useCompany, useMoneyFmt } from "@/lib/company";
 import { toast } from "sonner";
 import { BarChart3, Loader2, Download, TrendingUp, TrendingDown, Package, ShoppingCart, Users, Truck } from "lucide-react";
 import ContactDetailModal from "@/components/ContactDetailModal";
@@ -12,6 +12,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 // Sales and Purchases share almost identical shape, so we drive both from
 // this single page with a top-level toggle. Deep-linkable via ?mode=purchases.
 export default function SalesReports() {
+  const fmtMoney = useMoneyFmt();
   const { currentId } = useCompany();
   const [searchParams, setSearchParams] = useSearchParams();
   const mode = searchParams.get("mode") === "purchases" ? "purchases" : "sales";

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, fmtMoney } from "@/lib/api";
-import { useCompany } from "@/lib/company";
+import { api } from "@/lib/api";
+import { useCompany, useMoneyFmt } from "@/lib/company";
 import { toast } from "sonner";
 import { Plus, Trash2, Pencil, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,7 @@ export default function TxnTypeListPage({
   contactLabel = "Customer",
   emptyHint,        // helper text for empty state
 }) {
+  const fmtMoney = useMoneyFmt();
   const { currentId: cid } = useCompany();
   const nav = useNavigate();
   const [rows, setRows] = useState([]);

@@ -10,11 +10,13 @@
  */
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, fmtMoney } from "@/lib/api";
+import { api } from "@/lib/api";
 import { AlertTriangle, PackageMinus, ShoppingCart, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { useMoneyFmt } from "@/lib/company";
 export default function ReorderAlertsTile({ currentId }) {
+  const fmtMoney = useMoneyFmt();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [drafting, setDrafting] = useState(null);

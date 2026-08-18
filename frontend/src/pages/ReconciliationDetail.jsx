@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, fmtMoney } from "@/lib/api";
-import { useCompany } from "@/lib/company";
+import { api } from "@/lib/api";
+import { useCompany, useMoneyFmt } from "@/lib/company";
 import { toast } from "sonner";
 import {
   ArrowLeft, CheckCircle2, Loader2, CalendarDays, User, Undo2,
@@ -12,6 +12,7 @@ import {
 // ledger balance, difference) plus the full list of transactions that were
 // cleared as part of this reconciliation.
 export default function ReconciliationDetail() {
+  const fmtMoney = useMoneyFmt();
   const { rid } = useParams();
   const { currentId } = useCompany();
   const navigate = useNavigate();
@@ -167,6 +168,8 @@ export default function ReconciliationDetail() {
 }
 
 function StatBlock({ label, value, accent, muted }) {
+
+  const fmtMoney = useMoneyFmt();
   const color = accent === "emerald" ? "text-emerald-700"
               : accent === "red"     ? "text-red-700"
               : muted                ? "text-slate-500"

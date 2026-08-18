@@ -11,8 +11,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { ArrowLeftRight, Check, X, Info, Sparkles } from "lucide-react";
-import { api, fmtMoney, fmtDate } from "@/lib/api";
-import { useCompany } from "@/lib/company";
+import { api } from "@/lib/api";
+import { useCompany, useMoneyFmt, useDateFmt } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
 import CleanupCopilot from "@/components/CleanupCopilot";
@@ -37,6 +37,10 @@ function ConfBadge({ conf, delta }) {
 }
 
 function InspectCard({ pair, onApprove, onReject, busy }) {
+
+  const fmtMoney = useMoneyFmt();
+
+  const fmtDate = useDateFmt();
   const d = pair.debit_leg;
   const c = pair.credit_leg;
   return (
@@ -123,6 +127,12 @@ function TransferReviewDoneRedirect() {
 
 
 export default function TransferReview() {
+
+
+  const fmtMoney = useMoneyFmt();
+
+
+  const fmtDate = useDateFmt();
   const { currentId } = useCompany();
   const { user } = useAuth();
   const [searchParams] = useSearchParams();

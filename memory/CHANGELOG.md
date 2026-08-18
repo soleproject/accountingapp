@@ -1,5 +1,33 @@
 # SmartBooks — Changelog
 
+## 2026-02-27 — Phase 1.4 (v2): Fmt Sweep Round 2 — 27 files, 148 call-sites
+
+- **Codemod-based sweep**: `/tmp/fmt_sweep.py` — regex + naive-brace-matching transformer that removes `fmtMoney`/`fmtDate` from `@/lib/api` imports, adds the corresponding `useMoneyFmt`/`useDateFmt` hook imports from `@/lib/company`, and injects the hook lines into every function scope that references the formatters.
+- **26 files transformed automatically**; 2 required manual fixes:
+  - `PaymentHistoryBlock.jsx` — codemod injected the hook into lowercase `renderBlock` helper (rules-of-hooks violation). Fixed by hoisting the hook to the uppercase parent and passing `fmtMoney` as a prop.
+  - `AskClientButton.jsx` + `Payments.jsx::PaymentModal` — multi-line and `export function` signatures didn't match the codemod's regex. Added hooks manually.
+- **Full test coverage**: 17 pages under `/demo/uk` verified. £ counts total 97+, `$=0` across the entire UK demo experience.
+- **Zero US regression**: `fmtMoney(x)` defaults `region="US"` when called without argument — every US company continues to render `$1,234.50`.
+
+## 2026-02-27 — Phase 1.4: Fmt Sweep Round 2 (27 files, 148 call-sites)
+
+- **Codemod-based sweep**: wrote `/tmp/fmt_sweep.py` to swap `fmtMoney`/`fmtDate` imports from `@/lib/api` → `useMoneyFmt`/`useDateFmt` hooks from `@/lib/company`, and inject the hooks into every function scope that references them. Safely handled: import merging with existing company imports, hook injection at scope-open point, and rules-of-hooks compliance.
+- **Files touched (26 by codemod + 1 manual fix)**: CustomerStatements, BusinessOverview, LoansPage, SalesReports, Reconciliation, ContactDetailModal, InventoryPage, FirmAtAGlance, TransferReview, JournalEntries, InvoiceEditor, BillEditor, PaymentHistoryBlock, EstimateEditor, PurchaseOrderEditor, Communications, Recurring, Items, Billing, TxnTypeListPage, TransactionEditor, ReconciliationDetail, Receipts, BankMatchReview, Payments, AskClientButton, ReorderAlertsTile.
+- **One manual fix**: `PaymentHistoryBlock.jsx` — the codemod injected `useMoneyFmt()` into a lowercase helper `renderBlock` (rules-of-hooks violation). Fixed by moving the hook into the uppercase parent component and passing `fmtMoney` through as a prop closure.
+- **Verified end-to-end**: browsed 17 screens under `/demo/uk`. Zero compilation errors, zero rules-of-hooks warnings, £=97 total occurrences across the demo, `$=0` on every page.
+- **Zero US regression**: US company with no region argument continues to render `$1,234.50` byte-identical to pre-Phase-1.
+
+## 2026-02-27 — Phase 1.3: Formatting sweep — Transactions, Invoices, Bills, Insights
+
+- **Extended `useMoneyFmt()` / `useDateFmt()`** into 4 more high-value screens:
+  - `pages/Transactions.jsx` (5 components, 16 fmtMoney call-sites)
+  - `pages/Invoices.jsx` (4 components, 11 call-sites)
+  - `pages/Bills.jsx` (2 components, 8 call-sites)
+  - `components/InsightsChatWidget.jsx` (3 components, 34 call-sites)
+- **Import swap**: each file now pulls `useMoneyFmt` / `useDateFmt` from `@/lib/company` instead of `fmtMoney` / `fmtDate` from `@/lib/api`. No call-site rewrites — hooks shadow the names locally.
+- **Verified end-to-end**: UK demo (`/demo/uk`) now renders £ on Transactions, Invoices, Bills, and Insights chat — 47 £ symbols total, 0 $ symbols. UK date format ("11 Aug 2026") also flows through Bills / Invoices via `useDateFmt`.
+- **Zero US regression**: US callers with no region argument continue to receive `$1,234.50` / `Feb 27, 2026` byte-identical to pre-Phase-1.
+
 ## 2026-02-27 — Phase 1.2: Public "Live UK demo" landing (`/demo/uk`)
 
 - **New public URL `smartbookssoftware.ai/demo/uk`** — cold traffic auto-logs into a read-only view of Northgate Advisory Ltd. Zero friction, zero signup, zero card. 30-min JWT, 30/min IP rate-limit.

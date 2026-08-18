@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, fmtMoney } from "@/lib/api";
-import { useCompany } from "@/lib/company";
+import { api } from "@/lib/api";
+import { useCompany, useMoneyFmt } from "@/lib/company";
 import { Plus, ChevronDown, ChevronRight, Percent, Calendar, DollarSign, Trash2, Download, Send } from "lucide-react";
 import { toast } from "sonner";
 
@@ -13,6 +13,7 @@ import { toast } from "sonner";
  * schedules recompute instantly as pros scan the register.
  */
 export default function LoansPage() {
+  const fmtMoney = useMoneyFmt();
   const { currentId } = useCompany();
   const [loans, setLoans] = useState([]);
   const [expandedId, setExpandedId] = useState(null);
@@ -126,6 +127,8 @@ function calcMonthlyPayment(principal, ratePct, termMonths) {
 }
 
 function AmortizationPreview({ loan, currentId, onPaymentRecorded }) {
+
+  const fmtMoney = useMoneyFmt();
   const paidCount = Number(loan.payments_made || 0);
   const [cashAccts, setCashAccts] = useState([]);
   const [recording, setRecording] = useState(false);

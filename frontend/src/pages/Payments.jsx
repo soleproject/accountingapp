@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { api, fmtMoney, fmtDate } from "@/lib/api";
-import { useCompany } from "@/lib/company";
+import { api } from "@/lib/api";
+import { useCompany, useMoneyFmt, useDateFmt } from "@/lib/company";
 import { TID } from "@/constants/testIds";
 import { Plus, Trash2, X, Link2, Search, ShoppingCart, FileText } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Payments() {
+
+  const fmtMoney = useMoneyFmt();
+
+  const fmtDate = useDateFmt();
   const { currentId } = useCompany();
   const [sp, setSp] = useSearchParams();
   // ?direction=in|out drives the Sales / Purchases toggle. Missing param
@@ -191,6 +195,7 @@ export default function Payments() {
 }
 
 export function PaymentModal({ currentId, contacts, invoices, bills, transactions = [], preset, onClose }) {
+  const fmtMoney = useMoneyFmt();
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [amount, setAmount] = useState("");
   const [kind, setKind] = useState(preset?.kind || "invoice");

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { api, fmtMoney, fmtDate } from "@/lib/api";
+import { api } from "@/lib/api";
+import { useMoneyFmt, useDateFmt } from "@/lib/company";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
 import { Plus, Trash2, X, AlertTriangle, Pencil, Repeat, Check } from "lucide-react";
@@ -23,6 +24,8 @@ const BG = { emerald: "bg-emerald-50 border-emerald-100", amber: "bg-amber-50 bo
 
 export default function Bills() {
   const { currentId } = useCompany();
+  const fmtMoney = useMoneyFmt();
+  const fmtDate = useDateFmt();
   const [items, setItems] = useState([]);
   const navigate = useNavigate();
   const [contacts, setContacts] = useState([]);
@@ -257,6 +260,7 @@ export default function Bills() {
 }
 
 function BillModal({ contacts, itemsCatalog, currentId, bill, prefill, onClose }) {
+  const fmtMoney = useMoneyFmt();
   const editMode = !!bill;
   const p = prefill || {};
   const initLines = () => {

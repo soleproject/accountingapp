@@ -9,8 +9,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useRegisterChart } from "@/hooks/useRegisterChart";
-import { api, fmtMoney } from "@/lib/api";
-import { useCompany } from "@/lib/company";
+import { api } from "@/lib/api";
+import { useCompany, useMoneyFmt } from "@/lib/company";
 import { Boxes, Loader2, X, ArrowUpDown, Sliders, BarChart3, Download, Printer } from "lucide-react";
 import { toast } from "sonner";
 
@@ -75,6 +75,9 @@ export default function InventoryPage() {
 
 
 function ValuationView({ currentId }) {
+
+
+  const fmtMoney = useMoneyFmt();
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -180,6 +183,9 @@ function ValuationView({ currentId }) {
 
 
 function MovementsView({ currentId }) {
+
+
+  const fmtMoney = useMoneyFmt();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [itemId, setItemId] = useState("");
@@ -262,6 +268,9 @@ function MovementsView({ currentId }) {
 
 
 function AdjustmentsView({ currentId }) {
+
+
+  const fmtMoney = useMoneyFmt();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
@@ -344,6 +353,8 @@ function AdjustQuickButton({ it, onSaved, currentId }) {
 }
 
 function AdjustmentModal({ items, preselect, currentId, onClose }) {
+
+  const fmtMoney = useMoneyFmt();
   const [itemId, setItemId] = useState(preselect || items[0]?.id || "");
   const [mode, setMode] = useState("delta");  // delta | absolute
   const [qtyDelta, setQtyDelta] = useState(0);

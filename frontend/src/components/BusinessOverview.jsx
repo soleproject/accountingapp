@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, fmtMoney } from "@/lib/api";
-import { useCompany } from "@/lib/company";
+import { api } from "@/lib/api";
+import { useCompany, useMoneyFmt } from "@/lib/company";
 import {
   Play, Wallet2, ArrowUpRight, ArrowDownRight, Building2, PiggyBank,
 } from "lucide-react";
@@ -83,6 +83,7 @@ function SalesLineChart({ points, w = 340, h = 130 }) {
 
 // -------- Main component --------
 export default function BusinessOverview() {
+  const fmtMoney = useMoneyFmt();
   const { currentId, current } = useCompany();
   const [month] = useState(() => monthKey(0));
   const [data, setData] = useState(null);
@@ -357,6 +358,8 @@ function pctBar(part, whole) {
 }
 
 function PLBar({ label, amount, max, color, arrow }) {
+
+  const fmtMoney = useMoneyFmt();
   const w = Math.min(100, Math.max(0, ((amount || 0) / (max || 1)) * 100));
   const Icon = arrow === "up" ? ArrowUpRight : ArrowDownRight;
   return (

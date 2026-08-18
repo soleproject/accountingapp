@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useCompany } from "@/lib/company";
-import { api, fmtMoney } from "@/lib/api";
+import { useCompany, useMoneyFmt } from "@/lib/company";
+import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
   Inbox, Settings as SettingsIcon, Mail, CheckCircle2, XCircle,
@@ -577,6 +577,8 @@ function SuggestedTab({ cid }) {
 }
 
 function SuggestionCard({ sug, question, selected, onToggle, onChangeQuestion, onSendNow, sending }) {
+
+  const fmtMoney = useMoneyFmt();
   const [expanded, setExpanded] = useState(sug.count <= 3);
   return (
     <div
@@ -706,6 +708,8 @@ function AiLogsTab({ cid }) {
 }
 
 function AiLogRow({ log, open, onToggle, onArchive }) {
+
+  const fmtMoney = useMoneyFmt();
   const isAnswered = log.status === "answered";
   const category = log.linked_txns.find(t => t.category_account_name)?.category_account_name;
   const total = log.linked_txns.reduce((s, t) => s + Number(t.amount || 0), 0);

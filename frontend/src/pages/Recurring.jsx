@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, fmtMoney, fmtDate } from "@/lib/api";
-import { useCompany } from "@/lib/company";
+import { api } from "@/lib/api";
+import { useCompany, useMoneyFmt, useDateFmt } from "@/lib/company";
 import { toast } from "sonner";
 import { Play, Pause, Trash2, Repeat, X, Loader2, CheckCircle2 } from "lucide-react";
 
@@ -12,6 +12,10 @@ const FREQ_LABEL = {
 };
 
 export default function Recurring() {
+
+  const fmtMoney = useMoneyFmt();
+
+  const fmtDate = useDateFmt();
   const { currentId } = useCompany();
   const [tab, setTab] = useState("invoice");
   const [templates, setTemplates] = useState([]);

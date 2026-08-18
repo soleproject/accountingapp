@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import { api, fmtMoney } from "@/lib/api";
-import { useCompany } from "@/lib/company";
+import { api } from "@/lib/api";
+import { useCompany, useMoneyFmt } from "@/lib/company";
 import { toast } from "sonner";
 import {
   ArrowLeft, Save, Send, Plus, Trash2, Paperclip, Eye, Pencil, Mail,
@@ -663,6 +663,7 @@ function EditForm({
   docId,
   reloadPayments,
 }) {
+  const fmtMoney = useMoneyFmt();
   const customerContacts = useMemo(
     () => contacts.filter(c => c.type === "customer" || c.type === "both"),
     [contacts]
