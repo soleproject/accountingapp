@@ -7,7 +7,6 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
-import QboMigrationVerify from "@/components/QboMigrationVerify";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
@@ -176,7 +175,13 @@ export default function QboConnect() {
   // so we can highlight ONE button in filled emerald + downgrade
   // earlier completed steps to the outline (border) variant. The user's
   // eye always lands on the next thing to do.
-  //   activeStep = 1 (connect) → 2 (preview) → 3 (migrate) → 4 (verify) → 5 (mirror)
+  //   activeStep = 1 (connect) → 2 (preview) → 3 (migrate) → 4 (mirror)
+  //
+  // Prior versions had a "Verify migration" step at 4 that let users
+  // upload a QBO Balance Sheet PDF for AI-driven side-by-side diff.
+  // Removed Feb 28 2026 — the Recon Panel on the P&L / BS report
+  // pages now fetches QBO's own reports live via API and shows
+  // per-account drift inline, making the PDF-upload step redundant.
   let activeStep = 1;
   if (status?.connected) activeStep = 2;
   if (preview)           activeStep = 3;
@@ -429,42 +434,19 @@ export default function QboConnect() {
         )}
       </section>
 
-      {/* Step 4: Verify migration — AI-driven side-by-side diff
-          between the QBO Balance Sheet PDF (customer uploads) and
-          our computed Balance Sheet. Only meaningful after a
-          successful migration, so we gate it on `done`. */}
-      <section className={`rounded-xl border bg-white p-5 mb-4 transition-opacity ${
-        done ? "" : "opacity-40 pointer-events-none"
-      }`} data-testid="qbo-step-verify">
-        <div className="flex items-center gap-3 mb-3">
-          <span className={`w-7 h-7 rounded-full grid place-items-center text-xs font-semibold ${
-            activeStep === 4 ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
-          }`}>4</span>
-          <h2 className="font-heading font-semibold text-slate-900">Verify migration</h2>
-          <span className="text-[10px] uppercase tracking-wide bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full">
-            Optional
-          </span>
-        </div>
-        <p className="text-sm text-slate-500 mb-4">
-          Prove your books tie to QuickBooks. Export a Balance Sheet or
-          Profit &amp; Loss PDF from QBO and drop it in — we'll parse it
-          with AI and show a per-account side-by-side against our
-          computed report. Green rows tie to the penny; yellow are
-          within 5%; red need a bookkeeper's eye.
-        </p>
-        {currentId && <QboMigrationVerify companyId={currentId} />}
-      </section>
-
-      {/* Step 5: Open Live Mirror — always visible when connected so
+      {/* Step 4: Open Live Mirror — always visible when connected so
           returning users can jump into the bi-directional sync
           without needing to re-run migration. Bi-directional sync is
-          the real long-lived value prop, so it deserves its own step. */}
+          the real long-lived value prop, so it deserves its own step.
+          Prior "Verify migration" step (PDF upload → AI-diff) was
+          removed Feb 28 2026 — superseded by the live Recon Panel
+          inside the P&L / Balance Sheet report views. */}
       <section className={`rounded-xl border bg-white p-5 mb-4 transition-opacity ${
         status?.connected ? "" : "opacity-40 pointer-events-none"
       }`} data-testid="qbo-step-mirror">
         <div className="flex items-center gap-3 mb-3">
           <span className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-800 inline-flex items-center justify-center text-sm font-medium">
-            5
+            4
           </span>
           <h2 className="font-heading font-semibold text-slate-900">Open Live Mirror</h2>
           <span className="text-[10px] uppercase tracking-wide bg-indigo-600 text-white px-1.5 py-0.5 rounded-full">Live</span>
