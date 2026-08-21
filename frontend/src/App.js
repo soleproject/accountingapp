@@ -7,6 +7,7 @@ import Layout from "@/components/Layout";
 import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
 import EnterReferral from "@/pages/EnterReferral";
+import ReferClickThru from "@/pages/ReferClickThru";
 import Share from "@/pages/Share";
 import PublicDemoUK from "@/pages/PublicDemoUK";
 import Dashboard from "@/pages/Dashboard";
@@ -119,6 +120,7 @@ function App() {
             <Route path="/signup/enterprise" element={<Signup />} />
             <Route path="/refer" element={<EnterReferral />} />
             <Route path="/refer/:slug" element={<EnterReferral />} />
+            <Route path="/r/:slug" element={<ReferClickThru />} />
             <Route path="/set-password/:token" element={<SetPassword />} />
             <Route path="/invite/:token" element={<AcceptInvite />} />
             <Route path="/q/:token" element={<AskClientAnswer />} />

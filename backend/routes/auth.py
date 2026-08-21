@@ -286,15 +286,15 @@ def _share_link_for(user: dict, slug: str) -> tuple[str, str]:
       1. Firm's custom "buy page URL" (``branding.buy_page_url``) —
          referrer's site or a dedicated pricing page. Ref param appended
          as ``?ref=`` (or ``&ref=`` if the URL already has a query).
-      2. Firm's private-label subdomain + ``/refer/<slug>`` — when the
+      2. Firm's private-label subdomain + ``/r/<slug>`` — when the
          pro has ``branding.signin_subdomain`` set and the platform has
          a ``PRIVATE_LABEL_HOST_TEMPLATE`` env var.
-      3. Platform ``/refer/<slug>`` on ``PRIMARY_HOST``.
+      3. Platform ``/r/<slug>`` on ``PRIMARY_HOST``.
 
-    Note: link now lands on the ``/refer/<slug>`` lead-capture page
-    which forwards to ``/signup?ref=<slug>`` after submission. This
-    lets us drop the visitor into a drip campaign even if they don't
-    complete signup on the first visit.
+    Note: link lands on the ``/r/<slug>`` click-tracker route which
+    logs the click and forwards to ``/refer/<slug>`` (lead-capture),
+    which itself forwards to ``/signup?ref=<slug>`` after submission.
+    Full funnel is trackable end-to-end: click → lead → signup → pay.
     """
     b = (user or {}).get("branding") or {}
     buy_url = (b.get("buy_page_url") or "").strip()
@@ -305,9 +305,9 @@ def _share_link_for(user: dict, slug: str) -> tuple[str, str]:
     template = os.environ.get("PRIVATE_LABEL_HOST_TEMPLATE")
     if firm_slug and template:
         host_url = template.replace("{slug}", firm_slug).rstrip("/")
-        return f"{host_url}/refer/{slug}", "firm_subdomain"
+        return f"{host_url}/r/{slug}", "firm_subdomain"
     host = os.environ.get("PRIMARY_HOST", "app.smartbookssoftware.ai")
-    return f"https://{host}/refer/{slug}", "platform"
+    return f"https://{host}/r/{slug}", "platform"
 
 
 @router.get("/share")
@@ -413,6 +413,164 @@ async def share_referrals(user: dict = Depends(get_current_user)):
         })
     rows.sort(key=lambda r: r["signed_up_at"] or "", reverse=True)
     return {"referrals": rows}
+
+
+@router.get("/share/pipeline")
+async def share_pipeline(user: dict = Depends(get_current_user)):
+    """Unified funnel view for the affiliate: every prospect the caller
+    has ever touched, whether they submitted the referral form
+    (leads collection), came in through their slug and signed up
+    (users.referred_by_user_id), or both — de-duped on email.
+
+    Stages (industry-standard SaaS affiliate funnel — Rewardful,
+    PartnerStack, FirstPromoter):
+
+        lead        →  Submitted the referral form; hasn't signed up.
+        contacted   →  Superadmin marked as contacted (drip started).
+        signed_up   →  Created a user account under this slug.
+        trial       →  Signed up, has a company, not paying yet.
+        paying      →  At least one payment recorded.
+        dead        →  Superadmin marked dead OR churned.
+
+    Returns funnel counts + per-row entries with the most-advanced
+    stage, last-activity timestamp, and a suggested next action so
+    the affiliate can see who needs a nudge.
+    """
+    my_slug = user.get("referral_slug")
+    uid = user["id"]
+
+    # ---- 1. Leads submitted through the form (attributed to me) ----
+    leads = await db.leads.find(
+        {"referrer_user_id": uid},
+        {"_id": 0},
+    ).to_list(5000)
+
+    # ---- 2. Users who signed up under my slug ----
+    referred = await db.users.find(
+        {"referred_by_user_id": uid},
+        {"id": 1, "email": 1, "name": 1, "created_at": 1, "_id": 0},
+    ).to_list(5000)
+    referred_ids = [u["id"] for u in referred]
+
+    # ---- 3. Earnings ledger (for paying detection + amounts) ----
+    earnings = await db.referral_earnings.find(
+        {"referrer_user_id": uid, "referred_user_id": {"$in": referred_ids}}
+        if referred_ids else {"referrer_user_id": uid},
+    ).to_list(50000)
+    earn_by_uid: dict[str, list] = {}
+    for e in earnings:
+        earn_by_uid.setdefault(e["referred_user_id"], []).append(e)
+
+    # ---- 4. Fold leads + referrals together on email ----
+    rows: dict[str, dict] = {}   # email → row
+
+    for lead in leads:
+        email = (lead.get("email") or "").lower()
+        if not email: continue
+        rows[email] = {
+            "email":       email,
+            "name":        lead.get("name"),
+            "role":        lead.get("role"),
+            "company_name":lead.get("company_name"),
+            "lead_id":     lead.get("id"),
+            "lead_status": lead.get("status"),
+            "lead_notes":  lead.get("notes"),
+            "submitted_at":lead.get("created_at"),
+            "signed_up_at":None,
+            "user_id":     None,
+            "payments":    0,
+            "earned_cents":0,
+            "last_seen_at":lead.get("last_seen_at") or lead.get("created_at"),
+        }
+
+    for u in referred:
+        email = (u.get("email") or "").lower()
+        entries = earn_by_uid.get(u["id"], [])
+        total = sum(int(e.get("share_cents") or 0) for e in entries)
+        base = rows.get(email) or {
+            "email": email, "name": u.get("name"),
+            "role": None, "company_name": None,
+            "lead_id": None, "lead_status": None, "lead_notes": None,
+            "submitted_at": None,
+        }
+        base.update({
+            "signed_up_at": u.get("created_at"),
+            "user_id":      u["id"],
+            "payments":     len(entries),
+            "earned_cents": total,
+            "last_seen_at": u.get("created_at"),
+        })
+        rows[email] = base
+
+    # ---- 5. Compute stage + suggested next action ----
+    def derive_stage(r: dict) -> tuple[str, str]:
+        """Return (stage, next_action_hint)."""
+        if r.get("lead_status") == "dead":
+            return ("dead", "Archived — no action")
+        if r.get("payments", 0) > 0:
+            return ("paying", "Keep them happy — this is recurring revenue")
+        if r.get("user_id"):
+            return ("trial", "Nudge them to add a payment method")
+        if r.get("lead_status") == "contacted":
+            return ("contacted", "Follow-up in 48h if no reply")
+        # New lead only
+        return ("lead", "Send intro email + calendar link")
+
+    entries = []
+    for r in rows.values():
+        stage, hint = derive_stage(r)
+        entries.append({**r, "stage": stage, "next_action": hint})
+
+    # Sort: most-advanced first, then most-recent activity
+    stage_rank = {"paying": 5, "trial": 4, "contacted": 3,
+                  "signed_up": 2, "lead": 1, "dead": 0}
+    entries.sort(
+        key=lambda x: (stage_rank.get(x["stage"], 0),
+                       x.get("last_seen_at") or ""),
+        reverse=True,
+    )
+
+    # ---- 6. Funnel counts + conversion % ----
+    total = len(entries)
+    counts = {
+        "lead":      sum(1 for e in entries if e["stage"] == "lead"),
+        "contacted": sum(1 for e in entries if e["stage"] == "contacted"),
+        "trial":     sum(1 for e in entries if e["stage"] == "trial"),
+        "paying":    sum(1 for e in entries if e["stage"] == "paying"),
+        "dead":      sum(1 for e in entries if e["stage"] == "dead"),
+    }
+    signed_up_total = counts["trial"] + counts["paying"]
+    lead_to_signup = (signed_up_total / total * 100.0) if total else 0.0
+    signup_to_paying = (counts["paying"] / signed_up_total * 100.0) if signed_up_total else 0.0
+
+    total_earned = sum(int(e.get("earned_cents") or 0) for e in entries)
+
+    # ---- 7. Click stats (top-of-funnel) ----
+    click_total = 0
+    click_unique_ips = 0
+    click_to_lead_pct = 0.0
+    if my_slug:
+        click_total = await db.referral_clicks.count_documents({"slug": my_slug})
+        unique_ips = await db.referral_clicks.distinct("ip", {"slug": my_slug})
+        click_unique_ips = len(unique_ips)
+        if click_total > 0:
+            click_to_lead_pct = round(total / click_total * 100.0, 1)
+
+    return {
+        "entries": entries,
+        "totals": {
+            "total": total,
+            "counts": counts,
+            "signed_up_total": signed_up_total,
+            "lead_to_signup_pct": round(lead_to_signup, 1),
+            "signup_to_paying_pct": round(signup_to_paying, 1),
+            "total_earned_cents": total_earned,
+            "clicks": click_total,
+            "unique_clicks": click_unique_ips,
+            "click_to_lead_pct": click_to_lead_pct,
+        },
+        "slug": my_slug,
+    }
 
 
 @router.get("/share/report")
