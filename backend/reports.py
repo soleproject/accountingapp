@@ -433,6 +433,35 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
     cogs_rows    = _emit("cogs")
     expense_rows = _emit("expense")
 
+    # `_emit` only walks parent + direct children. Any grandchild (or
+    # deeper) account with non-zero raw signed activity (typically a
+    # Purchase categorized to a leaf-level revenue account, which QBO
+    # subtracts from that leaf's income total) gets dropped. Sweep in
+    # a flat row for every remaining non-zero account so the P&L
+    # reflects deep-level activity.
+    # Feb 28 2026 — QBO Phase 2 parity, closes the last ~$79 Takeout
+    # / Food & Beverage Sales drift on QBO Test 553 LLC.
+    def _sweep_deep_accounts(section_type: str, rows: list[dict]) -> list[dict]:
+        seen_ids = {r["id"] for r in rows if r.get("id") and not r.get("is_subtotal")}
+        for a in accts:
+            if a["type"] != section_type:
+                continue
+            if a["id"] in seen_ids:
+                continue
+            direct = _display_amount(a, by.get(a["id"], 0.0))
+            if abs(direct) < 0.005:
+                continue
+            rows.append({
+                "id": a["id"], "code": a.get("code") or "",
+                "name": a["name"],
+                "amount": round(direct, 2),
+                "detail_type": (a.get("detail_type") or "").strip(),
+            })
+        return rows
+    revenue_rows = _sweep_deep_accounts("revenue", revenue_rows)
+    cogs_rows    = _sweep_deep_accounts("cogs",    cogs_rows)
+    expense_rows = _sweep_deep_accounts("expense", expense_rows)
+
     # Section totals — sum every row that is NOT a "Total X" subtotal.
     # Because parent rows are now direct-only and children carry their
     # own amounts, adding all non-subtotal rows equals the true total
@@ -526,6 +555,57 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
                 "name": "Uncategorized Income (accrual)",
                 "amount": round(rev_uncategorized, 2),
             })
+
+        # 1b) CreditMemos issued in the period → NEGATE the revenue
+        #     line. QBO's P&L subtracts CMs from the target income
+        #     account (Pest Control -$100 on QBO Test 553 LLC's CM
+        #     1026). Without this pass, our accrual revenue over-
+        #     counts by the CM total because `_open_ar_ap` already
+        #     applied the CM to invoice.balance_due (AR reduction)
+        #     but the revenue side stayed at the original invoiced
+        #     amount. RefundReceipts are already handled in
+        #     `_signed_balances` (they carry a negative txn amount
+        #     that credits the revenue account directly) — we
+        #     deliberately skip them here to avoid double-counting.
+        #     Feb 28 2026 — QBO Phase 2 parity.
+        async for cm in db.transactions.find({
+            "company_id": company_id, "source": "qbo",
+            "txn_type": "CreditMemo",
+        }):
+            date = cm.get("date") or ""
+            if not (date and start <= date <= end):
+                continue
+            for ln in cm.get("line_items") or []:
+                amt = float(ln.get("amount") or 0)
+                if abs(amt) < 0.005:
+                    continue
+                qid = str(ln.get("account_qbo_id") or "")
+                if not qid and ln.get("item_qbo_id"):
+                    item = await db.items.find_one({
+                        "company_id": company_id,
+                        "qbo_id": ln["item_qbo_id"]})
+                    if item:
+                        qid = str(item.get("income_account_qbo_id") or "")
+                acct = rev_by_qbo.get(qid)
+                # CM/RR reduce revenue → subtract the line amount.
+                if acct:
+                    row = rev_row_by_id.get(acct["id"])
+                    if row:
+                        row["amount"] = round(row["amount"] - amt, 2)
+                    else:
+                        new_row = {
+                            "id": acct["id"], "code": acct.get("code") or "",
+                            "name": acct.get("name") or "",
+                            "amount": round(-amt, 2),
+                            "detail_type": (acct.get("detail_type") or "").strip(),
+                        }
+                        revenue_rows.append(new_row)
+                        rev_row_by_id[acct["id"]] = new_row
+                # Negate the accrual adjustment so BS math tracks: the
+                # CM's AR-reduction side already flowed through
+                # `_open_ar_ap`, so pairing this NI reduction keeps
+                # Assets = L + E.
+                accrual_adj_rev -= amt
 
         # 2) Bills issued in the period → expense/COGS side.
         exp_uncategorized = 0.0

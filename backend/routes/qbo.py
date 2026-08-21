@@ -1028,6 +1028,30 @@ async def qbo_rebuild_account_hierarchy(cid: str, user: dict = Depends(get_curre
     return {"updated": updated}
 
 
+@router.post("/companies/{cid}/qbo/resolve-gl-line-accounts")
+async def qbo_resolve_gl_line_accounts(
+    cid: str,
+    start_date: str = "2020-01-01",
+    end_date: str | None = None,
+    user: dict = Depends(get_current_user),
+):
+    """Use QBO's General Ledger as source-of-truth to stamp the
+    correct `account_qbo_id` on every invoice/bill/SR/RR/CM line.
+    Necessary because QBO Items can be reassigned to different
+    income/expense accounts over time — historical postings keep
+    the account in effect at the moment of posting, but our
+    current Item.IncomeAccountRef only reflects the latest.
+
+    Fixes P&L drift on migrated companies where the recon panel
+    shows Δ between our per-account totals and QBO's. Idempotent.
+    Feb 28 2026 — Phase 2 QBO parity.
+    """
+    await require_company(user, cid)
+    from qbo_service import resolve_qbo_gl_line_accounts
+    stats = await resolve_qbo_gl_line_accounts(cid, start_date, end_date)
+    return stats
+
+
 @router.post("/companies/{cid}/qbo/resolve-undeposited")
 async def qbo_resolve_undeposited(cid: str, user: dict = Depends(get_current_user)):
     """Standalone re-run of `resolve_payment_undeposited` — stamps

@@ -2078,3 +2078,26 @@ into an actual bank account. Axiom now mirrors that.
   `deposit_to_account_id`): server stamps UF account id, direction='in'.
 - Frontend Payment modal rendering the new "Deposit to:" selector
   with default UF option + helper text.
+
+
+## QBO Phase 2 Parity — GL-Verified Line Accounts + CashBack + CM — Feb 28, 2026
+
+**Motivation**
+The QBO reconciliation panel on QBO Test 553 LLC surfaced $95.72 of P&L drift concentrated on child income accounts: Beverages -$1,695, Sales of Product Income +$1,833, Catering missing $138. Root cause: QBO users routinely reassign Items to new income accounts over time, but historical postings retain the account in effect at posting. Our line mapper resolves via the CURRENT `Item.IncomeAccountRef`, so per-account totals diverge from QBO's actual General Ledger.
+
+**Backend**
+- `qbo_service.py::resolve_qbo_gl_line_accounts(cid)` — new resolver that fetches QBO's `GeneralLedger` for every revenue/expense/cogs account and stamps `account_qbo_id` + `gl_verified=true` on each matching invoice/bill/SR/RR line via `(doc_num, txn_type, amount, memo)` matching. Scans accounts leaf-first (deepest child before parent) so QBO's parent-account GL rollups can't overwrite child-level stamps. Wired into the QBO import pipeline right after `resolve_transaction_categories`, and re-runnable via `POST /companies/{cid}/qbo/resolve-gl-line-accounts`.
+- `qbo_service.py::resolve_deposit_splits` — now captures QBO Deposits' top-level `CashBack` object as a negative-amount split targeting the cashback destination bank. Fixes Deposit 121 on QBO Test 553 LLC where $200 was routed to Savings but was landing as -$200 phantom Uncategorized Income on our P&L.
+- `reports.py::compute_income_statement` — accrual layer now iterates CreditMemos and NEGATES the target income account so QBO's own CM revenue-reduction is reflected. Skips RefundReceipts (already handled by `_signed_balances`). New `_sweep_deep_accounts` post-pass captures direct signed activity on grandchild-and-deeper revenue/expense leaves that `_emit`'s parent+one-level walk was dropping (Takeout raw -$79.28 from two Purchases).
+
+**Tests**
+- `tests/test_qbo_phase2_child_mapping.py` — 4 new regression tests covering `_flatten_gl_rows`, CashBack split capture, CM accrual negation, and deep-account signed-balance sweep. All pass.
+
+**Verified live**
+- QBO Test 553 LLC P&L drift closed from $95.72 to $75 — the residual $75 is a single QBO sandbox invoice (#1013) whose payload contains ONLY a `SubTotalLineDetail` with no `SalesItemLineDetail` (a genuine QBO data quirk, confirmed via fresh `_get`).
+- Per-account parity after the fix: Bar Sales ✓, Beverages ✓ (+$1,695), Catering ✓ (was missing), Discounts given ✓, Installation ✓, Maintenance and Repair ✓, Pest Control ✓ (was +$100), Sales of Product Income ✓ (was +$1,833), Services ✓, Takeout ✓ (was +$79.28).
+- Deposit 121: CashBack $200 correctly routed to Savings, Undeposited Funds fully offset, no phantom Uncategorized Income.
+
+**Follow-up (out of scope this pass)**
+- Discount attribution to specific revenue accounts (~$4 residual on Food & Bev Sales vs Takeout on companies with multi-line discounts).
+- Real-time inbound QBO webhooks (Phase 4).

@@ -5150,3 +5150,19 @@ Status: **DONE**. Sweep + summary chip live on Superadmin dashboard.
 
 Status: **DONE**. Held customer payments now show up correctly on the Balance Sheet even before a Bank Deposit sweeps them.
 
+
+
+### Feb 28 2026 — QBO Phase 2 Parity: GL-Verified Line Accounts
+
+**Problem**: The recon panel on QBO Test 553 LLC exposed $95.72 of P&L drift concentrated on child income accounts (Beverages -$1,695, Sales of Product Income +$1,833, Catering missing $138). Root cause: QBO Item.IncomeAccountRef can be reassigned to different accounts over time, but historical postings retain the account in effect at recording. Our line mapper resolved via current item mappings, diverging from QBO's actual GL.
+
+**Backend**
+- `resolve_qbo_gl_line_accounts(cid)` — fetches QBO's `GeneralLedger` per account and stamps `account_qbo_id` + `gl_verified=true` on invoice/bill/SR/RR lines. Leaf-first scan order (deepest child first) + never-overwrite-verified guard so parent-account GL rollups don't clobber child-level stamps. Wired into QBO import pipeline; standalone endpoint `POST /companies/{cid}/qbo/resolve-gl-line-accounts`.
+- `resolve_deposit_splits` — captures QBO Deposits' top-level `CashBack` object as a negative-amount split targeting the cashback destination bank.
+- `compute_income_statement` accrual layer — CreditMemos now NEGATE the target income account (matches QBO). `_sweep_deep_accounts` post-pass captures direct signed activity on grandchild-and-deeper revenue/expense leaves that the 2-level tree walker was dropping.
+
+**Tests**: `tests/test_qbo_phase2_child_mapping.py` — 4 new regression tests. All pass.
+
+**Verified live**: QBO Test 553 LLC P&L drift closed from $95.72 to $75. Residual $75 is a single sandbox invoice (#1013) with malformed line detail — a QBO data quirk that won't affect production migrations.
+
+Status: **DONE**. Per-account parity now essentially 1:1 with QBO on companies with well-formed line detail.
