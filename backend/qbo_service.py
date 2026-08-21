@@ -1697,6 +1697,16 @@ async def _post_opening_balances_je(company_id: str) -> dict:
     # detail_type wrongly excludes Notes Payable, Loan Payable, and
     # Board of Equalization Payable (bug in first cut, Feb 26 2026).
     _AR_AP_QBO_TYPES = {"Accounts Receivable", "Accounts Payable"}
+    # Sales-tax liabilities (Board of Equalization Payable et al.)
+    # are auto-populated by QBO whenever an Invoice or SalesReceipt
+    # includes tax lines; they should never carry an "opening
+    # balance" in the OBE plug. Excluding them prevents inflating
+    # OBE by the accumulated sales-tax liability on a fresh
+    # migration (Craig's Landscaping: $370.94 extra on OBE without
+    # this filter). Once we start extracting invoice `TxnTaxDetail`
+    # into a proper sales-tax posting, the account populates
+    # naturally. Feb 28 2026.
+    _SALES_TAX_SUBTYPES = {"GlobalTaxPayable", "SalesTaxPayable"}
 
     lines: list[dict] = []
     dr_total = 0.0
@@ -1713,18 +1723,33 @@ async def _post_opening_balances_je(company_id: str) -> dict:
         # Strict AR/AP skip — use QBO's AccountType, not detail_type.
         if str(raw.get("AccountType") or "") in _AR_AP_QBO_TYPES:
             continue
+        # Sales-tax payable — plug not applicable (see comment above).
+        if str(raw.get("AccountSubType") or "") in _SALES_TAX_SUBTYPES:
+            continue
 
         current_raw = float(by.get(acc["id"], 0.0) or 0.0)
-        typ = acc.get("type")
 
-        # QBO's `CurrentBalance` and our raw ledger balance use the
-        # SAME signing convention for both debit- and credit-normal
-        # accounts:
-        #   Asset  positive balance → stored positive on both sides
-        #   Liab   positive balance → stored NEGATIVE on both sides
-        #     (QBO shows Notes Payable CurrentBalance = -25000 when
-        #      the account has a credit balance of $25000 natural)
-        # So delta = qcb - current_raw can be compared directly.
+        # ONLY plug accounts that carry ZERO imported ledger activity.
+        # QBO's `CurrentBalance` reflects opening balance PLUS all
+        # subsequent transactions; if we've already imported activity
+        # (Checking accumulates from Deposit/Purchase txns, Inventory
+        # Asset accumulates from InventoryAdjustment JEs, etc.), the
+        # delta doesn't cleanly separate "opening" from "import gap".
+        # Plugging in that case double-counts (or masks) real import
+        # bugs — the opening JE would silently swallow a $76.90
+        # missing-deposit and quietly bake it into OBE.
+        #
+        # By contrast, Fixed Assets (Truck.Original Cost), Long-Term
+        # Liabilities (Loan Payable, Notes Payable), and initial-
+        # capital equity carry no through-line activity on the QBO
+        # API — QBO tracks their balances via a hidden "opening
+        # balance" system JE that the standard endpoints don't
+        # expose. Those are the only accounts we plug here.
+        # Feb 28 2026 — Craig's Landscaping OBE drift ($419.09).
+        if abs(current_raw) >= 0.005:
+            continue
+
+        # Delta collapses to `qcb` since `current_raw` is ~0.
         delta = round(qcb - current_raw, 2)
         if abs(delta) < 0.005:
             continue

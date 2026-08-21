@@ -2101,3 +2101,33 @@ The QBO reconciliation panel on QBO Test 553 LLC surfaced $95.72 of P&L drift co
 **Follow-up (out of scope this pass)**
 - Discount attribution to specific revenue accounts (~$4 residual on Food & Bev Sales vs Takeout on companies with multi-line discounts).
 - Real-time inbound QBO webhooks (Phase 4).
+
+
+## Sandbox 358d Migration Parity — BS/P&L Subtotals + OBE Fix — Feb 28, 2026
+
+**Motivation**
+User migrated the classic QBO sandbox (Craig's Design & Landscaping) as "Sandbox Company US 358d" and shared the Recon Panel drift screenshots. Three clear defects surfaced:
+1. `Δ $13,495` on Total Assets — Truck's Original Cost grandchild balance was dropped by the BS totals calc.
+2. `Δ $419.09` on Opening Balance Equity — the opening-balance JE double-counted accounts that had real imported activity.
+3. Big false-drift on Recon Panel — accounts with identical names in different sections (income "Plants and Soil" vs expense "Plants and Soil") collided in the lookup map.
+Also fixed a P&L parent-subtotal staleness: after the accrual layer added Bills to Accounting/Bookkeeper/Lawyer, "Total Legal & Professional Fees" stayed at emit-time $480 instead of the correct $1,170.
+
+**Backend**
+- `reports.py::compute_balance_sheet` — `total_assets` / `total_liabilities` / `total_equity` now come from `_emit_section`'s running `top_total` (which correctly rolls direct + children per parent), plus A/R + A/P + Current Period NI. Prior re-sum of the row list either double-counted subtotals or under-counted grandchild activity (Truck → Original Cost dropped $13,495 because parent was $0 direct AND child had `parent_id` set).
+- `reports.py::compute_income_statement` — `_emit` rows now carry `parent_id` (not just `parent_code`, which is `""` for every QBO-imported account). New `_refresh_subtotals` pass recomputes every "Total X" row after the accrual layer tops up child amounts, so "Total Legal & Professional Fees" correctly shows the post-accrual total.
+- `qbo_service.py::_post_opening_balances_je` — only plugs accounts with ZERO imported ledger activity, and skips sales-tax payables (`AccountSubType` in `{GlobalTaxPayable, SalesTaxPayable}`). Prior behaviour plugged Checking, Inventory Asset, and BoE Payable on top of their real imported activity, quietly inflating OBE by $419.09.
+
+**Frontend**
+- `QboReconciliationPanel.jsx` — flatteners now tag every row with a `section` (income/cogs/expense/asset/liability/equity). `ReconciliationTable` matches on `(section, normLabel)` first, falling back to bare-label only for section-less totals. Fixes the Plants and Soil / Sprinklers and Drip Systems / Maintenance and Repair false drift on Craig's Landscaping migrations where these labels exist on BOTH the income AND expense side.
+
+**Tests**
+- `tests/test_report_subtotals_and_opening.py` — 5 new regression tests: grandchild activity in BS totals, P&L subtotal refresh after accrual, opening-balance skip for accounts with activity, opening-balance skip for sales-tax payables, and positive-case opening-balance plug for a zero-activity Fixed Asset. All pass.
+
+**Verified live (Sandbox 358d, Craig's Design & Landscaping)**
+- Opening Balance Equity: was -$9,756.59, now **-$9,337.50 (exact QBO match).**
+- Total Assets: was $9,941.29, now **$23,484.44 vs QBO $23,436.29** ($48.15 residual = Checking +$76.90 / Inv Asset -$28.75 — real import gaps to chase separately).
+- Total Liabilities: **$30,760.39 vs QBO $31,131.33** ($370.94 = BoE Payable, needs invoice sales-tax extraction).
+- Total Equity: **-$7,275.95** (matches within $419).
+- BS balanced=True imbalance=0.0 on both Sandbox 358d and QBO Test 553 LLC.
+- Total Legal & Professional Fees subtotal: was $480, now **$1,170 (exact QBO match).**
+- Total Automobile subtotal: **$463.37 (exact QBO match).**
