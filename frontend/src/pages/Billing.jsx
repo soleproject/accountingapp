@@ -17,7 +17,7 @@ import {
  * the money-formatting helpers and stat-card styling without wiring
  * three near-identical routes.
  */
-const cents = (c) => fmtMoney((Number(c || 0) / 100));
+const centsFmt = (fmtMoney) => (c) => fmtMoney((Number(c || 0) / 100));
 
 // Turn a raw product/discount tuple into a human label for the payment
 // history + subscription card. Matches the labels in
@@ -61,6 +61,8 @@ export default function Billing() {
 /* ---------------------------------------------------------------- */
 function MyBillingSection() {
   const fmtDate = useDateFmt();
+  const fmtMoney = useMoneyFmt();
+  const cents = centsFmt(fmtMoney);
   const { currentId, current } = useCompany();
   const [data, setData] = useState(null);
 
@@ -167,6 +169,8 @@ function MyBillingSection() {
 /*  Pro — client billing overview                                     */
 /* ---------------------------------------------------------------- */
 function ProClientBillingSection() {
+  const fmtMoney = useMoneyFmt();
+  const cents = centsFmt(fmtMoney);
   const [rows, setRows] = useState(null);
 
   useEffect(() => {
@@ -236,6 +240,8 @@ function ProClientBillingSection() {
 /* ---------------------------------------------------------------- */
 function SuperadminBillingSection() {
   const fmtDate = useDateFmt();
+  const fmtMoney = useMoneyFmt();
+  const cents = centsFmt(fmtMoney);
   const [data, setData] = useState(null);
   const [selected, setSelected] = useState(new Set());
 

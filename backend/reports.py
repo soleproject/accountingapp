@@ -362,28 +362,49 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
                 })
                 kids_total += kd
             rolled = direct + kids_total
+            # QBO's report convention: parent row shows ONLY its own direct
+            # postings; children listed indented; then a "Total {parent}"
+            # subtotal row that equals direct + children. This is the same
+            # shape QBO's own P&L renders, so the reconciliation panel can
+            # match rows label-to-label.
             if abs(rolled) < 0.005:
-                # Nothing to show at parent level, but children with activity
-                # still deserve a line — emit them flat.
+                # Parent is truly zero and no active children: skip.
                 for kr in kids_rows:
                     rows.append(kr)
                 continue
-            rows.append({
-                "id": a["id"], "code": a["code"], "name": a["name"],
-                "amount": round(rolled, 2),
-                "detail_type": (a.get("detail_type") or "").strip(),
-            })
+            # Emit parent (direct-only)
+            if abs(direct) >= 0.005 or kids_rows:
+                rows.append({
+                    "id": a["id"], "code": a["code"], "name": a["name"],
+                    "amount": round(direct, 2),
+                    "detail_type": (a.get("detail_type") or "").strip(),
+                })
             rows.extend(kids_rows)
+            # Emit "Total X" subtotal only when there are children — matches QBO.
+            if kids_rows:
+                rows.append({
+                    "id": f"{a['id']}__subtotal", "code": "",
+                    "name": f"Total {a['name']}",
+                    "amount": round(rolled, 2),
+                    "parent_code": a["code"],
+                    "is_subtotal": True,
+                    "detail_type": (a.get("detail_type") or "").strip(),
+                })
         return rows
 
     revenue_rows = _emit("revenue")
     cogs_rows    = _emit("cogs")
     expense_rows = _emit("expense")
 
-    # Section totals — count TOP-LEVEL rows only (parent_code missing).
-    total_revenue = round(sum(r["amount"] for r in revenue_rows if not r.get("parent_code")), 2)
-    total_cogs    = round(sum(r["amount"] for r in cogs_rows    if not r.get("parent_code")), 2)
-    total_expense = round(sum(r["amount"] for r in expense_rows if not r.get("parent_code")), 2)
+    # Section totals — sum every row that is NOT a "Total X" subtotal.
+    # Because parent rows are now direct-only and children carry their
+    # own amounts, adding all non-subtotal rows equals the true total
+    # (no double-counting).
+    def _sum_section(rows):
+        return round(sum(r["amount"] for r in rows if not r.get("is_subtotal")), 2)
+    total_revenue = _sum_section(revenue_rows)
+    total_cogs    = _sum_section(cogs_rows)
+    total_expense = _sum_section(expense_rows)
 
     # Accrual layer: on QBO's own P&L, revenue is recognized when an
     # invoice is issued (regardless of whether it's been collected).
@@ -620,12 +641,20 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
                                        parent_id=a["id"]))
                 kids_total += kd
             rolled = direct + kids_total
-            # Only emit the parent if it has ANY value (own or via children)
-            # OR is a well-known section anchor (Retained Earnings, etc.).
+            # Match QBO's rendering convention on Balance Sheet as well:
+            # parent = direct-only, then children, then "Total {parent}"
+            # subtotal row. Special-case Retained Earnings (3100) which
+            # QBO always emits even at $0.
             keep_parent = abs(rolled) >= 0.005 or a["code"] == "3100"
             if keep_parent:
-                rows.append(_row(a, rolled))
+                if abs(direct) >= 0.005 or kids_rows or a["code"] == "3100":
+                    rows.append(_row(a, direct))
                 rows.extend(kids_rows)
+                if kids_rows:
+                    subtotal_row = _row(a, rolled, parent_code=a["code"], parent_id=a["id"])
+                    subtotal_row["name"] = f"Total {a['name']}"
+                    subtotal_row["is_subtotal"] = True
+                    rows.append(subtotal_row)
                 top_total += rolled
             else:
                 # Parent is zero + no visible children: still emit visible children
