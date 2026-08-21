@@ -1282,6 +1282,14 @@ async def run_migration(job_id: str, company_id: str) -> None:
         # id lookups succeed. Direct writes (no PATCH cascade) since
         # QBO already gave us the correct balance on each doc.
         linked = await resolve_payment_links(company_id)
+        # Post-import: resolve item account refs and flip
+        # `track_inventory=True` on real Inventory items so they
+        # appear on the Inventory Management page. Idempotent.
+        try:
+            items_resolved = await resolve_item_accounts_and_tracking(company_id)
+        except Exception:  # noqa: BLE001
+            items_resolved = {"items_resolved": 0,
+                              "error": "resolver_failed"}
         # Post-import: for Payment IN docs where QBO omitted
         # `DepositToAccountRef` (customer payments held in Undeposited
         # Funds pending a Bank Deposit sweep), stamp the local UF
@@ -1894,6 +1902,91 @@ async def resolve_tax_rates(company_id: str) -> dict:
         )
         upserted += 1
     return {"rates_upserted": upserted}
+
+
+async def resolve_item_accounts_and_tracking(company_id: str) -> dict:
+    """Post-import resolver — for QBO-imported items, translate the
+    stored `*_account_qbo_id` fields into local `*_account_id`s and
+    flip `track_inventory=True` for real inventory items.
+
+    Why this exists
+    ---------------
+    The migration pipeline runs `map_item` which stores QBO's account
+    IDs and Type enum, but the *_account_id resolution and internal
+    `track_inventory` flag are only set by `_pull_items` in the
+    ongoing mirror pull — so companies that finished migrating but
+    never triggered a subsequent mirror have items with `type=
+    'inventory'` yet `track_inventory=None`, making the Inventory
+    Management page look empty even though QBO tracked qty-on-hand
+    for those items. Sandbox 358d Craig's Landscaping: 4 real
+    Inventory items (Pump, Rock Fountain, Sprinkler Heads,
+    Sprinkler Pipes) all silent on the Inventory page.
+
+    Idempotent — writes only when a field is missing/wrong.
+
+    Aug 21 2026 — QBO inventory visibility fix.
+    """
+    # Cache accounts by qbo_id for fast lookup.
+    acct_by_qbo: dict[str, dict] = {}
+    async for a in db.accounts.find(
+        {"company_id": company_id, "source": "qbo",
+          "qbo_id": {"$ne": None}}):
+        acct_by_qbo[str(a.get("qbo_id"))] = a
+
+    resolved = 0
+    flipped = 0
+    async for it in db.items.find({"company_id": company_id,
+                                     "source": "qbo"}):
+        patch: dict = {}
+        asset_qid = str(it.get("asset_account_qbo_id") or "")
+        exp_qid   = str(it.get("expense_account_qbo_id") or "")
+        inc_qid   = str(it.get("income_account_qbo_id") or "")
+
+        if asset_qid and not it.get("inventory_account_id"):
+            a = acct_by_qbo.get(asset_qid)
+            if a:
+                patch["inventory_account_id"] = a["id"]
+                patch["inventory_account_name"] = a.get("name")
+        if exp_qid and (not it.get("cogs_account_id")
+                          or not it.get("expense_account_id")):
+            a = acct_by_qbo.get(exp_qid)
+            if a:
+                patch["cogs_account_id"] = a["id"]
+                patch["expense_account_id"] = a["id"]
+        if inc_qid and not it.get("income_account_id"):
+            a = acct_by_qbo.get(inc_qid)
+            if a:
+                patch["income_account_id"] = a["id"]
+
+        # Flip on `track_inventory` for real inventory items.
+        want_track = (
+            (it.get("item_type") or "").lower() == "inventory"
+            or bool(it.get("track_qty_on_hand"))
+        )
+        if want_track and not it.get("track_inventory"):
+            patch["track_inventory"] = True
+            flipped += 1
+
+        # Seed `cost_basis` from QBO's `PurchaseCost` (stored as
+        # `cost`) so the Inventory Valuation report shows a starting
+        # value on migration. `cost_basis` maintains the weighted-
+        # average unit cost via subsequent inventory movements, so
+        # only seed when it's empty.
+        if want_track and not it.get("cost_basis"):
+            qbo_cost = float(it.get("cost") or 0)
+            if qbo_cost > 0.005:
+                patch["cost_basis"] = qbo_cost
+
+        if patch:
+            patch["updated_at"] = now_iso()
+            await db.items.update_one({"id": it["id"]},
+                                        {"$set": patch})
+            resolved += 1
+
+    return {"items_resolved": resolved,
+             "tracking_flipped": flipped}
+
+
 
 
 async def resolve_qbo_sales_tax_payments(company_id: str) -> dict:

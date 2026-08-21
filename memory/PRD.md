@@ -5282,3 +5282,26 @@ Status: **DONE**. Sales-tax payment lifecycle now fully round-trips through synt
 Residual -$55 is a separate item-mapping shuffle (Landscaping parent direct postings, Fountains, Pest Control) — smaller root cause, distinct from the top-down bug closed here.
 
 Status: **DONE**. Multi-payment cash-basis top-down allocation now matches QBO for both customer receipts and vendor payments.
+
+
+### Aug 21 2026 — QBO Inventory Visibility Fix
+
+**Problem**: Sandbox 358d Craig's Landscaping migrated 18 items + 4 InventoryAdjustments successfully — but the Inventory Management page showed "0 tracked items · total value $0.00". QBO's real answer: 4 inventory items (Pump, Rock Fountain, Sprinkler Heads, Sprinkler Pipes) with total value $596.25.
+
+**Root cause**: Two-track import pipeline mismatch.
+- The migration entry (`run_migration` → `_PIPELINE`) called `map_item` which stored `type='inventory'`, `item_type='Inventory'`, `track_qty_on_hand=True`, and quantity/cost fields correctly.
+- BUT the internal `track_inventory` flag (which the Inventory page filters on) and the local `inventory_account_id` / `cogs_account_id` / `income_account_id` resolutions were only done by `_pull_items` in the ongoing mirror pull — which never fires immediately after migration.
+- Additionally, `compute_valuation` reads `cost_basis` (weighted-average maintained by inventory movements) but QBO stores unit cost in `cost` — freshly migrated items had `cost_basis=None`, showing $0 valuation.
+
+**Backend**
+- `qbo_service.py::resolve_item_accounts_and_tracking(cid)` — new post-import resolver. For each QBO-imported item: resolves QBO account refs to local ids, flips `track_inventory=True` on Inventory-typed items, and seeds `cost_basis` from `cost` (only when empty — respects weighted-average updated by movements later). Idempotent.
+- Wired into `run_migration` right after `resolve_payment_links`.
+- Backfilled all 8 QBO-connected sandbox companies (4 items flipped each).
+
+**Tests**: `tests/test_qbo_item_resolver.py` — 3 new regressions (flip + resolve, service-item skip, idempotency). Wider **36/36 targeted parity suite green**.
+
+**Verified live on Sandbox 358d**:
+- 4 tracked items now visible: Pump ($250), Rock Fountain ($250), Sprinkler Pipes ($77.50), Sprinkler Heads ($18.75)
+- **Total value: $596.25 ✓** — exact match to QBO Inventory Asset target from prior parity work.
+
+Status: **DONE**. QBO-migrated inventory items now surface on the Inventory Management page immediately after import.
