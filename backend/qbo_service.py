@@ -1296,6 +1296,14 @@ async def run_migration(job_id: str, company_id: str) -> None:
         except Exception:  # noqa: BLE001
             tax_rates_stats = {"rates_upserted": 0,
                                 "error": "resolver_failed"}
+        # Synthesize QBO Sales Tax Payment postings (not exposed by
+        # the REST endpoints, only by the GL report). Fixes both the
+        # Checking over-count and the residual sales-tax-payable
+        # inflation on migrations. Feb 28 2026.
+        try:
+            tax_pay_stats = await resolve_qbo_sales_tax_payments(company_id)
+        except Exception:  # noqa: BLE001
+            tax_pay_stats = {"lines_added": 0, "error": "resolver_failed"}
         # Post-import: build the Deposit `splits[]` so multi-source
         # deposits credit their line sources (Undep sweeps or direct
         # income accounts) instead of only DR-ing the bank. Without
@@ -1886,6 +1894,150 @@ async def resolve_tax_rates(company_id: str) -> dict:
         )
         upserted += 1
     return {"rates_upserted": upserted}
+
+
+async def resolve_qbo_sales_tax_payments(company_id: str) -> dict:
+    """Synthesize the "Sales Tax Payment" QBO txns that reduce a
+    sales-tax-payable account and its funding bank. QBO's REST API
+    doesn't expose `SalesTaxPayment` as a queryable entity
+    (returns 400), and its "Purchase" endpoint doesn't include
+    them either — but the GeneralLedger report DOES surface them
+    per-account. We walk the GL for each `GlobalTaxPayable`
+    account, find every DR posting (payment to the tax agency),
+    and post a matching JE that DR's the payable / CR's the
+    funding Checking account.
+
+    Fixes two drifts at once on Craig's Landscaping:
+      - Checking is $76.90 too high because two Sales Tax Payments
+        ($38.50 + $38.40) never CR'd Checking on our side.
+      - BoE Payable is $38.50 and AZ Payable is $38.40 too high
+        because their DR postings weren't captured.
+
+    Idempotent — deletes then re-posts a single "sales-tax-
+    payments" JE keyed by company. Feb 28 2026.
+    """
+    conn = await db.qbo_connections.find_one({"company_id": company_id})
+    if not conn:
+        return {"lines_added": 0, "reason": "no_connection"}
+    realm = conn["realm_id"]
+
+    # Sales-tax-payable accounts.
+    payables: list[dict] = []
+    async for a in db.accounts.find({
+        "company_id": company_id,
+        "raw.AccountSubType": "GlobalTaxPayable",
+    }):
+        if a.get("qbo_id"):
+            payables.append(a)
+    if not payables:
+        return {"lines_added": 0, "reason": "no_tax_payables"}
+
+    # Fund-side bank accounts. We walk each bank's GL for the CR side
+    # of the Sales Tax Payment so we can match date + amount to the
+    # payable's DR side. QBO's `split_account` column shows "-Split-"
+    # for any STP that also carries a bank-fee expense line, so the
+    # naive `split → bank name` lookup misses everything but the
+    # single-line cases. Two-sided GL match handles both.
+    banks: list[dict] = []
+    async for a in db.accounts.find({
+        "company_id": company_id,
+        "detail_type": "cash_and_bank",
+    }):
+        if a.get("qbo_id"):
+            banks.append(a)
+
+    # bank_credits[(date, abs_amount)] = [bank_acct_id, ...]
+    bank_credits: dict[tuple, list[str]] = {}
+    for bank in banks:
+        try:
+            gl = await fetch_report(
+                company_id, realm, "GeneralLedger",
+                {"start_date": "2000-01-01",
+                 "end_date": now_iso()[:10],
+                 "account": str(bank["qbo_id"]),
+                 "accounting_method": "Accrual"},
+            )
+        except Exception:  # noqa: BLE001
+            continue
+        for p in _flatten_gl_rows((gl.get("Rows") or {}).get("Row") or []):
+            if p.get("txn_type") != "Sales Tax Payment":
+                continue
+            amt = p.get("amount", 0)
+            # CR on a bank = negative signed amount (cash out).
+            if amt >= -0.005:
+                continue
+            key = (p.get("date") or "", round(abs(amt), 2))
+            bank_credits.setdefault(key, []).append(bank["id"])
+
+    lines: list[dict] = []
+    for pay_acct in payables:
+        try:
+            gl = await fetch_report(
+                company_id, realm, "GeneralLedger",
+                {"start_date": "2000-01-01",
+                 "end_date": now_iso()[:10],
+                 "account": str(pay_acct["qbo_id"]),
+                 "accounting_method": "Accrual"},
+            )
+        except Exception:  # noqa: BLE001
+            continue
+        for p in _flatten_gl_rows((gl.get("Rows") or {}).get("Row") or []):
+            # DR postings on a tax-payable = a payment TO the agency
+            # (reduces the natural credit balance). QBO's `amount`
+            # is signed toward the account's natural side, so a
+            # payment reads as NEGATIVE on a credit-normal liability.
+            amt = p.get("amount", 0)
+            if amt >= -0.005:
+                continue  # skip credits (accrued tax from invoices)
+            if p.get("txn_type") != "Sales Tax Payment":
+                continue
+            abs_amt = round(abs(amt), 2)
+            date = p.get("date") or ""
+            # Two-sided match: find the bank whose GL has a CR of the
+            # same amount on the same date.
+            key = (date, abs_amt)
+            candidates = bank_credits.get(key) or []
+            if not candidates:
+                # Fallback (single-line split case) — resolve via the
+                # `split` column when it names a real bank account.
+                bank_id = next(
+                    (b["id"] for b in banks
+                      if (b.get("name") or "").lower()
+                          == (p.get("split") or "").lower()),
+                    None,
+                )
+                if not bank_id:
+                    continue
+            else:
+                # Consume one candidate so a repeated same-day/same-amt
+                # payment routes to a different bank if applicable.
+                bank_id = candidates.pop(0)
+            # DR the payable, CR the bank.
+            lines.append({"account_id": pay_acct["id"],
+                            "account_qbo_id": pay_acct.get("qbo_id"),
+                            "debit": abs_amt, "credit": 0.0,
+                            "date": date,
+                            "memo": "QBO Sales Tax Payment"})
+            lines.append({"account_id": bank_id,
+                            "debit": 0.0, "credit": abs_amt,
+                            "date": date,
+                            "memo": "QBO Sales Tax Payment"})
+
+    je_id = f"qbo-sales-tax-payments-{company_id[:8]}"
+    await db.journal_entries.delete_many({"id": je_id,
+                                            "company_id": company_id})
+    if not lines:
+        return {"lines_added": 0}
+    await db.journal_entries.insert_one({
+        "id": je_id, "company_id": company_id, "source": "qbo",
+        "posted": True,
+        "date": max(l["date"] for l in lines if l.get("date")),
+        "memo": "Synthesized Sales Tax Payments from QBO GL",
+        "lines": lines,
+        "created_at": now_iso(), "updated_at": now_iso(),
+    })
+    return {"lines_added": len(lines),
+             "payables_scanned": len(payables)}
 
 
 async def resolve_payment_undeposited(company_id: str) -> dict:

@@ -1109,7 +1109,6 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
             tax_lines = td.get("TaxLine") or []
             if not tax_lines:
                 continue
-            # Accrual: full tax. Cash: prorate by paid_ratio.
             paid_ratio = 1.0
             if basis == "cash":
                 total = float(inv.get("total") or 0)
@@ -1128,6 +1127,34 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
                 if not aid:
                     continue
                 tax_by_account[aid] = tax_by_account.get(aid, 0.0) + amt
+
+        # CreditMemo + RefundReceipt tax reversals: subtract their
+        # `TxnTaxDetail.TaxLine` amounts from the payable so voided
+        # or refunded invoices don't leave phantom tax liability
+        # sitting on the BS. Craig's Landscaping had one such CM
+        # (BoE $38.50 residual). RefundReceipts on cash basis are
+        # fully credited (money already refunded to the customer).
+        # Feb 28 2026.
+        async for txn in db.transactions.find({
+            "company_id": company_id, "source": "qbo",
+            "txn_type": {"$in": ["CreditMemo", "RefundReceipt"]},
+        }):
+            date = txn.get("date") or ""
+            if not date or date > as_of:
+                continue
+            td = (txn.get("raw") or {}).get("TxnTaxDetail") or {}
+            tax_lines = td.get("TaxLine") or []
+            if not tax_lines:
+                continue
+            for tl in tax_lines:
+                amt = float(tl.get("Amount") or 0)
+                if abs(amt) < 0.005:
+                    continue
+                rref = (tl.get("TaxLineDetail") or {}).get("TaxRateRef") or {}
+                aid = tax_rate_to_account_id.get(str(rref.get("value") or ""))
+                if not aid:
+                    continue
+                tax_by_account[aid] = tax_by_account.get(aid, 0.0) - amt
 
         for aid, tax_amt in tax_by_account.items():
             tax_amt = round(tax_amt, 2)

@@ -278,6 +278,148 @@ def test_sales_tax_populates_payable_from_invoice_tax_lines():
 
 
 
+def test_credit_memo_tax_reversal_zeroes_payable():
+    """CreditMemo `TxnTaxDetail.TaxLine` must be SUBTRACTED from the
+    same sales-tax-payable so a fully credited invoice leaves no
+    phantom tax on the BS. Craig's Landscaping regression: BoE Payable
+    was $38.50 too high because a $38.50 CM reversal was ignored.
+    """
+    async def go():
+        cid = str(uuid.uuid4())
+        await db.companies.insert_one({"id": cid, "name": "CM Tax Co"})
+        await _seed_account(cid, "acct-rev-cm", "1", "Sales", "revenue")
+        await _seed_account(cid, "acct-ar-cm", "84", "A/R", "asset",
+                            "accounts_receivable")
+        now = datetime.now(timezone.utc).isoformat()
+        await db.accounts.insert_one({
+            "id": "acct-boe-cm", "company_id": cid, "qbo_id": "90",
+            "source": "qbo", "code": "",
+            "name": "Board of Equalization Payable",
+            "type": "liability", "detail_type": "",
+            "raw": {"AccountSubType": "GlobalTaxPayable"},
+            "active": True, "created_at": now, "updated_at": now,
+        })
+        await db.tax_rates.insert_one({
+            "company_id": cid, "qbo_id": "3", "source": "qbo",
+            "name": "California", "rate": 8.0,
+            "agency_qbo_id": "2",
+            "agency_name": "Board of Equalization",
+        })
+        # Invoice with $8 tax
+        await db.invoices.insert_one({
+            "id": "inv-cm", "company_id": cid, "source": "qbo",
+            "issue_date": "2026-02-05", "number": "INV-CM",
+            "total": 108.0, "balance_due": 108.0, "status": "open",
+            "line_items": [{"amount": 100.0, "account_qbo_id": "1"}],
+            "raw": {"TxnTaxDetail": {
+                "TotalTax": 8.0,
+                "TaxLine": [{
+                    "Amount": 8.0, "DetailType": "TaxLineDetail",
+                    "TaxLineDetail": {"TaxRateRef": {"value": "3"},
+                                       "NetAmountTaxable": 100.0}}]}},
+        })
+        # CreditMemo reversing the same $8 tax line
+        await db.transactions.insert_one({
+            "id": "cm-1", "company_id": cid, "source": "qbo",
+            "txn_type": "CreditMemo",
+            "date": "2026-02-10", "amount": 108.0,
+            "raw": {"TxnTaxDetail": {
+                "TotalTax": 8.0,
+                "TaxLine": [{
+                    "Amount": 8.0, "DetailType": "TaxLineDetail",
+                    "TaxLineDetail": {"TaxRateRef": {"value": "3"},
+                                       "NetAmountTaxable": 100.0}}]}},
+        })
+
+        try:
+            import reports as R
+            bs = await R.compute_balance_sheet(
+                cid, as_of="2026-02-28", basis="accrual")
+            boe = next((r for r in bs["liabilities"]
+                         if r["name"] == "Board of Equalization Payable"),
+                        None)
+            # Invoice +$8, CM -$8 → net $0 on the payable → row should
+            # be absent (or effectively zero).
+            assert boe is None or abs(boe["amount"]) < 0.02, (
+                f"expected BoE Payable to net to $0 after CM reversal, "
+                f"got {boe}"
+            )
+        finally:
+            await db.tax_rates.delete_many({"company_id": cid})
+            await _cleanup(cid)
+
+    _run(go())
+
+
+def test_refund_receipt_tax_reversal_zeroes_payable():
+    """RefundReceipt `TxnTaxDetail.TaxLine` must also reverse tax on
+    the payable (money already refunded to customer means the tax
+    collected was never truly owed to the agency)."""
+    async def go():
+        cid = str(uuid.uuid4())
+        await db.companies.insert_one({"id": cid, "name": "RR Tax Co"})
+        await _seed_account(cid, "acct-rev-rr", "1", "Sales", "revenue")
+        await _seed_account(cid, "acct-ar-rr", "84", "A/R", "asset",
+                            "accounts_receivable")
+        now = datetime.now(timezone.utc).isoformat()
+        await db.accounts.insert_one({
+            "id": "acct-az-rr", "company_id": cid, "qbo_id": "91",
+            "source": "qbo", "code": "",
+            "name": "Arizona Dept of Revenue Payable",
+            "type": "liability", "detail_type": "",
+            "raw": {"AccountSubType": "GlobalTaxPayable"},
+            "active": True, "created_at": now, "updated_at": now,
+        })
+        await db.tax_rates.insert_one({
+            "company_id": cid, "qbo_id": "5", "source": "qbo",
+            "name": "Arizona", "rate": 6.0,
+            "agency_qbo_id": "4",
+            "agency_name": "Arizona Dept of Revenue",
+        })
+        # Invoice with $6 tax
+        await db.invoices.insert_one({
+            "id": "inv-rr", "company_id": cid, "source": "qbo",
+            "issue_date": "2026-02-05", "number": "INV-RR",
+            "total": 106.0, "balance_due": 106.0, "status": "open",
+            "line_items": [{"amount": 100.0, "account_qbo_id": "1"}],
+            "raw": {"TxnTaxDetail": {
+                "TotalTax": 6.0,
+                "TaxLine": [{
+                    "Amount": 6.0, "DetailType": "TaxLineDetail",
+                    "TaxLineDetail": {"TaxRateRef": {"value": "5"},
+                                       "NetAmountTaxable": 100.0}}]}},
+        })
+        # RefundReceipt reversing $6 tax
+        await db.transactions.insert_one({
+            "id": "rr-1", "company_id": cid, "source": "qbo",
+            "txn_type": "RefundReceipt",
+            "date": "2026-02-10", "amount": 106.0,
+            "raw": {"TxnTaxDetail": {
+                "TotalTax": 6.0,
+                "TaxLine": [{
+                    "Amount": 6.0, "DetailType": "TaxLineDetail",
+                    "TaxLineDetail": {"TaxRateRef": {"value": "5"},
+                                       "NetAmountTaxable": 100.0}}]}},
+        })
+
+        try:
+            import reports as R
+            bs = await R.compute_balance_sheet(
+                cid, as_of="2026-02-28", basis="accrual")
+            az = next((r for r in bs["liabilities"]
+                         if r["name"] == "Arizona Dept of Revenue Payable"),
+                        None)
+            assert az is None or abs(az["amount"]) < 0.02, (
+                f"expected AZ Payable to net to $0 after RR reversal, "
+                f"got {az}"
+            )
+        finally:
+            await db.tax_rates.delete_many({"company_id": cid})
+            await _cleanup(cid)
+
+    _run(go())
+
+
 def test_cash_and_accrual_disagree_on_unpaid_invoice():
     """A fundamental cash-vs-accrual property: an unpaid invoice
     contributes revenue on accrual but zero on cash."""

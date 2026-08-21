@@ -5217,3 +5217,41 @@ Status: **DONE**. Both accrual and cash basis now essentially tie to QBO 1:1 on 
 **Verified live**: Cash Total Equity on Sandbox 358d now matches QBO **to the penny (-$11,809.12)**. Sales-tax payables populate from real invoice data.
 
 Status: **DONE**. Cash-basis reports now essentially tie to QBO 1:1 on Craig's Landscaping.
+
+
+
+### Feb 28 2026 (evening) — Final Parity Blockers Closed: Sales Tax Payment Synth + CM/RR Tax Reversals
+
+**Problem**: Two residual drifts remained after the tax-extraction pass:
+1. **Checking -$76.90** on Sandbox a026/2457 — QBO's Sales Tax Payment entity isn't exposed by the REST API (returns 400) or the Purchase endpoint, so two payments ($38.50 + $38.40) never CR'd Checking on our side.
+2. **BoE + AZ Payables inflated** — Same two payments never DR'd the payables either, and CreditMemos/RefundReceipts with TaxLines weren't reversing their tax contribution.
+
+**Backend**
+- `qbo_service.py::resolve_qbo_sales_tax_payments(cid)` — new synthesizer that walks the GeneralLedger for every `GlobalTaxPayable` account, picks up every `Sales Tax Payment` DR posting, matches it to the funding bank via a two-sided (payable-GL × bank-GL, date + amount) walk, and posts a single deterministic JE. Handles QBO's `-Split-` column (fires when the STP carries an extra expense line like a bank fee). Idempotent by fixed JE id.
+- Wired into the import pipeline right after `resolve_tax_rates`.
+- `reports.py::compute_balance_sheet` — CreditMemo + RefundReceipt `TxnTaxDetail.TaxLine` amounts now subtract from the same sales-tax-payable so voided/refunded invoices don't leave phantom tax liability sitting on the BS.
+
+**Tests**: 
+- `tests/test_qbo_sales_tax_payment_synth.py` — 5 new tests (matched JE shape, idempotency, credit-side skip, no-connection noop, real-world `-Split-` two-sided match)
+- `tests/test_cash_basis_parity.py` — added 2 tests for CM and RR TxnTaxDetail reversals (10 total in file, all green)
+- `tests/test_qbo_opening_balance_delta.py` — updated stale `test_opening_je_with_activity_plugs_only_the_delta` to reflect the new design (opener SKIPS accounts with activity so real import gaps surface on the Recon Panel rather than being silently swallowed into OBE).
+- Full targeted suite: **31/31 green**.
+
+**Verified live (Sandbox a026 + 2457)**:
+- Checking: -$76.90 → **$1,201.00** ✓ (target $1,201.00)
+- BoE Payable: was inflated by opener plug → **$370.94** ✓ (target $370.94)
+- AZ Dept. of Revenue Payable: **$0.00** ✓ (accrual and STP DR cancel)
+- Accounts Payable: **$1,602.67** ✓
+- Undeposited Funds: **$2,062.52** ✓
+- Truck Original Cost: **$13,495.00** ✓
+- Notes Payable: **$25,000.00** ✓, Loan Payable: **$4,000.00** ✓, Mastercard: **$157.72** ✓
+- BS balanced end-to-end on both realms.
+
+Residual known gaps (surface on Recon Panel, not silently plugged):
+- Savings $600 vs QBO $800 ($200 opening balance predates activity — synthesizer for this account class pending)
+- Inventory Asset $567.50 vs QBO $596.25 ($28.75 opening balance, same class)
+- A/R $5,381.52 vs QBO $5,281.52 ($100 import gap — CM allocation)
+
+These are surfaced correctly for review rather than being masked into OBE.
+
+Status: **DONE**. Sales-tax payment lifecycle now fully round-trips through synthesis + accrual + reversal.
