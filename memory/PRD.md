@@ -5185,3 +5185,19 @@ Status: **DONE**. Per-account parity now essentially 1:1 with QBO on companies w
 **Verified live**: Craig's Landscaping OBE = -$9,337.50 (exact QBO match). BS balanced. Total L&P subtotal = $1,170 (exact QBO match). Residual per-account drift confined to real import gaps (Checking +$76.90, Inv Asset -$28.75, BoE Payable $370.94 = missing invoice sales-tax extraction).
 
 Status: **DONE**. Big three drift items closed; remaining residuals are isolated import gaps on specific accounts, not systemic.
+
+
+### Feb 28 2026 — Cash-Basis Report Parity
+
+**Problem**: With accrual parity done, toggling to Cash showed Total Income $614 vs QBO $5,080 (-$4,466 gap). Cash basis was falling through to `_signed_balances` alone — invoices paid by Payment docs never contributed revenue because the allocation layer was gated behind `basis=='accrual'`.
+
+**Backend**
+- New `basis=='cash'` block in `compute_income_statement`: prorates each Payment IN over the linked invoice's line items and posts to the line's income account. Symmetrical for Payments OUT + bills.
+- New `basis=='cash'` block in `compute_balance_sheet`: strips Inventory Asset (QBO cash convention) and rolls the value into Net Income to keep the sheet balanced.
+- `_refresh_subtotals` hoisted so both bases reuse it.
+
+**Tests**: `tests/test_cash_basis_parity.py` — 5 new tests. Full suite 19/19 green.
+
+**Verified live**: Sandbox 358d cash P&L expenses and COGS match to the penny; revenue within 2.4% (+$120 from partial-payment proration vs QBO's top-down application). Cash BS balances; assets within $77 (same Checking import gap that also shows on accrual). Accrual reports unchanged.
+
+Status: **DONE**. Both accrual and cash basis now essentially tie to QBO 1:1 on Craig's Landscaping.

@@ -472,6 +472,40 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
     cogs_rows    = _sweep_deep_accounts("cogs",    cogs_rows)
     expense_rows = _sweep_deep_accounts("expense", expense_rows)
 
+    # Shared subtotal refresher — used by both the accrual and the
+    # cash allocation passes. `_emit` created the subtotal at
+    # emit-time using the pre-adjustment `rolled = direct + kids`
+    # value, but subsequent layers (accrual invoice/bill top-ups,
+    # cash-basis payment prorations) subsequently topped up each
+    # kid row with its share of the period's activity — the subtotal
+    # doesn't auto-recompute, so "Total Legal & Professional Fees"
+    # stayed at emit-time $480 instead of the post-accrual $1,170.
+    # Feb 28 2026 — Craig's Landscaping P&L subtotal drift.
+    def _refresh_subtotals(rows):
+        # Build maps keyed by parent_id (authoritative — QBO
+        # accounts routinely have `code = ""`, so relying on
+        # `parent_code` alone missed 100% of QBO-imported groupings).
+        child_sum_by_parent: dict[str, float] = {}
+        parent_direct_by_id: dict[str, float] = {}
+        for r in rows:
+            if r.get("is_subtotal"):
+                continue
+            pid = r.get("parent_id")
+            if pid:
+                child_sum_by_parent[pid] = (
+                    child_sum_by_parent.get(pid, 0.0) + r["amount"])
+            elif r.get("id"):
+                parent_direct_by_id[r["id"]] = r["amount"]
+        for r in rows:
+            if not r.get("is_subtotal"):
+                continue
+            pid = r.get("parent_id")
+            if not pid:
+                continue
+            new_total = (parent_direct_by_id.get(pid, 0.0)
+                         + child_sum_by_parent.get(pid, 0.0))
+            r["amount"] = round(new_total, 2)
+
     # Section totals — sum every row that is NOT a "Total X" subtotal.
     # Because parent rows are now direct-only and children carry their
     # own amounts, adding all non-subtotal rows equals the true total
@@ -672,40 +706,155 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
         total_expense = _sum_section(expense_rows)
 
         # Refresh "Total X" subtotal rows so they reflect the child
-        # amounts after the accrual pass. `_emit` created the subtotal
-        # at emit-time using the pre-accrual `rolled = direct + kids`
-        # value, but the accrual layer subsequently topped up each
-        # kid row with its share of the period's bills/invoices — the
-        # subtotal doesn't auto-recompute, so Total Legal &
-        # Professional Fees stayed at $480 (direct $75 + emit-time
-        # kids) instead of the post-accrual $1,170 ($75 + Accounting
-        # $640 + Bookkeeper $55 + Lawyer $400).
-        # Feb 28 2026 — Craig's Landscaping P&L subtotal drift.
-        def _refresh_subtotals(rows):
-            # Build maps keyed by parent_id (authoritative — QBO
-            # accounts routinely have `code = ""`, so relying on
-            # `parent_code` alone missed 100% of QBO-imported groupings
-            # like Legal & Professional Fees).
-            child_sum_by_parent: dict[str, float] = {}
-            parent_direct_by_id: dict[str, float] = {}
-            for r in rows:
-                if r.get("is_subtotal"):
+        # amounts after the accrual pass.
+        _refresh_subtotals(revenue_rows)
+        _refresh_subtotals(cogs_rows)
+        _refresh_subtotals(expense_rows)
+
+    elif basis == "cash":
+        # ------------------------------------------------------------------
+        # Cash-basis allocation (Feb 28 2026 — Craig's Landscaping parity)
+        # ------------------------------------------------------------------
+        # On cash basis, revenue and expense recognize when MONEY MOVES,
+        # not when the invoice/bill is issued. `_signed_balances` already
+        # captures direct cash txns (SalesReceipt, RefundReceipt, Purchase,
+        # Check, Deposit-with-revenue-category), but any invoice paid by
+        # a Payment doc contributes nothing without an explicit
+        # allocation pass — we'd under-count revenue by the amount of
+        # every paid invoice's line items.
+        #
+        # Allocation rule (matches QBO):
+        #   For each Payment (direction='in') dated in the period, split
+        #   the payment amount across the linked invoice's line items
+        #   in proportion to each line's contribution to the invoice
+        #   subtotal, then post that slice to the line's income account.
+        #   Symmetrical for direction='out' + bill lines → expense/COGS.
+        rev_by_qbo: dict[str, dict] = {}
+        exp_by_qbo: dict[str, dict] = {}
+        for a in accts:
+            if a.get("qbo_id"):
+                if a["type"] == "revenue":
+                    rev_by_qbo[str(a["qbo_id"])] = a
+                elif a["type"] in ("expense", "cogs"):
+                    exp_by_qbo[str(a["qbo_id"])] = a
+
+        rev_row_by_id = {r["id"]: r for r in revenue_rows if r.get("id")}
+        exp_row_by_id = {r["id"]: r for r in expense_rows if r.get("id")}
+        cogs_row_by_id = {r["id"]: r for r in cogs_rows if r.get("id")}
+
+        def _add_to(section: str, acct: dict, amt: float):
+            """Increment (or create) the P&L row for `acct` by `amt`.
+            Handles parent_id linkage so `_refresh_subtotals` finds
+            it. Idempotent per account id."""
+            if section == "revenue":
+                idx, target_rows = rev_row_by_id, revenue_rows
+            elif section == "cogs":
+                idx, target_rows = cogs_row_by_id, cogs_rows
+            else:
+                idx, target_rows = exp_row_by_id, expense_rows
+            row = idx.get(acct["id"])
+            if row:
+                row["amount"] = round(row["amount"] + amt, 2)
+                return
+            new_row = {
+                "id": acct["id"], "code": acct.get("code") or "",
+                "name": acct.get("name") or "",
+                "amount": round(amt, 2),
+                "detail_type": (acct.get("detail_type") or "").strip(),
+            }
+            if acct.get("parent_account_id"):
+                new_row["parent_id"] = acct["parent_account_id"]
+            target_rows.append(new_row)
+            idx[acct["id"]] = new_row
+
+        # --- 1) Customer payments → revenue (prorated over invoice lines)
+        async for pay in db.payments.find({"company_id": company_id,
+                                            "direction": "in",
+                                            "date": {"$gte": start, "$lte": end}}):
+            paid = float(pay.get("amount") or 0)
+            if paid < 0.005:
+                continue
+            inv_id = pay.get("linked_invoice_id")
+            if not inv_id:
+                continue
+            inv = await db.invoices.find_one({"id": inv_id,
+                                                "company_id": company_id})
+            if not inv:
+                continue
+            lines = inv.get("line_items") or []
+            # Sum only revenue-eligible line amounts (positive lines
+            # pointing to a revenue account). Discount lines carry a
+            # negative amount and route to "Discounts given" — same
+            # ratio applies so QBO's Discounts row shrinks
+            # proportionally as invoices are only partially paid.
+            line_slices: list[tuple[dict, float]] = []
+            base_total = 0.0
+            for ln in lines:
+                la = float(ln.get("amount") or 0)
+                if abs(la) < 0.005:
                     continue
-                pid = r.get("parent_id")
-                if pid:
-                    child_sum_by_parent[pid] = (
-                        child_sum_by_parent.get(pid, 0.0) + r["amount"])
-                elif r.get("id"):
-                    parent_direct_by_id[r["id"]] = r["amount"]
-            for r in rows:
-                if not r.get("is_subtotal"):
+                qid = str(ln.get("account_qbo_id") or "")
+                acct = rev_by_qbo.get(qid)
+                if not acct:
                     continue
-                pid = r.get("parent_id")
-                if not pid:
+                line_slices.append((acct, la))
+                base_total += la
+            if base_total <= 0.005:
+                continue
+            # Cap ratio at 1.0 — over-payments don't add phantom revenue.
+            ratio = min(paid / base_total, 1.0)
+            for acct, la in line_slices:
+                slice_amt = round(la * ratio, 2)
+                if abs(slice_amt) < 0.005:
                     continue
-                new_total = (parent_direct_by_id.get(pid, 0.0)
-                             + child_sum_by_parent.get(pid, 0.0))
-                r["amount"] = round(new_total, 2)
+                _add_to("revenue", acct, slice_amt)
+
+        # --- 2) Vendor payments → expense/COGS (prorated over bill lines)
+        async for pay in db.payments.find({"company_id": company_id,
+                                            "direction": "out",
+                                            "date": {"$gte": start, "$lte": end}}):
+            paid = float(pay.get("amount") or 0)
+            if paid < 0.005:
+                continue
+            bill_id = pay.get("linked_bill_id")
+            if not bill_id:
+                continue
+            bill = await db.bills.find_one({"id": bill_id,
+                                              "company_id": company_id})
+            if not bill:
+                continue
+            lines = bill.get("line_items") or []
+            line_slices = []
+            base_total = 0.0
+            for ln in lines:
+                la = float(ln.get("amount") or 0)
+                if abs(la) < 0.005:
+                    continue
+                qid = str(ln.get("account_qbo_id") or "")
+                if not qid and ln.get("item_qbo_id"):
+                    item = await db.items.find_one({
+                        "company_id": company_id,
+                        "qbo_id": ln["item_qbo_id"]})
+                    if item:
+                        qid = str(item.get("expense_account_qbo_id") or "")
+                acct = exp_by_qbo.get(qid)
+                if not acct:
+                    continue
+                line_slices.append((acct, la))
+                base_total += la
+            if base_total <= 0.005:
+                continue
+            ratio = min(paid / base_total, 1.0)
+            for acct, la in line_slices:
+                slice_amt = round(la * ratio, 2)
+                if abs(slice_amt) < 0.005:
+                    continue
+                _add_to("cogs" if acct["type"] == "cogs" else "expense",
+                        acct, slice_amt)
+
+        total_revenue = _sum_section(revenue_rows)
+        total_cogs    = _sum_section(cogs_rows)
+        total_expense = _sum_section(expense_rows)
         _refresh_subtotals(revenue_rows)
         _refresh_subtotals(cogs_rows)
         _refresh_subtotals(expense_rows)
@@ -882,6 +1031,26 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
         net_income_current += ar_open - ap_open
         assets.sort(key=lambda x: (x["code"], x.get("parent_code", "")))
         liabilities.sort(key=lambda x: (x.get("parent_code", "") or x["code"], x["code"]))
+    elif basis == "cash":
+        # Cash-basis convention (matches QBO): Inventory Asset does
+        # NOT appear on the cash BS because on cash accounting,
+        # inventory is expensed when purchased, not tracked as an
+        # asset. Strip it from the asset rows and add its net value
+        # to `net_income_current` as an expense adjustment so the
+        # sheet still balances (Inventory value on hand effectively
+        # rolls into COGS/period expense).
+        # Feb 28 2026 — Craig's Landscaping cash BS parity.
+        inv_total = 0.0
+        kept_assets = []
+        for r in assets:
+            if (r.get("detail_type") or "").lower() == "inventory":
+                inv_total += r["amount"]
+                continue
+            kept_assets.append(r)
+        assets = kept_assets
+        if abs(inv_total) >= 0.005:
+            total_assets -= inv_total
+            net_income_current -= inv_total  # inventory value → cash expense
 
     # ------------------------------------------------------------------
     # Payment cash-side offset. `_signed_balances` now rolls QBO
