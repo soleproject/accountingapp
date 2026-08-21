@@ -64,6 +64,7 @@ import LoansPage from "@/pages/LoansPage";
 import Connections from "@/pages/Connections";
 import QboConnect from "@/pages/QboConnect";
 import QboMirror from "@/pages/QboMirror";
+import TestQbo from "@/pages/TestQbo";
 import PfcCategoryMap from "@/pages/PfcCategoryMap";
 import StatementImportDetail from "@/pages/StatementImportDetail";
 import CompanySettings from "@/pages/CompanySettings";
@@ -177,6 +178,7 @@ function App() {
               <Route path="/customer-statements" element={<CustomerStatements />} />
               <Route path="/connections" element={<Connections />} />
               <Route path="/connections/qbo" element={<QboConnect />} />
+              <Route path="/test-qbo" element={<TestQbo />} />
               <Route path="/settings/qbo-mirror" element={<QboMirror />} />
               <Route path="/settings/pfc-map" element={<PfcCategoryMap />} />
               <Route path="/connections/imports/:importId" element={<StatementImportDetail />} />
