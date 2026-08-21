@@ -1289,6 +1289,13 @@ async def run_migration(job_id: str, company_id: str) -> None:
         # the held cash. Idempotent, safe to re-run.
         # Feb 28 2026 — QBO Undeposited Funds two-step workflow.
         undep_stamped = await resolve_payment_undeposited(company_id)
+        # Fetch QBO TaxRate + TaxAgency so `compute_balance_sheet`
+        # can route sales-tax lines to the correct payable account.
+        try:
+            tax_rates_stats = await resolve_tax_rates(company_id)
+        except Exception:  # noqa: BLE001
+            tax_rates_stats = {"rates_upserted": 0,
+                                "error": "resolver_failed"}
         # Post-import: build the Deposit `splits[]` so multi-source
         # deposits credit their line sources (Undep sweeps or direct
         # income accounts) instead of only DR-ing the bank. Without
@@ -1832,8 +1839,53 @@ async def _post_opening_balances_je(company_id: str) -> dict:
     )
     return {"posted_je_id": je_id,
              "line_count": len(lines),
-             "gross_debits": round(dr_total, 2),
-             "gross_credits": round(cr_total, 2)}
+             "gross_debits": round(sum(l.get("debit", 0.0) for l in lines), 2),
+             "gross_credits": round(sum(l.get("credit", 0.0) for l in lines), 2)}
+
+
+async def resolve_tax_rates(company_id: str) -> dict:
+    """Fetch QBO's `TaxRate` + `TaxAgency` and cache each rate's
+    agency-name mapping in `db.tax_rates` so `compute_balance_sheet`
+    can route Invoice `TxnTaxDetail.TaxLine` amounts to the correct
+    sales-tax-payable account. Idempotent — upserts by
+    `(company_id, qbo_id)`. Feb 28 2026 — sales-tax parity.
+    """
+    conn = await db.qbo_connections.find_one({"company_id": company_id})
+    if not conn:
+        return {"rates_upserted": 0, "reason": "no_connection"}
+    realm = conn["realm_id"]
+    try:
+        rr = await _get(company_id, realm, f"/company/{realm}/query",
+                          {"query": "select * from TaxRate"})
+        ar = await _get(company_id, realm, f"/company/{realm}/query",
+                          {"query": "select * from TaxAgency"})
+    except Exception:  # noqa: BLE001 — transient QBO error
+        return {"rates_upserted": 0, "reason": "qbo_fetch_failed"}
+    agencies = {str(a.get("Id")): a.get("DisplayName") or ""
+                for a in (ar.get("QueryResponse") or {}).get("TaxAgency", [])}
+    upserted = 0
+    for tr in (rr.get("QueryResponse") or {}).get("TaxRate", []):
+        qid = str(tr.get("Id") or "")
+        if not qid:
+            continue
+        agency_id = str((tr.get("AgencyRef") or {}).get("value") or "")
+        agency_name = agencies.get(agency_id, "")
+        await db.tax_rates.update_one(
+            {"company_id": company_id, "qbo_id": qid},
+            {"$set": {
+                "company_id": company_id,
+                "qbo_id": qid,
+                "name": tr.get("Name") or "",
+                "rate": float(tr.get("RateValue") or 0),
+                "agency_qbo_id": agency_id,
+                "agency_name": agency_name,
+                "source": "qbo",
+                "updated_at": now_iso(),
+            }},
+            upsert=True,
+        )
+        upserted += 1
+    return {"rates_upserted": upserted}
 
 
 async def resolve_payment_undeposited(company_id: str) -> dict:

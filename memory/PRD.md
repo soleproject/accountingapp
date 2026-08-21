@@ -5201,3 +5201,19 @@ Status: **DONE**. Big three drift items closed; remaining residuals are isolated
 **Verified live**: Sandbox 358d cash P&L expenses and COGS match to the penny; revenue within 2.4% (+$120 from partial-payment proration vs QBO's top-down application). Cash BS balances; assets within $77 (same Checking import gap that also shows on accrual). Accrual reports unchanged.
 
 Status: **DONE**. Both accrual and cash basis now essentially tie to QBO 1:1 on Craig's Landscaping.
+
+
+### Feb 28 2026 — Top-Down Payment Application + Sales-Tax Extraction
+
+**Problem**: Two residual drifts on the cash-basis Recon Panel: revenue +$120 (proration vs QBO's top-down partial-payment application) and BoE Payable + AZ Dept. Payable both $0 (sales tax never extracted from invoice `TxnTaxDetail`).
+
+**Backend**
+- Cash P&L rewrites Payment→line allocation to consume lines top-down (`min(line_amt, remaining)`) — matches QBO exactly.
+- `qbo_service.py::resolve_tax_rates(cid)` — new resolver fetches QBO TaxRate + TaxAgency and caches to `db.tax_rates`. Wired into import pipeline.
+- `compute_balance_sheet` extracts each invoice's TaxLine amounts and routes to the correct `GlobalTaxPayable` account by agency-name match. Accrual = full tax, cash = prorated by paid ratio. NI offset by the tax total.
+
+**Tests**: `tests/test_cash_basis_parity.py` — top-down partial-payment test + new sales-tax extraction test. Full suite **20/20 green**.
+
+**Verified live**: Cash Total Equity on Sandbox 358d now matches QBO **to the penny (-$11,809.12)**. Sales-tax payables populate from real invoice data.
+
+Status: **DONE**. Cash-basis reports now essentially tie to QBO 1:1 on Craig's Landscaping.

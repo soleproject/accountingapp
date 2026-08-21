@@ -84,10 +84,11 @@ def test_cash_revenue_from_full_invoice_payment():
     _run(go())
 
 
-def test_cash_revenue_partial_payment_prorated():
-    """Half-payment case: $250 against $500 Invoice with lines Design
-    $300 / Services $200 must post proportionally: Design $150,
-    Services $100."""
+def test_cash_revenue_partial_payment_top_down():
+    """Top-down application (matches QBO): $250 payment against $500
+    Invoice with lines Design $300 / Services $200 consumes lines in
+    order — Design gets the full $250, Services gets $0. Prior
+    proration variant would have posted Design $150 / Services $100."""
     async def go():
         cid = str(uuid.uuid4())
         await db.companies.insert_one({"id": cid, "name": "PartialPay Co"})
@@ -113,10 +114,12 @@ def test_cash_revenue_partial_payment_prorated():
             pl = await R.compute_income_statement(
                 cid, start="2026-01-01", end="2026-02-28", basis="cash")
             d = next(r for r in pl["revenue"] if r["name"] == "Design")
-            s = next(r for r in pl["revenue"] if r["name"] == "Services")
-            # 250/500 = 0.5 → Design 150, Services 100
-            assert abs(d["amount"] - 150.0) < 0.02, d
-            assert abs(s["amount"] - 100.0) < 0.02, s
+            s_row = next((r for r in pl["revenue"]
+                            if r["name"] == "Services"), None)
+            # Top-down: full $250 lands on Design.
+            assert abs(d["amount"] - 250.0) < 0.02, d
+            # Services line untouched — either absent or $0.
+            assert s_row is None or abs(s_row["amount"]) < 0.02, s_row
         finally:
             await _cleanup(cid)
 
@@ -216,6 +219,63 @@ def test_cash_bs_strips_inventory_asset():
             await _cleanup(cid)
 
     _run(go())
+
+def test_sales_tax_populates_payable_from_invoice_tax_lines():
+    """Invoice `TxnTaxDetail.TaxLine` entries route to the correct
+    sales-tax-payable account based on the tax rate's agency name."""
+    async def go():
+        cid = str(uuid.uuid4())
+        await db.companies.insert_one({"id": cid, "name": "SalesTax Co"})
+        await _seed_account(cid, "acct-rev-st", "1", "Sales", "revenue")
+        await _seed_account(cid, "acct-ar-st", "84", "A/R", "asset",
+                            "accounts_receivable")
+        now = datetime.now(timezone.utc).isoformat()
+        await db.accounts.insert_one({
+            "id": "acct-boe-st", "company_id": cid, "qbo_id": "90",
+            "source": "qbo", "code": "",
+            "name": "Board of Equalization Payable",
+            "type": "liability", "detail_type": "",
+            "raw": {"AccountSubType": "GlobalTaxPayable"},
+            "active": True, "created_at": now, "updated_at": now,
+        })
+        await db.tax_rates.insert_one({
+            "company_id": cid, "qbo_id": "3", "source": "qbo",
+            "name": "California", "rate": 8.0,
+            "agency_qbo_id": "2",
+            "agency_name": "Board of Equalization",
+        })
+        await db.invoices.insert_one({
+            "id": "inv-st", "company_id": cid, "source": "qbo",
+            "issue_date": "2026-02-05", "number": "INV-ST",
+            "total": 108.0, "balance_due": 108.0, "status": "open",
+            "line_items": [
+                {"amount": 100.0, "account_qbo_id": "1"},
+            ],
+            "raw": {"TxnTaxDetail": {
+                "TotalTax": 8.0,
+                "TaxLine": [{
+                    "Amount": 8.0,
+                    "DetailType": "TaxLineDetail",
+                    "TaxLineDetail": {"TaxRateRef": {"value": "3"},
+                                        "NetAmountTaxable": 100.0}}]}},
+        })
+
+        try:
+            import reports as R
+            bs = await R.compute_balance_sheet(
+                cid, as_of="2026-02-28", basis="accrual")
+            boe = next((r for r in bs["liabilities"]
+                         if r["name"] == "Board of Equalization Payable"),
+                        None)
+            assert boe is not None, "expected BoE Payable row on BS"
+            assert abs(boe["amount"] - 8.0) < 0.02, boe
+        finally:
+            await db.tax_rates.delete_many({"company_id": cid})
+            await _cleanup(cid)
+
+    _run(go())
+
+
 
 
 def test_cash_and_accrual_disagree_on_unpaid_invoice():
