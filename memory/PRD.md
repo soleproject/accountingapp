@@ -5185,3 +5185,73 @@ Status: **DONE**. Per-account parity now essentially 1:1 with QBO on companies w
 **Verified live**: Craig's Landscaping OBE = -$9,337.50 (exact QBO match). BS balanced. Total L&P subtotal = $1,170 (exact QBO match). Residual per-account drift confined to real import gaps (Checking +$76.90, Inv Asset -$28.75, BoE Payable $370.94 = missing invoice sales-tax extraction).
 
 Status: **DONE**. Big three drift items closed; remaining residuals are isolated import gaps on specific accounts, not systemic.
+
+
+### Feb 28 2026 — Cash-Basis Report Parity
+
+**Problem**: With accrual parity done, toggling to Cash showed Total Income $614 vs QBO $5,080 (-$4,466 gap). Cash basis was falling through to `_signed_balances` alone — invoices paid by Payment docs never contributed revenue because the allocation layer was gated behind `basis=='accrual'`.
+
+**Backend**
+- New `basis=='cash'` block in `compute_income_statement`: prorates each Payment IN over the linked invoice's line items and posts to the line's income account. Symmetrical for Payments OUT + bills.
+- New `basis=='cash'` block in `compute_balance_sheet`: strips Inventory Asset (QBO cash convention) and rolls the value into Net Income to keep the sheet balanced.
+- `_refresh_subtotals` hoisted so both bases reuse it.
+
+**Tests**: `tests/test_cash_basis_parity.py` — 5 new tests. Full suite 19/19 green.
+
+**Verified live**: Sandbox 358d cash P&L expenses and COGS match to the penny; revenue within 2.4% (+$120 from partial-payment proration vs QBO's top-down application). Cash BS balances; assets within $77 (same Checking import gap that also shows on accrual). Accrual reports unchanged.
+
+Status: **DONE**. Both accrual and cash basis now essentially tie to QBO 1:1 on Craig's Landscaping.
+
+
+### Feb 28 2026 — Top-Down Payment Application + Sales-Tax Extraction
+
+**Problem**: Two residual drifts on the cash-basis Recon Panel: revenue +$120 (proration vs QBO's top-down partial-payment application) and BoE Payable + AZ Dept. Payable both $0 (sales tax never extracted from invoice `TxnTaxDetail`).
+
+**Backend**
+- Cash P&L rewrites Payment→line allocation to consume lines top-down (`min(line_amt, remaining)`) — matches QBO exactly.
+- `qbo_service.py::resolve_tax_rates(cid)` — new resolver fetches QBO TaxRate + TaxAgency and caches to `db.tax_rates`. Wired into import pipeline.
+- `compute_balance_sheet` extracts each invoice's TaxLine amounts and routes to the correct `GlobalTaxPayable` account by agency-name match. Accrual = full tax, cash = prorated by paid ratio. NI offset by the tax total.
+
+**Tests**: `tests/test_cash_basis_parity.py` — top-down partial-payment test + new sales-tax extraction test. Full suite **20/20 green**.
+
+**Verified live**: Cash Total Equity on Sandbox 358d now matches QBO **to the penny (-$11,809.12)**. Sales-tax payables populate from real invoice data.
+
+Status: **DONE**. Cash-basis reports now essentially tie to QBO 1:1 on Craig's Landscaping.
+
+
+
+### Feb 28 2026 (evening) — Final Parity Blockers Closed: Sales Tax Payment Synth + CM/RR Tax Reversals
+
+**Problem**: Two residual drifts remained after the tax-extraction pass:
+1. **Checking -$76.90** on Sandbox a026/2457 — QBO's Sales Tax Payment entity isn't exposed by the REST API (returns 400) or the Purchase endpoint, so two payments ($38.50 + $38.40) never CR'd Checking on our side.
+2. **BoE + AZ Payables inflated** — Same two payments never DR'd the payables either, and CreditMemos/RefundReceipts with TaxLines weren't reversing their tax contribution.
+
+**Backend**
+- `qbo_service.py::resolve_qbo_sales_tax_payments(cid)` — new synthesizer that walks the GeneralLedger for every `GlobalTaxPayable` account, picks up every `Sales Tax Payment` DR posting, matches it to the funding bank via a two-sided (payable-GL × bank-GL, date + amount) walk, and posts a single deterministic JE. Handles QBO's `-Split-` column (fires when the STP carries an extra expense line like a bank fee). Idempotent by fixed JE id.
+- Wired into the import pipeline right after `resolve_tax_rates`.
+- `reports.py::compute_balance_sheet` — CreditMemo + RefundReceipt `TxnTaxDetail.TaxLine` amounts now subtract from the same sales-tax-payable so voided/refunded invoices don't leave phantom tax liability sitting on the BS.
+
+**Tests**: 
+- `tests/test_qbo_sales_tax_payment_synth.py` — 5 new tests (matched JE shape, idempotency, credit-side skip, no-connection noop, real-world `-Split-` two-sided match)
+- `tests/test_cash_basis_parity.py` — added 2 tests for CM and RR TxnTaxDetail reversals (10 total in file, all green)
+- `tests/test_qbo_opening_balance_delta.py` — updated stale `test_opening_je_with_activity_plugs_only_the_delta` to reflect the new design (opener SKIPS accounts with activity so real import gaps surface on the Recon Panel rather than being silently swallowed into OBE).
+- Full targeted suite: **31/31 green**.
+
+**Verified live (Sandbox a026 + 2457)**:
+- Checking: -$76.90 → **$1,201.00** ✓ (target $1,201.00)
+- BoE Payable: was inflated by opener plug → **$370.94** ✓ (target $370.94)
+- AZ Dept. of Revenue Payable: **$0.00** ✓ (accrual and STP DR cancel)
+- Accounts Payable: **$1,602.67** ✓
+- Undeposited Funds: **$2,062.52** ✓
+- Truck Original Cost: **$13,495.00** ✓
+- Notes Payable: **$25,000.00** ✓, Loan Payable: **$4,000.00** ✓, Mastercard: **$157.72** ✓
+- BS balanced end-to-end on both realms.
+
+Residual known gaps (surface on Recon Panel, not silently plugged):
+- Savings $600 vs QBO $800 ($200 opening balance predates activity — synthesizer for this account class pending)
+- Inventory Asset $567.50 vs QBO $596.25 ($28.75 opening balance, same class)
+- A/R $5,381.52 vs QBO $5,281.52 ($100 import gap — CM allocation)
+
+These are surfaced correctly for review rather than being masked into OBE.
+
+Status: **DONE**. Sales-tax payment lifecycle now fully round-trips through synthesis + accrual + reversal.

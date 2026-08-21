@@ -115,10 +115,18 @@ def test_opening_je_zero_activity_liability_posts_credit():
     _run(go())
 
 
-def test_opening_je_with_activity_plugs_only_the_delta():
-    """Savings-like case: QBO CurBal = $800 but we've already imported
-    a Deposit contributing $600 of activity. Opener should plug just
-    the $200 opening balance, NOT $800 (which would double it)."""
+def test_opening_je_skips_accounts_with_activity():
+    """DESIGN CHANGE (Feb 28 2026): The opener now SKIPS any account
+    that already has imported ledger activity — plugging in that case
+    would silently swallow real import gaps (e.g. a missing $76.90
+    Deposit line) and bake them into OBE. Those gaps must be closed
+    at the source (e.g. `synthesize_sales_tax_payments`), not by the
+    opener.
+
+    Regression: Savings ($800 CurBal, $600 Deposit activity) → opener
+    posts NOTHING for Savings. Any $200 residual represents a real
+    import gap that must be resolved by a source-level synthesizer,
+    not silently plugged into OBE."""
     async def go():
         cid = str(uuid.uuid4())
         await db.companies.insert_one({"id": cid, "name": "OB3 Co"})
@@ -142,16 +150,25 @@ def test_opening_je_with_activity_plugs_only_the_delta():
             "created_at": now, "updated_at": now,
         })
         try:
-            await Q._post_opening_balances_je(cid)
+            r = await Q._post_opening_balances_je(cid)
+            # Opener writes no line for Savings — it has activity.
+            je = await db.journal_entries.find_one(
+                {"id": r.get("posted_je_id")}) if r.get("posted_je_id") else None
+            if je:
+                names = [l.get("account_name") for l in je["lines"]]
+                assert "Savings" not in names, (
+                    f"Opener should skip Savings (has activity), "
+                    f"but posted a line for it. names={names}"
+                )
+            # Savings balance = pure ledger activity ($600). Any
+            # residual delta vs QBO's CurBal ($200) is a real import
+            # gap surfaced on the Recon Panel — NOT plugged silently.
             by = await R._signed_balances(cid, start=None,
                                             end="2099-12-31",
                                             include_pre_period=True)
-            # Savings should end at $800 total ($600 from Deposit +
-            # $200 opening plug). If the opener wrongly used full
-            # QBO CurBal, Savings would be $1,400 here.
-            assert abs(by.get("acct-savings", 0) - 800.0) < 0.02, (
-                f"expected Savings=$800, got {by.get('acct-savings')}. "
-                f"Opener should plug delta ($200), not full CurBal ($800)."
+            assert abs(by.get("acct-savings", 0) - 600.0) < 0.02, (
+                f"expected Savings=$600 (activity only, no plug), "
+                f"got {by.get('acct-savings')}."
             )
         finally:
             await _cleanup(cid)

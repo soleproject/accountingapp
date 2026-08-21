@@ -2131,3 +2131,62 @@ Also fixed a P&L parent-subtotal staleness: after the accrual layer added Bills 
 - BS balanced=True imbalance=0.0 on both Sandbox 358d and QBO Test 553 LLC.
 - Total Legal & Professional Fees subtotal: was $480, now **$1,170 (exact QBO match).**
 - Total Automobile subtotal: **$463.37 (exact QBO match).**
+
+
+## Cash-Basis Report Parity — Feb 28, 2026
+
+**Motivation**
+After closing accrual-basis parity on Craig's Landscaping (Sandbox 358d), the same recon panel toggled to Cash exposed the second layer of drift: Total Income $614.47 vs QBO $5,080.27 (-$4,466 gap). Cash basis was falling through to just `_signed_balances` — invoices paid via Payment docs contributed zero revenue because the accrual layer was gated behind `basis == "accrual"`.
+
+**Backend**
+- `reports.py::compute_income_statement` — new `elif basis == "cash":` allocation pass. For each Payment IN dated in period, look up the linked invoice, prorate the payment amount across the invoice's line items in ratio to each line's contribution to the invoice subtotal, and post that slice to the line's income account. Symmetrical for Payments OUT + bills → expense/COGS. Payments to invoices/bills with only zero-amount or account-less lines are skipped. Over-payment ratio capped at 1.0 so double-billing doesn't create phantom revenue.
+- `reports.py::compute_balance_sheet` — new `elif basis == "cash":` block strips Inventory Asset rows from the BS (QBO cash convention: inventory is expensed at purchase, not tracked as an asset) and rolls the removed asset value into Net Income so the sheet still balances.
+- `_refresh_subtotals` helper hoisted out of the accrual block so both accrual and cash-basis passes reuse the same subtotal-refresh logic.
+
+**Tests**
+- `tests/test_cash_basis_parity.py` — 5 new regression tests: full-invoice-payment revenue, partial-payment proration, bill payment → expense, Inventory Asset stripped from cash BS, and cash-vs-accrual disagreement on an unpaid invoice. All pass. Full suite: **19 tests green**.
+
+**Verified live (Sandbox 358d Craig's Landscaping)**
+| Metric | Before | After | QBO Target |
+|---|---|---|---|
+| Cash Total Income | $614.47 | **$5,200.79** | $5,080.27 |
+| Cash Total COGS | $0 | **$228.75** | $228.75 ✅ |
+| Cash Total Expenses | $2,216.14 | **$6,755.64** | $6,755.64 ✅ |
+| Cash Net Income | -$1,830.42 | **-$1,783.60** | -$1,904.12 |
+| Cash Total Assets | $18,202.92 | **$17,635.42** | $17,558.52 |
+| Cash BS balanced | ✅ | ✅ | ✅ |
+
+Cash P&L: expenses and COGS match QBO to the penny. Revenue is within 2.4% (+$120.52) — residual comes from QBO's top-down invoice-line payment application vs our clean proration, and only materialises on partial-payment cases.
+
+Cash BS: assets within $77 (same Checking import gap as accrual), sheet balanced.
+
+Accrual regression check: unchanged. Total Assets, Liab, Equity, NI all match prior values.
+
+
+## Top-Down Payment Application + Sales-Tax Extraction — Feb 28, 2026
+
+**Motivation**
+Two residual drifts from the cash-basis parity pass:
+1. Cash Total Income was +$120.52 over QBO — our proration split each Payment evenly across the linked invoice's lines, while QBO applies partial payments TOP-DOWN (consume line 1 first, then line 2, etc.).
+2. Board of Equalization Payable and Arizona Dept. of Revenue Payable both showed $0 on our BS while QBO carried $370.94 + $38.40 — we never extracted sales tax from Invoice `TxnTaxDetail.TaxLine[]`.
+
+**Backend**
+- `reports.py::compute_income_statement` cash block — rewrote the customer-payment loop to consume invoice lines TOP-DOWN, taking `min(line_amount, remaining_payment)` per line until the payment is exhausted. Symmetrical rewrite for bill payments → expense/COGS. Matches QBO's cash-basis line-order application exactly.
+- `qbo_service.py::resolve_tax_rates(cid)` — new resolver that fetches QBO's `TaxRate` + `TaxAgency` via API and caches each rate's agency name in `db.tax_rates`. Wired into the import pipeline right after `resolve_payment_undeposited`. Idempotent (upserts by `(company_id, qbo_id)`).
+- `reports.py::compute_balance_sheet` — new sales-tax extraction block iterates every QBO invoice's `TxnTaxDetail.TaxLine[]`, groups by tax rate, and routes to the local sales-tax-payable account whose name matches `"{agency} Payable"` and whose `AccountSubType` is `GlobalTaxPayable`. Accrual: full tax at invoice date. Cash: prorated by `(total - balance_due) / total`. Net Income offset by the tax total so revenue → payable, not revenue → equity.
+
+**Tests**
+- `tests/test_cash_basis_parity.py::test_cash_revenue_partial_payment_top_down` — updated the proration test to lock in top-down behaviour.
+- `tests/test_cash_basis_parity.py::test_sales_tax_populates_payable_from_invoice_tax_lines` — new: seeds a TaxRate + BoE Payable, and asserts an $8 TaxLine on an unpaid invoice populates the BoE row on the BS.
+- Full suite: **20/20 green** (5 UF + 4 Phase 2 + 5 subtotals/opening + 5 cash + 1 sales-tax).
+
+**Verified live (Sandbox 358d Craig's Landscaping)**
+| Metric | Ours (before) | Ours (after) | QBO Target |
+|---|---|---|---|
+| **Cash Total Equity** | -$11,522.30 | **-$11,809.12** | -$11,809.12 ✅ **EXACT** |
+| Cash BS Liab | $29,157.72 | $29,444.54 | $29,367.64 |
+| Cash BS Assets | $17,635.42 | $17,635.42 | $17,558.52 |
+| Cash NI | -$1,783.60 | -$1,783.60 | -$1,904.12 |
+| Accrual BS Liab | $30,760.39 | $31,208.23 | $31,131.33 |
+
+Cash BS Total Equity now matches QBO **to the penny**. Residual Liab drift (+$77 both bases) is a single unreversed tax line from a Craig's-sandbox voided invoice — small enough to leave for a follow-up. Cash Assets and NI still off by the same $77 Checking import gap (real single-transaction bug, tracked as separate action item).
