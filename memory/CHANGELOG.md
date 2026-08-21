@@ -2014,3 +2014,67 @@ the visitor bounces from Stripe.
 - Calendar link (Cal.com / Calendly integration) for accounting
   pros on the drip
 - Auto-graduate lead → `converted` when they finish `/signup`
+
+
+## Undeposited Funds Two-Step Workflow — Feb 28, 2026
+
+**Motivation**
+The QBO reconciliation panel (shipped in the prior session)
+surfaced that ~$2k of held customer payments could be missing from
+the Balance Sheet on native Axiom companies whose payments were
+never paired with a bank deposit transaction — the invoice's
+`balance_due` was reduced (AR down), but nothing on the asset
+column reflected the held cash. QBO models this as a two-step:
+Receive Payment → Undeposited Funds, then Bank Deposit sweeps UF
+into an actual bank account. Axiom now mirrors that.
+
+**Backend**
+- `models.py::PaymentCreate` — added `deposit_to_account_id`, the
+  local account id the payment's cash-side DRs (customer
+  receipts) or CRs (vendor payouts). Optional.
+- `routes/payments.py::create_payment` — when direction='in' and
+  no `deposit_to_account_id` and no `source_transaction_id`, the
+  server auto-fills the company's Undeposited Funds account so
+  every customer receipt has a home on the asset side of the BS.
+- `reports.py::_signed_balances` — now handles native payments
+  (source != qbo) in addition to QBO payments. Cash-side posting
+  is skipped when a payment is paired with a bank transaction via
+  `source_transaction_id` (the txn already handled the DR).
+  Direction='in' payments with no resolvable deposit account fall
+  through to the company's UF account, preserving the BS identity.
+- `qbo_service.py::resolve_payment_undeposited(cid)` — new
+  post-import + backfill resolver that stamps `held_in_undeposited`
+  flag + the correct deposit reference on both QBO and native
+  payments missing one. Idempotent. Wired into the QBO import
+  pipeline right after `resolve_payment_links`.
+- `routes/qbo.py` — new `POST /companies/{cid}/qbo/resolve-undeposited`
+  admin endpoint to re-run the resolver on demand.
+
+**Frontend**
+- `pages/Payments.jsx::PaymentModal` — added a "Deposit to:" dropdown
+  for customer-receipt payments, populated with the company's Cash
+  and Bank + Undeposited Funds accounts. Default option is UF with
+  a "(default — sweep later)" tag and helper text explaining the
+  QBO two-step workflow. `deposit_to_account_id` is only sent when
+  the user actively picks a bank; blank → backend auto-fills UF.
+
+**Tests**
+- `tests/test_undeposited_funds_workflow.py` — 5 new regression tests:
+  * QBO Payment IN with no DepositToAccountRef falls back to UF
+  * Native payment with no deposit_to_account_id uses UF
+  * Native payment with explicit bank → posts to that bank (not UF)
+  * Native payment paired via source_transaction_id is NOT double-posted
+  * `resolve_payment_undeposited` backfill stamps + is idempotent
+- All 5 pass. Pre-existing QBO Payment cash-side suite (4 tests)
+  still passes.
+
+**Verified live**
+- QBO Test 553 LLC: Balance Sheet UF row = $2,062.52 (matches QBO
+  snapshot exactly).
+- Native TEST_dup company: creating a $500 payment without a bank
+  account auto-fills UF; BS delta = $0 (AR down $500, UF up $500,
+  sheet balanced). Rolled back after test.
+- End-to-end curl on `POST /companies/{cid}/payments` (no
+  `deposit_to_account_id`): server stamps UF account id, direction='in'.
+- Frontend Payment modal rendering the new "Deposit to:" selector
+  with default UF option + helper text.

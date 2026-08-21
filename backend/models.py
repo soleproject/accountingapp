@@ -271,6 +271,13 @@ class PaymentCreate(BaseModel):
     linked_invoice_id: Optional[str] = None
     linked_bill_id: Optional[str] = None
     bank_account_id: Optional[str] = None
+    # Undeposited Funds two-step workflow: the local account id the
+    # payment's cash side DRs (customer receipts) or CRs (vendor
+    # payouts). If omitted for a direction='in' payment, `create_payment`
+    # auto-fills the company's Undeposited Funds account so the BS
+    # asset column reflects the held cash until a Bank Deposit sweeps
+    # it into an actual bank account. Feb 28 2026.
+    deposit_to_account_id: Optional[str] = None
     memo: Optional[str] = ""
     # Feb 2026 — Record-Payment modal can auto-fill from an existing
     # bank transaction. Setting this locks the payment to the txn so

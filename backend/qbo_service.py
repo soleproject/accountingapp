@@ -1282,6 +1282,13 @@ async def run_migration(job_id: str, company_id: str) -> None:
         # id lookups succeed. Direct writes (no PATCH cascade) since
         # QBO already gave us the correct balance on each doc.
         linked = await resolve_payment_links(company_id)
+        # Post-import: for Payment IN docs where QBO omitted
+        # `DepositToAccountRef` (customer payments held in Undeposited
+        # Funds pending a Bank Deposit sweep), stamp the local UF
+        # account's qbo_id so the Balance Sheet asset column reflects
+        # the held cash. Idempotent, safe to re-run.
+        # Feb 28 2026 — QBO Undeposited Funds two-step workflow.
+        undep_stamped = await resolve_payment_undeposited(company_id)
         # Post-import: build the Deposit `splits[]` so multi-source
         # deposits credit their line sources (Undep sweeps or direct
         # income accounts) instead of only DR-ing the bank. Without
@@ -1787,6 +1794,94 @@ async def _post_opening_balances_je(company_id: str) -> dict:
              "line_count": len(lines),
              "gross_debits": round(dr_total, 2),
              "gross_credits": round(cr_total, 2)}
+
+
+async def resolve_payment_undeposited(company_id: str) -> dict:
+    """Stamp `deposit_to_account_id` (native) and `deposit_account_qbo_id`
+    (QBO) on customer payments (direction='in') that lack a resolvable
+    cash-side account. QBO's default behaviour is to hold such receipts
+    in the Undeposited Funds account until a Bank Deposit sweeps them
+    into a bank; Axiom mirrors that so the Balance Sheet asset column
+    reflects the held cash.
+
+    Two-part backfill:
+      1. QBO payments — if `deposit_account_qbo_id` is None and the
+         raw payload's CheckPayment/CreditCardPayment refs are also
+         empty, stamp the QBO Undeposited Funds account's `qbo_id`.
+      2. Native payments — if `deposit_to_account_id` is None and there
+         is no `source_transaction_id` linking it to a bank txn, stamp
+         the local Undeposited Funds account id.
+
+    Idempotent — payments already carrying a deposit reference are
+    left untouched. Returns
+    ``{"qbo_stamped": N, "native_stamped": M, "undep_found": bool}``.
+    """
+    undep = await db.accounts.find_one({
+        "company_id": company_id,
+        "$or": [{"detail_type": "money_in_transit"},
+                {"name": {"$regex": "^Undeposited Funds$",
+                          "$options": "i"}}],
+    })
+    if not undep:
+        return {"qbo_stamped": 0, "native_stamped": 0,
+                "undep_found": False}
+    undep_id = undep["id"]
+    undep_qbo_id = undep.get("qbo_id")
+
+    qbo_stamped = 0
+    if undep_qbo_id:
+        async for p in db.payments.find({
+            "company_id": company_id,
+            "source": "qbo",
+            "direction": "in",
+            "$or": [{"deposit_account_qbo_id": None},
+                    {"deposit_account_qbo_id": ""},
+                    {"deposit_account_qbo_id": {"$exists": False}}],
+        }):
+            # Double-check the raw payload isn't hiding a valid ref —
+            # only stamp UF when the QBO doc genuinely omits the field.
+            raw = p.get("raw") or {}
+            cp = raw.get("CheckPayment") or {}
+            cc = raw.get("CreditCardPayment") or {}
+            if ((cp.get("BankAccountRef") or {}).get("value")
+                    or (cc.get("CCAccountRef") or {}).get("value")
+                    or (raw.get("DepositToAccountRef") or {}).get("value")):
+                continue
+            await db.payments.update_one(
+                {"id": p["id"]},
+                {"$set": {"deposit_account_qbo_id": str(undep_qbo_id),
+                          "held_in_undeposited": True,
+                          "updated_at": now_iso()}},
+            )
+            qbo_stamped += 1
+
+    native_stamped = 0
+    async for p in db.payments.find({
+        "company_id": company_id,
+        "source": {"$ne": "qbo"},
+        "direction": "in",
+        "$and": [
+            {"$or": [{"deposit_to_account_id": None},
+                     {"deposit_to_account_id": ""},
+                     {"deposit_to_account_id": {"$exists": False}}]},
+            {"$or": [{"source_transaction_id": None},
+                     {"source_transaction_id": ""},
+                     {"source_transaction_id": {"$exists": False}}]},
+        ],
+    }):
+        await db.payments.update_one(
+            {"id": p["id"]},
+            {"$set": {"deposit_to_account_id": undep_id,
+                      "held_in_undeposited": True,
+                      "updated_at": now_iso()}},
+        )
+        native_stamped += 1
+
+    return {"qbo_stamped": qbo_stamped,
+            "native_stamped": native_stamped,
+            "undep_found": True}
+
+
 
 
 async def resolve_deposit_splits(company_id: str) -> dict:

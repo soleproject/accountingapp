@@ -170,12 +170,34 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
     async for a in db.accounts.find({"company_id": company_id, "qbo_id": {"$ne": None}}):
         acct_by_qbo_id[str(a["qbo_id"])] = a["id"]
 
+    # Company's Undeposited Funds account — used as fallback when a
+    # customer payment has no explicit deposit destination. QBO models
+    # this as a two-step workflow (Receive Payment → holds in Undep;
+    # Bank Deposit → sweeps Undep into a bank), and Axiom mirrors it:
+    # native payments recorded without a bank account default to Undep
+    # so the Balance Sheet asset column still reflects the held cash.
+    # Feb 28 2026 — Undeposited Funds workflow, Phase 2 QBO parity.
+    undep_acct = await db.accounts.find_one({
+        "company_id": company_id,
+        "$or": [{"detail_type": "money_in_transit"},
+                {"name": {"$regex": "^Undeposited Funds$",
+                          "$options": "i"}}],
+    })
+    undep_id = undep_acct["id"] if undep_acct else None
+
     def _pay_account_id(p: dict) -> str | None:
-        """Resolve which local account this payment moves cash on. For
-        Payment IN, that's `deposit_account_qbo_id` (Undeposited Funds
-        or a bank). For BillPayment OUT the field is often unset in the
-        mapper, so fall back to the raw QBO payload's `CheckPayment` /
-        `CreditCardPayment` account refs."""
+        """Resolve which local account this payment moves cash on.
+
+        Resolution order:
+          1. QBO: `deposit_account_qbo_id` (Payment.DepositToAccountRef,
+             or BillPayment.CheckPayment/CreditCardPayment fallback in
+             raw payload).
+          2. Native: `deposit_to_account_id` (direct local id set by
+             `POST /companies/{cid}/payments` — either explicitly by
+             the user or auto-filled to Undeposited Funds).
+          3. Fallback: None (caller applies the UF fallback for
+             direction='in' payments, i.e. held-in-undeposited-funds).
+        """
         qid = p.get("deposit_account_qbo_id")
         if not qid:
             raw = p.get("raw") or {}
@@ -183,18 +205,33 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
             cc = raw.get("CreditCardPayment") or {}
             qid = ((cp.get("BankAccountRef") or {}).get("value")
                    or (cc.get("CCAccountRef") or {}).get("value"))
-        if not qid:
-            return None
-        return acct_by_qbo_id.get(str(qid))
+        if qid:
+            return acct_by_qbo_id.get(str(qid))
+        # Native path — the local account id lives directly on the doc.
+        return p.get("deposit_to_account_id") or None
 
     async for p in db.payments.find(pay_q):
         amt = float(p.get("amount") or 0)
         if amt <= 0.005:
             continue
+        # Native payments paired with a bank transaction already have
+        # the cash side posted via that txn's `bank_account_id` — the
+        # payment doc is purely for AR/AP reduction. Posting the
+        # payment too would double-count both sides of the ledger,
+        # unbalancing the BS by exactly the payment amount.
+        if p.get("source") != "qbo" and p.get("source_transaction_id"):
+            continue
         aid = _pay_account_id(p)
+        direction = p.get("direction") or "in"
+        # Direction='in' with no resolvable deposit account →
+        # Undeposited Funds. Preserves the BS identity: the invoice's
+        # `balance_due` was already reduced (AR down by amt), so we
+        # need SOMETHING on the asset side up by amt or the sheet
+        # unbalances. Held-in-UF is the QBO-compliant answer.
+        if not aid and direction == "in" and undep_id:
+            aid = undep_id
         if not aid:
             continue
-        direction = p.get("direction") or "in"
         if direction == "in":
             # DR the deposit account (bank/undep) — cash goes up.
             by[aid] += amt

@@ -99,6 +99,23 @@ async def create_payment(cid: str, inp: PaymentCreate, user: dict = Depends(get_
             payload["direction"] = "in"
         elif payload.get("linked_bill_id"):
             payload["direction"] = "out"
+        # Undeposited Funds default: a customer receipt (direction='in')
+        # that isn't paired with a bank transaction and doesn't specify
+        # a deposit account should land in Undeposited Funds — matches
+        # QBO's default behaviour. Without this the payment silently
+        # reduces AR without a matching asset-side bump, unbalancing
+        # the BS by `amount`. Feb 28 2026.
+        if (payload.get("direction") == "in"
+                and not payload.get("deposit_to_account_id")
+                and not payload.get("source_transaction_id")):
+            undep = await db.accounts.find_one({
+                "company_id": cid,
+                "$or": [{"detail_type": "money_in_transit"},
+                        {"name": {"$regex": "^Undeposited Funds$",
+                                  "$options": "i"}}],
+            })
+            if undep:
+                payload["deposit_to_account_id"] = undep["id"]
         await db.payments.insert_one({
             "id": pid, "company_id": cid, **payload,
             "created_at": now, "updated_at": now,

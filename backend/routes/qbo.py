@@ -1028,6 +1028,25 @@ async def qbo_rebuild_account_hierarchy(cid: str, user: dict = Depends(get_curre
     return {"updated": updated}
 
 
+@router.post("/companies/{cid}/qbo/resolve-undeposited")
+async def qbo_resolve_undeposited(cid: str, user: dict = Depends(get_current_user)):
+    """Standalone re-run of `resolve_payment_undeposited` — stamps
+    the company's Undeposited Funds account on customer payments
+    (direction='in') that lack a resolvable cash-side account. QBO
+    holds such receipts in UF until a Bank Deposit sweeps them; this
+    endpoint keeps Axiom's ledger in sync so the Balance Sheet asset
+    column doesn't silently under-report held cash.
+
+    Idempotent — payments already carrying a deposit reference are
+    left alone. Runs on both QBO-imported AND native payments.
+    Feb 28 2026 — Undeposited Funds two-step workflow.
+    """
+    await require_company(user, cid)
+    from qbo_service import resolve_payment_undeposited
+    stats = await resolve_payment_undeposited(cid)
+    return stats
+
+
 @router.post("/companies/{cid}/qbo/rebuild-transaction-categories")
 async def qbo_rebuild_transaction_categories(cid: str, user: dict = Depends(get_current_user)):
     """Backfill: for companies migrated before the resolvers were wired
