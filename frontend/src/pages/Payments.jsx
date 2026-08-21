@@ -203,7 +203,30 @@ export function PaymentModal({ currentId, contacts, invoices, bills, transaction
   const [contact, setContact] = useState(preset?.contactId || "");
   const [method, setMethod] = useState("check");
   const [sourceTxnId, setSourceTxnId] = useState("");
+  // Cash-side destination — where the DR posts. For customer receipts
+  // that don't specify a bank account, backend auto-fills to
+  // Undeposited Funds (QBO's default two-step workflow). Users who
+  // want to skip the sweep step can pick a bank explicitly here.
+  const [depositToId, setDepositToId] = useState("");
+  const [accounts, setAccounts] = useState([]);
   const lockedKind = !!preset?.kind;   // Called from an editor → don't let user flip pane
+
+  // Fetch bank + Undeposited Funds accounts for the deposit selector.
+  // Only shown on customer-receipt (invoice) side — bill payments use
+  // the txn picker's paired bank.
+  useEffect(() => {
+    if (!currentId) return;
+    api.get(`/companies/${currentId}/accounts`).then(r => {
+      setAccounts(r.data.accounts || []);
+    }).catch(() => {});
+  }, [currentId]);
+  const depositOptions = useMemo(() => {
+    return accounts.filter(a =>
+      a.type === "asset"
+      && (a.detail_type === "cash_and_bank"
+          || a.detail_type === "money_in_transit"));
+  }, [accounts]);
+  const undepId = depositOptions.find(a => a.detail_type === "money_in_transit")?.id || "";
 
   const applyTxn = (t) => {
     if (!t) { setSourceTxnId(""); return; }
@@ -239,6 +262,10 @@ export function PaymentModal({ currentId, contacts, invoices, bills, transaction
       linked_invoice_id: kind === "invoice" ? linkedId || null : null,
       linked_bill_id: kind === "bill" ? linkedId || null : null,
       source_transaction_id: sourceTxnId || null,
+      // Only send when the user explicitly picked a bank. Blank →
+      // backend auto-fills Undeposited Funds for customer receipts,
+      // preserving the QBO two-step workflow.
+      deposit_to_account_id: (kind === "invoice" && depositToId) ? depositToId : null,
     });
     toast.success("Payment recorded"); onClose();
   };
@@ -306,6 +333,30 @@ export function PaymentModal({ currentId, contacts, invoices, bills, transaction
           <option value="bank_transfer">Bank transfer</option>
           <option value="other">Other</option>
         </select>
+        {kind === "invoice" && depositOptions.length > 0 && (
+          <div className="space-y-1">
+            <select
+              value={depositToId || undepId}
+              onChange={(e) => setDepositToId(e.target.value)}
+              className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+              data-testid="payment-modal-deposit-to"
+            >
+              {depositOptions.map(a => (
+                <option key={a.id} value={a.id}>
+                  Deposit to: {a.name}
+                  {a.detail_type === "money_in_transit" ? " (default — sweep later)" : ""}
+                </option>
+              ))}
+            </select>
+            {(!depositToId || depositToId === undepId) && (
+              <div className="text-[11px] text-slate-500 px-1">
+                Payment will be held in Undeposited Funds until a Bank
+                Deposit sweeps it into an actual bank account (matches
+                QuickBooks Online's two-step workflow).
+              </div>
+            )}
+          </div>
+        )}
         <button data-testid={TID.saveBtn} onClick={save}
                 className="w-full py-2 rounded-md bg-slate-900 text-white text-sm">Save</button>
       </div>

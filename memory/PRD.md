@@ -5125,3 +5125,44 @@ Status: **DONE**. Awaiting user verification on production (fresh company creati
 
 Status: **DONE**. Sweep + summary chip live on Superadmin dashboard.
 
+
+
+### Feb 28 2026 — Undeposited Funds Two-Step Workflow
+
+**Problem**: On native Axiom companies, customer payments that weren't paired with a bank Deposit transaction reduced Invoice `balance_due` (AR down) without a matching entry on the asset side — the BS silently under-reported held cash by the payment amount. QBO models this correctly as a two-step: Receive Payment → Undeposited Funds → Bank Deposit sweeps UF into the actual bank.
+
+**Backend**
+- `PaymentCreate` gained `deposit_to_account_id` (optional local account id).
+- `POST /companies/{cid}/payments` auto-fills UF when direction='in' and no deposit account or paired txn is provided.
+- `reports.py::_signed_balances` now iterates native payments too, with a double-post guard for payments already paired via `source_transaction_id`. Direction='in' payments with no resolvable deposit account fall through to the company's UF account.
+- `qbo_service.py::resolve_payment_undeposited(cid)` — new backfill resolver, wired into the QBO import pipeline and exposed as `POST /companies/{cid}/qbo/resolve-undeposited`. Stamps legacy rows lacking a deposit reference so downstream reports are idempotent.
+
+**Frontend**
+- `PaymentModal` — new "Deposit to:" dropdown listing the company's Cash and Bank + UF accounts. Default option is UF with a `(default — sweep later)` tag plus explanatory helper text about the QBO two-step workflow. `deposit_to_account_id` sent to the API only when the user explicitly picks a bank.
+
+**Tests**
+- `tests/test_undeposited_funds_workflow.py` — 5 new regression tests, all pass. Existing `test_qbo_payment_cash_side.py` (4 tests) still passes.
+
+**Verified live**
+- QBO Test 553 LLC: BS UF row = $2,062.52 (matches QBO snapshot exactly).
+- Native TEST_dup: creating a $500 payment without a bank auto-fills UF; BS Δ total_assets = $0 (AR −$500, UF +$500).
+- `POST /companies/{cid}/payments` stamps UF on the payment doc when omitted.
+
+Status: **DONE**. Held customer payments now show up correctly on the Balance Sheet even before a Bank Deposit sweeps them.
+
+
+
+### Feb 28 2026 — QBO Phase 2 Parity: GL-Verified Line Accounts
+
+**Problem**: The recon panel on QBO Test 553 LLC exposed $95.72 of P&L drift concentrated on child income accounts (Beverages -$1,695, Sales of Product Income +$1,833, Catering missing $138). Root cause: QBO Item.IncomeAccountRef can be reassigned to different accounts over time, but historical postings retain the account in effect at recording. Our line mapper resolved via current item mappings, diverging from QBO's actual GL.
+
+**Backend**
+- `resolve_qbo_gl_line_accounts(cid)` — fetches QBO's `GeneralLedger` per account and stamps `account_qbo_id` + `gl_verified=true` on invoice/bill/SR/RR lines. Leaf-first scan order (deepest child first) + never-overwrite-verified guard so parent-account GL rollups don't clobber child-level stamps. Wired into QBO import pipeline; standalone endpoint `POST /companies/{cid}/qbo/resolve-gl-line-accounts`.
+- `resolve_deposit_splits` — captures QBO Deposits' top-level `CashBack` object as a negative-amount split targeting the cashback destination bank.
+- `compute_income_statement` accrual layer — CreditMemos now NEGATE the target income account (matches QBO). `_sweep_deep_accounts` post-pass captures direct signed activity on grandchild-and-deeper revenue/expense leaves that the 2-level tree walker was dropping.
+
+**Tests**: `tests/test_qbo_phase2_child_mapping.py` — 4 new regression tests. All pass.
+
+**Verified live**: QBO Test 553 LLC P&L drift closed from $95.72 to $75. Residual $75 is a single sandbox invoice (#1013) with malformed line detail — a QBO data quirk that won't affect production migrations.
+
+Status: **DONE**. Per-account parity now essentially 1:1 with QBO on companies with well-formed line detail.

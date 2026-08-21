@@ -1278,6 +1278,13 @@ async def run_migration(job_id: str, company_id: str) -> None:
         # id lookups succeed. Direct writes (no PATCH cascade) since
         # QBO already gave us the correct balance on each doc.
         linked = await resolve_payment_links(company_id)
+        # Post-import: for Payment IN docs where QBO omitted
+        # `DepositToAccountRef` (customer payments held in Undeposited
+        # Funds pending a Bank Deposit sweep), stamp the local UF
+        # account's qbo_id so the Balance Sheet asset column reflects
+        # the held cash. Idempotent, safe to re-run.
+        # Feb 28 2026 — QBO Undeposited Funds two-step workflow.
+        undep_stamped = await resolve_payment_undeposited(company_id)
         # Post-import: build the Deposit `splits[]` so multi-source
         # deposits credit their line sources (Undep sweeps or direct
         # income accounts) instead of only DR-ing the bank. Without
@@ -1297,6 +1304,21 @@ async def run_migration(job_id: str, company_id: str) -> None:
         # classified. Must run AFTER Account import (needs qbo_id →
         # local id lookups).
         categorized = await resolve_transaction_categories(company_id)
+        # Post-import: use QBO's General Ledger as source-of-truth to
+        # stamp `account_qbo_id` on invoice / bill / SR / RR lines
+        # whose current Item mapping disagrees with what QBO actually
+        # posted. Historical items get reassigned to new accounts over
+        # time; without this, per-account P&L totals diverge from
+        # QBO's own report by the amount of any re-mapped item's
+        # historical activity. Feb 28 2026 — Phase 2 QBO parity.
+        try:
+            gl_stamped = await resolve_qbo_gl_line_accounts(company_id)
+        except Exception:  # noqa: BLE001
+            # QBO's GeneralLedger endpoint can be slow or rate-limited
+            # on large books — a failure here shouldn't block the
+            # whole migration. Operator can re-run via
+            # POST /companies/{cid}/qbo/resolve-gl-line-accounts.
+            gl_stamped = {"lines_stamped": 0, "error": "gl_resolver_failed"}
         # Post-import: sign each QBO transaction's `amount` based on
         # txn_type so Purchases show as outflows (negative) and
         # Deposits/SalesReceipts as inflows (positive). Also stamps a
@@ -1785,6 +1807,94 @@ async def _post_opening_balances_je(company_id: str) -> dict:
              "gross_credits": round(cr_total, 2)}
 
 
+async def resolve_payment_undeposited(company_id: str) -> dict:
+    """Stamp `deposit_to_account_id` (native) and `deposit_account_qbo_id`
+    (QBO) on customer payments (direction='in') that lack a resolvable
+    cash-side account. QBO's default behaviour is to hold such receipts
+    in the Undeposited Funds account until a Bank Deposit sweeps them
+    into a bank; Axiom mirrors that so the Balance Sheet asset column
+    reflects the held cash.
+
+    Two-part backfill:
+      1. QBO payments — if `deposit_account_qbo_id` is None and the
+         raw payload's CheckPayment/CreditCardPayment refs are also
+         empty, stamp the QBO Undeposited Funds account's `qbo_id`.
+      2. Native payments — if `deposit_to_account_id` is None and there
+         is no `source_transaction_id` linking it to a bank txn, stamp
+         the local Undeposited Funds account id.
+
+    Idempotent — payments already carrying a deposit reference are
+    left untouched. Returns
+    ``{"qbo_stamped": N, "native_stamped": M, "undep_found": bool}``.
+    """
+    undep = await db.accounts.find_one({
+        "company_id": company_id,
+        "$or": [{"detail_type": "money_in_transit"},
+                {"name": {"$regex": "^Undeposited Funds$",
+                          "$options": "i"}}],
+    })
+    if not undep:
+        return {"qbo_stamped": 0, "native_stamped": 0,
+                "undep_found": False}
+    undep_id = undep["id"]
+    undep_qbo_id = undep.get("qbo_id")
+
+    qbo_stamped = 0
+    if undep_qbo_id:
+        async for p in db.payments.find({
+            "company_id": company_id,
+            "source": "qbo",
+            "direction": "in",
+            "$or": [{"deposit_account_qbo_id": None},
+                    {"deposit_account_qbo_id": ""},
+                    {"deposit_account_qbo_id": {"$exists": False}}],
+        }):
+            # Double-check the raw payload isn't hiding a valid ref —
+            # only stamp UF when the QBO doc genuinely omits the field.
+            raw = p.get("raw") or {}
+            cp = raw.get("CheckPayment") or {}
+            cc = raw.get("CreditCardPayment") or {}
+            if ((cp.get("BankAccountRef") or {}).get("value")
+                    or (cc.get("CCAccountRef") or {}).get("value")
+                    or (raw.get("DepositToAccountRef") or {}).get("value")):
+                continue
+            await db.payments.update_one(
+                {"id": p["id"]},
+                {"$set": {"deposit_account_qbo_id": str(undep_qbo_id),
+                          "held_in_undeposited": True,
+                          "updated_at": now_iso()}},
+            )
+            qbo_stamped += 1
+
+    native_stamped = 0
+    async for p in db.payments.find({
+        "company_id": company_id,
+        "source": {"$ne": "qbo"},
+        "direction": "in",
+        "$and": [
+            {"$or": [{"deposit_to_account_id": None},
+                     {"deposit_to_account_id": ""},
+                     {"deposit_to_account_id": {"$exists": False}}]},
+            {"$or": [{"source_transaction_id": None},
+                     {"source_transaction_id": ""},
+                     {"source_transaction_id": {"$exists": False}}]},
+        ],
+    }):
+        await db.payments.update_one(
+            {"id": p["id"]},
+            {"$set": {"deposit_to_account_id": undep_id,
+                      "held_in_undeposited": True,
+                      "updated_at": now_iso()}},
+        )
+        native_stamped += 1
+
+    return {"qbo_stamped": qbo_stamped,
+            "native_stamped": native_stamped,
+            "undep_found": True}
+
+
+
+
 async def resolve_deposit_splits(company_id: str) -> dict:
     """Populate `splits[]` on QBO-imported Deposit transactions so the
     credit-side of each Deposit line hits the correct source account.
@@ -1838,6 +1948,7 @@ async def resolve_deposit_splits(company_id: str) -> dict:
     txns_updated = 0
     splits_added = 0
     undep_fallbacks = 0
+    cashback_captured = 0
 
     async for t in db.transactions.find({"company_id": company_id,
                                            "source": "qbo",
@@ -1867,6 +1978,37 @@ async def resolve_deposit_splits(company_id: str) -> dict:
                 "amount": round(amt, 2),
                 "source": "qbo_deposit_line",
             })
+        # QBO's Deposit form has a "Cash back goes to" section that
+        # routes part of the deposit total straight into a second bank
+        # account (e.g. clerk pockets $200 of cash into Savings while
+        # the rest lands in Checking). QBO models this as a top-level
+        # `CashBack` object on the raw doc, NOT as a Line row — so it
+        # never shows up in `line_items`. Without capturing it, the
+        # ledger only DRs the primary bank (Checking) while the source
+        # CRs (via splits) reflect the FULL line-sum, leaving the
+        # CashBack amount stuck on `category_account_id` as
+        # Uncategorized Income. On QBO Test 553 LLC, Deposit 121
+        # dropped $200 into Savings — we were showing that as -$200
+        # revenue on the P&L until this fix. Feb 28 2026.
+        raw = t.get("raw") or {}
+        cashback = raw.get("CashBack") or {}
+        cb_amt = float(cashback.get("Amount") or 0)
+        cb_qbo = ((cashback.get("AccountRef") or {}).get("value"))
+        if abs(cb_amt) >= 0.005 and cb_qbo:
+            cb_local = acct_by_qbo_id.get(str(cb_qbo))
+            if cb_local:
+                # Negative-amount split → `_signed_balances` computes
+                # `by[cb_local] += -(-cb_amt) = +cb_amt` → DR to the
+                # cashback destination bank. Pairs with the primary
+                # bank DR (`bank_account_id`) so total DRs equal total
+                # line-sum CRs, keeping the entry balanced.
+                splits.append({
+                    "account_id": cb_local,
+                    "category_account_id": cb_local,
+                    "amount": -round(cb_amt, 2),
+                    "source": "qbo_deposit_cashback",
+                })
+                cashback_captured += 1
         if not splits:
             continue
         await db.transactions.update_one(
@@ -1879,7 +2021,8 @@ async def resolve_deposit_splits(company_id: str) -> dict:
 
     return {"txns_updated": txns_updated,
              "splits_added": splits_added,
-             "undep_fallbacks": undep_fallbacks}
+             "undep_fallbacks": undep_fallbacks,
+             "cashback_captured": cashback_captured}
 
 
 
@@ -2310,3 +2453,304 @@ async def resolve_account_parents(company_id: str) -> int:
             )
             updated += 1
     return updated
+
+
+
+# ----------------------------------------------------------------------
+# QBO General Ledger — source-of-truth line-account resolver
+# ----------------------------------------------------------------------
+
+def _flatten_gl_rows(rows: list) -> list[dict]:
+    """Walk QBO GeneralLedger nested Row tree and yield each data row
+    as `{txn_type, doc_num, name, memo, amount}`. GL rows are grouped
+    by account under nested `Header` sections — we don't care about
+    the grouping here because the caller pins the fetch to one
+    account at a time."""
+    out: list[dict] = []
+    def walk(rs):
+        for r in rs or []:
+            inner = (r.get("Rows") or {}).get("Row") or []
+            if inner:
+                walk(inner)
+            cd = r.get("ColData")
+            if cd:
+                # Column shape: [tx_date, txn_type, doc_num, name,
+                #                memo, split_account, amount, balance]
+                v = [c.get("value", "") for c in cd]
+                if len(v) < 7:
+                    continue
+                try:
+                    amt = float(v[6] or 0)
+                except (ValueError, TypeError):
+                    continue
+                out.append({
+                    "date": v[0],
+                    "txn_type": v[1],
+                    "doc_num": v[2],
+                    "name": v[3],
+                    "memo": v[4],
+                    "split": v[5],
+                    "amount": amt,
+                })
+    walk(rows)
+    return out
+
+
+async def resolve_qbo_gl_line_accounts(
+    company_id: str,
+    start_date: str = "2020-01-01",
+    end_date: str | None = None,
+) -> dict:
+    """Use QBO's General Ledger as source-of-truth to stamp
+    line-level `account_qbo_id` on QBO-imported invoices, bills,
+    sales receipts, and refund receipts.
+
+    Why this exists
+    ---------------
+    Historical postings in QBO can diverge from an Item's CURRENT
+    `IncomeAccountRef` / `ExpenseAccountRef` — QBO users routinely
+    reassign items to new accounts over time, but past invoices
+    retain the account in effect at the moment of posting. Our line
+    mapper resolves via the CURRENT item mapping, so per-account
+    totals drift from QBO's actual GL by the amount of any
+    reassigned item's historical activity. On QBO Test 553 LLC this
+    was ~$3.5k of P&L drift (Beverages -$1,695, Sales of Product
+    Income +$1,833, Catering missing $138).
+
+    What we do
+    ----------
+    For every revenue / expense / COGS account, pull QBO's
+    GeneralLedger and iterate its postings. Match each posting to
+    our stored invoice/bill/SR line by `(doc_num, txn_type, amount,
+    memo)` and stamp `account_qbo_id` on that line. Then re-run
+    `resolve_transaction_categories` so the stamped accounts flow
+    through to `category_account_id` / `splits[]`.
+
+    Match strategy
+    --------------
+    - Primary: `(doc_num, amount, memo)` — the memo column contains
+      the item name for SalesItemLineDetail lines, so it's usually
+      distinctive enough within a single invoice.
+    - Fallback: `(doc_num, amount)` — safe when only one line in
+      the doc has that amount.
+    - We DO NOT match by amount alone across docs — false positives
+      would silently misroute revenue.
+
+    Returns `{"lines_stamped": N, "accounts_scanned": M,
+              "docs_touched": K, "skipped_ambiguous": S}`.
+    Idempotent: re-running only overwrites `account_qbo_id` when
+    the GL disagrees with the stored value.
+    """
+    conn = await db.qbo_connections.find_one({"company_id": company_id})
+    if not conn:
+        return {"lines_stamped": 0, "accounts_scanned": 0,
+                "docs_touched": 0, "skipped_ambiguous": 0,
+                "reason": "no_qbo_connection"}
+    realm_id = conn["realm_id"]
+    if not end_date:
+        from datetime import date
+        end_date = date.today().isoformat()
+
+    # Pull all revenue/expense/cogs accounts with a QBO id — those
+    # are the ones the GL will surface line-item postings for.
+    #
+    # ORDER MATTERS: QBO's GeneralLedger for a parent account rolls
+    # up child activity (e.g. fetching GL for `Food & Supplies` also
+    # lists postings that actually hit its child `Beverages`). If we
+    # stamp parents before children, the parent's rollup overwrites
+    # the child's leaf-level stamp — every Wine Bottle line ends up
+    # on `Food & Supplies` instead of `Beverages`. Process leaves
+    # first (deepest child → shallow parent) so leaves win, and skip
+    # any line already marked `gl_verified`.
+    all_accts_map: dict[str, dict] = {}
+    async for a in db.accounts.find(
+        {"company_id": company_id, "source": "qbo", "qbo_id": {"$ne": None}},
+        {"id": 1, "qbo_id": 1, "name": 1, "type": 1, "parent_qbo_id": 1, "_id": 0},
+    ):
+        all_accts_map[str(a["qbo_id"])] = a
+    # Depth = length of parent chain up to the root.
+    def _depth(a: dict) -> int:
+        d, cur = 0, a
+        seen: set[str] = set()
+        while cur and cur.get("parent_qbo_id"):
+            key = str(cur["parent_qbo_id"])
+            if key in seen:
+                break  # defensive: cyclic chain
+            seen.add(key)
+            cur = all_accts_map.get(key)
+            d += 1
+        return d
+    scan_accts = [
+        a for a in all_accts_map.values()
+        if a.get("type") in ("revenue", "expense", "cogs")
+    ]
+    scan_accts.sort(key=lambda a: -_depth(a))  # leaves first
+
+    if not scan_accts:
+        return {"lines_stamped": 0, "accounts_scanned": 0,
+                "docs_touched": 0, "skipped_ambiguous": 0}
+
+    # (doc_num, txn_type) → doc summary so we can match GL rows back
+    # to our stored line items. `txn_type` alignment: QBO's GL uses
+    # "Sales Receipt" (with space), our stored `txn_type` is
+    # "SalesReceipt" (no space). Normalize both to compare.
+    def _norm_type(s: str) -> str:
+        return (s or "").replace(" ", "").lower()
+
+    # Preload every QBO invoice / bill / SR / RR keyed by (doc_num,
+    # normalized txn_type).
+    #
+    # Invoice/Bill live in dedicated collections; SR/RR live in
+    # `db.transactions` under their own txn_type.
+    docs_by_key: dict[tuple[str, str], dict] = {}
+    async for inv in db.invoices.find({"company_id": company_id, "source": "qbo"}):
+        num = (inv.get("number") or "").strip()
+        if num:
+            docs_by_key[(num, "invoice")] = {
+                "coll": "invoices",
+                "doc": inv,
+            }
+    async for bill in db.bills.find({"company_id": company_id, "source": "qbo"}):
+        num = (bill.get("number") or "").strip()
+        if num:
+            docs_by_key[(num, "bill")] = {
+                "coll": "bills",
+                "doc": bill,
+            }
+    async for txn in db.transactions.find({
+        "company_id": company_id, "source": "qbo",
+        "txn_type": {"$in": ["SalesReceipt", "RefundReceipt", "CreditMemo"]},
+    }):
+        num = (txn.get("number") or "").strip()
+        tt = _norm_type(txn.get("txn_type") or "")
+        if num and tt:
+            docs_by_key[(num, tt)] = {
+                "coll": "transactions",
+                "doc": txn,
+            }
+
+    lines_stamped = 0
+    docs_touched: set[str] = set()
+    skipped_ambiguous = 0
+
+    for acct in scan_accts:
+        try:
+            gl = await fetch_report(
+                company_id, realm_id, "GeneralLedger",
+                {"start_date": start_date, "end_date": end_date,
+                 "account": str(acct["qbo_id"]),
+                 "accounting_method": "Accrual"},
+            )
+        except Exception:  # noqa: BLE001
+            # Skip on transient QBO API errors — resolver is retry-safe.
+            continue
+        rows = (gl.get("Rows") or {}).get("Row") or []
+        postings = _flatten_gl_rows(rows)
+        if not postings:
+            continue
+
+        for p in postings:
+            num = (p.get("doc_num") or "").strip()
+            tt = _norm_type(p.get("txn_type") or "")
+            if not num or not tt:
+                continue
+            entry = docs_by_key.get((num, tt))
+            if not entry:
+                continue
+            doc = entry["doc"]
+            lines = doc.get("line_items") or []
+            if not lines:
+                continue
+
+            # Match by (amount + memo/description) first — memo often
+            # carries the item name so it disambiguates same-amount
+            # lines. Fall back to amount-only when unique.
+            gl_amt = round(p["amount"], 2)
+            gl_memo = (p.get("memo") or "").strip().lower()
+
+            candidates: list[int] = []
+            for i, ln in enumerate(lines):
+                if abs(round(float(ln.get("amount") or 0), 2) - gl_amt) > 0.01:
+                    continue
+                candidates.append(i)
+            if not candidates:
+                continue
+
+            # Prefer the candidate whose memo/description or item_name
+            # matches the GL memo.
+            picked_i: int | None = None
+            if len(candidates) == 1:
+                picked_i = candidates[0]
+            else:
+                for i in candidates:
+                    ln = lines[i]
+                    hay = " ".join([
+                        (ln.get("description") or "").lower(),
+                        (ln.get("item_name") or "").lower(),
+                    ])
+                    if gl_memo and gl_memo in hay:
+                        picked_i = i
+                        break
+                if picked_i is None:
+                    # Ambiguous — leave alone rather than misroute.
+                    skipped_ambiguous += 1
+                    continue
+
+            ln = lines[picked_i]
+            # Once a line is `gl_verified`, we trust the leaf-level
+            # stamp — do NOT overwrite even if a parent's rollup GL
+            # tries to reroute it. Leaves scanned first (see the
+            # depth sort above); parents come later and are skipped
+            # here.
+            if ln.get("gl_verified"):
+                continue
+
+            existing = str(ln.get("account_qbo_id") or "")
+            wanted = str(acct["qbo_id"])
+
+            # Stamp the correct account onto this line. Update the
+            # in-memory `lines` list too so subsequent postings in
+            # the same doc don't re-match this line.
+            ln["account_qbo_id"] = wanted
+            ln["account_name"] = acct.get("name") or ln.get("account_name")
+            ln["gl_verified"] = True
+            lines[picked_i] = ln
+
+            # Persist. Small-write pattern: update the individual
+            # line via array index so we don't rewrite the whole
+            # doc every posting.
+            await db[entry["coll"]].update_one(
+                {"id": doc["id"]},
+                {"$set": {f"line_items.{picked_i}.account_qbo_id": wanted,
+                          f"line_items.{picked_i}.account_name": ln.get("account_name"),
+                          f"line_items.{picked_i}.gl_verified": True,
+                          "updated_at": now_iso()}},
+            )
+            lines_stamped += 1
+            docs_touched.add(doc["id"])
+
+    # Re-resolve categories/splits so the newly-stamped account_qbo_id
+    # values propagate into `category_account_id` and `splits[]` on
+    # any SR/RR/CM transactions we touched. Invoices/bills are read
+    # directly by `_signed_balances`' accrual layer, so they pick up
+    # the new account_qbo_id on the next report run — no separate
+    # resolver pass needed.
+    if docs_touched:
+        # Clear existing category on touched SR/RR/CM docs so the
+        # resolver re-picks with the new line accounts.
+        await db.transactions.update_many(
+            {"company_id": company_id,
+             "id": {"$in": list(docs_touched)},
+             "source": "qbo",
+             "txn_type": {"$in": ["SalesReceipt", "RefundReceipt", "CreditMemo"]}},
+            {"$unset": {"category_account_id": "",
+                        "category_account_code": "",
+                        "category_account_name": "",
+                        "splits": ""}},
+        )
+        await resolve_transaction_categories(company_id)
+
+    return {"lines_stamped": lines_stamped,
+            "accounts_scanned": len(scan_accts),
+            "docs_touched": len(docs_touched),
+            "skipped_ambiguous": skipped_ambiguous}

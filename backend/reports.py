@@ -170,12 +170,34 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
     async for a in db.accounts.find({"company_id": company_id, "qbo_id": {"$ne": None}}):
         acct_by_qbo_id[str(a["qbo_id"])] = a["id"]
 
+    # Company's Undeposited Funds account — used as fallback when a
+    # customer payment has no explicit deposit destination. QBO models
+    # this as a two-step workflow (Receive Payment → holds in Undep;
+    # Bank Deposit → sweeps Undep into a bank), and Axiom mirrors it:
+    # native payments recorded without a bank account default to Undep
+    # so the Balance Sheet asset column still reflects the held cash.
+    # Feb 28 2026 — Undeposited Funds workflow, Phase 2 QBO parity.
+    undep_acct = await db.accounts.find_one({
+        "company_id": company_id,
+        "$or": [{"detail_type": "money_in_transit"},
+                {"name": {"$regex": "^Undeposited Funds$",
+                          "$options": "i"}}],
+    })
+    undep_id = undep_acct["id"] if undep_acct else None
+
     def _pay_account_id(p: dict) -> str | None:
-        """Resolve which local account this payment moves cash on. For
-        Payment IN, that's `deposit_account_qbo_id` (Undeposited Funds
-        or a bank). For BillPayment OUT the field is often unset in the
-        mapper, so fall back to the raw QBO payload's `CheckPayment` /
-        `CreditCardPayment` account refs."""
+        """Resolve which local account this payment moves cash on.
+
+        Resolution order:
+          1. QBO: `deposit_account_qbo_id` (Payment.DepositToAccountRef,
+             or BillPayment.CheckPayment/CreditCardPayment fallback in
+             raw payload).
+          2. Native: `deposit_to_account_id` (direct local id set by
+             `POST /companies/{cid}/payments` — either explicitly by
+             the user or auto-filled to Undeposited Funds).
+          3. Fallback: None (caller applies the UF fallback for
+             direction='in' payments, i.e. held-in-undeposited-funds).
+        """
         qid = p.get("deposit_account_qbo_id")
         if not qid:
             raw = p.get("raw") or {}
@@ -183,18 +205,33 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
             cc = raw.get("CreditCardPayment") or {}
             qid = ((cp.get("BankAccountRef") or {}).get("value")
                    or (cc.get("CCAccountRef") or {}).get("value"))
-        if not qid:
-            return None
-        return acct_by_qbo_id.get(str(qid))
+        if qid:
+            return acct_by_qbo_id.get(str(qid))
+        # Native path — the local account id lives directly on the doc.
+        return p.get("deposit_to_account_id") or None
 
     async for p in db.payments.find(pay_q):
         amt = float(p.get("amount") or 0)
         if amt <= 0.005:
             continue
+        # Native payments paired with a bank transaction already have
+        # the cash side posted via that txn's `bank_account_id` — the
+        # payment doc is purely for AR/AP reduction. Posting the
+        # payment too would double-count both sides of the ledger,
+        # unbalancing the BS by exactly the payment amount.
+        if p.get("source") != "qbo" and p.get("source_transaction_id"):
+            continue
         aid = _pay_account_id(p)
+        direction = p.get("direction") or "in"
+        # Direction='in' with no resolvable deposit account →
+        # Undeposited Funds. Preserves the BS identity: the invoice's
+        # `balance_due` was already reduced (AR down by amt), so we
+        # need SOMETHING on the asset side up by amt or the sheet
+        # unbalances. Held-in-UF is the QBO-compliant answer.
+        if not aid and direction == "in" and undep_id:
+            aid = undep_id
         if not aid:
             continue
-        direction = p.get("direction") or "in"
         if direction == "in":
             # DR the deposit account (bank/undep) — cash goes up.
             by[aid] += amt
@@ -396,6 +433,35 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
     cogs_rows    = _emit("cogs")
     expense_rows = _emit("expense")
 
+    # `_emit` only walks parent + direct children. Any grandchild (or
+    # deeper) account with non-zero raw signed activity (typically a
+    # Purchase categorized to a leaf-level revenue account, which QBO
+    # subtracts from that leaf's income total) gets dropped. Sweep in
+    # a flat row for every remaining non-zero account so the P&L
+    # reflects deep-level activity.
+    # Feb 28 2026 — QBO Phase 2 parity, closes the last ~$79 Takeout
+    # / Food & Beverage Sales drift on QBO Test 553 LLC.
+    def _sweep_deep_accounts(section_type: str, rows: list[dict]) -> list[dict]:
+        seen_ids = {r["id"] for r in rows if r.get("id") and not r.get("is_subtotal")}
+        for a in accts:
+            if a["type"] != section_type:
+                continue
+            if a["id"] in seen_ids:
+                continue
+            direct = _display_amount(a, by.get(a["id"], 0.0))
+            if abs(direct) < 0.005:
+                continue
+            rows.append({
+                "id": a["id"], "code": a.get("code") or "",
+                "name": a["name"],
+                "amount": round(direct, 2),
+                "detail_type": (a.get("detail_type") or "").strip(),
+            })
+        return rows
+    revenue_rows = _sweep_deep_accounts("revenue", revenue_rows)
+    cogs_rows    = _sweep_deep_accounts("cogs",    cogs_rows)
+    expense_rows = _sweep_deep_accounts("expense", expense_rows)
+
     # Section totals — sum every row that is NOT a "Total X" subtotal.
     # Because parent rows are now direct-only and children carry their
     # own amounts, adding all non-subtotal rows equals the true total
@@ -489,6 +555,57 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
                 "name": "Uncategorized Income (accrual)",
                 "amount": round(rev_uncategorized, 2),
             })
+
+        # 1b) CreditMemos issued in the period → NEGATE the revenue
+        #     line. QBO's P&L subtracts CMs from the target income
+        #     account (Pest Control -$100 on QBO Test 553 LLC's CM
+        #     1026). Without this pass, our accrual revenue over-
+        #     counts by the CM total because `_open_ar_ap` already
+        #     applied the CM to invoice.balance_due (AR reduction)
+        #     but the revenue side stayed at the original invoiced
+        #     amount. RefundReceipts are already handled in
+        #     `_signed_balances` (they carry a negative txn amount
+        #     that credits the revenue account directly) — we
+        #     deliberately skip them here to avoid double-counting.
+        #     Feb 28 2026 — QBO Phase 2 parity.
+        async for cm in db.transactions.find({
+            "company_id": company_id, "source": "qbo",
+            "txn_type": "CreditMemo",
+        }):
+            date = cm.get("date") or ""
+            if not (date and start <= date <= end):
+                continue
+            for ln in cm.get("line_items") or []:
+                amt = float(ln.get("amount") or 0)
+                if abs(amt) < 0.005:
+                    continue
+                qid = str(ln.get("account_qbo_id") or "")
+                if not qid and ln.get("item_qbo_id"):
+                    item = await db.items.find_one({
+                        "company_id": company_id,
+                        "qbo_id": ln["item_qbo_id"]})
+                    if item:
+                        qid = str(item.get("income_account_qbo_id") or "")
+                acct = rev_by_qbo.get(qid)
+                # CM/RR reduce revenue → subtract the line amount.
+                if acct:
+                    row = rev_row_by_id.get(acct["id"])
+                    if row:
+                        row["amount"] = round(row["amount"] - amt, 2)
+                    else:
+                        new_row = {
+                            "id": acct["id"], "code": acct.get("code") or "",
+                            "name": acct.get("name") or "",
+                            "amount": round(-amt, 2),
+                            "detail_type": (acct.get("detail_type") or "").strip(),
+                        }
+                        revenue_rows.append(new_row)
+                        rev_row_by_id[acct["id"]] = new_row
+                # Negate the accrual adjustment so BS math tracks: the
+                # CM's AR-reduction side already flowed through
+                # `_open_ar_ap`, so pairing this NI reduction keeps
+                # Assets = L + E.
+                accrual_adj_rev -= amt
 
         # 2) Bills issued in the period → expense/COGS side.
         exp_uncategorized = 0.0

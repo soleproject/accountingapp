@@ -1038,6 +1038,49 @@ async def qbo_rebuild_account_hierarchy(cid: str, user: dict = Depends(get_curre
     return {"updated": updated}
 
 
+@router.post("/companies/{cid}/qbo/resolve-gl-line-accounts")
+async def qbo_resolve_gl_line_accounts(
+    cid: str,
+    start_date: str = "2020-01-01",
+    end_date: str | None = None,
+    user: dict = Depends(get_current_user),
+):
+    """Use QBO's General Ledger as source-of-truth to stamp the
+    correct `account_qbo_id` on every invoice/bill/SR/RR/CM line.
+    Necessary because QBO Items can be reassigned to different
+    income/expense accounts over time — historical postings keep
+    the account in effect at the moment of posting, but our
+    current Item.IncomeAccountRef only reflects the latest.
+
+    Fixes P&L drift on migrated companies where the recon panel
+    shows Δ between our per-account totals and QBO's. Idempotent.
+    Feb 28 2026 — Phase 2 QBO parity.
+    """
+    await require_company(user, cid)
+    from qbo_service import resolve_qbo_gl_line_accounts
+    stats = await resolve_qbo_gl_line_accounts(cid, start_date, end_date)
+    return stats
+
+
+@router.post("/companies/{cid}/qbo/resolve-undeposited")
+async def qbo_resolve_undeposited(cid: str, user: dict = Depends(get_current_user)):
+    """Standalone re-run of `resolve_payment_undeposited` — stamps
+    the company's Undeposited Funds account on customer payments
+    (direction='in') that lack a resolvable cash-side account. QBO
+    holds such receipts in UF until a Bank Deposit sweeps them; this
+    endpoint keeps Axiom's ledger in sync so the Balance Sheet asset
+    column doesn't silently under-report held cash.
+
+    Idempotent — payments already carrying a deposit reference are
+    left alone. Runs on both QBO-imported AND native payments.
+    Feb 28 2026 — Undeposited Funds two-step workflow.
+    """
+    await require_company(user, cid)
+    from qbo_service import resolve_payment_undeposited
+    stats = await resolve_payment_undeposited(cid)
+    return stats
+
+
 @router.post("/companies/{cid}/qbo/rebuild-transaction-categories")
 async def qbo_rebuild_transaction_categories(cid: str, user: dict = Depends(get_current_user)):
     """Backfill: for companies migrated before the resolvers were wired

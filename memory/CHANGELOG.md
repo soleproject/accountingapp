@@ -2014,3 +2014,90 @@ the visitor bounces from Stripe.
 - Calendar link (Cal.com / Calendly integration) for accounting
   pros on the drip
 - Auto-graduate lead → `converted` when they finish `/signup`
+
+
+## Undeposited Funds Two-Step Workflow — Feb 28, 2026
+
+**Motivation**
+The QBO reconciliation panel (shipped in the prior session)
+surfaced that ~$2k of held customer payments could be missing from
+the Balance Sheet on native Axiom companies whose payments were
+never paired with a bank deposit transaction — the invoice's
+`balance_due` was reduced (AR down), but nothing on the asset
+column reflected the held cash. QBO models this as a two-step:
+Receive Payment → Undeposited Funds, then Bank Deposit sweeps UF
+into an actual bank account. Axiom now mirrors that.
+
+**Backend**
+- `models.py::PaymentCreate` — added `deposit_to_account_id`, the
+  local account id the payment's cash-side DRs (customer
+  receipts) or CRs (vendor payouts). Optional.
+- `routes/payments.py::create_payment` — when direction='in' and
+  no `deposit_to_account_id` and no `source_transaction_id`, the
+  server auto-fills the company's Undeposited Funds account so
+  every customer receipt has a home on the asset side of the BS.
+- `reports.py::_signed_balances` — now handles native payments
+  (source != qbo) in addition to QBO payments. Cash-side posting
+  is skipped when a payment is paired with a bank transaction via
+  `source_transaction_id` (the txn already handled the DR).
+  Direction='in' payments with no resolvable deposit account fall
+  through to the company's UF account, preserving the BS identity.
+- `qbo_service.py::resolve_payment_undeposited(cid)` — new
+  post-import + backfill resolver that stamps `held_in_undeposited`
+  flag + the correct deposit reference on both QBO and native
+  payments missing one. Idempotent. Wired into the QBO import
+  pipeline right after `resolve_payment_links`.
+- `routes/qbo.py` — new `POST /companies/{cid}/qbo/resolve-undeposited`
+  admin endpoint to re-run the resolver on demand.
+
+**Frontend**
+- `pages/Payments.jsx::PaymentModal` — added a "Deposit to:" dropdown
+  for customer-receipt payments, populated with the company's Cash
+  and Bank + Undeposited Funds accounts. Default option is UF with
+  a "(default — sweep later)" tag and helper text explaining the
+  QBO two-step workflow. `deposit_to_account_id` is only sent when
+  the user actively picks a bank; blank → backend auto-fills UF.
+
+**Tests**
+- `tests/test_undeposited_funds_workflow.py` — 5 new regression tests:
+  * QBO Payment IN with no DepositToAccountRef falls back to UF
+  * Native payment with no deposit_to_account_id uses UF
+  * Native payment with explicit bank → posts to that bank (not UF)
+  * Native payment paired via source_transaction_id is NOT double-posted
+  * `resolve_payment_undeposited` backfill stamps + is idempotent
+- All 5 pass. Pre-existing QBO Payment cash-side suite (4 tests)
+  still passes.
+
+**Verified live**
+- QBO Test 553 LLC: Balance Sheet UF row = $2,062.52 (matches QBO
+  snapshot exactly).
+- Native TEST_dup company: creating a $500 payment without a bank
+  account auto-fills UF; BS delta = $0 (AR down $500, UF up $500,
+  sheet balanced). Rolled back after test.
+- End-to-end curl on `POST /companies/{cid}/payments` (no
+  `deposit_to_account_id`): server stamps UF account id, direction='in'.
+- Frontend Payment modal rendering the new "Deposit to:" selector
+  with default UF option + helper text.
+
+
+## QBO Phase 2 Parity — GL-Verified Line Accounts + CashBack + CM — Feb 28, 2026
+
+**Motivation**
+The QBO reconciliation panel on QBO Test 553 LLC surfaced $95.72 of P&L drift concentrated on child income accounts: Beverages -$1,695, Sales of Product Income +$1,833, Catering missing $138. Root cause: QBO users routinely reassign Items to new income accounts over time, but historical postings retain the account in effect at posting. Our line mapper resolves via the CURRENT `Item.IncomeAccountRef`, so per-account totals diverge from QBO's actual General Ledger.
+
+**Backend**
+- `qbo_service.py::resolve_qbo_gl_line_accounts(cid)` — new resolver that fetches QBO's `GeneralLedger` for every revenue/expense/cogs account and stamps `account_qbo_id` + `gl_verified=true` on each matching invoice/bill/SR/RR line via `(doc_num, txn_type, amount, memo)` matching. Scans accounts leaf-first (deepest child before parent) so QBO's parent-account GL rollups can't overwrite child-level stamps. Wired into the QBO import pipeline right after `resolve_transaction_categories`, and re-runnable via `POST /companies/{cid}/qbo/resolve-gl-line-accounts`.
+- `qbo_service.py::resolve_deposit_splits` — now captures QBO Deposits' top-level `CashBack` object as a negative-amount split targeting the cashback destination bank. Fixes Deposit 121 on QBO Test 553 LLC where $200 was routed to Savings but was landing as -$200 phantom Uncategorized Income on our P&L.
+- `reports.py::compute_income_statement` — accrual layer now iterates CreditMemos and NEGATES the target income account so QBO's own CM revenue-reduction is reflected. Skips RefundReceipts (already handled by `_signed_balances`). New `_sweep_deep_accounts` post-pass captures direct signed activity on grandchild-and-deeper revenue/expense leaves that `_emit`'s parent+one-level walk was dropping (Takeout raw -$79.28 from two Purchases).
+
+**Tests**
+- `tests/test_qbo_phase2_child_mapping.py` — 4 new regression tests covering `_flatten_gl_rows`, CashBack split capture, CM accrual negation, and deep-account signed-balance sweep. All pass.
+
+**Verified live**
+- QBO Test 553 LLC P&L drift closed from $95.72 to $75 — the residual $75 is a single QBO sandbox invoice (#1013) whose payload contains ONLY a `SubTotalLineDetail` with no `SalesItemLineDetail` (a genuine QBO data quirk, confirmed via fresh `_get`).
+- Per-account parity after the fix: Bar Sales ✓, Beverages ✓ (+$1,695), Catering ✓ (was missing), Discounts given ✓, Installation ✓, Maintenance and Repair ✓, Pest Control ✓ (was +$100), Sales of Product Income ✓ (was +$1,833), Services ✓, Takeout ✓ (was +$79.28).
+- Deposit 121: CashBack $200 correctly routed to Savings, Undeposited Funds fully offset, no phantom Uncategorized Income.
+
+**Follow-up (out of scope this pass)**
+- Discount attribution to specific revenue accounts (~$4 residual on Food & Bev Sales vs Takeout on companies with multi-line discounts).
+- Real-time inbound QBO webhooks (Phase 4).
