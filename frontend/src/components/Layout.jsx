@@ -23,6 +23,7 @@ function CompanySwitcher() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const searchRef = useRef(null);
+  const containerRef = useRef(null);
 
   // Reset & auto-focus the search field every time the dropdown opens.
   useEffect(() => {
@@ -30,6 +31,23 @@ function CompanySwitcher() {
       setQuery("");
       setTimeout(() => searchRef.current?.focus(), 40);
     }
+  }, [open]);
+
+  // Close on outside-click / Escape — same ergonomics as the profile menu.
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [open]);
 
   if (!companies?.length) return null;
@@ -77,7 +95,7 @@ function CompanySwitcher() {
   });
 
   return (
-    <div className="relative">
+    <div className="relative" ref={containerRef}>
       <button
         data-testid={TID.companySwitcher}
         onClick={() => setOpen(!open)}
