@@ -278,6 +278,127 @@ def test_sales_tax_populates_payable_from_invoice_tax_lines():
 
 
 
+def test_cash_multi_payment_advances_line_pointer():
+    """MULTI-PAYMENT bug fix (Aug 21 2026): Two payments on the same
+    invoice must advance the top-down consumption pointer cumulatively
+    — the second payment must NOT restart from the top of the invoice
+    lines. Prior bug on Sandbox 358d Craig's Landscaping: Invoice 1004
+    ($20 + $24 + $1,750 + $400 = $2,194 subtotal) paid by P1=$694 and
+    P2=$1,500 posted Sprinklers 2x ($88 vs QBO $44), Sod double-
+    counted, and Services $400 was never reached (drift -$400).
+    """
+    async def go():
+        cid = str(uuid.uuid4())
+        await db.companies.insert_one({"id": cid, "name": "MultiPay Co"})
+        await _seed_account(cid, "acct-sp", "1", "Sales of Product",
+                            "revenue")
+        await _seed_account(cid, "acct-plants", "2", "Plants", "revenue")
+        await _seed_account(cid, "acct-svc", "3", "Services", "revenue")
+        await db.invoices.insert_one({
+            "id": "inv-mp", "company_id": cid, "source": "qbo",
+            "issue_date": "2026-07-13", "number": "1004",
+            "total": 2194.0, "balance_due": 0.0, "status": "paid",
+            "line_items": [
+                {"amount": 20.0,   "account_qbo_id": "1"},
+                {"amount": 24.0,   "account_qbo_id": "1"},
+                {"amount": 1750.0, "account_qbo_id": "2"},
+                {"amount": 400.0,  "account_qbo_id": "3"},
+            ],
+        })
+        # Two payments — must be treated cumulatively.
+        await db.payments.insert_one({
+            "id": "pay-mp1", "company_id": cid, "direction": "in",
+            "date": "2026-07-18", "amount": 694.0,
+            "linked_invoice_id": "inv-mp",
+        })
+        await db.payments.insert_one({
+            "id": "pay-mp2", "company_id": cid, "direction": "in",
+            "date": "2026-07-25", "amount": 1500.0,
+            "linked_invoice_id": "inv-mp",
+        })
+
+        try:
+            import reports as R
+            pl = await R.compute_income_statement(
+                cid, start="2026-01-01", end="2026-12-31", basis="cash")
+            def _amt(name):
+                row = next((r for r in pl["revenue"]
+                             if r["name"] == name), None)
+                return row["amount"] if row else 0.0
+            # Both payments in window -> total paid $2,194 -> full
+            # top-down consumption reaches every line.
+            assert abs(_amt("Sales of Product") - 44.0) < 0.02, (
+                f"Sales of Product should be $44 (once), got {_amt('Sales of Product')}"
+            )
+            assert abs(_amt("Plants") - 1750.0) < 0.02, (
+                f"Plants should be $1,750 (once), got {_amt('Plants')}"
+            )
+            assert abs(_amt("Services") - 400.0) < 0.02, (
+                f"Services should be $400 (reached by second payment), "
+                f"got {_amt('Services')}"
+            )
+            assert abs(pl["total_revenue"] - 2194.0) < 0.02, pl["total_revenue"]
+        finally:
+            await _cleanup(cid)
+
+    _run(go())
+
+
+def test_cash_pre_period_payment_advances_pointer_without_posting():
+    """A payment BEFORE the report window advances the consumption
+    pointer but does NOT post revenue. A later in-window payment
+    then attributes only to lines it actually consumes."""
+    async def go():
+        cid = str(uuid.uuid4())
+        await db.companies.insert_one({"id": cid, "name": "PrePeriod Co"})
+        await _seed_account(cid, "acct-a", "1", "Line A", "revenue")
+        await _seed_account(cid, "acct-b", "2", "Line B", "revenue")
+        await db.invoices.insert_one({
+            "id": "inv-pp", "company_id": cid, "source": "qbo",
+            "issue_date": "2026-01-15", "number": "INV-PP",
+            "total": 500.0, "balance_due": 0.0, "status": "paid",
+            "line_items": [
+                {"amount": 300.0, "account_qbo_id": "1"},
+                {"amount": 200.0, "account_qbo_id": "2"},
+            ],
+        })
+        # Payment BEFORE window (Jan) - advances pointer past Line A.
+        await db.payments.insert_one({
+            "id": "pay-pre", "company_id": cid, "direction": "in",
+            "date": "2026-01-20", "amount": 300.0,
+            "linked_invoice_id": "inv-pp",
+        })
+        # Payment IN window (Feb) - should hit Line B only.
+        await db.payments.insert_one({
+            "id": "pay-in", "company_id": cid, "direction": "in",
+            "date": "2026-02-15", "amount": 200.0,
+            "linked_invoice_id": "inv-pp",
+        })
+
+        try:
+            import reports as R
+            pl = await R.compute_income_statement(
+                cid, start="2026-02-01", end="2026-02-28", basis="cash")
+            a = next((r for r in pl["revenue"]
+                        if r["name"] == "Line A"), None)
+            b = next((r for r in pl["revenue"]
+                        if r["name"] == "Line B"), None)
+            # Line A payment was pre-period -> NOT posted here.
+            assert a is None or abs(a["amount"]) < 0.02, (
+                f"Line A should be $0 in Feb window, got {a}"
+            )
+            # Line B $200 fully in-window.
+            assert b and abs(b["amount"] - 200.0) < 0.02, (
+                f"Line B should be $200, got {b}"
+            )
+            assert abs(pl["total_revenue"] - 200.0) < 0.02, pl["total_revenue"]
+        finally:
+            await _cleanup(cid)
+
+    _run(go())
+
+
+
 def test_credit_memo_tax_reversal_zeroes_payable():
     """CreditMemo `TxnTaxDetail.TaxLine` must be SUBTRACTED from the
     same sales-tax-payable so a fully credited invoice leaves no
