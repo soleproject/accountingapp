@@ -6,6 +6,7 @@ import { t as tr } from "@/lib/i18n";
 import { TID } from "@/constants/testIds";
 import { Download, Loader2, ArrowRightCircle, ChevronLeft, ChevronDown, ChevronRight, Search, SlidersHorizontal, X } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
+import QboReconciliationPanel from "@/components/QboReconciliationPanel";
 import { toast } from "sonner";
 
 const startYtd = () => new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0, 10);
@@ -650,6 +651,14 @@ export default function ReportView() {
           {kind === "balance-sheet" && Array.isArray(data.assets) && (
             <BalanceSheetBody data={data} onDrilldown={goToAccountDetail} onDrilldownGroup={goToSubtypeDetail} />
           )}
+          {(kind === "balance-sheet" || kind === "income-statement") && data && (
+            <QboReconciliationPanel
+              companyId={currentId}
+              reportKind={kind}
+              basis={basis}
+              ourReport={data}
+            />
+          )}
           {kind === "account-detail" && Array.isArray(data.rows) && data.account !== undefined && (
             <AccountDetailBody
               currentId={currentId}
@@ -738,7 +747,7 @@ function IncomeStatementBody({ data, onDrilldown }) {
     <div className="text-sm">
       <Section title="Revenue" />
       <RolledUpRows rows={data.revenue} onDrilldown={onDrilldown} />
-      <Row code="" name="Total Revenue" amount={data.total_revenue} bold />
+      <Row code="" name="Total Income" amount={data.total_revenue} bold />
       {hasCogs && (
         <>
           <Section title="Cost of Goods Sold" />

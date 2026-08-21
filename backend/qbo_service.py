@@ -353,6 +353,76 @@ async def query_all(company_id: str, realm_id: str, entity: str) -> AsyncIterato
         start += len(rows)
 
 
+async def fetch_report(
+    company_id: str, realm_id: str, report_name: str,
+    params: dict | None = None,
+) -> dict:
+    """Fetch a canonical QBO report as structured JSON.
+
+    ``report_name`` is one of QBO's report codes — the three we care
+    about for reconciliation are ``ProfitAndLoss``, ``BalanceSheet``,
+    and ``TransactionList``. ``params`` accepts QBO's standard report
+    query args: ``start_date``, ``end_date``, ``date_macro``,
+    ``accounting_method`` (``Accrual`` / ``Cash``), etc.
+
+    Returned payload is QBO's ``Header`` + ``Columns`` + ``Rows`` tree —
+    the same data QBO's own UI uses to render the report — so storing
+    it verbatim gives us a canonical reference to reconcile our
+    recomputed reports against.
+    """
+    path = f"/company/{realm_id}/reports/{report_name}"
+    return await _get(company_id, realm_id, path, params or {})
+
+
+async def snapshot_reports(
+    company_id: str, realm_id: str,
+    start_date: str | None = None, end_date: str | None = None,
+    accounting_method: str = "Accrual",
+) -> dict:
+    """Fetch P&L, BS, and Transaction List from QBO and persist the
+    payloads to ``qbo_report_snapshots``.
+
+    One document per snapshot — we keep every snapshot so we can
+    reconcile against any historical point-in-time comparison. Returns
+    a summary of what was captured.
+    """
+    reports = [
+        ("ProfitAndLoss",   {"start_date": start_date, "end_date": end_date,
+                             "accounting_method": accounting_method}),
+        ("BalanceSheet",    {"end_date": end_date,
+                             "accounting_method": accounting_method}),
+        ("TransactionList", {"start_date": start_date, "end_date": end_date,
+                             "accounting_method": accounting_method}),
+    ]
+    captured = []
+    for name, params in reports:
+        params = {k: v for k, v in params.items() if v is not None}
+        try:
+            payload = await fetch_report(company_id, realm_id, name, params)
+        except Exception as e:  # noqa: BLE001
+            captured.append({"report": name, "ok": False, "error": str(e)[:400]})
+            continue
+        doc = {
+            "id": f"snap-{company_id[:8]}-{name}-{now_iso()}",
+            "company_id": company_id,
+            "realm_id": realm_id,
+            "report_name": name,
+            "accounting_method": accounting_method,
+            "start_date": start_date,
+            "end_date": end_date,
+            "snapshot_at": now_iso(),
+            "payload": payload,
+        }
+        await db.qbo_report_snapshots.insert_one(doc)
+        captured.append({
+            "report": name, "ok": True,
+            "snapshot_id": doc["id"],
+            "rows": len((payload.get("Rows") or {}).get("Row", []) or []),
+        })
+    return {"captured": captured}
+
+
+
 async def get_company_info(company_id: str, realm_id: str) -> dict:
     return await _get(company_id, realm_id,
                       f"/company/{realm_id}/companyinfo/{realm_id}", {})
@@ -2108,31 +2178,54 @@ async def resolve_transaction_categories(company_id: str) -> int:
     ):
         txn_type = t.get("txn_type") or ""
         outbound = txn_type in _OUTBOUND
-        picked = None
+
+        # ---- Resolve each line to its own account ---------------------
+        # If the transaction has multiple lines resolving to DIFFERENT
+        # accounts, we build splits so the P&L breaks the revenue out
+        # per child account (Beverages vs Takeout vs …) instead of
+        # lumping everything into the first-line's parent bucket.
+        line_accts: list[tuple[dict, float]] = []
         for ln in t.get("line_items") or []:
-            # 1. Direct account ref
+            amt = float(ln.get("amount") or 0)
+            if abs(amt) < 0.005:
+                continue
+            resolved = None
             aqid = ln.get("account_qbo_id")
             if aqid:
-                local = qbo_to_local.get(str(aqid))
-                if local:
-                    picked = local
-                    break
-            # 2. Item ref → item's income/expense account
-            iqid = ln.get("item_qbo_id")
-            if iqid:
-                inc, exp = item_to_accts.get(str(iqid), ("", ""))
-                candidate_qid = exp if outbound else inc
-                # If the "correct-direction" account is missing, fall
-                # back to the other side (some QBO items only carry
-                # one of the two — e.g. inventory items skip the
-                # income account on service-only companies).
-                if not candidate_qid:
-                    candidate_qid = inc or exp
-                if candidate_qid:
-                    local = qbo_to_local.get(candidate_qid)
-                    if local:
-                        picked = local
-                        break
+                resolved = qbo_to_local.get(str(aqid))
+            if not resolved:
+                iqid = ln.get("item_qbo_id")
+                if iqid:
+                    inc, exp = item_to_accts.get(str(iqid), ("", ""))
+                    candidate_qid = exp if outbound else inc
+                    if not candidate_qid:
+                        candidate_qid = inc or exp
+                    if candidate_qid:
+                        resolved = qbo_to_local.get(candidate_qid)
+            if resolved:
+                line_accts.append((resolved, amt))
+
+        picked = line_accts[0][0] if line_accts else None
+        # If two or more lines resolve to different local accounts,
+        # emit them as splits so `_signed_balances` posts each amount
+        # to its own bucket. Single-account (or single-line) txns keep
+        # the flat `category_account_id` path.
+        distinct_accts = {a["id"] for a, _ in line_accts}
+        splits_payload: list[dict] | None = None
+        if len(distinct_accts) > 1:
+            agg: dict[str, dict] = {}
+            for a, amt in line_accts:
+                s = agg.setdefault(a["id"], {
+                    "category_account_id": a["id"],
+                    "category_account_code": a.get("code") or "",
+                    "category_account_name": a.get("name") or "",
+                    "amount": 0.0,
+                })
+                s["amount"] += amt
+            splits_payload = [
+                {**s, "amount": round(s["amount"], 2)} for s in agg.values()
+            ]
+
         if not picked:
             # No line-level AccountRef or Item resolution — drop the
             # transaction into Uncategorized Expense/Income keyed by
@@ -2143,14 +2236,17 @@ async def resolve_transaction_categories(company_id: str) -> int:
             picked = _uncat(direction)
         if not picked:
             continue
+        update_doc = {
+            "category_account_id": picked["id"],
+            "category_account_code": picked.get("code") or "",
+            "category_account_name": picked.get("name") or "",
+            "updated_at": now_iso(),
+        }
+        if splits_payload:
+            update_doc["splits"] = splits_payload
         await db.transactions.update_one(
             {"id": t["id"]},
-            {"$set": {
-                "category_account_id": picked["id"],
-                "category_account_code": picked.get("code") or "",
-                "category_account_name": picked.get("name") or "",
-                "updated_at": now_iso(),
-            }},
+            {"$set": update_doc},
         )
         updated += 1
     return updated
