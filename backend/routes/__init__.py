@@ -33,6 +33,7 @@ from routes.recurring import router as recurring_router  # noqa: F401
 from routes.items import router as items_router  # noqa: F401
 from routes.qbo import router as qbo_router  # noqa: F401
 from routes.qbo_mirror import router as qbo_mirror_router  # noqa: F401
+from routes.qbo_test import router as qbo_test_router  # noqa: F401
 from routes.estimates_pos import router as estimates_pos_router  # noqa: F401
 from routes.audit_routes import router as audit_router  # noqa: F401
 from routes.partners_routes import router as partners_router  # noqa: F401
@@ -76,6 +77,7 @@ ALL_ROUTERS = [
     items_router,
     qbo_router,
     qbo_mirror_router,
+    qbo_test_router,
     estimates_pos_router,
     audit_router,
     partners_router,

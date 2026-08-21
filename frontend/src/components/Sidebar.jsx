@@ -7,7 +7,7 @@ import {
   BookOpen, Notebook, ListTree, Sparkles, Shield, Briefcase, Wand2,
   PanelLeftClose, PanelLeft, Settings2, Share2, Activity, Repeat, Package,
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
-  Percent, Lock, History,
+  Percent, Lock, History, FlaskConical,
 } from "lucide-react";
 import { TID } from "@/constants/testIds";
 import { useAuth } from "@/lib/auth";
@@ -59,6 +59,7 @@ const GROUPS = [
       { to: "/connections", label: "Connect Accounts", icon: Link2, exact: true },
       { to: "/connections?view=imports", label: "Import Statements", icon: Download, matchPath: "/connections", exact: true },
       { to: "/connections/qbo", label: "Connect QBO", icon: Link2, matchPath: "/connections/qbo" },
+      { to: "/test-qbo", label: "Test QBO", icon: FlaskConical, matchPath: "/test-qbo" },
     ],
   },
   {
