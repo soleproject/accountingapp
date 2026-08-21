@@ -5255,3 +5255,30 @@ Residual known gaps (surface on Recon Panel, not silently plugged):
 These are surfaced correctly for review rather than being masked into OBE.
 
 Status: **DONE**. Sales-tax payment lifecycle now fully round-trips through synthesis + accrual + reversal.
+
+
+### Aug 21 2026 — Multi-Payment Cash-Basis Fix
+
+**Problem**: Cash P&L Recon Panel on Sandbox 358d showed a +$120.52 shuffle pattern — Sales of Product +$44, Plants and Soil +$609.62, Services -$400, Maintenance +$135. Category totals almost tied but children were scrambled, classic sign of misclassification. Initial hypothesis (item→income-account historical divergence) turned out wrong (GL resolver stamped 0 lines because our stored `account_qbo_id` already matched current item mapping).
+
+**Root cause**: `reports.py` top-down cash allocator reset `remaining = paid` per payment while iterating the invoice's FULL line array. Multi-payment invoices double-consumed top lines and never reached bottom lines. Sandbox 358d Invoice 1004 ($20 + $24 + $1,750 + $400 = $2,194 subtotal, paid by $694 + $1,500) posted:
+- Sprinklers 2× ($88 vs QBO $44)
+- Sod double-counted ($2,281 vs QBO $1,750)
+- Services $0 (never reached, vs QBO $400)
+
+**Backend** (`reports.py::compute_income_statement` cash-basis block)
+- Group payments per invoice/bill into `pre_period` (before window) + `in_period` (within window)
+- Walk lines ONCE per invoice with cumulative consumption pointer: `pre_period` advances pointer silently, `in_period` posts revenue only for the segment it consumes
+- Same treatment on vendor side (bills → expense/COGS)
+
+**Tests**: `tests/test_cash_basis_parity.py` — added `test_cash_multi_payment_advances_line_pointer` (exact Sandbox 358d Invoice 1004 scenario) + `test_cash_pre_period_payment_advances_pointer_without_posting` (window boundary). Full suite **12/12 green**, wider 33/33 parity suite green.
+
+**Verified live on Sandbox 358d cash P&L**:
+- Sales of Product $88 → **$44 ✓** (exact match)
+- Services $103.55 → **$503.55 ✓** (exact match — the $400 line came back)
+- Plants and Soil $2,483.49 → $1,951.97 (drift +$609.62 → +$78)
+- Total Income drift **+$120.52 → -$55.00** (55% reduction)
+
+Residual -$55 is a separate item-mapping shuffle (Landscaping parent direct postings, Fountains, Pest Control) — smaller root cause, distinct from the top-down bug closed here.
+
+Status: **DONE**. Multi-payment cash-basis top-down allocation now matches QBO for both customer receipts and vendor payments.

@@ -778,68 +778,116 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
         # (Sandbox 358d Craig's Landscaping was over by $120.52 on
         # Cash Total Income due to this).
         # Feb 28 2026 — Cash-basis parity, top-down allocation.
+        #
+        # Multi-payment fix (Aug 21 2026): allocating each payment
+        # independently against `lines` re-consumed the top lines and
+        # never reached the bottom on invoices paid by more than one
+        # deposit. Group payments per invoice, then walk lines once
+        # with a cumulative consumption pointer split into
+        # pre-period (outside window, advances pointer only) and
+        # in-period (attributes to revenue). Sandbox 358d: Invoice
+        # 1004 has P1=$694 + P2=$1,675.52 → prior code posted
+        # Sprinklers $88 (2×) and Sod $2,281.52 (2×) while Services
+        # $400 was never reached; multi-payment invoices drove the
+        # shuffle pattern on the cash-P&L Recon Panel.
+        inv_prepay: dict[str, float] = {}
+        inv_inpay:  dict[str, float] = {}
         async for pay in db.payments.find({"company_id": company_id,
-                                            "direction": "in",
-                                            "date": {"$gte": start,
-                                                       "$lte": end}}):
-            paid = float(pay.get("amount") or 0)
-            if paid < 0.005:
-                continue
+                                            "direction": "in"}):
             inv_id = pay.get("linked_invoice_id")
             if not inv_id:
                 continue
+            paid = float(pay.get("amount") or 0)
+            if paid < 0.005:
+                continue
+            d = pay.get("date") or ""
+            if not d:
+                continue
+            if d < start:
+                inv_prepay[inv_id] = inv_prepay.get(inv_id, 0.0) + paid
+            elif d <= end:
+                inv_inpay[inv_id] = inv_inpay.get(inv_id, 0.0) + paid
+
+        for inv_id, in_paid in inv_inpay.items():
             inv = await db.invoices.find_one({"id": inv_id,
                                                 "company_id": company_id})
             if not inv:
                 continue
             lines = inv.get("line_items") or []
-            remaining = paid
+            remaining_pre = inv_prepay.get(inv_id, 0.0)
+            remaining_in  = in_paid
             for ln in lines:
-                if remaining <= 0.005:
-                    break
                 la = float(ln.get("amount") or 0)
                 if abs(la) < 0.005:
                     continue
+                # Pre-period consumption advances the pointer without
+                # posting revenue (those payments already recognized
+                # in a prior period).
+                pre_consumed = min(la, remaining_pre) if la > 0 else 0.0
+                remaining_pre -= pre_consumed
+                line_remaining = la - pre_consumed
+                if line_remaining < 0.005 and la > 0:
+                    continue
+                # In-period portion posts to the line's account.
+                if remaining_in <= 0.005:
+                    break
+                in_consumed = round(min(line_remaining, remaining_in), 2)
+                remaining_in -= in_consumed
                 qid = str(ln.get("account_qbo_id") or "")
                 acct = rev_by_qbo.get(qid)
                 if not acct:
                     # Line points somewhere we can't classify as
                     # revenue (a Discount line, or a line whose GL
-                    # stamp landed on an expense) — still consume
-                    # the line amount so subsequent revenue lines
-                    # get the correct residual.
-                    remaining -= la
+                    # stamp landed on an expense) — consumed above so
+                    # subsequent revenue lines get the correct
+                    # residual.
                     continue
-                slice_amt = round(min(la, remaining), 2)
-                if slice_amt < 0.005:
+                if in_consumed < 0.005:
                     continue
-                _add_to("revenue", acct, slice_amt)
-                remaining -= slice_amt
+                _add_to("revenue", acct, in_consumed)
 
         # --- 2) Vendor payments → expense/COGS (top-down bill-line
         #        application, matching QBO's cash-basis behaviour).
+        # Same multi-payment fix as the customer side (Aug 21 2026).
+        bill_prepay: dict[str, float] = {}
+        bill_inpay:  dict[str, float] = {}
         async for pay in db.payments.find({"company_id": company_id,
-                                            "direction": "out",
-                                            "date": {"$gte": start,
-                                                       "$lte": end}}):
-            paid = float(pay.get("amount") or 0)
-            if paid < 0.005:
-                continue
+                                            "direction": "out"}):
             bill_id = pay.get("linked_bill_id")
             if not bill_id:
                 continue
+            paid = float(pay.get("amount") or 0)
+            if paid < 0.005:
+                continue
+            d = pay.get("date") or ""
+            if not d:
+                continue
+            if d < start:
+                bill_prepay[bill_id] = bill_prepay.get(bill_id, 0.0) + paid
+            elif d <= end:
+                bill_inpay[bill_id] = bill_inpay.get(bill_id, 0.0) + paid
+
+        for bill_id, in_paid in bill_inpay.items():
             bill = await db.bills.find_one({"id": bill_id,
                                               "company_id": company_id})
             if not bill:
                 continue
             lines = bill.get("line_items") or []
-            remaining = paid
+            remaining_pre = bill_prepay.get(bill_id, 0.0)
+            remaining_in  = in_paid
             for ln in lines:
-                if remaining <= 0.005:
-                    break
                 la = float(ln.get("amount") or 0)
                 if abs(la) < 0.005:
                     continue
+                pre_consumed = min(la, remaining_pre) if la > 0 else 0.0
+                remaining_pre -= pre_consumed
+                line_remaining = la - pre_consumed
+                if line_remaining < 0.005 and la > 0:
+                    continue
+                if remaining_in <= 0.005:
+                    break
+                in_consumed = round(min(line_remaining, remaining_in), 2)
+                remaining_in -= in_consumed
                 qid = str(ln.get("account_qbo_id") or "")
                 if not qid and ln.get("item_qbo_id"):
                     item = await db.items.find_one({
@@ -849,14 +897,11 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
                         qid = str(item.get("expense_account_qbo_id") or "")
                 acct = exp_by_qbo.get(qid)
                 if not acct:
-                    remaining -= la
                     continue
-                slice_amt = round(min(la, remaining), 2)
-                if slice_amt < 0.005:
+                if in_consumed < 0.005:
                     continue
                 _add_to("cogs" if acct["type"] == "cogs" else "expense",
-                        acct, slice_amt)
-                remaining -= slice_amt
+                        acct, in_consumed)
 
         total_revenue = _sum_section(revenue_rows)
         total_cogs    = _sum_section(cogs_rows)
