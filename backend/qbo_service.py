@@ -353,6 +353,76 @@ async def query_all(company_id: str, realm_id: str, entity: str) -> AsyncIterato
         start += len(rows)
 
 
+async def fetch_report(
+    company_id: str, realm_id: str, report_name: str,
+    params: dict | None = None,
+) -> dict:
+    """Fetch a canonical QBO report as structured JSON.
+
+    ``report_name`` is one of QBO's report codes — the three we care
+    about for reconciliation are ``ProfitAndLoss``, ``BalanceSheet``,
+    and ``TransactionList``. ``params`` accepts QBO's standard report
+    query args: ``start_date``, ``end_date``, ``date_macro``,
+    ``accounting_method`` (``Accrual`` / ``Cash``), etc.
+
+    Returned payload is QBO's ``Header`` + ``Columns`` + ``Rows`` tree —
+    the same data QBO's own UI uses to render the report — so storing
+    it verbatim gives us a canonical reference to reconcile our
+    recomputed reports against.
+    """
+    path = f"/company/{realm_id}/reports/{report_name}"
+    return await _get(company_id, realm_id, path, params or {})
+
+
+async def snapshot_reports(
+    company_id: str, realm_id: str,
+    start_date: str | None = None, end_date: str | None = None,
+    accounting_method: str = "Accrual",
+) -> dict:
+    """Fetch P&L, BS, and Transaction List from QBO and persist the
+    payloads to ``qbo_report_snapshots``.
+
+    One document per snapshot — we keep every snapshot so we can
+    reconcile against any historical point-in-time comparison. Returns
+    a summary of what was captured.
+    """
+    reports = [
+        ("ProfitAndLoss",   {"start_date": start_date, "end_date": end_date,
+                             "accounting_method": accounting_method}),
+        ("BalanceSheet",    {"end_date": end_date,
+                             "accounting_method": accounting_method}),
+        ("TransactionList", {"start_date": start_date, "end_date": end_date,
+                             "accounting_method": accounting_method}),
+    ]
+    captured = []
+    for name, params in reports:
+        params = {k: v for k, v in params.items() if v is not None}
+        try:
+            payload = await fetch_report(company_id, realm_id, name, params)
+        except Exception as e:  # noqa: BLE001
+            captured.append({"report": name, "ok": False, "error": str(e)[:400]})
+            continue
+        doc = {
+            "id": f"snap-{company_id[:8]}-{name}-{now_iso()}",
+            "company_id": company_id,
+            "realm_id": realm_id,
+            "report_name": name,
+            "accounting_method": accounting_method,
+            "start_date": start_date,
+            "end_date": end_date,
+            "snapshot_at": now_iso(),
+            "payload": payload,
+        }
+        await db.qbo_report_snapshots.insert_one(doc)
+        captured.append({
+            "report": name, "ok": True,
+            "snapshot_id": doc["id"],
+            "rows": len((payload.get("Rows") or {}).get("Row", []) or []),
+        })
+    return {"captured": captured}
+
+
+
 async def get_company_info(company_id: str, realm_id: str) -> dict:
     return await _get(company_id, realm_id,
                       f"/company/{realm_id}/companyinfo/{realm_id}", {})

@@ -14,6 +14,7 @@ import asyncio
 import uuid
 import secrets
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
@@ -518,6 +519,74 @@ async def qbo_preview(cid: str, user: dict = Depends(get_current_user)):
         }},
     )
     return {"counts": counts, "total": total}
+
+
+# --------------------------------------------------------------------------
+# Report reconciliation (Option C / Phase 1)
+# --------------------------------------------------------------------------
+
+@router.post("/companies/{cid}/qbo/reports/snapshot")
+async def qbo_snapshot_reports(
+    cid: str,
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    accounting_method: str = Query("Accrual"),
+    user: dict = Depends(get_current_user),
+):
+    """Fetch QBO's canonical P&L, BS, and Transaction List for this
+    company and persist them to ``qbo_report_snapshots``. Used by the
+    reconciliation panel to prove the numbers we're recomputing match
+    what QBO's own report engine renders.
+
+    ``accounting_method`` = ``Accrual`` or ``Cash`` — mirrors QBO's
+    per-report toggle. Callers should pass the same basis they want
+    to compare our reports against.
+    """
+    await require_company(user, cid)
+    conn = await Q.get_connection(cid)
+    if not conn or conn.get("status") != "connected":
+        raise HTTPException(400, "QBO not connected")
+    try:
+        result = await Q.snapshot_reports(
+            company_id=cid,
+            realm_id=conn["realm_id"],
+            start_date=start_date,
+            end_date=end_date,
+            accounting_method=accounting_method,
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"QBO snapshot failed: {e}") from e
+    return result
+
+
+@router.get("/companies/{cid}/qbo/reports/latest")
+async def qbo_latest_snapshot(
+    cid: str,
+    report_name: str = Query(..., regex="^(ProfitAndLoss|BalanceSheet|TransactionList)$"),
+    accounting_method: str = Query("Accrual"),
+    user: dict = Depends(get_current_user),
+):
+    """Return the most recent snapshot for the given report + basis.
+
+    Powers the "official QBO" column of the side-by-side view. Returns
+    ``null`` payload if nothing has been snapshotted yet — the UI shows
+    a "Fetch official QBO report" button in that case.
+    """
+    await require_company(user, cid)
+    doc = await db.qbo_report_snapshots.find_one(
+        {
+            "company_id": cid,
+            "report_name": report_name,
+            "accounting_method": accounting_method,
+        },
+        sort=[("snapshot_at", -1)],
+    )
+    if not doc:
+        return {"snapshot": None}
+    doc.pop("_id", None)
+    return {"snapshot": doc}
+
+
 
 
 @router.post("/companies/{cid}/qbo/migrations")
