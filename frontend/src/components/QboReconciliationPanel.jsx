@@ -286,7 +286,7 @@ function flattenOurReport(data, kind) {
   } else if (kind === "income-statement") {
     walk(data.revenue, 0);
     walk(data.expenses, 0);
-    if (data.total_revenue != null) out.push({ label: "Total Revenue", value: Number(data.total_revenue) });
+    if (data.total_revenue != null) out.push({ label: "Total Income", value: Number(data.total_revenue) });
     if (data.total_expenses != null) out.push({ label: "Total Expenses", value: Number(data.total_expenses) });
     if (data.net_income != null) out.push({ label: "Net Income", value: Number(data.net_income) });
   }

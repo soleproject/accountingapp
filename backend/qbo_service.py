@@ -2182,31 +2182,54 @@ async def resolve_transaction_categories(company_id: str) -> int:
     ):
         txn_type = t.get("txn_type") or ""
         outbound = txn_type in _OUTBOUND
-        picked = None
+
+        # ---- Resolve each line to its own account ---------------------
+        # If the transaction has multiple lines resolving to DIFFERENT
+        # accounts, we build splits so the P&L breaks the revenue out
+        # per child account (Beverages vs Takeout vs …) instead of
+        # lumping everything into the first-line's parent bucket.
+        line_accts: list[tuple[dict, float]] = []
         for ln in t.get("line_items") or []:
-            # 1. Direct account ref
+            amt = float(ln.get("amount") or 0)
+            if abs(amt) < 0.005:
+                continue
+            resolved = None
             aqid = ln.get("account_qbo_id")
             if aqid:
-                local = qbo_to_local.get(str(aqid))
-                if local:
-                    picked = local
-                    break
-            # 2. Item ref → item's income/expense account
-            iqid = ln.get("item_qbo_id")
-            if iqid:
-                inc, exp = item_to_accts.get(str(iqid), ("", ""))
-                candidate_qid = exp if outbound else inc
-                # If the "correct-direction" account is missing, fall
-                # back to the other side (some QBO items only carry
-                # one of the two — e.g. inventory items skip the
-                # income account on service-only companies).
-                if not candidate_qid:
-                    candidate_qid = inc or exp
-                if candidate_qid:
-                    local = qbo_to_local.get(candidate_qid)
-                    if local:
-                        picked = local
-                        break
+                resolved = qbo_to_local.get(str(aqid))
+            if not resolved:
+                iqid = ln.get("item_qbo_id")
+                if iqid:
+                    inc, exp = item_to_accts.get(str(iqid), ("", ""))
+                    candidate_qid = exp if outbound else inc
+                    if not candidate_qid:
+                        candidate_qid = inc or exp
+                    if candidate_qid:
+                        resolved = qbo_to_local.get(candidate_qid)
+            if resolved:
+                line_accts.append((resolved, amt))
+
+        picked = line_accts[0][0] if line_accts else None
+        # If two or more lines resolve to different local accounts,
+        # emit them as splits so `_signed_balances` posts each amount
+        # to its own bucket. Single-account (or single-line) txns keep
+        # the flat `category_account_id` path.
+        distinct_accts = {a["id"] for a, _ in line_accts}
+        splits_payload: list[dict] | None = None
+        if len(distinct_accts) > 1:
+            agg: dict[str, dict] = {}
+            for a, amt in line_accts:
+                s = agg.setdefault(a["id"], {
+                    "category_account_id": a["id"],
+                    "category_account_code": a.get("code") or "",
+                    "category_account_name": a.get("name") or "",
+                    "amount": 0.0,
+                })
+                s["amount"] += amt
+            splits_payload = [
+                {**s, "amount": round(s["amount"], 2)} for s in agg.values()
+            ]
+
         if not picked:
             # No line-level AccountRef or Item resolution — drop the
             # transaction into Uncategorized Expense/Income keyed by
@@ -2217,14 +2240,17 @@ async def resolve_transaction_categories(company_id: str) -> int:
             picked = _uncat(direction)
         if not picked:
             continue
+        update_doc = {
+            "category_account_id": picked["id"],
+            "category_account_code": picked.get("code") or "",
+            "category_account_name": picked.get("name") or "",
+            "updated_at": now_iso(),
+        }
+        if splits_payload:
+            update_doc["splits"] = splits_payload
         await db.transactions.update_one(
             {"id": t["id"]},
-            {"$set": {
-                "category_account_id": picked["id"],
-                "category_account_code": picked.get("code") or "",
-                "category_account_name": picked.get("name") or "",
-                "updated_at": now_iso(),
-            }},
+            {"$set": update_doc},
         )
         updated += 1
     return updated

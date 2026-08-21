@@ -1384,7 +1384,7 @@ def build_income_statement_pdf(data: dict) -> bytes:
         Paragraph(f"For the period {data['period_start']} to {data['period_end']} &middot; {data['basis'].title()} Basis", s["SubTitle"]),
         Spacer(1, 12),
         Paragraph("REVENUE", s["Section"]),
-        _money_table_grouped(data["revenue"], "Total Revenue", data["total_revenue"]),
+        _money_table_grouped(data["revenue"], "Total Income", data["total_revenue"]),
         Spacer(1, 8),
     ]
     # COGS + Gross Profit only render when there's activity in the

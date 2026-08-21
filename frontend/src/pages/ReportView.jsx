@@ -747,7 +747,7 @@ function IncomeStatementBody({ data, onDrilldown }) {
     <div className="text-sm">
       <Section title="Revenue" />
       <RolledUpRows rows={data.revenue} onDrilldown={onDrilldown} />
-      <Row code="" name="Total Revenue" amount={data.total_revenue} bold />
+      <Row code="" name="Total Income" amount={data.total_revenue} bold />
       {hasCogs && (
         <>
           <Section title="Cost of Goods Sold" />
