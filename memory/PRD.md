@@ -5166,3 +5166,22 @@ Status: **DONE**. Held customer payments now show up correctly on the Balance Sh
 **Verified live**: QBO Test 553 LLC P&L drift closed from $95.72 to $75. Residual $75 is a single sandbox invoice (#1013) with malformed line detail — a QBO data quirk that won't affect production migrations.
 
 Status: **DONE**. Per-account parity now essentially 1:1 with QBO on companies with well-formed line detail.
+
+
+### Feb 28 2026 — Sandbox 358d Migration Parity Fixes
+
+**Problem**: Fresh Craig's Landscaping migration exposed three defects: Total Assets short by $13,495 (Truck grandchild lost), OBE off by $419.09 (opening JE double-counted), and cross-section name collisions on the Recon Panel (income "Plants and Soil" ↔ expense "Plants and Soil").
+
+**Backend**
+- BS totals now use `_emit_section`'s running `top_total` + A/R + A/P + NI (no row re-sum).
+- P&L `_emit` rows carry `parent_id`; new `_refresh_subtotals` pass keeps subtotals current after the accrual layer tops up child rows.
+- `_post_opening_balances_je` only plugs accounts with ZERO imported activity + skips sales-tax payables (`AccountSubType` GlobalTax/SalesTaxPayable).
+
+**Frontend**
+- `QboReconciliationPanel` matches rows by `(section, normLabel)` scoped tuple so income/expense name collisions no longer cross-match.
+
+**Tests**: `tests/test_report_subtotals_and_opening.py` — 5 new tests, all pass. Full suite 14 tests green.
+
+**Verified live**: Craig's Landscaping OBE = -$9,337.50 (exact QBO match). BS balanced. Total L&P subtotal = $1,170 (exact QBO match). Residual per-account drift confined to real import gaps (Checking +$76.90, Inv Asset -$28.75, BoE Payable $370.94 = missing invoice sales-tax extraction).
+
+Status: **DONE**. Big three drift items closed; remaining residuals are isolated import gaps on specific accounts, not systemic.

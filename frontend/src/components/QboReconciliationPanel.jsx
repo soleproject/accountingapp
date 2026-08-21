@@ -23,16 +23,42 @@ const KIND_TO_QBO = {
   "income-statement": "ProfitAndLoss",
 };
 
-/** Walk QBO's Rows tree flat, extracting every leaf line's label + total. */
-function flattenQboRows(rows, out = [], depth = 0) {
+/** Normalize a section name so QBO's "Income" ↔ our revenue rows tie
+ *  cleanly. QBO uses different section headers by report type, and
+ *  BS headers are UPPER-CASED with punctuation, so we canonicalise
+ *  down to a small vocabulary: income / cogs / expense / asset /
+ *  liability / equity. Anything unknown returns "" and won't scope. */
+function normSection(label) {
+  const s = (label || "").toLowerCase().replace(/[^a-z ]/g, "").trim();
+  if (!s) return "";
+  if (s === "income" || s.startsWith("other income")) return "income";
+  if (s.startsWith("cost of goods")) return "cogs";
+  if (s === "expenses" || s.startsWith("other expenses")) return "expense";
+  if (s === "assets" || s.endsWith("assets") || s.startsWith("current assets") || s.startsWith("other current assets") || s.startsWith("fixed assets") || s === "bank accounts" || s === "accounts receivable") return "asset";
+  if (s === "liabilities" || s.startsWith("liabilities and") || s.endsWith("liabilities") || s === "accounts payable" || s === "credit cards" || s.startsWith("current liabilities") || s.startsWith("longterm liabilities") || s.startsWith("other current liabilities")) return "liability";
+  if (s === "equity") return "equity";
+  return "";  // sub-header, fall through to parent scope
+}
+
+/** Walk QBO's Rows tree flat, extracting every leaf line's label + total.
+ *  Each emitted row carries its `section` (income/cogs/expense/asset/
+ *  liability/equity) so the recon table can match against OUR rows
+ *  scoped by section too — otherwise QBO's "Plants and Soil" income
+ *  account collides with our "Plants and Soil" expense account (Craig's
+ *  Design & Landscaping has both) and the panel prints false drift. */
+function flattenQboRows(rows, out = [], depth = 0, section = "") {
   if (!rows) return out;
   const list = Array.isArray(rows.Row) ? rows.Row : (Array.isArray(rows) ? rows : []);
   for (const r of list) {
     // Section headers with a nested Rows key
     if (r.Rows) {
       const header = r.Header?.ColData?.[0]?.value;
-      if (header) out.push({ label: header, value: null, header: true, depth });
-      flattenQboRows(r.Rows, out, depth + 1);
+      // Only override `section` when the header maps to a known one
+      // — sub-headers like "Job Materials" keep the parent's section
+      // scope (expense stays expense; income stays income).
+      const nextSection = normSection(header) || section;
+      if (header) out.push({ label: header, value: null, header: true, depth, section: nextSection });
+      flattenQboRows(r.Rows, out, depth + 1, nextSection);
       // Summary row (subtotal)
       if (r.Summary?.ColData) {
         const [lbl, val] = r.Summary.ColData;
@@ -41,6 +67,7 @@ function flattenQboRows(rows, out = [], depth = 0) {
           value: parseFloat(val?.value || 0),
           summary: true,
           depth,
+          section: nextSection,
         });
       }
     } else if (r.ColData) {
@@ -49,6 +76,7 @@ function flattenQboRows(rows, out = [], depth = 0) {
         label: lbl?.value || "",
         value: val?.value !== "" ? parseFloat(val?.value || 0) : null,
         depth,
+        section,
       });
     }
   }
@@ -58,13 +86,33 @@ function flattenQboRows(rows, out = [], depth = 0) {
 /** Normalize a label for fuzzy match: lowercase, strip whitespace + punctuation. */
 const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
-/** Compare QBO totals vs our totals side by side. */
+/** Compare QBO totals vs our totals side by side, scoped by section. */
 function ReconciliationTable({ qboRows, ourRows, fmt }) {
-  const ourByLabel = useMemo(() => {
-    const m = new Map();
-    for (const r of ourRows) m.set(norm(r.label), r.value);
-    return m;
+  // Key rows by `${section}::${normLabel}` so an income "Plants and
+  // Soil" doesn't collide with an expense "Plants and Soil". Falls
+  // back to plain label-only for rows that have no section context
+  // (top-level totals like "Net Income", "Total Assets").
+  const ourBy = useMemo(() => {
+    const scoped = new Map();
+    const bare = new Map();
+    for (const r of ourRows) {
+      const l = norm(r.label);
+      if (r.section) scoped.set(`${r.section}::${l}`, r.value);
+      // Only populate the bare map with the FIRST occurrence — later
+      // duplicates keep their section-scoped identity via `scoped`.
+      if (!bare.has(l)) bare.set(l, r.value);
+    }
+    return { scoped, bare };
   }, [ourRows]);
+
+  const lookup = (section, label) => {
+    const l = norm(label);
+    if (section) {
+      const v = ourBy.scoped.get(`${section}::${l}`);
+      if (v !== undefined) return v;
+    }
+    return ourBy.bare.get(l);
+  };
 
   return (
     <table className="w-full text-sm">
@@ -88,7 +136,7 @@ function ReconciliationTable({ qboRows, ourRows, fmt }) {
           if (r.value === null) return (
             <tr key={i}><td className="py-1 px-2" style={{ paddingLeft: 8 + r.depth * 12 }}>{r.label}</td></tr>
           );
-          const ourVal = ourByLabel.get(norm(r.label));
+          const ourVal = lookup(r.section, r.label);
           const hasOurs = ourVal !== undefined && ourVal !== null;
           const diff = hasOurs ? Math.abs(r.value - ourVal) : null;
           const matches = hasOurs && diff < 0.01;
@@ -266,26 +314,36 @@ export default function QboReconciliationPanel({ companyId, reportKind, basis, o
   );
 }
 
-/** Flatten our internal report shape to the same {label, value} form. */
+/** Flatten our internal report shape to the same {label, value, section}
+ *  form so the recon table can match rows scoped by section. Without
+ *  the `section` tag, income "Plants and Soil" collides with expense
+ *  "Plants and Soil" in the ourBy lookup and the panel shows the
+ *  wrong value. */
 function flattenOurReport(data, kind) {
   const out = [];
-  const walk = (rows, depth = 0) => {
+  const walk = (rows, section, depth = 0) => {
     if (!Array.isArray(rows)) return;
     for (const r of rows) {
-      out.push({ label: r.name || r.label, value: Number(r.balance ?? r.amount ?? 0), depth });
-      if (Array.isArray(r.children)) walk(r.children, depth + 1);
+      out.push({
+        label: r.name || r.label,
+        value: Number(r.balance ?? r.amount ?? 0),
+        depth,
+        section,
+      });
+      if (Array.isArray(r.children)) walk(r.children, section, depth + 1);
     }
   };
   if (kind === "balance-sheet") {
-    walk(data.assets, 0);
-    walk(data.liabilities, 0);
-    walk(data.equity, 0);
+    walk(data.assets, "asset");
+    walk(data.liabilities, "liability");
+    walk(data.equity, "equity");
     if (data.total_assets != null) out.push({ label: "Total Assets", value: Number(data.total_assets) });
     if (data.total_liabilities != null) out.push({ label: "Total Liabilities", value: Number(data.total_liabilities) });
     if (data.total_equity != null) out.push({ label: "Total Equity", value: Number(data.total_equity) });
   } else if (kind === "income-statement") {
-    walk(data.revenue, 0);
-    walk(data.expenses, 0);
+    walk(data.revenue, "income");
+    walk(data.cogs, "cogs");
+    walk(data.expenses, "expense");
     if (data.total_revenue != null) out.push({ label: "Total Income", value: Number(data.total_revenue) });
     if (data.total_expenses != null) out.push({ label: "Total Expenses", value: Number(data.total_expenses) });
     if (data.net_income != null) out.push({ label: "Net Income", value: Number(data.net_income) });

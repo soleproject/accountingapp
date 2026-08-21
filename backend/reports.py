@@ -374,6 +374,9 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
             children_of.setdefault(pid, []).append(a)
 
     def _emit(section_type: str):
+        """Return the flat row list for one P&L section. Callers pair
+        this with `_sum_section(rows)` to get the correctly-rolled
+        total — re-summing here would double-count subtotal rows."""
         rows: list[dict] = []
         top_level = [a for a in accts
                      if a["type"] == section_type and not a.get("parent_account_id")]
@@ -394,7 +397,10 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
                     continue
                 kids_rows.append({
                     "id": k["id"], "code": k["code"], "name": k["name"],
-                    "amount": round(kd, 2), "parent_code": a["code"],
+                    "amount": round(kd, 2),
+                    "parent_code": a["code"],
+                    "parent_id": a["id"],  # authoritative link (code is
+                                            # often "" for QBO accounts)
                     "detail_type": (k.get("detail_type") or "").strip(),
                 })
                 kids_total += kd
@@ -424,6 +430,10 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
                     "name": f"Total {a['name']}",
                     "amount": round(rolled, 2),
                     "parent_code": a["code"],
+                    "parent_id": a["id"],  # links subtotal to its parent
+                                            # so `_refresh_subtotals` can
+                                            # find it via id even when
+                                            # the parent code is "".
                     "is_subtotal": True,
                     "detail_type": (a.get("detail_type") or "").strip(),
                 })
@@ -651,13 +661,54 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
             })
 
         # Recompute section totals now that accrual rows have been
-        # merged into the per-account rows.
-        total_revenue = round(sum(r["amount"] for r in revenue_rows
-                                    if not r.get("parent_code")), 2)
-        total_cogs    = round(sum(r["amount"] for r in cogs_rows
-                                    if not r.get("parent_code")), 2)
-        total_expense = round(sum(r["amount"] for r in expense_rows
-                                    if not r.get("parent_code")), 2)
+        # merged into the per-account rows. Use `_sum_section` (which
+        # only skips `is_subtotal` rows) so parent-direct + child
+        # amounts add up correctly. The old logic skipped `parent_code`
+        # rows too, which under-counted totals by the parent-direct
+        # amount every time a parent had children (e.g. Legal &
+        # Professional Fees' $75 direct + child totals were lost).
+        total_revenue = _sum_section(revenue_rows)
+        total_cogs    = _sum_section(cogs_rows)
+        total_expense = _sum_section(expense_rows)
+
+        # Refresh "Total X" subtotal rows so they reflect the child
+        # amounts after the accrual pass. `_emit` created the subtotal
+        # at emit-time using the pre-accrual `rolled = direct + kids`
+        # value, but the accrual layer subsequently topped up each
+        # kid row with its share of the period's bills/invoices — the
+        # subtotal doesn't auto-recompute, so Total Legal &
+        # Professional Fees stayed at $480 (direct $75 + emit-time
+        # kids) instead of the post-accrual $1,170 ($75 + Accounting
+        # $640 + Bookkeeper $55 + Lawyer $400).
+        # Feb 28 2026 — Craig's Landscaping P&L subtotal drift.
+        def _refresh_subtotals(rows):
+            # Build maps keyed by parent_id (authoritative — QBO
+            # accounts routinely have `code = ""`, so relying on
+            # `parent_code` alone missed 100% of QBO-imported groupings
+            # like Legal & Professional Fees).
+            child_sum_by_parent: dict[str, float] = {}
+            parent_direct_by_id: dict[str, float] = {}
+            for r in rows:
+                if r.get("is_subtotal"):
+                    continue
+                pid = r.get("parent_id")
+                if pid:
+                    child_sum_by_parent[pid] = (
+                        child_sum_by_parent.get(pid, 0.0) + r["amount"])
+                elif r.get("id"):
+                    parent_direct_by_id[r["id"]] = r["amount"]
+            for r in rows:
+                if not r.get("is_subtotal"):
+                    continue
+                pid = r.get("parent_id")
+                if not pid:
+                    continue
+                new_total = (parent_direct_by_id.get(pid, 0.0)
+                             + child_sum_by_parent.get(pid, 0.0))
+                r["amount"] = round(new_total, 2)
+        _refresh_subtotals(revenue_rows)
+        _refresh_subtotals(cogs_rows)
+        _refresh_subtotals(expense_rows)
 
     # Gross Profit = Revenue − COGS. Emitted as a subtotal above
     # Operating Expenses whenever there's any COGS activity.
@@ -785,6 +836,20 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
     liabilities, total_liabilities_raw = _emit_section("liability")
     equity, total_equity_raw = _emit_section("equity")
 
+    # Running totals — start from `_emit_section`'s `top_total` (which
+    # correctly rolls parent-only + children under it) and layer in
+    # any post-emit additions (A/R, A/P, Current Period Net Income).
+    # We deliberately DO NOT re-sum the `assets` list at the end: the
+    # emit output contains a "Total {parent}" subtotal row per
+    # multi-child parent (Truck → Original Cost → Total Truck), and
+    # summing those subtotals on top of their children double-counts
+    # the value. Also, `sum(only rows with no parent_id/parent_code)`
+    # under-counts because the direct-only parent row is $0 while
+    # the child carries the $13,495 balance. Feb 28 2026.
+    total_assets = total_assets_raw
+    total_liabilities = total_liabilities_raw
+    total_equity = total_equity_raw
+
     # Net income roll-in from revenue/expense/COGS accounts. `cogs` is
     # its own account type (Option B GAAP Income Statement, Feb 2026)
     # but still reduces Net Income exactly like a regular expense —
@@ -809,8 +874,10 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
         ap_open = ap["ap_end"]
         if ar_open >= 0.005:
             assets.append({"code": "1200", "name": "Accounts Receivable", "amount": round(ar_open, 2)})
+            total_assets += ar_open
         if ap_open >= 0.005:
             liabilities.append({"code": "2000", "name": "Accounts Payable", "amount": round(ap_open, 2)})
+            total_liabilities += ap_open
         # keep books balanced: A/R adds to accrued revenue, A/P adds to accrued expense
         net_income_current += ar_open - ap_open
         assets.sort(key=lambda x: (x["code"], x.get("parent_code", "")))
@@ -845,16 +912,14 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
         "code": "NI", "name": "Current Period Net Income",
         "amount": net_income_current,
     })
+    total_equity += net_income_current
 
-    # Totals: sum only TOP-LEVEL rows. Children carry `parent_id`
-    # (authoritative) and/or `parent_code` (may be empty when the
-    # parent has no chart code — very common for QBO-imported parents).
-    total_assets = round(sum(x["amount"] for x in assets
-                              if not x.get("parent_id") and not x.get("parent_code")), 2)
-    total_liabilities = round(sum(x["amount"] for x in liabilities
-                                   if not x.get("parent_id") and not x.get("parent_code")), 2)
-    total_equity = round(sum(x["amount"] for x in equity
-                              if not x.get("parent_id") and not x.get("parent_code")), 2)
+    # Round the running totals now that all layers (emit → A/R/A/P →
+    # NI) have been folded in. See `total_assets_raw` comment above
+    # for why we don't re-sum `assets`/`liabilities`/`equity` here.
+    total_assets = round(total_assets, 2)
+    total_liabilities = round(total_liabilities, 2)
+    total_equity = round(total_equity, 2)
     total_le = round(total_liabilities + total_equity, 2)
     balanced = abs(total_assets - total_le) < 0.02
 
