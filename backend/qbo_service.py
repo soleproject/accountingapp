@@ -362,9 +362,20 @@ async def query_count(company_id: str, realm_id: str, entity: str) -> int:
 
 
 async def query_all(company_id: str, realm_id: str, entity: str) -> AsyncIterator[dict]:
+    # QBO's default `SELECT *` filters out `Active=false` rows. That's
+    # normally fine, but deleted/inactive Accounts still appear as
+    # `AccountRef` values on historical JournalEntry, Purchase, and
+    # Bill lines. If we don't pull them here they never make it into
+    # our `accounts` collection, `_signed_balances` can't map those
+    # JE lines to a local account, and their ledger impact vanishes
+    # from the Balance Sheet — showing up as a phantom L+E imbalance.
+    # BM QBO 2 LLC (Feb 27 2026) had two such accounts, "Partners
+    # Clearing for Capital (deleted)" and "Payment Clearing Account
+    # (deleted)", carrying $44,904.31 of unmapped JE activity.
+    where = " WHERE Active IN (true, false)" if entity == "Account" else ""
     start, page = 1, 1000
     while True:
-        q = f"SELECT * FROM {entity} STARTPOSITION {start} MAXRESULTS {page}"
+        q = f"SELECT * FROM {entity}{where} STARTPOSITION {start} MAXRESULTS {page}"
         data = await _get(company_id, realm_id, f"/company/{realm_id}/query", {"query": q})
         rows = data.get("QueryResponse", {}).get(entity, []) or []
         for row in rows:
@@ -1495,6 +1506,12 @@ async def run_migration(job_id: str, company_id: str) -> None:
         # classified. Must run AFTER Account import (needs qbo_id →
         # local id lookups).
         categorized = await resolve_transaction_categories(company_id)
+        # Post-import: backfill `journal_entries.lines[i].account_id`
+        # from `account_qbo_id`. Must run AFTER Account import.
+        # `_signed_balances` reads `line.account_id`, so without this
+        # every migrated JE line's ledger impact is silently dropped.
+        # Feb 27 2026 — BM QBO 2 LLC parity fix.
+        je_lines_resolved = await resolve_journal_entry_line_accounts(company_id)
         # Post-import: use QBO's General Ledger as source-of-truth to
         # stamp `account_qbo_id` on invoice / bill / SR / RR lines
         # whose current Item mapping disagrees with what QBO actually
@@ -2818,10 +2835,16 @@ async def resolve_transaction_categories(company_id: str) -> int:
         # per child account (Beverages vs Takeout vs …) instead of
         # lumping everything into the first-line's parent bucket.
         line_accts: list[tuple[dict, float]] = []
+        # New Feb 27 2026 — also collect the resolved local id per
+        # line so we can write it back onto `line_items[i].account_id`.
+        # `_signed_balances` doesn't read line_items directly for
+        # transactions (it uses the top-level `category_account_id` +
+        # `splits`), but the Transactions page filters and the P&L
+        # drill-down DO — leaving `line_items[].account_id = None`
+        # after import breaks both.
+        resolved_line_ids: list[str | None] = []
         for ln in t.get("line_items") or []:
             amt = float(ln.get("amount") or 0)
-            if abs(amt) < 0.005:
-                continue
             resolved = None
             aqid = ln.get("account_qbo_id")
             if aqid:
@@ -2835,7 +2858,8 @@ async def resolve_transaction_categories(company_id: str) -> int:
                         candidate_qid = inc or exp
                     if candidate_qid:
                         resolved = qbo_to_local.get(candidate_qid)
-            if resolved:
+            resolved_line_ids.append(resolved["id"] if resolved else None)
+            if resolved and abs(amt) >= 0.005:
                 line_accts.append((resolved, amt))
 
         picked = line_accts[0][0] if line_accts else None
@@ -2877,11 +2901,79 @@ async def resolve_transaction_categories(company_id: str) -> int:
         }
         if splits_payload:
             update_doc["splits"] = splits_payload
+        # Also stamp `account_id` on each line_item so drill-downs
+        # from the P&L / BS / Transactions page can filter by GL
+        # account. Purely additive — the field wasn't there before,
+        # so no risk of overwriting.
+        raw_lines = t.get("line_items") or []
+        if raw_lines and any(rid for rid in resolved_line_ids):
+            new_lines = []
+            for i, ln in enumerate(raw_lines):
+                rid = resolved_line_ids[i] if i < len(resolved_line_ids) else None
+                new_lines.append({**ln, "account_id": rid} if rid else ln)
+            update_doc["line_items"] = new_lines
         await db.transactions.update_one(
             {"id": t["id"]},
             {"$set": update_doc},
         )
         updated += 1
+    return updated
+
+
+
+async def resolve_journal_entry_line_accounts(company_id: str) -> int:
+    """Backfill `journal_entries.lines[i].account_id` from each line's
+    `account_qbo_id` using the local QBO account map.
+
+    QBO's JE payload only carries `AccountRef.value` (the QBO id) on
+    each line. `map_journal_entry` stores it as `account_qbo_id` — but
+    `_signed_balances` (reports.py) reads `line.account_id` (our local
+    id), so unless we translate the qbo_id here, every JE line's ledger
+    impact silently disappears from the BS and P&L. BM QBO 2 LLC
+    (Feb 27 2026) had 293 of 299 lines dropped for exactly this
+    reason, hiding ~$154k of income and ~$90k of expense.
+
+    Idempotent — only touches lines whose `account_id` is currently
+    empty. Deleted-account lines (`Partners Clearing (deleted)`, etc.)
+    resolve too once `query_all` starts pulling inactive accounts.
+    """
+    qbo_to_local: dict[str, str] = {}
+    async for a in db.accounts.find(
+        {"company_id": company_id, "source": "qbo"},
+        {"id": 1, "qbo_id": 1, "_id": 0},
+    ):
+        if a.get("qbo_id"):
+            qbo_to_local[str(a["qbo_id"])] = a["id"]
+    if not qbo_to_local:
+        return 0
+
+    updated = 0
+    async for j in db.journal_entries.find(
+        {"company_id": company_id, "source": "qbo"},
+        {"id": 1, "lines": 1},
+    ):
+        raw_lines = j.get("lines") or []
+        if not raw_lines:
+            continue
+        changed = False
+        new_lines = []
+        for ln in raw_lines:
+            if ln.get("account_id"):
+                new_lines.append(ln)
+                continue
+            aqid = ln.get("account_qbo_id")
+            local_id = qbo_to_local.get(str(aqid)) if aqid else None
+            if local_id:
+                new_lines.append({**ln, "account_id": local_id})
+                changed = True
+            else:
+                new_lines.append(ln)
+        if changed:
+            await db.journal_entries.update_one(
+                {"id": j["id"]},
+                {"$set": {"lines": new_lines, "updated_at": now_iso()}},
+            )
+            updated += 1
     return updated
 
 
