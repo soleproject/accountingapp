@@ -403,7 +403,7 @@ async def qbo_test_disconnect(cid: str,
 # wide range so the report shows the full company history — the UI
 # exposes overridable date pickers on top of this.
 _TEST_REPORTS = ["BalanceSheet", "ProfitAndLoss"]
-_DEFAULT_START = "2020-01-01"
+_DEFAULT_START = "2000-01-01"
 _DEFAULT_END = "2099-12-31"
 
 

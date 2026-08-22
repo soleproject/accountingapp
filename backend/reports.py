@@ -186,7 +186,16 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
     # Feb 28 2026 — Undeposited Funds workflow, Phase 2 QBO parity.
     undep_acct = await db.accounts.find_one({
         "company_id": company_id,
-        "$or": [{"detail_type": "money_in_transit"},
+        # QBO's authoritative "this IS Undeposited Funds" signal is
+        # `AccountSubType=UndepositedFunds`. Some CoAs also carry
+        # unrelated `detail_type=money_in_transit` accounts (Stripe
+        # Clearing, Payment Clearing, etc.) that would falsely match
+        # a looser query — on BM QBO 2 LLC that non-determinism sent
+        # all 47 sweep-from-UF deposits into Stripe Clearing instead
+        # of UF, inflating both by $37k on the BS. Prefer subtype
+        # first, fall back to the exact name only. Feb 27 2026.
+        "$or": [{"subtype": {"$regex": "^UndepositedFunds$",
+                              "$options": "i"}},
                 {"name": {"$regex": "^Undeposited Funds$",
                           "$options": "i"}}],
     })
@@ -284,6 +293,8 @@ async def _open_ar_ap(company_id: str, as_of: str, start: str | None = None):
     ap_start = 0.0
     ar_billed_in_period = 0.0
     ap_billed_in_period = 0.0
+    ar_by_account: dict[str, float] = {}
+    ap_by_account: dict[str, float] = {}
 
     # Inventory-tracked bill lines already sit on the balance sheet
     # via `DR Inventory / CR A/P` journal entries posted by
@@ -326,8 +337,11 @@ async def _open_ar_ap(company_id: str, as_of: str, start: str | None = None):
         issue = i.get("issue_date") or ""
         total = float(i.get("total", 0) or 0)
         bal = float(i.get("balance_due", 0) or 0)
+        ar_qid = str(((i.get("raw") or {}).get("ARAccountRef") or {}).get("value") or "")
         if issue and issue <= as_of and bal > 0.005:
             ar_end += bal
+            if ar_qid:
+                ar_by_account[ar_qid] = ar_by_account.get(ar_qid, 0.0) + bal
         if prev_end and issue and issue <= prev_end and bal > 0.005:
             # Rough approximation: use current balance_due as a snapshot proxy.
             # If total==bal (unpaid) we count it fully; partially-paid may
@@ -340,6 +354,7 @@ async def _open_ar_ap(company_id: str, as_of: str, start: str | None = None):
         issue = b.get("issue_date") or ""
         total = float(b.get("total", 0) or 0)
         bal = float(b.get("balance_due", 0) or 0)
+        ap_qid = str(((b.get("raw") or {}).get("APAccountRef") or {}).get("value") or "")
         # Inventory-tracked portion already booked as A/P via JE — pull
         # it out of every accrual figure so we don't count it twice.
         inv_portion = float(inv_bill_portion.get(b.get("id"), 0.0))
@@ -350,7 +365,10 @@ async def _open_ar_ap(company_id: str, as_of: str, start: str | None = None):
         open_ratio = (bal / total) if total > 0.005 else 0.0
         open_inv_portion = inv_portion * open_ratio
         if issue and issue <= as_of and bal > 0.005:
-            ap_end += max(bal - open_inv_portion, 0.0)
+            open_bill_net = max(bal - open_inv_portion, 0.0)
+            ap_end += open_bill_net
+            if ap_qid:
+                ap_by_account[ap_qid] = ap_by_account.get(ap_qid, 0.0) + open_bill_net
         if prev_end and issue and issue <= prev_end and bal > 0.005:
             ap_start += max(bal - open_inv_portion, 0.0)
         if _in_period(issue):
@@ -361,6 +379,14 @@ async def _open_ar_ap(company_id: str, as_of: str, start: str | None = None):
         "ar_start": round(ar_start, 2), "ap_start": round(ap_start, 2),
         "ar_billed_in_period": round(ar_billed_in_period, 2),
         "ap_billed_in_period": round(ap_billed_in_period, 2),
+        # Per-account bucketing so `compute_balance_sheet` can fold each
+        # AR/AP total into the correct GL account row (bills post to
+        # `APAccountRef`, invoices to `ARAccountRef`). Only populated
+        # for QBO-imported docs — native ones default to unspecified
+        # and fall through to the caller's primary-account fallback.
+        # Feb 27 2026 — see BM QBO 2 LLC parity fix.
+        "ar_by_account_qbo_id": {k: round(v, 2) for k, v in ar_by_account.items()},
+        "ap_by_account_qbo_id": {k: round(v, 2) for k, v in ap_by_account.items()},
     }
 
 
@@ -948,6 +974,78 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
     accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
     by = await _signed_balances(company_id, start=None, end=as_of, include_pre_period=True)
 
+    # ------------------------------------------------------------------
+    # A/R and A/P: layer unpaid-invoice / unpaid-bill totals directly
+    # onto the corresponding GL account balance BEFORE we emit sections.
+    #
+    # Historical bug (fixed Feb 27 2026): we used to emit a phantom
+    # "Accounts Receivable" / "Accounts Payable" row *after* the section
+    # emit, on top of the QBO-imported A/R and A/P accounts. As long as
+    # `_signed_balances` was dropping JE lines (see Fix #1 in
+    # qbo_service.resolve_journal_entry_line_accounts), the section
+    # rows sat empty and the phantom row was the only A/R/A/P we
+    # showed — so the numbers looked ok. Once JE lines started posting
+    # correctly, every year-end true-up JE to A/R (e.g.
+    # "reclassify $85k AR into Note Receivable") appeared TWICE — once
+    # in the section row via `by[AR_id]`, and again in the phantom row.
+    # BM QBO 2 LLC drifted by $118k on the BS because of this.
+    #
+    # Fix: bucket `_open_ar_ap` by `ARAccountRef`/`APAccountRef` (QBO
+    # tells us which A/R and A/P account each invoice/bill posts to),
+    # translate those qbo_ids to local ids, and fold each bucket into
+    # `by[local_id]` using the appropriate sign convention. Native (non-
+    # QBO) docs with no A/R/A/P ref default to the first A/R and A/P
+    # account found in the CoA.
+    # ------------------------------------------------------------------
+    ar_open = 0.0
+    ap_open = 0.0
+    ap_split_result: dict | None = None
+    if basis == "accrual":
+        ap_split_result = await _open_ar_ap(company_id, as_of=as_of, start=None)
+        ar_open = ap_split_result["ar_end"]
+        ap_open = ap_split_result["ap_end"]
+
+        # Local-id lookup keyed on qbo_id AND primary A/R / A/P
+        # accounts for the native / no-ref fallback path.
+        acct_by_qbo_id = {str(a["qbo_id"]): a for a in accts if a.get("qbo_id")}
+        ar_accts = sorted(
+            [a for a in accts
+             if a["type"] == "asset"
+             and (a.get("subtype") or "").lower() == "accountsreceivable"],
+            key=lambda a: (a.get("code") or "", a.get("name") or ""),
+        )
+        ap_accts = sorted(
+            [a for a in accts
+             if a["type"] == "liability"
+             and (a.get("subtype") or "").lower() == "accountspayable"],
+            key=lambda a: (a.get("code") or "", a.get("name") or ""),
+        )
+        primary_ar = ar_accts[0] if ar_accts else None
+        primary_ap = ap_accts[0] if ap_accts else None
+
+        for qid, amt in (ap_split_result.get("ar_by_account_qbo_id") or {}).items():
+            a = acct_by_qbo_id.get(qid) or primary_ar
+            if a and abs(amt) >= 0.005:
+                by[a["id"]] = by.get(a["id"], 0.0) + amt
+        # Any unbucketed remainder (native invoices w/o ARAccountRef)
+        # spills onto the primary A/R.
+        bucketed_ar = sum((ap_split_result.get("ar_by_account_qbo_id") or {}).values())
+        unbucketed_ar = ar_open - bucketed_ar
+        if primary_ar and abs(unbucketed_ar) >= 0.005:
+            by[primary_ar["id"]] = by.get(primary_ar["id"], 0.0) + unbucketed_ar
+
+        for qid, amt in (ap_split_result.get("ap_by_account_qbo_id") or {}).items():
+            a = acct_by_qbo_id.get(qid) or primary_ap
+            # A/P is credit-normal — raw ledger convention stores a
+            # positive AP balance as a NEGATIVE `by[]` value (see
+            # `_display_amount`). Subtract to reflect an increase.
+            if a and abs(amt) >= 0.005:
+                by[a["id"]] = by.get(a["id"], 0.0) - amt
+        bucketed_ap = sum((ap_split_result.get("ap_by_account_qbo_id") or {}).values())
+        unbucketed_ap = ap_open - bucketed_ap
+        if primary_ap and abs(unbucketed_ap) >= 0.005:
+            by[primary_ap["id"]] = by.get(primary_ap["id"], 0.0) - unbucketed_ap
+
     # ----- Build parent → children index for hierarchical rollup -----
     # Each account can have `parent_account_id`. Parents (no parent id) show
     # a rolled-up amount = own direct postings + sum of children. Children
@@ -959,6 +1057,12 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
         pid = a.get("parent_account_id")
         if pid:
             children_of.setdefault(pid, []).append(a)
+
+    _BANK_LIKE_SUBTYPES = {
+        "checking", "savings", "moneymarket", "cashonhand",
+        "trustaccounts", "moneyinaccount",
+        "creditcard",
+    }
 
     def _row(a: dict, direct_amount: float, parent_code: str | None = None,
               parent_id: str | None = None):
@@ -987,57 +1091,108 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
             r["parent_code"] = parent_code
         if parent_id:
             r["parent_id"] = parent_id
+        # Bank/CC-JE-variance annotation. See PRD.md "Known Variance #1
+        # — Bank/CC JE Rendering" (Feb 27 2026): QBO's own BS report
+        # excludes Journal Entries when computing bank/CC account
+        # balances, whereas our engine sums every JE line for GAAP
+        # completeness. On QBO-imported companies with year-end
+        # adjustment JEs against banks/CCs (e.g. BM QBO 2 LLC's
+        # opening-balance JE#7 + Q1-adjustment JE#12), this produces
+        # a small documented variance. The UI can look for this flag
+        # to render a "matches ledger; may differ from QBO's own BS
+        # for accounts with adjustment JEs" tooltip.
+        subtype_l = (a.get("subtype") or "").strip().lower()
+        if subtype_l in _BANK_LIKE_SUBTYPES and a.get("source") == "qbo":
+            r["variance_note"] = "bank_je_rendering"
         return r
 
     def _emit_section(section_type: str) -> tuple[list[dict], float]:
-        """Return (rows, section_total) for one type — assets, liabilities, equity."""
+        """Return (rows, section_total) for one type — assets, liabilities, equity.
+
+        Renders the CoA as a nested tree so grandchildren (e.g. an
+        `Allowance` sub-account under `Note Receivable - 72 Holdings`
+        under `Client Note Receivables`) roll into their direct parent's
+        subtotal, not into the top-level ancestor. Prior single-level
+        implementation orphaned every grandchild — a QBO-real pattern
+        that put $60k of unmapped activity on BM QBO 2 LLC's BS
+        (Feb 27 2026).
+
+        Rendering per subtree (`_walk`):
+          * Parent header row → direct amount only (no descendant roll-in)
+          * Recursive child rows (with their own subtotals for THEIR
+            descendants)
+          * `Total {parent}` subtotal row → direct + all descendants
+        Suppresses subtrees whose rolled total is ~0.
+        """
+        def _walk(a: dict, parent_code: str | None,
+                  parent_id: str | None) -> tuple[list[dict], float]:
+            # QBO parity: soft-deleted accounts whose authoritative
+            # `CurrentBalance` is 0 are hidden from QBO's own BS/PL
+            # payload (verified on BM QBO 2 LLC's TEMPORARY-BP-Cash,
+            # `Active=False` + `CurrentBalance=0`). Our ledger can
+            # accumulate residual activity on these (JE lines that
+            # debit/credit the account before QBO's hidden closing
+            # entry zeroes it out) — those show up as phantom $ on
+            # the BS. Skip the whole subtree to match QBO's
+            # rendering.  We do NOT skip inactive-with-nonzero
+            # accounts: if QBO still carries a balance, we do too.
+            # Feb 27 2026 — BM QBO 2 LLC parity fix.
+            if a.get("active") is False:
+                qcb = float((a.get("raw") or {}).get("CurrentBalance") or 0)
+                if abs(qcb) < 0.005:
+                    return [], 0.0
+            direct = _display_amount(a, by.get(a["id"], 0.0))
+            kids_sorted = sorted(
+                (k for k in children_of.get(a["id"], [])
+                 if k["type"] == section_type),
+                key=lambda x: (x.get("code") or "", x.get("name") or ""),
+            )
+            child_rows: list[dict] = []
+            kids_total = 0.0
+            for k in kids_sorted:
+                k_rows, k_rolled = _walk(k, parent_code=a.get("code") or "",
+                                          parent_id=a["id"])
+                child_rows.extend(k_rows)
+                kids_total += k_rolled
+            rolled = direct + kids_total
+            keep = abs(rolled) >= 0.005 or a["code"] == "3100"
+            if not keep:
+                return [], 0.0
+            emitted: list[dict] = []
+            # Parent header row (direct only). Suppress if this account
+            # has neither its own posts nor any visible descendant —
+            # avoids empty "container" rows.
+            if abs(direct) >= 0.005 or child_rows or a["code"] == "3100":
+                emitted.append(_row(a, direct,
+                                     parent_code=parent_code,
+                                     parent_id=parent_id))
+            emitted.extend(child_rows)
+            if child_rows:
+                sub = _row(a, rolled,
+                            parent_code=a.get("code") or "",
+                            parent_id=a["id"])
+                sub["name"] = f"Total {a['name']}"
+                sub["is_subtotal"] = True
+                emitted.append(sub)
+            return emitted, rolled
+
         rows: list[dict] = []
         top_total = 0.0
-        # Sort parents (top-level accounts of this type) by code.
         top_level = [a for a in accts
-                     if a["type"] == section_type and not a.get("parent_account_id")]
+                     if a["type"] == section_type
+                     and not a.get("parent_account_id")]
         # Sort by (detail_type, code) so accounts sharing a Wave-style
         # sub-type end up contiguous — required for the grouped
         # renderer to emit clean sub-type banners in the PDF.
-        top_level.sort(key=lambda x: ((x.get("detail_type") or "zzz").lower(), (x.get("code") or "")))
+        top_level.sort(
+            key=lambda x: ((x.get("detail_type") or "zzz").lower(),
+                            (x.get("code") or "")))
         for a in top_level:
-            direct = _display_amount(a, by.get(a["id"], 0.0))
-            kids = sorted(children_of.get(a["id"], []), key=lambda x: x["code"])
-            kids_rows: list[dict] = []
-            kids_total = 0.0
-            for k in kids:
-                if k["type"] != section_type:
-                    continue  # defensive
-                kd = _display_amount(k, by.get(k["id"], 0.0))
-                if abs(kd) < 0.005:
-                    continue
-                kids_rows.append(_row(k, kd,
-                                       parent_code=a["code"],
-                                       parent_id=a["id"]))
-                kids_total += kd
-            rolled = direct + kids_total
-            # Match QBO's rendering convention on Balance Sheet as well:
-            # parent = direct-only, then children, then "Total {parent}"
-            # subtotal row. Special-case Retained Earnings (3100) which
-            # QBO always emits even at $0.
-            keep_parent = abs(rolled) >= 0.005 or a["code"] == "3100"
-            if keep_parent:
-                if abs(direct) >= 0.005 or kids_rows or a["code"] == "3100":
-                    rows.append(_row(a, direct))
-                rows.extend(kids_rows)
-                if kids_rows:
-                    subtotal_row = _row(a, rolled, parent_code=a["code"], parent_id=a["id"])
-                    subtotal_row["name"] = f"Total {a['name']}"
-                    subtotal_row["is_subtotal"] = True
-                    rows.append(subtotal_row)
-                top_total += rolled
-            else:
-                # Parent is zero + no visible children: still emit visible children
-                # (they had activity even if it netted at the parent).
-                for kr in kids_rows:
-                    rows.append(kr)
-                    top_total += kr["amount"]
+            sub_rows, sub_total = _walk(a, parent_code=None, parent_id=None)
+            rows.extend(sub_rows)
+            top_total += sub_total
         return rows, top_total
+
 
     assets, total_assets_raw = _emit_section("asset")
     liabilities, total_liabilities_raw = _emit_section("liability")
@@ -1071,21 +1226,16 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
             else:
                 net_income_current -= disp
 
-    # Accrual basis: layer in A/R (unpaid invoices) as an asset, A/P (unpaid bills)
-    # as a liability, and adjust net income by (A/R - A/P) so the sheet balances.
-    ar_open = 0.0
-    ap_open = 0.0
+    # Accrual basis: A/R (unpaid invoices) and A/P (unpaid bills) are
+    # already folded into `by[]` above so the section-emit rows carry
+    # the correct combined GL balance. We still need to bump NI by
+    # (A/R − A/P) so the sheet balances (invoices/bills represent
+    # earned revenue / accrued expense that hasn't yet moved through
+    # `_signed_balances`).
     if basis == "accrual":
-        ap = await _open_ar_ap(company_id, as_of=as_of, start=None)
-        ar_open = ap["ar_end"]
-        ap_open = ap["ap_end"]
-        if ar_open >= 0.005:
-            assets.append({"code": "1200", "name": "Accounts Receivable", "amount": round(ar_open, 2)})
-            total_assets += ar_open
-        if ap_open >= 0.005:
-            liabilities.append({"code": "2000", "name": "Accounts Payable", "amount": round(ap_open, 2)})
-            total_liabilities += ap_open
-        # keep books balanced: A/R adds to accrued revenue, A/P adds to accrued expense
+        # Preserve the top-level `ar_open` / `ap_open` figures returned
+        # in the response so callers (Recon Panel, cash-flow bridge)
+        # can still read them.
         net_income_current += ar_open - ap_open
         assets.sort(key=lambda x: (x["code"], x.get("parent_code", "")))
         liabilities.sort(key=lambda x: (x.get("parent_code", "") or x["code"], x["code"]))

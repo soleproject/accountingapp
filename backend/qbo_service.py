@@ -362,9 +362,20 @@ async def query_count(company_id: str, realm_id: str, entity: str) -> int:
 
 
 async def query_all(company_id: str, realm_id: str, entity: str) -> AsyncIterator[dict]:
+    # QBO's default `SELECT *` filters out `Active=false` rows. That's
+    # normally fine, but deleted/inactive Accounts still appear as
+    # `AccountRef` values on historical JournalEntry, Purchase, and
+    # Bill lines. If we don't pull them here they never make it into
+    # our `accounts` collection, `_signed_balances` can't map those
+    # JE lines to a local account, and their ledger impact vanishes
+    # from the Balance Sheet — showing up as a phantom L+E imbalance.
+    # BM QBO 2 LLC (Feb 27 2026) had two such accounts, "Partners
+    # Clearing for Capital (deleted)" and "Payment Clearing Account
+    # (deleted)", carrying $44,904.31 of unmapped JE activity.
+    where = " WHERE Active IN (true, false)" if entity == "Account" else ""
     start, page = 1, 1000
     while True:
-        q = f"SELECT * FROM {entity} STARTPOSITION {start} MAXRESULTS {page}"
+        q = f"SELECT * FROM {entity}{where} STARTPOSITION {start} MAXRESULTS {page}"
         data = await _get(company_id, realm_id, f"/company/{realm_id}/query", {"query": q})
         rows = data.get("QueryResponse", {}).get(entity, []) or []
         for row in rows:
@@ -410,7 +421,20 @@ async def snapshot_reports(
     reports = [
         ("ProfitAndLoss",   {"start_date": start_date, "end_date": end_date,
                              "accounting_method": accounting_method}),
-        ("BalanceSheet",    {"end_date": end_date,
+        # Balance Sheet: passing `start_date` too even though a BS is a
+        # point-in-time snapshot — QBO's response actually varies based
+        # on its presence (without start_date QBO defaults the period
+        # to YTD-of-end_date, which flattens historical accumulation
+        # into the current-period Net Income line and shifts Retained
+        # Earnings, changing TOTAL ASSETS by tens of thousands on real
+        # books). Passing the same wide window as Test QBO
+        # (2000-01-01 → 2099-12-31) makes both snapshots line up.
+        # 2000-01-01 is deliberately older than QBO's 2001 launch so
+        # no legit book ever has activity before this floor —
+        # protects report/backfill correctness on legacy companies
+        # with pre-2020 history.
+        # Feb 27 2026 — BM QBO 2 LLC Compare-vs-Test $29k mismatch.
+        ("BalanceSheet",    {"start_date": start_date, "end_date": end_date,
                              "accounting_method": accounting_method}),
         ("TransactionList", {"start_date": start_date, "end_date": end_date,
                              "accounting_method": accounting_method}),
@@ -1124,7 +1148,21 @@ def _bank_account_qbo_id(obj: dict, txn_type: str) -> str | None:
       Deposit         → `DepositToAccountRef` (destination bank)
       SalesReceipt    → `DepositToAccountRef` (destination bank)
       RefundReceipt   → `DepositToAccountRef` (source bank)
-      Transfer        → `FromAccountRef` (outbound leg)
+      Transfer        → `ToAccountRef` (destination bank; the FROM
+                         side is emitted as a synthesized line_item
+                         so `resolve_transaction_categories` posts
+                         it as the category leg, mirroring how
+                         Deposits work. Fix Feb 27 2026: earlier
+                         convention was `FromAccountRef` with no
+                         category, which meant `_signed_balances`
+                         only posted the outbound leg to the wrong
+                         account and the destination bank was never
+                         credited. Nicole Pettyjohn canary caught
+                         it — 76 transfers × $145k missing from
+                         Savings, all landing back on Checking.
+                         Aligning to ToAccountRef makes Transfer
+                         behave identically to Deposit at the
+                         reporting layer.)
       CreditMemo      → `ARAccountRef` (AR side)
     """
     key = {
@@ -1132,7 +1170,7 @@ def _bank_account_qbo_id(obj: dict, txn_type: str) -> str | None:
         "Deposit":           "DepositToAccountRef",
         "SalesReceipt":      "DepositToAccountRef",
         "RefundReceipt":     "DepositToAccountRef",
-        "Transfer":          "FromAccountRef",
+        "Transfer":          "ToAccountRef",
         "CreditMemo":        "ARAccountRef",
         # New Aug 22 2026 — production parity for enterprise drift.
         # CreditCardPayment: source of funds (Bank) → `BankAccountRef`,
@@ -1155,7 +1193,17 @@ def map_generic_txn(cid: str, realm_id: str, obj: dict, txn_type: str) -> dict:
     can build type-specific detail views without re-fetching."""
     ref = (obj.get("CustomerRef") or obj.get("VendorRef")
            or obj.get("EntityRef") or {})
-    magnitude = round(float(obj.get("TotalAmt") or 0), 2)
+    # QBO's Transfer entity is the only txn type that stores its dollar
+    # value in `Amount` instead of `TotalAmt`. Without this fallback,
+    # every migrated Transfer landed with `amount=0` — the transfers
+    # existed in our txn table but contributed nothing to `_signed_
+    # balances`, leaving Checking over-inflated and Savings under-
+    # counted by the transfer total. Nicole Pettyjohn canary
+    # Feb 27 2026: 76 Transfers × avg $1,900 = $145k missing.
+    total_amt = obj.get("TotalAmt")
+    if total_amt is None and txn_type == "Transfer":
+        total_amt = obj.get("Amount")
+    magnitude = round(float(total_amt or 0), 2)
     # QBO's `Purchase` object doubles as both a normal expense (Credit
     # missing / false) AND a "Credit Card Credit" refund back to the
     # source account (Credit=true, PaymentType=CreditCard). In the
@@ -1192,6 +1240,26 @@ def map_generic_txn(cid: str, realm_id: str, obj: dict, txn_type: str) -> dict:
         # Expense/COGS side lives in the QBO Line array, same shape
         # as Bill — reuse the standard `_map_lines` output later.
         pass
+    elif txn_type == "Transfer":
+        # QBO Transfers don't carry a `Line` array — they're described
+        # entirely by ToAccountRef + FromAccountRef + Amount. To flow
+        # through the same `resolve_transaction_categories` pipeline
+        # every other txn type uses, we synthesize the FROM (source)
+        # side as a line_item. `bank_account_qbo_id` above already
+        # points at TO (destination), so this pairs the ledger:
+        #    DR ToAccountRef (bank leg, positive amt)
+        #    CR FromAccountRef (category leg, resolver flips sign)
+        # Nicole Pettyjohn canary Feb 27 2026 — see `_bank_account_
+        # qbo_id` comment above for why.
+        from_ref = obj.get("FromAccountRef") or {}
+        from_qid = from_ref.get("value")
+        if from_qid:
+            synth_lines = [{
+                "description": "Transfer",
+                "amount": magnitude,
+                "account_qbo_id": from_qid,
+                "account_name": from_ref.get("name") or "",
+            }]
     return {
         "company_id": cid, "source": "qbo",
         "qbo_id": obj["Id"],
@@ -1514,6 +1582,12 @@ async def run_migration(job_id: str, company_id: str) -> None:
         # classified. Must run AFTER Account import (needs qbo_id →
         # local id lookups).
         categorized = await resolve_transaction_categories(company_id)
+        # Post-import: backfill `journal_entries.lines[i].account_id`
+        # from `account_qbo_id`. Must run AFTER Account import.
+        # `_signed_balances` reads `line.account_id`, so without this
+        # every migrated JE line's ledger impact is silently dropped.
+        # Feb 27 2026 — BM QBO 2 LLC parity fix.
+        je_lines_resolved = await resolve_journal_entry_line_accounts(company_id)
         # Post-import: use QBO's General Ledger as source-of-truth to
         # stamp `account_qbo_id` on invoice / bill / SR / RR lines
         # whose current Item mapping disagrees with what QBO actually
@@ -2338,7 +2412,14 @@ async def resolve_payment_undeposited(company_id: str) -> dict:
     """
     undep = await db.accounts.find_one({
         "company_id": company_id,
-        "$or": [{"detail_type": "money_in_transit"},
+        # See reports._signed_balances for the full rationale — QBO's
+        # authoritative Undeposited Funds signal is
+        # `AccountSubType=UndepositedFunds`. Loose `detail_type=
+        # money_in_transit` matches other clearing accounts (Stripe
+        # Clearing, Payment Clearing, etc.) and causes payments to
+        # land in the wrong place. Feb 27 2026.
+        "$or": [{"subtype": {"$regex": "^UndepositedFunds$",
+                              "$options": "i"}},
                 {"name": {"$regex": "^Undeposited Funds$",
                           "$options": "i"}}],
     })
@@ -2442,9 +2523,16 @@ async def resolve_deposit_splits(company_id: str) -> dict:
     `splits` are skipped.
     """
     # Cache the company's Undeposited Funds and account-by-qbo_id map.
+    # See reports._signed_balances — QBO's `AccountSubType=
+    # UndepositedFunds` is the authoritative signal. A looser
+    # `detail_type=money_in_transit` match picks up Stripe/Payment
+    # clearing accounts too, and `find_one` returned one of those
+    # instead of UF on BM QBO 2 LLC, silently routing 47 sweep
+    # deposits into Stripe Clearing. Feb 27 2026.
     undep = await db.accounts.find_one({
         "company_id": company_id,
-        "$or": [{"detail_type": "money_in_transit"},
+        "$or": [{"subtype": {"$regex": "^UndepositedFunds$",
+                              "$options": "i"}},
                 {"name": {"$regex": "^Undeposited Funds$",
                           "$options": "i"}}],
     })
@@ -2837,10 +2925,16 @@ async def resolve_transaction_categories(company_id: str) -> int:
         # per child account (Beverages vs Takeout vs …) instead of
         # lumping everything into the first-line's parent bucket.
         line_accts: list[tuple[dict, float]] = []
+        # New Feb 27 2026 — also collect the resolved local id per
+        # line so we can write it back onto `line_items[i].account_id`.
+        # `_signed_balances` doesn't read line_items directly for
+        # transactions (it uses the top-level `category_account_id` +
+        # `splits`), but the Transactions page filters and the P&L
+        # drill-down DO — leaving `line_items[].account_id = None`
+        # after import breaks both.
+        resolved_line_ids: list[str | None] = []
         for ln in t.get("line_items") or []:
             amt = float(ln.get("amount") or 0)
-            if abs(amt) < 0.005:
-                continue
             resolved = None
             aqid = ln.get("account_qbo_id")
             if aqid:
@@ -2854,7 +2948,8 @@ async def resolve_transaction_categories(company_id: str) -> int:
                         candidate_qid = inc or exp
                     if candidate_qid:
                         resolved = qbo_to_local.get(candidate_qid)
-            if resolved:
+            resolved_line_ids.append(resolved["id"] if resolved else None)
+            if resolved and abs(amt) >= 0.005:
                 line_accts.append((resolved, amt))
 
         picked = line_accts[0][0] if line_accts else None
@@ -2896,11 +2991,79 @@ async def resolve_transaction_categories(company_id: str) -> int:
         }
         if splits_payload:
             update_doc["splits"] = splits_payload
+        # Also stamp `account_id` on each line_item so drill-downs
+        # from the P&L / BS / Transactions page can filter by GL
+        # account. Purely additive — the field wasn't there before,
+        # so no risk of overwriting.
+        raw_lines = t.get("line_items") or []
+        if raw_lines and any(rid for rid in resolved_line_ids):
+            new_lines = []
+            for i, ln in enumerate(raw_lines):
+                rid = resolved_line_ids[i] if i < len(resolved_line_ids) else None
+                new_lines.append({**ln, "account_id": rid} if rid else ln)
+            update_doc["line_items"] = new_lines
         await db.transactions.update_one(
             {"id": t["id"]},
             {"$set": update_doc},
         )
         updated += 1
+    return updated
+
+
+
+async def resolve_journal_entry_line_accounts(company_id: str) -> int:
+    """Backfill `journal_entries.lines[i].account_id` from each line's
+    `account_qbo_id` using the local QBO account map.
+
+    QBO's JE payload only carries `AccountRef.value` (the QBO id) on
+    each line. `map_journal_entry` stores it as `account_qbo_id` — but
+    `_signed_balances` (reports.py) reads `line.account_id` (our local
+    id), so unless we translate the qbo_id here, every JE line's ledger
+    impact silently disappears from the BS and P&L. BM QBO 2 LLC
+    (Feb 27 2026) had 293 of 299 lines dropped for exactly this
+    reason, hiding ~$154k of income and ~$90k of expense.
+
+    Idempotent — only touches lines whose `account_id` is currently
+    empty. Deleted-account lines (`Partners Clearing (deleted)`, etc.)
+    resolve too once `query_all` starts pulling inactive accounts.
+    """
+    qbo_to_local: dict[str, str] = {}
+    async for a in db.accounts.find(
+        {"company_id": company_id, "source": "qbo"},
+        {"id": 1, "qbo_id": 1, "_id": 0},
+    ):
+        if a.get("qbo_id"):
+            qbo_to_local[str(a["qbo_id"])] = a["id"]
+    if not qbo_to_local:
+        return 0
+
+    updated = 0
+    async for j in db.journal_entries.find(
+        {"company_id": company_id, "source": "qbo"},
+        {"id": 1, "lines": 1},
+    ):
+        raw_lines = j.get("lines") or []
+        if not raw_lines:
+            continue
+        changed = False
+        new_lines = []
+        for ln in raw_lines:
+            if ln.get("account_id"):
+                new_lines.append(ln)
+                continue
+            aqid = ln.get("account_qbo_id")
+            local_id = qbo_to_local.get(str(aqid)) if aqid else None
+            if local_id:
+                new_lines.append({**ln, "account_id": local_id})
+                changed = True
+            else:
+                new_lines.append(ln)
+        if changed:
+            await db.journal_entries.update_one(
+                {"id": j["id"]},
+                {"$set": {"lines": new_lines, "updated_at": now_iso()}},
+            )
+            updated += 1
     return updated
 
 
@@ -3007,7 +3170,7 @@ def _flatten_gl_rows(rows: list) -> list[dict]:
 
 async def resolve_qbo_gl_line_accounts(
     company_id: str,
-    start_date: str = "2020-01-01",
+    start_date: str = "2000-01-01",
     end_date: str | None = None,
 ) -> dict:
     """Use QBO's General Ledger as source-of-truth to stamp

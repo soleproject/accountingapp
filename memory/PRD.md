@@ -16,6 +16,246 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - **Auth**: JWT (bcrypt), role-based access (superadmin / pro / client), multi-tenant memberships
 
 
+### Feb 27 2026 — Prod→Preview Clone: "BM QBO 2 LLC"
+
+Cloned live company **BM QBO 2 LLC** (prod id `2f6d6451-0fdb-44d3-ba97-05775f37617c`, realm `9341452279649363`) from prod (`axiom_prod`) into preview as `bm-qbo-2-preview-clone` using `/app/backend/scripts/clone_qbo_to_preview.py`. QBO connection tokens (access + refresh) preserved via `crypto_service.encrypt` under preview's key. Post-clone remap: `owner_user_id → admin@axiom.ai`, `pro_user_id → pro@axiom.ai`, `partner_id/enterprise_id → None`; `users_companies` rows upserted for both. Tokens verified decryptable via preview backend. `PROD_MONGO_URL` was set inline per-command (never `export`ed) — no lingering credentials in the pod env. User can now switch to this company and click **Run Migration** on Connect QBO, or **Import from Production Connection** in Test QBO.
+
+⚠️ QBO refresh tokens are single-use — the first environment (prod OR preview) to refresh invalidates the other. Treat this preview clone as short-lived.
+
+### Feb 27 2026 — QBO Parity: Fix #1 + #2 + #5 + #7 (JE Line Hydration + Deleted Accounts + Double-Count Elimination)
+
+Root-caused a systemic parity gap on BM QBO 2 LLC where our P&L was off by $60k-$120k and BS was $103k out of balance. Chain of fixes shipped:
+
+**Fix #1 — JE line `account_id` backfill** (`qbo_service.resolve_journal_entry_line_accounts`): The QBO importer wrote `account_qbo_id` on each `journal_entries.lines[i]` but not the local `account_id`. `reports._signed_balances` reads only `account_id`, silently dropping 98% of every JE line's ledger impact. New resolver folds the local id in — 293/299 lines on BM QBO 2 LLC recovered on first pass (rest were deleted-account refs, handled by Fix #2).
+
+**Fix #2 — Include inactive accounts in QBO pull** (`qbo_service.query_all`): Default `SELECT * FROM Account` filters out `Active=false`, so deleted accounts referenced by historical JEs never make it to our `accounts` collection. Added `WHERE Active IN (true, false)`. Picked up 3 missing accounts on BM QBO 2 LLC (Partners Clearing, Payment Clearing, TEMPORARY-BP-Cash).
+
+**Fix #5 — Transaction line-item `account_id` hydration** (`qbo_service.resolve_transaction_categories`): Extended existing resolver to also stamp `account_id` on each `transactions.line_items[i]`, unblocking drill-downs from BS/PL → source rows and the Transactions page category filter.
+
+**Fix #7 — A/R and A/P double-count elimination** (`reports.compute_balance_sheet` + `reports._open_ar_ap`): After Fix #1 activated JE-driven A/R and A/P balances in `_signed_balances`, the balance-sheet builder was ALSO appending a phantom "Accounts Receivable" / "Accounts Payable" row from `_open_ar_ap`, double-counting every year-end adjusting JE. Rewrote `_open_ar_ap` to bucket totals by `ARAccountRef`/`APAccountRef` (QBO tells us which A/R and A/P account each invoice/bill posts to), and `compute_balance_sheet` now folds each bucket into `by[local_id]` **before** section emit — no more phantom rows, single accurate row per A/R/A/P account. AR on BM QBO 2 LLC now shows $43,989.36 vs QBO $45,000.00 (within $1,011).
+
+**Data patch on BM QBO 2 LLC**: also re-ran `_post_opening_balances_je` — the stale opening-balance JE created during migration (before Fix #1 landed) had over-plugged $120k+ on Note Receivable accounts because JE lines were still being dropped by `_signed_balances`. Re-running the resolver (idempotent, delete + rewrite) cleared that stale plug.
+
+**Impact:**
+- P&L Accrual: 68/83 accounts match to the penny (was 1/85); NI within $3.7k of QBO ($244,346 vs $240,617)
+- P&L Cash: 67/83 accounts match; NI $75,546 vs QBO $130,317 (residual Services drift)
+- BS Accrual imbalance: $103,751 (was $103,751 originally, $163,827 after Fix #1 alone). Equity now within $2.5k of QBO ($246,420 vs $243,891)
+- 47/47 QBO parity tests pass
+
+**Remaining BS drift** (~$103k imbalance) identified but not yet fixed:
+1. Multi-level parent/child rendering — Allowance Note Receivable (grandchild) not rolled into 72 Holdings LLC parent (`~$60k`)
+2. Deleted-with-activity accounts showing (TEMPORARY-BP-Cash `~$47k`) — QBO hides these from reports
+3. Skyward AMEX Ops vs Gold Card offsetting drift (`~$32k` each side)
+4. Undeposited Funds ↔ Stripe Clearing swap (`~$37k` both sides, nets to 0 on total)
+5. AP header-account $188 phantom row
+
+### Feb 27 2026 — Pre-2020 History Guard + Transfer Re-map in Backfill
+
+**Two hardening changes ahead of prod broadcast:**
+
+**1. Widened default date floor from `2020-01-01` → `2000-01-01`**
+Rationale: QBO launched in 2001, so no legit book has activity before 2000-01-01. Setting the floor there guards against silent P&L truncation on any legacy company migrated with pre-2020 history. Changed in 4 places: `qbo_service.snapshot_reports` docstring, `qbo_service.resolve_qbo_gl_line_accounts` default, `routes/qbo.py::qbo_snapshot_reports` fallback, `routes/qbo.py::qbo_resolve_gl_line_accounts` default, `routes/qbo_test._DEFAULT_START`, `routes/admin.py::_bs_snapshot` P&L range. Frontend Compare panel + Test QBO auto-inherit via the backend defaults.
+
+**2. Extended `POST /api/admin/qbo/full-backfill` with Transfer re-map (Step 3.5)**
+Every legacy prod company's Transfers are broken (Nicole Pettyjohn canary caught it). Just re-running `resolve_transaction_categories` isn't enough because the underlying `amount` is still 0. Step 3.5 iterates every QBO-source Transfer in the company, re-runs `map_generic_txn` (which now knows to read `Amount` fallback + use `ToAccountRef`), blanks out the resolved category/bank fields, and lets Steps 2 (resolve_transaction_categories) and 3 (resolve_transaction_banks) re-hydrate cleanly. Response `steps.transfers_remapped` counter surfaces the blast radius per company.
+
+**Verified idempotent on Nicole Pettyjohn**: real backfill run on already-manually-patched data → 76 transfers re-mapped, before/after BS+P&L totals byte-identical. Safe to re-invoke.
+
+**Updated backfill workflow:**
+```bash
+# Dry-run to see per-company gaps
+POST /api/admin/qbo/full-backfill  {"dry_run": true}
+
+# Real run
+POST /api/admin/qbo/full-backfill  {"dry_run": false}
+```
+Planned steps returned in dry-run mode: `re_pull_accounts_incl_inactive` → `resolve_account_parents` → `resolve_transaction_categories` → `resolve_journal_entry_line_accounts` → `remap_qbo_transfers` → `reset_and_resolve_deposit_splits` → `post_opening_balances_je`.
+
+### Feb 27 2026 — Nicole Pettyjohn Canary + Transfer Amount Bug Fix
+
+**Canary target:** cloned prod company `Nicole Pettyjohn` (realm `9341456698264639`) into preview → ran full migration under new code → compared to QBO's own reports.
+
+**Bug caught by canary:** QBO's Transfer entity carries its dollar value in `Amount` (unlike every other txn type which uses `TotalAmt`). Our `map_generic_txn` only read `TotalAmt`, so every migrated Transfer landed with `amount = 0`. In addition, `_bank_account_qbo_id` mapped Transfer to `FromAccountRef` with no corresponding category line — so even with a non-zero amount, only the FROM side would post and it'd post in the wrong direction. Nicole Pettyjohn: 76 Transfers moving $145k+ between Checking and Savings entirely lost, showing as Checking over-inflated by $160k and Savings under by $145k.
+
+**Fix (`qbo_service.py`)**:
+1. `map_generic_txn` — pull `Amount` fallback for Transfer when `TotalAmt` is missing
+2. `_bank_account_qbo_id` — Transfer now maps to `ToAccountRef` (destination bank), matching Deposit convention. Aligns with `_signed_balances` reading `by[bank] += amt` (destination up)
+3. `map_generic_txn` — synthesize a `line_items[]` entry pointing at `FromAccountRef` so `resolve_transaction_categories` posts the source-side credit (`by[from_bank] += -amt` → source down)
+
+**Data patch on Nicole Pettyjohn**: re-mapped 76 Transfers, re-resolved banks + categories.
+
+**Canary result — after fix:**
+| | Ours | QBO | Δ |
+|---|---:|---:|---:|
+| Accrual Total Assets | $172,966.17 | $172,966.17 | **$0.00** ✅ |
+| Cash Total Assets | $172,966.17 | $172,966.17 | **$0.00** ✅ |
+| BS Imbalance | $0.00 | $0.00 | **$0.00** ✅ |
+| Accrual NI | $372,331.58 | $383,393.92 | -$11,062.34 (bill-timing) |
+
+**Assessment:** This fix is critical infrastructure — every prod company with Transfers between banks (which is essentially every company) has this bug in their pre-fix migration data. The `full-backfill` endpoint's `resolve_transaction_categories` step won't catch it because the underlying `amount` field is still 0. A **new backfill step is needed** to re-map QBO Transfer transactions using the fixed mapper.
+
+**Recommended next**: extend `POST /api/admin/qbo/full-backfill` with a Step 3.5 that re-maps existing Transfers via `map_generic_txn`, then re-resolves banks + categories. Same pattern I did for Nicole Pettyjohn.
+
+### Feb 27 2026 — QBO Full-Backfill Endpoint (Broadcast the Parity Fixes)
+
+**What:** New superadmin endpoint `POST /api/admin/qbo/full-backfill` that runs the entire Feb 27 2026 parity-fix chain across every QBO-connected company (or a single company via `company_id`), with an explicit `dry_run` mode that captures before/after BS + P&L totals per company without mutating anything.
+
+**Chain executed (in order) when `dry_run=false`:**
+1. Re-pull `Account` entity with `Active IN (true, false)` — imports deleted/inactive accounts referenced by historical JEs
+2. `resolve_account_parents` — re-links parent hierarchy for any newly-imported accounts
+3. `resolve_transaction_categories` — hydrates `account_id` on `transactions.line_items[]`
+4. `resolve_journal_entry_line_accounts` — hydrates `account_id` on `journal_entries.lines[]` (Fix #1)
+5. Clear + re-run `resolve_deposit_splits` — corrects UF-fallback misroutes
+6. `_post_opening_balances_je` — idempotent purge of stale over-plugs
+
+**Response shape (per company):**
+- `before` / `after` — BS + P&L totals on both bases (accrual + cash) with `total_assets`, `total_liabilities`, `total_equity`, `imbalance`, `net_income`
+- `steps` — counters per step so the operator can eyeball what changed (new accounts, JE lines resolved, deposits reset, UF fallbacks, opening balance lines)
+- Top-level `companies_ok`, `companies_errored`, `companies_dry_run` summary
+
+**Verified idempotent on BM QBO 2 LLC (already backfilled)** — before/after totals byte-identical after a real run. Safe to re-invoke.
+
+**Not-connected companies** included in the response with `error: "not_connected"` and skipped — they show up in operator's list so they know to reconnect QBO.
+
+**Test workflow:**
+```bash
+# 1. Dry-run against all connected companies to see current parity gaps
+curl -X POST $API/api/admin/qbo/full-backfill \
+  -H "Authorization: Bearer $SUPERADMIN_TOKEN" \
+  -H "Content-Type: application/json" -d '{"dry_run":true}'
+
+# 2. Review each company's `before` block; if the imbalances look
+#    like the same class of issue we fixed on BM QBO 2 LLC, run for real
+curl -X POST $API/api/admin/qbo/full-backfill \
+  -H "Authorization: Bearer $SUPERADMIN_TOKEN" \
+  -H "Content-Type: application/json" -d '{"dry_run":false}'
+```
+
+### Feb 27 2026 — Known Variance #1: Bank/CC JE Rendering (Accepted)
+
+**Status:** ACCEPTED / DOCUMENTED. Not a bug, structural convention mismatch.
+
+**What it is:** On QBO-imported companies, bank and credit-card accounts may show slightly different balances on Axiom's BS than QBO's own BS report — specifically when there are Journal Entries with lines targeting those bank/CC accounts (opening balances, adjusting entries, bank-fee JEs booked directly to the bank register).
+
+**Root cause:** QBO's report engine excludes Journal Entries from bank/CC account balances (verified via QBO's own TransactionList filtered on `AMEX Operations` — 295 rows across 7 transaction types, zero JEs). Our engine sums every ledger post per GAAP standard, so JE lines to bank/CC accounts DO show in our BS. Both approaches are internally consistent; they disagree only on which is "source of truth" for a bank balance.
+
+**Dollar impact on BM QBO 2 LLC:**
+- Skyward AMEX Operations: ours $32,405.82 vs QBO $5,076.88 (over $27,328.94)
+- Skyward Bluevine Checking: ours $4,729.05 vs QBO $0 (over $4,729.05)
+- Skyward AMEX Gold Card (liab): ours $35,313.20 vs QBO $3,255.32 (over $32,057.88)
+- Net BS imbalance impact: symmetric (~$32k on both sides), does NOT unbalance the sheet
+
+**Options considered & rejected this session:**
+- **Skip JE lines to bank/CC accounts in `_signed_balances`** — would unbalance the BS (offsetting income/expense/equity legs would still post without their bank counterpart)
+- **Trust `Account.CurrentBalance` for banks/CCs + equity-plug the delta** — matches QBO at import time but slowly rots as native activity in Axiom diverges from the frozen QBO snapshot; also forces a permanent branch to handle native/non-QBO companies
+
+**Mitigation shipped (Feb 27 2026):**
+- Backend (`reports.compute_balance_sheet::_row`) now stamps `variance_note: "bank_je_rendering"` on every QBO-imported bank/CC row (subtypes: Checking, Savings, MoneyMarket, CashOnHand, TrustAccounts, MoneyInAccount, CreditCard) with `source=qbo`.
+- Frontend (`ReportView.jsx::Row`) renders a small amber Info icon next to those rows with a tooltip explaining the variance.
+
+**Proper long-term fix (deferred):** Classify JE lines against bank/CC accounts by type (opening balance, bank reconciliation adjustment, book-only adjustment) and handle each per its actual accounting meaning. Requires new fixtures for both QBO-imported and native companies, and staged rollout with dry-run diff output.
+
+### Feb 27 2026 — Undeposited Funds Detection Fix (Stripe/UF $37k Row Swap)
+
+**Root cause**: `resolve_deposit_splits` and `resolve_payment_undeposited` (and `_signed_balances`'s UF lookup) all used a loose Mongo query `{$or: [{detail_type:"money_in_transit"}, {name:/^Undeposited Funds$/i}]}`. On BM QBO 2 LLC three accounts matched (`Stripe Clearing Account`, `Undeposited Funds`, `Payment Clearing Account (deleted)` all carry `detail_type=money_in_transit`), and `find_one` non-deterministically returned Stripe Clearing. All 47 LinkedTxn-only Deposits (sweep-from-UF pattern) fell back to Stripe Clearing instead of UF → BS showed UF `+$37,196` and Stripe Clearing `-$37,196`, both wrong.
+
+**Fix**: tightened the query to `AccountSubType=UndepositedFunds` (QBO's authoritative signal) with `name=Undeposited Funds` as secondary fallback. Applied in three call sites: `qbo_service.resolve_deposit_splits`, `qbo_service.resolve_payment_undeposited`, `reports._signed_balances`.
+
+**Data patch**: cleared and re-computed splits on all 117 QBO Deposits — 47 now correctly attribute to UF, 70 direct-income splits unchanged.
+
+**Impact on BM QBO 2 LLC**:
+- Undeposited Funds: `$37,196.03 → $0.00` ✅ matches QBO
+- Stripe Clearing Account: `-$37,196.03 → $0.00` ✅ matches QBO
+- 47/47 QBO parity tests pass
+
+### Feb 27 2026 — Remaining BS Drift Investigation (Bank/CC Adjustment JEs)
+
+Investigation of the last symmetric ~$32k drift (Skyward AMEX Ops `+$27k` asset overshoot + AMEX Gold Card `+$32k` liability overshoot + Bluevine `+$4.7k` asset overshoot) traced to **QBO Adjustment=True JEs** (JE#7 2025-05-23 opening balance, JE#12 2026-03-31 Q1 adjustment). Both carry sizable debits to Skyward bank/CC accounts.
+
+**Hypothesis** (unconfirmed): QBO's BS report renders bank/CC accounts via `Account.CurrentBalance` (bank-reconciliation-authoritative) rather than the recomputed GL sum, and adjustment JEs are reflected via a hidden offset. Our engine sums the raw ledger which includes these adjustment debits, causing the overshoot.
+
+**Decision**: paused further investigation — this fix requires either (a) special-case treatment for Adjustment=True JEs on bank/CC accounts, or (b) trusting `Account.CurrentBalance` directly for banks/CCs on the BS. Both are structural changes with regression risk on native/non-QBO companies. Deferred to a follow-up session.
+
+**Current parity state (BM QBO 2 LLC)**:
+- P&L Accrual: 68/83 accounts match; NI $244,346 vs QBO $240,617 (Δ $3,728 — matches Uncategorized Expense residual)
+- P&L Cash: 67/83 accounts match; NI $75,546 vs QBO $130,317
+- BS Accrual: assets $365,538 vs $334,491, L $122,846 vs $90,600, equity $246,420 vs $243,891 (equity within $2.5k) — imbalance -$3,728.53 (same Uncategorized Expense residual)
+- BS Cash: imbalance -$3,728.53
+- 47/47 QBO parity tests pass
+
+### Feb 27 2026 — Grandchild Rollup Fix (Multi-Level BS Nesting)
+
+**Fix**: rewrote `reports.compute_balance_sheet::_emit_section` as a recursive tree walker so grandchildren of top-level accounts render under their DIRECT parent (with their own `Total {parent}` subtotal) instead of being silently dropped by the previous single-level implementation.
+
+**Impact on BM QBO 2 LLC:**
+- Note Receivable tree now renders correctly:
+  - `Note Receivable - 72 Holdings, LLC` $120,151.26
+  - `Allowance Note Receivable` -$60,075.63 (grandchild — was previously orphaned)
+  - `Total Note Receivable - 72 Holdings, LLC` = **$60,075.63** ✅ matches QBO to the penny
+  - `Total Client Note Receivables` = **$145,075.63** ✅ matches QBO to the penny
+- BS imbalance: **$103,751 → $43,676**
+- 47/47 QBO parity pytest tests still pass
+
+### Feb 27 2026 — QBO Snapshot Date-Range Alignment (Compare Panel ↔ Test QBO)
+
+**Problem**: The "Compare with official QuickBooks Online report" panel and the "Test QBO — QBO Reports" panel were showing DIFFERENT official QBO numbers on the same BM QBO 2 LLC company (Total Assets: $305k vs $334k on Accrual). Both pull from QBO's report API, so official numbers should be identical.
+
+**Root cause**: two independent snapshot code paths used different date-range defaults —
+1. `QboReconciliationPanel.fetchFresh` explicitly passed YTD-of-today (`2026-01-01 → 2026-08-22`)
+2. `snapshot_reports` for BS deliberately dropped `start_date` from the QBO query (thinking a BS is date-agnostic)
+3. Test QBO's `qbo_test.snapshot_test_reports` uses `2020-01-01 → 2099-12-31` and passes both dates
+
+QBO's BS response actually VARIES based on `start_date` presence — without it, QBO defaults the period to YTD-of-end_date, which flattens historical accumulation into current-period NI and shifts Retained Earnings, changing TOTAL ASSETS by tens of thousands.
+
+**Fix**:
+1. `POST /qbo/reports/snapshot` now defaults `start_date="2020-01-01"` and `end_date="2099-12-31"` when not provided — same wide window as Test QBO
+2. `snapshot_reports` no longer strips `start_date` from the BS query — passes it through to QBO
+3. `QboReconciliationPanel.fetchFresh` no longer passes explicit YTD — inherits backend defaults so both panels align in one place
+
+**Result**: Compare panel and Test QBO now return byte-identical official QBO numbers on all 4 reports (BS/PL × Accrual/Cash) on BM QBO 2 LLC.
+
+### Feb 27 2026 — Deleted-Account Filter (BS/PL Match QBO's Hide-Inactive Convention)
+
+**Fix**: `_emit_section::_walk` now skips accounts where `active=False` AND QBO's own `raw.CurrentBalance ≈ 0`. Matches QBO's report engine convention (verified on BM QBO 2 LLC: `TEMPORARY-BP-Cash` with `Active=False, CurrentBalance=0` completely absent from QBO's BS/PL payload). Non-zero inactive accounts still render so we don't hide legitimate residual activity.
+
+**Impact on BM QBO 2 LLC:**
+- BS imbalance: **$43,676 → -$3,728.53** (the residual is exactly the Uncategorized Expense pre-existing drift)
+- Accrual: assets $365,538 vs QBO $334,491, L $122,846 vs QBO $90,600, equity $246,420 vs QBO $243,891 (**within $2,529**)
+- 47/47 QBO parity tests still pass
+
+**Remaining BS drift (~$31k both sides, symmetric)**:
+- Skyward AMEX Operations `$32,405` vs QBO `$5,076` (+$27,329)
+- Skyward Bluevine Checking `$4,729` vs QBO `$0` (+$4,729)  
+- AMEX Gold Card liability `$35,313` vs QBO `$3,255` (+$32,058)
+- Undeposited Funds `$37,196` ↔ Stripe Clearing `-$37,196` — net 0 on assets, but wrong rows
+- AP header phantom `$188`
+
+Sum: assets over ≈ $32k, liab over ≈ $32k → symmetric drift = one JE double-post between the Skyward AMEX Ops/Gold Card pair.
+
+
+
+**Fix**: rewrote `reports.compute_balance_sheet::_emit_section` as a recursive tree walker so grandchildren of top-level accounts render under their DIRECT parent (with their own `Total {parent}` subtotal) instead of being silently dropped by the previous single-level implementation.
+
+**Impact on BM QBO 2 LLC:**
+- Note Receivable tree now renders correctly:
+  - `Note Receivable - 72 Holdings, LLC` $120,151.26
+  - `Allowance Note Receivable` -$60,075.63 (grandchild — was previously orphaned)
+  - `Total Note Receivable - 72 Holdings, LLC` = **$60,075.63** ✅ matches QBO to the penny
+  - `Total Client Note Receivables` = **$145,075.63** ✅ matches QBO to the penny
+- BS imbalance: **$103,751 → $43,676** ($60,075 closed in one shot — exactly the Allowance amount previously orphaned)
+- 47/47 QBO parity pytest tests still pass
+
+**Remaining BS drift after Grandchild fix** (~$43,676 imbalance):
+1. TEMPORARY-BP-Cash (deleted-account activity, ~$47k) — QBO hides these from reports
+2. Skyward AMEX Operations $32,405 vs QBO $5,076 (~$27k over) + AMEX Gold Card liability $35,313 vs QBO $3,255 (~$32k over) — offsetting bank/CC drift
+3. Skyward Bluevine Checking $4,729 vs QBO $0
+4. Undeposited Funds $37,196 vs Stripe Clearing -$37,196 — payment sweep routing (nets to 0 on total assets)
+5. AP header-account $188 phantom row
+
+
+
+
+
 ### Feb 26 2026 — QBO Integration: BS Ties Penny-for-Penny to QBO's Own Report
 
 **Milestone**: our accrual Balance Sheet now reconciles EXACTLY to QBO's own report on every account, verified on two distinct sandbox realms (`Sandbox Company US a026` realm `9341457726749100`, `Sandbox Company US 2457` realm `9341457727012245`). Same 11 accounts match to the penny — Total Assets $23,436.29 = QBO $23,436.29 on both. Companies now migrated from QBO can trust the accrual BS out of the box.
