@@ -1194,3 +1194,72 @@ async def qbo_diagnostics(cid: str, user: dict = Depends(get_current_user)):
         "collections": out_collections,
         "live_qbo_preview": preview,
     }
+
+
+# ---------- Raw entity drill-down (production) --------------------
+# Same UX as Test QBO's tile drill, but reads from production
+# collections (`db.invoices`, `db.bills`, `db.transactions`, etc.)
+# and returns the stored `raw` payload alongside a few identifying
+# fields so the frontend can render an accordion of raw JSON without
+# a schema translation layer.
+
+_PROD_ENTITY_LOOKUP: dict[str, tuple[str, str]] = {
+    # entity_type → (collection, txn_type filter if collection is 'transactions')
+    "Account":              ("accounts",           ""),
+    "Customer":             ("contacts",           ""),
+    "Vendor":               ("contacts",           ""),
+    "Item":                 ("items",              ""),
+    "Invoice":              ("invoices",           ""),
+    "Bill":                 ("bills",              ""),
+    "Payment":              ("payments",           ""),
+    "BillPayment":          ("payments",           ""),
+    "JournalEntry":         ("journal_entries",    ""),
+    "Deposit":              ("transactions",       "Deposit"),
+    "Transfer":             ("transactions",       "Transfer"),
+    "Purchase":             ("transactions",       "Purchase"),
+    "SalesReceipt":         ("transactions",       "SalesReceipt"),
+    "RefundReceipt":        ("transactions",       "RefundReceipt"),
+    "CreditMemo":           ("transactions",       "CreditMemo"),
+    "VendorCredit":         ("transactions",       "VendorCredit"),
+    "CreditCardPayment":    ("transactions",       "CreditCardPayment"),
+    "InventoryAdjustment":  ("transactions",       "InventoryAdjustment"),
+    "Estimate":             ("transactions",       "Estimate"),
+    "PurchaseOrder":        ("transactions",       "PurchaseOrder"),
+    "RecurringTransaction": ("transactions",       "RecurringTransaction"),
+}
+
+
+@router.get("/companies/{cid}/qbo/entity/{entity_type}")
+async def qbo_entity_drill(cid: str, entity_type: str,
+                             limit: int = 50, skip: int = 0,
+                             user: dict = Depends(get_current_user)):
+    """Return production docs of a given QBO entity type with their
+    stored `raw` payload. Powers the drill-down modal on the Connect
+    QBO Preview scope tiles. Aug 22 2026."""
+    await require_company(user, cid)
+    if entity_type not in _PROD_ENTITY_LOOKUP:
+        raise HTTPException(400, f"Unsupported entity: {entity_type}")
+    coll_name, txn_filter = _PROD_ENTITY_LOOKUP[entity_type]
+    q: dict = {"company_id": cid, "source": "qbo"}
+    if txn_filter:
+        q["txn_type"] = txn_filter
+    # Customer / Vendor share `db.contacts`; disambiguate by `type`.
+    if entity_type == "Customer": q["type"] = "customer"
+    if entity_type == "Vendor":   q["type"] = "vendor"
+    coll = getattr(Q.db, coll_name)
+    total = await coll.count_documents(q)
+    rows: list[dict] = []
+    async for r in coll.find(q, {"_id": 0}).skip(skip).limit(limit):
+        rows.append({
+            "id":          r.get("id"),
+            "qbo_id":      r.get("qbo_id"),
+            "display":     (r.get("name") or r.get("display_name")
+                              or r.get("number") or r.get("qbo_id")),
+            "amount":      r.get("amount") or r.get("total"),
+            "date":        r.get("date") or r.get("issue_date"),
+            "raw":         r.get("raw") or {},
+        })
+    return {"entity_type": entity_type, "total": total,
+             "rows": rows, "skip": skip, "limit": limit,
+             "collection": coll_name}
+

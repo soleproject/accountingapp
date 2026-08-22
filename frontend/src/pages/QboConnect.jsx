@@ -3,9 +3,13 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   Link2, CheckCircle2, XCircle, Loader2, ChevronRight,
-  Sparkles, RefreshCw, Play, ShieldCheck, Mail,
+  Sparkles, RefreshCw, Play, ShieldCheck, Mail, X,
   FileBarChart2, Repeat as RepeatIcon,
 } from "lucide-react";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter,
+  DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import {
@@ -13,10 +17,6 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  Dialog, DialogContent, DialogDescription, DialogFooter,
-  DialogHeader, DialogTitle,
-} from "@/components/ui/dialog";
 
 // Cadence of the migration-status poll while a job is running. QBO
 // migrations for a mid-size realm typically finish in 30-90s; the
@@ -50,6 +50,7 @@ export default function QboConnect() {
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [job, setJob] = useState(null);
+  const [drill, setDrill] = useState(null);
   // Two-step dialog flow for kicking off a migration:
   //   1. `confirmOpen` — pre-flight modal that promises an email on
   //      completion. Replaces the browser-native `confirm()` so the
@@ -280,17 +281,46 @@ export default function QboConnect() {
           </button>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
-            {Object.entries(preview.counts).map(([e, n]) => (
-              <div key={e} className="flex items-center justify-between border rounded-md px-3 py-2">
-                <span className="text-slate-700">{ENTITY_LABELS[e] || e}</span>
-                <span className={`font-mono text-xs ${n < 0 ? "text-red-500" : "text-slate-900"}`}>
-                  {n < 0 ? "—" : n.toLocaleString()}
-                </span>
-              </div>
-            ))}
+            {Object.entries(preview.counts).map(([e, n]) => {
+              const has = n > 0;
+              return (
+                <button
+                  key={e}
+                  disabled={!has || !done}
+                  onClick={() => has && done && setDrill({
+                    entity_type: e,
+                    label: ENTITY_LABELS[e] || e,
+                  })}
+                  className={`flex items-center justify-between border rounded-md
+                              px-3 py-2 text-left transition ${
+                    has && done
+                      ? "hover:border-indigo-400 hover:shadow-sm cursor-pointer"
+                      : "cursor-default opacity-90"
+                  }`}
+                  data-testid={`qbo-preview-tile-${e}`}
+                >
+                  <span className="text-slate-700">{ENTITY_LABELS[e] || e}</span>
+                  <span className="flex items-center gap-1.5">
+                    <span className={`font-mono text-xs ${n < 0 ? "text-red-500" : "text-slate-900"}`}>
+                      {n < 0 ? "—" : n.toLocaleString()}
+                    </span>
+                    {has && done && <ChevronRight size={12} className="text-slate-400" />}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         )}
       </section>
+
+      {/* Raw drill-down modal for the Preview tiles. Only opens after
+          migration is complete — before then, the entities aren't in
+          our DB yet. Aug 22 2026. */}
+      <QboEntityDrill
+        cid={currentId}
+        drill={drill}
+        onClose={() => setDrill(null)}
+      />
 
       {/* Step 3: Migrate */}
       <section className={`rounded-xl border bg-white p-5 mb-4 transition-opacity ${
@@ -778,6 +808,93 @@ function QboReportsPanel({ currentId, connected }) {
         </div>
       )}
     </section>
+  );
+}
+
+
+
+// ---------- Production entity raw drill-down ---------------------
+// Same modal shape as Test QBO's EntityDrillDown but hits the
+// production endpoint that reads from `db.invoices` / `db.bills`
+// / `db.transactions` / etc. (not `qbo_test_raw`).
+
+function QboEntityDrill({ cid, drill, onClose }) {
+  const [rows, setRows]   = useState(null);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!drill || !cid) return;
+    setLoading(true);
+    api.get(`/companies/${cid}/qbo/entity/${drill.entity_type}`,
+             { params: { limit: 100 } })
+      .then(r => { setRows(r.data.rows || []); setTotal(r.data.total || 0); })
+      .catch(() => toast.error("Failed to load entity"))
+      .finally(() => setLoading(false));
+  }, [drill, cid]);
+
+  return (
+    <Dialog open={!!drill} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <span>{drill?.label}</span>
+            <span className="text-xs font-mono px-2 py-0.5 rounded
+                              bg-slate-100 text-slate-500">
+              {drill?.entity_type}
+            </span>
+            <span className="text-xs text-slate-500 font-normal">
+              · showing {rows?.length ?? 0} of {total}
+            </span>
+          </DialogTitle>
+        </DialogHeader>
+        <div className="flex-1 overflow-auto rounded-lg border bg-slate-50">
+          {loading && (
+            <div className="p-6 text-sm text-slate-500 flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin" /> Loading raw rows…
+            </div>
+          )}
+          {!loading && rows && rows.length === 0 && (
+            <div className="p-6 text-sm text-slate-500">No rows.</div>
+          )}
+          {!loading && rows && rows.map((r, i) => (
+            <details key={i} className="border-b last:border-none">
+              <summary className="cursor-pointer p-3 text-sm font-mono
+                                   hover:bg-white">
+                <span className="text-slate-500">{drill?.entity_type} · </span>
+                <span>Id {r.qbo_id}</span>
+                {r.display && (
+                  <span className="ml-2 text-slate-700 font-sans">
+                    {r.display}
+                  </span>
+                )}
+                {r.amount !== undefined && r.amount !== null && (
+                  <span className="ml-2 text-slate-500 font-sans">
+                    · ${r.amount}
+                  </span>
+                )}
+                {r.date && (
+                  <span className="ml-2 text-slate-500 font-sans">
+                    · {r.date}
+                  </span>
+                )}
+              </summary>
+              <pre className="text-[11px] p-3 pt-0 whitespace-pre-wrap
+                              break-all text-slate-600">
+                {JSON.stringify(r.raw, null, 2)}
+              </pre>
+            </details>
+          ))}
+        </div>
+        <DialogFooter>
+          <button onClick={onClose}
+                   className="inline-flex items-center gap-1.5 px-3 py-1.5
+                              rounded-lg text-sm border hover:bg-slate-50">
+            <X className="w-4 h-4" /> Close
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
