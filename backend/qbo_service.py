@@ -733,6 +733,44 @@ async def _run_entity(job_id: str, company_id: str, realm_id: str,
     await db.qbo_jobs.update_one({"job_id": job_id}, update)
 
 
+_PIPELINE: list[tuple[str, callable, str]] = [
+    # Foundation — MUST run first, transactional records reference these.
+    ("Account",  map_account, "accounts"),
+    ("Customer", lambda c, r, o: map_contact(c, r, o, "customer"), "contacts"),
+    ("Vendor",   lambda c, r, o: map_contact(c, r, o, "vendor"),   "contacts"),
+    ("Item",     map_item,    "items"),
+    # Transactional — order doesn't matter for correctness, but we do
+    # invoices/bills first (largest volume typically) so progress bars
+    # feel snappier.
+    ("Invoice",       lambda c, r, o: map_invoice(c, r, o),      "invoices"),
+    ("Bill",          lambda c, r, o: map_bill(c, r, o),         "bills"),
+    ("Payment",       lambda c, r, o: map_payment(c, r, o, "in"),  "payments"),
+    ("BillPayment",   lambda c, r, o: map_payment(c, r, o, "out"), "payments"),
+    ("JournalEntry",  lambda c, r, o: map_journal_entry(c, r, o), "journal_entries"),
+    ("Deposit",       lambda c, r, o: map_generic_txn(c, r, o, "Deposit"),      "transactions"),
+    ("Transfer",      lambda c, r, o: map_generic_txn(c, r, o, "Transfer"),     "transactions"),
+    ("Purchase",      lambda c, r, o: map_generic_txn(c, r, o, "Purchase"),     "transactions"),
+    ("SalesReceipt",  lambda c, r, o: map_generic_txn(c, r, o, "SalesReceipt"), "transactions"),
+    ("RefundReceipt", lambda c, r, o: map_generic_txn(c, r, o, "RefundReceipt"),"transactions"),
+    ("CreditMemo",    lambda c, r, o: map_generic_txn(c, r, o, "CreditMemo"),   "transactions"),
+    # Aug 22 2026 — Closing enterprise BS drift ($1M+ on Perfect Synovus)
+    # caused by these two categories previously being un-imported.
+    ("VendorCredit",       lambda c, r, o: map_generic_txn(c, r, o, "VendorCredit"),       "transactions"),
+    ("CreditCardPayment",  lambda c, r, o: map_generic_txn(c, r, o, "CreditCardPayment"),  "transactions"),
+    # Aug 22 2026 — Complete GL parity + non-posting round-trip.
+    # InventoryAdjustment has REAL GL impact (DR/CR Inventory Asset)
+    # and was the last posting entity missing from production.
+    # Estimate / PurchaseOrder / RecurringTransaction are non-posting
+    # (marked `posted=False` in the mapper so `_signed_balances`
+    # ignores them) — pulled so the existing Estimates / Purchase
+    # Orders / Recurring pages have data.
+    ("InventoryAdjustment", lambda c, r, o: map_inventory_adjustment_txn(c, r, o), "transactions"),
+    ("Estimate",            lambda c, r, o: map_non_posting_txn(c, r, o, "Estimate"),            "transactions"),
+    ("PurchaseOrder",       lambda c, r, o: map_non_posting_txn(c, r, o, "PurchaseOrder"),       "transactions"),
+    ("RecurringTransaction",lambda c, r, o: map_non_posting_txn(c, r, o, "RecurringTransaction"),"transactions"),
+]
+
+
 # ------------------------------------------------------------------
 # Transactional mappers
 # ------------------------------------------------------------------
@@ -1051,7 +1089,11 @@ def map_inventory_adjustment(cid: str, realm_id: str, obj: dict) -> dict:
 # negative = money OUT. QBO returns TotalAmt as a magnitude, so we
 # sign it here based on the txn_type. Kept as a module-level constant
 # so the backfill resolver can reuse the exact same rules.
-_OUTFLOW_TXN_TYPES = {"Purchase", "RefundReceipt", "CreditMemo"}
+_OUTFLOW_TXN_TYPES = {"Purchase", "RefundReceipt", "CreditMemo",
+                       # Aug 22 2026 — CC payments are outflows from
+                       # the funding bank; Vendor Credits reduce A/P
+                       # (net outflow of AP recognition).
+                       "CreditCardPayment", "VendorCredit"}
 _INFLOW_TXN_TYPES = {"Deposit", "SalesReceipt"}
 # Transfer is signless at the top level — it's a wash between two
 # asset accounts; the debit/credit legs carry the direction. Leave
@@ -1086,12 +1128,19 @@ def _bank_account_qbo_id(obj: dict, txn_type: str) -> str | None:
       CreditMemo      → `ARAccountRef` (AR side)
     """
     key = {
-        "Purchase":       "AccountRef",
-        "Deposit":        "DepositToAccountRef",
-        "SalesReceipt":   "DepositToAccountRef",
-        "RefundReceipt":  "DepositToAccountRef",
-        "Transfer":       "FromAccountRef",
-        "CreditMemo":     "ARAccountRef",
+        "Purchase":          "AccountRef",
+        "Deposit":           "DepositToAccountRef",
+        "SalesReceipt":      "DepositToAccountRef",
+        "RefundReceipt":     "DepositToAccountRef",
+        "Transfer":          "FromAccountRef",
+        "CreditMemo":        "ARAccountRef",
+        # New Aug 22 2026 — production parity for enterprise drift.
+        # CreditCardPayment: source of funds (Bank) → `BankAccountRef`,
+        # target is CreditCardAccountRef (handled below in lines mapping).
+        "CreditCardPayment": "BankAccountRef",
+        # VendorCredit: A/P side → `APAccountRef` (falls back to the
+        # vendor's default A/P when missing). Same shape as Bill.
+        "VendorCredit":      "APAccountRef",
     }.get(txn_type)
     if not key:
         return None
@@ -1120,6 +1169,29 @@ def map_generic_txn(cid: str, realm_id: str, obj: dict, txn_type: str) -> dict:
     if txn_type == "Purchase" and obj.get("Credit"):
         signed = -signed
         direction = "in" if direction == "out" else "out"
+
+    # Synthesize a category-side split so both legs of the double
+    # entry land on the ledger for entities that don't carry a `Line`
+    # array with `AccountBasedExpenseLineDetail`.
+    synth_lines: list[dict] = []
+    if txn_type == "CreditCardPayment":
+        # DR the target Credit-Card liability by TotalAmt. The bank
+        # side (CR) is already captured via `bank_account_qbo_id`
+        # (BankAccountRef) — see `_bank_account_qbo_id` above.
+        cc_ref = obj.get("CreditCardAccountRef") or {}
+        cc_qid = cc_ref.get("value")
+        if cc_qid:
+            synth_lines = [{
+                "description": "Credit Card Payment",
+                "amount": magnitude,
+                "account_qbo_id": cc_qid,
+                "account_name": cc_ref.get("name") or "",
+            }]
+    elif txn_type == "VendorCredit":
+        # A/P side captured via `bank_account_qbo_id` (APAccountRef).
+        # Expense/COGS side lives in the QBO Line array, same shape
+        # as Bill — reuse the standard `_map_lines` output later.
+        pass
     return {
         "company_id": cid, "source": "qbo",
         "qbo_id": obj["Id"],
@@ -1146,10 +1218,104 @@ def map_generic_txn(cid: str, realm_id: str, obj: dict, txn_type: str) -> dict:
         "posted": True,
         "needs_review": True,
         "memo": obj.get("PrivateNote") or "",
+        "line_items": _map_lines(obj.get("Line") or []) or synth_lines,
+        "raw": obj,
+        "created_at": now_iso(), "updated_at": now_iso(),
+    }
+
+
+def map_inventory_adjustment_txn(cid: str, realm_id: str, obj: dict) -> dict:
+    """InventoryAdjustment maps DR/CR of Inventory Asset against the
+    `AdjustAccountRef` (typically Inventory Shrinkage / Adjustments
+    Expense). Each `Line` carries `ItemAdjustmentLineDetail` with an
+    `AmountDiff` (positive = write-up, negative = write-down); we sum
+    them to derive the net inventory-asset movement. The bank side of
+    `_signed_balances` sees this via `bank_account_qbo_id` (adjust
+    account) and the offset via a synthetic split line pointing at
+    Inventory Asset (resolved from `AccountRef`).
+
+    Supersedes the older `map_inventory_adjustment` (which produced a
+    journal_entries doc with empty lines and required a separate cost-
+    resolution step). This one produces a fully-formed transaction
+    record ready for `_signed_balances`. Aug 22 2026.
+    """
+    adj_ref  = obj.get("AdjustAccountRef") or {}
+    inv_ref  = obj.get("AccountRef") or {}  # Inventory Asset account
+    lines = obj.get("Line") or []
+    net_amount = 0.0
+    synth_lines: list[dict] = []
+    for ln in lines:
+        detail = ln.get("ItemAdjustmentLineDetail") or {}
+        amt_diff = float(detail.get("AmountDiff") or 0)
+        qty_diff = float(detail.get("QtyDiff") or 0)
+        net_amount += amt_diff
+        item_ref = detail.get("ItemRef") or {}
+        synth_lines.append({
+            "description": item_ref.get("name") or "Inventory Adjustment",
+            "quantity": qty_diff,
+            "amount": amt_diff,
+            "item_qbo_id": item_ref.get("value"),
+            "account_qbo_id": inv_ref.get("value"),
+            "account_name": inv_ref.get("name") or "Inventory Asset",
+        })
+    magnitude = round(abs(net_amount), 2)
+    return {
+        "company_id": cid, "source": "qbo",
+        "qbo_id": obj["Id"],
+        "id": f"qbo-{cid[:8]}-inventoryadjustment-{obj['Id']}",
+        "realm_id": realm_id,
+        "txn_type": "InventoryAdjustment",
+        "number": obj.get("DocNumber") or f"IA-{obj['Id']}",
+        "date": obj.get("TxnDate") or "",
+        # `amount` is signed: positive net_amount = inventory write-up
+        # (DR Inventory Asset / CR Adjust account), negative = write-
+        # down (opposite). `bank_account_qbo_id` points at the ADJUST
+        # account so `_signed_balances` posts the offsetting side.
+        "amount": round(net_amount, 2),
+        "direction": "in" if net_amount >= 0 else "out",
+        "bank_account_qbo_id": adj_ref.get("value"),
+        "posted": True,
+        "needs_review": True,
+        "memo": obj.get("PrivateNote") or "",
+        "line_items": synth_lines,
+        "raw": obj,
+        "created_at": now_iso(), "updated_at": now_iso(),
+    }
+
+
+def map_non_posting_txn(cid: str, realm_id: str, obj: dict,
+                         txn_type: str) -> dict:
+    """Estimate / PurchaseOrder / RecurringTransaction — pulled for
+    UI round-trip but flagged `posted=False` so `_signed_balances`
+    ignores them (they never touch the GL). Standard shape otherwise
+    so existing entity list pages (`/estimates`, `/purchase-orders`,
+    `/recurring`) can render them unchanged.
+    """
+    ref = (obj.get("CustomerRef") or obj.get("VendorRef") or {})
+    return {
+        "company_id": cid, "source": "qbo",
+        "qbo_id": obj["Id"],
+        "id": f"qbo-{cid[:8]}-{txn_type.lower()}-{obj['Id']}",
+        "realm_id": realm_id,
+        "txn_type": txn_type,
+        "number": obj.get("DocNumber") or f"{txn_type}-{obj['Id']}",
+        "date": obj.get("TxnDate") or "",
+        "contact_qbo_id": ref.get("value"),
+        "contact_name": ref.get("name") or "",
+        "amount": round(float(obj.get("TotalAmt") or 0), 2),
+        "direction": "in" if txn_type == "Estimate" else "out",
+        # Critical — `posted=False` keeps these out of the ledger
+        # aggregations (`_signed_balances`, IS, BS, GL). They exist
+        # purely as UI records.
+        "posted": False,
+        "needs_review": False,
+        "memo": obj.get("PrivateNote") or obj.get("CustomerMemo", {}).get("value") or "",
         "line_items": _map_lines(obj.get("Line") or []),
         "raw": obj,
         "created_at": now_iso(), "updated_at": now_iso(),
     }
+
+
 
 
 async def _notify_migration_result(

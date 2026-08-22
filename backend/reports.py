@@ -104,6 +104,13 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
         # Feb 26 2026 — see CHANGELOG QBO CM double-count fix.
         if t.get("txn_type") == "CreditMemo":
             continue
+        # Non-posting entities (Estimate, PurchaseOrder,
+        # RecurringTransaction) are stored in db.transactions purely
+        # for the UI round-trip and are explicitly flagged
+        # `posted=False`. They must NOT contribute to any signed
+        # balance. Aug 22 2026 — non-posting round-trip.
+        if t.get("posted") is False:
+            continue
 
         amt = float(t.get("amount", 0) or 0)
         bank = t.get("bank_account_id")

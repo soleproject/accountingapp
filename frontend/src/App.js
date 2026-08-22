@@ -65,6 +65,9 @@ import Connections from "@/pages/Connections";
 import QboConnect from "@/pages/QboConnect";
 import QboMirror from "@/pages/QboMirror";
 import TestQbo from "@/pages/TestQbo";
+import VendorCredits from "@/pages/VendorCredits";
+import RefundReceipts from "@/pages/RefundReceipts";
+import SalesTax from "@/pages/SalesTax";
 import PfcCategoryMap from "@/pages/PfcCategoryMap";
 import StatementImportDetail from "@/pages/StatementImportDetail";
 import CompanySettings from "@/pages/CompanySettings";
@@ -179,6 +182,9 @@ function App() {
               <Route path="/connections" element={<Connections />} />
               <Route path="/connections/qbo" element={<QboConnect />} />
               <Route path="/test-qbo" element={<TestQbo />} />
+              <Route path="/vendor-credits" element={<VendorCredits />} />
+              <Route path="/refund-receipts" element={<RefundReceipts />} />
+              <Route path="/accounting/sales-tax" element={<SalesTax />} />
               <Route path="/settings/qbo-mirror" element={<QboMirror />} />
               <Route path="/settings/pfc-map" element={<PfcCategoryMap />} />
               <Route path="/connections/imports/:importId" element={<StatementImportDetail />} />
