@@ -328,6 +328,13 @@ async def qbo_oauth_callback(
         )
         return _err(f"exchange_failed:{str(e)[:120]}", rec)
     try:
+        # Dispatch to the isolated Test QBO connection collection when
+        # the state row was minted by the Test QBO OAuth start route.
+        # Setting the ContextVar ensures save_connection writes to
+        # `qbo_test_connections` and production `qbo_connections` stays
+        # untouched. Every other flow reads/writes production as before.
+        if (rec.get("mode") or "") == "test_qbo":
+            Q._conn_coll_var.set("qbo_test_connections")
         await Q.save_connection(cid, realmId, tokens, env=stored_env)
     except Exception as e:  # noqa: BLE001
         import logging
