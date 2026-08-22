@@ -164,6 +164,37 @@ export default function TestQbo() {
     }
   };
 
+  // Import via the production QBO OAuth link — no separate consent
+  // step. Backend uses `db.qbo_connections` tokens for the read but
+  // still writes to `qbo_test_raw`. Also runs the reports refresh so
+  // the BS/P&L snapshot lands in `qbo_test_reports`. Aug 22 2026.
+  const runMigrateFromProd = async () => {
+    setRunning(true);
+    try {
+      const r = await api.post(
+        `/companies/${currentId}/qbo-test/migrate`, null,
+        { params: { use_prod: true } },
+      );
+      const total = Object.values(r.data.counts || {})
+                       .reduce((a, b) => a + b, 0);
+      if (r.data.ok) {
+        toast.success(`Imported ${total} raw rows from production QBO`);
+      } else {
+        toast.warning("Completed with errors on some entities");
+      }
+      // Pull reports too so the panel lights up immediately.
+      try {
+        await api.post(`/companies/${currentId}/qbo-test/reports/refresh`,
+                        null, { params: { use_prod: true } });
+      } catch { /* non-fatal */ }
+      await refresh();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Import failed");
+    } finally {
+      setRunning(false);
+    }
+  };
+
   const runReset = async () => {
     setResetConfirm(false);
     try {
@@ -245,7 +276,7 @@ export default function TestQbo() {
             </div>
             <div className="text-base font-medium">Connect</div>
           </div>
-          <div>
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={connectQbo}
               disabled={connecting}
@@ -259,12 +290,37 @@ export default function TestQbo() {
                 : <ShieldCheck className="w-4 h-4" />}
               Connect to QuickBooks Online
             </button>
-            <p className="text-xs text-slate-500 mt-2">
-              Uses an isolated OAuth connection stored in
-              {" "}<code>qbo_test_connections</code>. Your production
-              QBO link is unaffected.
-            </p>
+            {/* Import from prod — only when a production QBO connection
+                exists on this company. Reuses prod OAuth tokens for
+                the pull but writes land in `qbo_test_raw` (isolation
+                preserved). Aug 22 2026 — user request. */}
+            {preview?.prod_connected && (
+              <button
+                onClick={runMigrateFromProd}
+                disabled={running || connecting}
+                className="inline-flex items-center gap-2 px-4 py-2.5
+                           rounded-lg border border-indigo-300 bg-white
+                           text-indigo-700 text-sm font-medium
+                           hover:bg-indigo-50 disabled:opacity-60"
+                data-testid="test-qbo-import-from-prod-btn"
+              >
+                {running
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <Play className="w-4 h-4" />}
+                Import from Production Connection
+              </button>
+            )}
           </div>
+          <p className="text-xs text-slate-500 mt-2">
+            {preview?.prod_connected
+              ? <>Reuse your production QBO connection to populate
+                  Test QBO without a second OAuth. Writes still land
+                  in <code>qbo_test_raw</code> — your live ledger
+                  is untouched.</>
+              : <>Uses an isolated OAuth connection stored in
+                  {" "}<code>qbo_test_connections</code>. Your production
+                  QBO link is unaffected.</>}
+          </p>
         </div>
       )}
 
