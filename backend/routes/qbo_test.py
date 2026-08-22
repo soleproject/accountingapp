@@ -61,26 +61,62 @@ def _use_test_conn():
     Q._conn_coll_var.set(_TEST_CONN_COLL)
 
 
-# Entities from the Test QBO tile grid (matches the Connect QBO
-# "Preview scope" panel 1:1). Order matches the UI grid: 3-column
-# reading order left-to-right, top-to-bottom.
+# Entities from the Test QBO tile grid — every queryable QBO REST v3
+# object type we care about for accounting parity. Grouped by
+# category in reading order (3-column grid):
+#
+#   1. Master data (chart of accounts, customers, vendors, items)
+#   2. HR / dimensional (employees, class, department, customer type)
+#   3. Sales side (invoices, estimates, sales receipts, credit/refund)
+#   4. Bill side (bills, POs, vendor credits, bill payments)
+#   5. Bank + cash (payments received, deposits, transfers,
+#      credit card payments, purchases/expenses)
+#   6. Manual + inventory (journal entries, inventory adjustment,
+#      recurring transactions)
+#   7. Reference (payment methods, terms, tax agencies/codes/rates)
+#   8. Company (company info, preferences, budget, attachments)
 _ENTITIES: list[str] = [
+    # Master data
     "Account",           # Chart of Accounts
     "Customer",
     "Vendor",
     "Item",
+    # HR + dimensional
+    "Employee",
+    "Class",
+    "Department",
+    "CustomerType",
+    # Sales side
     "Invoice",
+    "Estimate",
+    "SalesReceipt",
+    "CreditMemo",
+    "RefundReceipt",
+    # Bill side
     "Bill",
-    "Payment",           # Payments (received)
+    "PurchaseOrder",
+    "VendorCredit",
     "BillPayment",
-    "JournalEntry",
+    # Bank + cash
+    "Payment",           # Payments (received)
     "Deposit",
     "Transfer",
-    "CreditMemo",
-    "SalesReceipt",
-    "RefundReceipt",
+    "CreditCardPayment",
     "Purchase",          # Purchases / Expenses
+    # Manual + inventory
+    "JournalEntry",
     "InventoryAdjustment",
+    "RecurringTransaction",
+    # Reference
+    "PaymentMethod",
+    "Term",
+    "TaxAgency",
+    "TaxCode",
+    "TaxRate",
+    # Company
+    "CompanyInfo",
+    "Preferences",
+    "Budget",
     "Attachable",        # Attachments
 ]
 

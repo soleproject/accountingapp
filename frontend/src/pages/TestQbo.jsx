@@ -24,25 +24,51 @@ import {
 // production ledger, reports, or dashboards — pure raw payload lab.
 
 // Human-readable labels for the tile grid. Order = the tile grid
-// reading order (matches the Connect QBO "Preview scope" panel).
+// reading order (grouped: master data → HR/dimensional → sales side →
+// bill side → bank/cash → manual/inventory → reference → company).
 const ENTITY_META = [
-  { key: "Account",             label: "Chart of Accounts" },
-  { key: "Customer",            label: "Customers" },
-  { key: "Vendor",              label: "Vendors" },
-  { key: "Item",                label: "Items" },
-  { key: "Invoice",             label: "Invoices" },
-  { key: "Bill",                label: "Bills" },
-  { key: "Payment",             label: "Payments (received)" },
-  { key: "BillPayment",         label: "Bill Payments" },
-  { key: "JournalEntry",        label: "Journal Entries" },
-  { key: "Deposit",             label: "Deposits" },
-  { key: "Transfer",            label: "Transfers" },
-  { key: "CreditMemo",          label: "Credit Memos" },
-  { key: "SalesReceipt",        label: "Sales Receipts" },
-  { key: "RefundReceipt",       label: "Refund Receipts" },
-  { key: "Purchase",            label: "Purchases / Expenses" },
-  { key: "InventoryAdjustment", label: "InventoryAdjustment" },
-  { key: "Attachable",          label: "Attachments" },
+  // Master data
+  { key: "Account",              label: "Chart of Accounts" },
+  { key: "Customer",             label: "Customers" },
+  { key: "Vendor",               label: "Vendors" },
+  { key: "Item",                 label: "Items" },
+  // HR + dimensional
+  { key: "Employee",             label: "Employees" },
+  { key: "Class",                label: "Classes" },
+  { key: "Department",           label: "Departments" },
+  { key: "CustomerType",         label: "Customer Types" },
+  // Sales side
+  { key: "Invoice",              label: "Invoices" },
+  { key: "Estimate",             label: "Estimates" },
+  { key: "SalesReceipt",         label: "Sales Receipts" },
+  { key: "CreditMemo",           label: "Credit Memos" },
+  { key: "RefundReceipt",        label: "Refund Receipts" },
+  // Bill side
+  { key: "Bill",                 label: "Bills" },
+  { key: "PurchaseOrder",        label: "Purchase Orders" },
+  { key: "VendorCredit",         label: "Vendor Credits" },
+  { key: "BillPayment",          label: "Bill Payments" },
+  // Bank + cash
+  { key: "Payment",              label: "Payments (received)" },
+  { key: "Deposit",              label: "Deposits" },
+  { key: "Transfer",             label: "Transfers" },
+  { key: "CreditCardPayment",    label: "Credit Card Payments" },
+  { key: "Purchase",             label: "Purchases / Expenses" },
+  // Manual + inventory
+  { key: "JournalEntry",         label: "Journal Entries" },
+  { key: "InventoryAdjustment",  label: "InventoryAdjustment" },
+  { key: "RecurringTransaction", label: "Recurring Transactions" },
+  // Reference
+  { key: "PaymentMethod",        label: "Payment Methods" },
+  { key: "Term",                 label: "Terms" },
+  { key: "TaxAgency",            label: "Tax Agencies" },
+  { key: "TaxCode",              label: "Tax Codes" },
+  { key: "TaxRate",              label: "Tax Rates" },
+  // Company
+  { key: "CompanyInfo",          label: "Company Info" },
+  { key: "Preferences",          label: "Preferences" },
+  { key: "Budget",               label: "Budgets" },
+  { key: "Attachable",           label: "Attachments" },
 ];
 
 export default function TestQbo() {
