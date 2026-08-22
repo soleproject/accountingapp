@@ -201,15 +201,14 @@ export default function QboReconciliationPanel({ companyId, reportKind, basis, o
   const fetchFresh = async () => {
     setLoading(true); setError(null);
     try {
-      // For P&L pass full year-to-date range; for BS just end date
-      const today = new Date().toISOString().slice(0, 10);
-      const jan1 = today.slice(0, 4) + "-01-01";
+      // Let the backend apply the "since inception → far future"
+      // defaults so this snapshot lines up with Test QBO's date
+      // range. Previously we passed YTD-of-today here, which
+      // produced snapshots that visually mismatched Test QBO
+      // and made real drift indistinguishable from date-range
+      // truncation. Feb 27 2026.
       await api.post(`/companies/${companyId}/qbo/reports/snapshot`, null, {
-        params: {
-          start_date: jan1,
-          end_date: today,
-          accounting_method: method,
-        },
+        params: { accounting_method: method },
       });
       const r = await api.get(`/companies/${companyId}/qbo/reports/latest`, {
         params: { report_name: qboReportName, accounting_method: method },

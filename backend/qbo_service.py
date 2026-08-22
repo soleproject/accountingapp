@@ -421,7 +421,16 @@ async def snapshot_reports(
     reports = [
         ("ProfitAndLoss",   {"start_date": start_date, "end_date": end_date,
                              "accounting_method": accounting_method}),
-        ("BalanceSheet",    {"end_date": end_date,
+        # Balance Sheet: passing `start_date` too even though a BS is a
+        # point-in-time snapshot — QBO's response actually varies based
+        # on its presence (without start_date QBO defaults the period
+        # to YTD-of-end_date, which flattens historical accumulation
+        # into the current-period Net Income line and shifts Retained
+        # Earnings, changing TOTAL ASSETS by tens of thousands on real
+        # books). Passing the same wide window as Test QBO
+        # (2020-01-01 → 2099-12-31) makes both snapshots line up.
+        # Feb 27 2026 — BM QBO 2 LLC Compare-vs-Test $29k mismatch.
+        ("BalanceSheet",    {"start_date": start_date, "end_date": end_date,
                              "accounting_method": accounting_method}),
         ("TransactionList", {"start_date": start_date, "end_date": end_date,
                              "accounting_method": accounting_method}),

@@ -548,6 +548,17 @@ async def qbo_snapshot_reports(
     ``accounting_method`` = ``Accrual`` or ``Cash`` — mirrors QBO's
     per-report toggle. Callers should pass the same basis they want
     to compare our reports against.
+
+    Date-range defaults deliberately span "since inception → far
+    future" (2020-01-01 → 2099-12-31) so this endpoint returns the
+    same cumulative-history snapshot that Test QBO fetches. Two
+    frontend panels used to disagree on defaults (Compare panel:
+    YTD-of-today; QboConnect refresh: unspecified → QBO's own YTD),
+    producing snapshots at different as-of dates that then looked
+    like data drift when compared side-by-side. Aligning defaults
+    here fixes both frontends in one place. Callers wanting a
+    narrower period pass the params explicitly.
+    Feb 27 2026.
     """
     await require_company(user, cid)
     conn = await Q.get_connection(cid)
@@ -557,8 +568,8 @@ async def qbo_snapshot_reports(
         result = await Q.snapshot_reports(
             company_id=cid,
             realm_id=conn["realm_id"],
-            start_date=start_date,
-            end_date=end_date,
+            start_date=start_date or "2020-01-01",
+            end_date=end_date or "2099-12-31",
             accounting_method=accounting_method,
         )
     except Exception as e:  # noqa: BLE001

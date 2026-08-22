@@ -62,6 +62,24 @@ Root-caused a systemic parity gap on BM QBO 2 LLC where our P&L was off by $60k-
 - BS imbalance: **$103,751 → $43,676**
 - 47/47 QBO parity pytest tests still pass
 
+### Feb 27 2026 — QBO Snapshot Date-Range Alignment (Compare Panel ↔ Test QBO)
+
+**Problem**: The "Compare with official QuickBooks Online report" panel and the "Test QBO — QBO Reports" panel were showing DIFFERENT official QBO numbers on the same BM QBO 2 LLC company (Total Assets: $305k vs $334k on Accrual). Both pull from QBO's report API, so official numbers should be identical.
+
+**Root cause**: two independent snapshot code paths used different date-range defaults —
+1. `QboReconciliationPanel.fetchFresh` explicitly passed YTD-of-today (`2026-01-01 → 2026-08-22`)
+2. `snapshot_reports` for BS deliberately dropped `start_date` from the QBO query (thinking a BS is date-agnostic)
+3. Test QBO's `qbo_test.snapshot_test_reports` uses `2020-01-01 → 2099-12-31` and passes both dates
+
+QBO's BS response actually VARIES based on `start_date` presence — without it, QBO defaults the period to YTD-of-end_date, which flattens historical accumulation into current-period NI and shifts Retained Earnings, changing TOTAL ASSETS by tens of thousands.
+
+**Fix**:
+1. `POST /qbo/reports/snapshot` now defaults `start_date="2020-01-01"` and `end_date="2099-12-31"` when not provided — same wide window as Test QBO
+2. `snapshot_reports` no longer strips `start_date` from the BS query — passes it through to QBO
+3. `QboReconciliationPanel.fetchFresh` no longer passes explicit YTD — inherits backend defaults so both panels align in one place
+
+**Result**: Compare panel and Test QBO now return byte-identical official QBO numbers on all 4 reports (BS/PL × Accrual/Cash) on BM QBO 2 LLC.
+
 ### Feb 27 2026 — Deleted-Account Filter (BS/PL Match QBO's Hide-Inactive Convention)
 
 **Fix**: `_emit_section::_walk` now skips accounts where `active=False` AND QBO's own `raw.CurrentBalance ≈ 0`. Matches QBO's report engine convention (verified on BM QBO 2 LLC: `TEMPORARY-BP-Cash` with `Active=False, CurrentBalance=0` completely absent from QBO's BS/PL payload). Non-zero inactive accounts still render so we don't hide legitimate residual activity.
