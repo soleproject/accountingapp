@@ -22,6 +22,35 @@ Cloned live company **BM QBO 2 LLC** (prod id `2f6d6451-0fdb-44d3-ba97-05775f376
 
 ⚠️ QBO refresh tokens are single-use — the first environment (prod OR preview) to refresh invalidates the other. Treat this preview clone as short-lived.
 
+### Feb 27 2026 — QBO Parity: Fix #1 + #2 + #5 + #7 (JE Line Hydration + Deleted Accounts + Double-Count Elimination)
+
+Root-caused a systemic parity gap on BM QBO 2 LLC where our P&L was off by $60k-$120k and BS was $103k out of balance. Chain of fixes shipped:
+
+**Fix #1 — JE line `account_id` backfill** (`qbo_service.resolve_journal_entry_line_accounts`): The QBO importer wrote `account_qbo_id` on each `journal_entries.lines[i]` but not the local `account_id`. `reports._signed_balances` reads only `account_id`, silently dropping 98% of every JE line's ledger impact. New resolver folds the local id in — 293/299 lines on BM QBO 2 LLC recovered on first pass (rest were deleted-account refs, handled by Fix #2).
+
+**Fix #2 — Include inactive accounts in QBO pull** (`qbo_service.query_all`): Default `SELECT * FROM Account` filters out `Active=false`, so deleted accounts referenced by historical JEs never make it to our `accounts` collection. Added `WHERE Active IN (true, false)`. Picked up 3 missing accounts on BM QBO 2 LLC (Partners Clearing, Payment Clearing, TEMPORARY-BP-Cash).
+
+**Fix #5 — Transaction line-item `account_id` hydration** (`qbo_service.resolve_transaction_categories`): Extended existing resolver to also stamp `account_id` on each `transactions.line_items[i]`, unblocking drill-downs from BS/PL → source rows and the Transactions page category filter.
+
+**Fix #7 — A/R and A/P double-count elimination** (`reports.compute_balance_sheet` + `reports._open_ar_ap`): After Fix #1 activated JE-driven A/R and A/P balances in `_signed_balances`, the balance-sheet builder was ALSO appending a phantom "Accounts Receivable" / "Accounts Payable" row from `_open_ar_ap`, double-counting every year-end adjusting JE. Rewrote `_open_ar_ap` to bucket totals by `ARAccountRef`/`APAccountRef` (QBO tells us which A/R and A/P account each invoice/bill posts to), and `compute_balance_sheet` now folds each bucket into `by[local_id]` **before** section emit — no more phantom rows, single accurate row per A/R/A/P account. AR on BM QBO 2 LLC now shows $43,989.36 vs QBO $45,000.00 (within $1,011).
+
+**Data patch on BM QBO 2 LLC**: also re-ran `_post_opening_balances_je` — the stale opening-balance JE created during migration (before Fix #1 landed) had over-plugged $120k+ on Note Receivable accounts because JE lines were still being dropped by `_signed_balances`. Re-running the resolver (idempotent, delete + rewrite) cleared that stale plug.
+
+**Impact:**
+- P&L Accrual: 68/83 accounts match to the penny (was 1/85); NI within $3.7k of QBO ($244,346 vs $240,617)
+- P&L Cash: 67/83 accounts match; NI $75,546 vs QBO $130,317 (residual Services drift)
+- BS Accrual imbalance: $103,751 (was $103,751 originally, $163,827 after Fix #1 alone). Equity now within $2.5k of QBO ($246,420 vs $243,891)
+- 47/47 QBO parity tests pass
+
+**Remaining BS drift** (~$103k imbalance) identified but not yet fixed:
+1. Multi-level parent/child rendering — Allowance Note Receivable (grandchild) not rolled into 72 Holdings LLC parent (`~$60k`)
+2. Deleted-with-activity accounts showing (TEMPORARY-BP-Cash `~$47k`) — QBO hides these from reports
+3. Skyward AMEX Ops vs Gold Card offsetting drift (`~$32k` each side)
+4. Undeposited Funds ↔ Stripe Clearing swap (`~$37k` both sides, nets to 0 on total)
+5. AP header-account $188 phantom row
+
+
+
 
 
 ### Feb 26 2026 — QBO Integration: BS Ties Penny-for-Penny to QBO's Own Report

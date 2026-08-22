@@ -284,6 +284,8 @@ async def _open_ar_ap(company_id: str, as_of: str, start: str | None = None):
     ap_start = 0.0
     ar_billed_in_period = 0.0
     ap_billed_in_period = 0.0
+    ar_by_account: dict[str, float] = {}
+    ap_by_account: dict[str, float] = {}
 
     # Inventory-tracked bill lines already sit on the balance sheet
     # via `DR Inventory / CR A/P` journal entries posted by
@@ -326,8 +328,11 @@ async def _open_ar_ap(company_id: str, as_of: str, start: str | None = None):
         issue = i.get("issue_date") or ""
         total = float(i.get("total", 0) or 0)
         bal = float(i.get("balance_due", 0) or 0)
+        ar_qid = str(((i.get("raw") or {}).get("ARAccountRef") or {}).get("value") or "")
         if issue and issue <= as_of and bal > 0.005:
             ar_end += bal
+            if ar_qid:
+                ar_by_account[ar_qid] = ar_by_account.get(ar_qid, 0.0) + bal
         if prev_end and issue and issue <= prev_end and bal > 0.005:
             # Rough approximation: use current balance_due as a snapshot proxy.
             # If total==bal (unpaid) we count it fully; partially-paid may
@@ -340,6 +345,7 @@ async def _open_ar_ap(company_id: str, as_of: str, start: str | None = None):
         issue = b.get("issue_date") or ""
         total = float(b.get("total", 0) or 0)
         bal = float(b.get("balance_due", 0) or 0)
+        ap_qid = str(((b.get("raw") or {}).get("APAccountRef") or {}).get("value") or "")
         # Inventory-tracked portion already booked as A/P via JE — pull
         # it out of every accrual figure so we don't count it twice.
         inv_portion = float(inv_bill_portion.get(b.get("id"), 0.0))
@@ -350,7 +356,10 @@ async def _open_ar_ap(company_id: str, as_of: str, start: str | None = None):
         open_ratio = (bal / total) if total > 0.005 else 0.0
         open_inv_portion = inv_portion * open_ratio
         if issue and issue <= as_of and bal > 0.005:
-            ap_end += max(bal - open_inv_portion, 0.0)
+            open_bill_net = max(bal - open_inv_portion, 0.0)
+            ap_end += open_bill_net
+            if ap_qid:
+                ap_by_account[ap_qid] = ap_by_account.get(ap_qid, 0.0) + open_bill_net
         if prev_end and issue and issue <= prev_end and bal > 0.005:
             ap_start += max(bal - open_inv_portion, 0.0)
         if _in_period(issue):
@@ -361,6 +370,14 @@ async def _open_ar_ap(company_id: str, as_of: str, start: str | None = None):
         "ar_start": round(ar_start, 2), "ap_start": round(ap_start, 2),
         "ar_billed_in_period": round(ar_billed_in_period, 2),
         "ap_billed_in_period": round(ap_billed_in_period, 2),
+        # Per-account bucketing so `compute_balance_sheet` can fold each
+        # AR/AP total into the correct GL account row (bills post to
+        # `APAccountRef`, invoices to `ARAccountRef`). Only populated
+        # for QBO-imported docs — native ones default to unspecified
+        # and fall through to the caller's primary-account fallback.
+        # Feb 27 2026 — see BM QBO 2 LLC parity fix.
+        "ar_by_account_qbo_id": {k: round(v, 2) for k, v in ar_by_account.items()},
+        "ap_by_account_qbo_id": {k: round(v, 2) for k, v in ap_by_account.items()},
     }
 
 
@@ -948,6 +965,78 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
     accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
     by = await _signed_balances(company_id, start=None, end=as_of, include_pre_period=True)
 
+    # ------------------------------------------------------------------
+    # A/R and A/P: layer unpaid-invoice / unpaid-bill totals directly
+    # onto the corresponding GL account balance BEFORE we emit sections.
+    #
+    # Historical bug (fixed Feb 27 2026): we used to emit a phantom
+    # "Accounts Receivable" / "Accounts Payable" row *after* the section
+    # emit, on top of the QBO-imported A/R and A/P accounts. As long as
+    # `_signed_balances` was dropping JE lines (see Fix #1 in
+    # qbo_service.resolve_journal_entry_line_accounts), the section
+    # rows sat empty and the phantom row was the only A/R/A/P we
+    # showed — so the numbers looked ok. Once JE lines started posting
+    # correctly, every year-end true-up JE to A/R (e.g.
+    # "reclassify $85k AR into Note Receivable") appeared TWICE — once
+    # in the section row via `by[AR_id]`, and again in the phantom row.
+    # BM QBO 2 LLC drifted by $118k on the BS because of this.
+    #
+    # Fix: bucket `_open_ar_ap` by `ARAccountRef`/`APAccountRef` (QBO
+    # tells us which A/R and A/P account each invoice/bill posts to),
+    # translate those qbo_ids to local ids, and fold each bucket into
+    # `by[local_id]` using the appropriate sign convention. Native (non-
+    # QBO) docs with no A/R/A/P ref default to the first A/R and A/P
+    # account found in the CoA.
+    # ------------------------------------------------------------------
+    ar_open = 0.0
+    ap_open = 0.0
+    ap_split_result: dict | None = None
+    if basis == "accrual":
+        ap_split_result = await _open_ar_ap(company_id, as_of=as_of, start=None)
+        ar_open = ap_split_result["ar_end"]
+        ap_open = ap_split_result["ap_end"]
+
+        # Local-id lookup keyed on qbo_id AND primary A/R / A/P
+        # accounts for the native / no-ref fallback path.
+        acct_by_qbo_id = {str(a["qbo_id"]): a for a in accts if a.get("qbo_id")}
+        ar_accts = sorted(
+            [a for a in accts
+             if a["type"] == "asset"
+             and (a.get("subtype") or "").lower() == "accountsreceivable"],
+            key=lambda a: (a.get("code") or "", a.get("name") or ""),
+        )
+        ap_accts = sorted(
+            [a for a in accts
+             if a["type"] == "liability"
+             and (a.get("subtype") or "").lower() == "accountspayable"],
+            key=lambda a: (a.get("code") or "", a.get("name") or ""),
+        )
+        primary_ar = ar_accts[0] if ar_accts else None
+        primary_ap = ap_accts[0] if ap_accts else None
+
+        for qid, amt in (ap_split_result.get("ar_by_account_qbo_id") or {}).items():
+            a = acct_by_qbo_id.get(qid) or primary_ar
+            if a and abs(amt) >= 0.005:
+                by[a["id"]] = by.get(a["id"], 0.0) + amt
+        # Any unbucketed remainder (native invoices w/o ARAccountRef)
+        # spills onto the primary A/R.
+        bucketed_ar = sum((ap_split_result.get("ar_by_account_qbo_id") or {}).values())
+        unbucketed_ar = ar_open - bucketed_ar
+        if primary_ar and abs(unbucketed_ar) >= 0.005:
+            by[primary_ar["id"]] = by.get(primary_ar["id"], 0.0) + unbucketed_ar
+
+        for qid, amt in (ap_split_result.get("ap_by_account_qbo_id") or {}).items():
+            a = acct_by_qbo_id.get(qid) or primary_ap
+            # A/P is credit-normal — raw ledger convention stores a
+            # positive AP balance as a NEGATIVE `by[]` value (see
+            # `_display_amount`). Subtract to reflect an increase.
+            if a and abs(amt) >= 0.005:
+                by[a["id"]] = by.get(a["id"], 0.0) - amt
+        bucketed_ap = sum((ap_split_result.get("ap_by_account_qbo_id") or {}).values())
+        unbucketed_ap = ap_open - bucketed_ap
+        if primary_ap and abs(unbucketed_ap) >= 0.005:
+            by[primary_ap["id"]] = by.get(primary_ap["id"], 0.0) - unbucketed_ap
+
     # ----- Build parent → children index for hierarchical rollup -----
     # Each account can have `parent_account_id`. Parents (no parent id) show
     # a rolled-up amount = own direct postings + sum of children. Children
@@ -1071,21 +1160,16 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
             else:
                 net_income_current -= disp
 
-    # Accrual basis: layer in A/R (unpaid invoices) as an asset, A/P (unpaid bills)
-    # as a liability, and adjust net income by (A/R - A/P) so the sheet balances.
-    ar_open = 0.0
-    ap_open = 0.0
+    # Accrual basis: A/R (unpaid invoices) and A/P (unpaid bills) are
+    # already folded into `by[]` above so the section-emit rows carry
+    # the correct combined GL balance. We still need to bump NI by
+    # (A/R − A/P) so the sheet balances (invoices/bills represent
+    # earned revenue / accrued expense that hasn't yet moved through
+    # `_signed_balances`).
     if basis == "accrual":
-        ap = await _open_ar_ap(company_id, as_of=as_of, start=None)
-        ar_open = ap["ar_end"]
-        ap_open = ap["ap_end"]
-        if ar_open >= 0.005:
-            assets.append({"code": "1200", "name": "Accounts Receivable", "amount": round(ar_open, 2)})
-            total_assets += ar_open
-        if ap_open >= 0.005:
-            liabilities.append({"code": "2000", "name": "Accounts Payable", "amount": round(ap_open, 2)})
-            total_liabilities += ap_open
-        # keep books balanced: A/R adds to accrued revenue, A/P adds to accrued expense
+        # Preserve the top-level `ar_open` / `ap_open` figures returned
+        # in the response so callers (Recon Panel, cash-flow bridge)
+        # can still read them.
         net_income_current += ar_open - ap_open
         assets.sort(key=lambda x: (x["code"], x.get("parent_code", "")))
         liabilities.sort(key=lambda x: (x.get("parent_code", "") or x["code"], x["code"]))
