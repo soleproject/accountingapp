@@ -43,6 +43,14 @@ from datetime import datetime, timezone
 from cryptography.fernet import Fernet
 from motor.motor_asyncio import AsyncIOMotorClient
 
+# Preview's own crypto_service handles AES-GCM with the `enc_v1:`
+# sentinel format its `decrypt` expects. Using it here (instead of
+# raw Fernet) means the values we write are guaranteed readable when
+# the preview backend calls `decrypt(access_token_enc)` at runtime.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from crypto_service import encrypt as prev_encrypt  # noqa: E402
+from crypto_service import decrypt as prev_decrypt  # noqa: E402
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -54,8 +62,10 @@ async def clone(company_name: str,
                  dry_run: bool) -> None:
     prod_url = os.environ["PROD_MONGO_URL"]
     prev_url = os.environ["PREVIEW_MONGO_URL"]
-    prod_fernet = Fernet(os.environ["PROD_FIELD_ENCRYPTION_KEY"].encode())
-    prev_fernet = Fernet(os.environ["PREVIEW_FIELD_ENCRYPTION_KEY"].encode())
+    # Prod may run without FIELD_ENCRYPTION_KEY, in which case its
+    # `access_token_enc` fields are just plaintext strings.
+    prod_key = os.environ.get("PROD_FIELD_ENCRYPTION_KEY")
+    prod_fernet = Fernet(prod_key.encode()) if prod_key else None
 
     prod = AsyncIOMotorClient(prod_url)
     prev = AsyncIOMotorClient(prev_url)
@@ -78,13 +88,23 @@ async def clone(company_name: str,
     print(f"[prod] qbo: realm={src_conn['realm_id']} "
           f"env={src_conn.get('env')} status={src_conn.get('status')}")
 
-    # -------- Decrypt + re-encrypt tokens --------
-    access = prod_fernet.decrypt(
-        src_conn["access_token_enc"].encode()).decode()
-    refresh = prod_fernet.decrypt(
-        src_conn["refresh_token_enc"].encode()).decode()
-    new_access_enc  = prev_fernet.encrypt(access.encode()).decode()
-    new_refresh_enc = prev_fernet.encrypt(refresh.encode()).decode()
+    # -------- Decrypt (or read plaintext) + re-encrypt tokens --------
+    def _read(v: str) -> str:
+        # Source is prod. Two possibilities:
+        #   1. prod_fernet is set  → tokens are Fernet-encrypted
+        #   2. prod_fernet is None → tokens are plaintext (dev mode)
+        if prod_fernet is None:
+            return v
+        return prod_fernet.decrypt(v.encode()).decode()
+
+    # Target is preview. Always run through preview's crypto_service so
+    # the resulting value carries the `enc_v1:` sentinel the runtime
+    # `decrypt()` expects. When preview has no key, encrypt() is a
+    # no-op passthrough, still safe.
+    access  = _read(src_conn["access_token_enc"])
+    refresh = _read(src_conn["refresh_token_enc"])
+    new_access_enc  = prev_encrypt(access)
+    new_refresh_enc = prev_encrypt(refresh)
 
     # -------- Compose preview docs --------
     target_cid = target_company_id or str(uuid.uuid4())
@@ -132,8 +152,7 @@ def main():
     args = ap.parse_args()
     if not args.company_name and not args.source_company_id:
         ap.error("provide --company-name or --source-company-id")
-    for k in ("PROD_MONGO_URL", "PROD_FIELD_ENCRYPTION_KEY",
-              "PREVIEW_MONGO_URL", "PREVIEW_FIELD_ENCRYPTION_KEY"):
+    for k in ("PROD_MONGO_URL", "PREVIEW_MONGO_URL"):
         if not os.environ.get(k):
             ap.error(f"missing env: {k}")
     asyncio.run(clone(args.company_name, args.source_company_id,
