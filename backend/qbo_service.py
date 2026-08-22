@@ -428,7 +428,11 @@ async def snapshot_reports(
         # into the current-period Net Income line and shifts Retained
         # Earnings, changing TOTAL ASSETS by tens of thousands on real
         # books). Passing the same wide window as Test QBO
-        # (2020-01-01 → 2099-12-31) makes both snapshots line up.
+        # (2000-01-01 → 2099-12-31) makes both snapshots line up.
+        # 2000-01-01 is deliberately older than QBO's 2001 launch so
+        # no legit book ever has activity before this floor —
+        # protects report/backfill correctness on legacy companies
+        # with pre-2020 history.
         # Feb 27 2026 — BM QBO 2 LLC Compare-vs-Test $29k mismatch.
         ("BalanceSheet",    {"start_date": start_date, "end_date": end_date,
                              "accounting_method": accounting_method}),
@@ -3147,7 +3151,7 @@ def _flatten_gl_rows(rows: list) -> list[dict]:
 
 async def resolve_qbo_gl_line_accounts(
     company_id: str,
-    start_date: str = "2020-01-01",
+    start_date: str = "2000-01-01",
     end_date: str | None = None,
 ) -> dict:
     """Use QBO's General Ledger as source-of-truth to stamp

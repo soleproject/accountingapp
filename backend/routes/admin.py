@@ -547,14 +547,17 @@ class QboFullBackfillIn(BaseModel):
 async def _bs_snapshot(cid: str) -> dict:
     """Small helper: capture the four headline BS/PL numbers we care
     about for the diff report. Uses the same as-of range Test QBO
-    and the Compare panel now share (2020-01-01 → 2099-12-31)."""
+    and the Compare panel now share (2000-01-01 → 2099-12-31).
+    Floor of 2000-01-01 is deliberately pre-QBO-launch (2001) so no
+    real book ever has activity before it — guards against silent
+    truncation of legacy companies with pre-2020 history."""
     end = "2099-12-31"
     out: dict = {}
     for basis in ("accrual", "cash"):
         try:
             bs = await R.compute_balance_sheet(cid, end, basis)
             pl = await R.compute_income_statement(
-                cid, "2020-01-01", end, basis)
+                cid, "2000-01-01", end, basis)
             out[basis] = {
                 "total_assets": bs.get("total_assets"),
                 "total_liabilities": bs.get("total_liabilities"),
@@ -624,8 +627,10 @@ async def admin_qbo_full_backfill(
             entry["dry_run"] = True
             entry["planned_steps"] = [
                 "re_pull_accounts_incl_inactive",
+                "resolve_account_parents",
                 "resolve_transaction_categories",
                 "resolve_journal_entry_line_accounts",
+                "remap_qbo_transfers",
                 "reset_and_resolve_deposit_splits",
                 "post_opening_balances_je",
             ]
@@ -660,6 +665,58 @@ async def admin_qbo_full_backfill(
             # Step 3 — JE line account_id backfill.
             step_stats["je_lines_resolved"] = \
                 await Q.resolve_journal_entry_line_accounts(cid)
+
+            # Step 3.5 — re-map QBO Transfer transactions.
+            # QBO's Transfer entity stores its dollar in `Amount`
+            # (not `TotalAmt`), AND legacy migrations mapped Transfer
+            # `bank_account_qbo_id` to `FromAccountRef` with no
+            # category leg. Result on any pre-fix data: every
+            # transfer has `amount=0` OR posts to the wrong bank
+            # direction, silently dropping the source→destination
+            # motion. Nicole Pettyjohn canary Feb 27 2026 — 76
+            # transfers moving $145k+ were entirely missing from
+            # the ledger.
+            #
+            # We can't just re-run `resolve_transaction_categories`
+            # to fix this — the underlying `amount` field is still
+            # 0, and the bank/category account_ids are already
+            # populated (to the wrong values). Only re-mapping via
+            # the fixed `map_generic_txn` recomputes them.
+            transfer_updated = 0
+            async for t in db.transactions.find({
+                "company_id": cid, "txn_type": "Transfer",
+                "source": "qbo",
+            }):
+                raw = t.get("raw") or {}
+                if not raw.get("Id"):
+                    continue
+                new_doc = Q.map_generic_txn(
+                    cid, realm_id, raw, "Transfer")
+                r = await db.transactions.update_one(
+                    {"id": t["id"]},
+                    {"$set": {
+                        "amount": new_doc["amount"],
+                        "direction": new_doc["direction"],
+                        "bank_account_qbo_id":
+                            new_doc["bank_account_qbo_id"],
+                        "line_items": new_doc["line_items"],
+                        # Blank so the re-resolvers stamp fresh.
+                        "category_account_id": None,
+                        "category_account_qbo_id": None,
+                        "category_account_name": None,
+                        "category_account_code": None,
+                        "bank_account_id": None,
+                    }},
+                )
+                transfer_updated += r.modified_count
+            step_stats["transfers_remapped"] = transfer_updated
+            if transfer_updated:
+                # Re-hydrate bank + category account_ids that we
+                # just blanked out.
+                step_stats["transfers_banks_resolved"] = \
+                    await Q.resolve_transaction_banks(cid)
+                step_stats["transfers_categories_resolved"] = \
+                    await Q.resolve_transaction_categories(cid)
 
             # Step 4 — clear + re-resolve deposit splits so the UF
             # fallback picks the correct account (see the loose-query

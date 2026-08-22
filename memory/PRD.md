@@ -49,6 +49,28 @@ Root-caused a systemic parity gap on BM QBO 2 LLC where our P&L was off by $60k-
 4. Undeposited Funds ↔ Stripe Clearing swap (`~$37k` both sides, nets to 0 on total)
 5. AP header-account $188 phantom row
 
+### Feb 27 2026 — Pre-2020 History Guard + Transfer Re-map in Backfill
+
+**Two hardening changes ahead of prod broadcast:**
+
+**1. Widened default date floor from `2020-01-01` → `2000-01-01`**
+Rationale: QBO launched in 2001, so no legit book has activity before 2000-01-01. Setting the floor there guards against silent P&L truncation on any legacy company migrated with pre-2020 history. Changed in 4 places: `qbo_service.snapshot_reports` docstring, `qbo_service.resolve_qbo_gl_line_accounts` default, `routes/qbo.py::qbo_snapshot_reports` fallback, `routes/qbo.py::qbo_resolve_gl_line_accounts` default, `routes/qbo_test._DEFAULT_START`, `routes/admin.py::_bs_snapshot` P&L range. Frontend Compare panel + Test QBO auto-inherit via the backend defaults.
+
+**2. Extended `POST /api/admin/qbo/full-backfill` with Transfer re-map (Step 3.5)**
+Every legacy prod company's Transfers are broken (Nicole Pettyjohn canary caught it). Just re-running `resolve_transaction_categories` isn't enough because the underlying `amount` is still 0. Step 3.5 iterates every QBO-source Transfer in the company, re-runs `map_generic_txn` (which now knows to read `Amount` fallback + use `ToAccountRef`), blanks out the resolved category/bank fields, and lets Steps 2 (resolve_transaction_categories) and 3 (resolve_transaction_banks) re-hydrate cleanly. Response `steps.transfers_remapped` counter surfaces the blast radius per company.
+
+**Verified idempotent on Nicole Pettyjohn**: real backfill run on already-manually-patched data → 76 transfers re-mapped, before/after BS+P&L totals byte-identical. Safe to re-invoke.
+
+**Updated backfill workflow:**
+```bash
+# Dry-run to see per-company gaps
+POST /api/admin/qbo/full-backfill  {"dry_run": true}
+
+# Real run
+POST /api/admin/qbo/full-backfill  {"dry_run": false}
+```
+Planned steps returned in dry-run mode: `re_pull_accounts_incl_inactive` → `resolve_account_parents` → `resolve_transaction_categories` → `resolve_journal_entry_line_accounts` → `remap_qbo_transfers` → `reset_and_resolve_deposit_splits` → `post_opening_balances_je`.
+
 ### Feb 27 2026 — Nicole Pettyjohn Canary + Transfer Amount Bug Fix
 
 **Canary target:** cloned prod company `Nicole Pettyjohn` (realm `9341456698264639`) into preview → ran full migration under new code → compared to QBO's own reports.
