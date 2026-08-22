@@ -16,6 +16,14 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - **Auth**: JWT (bcrypt), role-based access (superadmin / pro / client), multi-tenant memberships
 
 
+### Feb 27 2026 — Prod→Preview Clone: "BM QBO 2 LLC"
+
+Cloned live company **BM QBO 2 LLC** (prod id `2f6d6451-0fdb-44d3-ba97-05775f37617c`, realm `9341452279649363`) from prod (`axiom_prod`) into preview as `bm-qbo-2-preview-clone` using `/app/backend/scripts/clone_qbo_to_preview.py`. QBO connection tokens (access + refresh) preserved via `crypto_service.encrypt` under preview's key. Post-clone remap: `owner_user_id → admin@axiom.ai`, `pro_user_id → pro@axiom.ai`, `partner_id/enterprise_id → None`; `users_companies` rows upserted for both. Tokens verified decryptable via preview backend. `PROD_MONGO_URL` was set inline per-command (never `export`ed) — no lingering credentials in the pod env. User can now switch to this company and click **Run Migration** on Connect QBO, or **Import from Production Connection** in Test QBO.
+
+⚠️ QBO refresh tokens are single-use — the first environment (prod OR preview) to refresh invalidates the other. Treat this preview clone as short-lived.
+
+
+
 ### Feb 26 2026 — QBO Integration: BS Ties Penny-for-Penny to QBO's Own Report
 
 **Milestone**: our accrual Balance Sheet now reconciles EXACTLY to QBO's own report on every account, verified on two distinct sandbox realms (`Sandbox Company US a026` realm `9341457726749100`, `Sandbox Company US 2457` realm `9341457727012245`). Same 11 accounts match to the penny — Total Assets $23,436.29 = QBO $23,436.29 on both. Companies now migrated from QBO can trust the accrual BS out of the box.
