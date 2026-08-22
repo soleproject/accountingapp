@@ -15,12 +15,25 @@ export default function Payments() {
   const [sp, setSp] = useSearchParams();
   // ?direction=in|out drives the Sales / Purchases toggle. Missing param
   // means "All" (both flavours in one list).
+  // ?type=cc switches the list to Credit Card Payments (which live in
+  // `db.transactions` with `txn_type='CreditCardPayment'`, not `db.payments`)
+  // Added Aug 22 2026 — closes the enterprise BS drift where every
+  // CC-payoff was invisible to the ledger UI.
   const urlDir = sp.get("direction");
+  const urlType = sp.get("type");
+  const isCcTab = urlType === "cc";
   const direction = urlDir === "in" ? "in" : urlDir === "out" ? "out" : "all";
   const setDirection = (v) => {
     const next = new URLSearchParams(sp);
     if (v === "in" || v === "out") next.set("direction", v);
     else next.delete("direction");
+    next.delete("type");
+    setSp(next, { replace: true });
+  };
+  const setType = (v) => {
+    const next = new URLSearchParams(sp);
+    if (v) next.set("type", v);
+    else next.delete("type");
     setSp(next, { replace: true });
   };
   const [query, setQuery] = useState("");
@@ -54,6 +67,29 @@ export default function Payments() {
   // Accept either signal so QBO imports show up in the right tab.
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
+    // Credit-card payments live in db.transactions, not db.payments.
+    // Adapt txn shape to the payment row shape so the existing table
+    // renders them without a separate template.
+    if (isCcTab) {
+      return transactions
+        .filter(t => t.txn_type === "CreditCardPayment")
+        .map(t => ({
+          id: t.id, date: t.date,
+          contact_name: t.contact_name,
+          amount: Math.abs(Number(t.amount || 0)),
+          direction: "out",
+          method: "Credit Card",
+          reference: t.number,
+          notes: t.memo,
+          _cc: true,
+        }))
+        .filter(p => {
+          if (!q) return true;
+          return [p.contact_name, p.method, p.reference, p.notes,
+                   String(p.amount || "")]
+                  .filter(Boolean).join(" ").toLowerCase().includes(q);
+        });
+    }
     return items.filter(p => {
       if (direction === "in"  && p.direction !== "in"  && !p.linked_invoice_id) return false;
       if (direction === "out" && p.direction !== "out" && !p.linked_bill_id)    return false;
@@ -67,11 +103,14 @@ export default function Payments() {
       ].filter(Boolean).join(" ").toLowerCase();
       return haystack.includes(q);
     });
-  }, [items, direction, query, invoices, bills]);
+  }, [items, transactions, direction, query, invoices, bills, isCcTab]);
 
-  const pageTitle = direction === "in" ? "Sales Payments"
+  const pageTitle = isCcTab ? "Credit Card Payments"
+    : direction === "in" ? "Sales Payments"
     : direction === "out" ? "Purchases Payments" : "Payments";
-  const pageSubtitle = direction === "in" ? "Money received · linked to invoices."
+  const pageSubtitle = isCcTab
+    ? "Payoffs from a bank account to a credit-card liability."
+    : direction === "in" ? "Money received · linked to invoices."
     : direction === "out" ? "Money sent · linked to bills."
     : "Received & sent · linked to invoices or bills.";
   return (

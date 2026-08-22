@@ -755,6 +755,10 @@ _PIPELINE: list[tuple[str, callable, str]] = [
     ("SalesReceipt",  lambda c, r, o: map_generic_txn(c, r, o, "SalesReceipt"), "transactions"),
     ("RefundReceipt", lambda c, r, o: map_generic_txn(c, r, o, "RefundReceipt"),"transactions"),
     ("CreditMemo",    lambda c, r, o: map_generic_txn(c, r, o, "CreditMemo"),   "transactions"),
+    # Aug 22 2026 — Closing enterprise BS drift ($1M+ on Perfect Synovus)
+    # caused by these two categories previously being un-imported.
+    ("VendorCredit",       lambda c, r, o: map_generic_txn(c, r, o, "VendorCredit"),       "transactions"),
+    ("CreditCardPayment",  lambda c, r, o: map_generic_txn(c, r, o, "CreditCardPayment"),  "transactions"),
 ]
 
 
@@ -1076,7 +1080,11 @@ def map_inventory_adjustment(cid: str, realm_id: str, obj: dict) -> dict:
 # negative = money OUT. QBO returns TotalAmt as a magnitude, so we
 # sign it here based on the txn_type. Kept as a module-level constant
 # so the backfill resolver can reuse the exact same rules.
-_OUTFLOW_TXN_TYPES = {"Purchase", "RefundReceipt", "CreditMemo"}
+_OUTFLOW_TXN_TYPES = {"Purchase", "RefundReceipt", "CreditMemo",
+                       # Aug 22 2026 — CC payments are outflows from
+                       # the funding bank; Vendor Credits reduce A/P
+                       # (net outflow of AP recognition).
+                       "CreditCardPayment", "VendorCredit"}
 _INFLOW_TXN_TYPES = {"Deposit", "SalesReceipt"}
 # Transfer is signless at the top level — it's a wash between two
 # asset accounts; the debit/credit legs carry the direction. Leave
@@ -1111,12 +1119,19 @@ def _bank_account_qbo_id(obj: dict, txn_type: str) -> str | None:
       CreditMemo      → `ARAccountRef` (AR side)
     """
     key = {
-        "Purchase":       "AccountRef",
-        "Deposit":        "DepositToAccountRef",
-        "SalesReceipt":   "DepositToAccountRef",
-        "RefundReceipt":  "DepositToAccountRef",
-        "Transfer":       "FromAccountRef",
-        "CreditMemo":     "ARAccountRef",
+        "Purchase":          "AccountRef",
+        "Deposit":           "DepositToAccountRef",
+        "SalesReceipt":      "DepositToAccountRef",
+        "RefundReceipt":     "DepositToAccountRef",
+        "Transfer":          "FromAccountRef",
+        "CreditMemo":        "ARAccountRef",
+        # New Aug 22 2026 — production parity for enterprise drift.
+        # CreditCardPayment: source of funds (Bank) → `BankAccountRef`,
+        # target is CreditCardAccountRef (handled below in lines mapping).
+        "CreditCardPayment": "BankAccountRef",
+        # VendorCredit: A/P side → `APAccountRef` (falls back to the
+        # vendor's default A/P when missing). Same shape as Bill.
+        "VendorCredit":      "APAccountRef",
     }.get(txn_type)
     if not key:
         return None
@@ -1145,6 +1160,29 @@ def map_generic_txn(cid: str, realm_id: str, obj: dict, txn_type: str) -> dict:
     if txn_type == "Purchase" and obj.get("Credit"):
         signed = -signed
         direction = "in" if direction == "out" else "out"
+
+    # Synthesize a category-side split so both legs of the double
+    # entry land on the ledger for entities that don't carry a `Line`
+    # array with `AccountBasedExpenseLineDetail`.
+    synth_lines: list[dict] = []
+    if txn_type == "CreditCardPayment":
+        # DR the target Credit-Card liability by TotalAmt. The bank
+        # side (CR) is already captured via `bank_account_qbo_id`
+        # (BankAccountRef) — see `_bank_account_qbo_id` above.
+        cc_ref = obj.get("CreditCardAccountRef") or {}
+        cc_qid = cc_ref.get("value")
+        if cc_qid:
+            synth_lines = [{
+                "description": "Credit Card Payment",
+                "amount": magnitude,
+                "account_qbo_id": cc_qid,
+                "account_name": cc_ref.get("name") or "",
+            }]
+    elif txn_type == "VendorCredit":
+        # A/P side captured via `bank_account_qbo_id` (APAccountRef).
+        # Expense/COGS side lives in the QBO Line array, same shape
+        # as Bill — reuse the standard `_map_lines` output later.
+        pass
     return {
         "company_id": cid, "source": "qbo",
         "qbo_id": obj["Id"],
@@ -1171,7 +1209,7 @@ def map_generic_txn(cid: str, realm_id: str, obj: dict, txn_type: str) -> dict:
         "posted": True,
         "needs_review": True,
         "memo": obj.get("PrivateNote") or "",
-        "line_items": _map_lines(obj.get("Line") or []),
+        "line_items": _map_lines(obj.get("Line") or []) or synth_lines,
         "raw": obj,
         "created_at": now_iso(), "updated_at": now_iso(),
     }
