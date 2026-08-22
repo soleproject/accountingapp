@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import {
   Link2, CheckCircle2, XCircle, Loader2, ChevronRight,
   Sparkles, RefreshCw, Play, ShieldCheck, Mail,
+  FileBarChart2, Repeat as RepeatIcon,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
@@ -419,6 +420,29 @@ export default function QboConnect() {
                 </div>
               </div>
             )}
+            {/* Re-run migration — visible after a successful import so
+                the user can force a fresh full-scope pull without
+                disconnecting first. Migration is idempotent (records
+                are keyed by QBO id) so this is safe. Aug 22 2026. */}
+            {done && (
+              <div className="mt-3 flex items-center justify-between
+                               rounded-lg border bg-slate-50 px-4 py-3">
+                <div className="text-xs text-slate-600">
+                  Need to pull fresh data from QuickBooks? Re-run the
+                  full-scope migration. Safe to repeat.
+                </div>
+                <button
+                  onClick={() => setConfirmOpen(true)}
+                  disabled={busy}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5
+                             rounded-md bg-indigo-600 text-white text-sm
+                             hover:bg-indigo-500 disabled:opacity-50"
+                  data-testid="qbo-remigrate-btn"
+                >
+                  <RepeatIcon size={14} /> Re-run migration
+                </button>
+              </div>
+            )}
             {/* NOTE (Feb 2026): The post-migration action button
                 row (View CoA / View Contacts / Review Plaid
                 Categories / Open Live Mirror / Re-run migration /
@@ -433,6 +457,13 @@ export default function QboConnect() {
           </div>
         )}
       </section>
+
+      {/* QBO Reports snapshot — pull the raw BS and P&L from QBO and
+          store them in `qbo_report_snapshots`. Exposes both bases and
+          lets users refresh without disconnecting. Uses the same
+          storage as the Recon Panel drift view. Aug 22 2026. */}
+      <QboReportsPanel currentId={currentId}
+                        connected={!!status?.connected} />
 
       {/* Step 4: Open Live Mirror — always visible when connected so
           returning users can jump into the bi-directional sync
@@ -556,3 +587,197 @@ export default function QboConnect() {
     </div>
   );
 }
+
+
+// ---------- QBO Reports panel (raw BS + P&L snapshots) ------------
+
+function QboReportsPanel({ currentId, connected }) {
+  const [tab, setTab] = useState("BalanceSheet");
+  const [basis, setBasis] = useState("Accrual");
+  const [snapshot, setSnapshot] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    if (!currentId || !connected) return;
+    setLoading(true);
+    api.get(`/companies/${currentId}/qbo/reports/latest`, {
+      params: { report_name: tab, accounting_method: basis },
+    }).then(r => setSnapshot(r.data?.snapshot || null))
+      .catch(() => setSnapshot(null))
+      .finally(() => setLoading(false));
+  }, [currentId, connected, tab, basis]);
+
+  const refresh = async () => {
+    setRunning(true);
+    try {
+      // Snapshot both bases in one click so switching the toggle is instant.
+      await Promise.all([
+        api.post(`/companies/${currentId}/qbo/reports/snapshot`, null,
+                  { params: { accounting_method: "Accrual" } }),
+        api.post(`/companies/${currentId}/qbo/reports/snapshot`, null,
+                  { params: { accounting_method: "Cash" } }),
+      ]);
+      toast.success("Refreshed QBO reports");
+      // Re-fetch the currently-visible one.
+      const r = await api.get(`/companies/${currentId}/qbo/reports/latest`, {
+        params: { report_name: tab, accounting_method: basis },
+      });
+      setSnapshot(r.data?.snapshot || null);
+    } catch (e) {
+      toast.error("Failed to refresh reports");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const rows = useMemo(() => {
+    const p = snapshot?.payload;
+    if (!p) return [];
+    const out = [];
+    const walk = (rs, depth) => {
+      (rs || []).forEach((r) => {
+        const cd  = r.ColData || (r.Summary && r.Summary.ColData) || [];
+        const hcd = (r.Header && r.Header.ColData) || [];
+        const scd = (r.Summary && r.Summary.ColData) || [];
+        const inner = (r.Rows && r.Rows.Row) || [];
+        if (cd.length && !inner.length && !r.Summary) {
+          out.push({ kind: "data", label: cd[0]?.value || "",
+                     values: cd.slice(1).map(c => c.value || ""), depth });
+          return;
+        }
+        if (inner.length) {
+          if (hcd.length) {
+            out.push({ kind: "header",
+                       label: hcd[0]?.value || "",
+                       values: hcd.slice(1).map(c => c.value || ""), depth });
+          }
+          walk(inner, depth + 1);
+          if (scd.length) {
+            out.push({ kind: "total", label: scd[0]?.value || "",
+                       values: scd.slice(1).map(c => c.value || ""), depth });
+          }
+          return;
+        }
+        if (scd.length) {
+          out.push({ kind: "total", label: scd[0]?.value || "",
+                     values: scd.slice(1).map(c => c.value || ""), depth });
+        }
+      });
+    };
+    walk((p.Rows && p.Rows.Row) || [], 0);
+    return out;
+  }, [snapshot]);
+
+  const fmt = (v) => {
+    if (v === "" || v == null) return "";
+    const n = Number(v);
+    if (Number.isNaN(n)) return v;
+    const s = Math.abs(n).toLocaleString(undefined,
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return n < 0 ? `(${s})` : s;
+  };
+
+  return (
+    <section className={`rounded-xl border bg-white p-5 mb-4 transition-opacity ${
+      connected ? "" : "opacity-40 pointer-events-none"
+    }`} data-testid="qbo-reports-panel">
+      <div className="flex items-center gap-3 mb-4">
+        <div className="rounded-lg bg-amber-100 p-2">
+          <FileBarChart2 className="w-4 h-4 text-amber-600" />
+        </div>
+        <div className="flex-1">
+          <div className="font-heading font-semibold text-slate-900">QBO Reports</div>
+          <div className="text-xs text-slate-500">
+            Raw Balance Sheet & Profit and Loss from QuickBooks. Cash
+            and Accrual, unchanged. Refresh anytime without
+            disconnecting.
+          </div>
+        </div>
+        <button onClick={refresh} disabled={running || !connected}
+                 data-testid="qbo-reports-refresh-btn"
+                 className="inline-flex items-center gap-1.5 px-3 py-2
+                            rounded-md bg-amber-600 text-white text-sm
+                            hover:bg-amber-500 disabled:opacity-50">
+          {running ? <Loader2 className="w-4 h-4 animate-spin"/>
+                    : <RefreshCw className="w-4 h-4"/>}
+          {running ? "Pulling…" : snapshot ? "Refresh reports" : "Pull reports"}
+        </button>
+      </div>
+
+      {/* Selector */}
+      <div className="flex flex-wrap gap-2 border-t pt-3">
+        {["BalanceSheet", "ProfitAndLoss"].map((n) => (
+          <button key={n} onClick={() => setTab(n)}
+                   className={`px-3 py-1.5 rounded-lg text-sm border ${
+                     tab === n
+                       ? "bg-indigo-600 border-indigo-600 text-white"
+                       : "hover:bg-slate-50"
+                   }`}
+                   data-testid={`qbo-report-tab-${n}`}>
+            {n === "BalanceSheet" ? "Balance Sheet" : "Profit & Loss"}
+          </button>
+        ))}
+        <div className="ml-auto flex items-center gap-2 text-xs">
+          {["Accrual", "Cash"].map((b) => (
+            <button key={b} onClick={() => setBasis(b)}
+                     className={`px-2.5 py-1 rounded-md ${
+                       basis === b
+                         ? "bg-slate-900 text-white"
+                         : "text-slate-500 hover:text-slate-700"
+                     }`}
+                     data-testid={`qbo-report-basis-${b}`}>
+              {b}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="mt-3 overflow-auto rounded-lg border max-h-[520px]">
+        {loading ? (
+          <div className="p-6 text-sm text-slate-500 flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin"/> Loading report…
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="p-6 text-sm text-slate-500">
+            No snapshot yet. Click <b>Pull reports</b> to fetch from QuickBooks.
+          </div>
+        ) : (
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50 sticky top-0">
+              <tr>
+                <th className="text-left px-4 py-2 font-medium text-slate-500
+                                 uppercase text-[11px] tracking-wide">Account</th>
+                <th className="text-right px-4 py-2 font-medium text-slate-500
+                                 uppercase text-[11px] tracking-wide">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i} className={
+                  r.kind === "header" ? "font-semibold text-slate-800"
+                  : r.kind === "total" ? "font-medium bg-slate-50/70 border-t"
+                  : "text-slate-700"}>
+                  <td className="px-4 py-1.5"
+                       style={{ paddingLeft: 16 + r.depth * 18 }}>
+                    {r.label}
+                  </td>
+                  <td className="px-4 py-1.5 text-right font-mono tabular-nums">
+                    {fmt(r.values[r.values.length - 1])}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      {snapshot?.snapshot_at && (
+        <div className="text-[11px] text-slate-400 mt-2">
+          Fetched · {new Date(snapshot.snapshot_at).toLocaleString()}
+        </div>
+      )}
+    </section>
+  );
+}
+
