@@ -1098,6 +1098,21 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
         """
         def _walk(a: dict, parent_code: str | None,
                   parent_id: str | None) -> tuple[list[dict], float]:
+            # QBO parity: soft-deleted accounts whose authoritative
+            # `CurrentBalance` is 0 are hidden from QBO's own BS/PL
+            # payload (verified on BM QBO 2 LLC's TEMPORARY-BP-Cash,
+            # `Active=False` + `CurrentBalance=0`). Our ledger can
+            # accumulate residual activity on these (JE lines that
+            # debit/credit the account before QBO's hidden closing
+            # entry zeroes it out) — those show up as phantom $ on
+            # the BS. Skip the whole subtree to match QBO's
+            # rendering.  We do NOT skip inactive-with-nonzero
+            # accounts: if QBO still carries a balance, we do too.
+            # Feb 27 2026 — BM QBO 2 LLC parity fix.
+            if a.get("active") is False:
+                qcb = float((a.get("raw") or {}).get("CurrentBalance") or 0)
+                if abs(qcb) < 0.005:
+                    return [], 0.0
             direct = _display_amount(a, by.get(a["id"], 0.0))
             kids_sorted = sorted(
                 (k for k in children_of.get(a["id"], [])

@@ -59,6 +59,37 @@ Root-caused a systemic parity gap on BM QBO 2 LLC where our P&L was off by $60k-
   - `Allowance Note Receivable` -$60,075.63 (grandchild — was previously orphaned)
   - `Total Note Receivable - 72 Holdings, LLC` = **$60,075.63** ✅ matches QBO to the penny
   - `Total Client Note Receivables` = **$145,075.63** ✅ matches QBO to the penny
+- BS imbalance: **$103,751 → $43,676**
+- 47/47 QBO parity pytest tests still pass
+
+### Feb 27 2026 — Deleted-Account Filter (BS/PL Match QBO's Hide-Inactive Convention)
+
+**Fix**: `_emit_section::_walk` now skips accounts where `active=False` AND QBO's own `raw.CurrentBalance ≈ 0`. Matches QBO's report engine convention (verified on BM QBO 2 LLC: `TEMPORARY-BP-Cash` with `Active=False, CurrentBalance=0` completely absent from QBO's BS/PL payload). Non-zero inactive accounts still render so we don't hide legitimate residual activity.
+
+**Impact on BM QBO 2 LLC:**
+- BS imbalance: **$43,676 → -$3,728.53** (the residual is exactly the Uncategorized Expense pre-existing drift)
+- Accrual: assets $365,538 vs QBO $334,491, L $122,846 vs QBO $90,600, equity $246,420 vs QBO $243,891 (**within $2,529**)
+- 47/47 QBO parity tests still pass
+
+**Remaining BS drift (~$31k both sides, symmetric)**:
+- Skyward AMEX Operations `$32,405` vs QBO `$5,076` (+$27,329)
+- Skyward Bluevine Checking `$4,729` vs QBO `$0` (+$4,729)  
+- AMEX Gold Card liability `$35,313` vs QBO `$3,255` (+$32,058)
+- Undeposited Funds `$37,196` ↔ Stripe Clearing `-$37,196` — net 0 on assets, but wrong rows
+- AP header phantom `$188`
+
+Sum: assets over ≈ $32k, liab over ≈ $32k → symmetric drift = one JE double-post between the Skyward AMEX Ops/Gold Card pair.
+
+
+
+**Fix**: rewrote `reports.compute_balance_sheet::_emit_section` as a recursive tree walker so grandchildren of top-level accounts render under their DIRECT parent (with their own `Total {parent}` subtotal) instead of being silently dropped by the previous single-level implementation.
+
+**Impact on BM QBO 2 LLC:**
+- Note Receivable tree now renders correctly:
+  - `Note Receivable - 72 Holdings, LLC` $120,151.26
+  - `Allowance Note Receivable` -$60,075.63 (grandchild — was previously orphaned)
+  - `Total Note Receivable - 72 Holdings, LLC` = **$60,075.63** ✅ matches QBO to the penny
+  - `Total Client Note Receivables` = **$145,075.63** ✅ matches QBO to the penny
 - BS imbalance: **$103,751 → $43,676** ($60,075 closed in one shot — exactly the Allowance amount previously orphaned)
 - 47/47 QBO parity pytest tests still pass
 
