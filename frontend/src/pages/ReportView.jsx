@@ -4,7 +4,7 @@ import { api, BACKEND_URL } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
 import { t as tr } from "@/lib/i18n";
 import { TID } from "@/constants/testIds";
-import { Download, Loader2, ArrowRightCircle, ChevronLeft, ChevronDown, ChevronRight, Search, SlidersHorizontal, X } from "lucide-react";
+import { Download, Loader2, ArrowRightCircle, ChevronLeft, ChevronDown, ChevronRight, Search, SlidersHorizontal, X, Info } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import QboReconciliationPanel from "@/components/QboReconciliationPanel";
 import { toast } from "sonner";
@@ -697,10 +697,20 @@ function Section({ title }) {
     </div>
   );
 }
-function Row({ id, code, name, amount, bold, parent_code, onClick, expandable, expanded, onToggleExpand, childCount }) {
+function Row({ id, code, name, amount, bold, parent_code, variance_note, onClick, expandable, expanded, onToggleExpand, childCount }) {
   const fmtMoney = useMoneyFmt();
   const isChild = !!parent_code;
   const clickable = !!(onClick && id);
+  // Known Variance #1 — Bank/CC JE Rendering (Feb 27 2026). Backend
+  // stamps `variance_note: "bank_je_rendering"` on QBO-imported bank
+  // and credit-card rows because our engine sums every JE line for
+  // GAAP completeness while QBO's own BS report hides JEs against
+  // bank/CC accounts. Small discrepancies vs QBO's report on these
+  // rows are expected, not bugs — surface a tooltip so users know
+  // where our number came from.
+  const varianceTip = variance_note === "bank_je_rendering"
+    ? "Includes journal-entry activity against this account. QBO's own Balance Sheet report may hide JEs against bank/CC accounts, so this row can differ slightly from QBO. Ledger is authoritative — see General Ledger."
+    : null;
   return (
     <div
       className={`grid grid-cols-12 gap-2 px-3 py-1.5 border-b border-slate-100 ${bold ? "font-semibold border-slate-800" : ""} ${isChild ? "bg-slate-50/60" : ""} ${clickable ? "cursor-pointer hover:bg-indigo-50/60 transition-colors" : ""}`}
@@ -726,6 +736,15 @@ function Row({ id, code, name, amount, bold, parent_code, onClick, expandable, e
         {name}
         {expandable && !expanded && childCount > 0 && (
           <span className="ml-2 text-[10px] text-slate-400">+{childCount} sub</span>
+        )}
+        {varianceTip && (
+          <span
+            className="ml-1.5 inline-flex align-middle text-amber-500 cursor-help"
+            title={varianceTip}
+            data-testid={`row-variance-${code}`}
+          >
+            <Info size={11} />
+          </span>
         )}
       </div>
       <div className={`col-span-3 text-right font-mono-num ${isChild ? "text-slate-600 text-[13px]" : ""}`}>{fmtMoney(amount)}</div>

@@ -1058,6 +1058,12 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
         if pid:
             children_of.setdefault(pid, []).append(a)
 
+    _BANK_LIKE_SUBTYPES = {
+        "checking", "savings", "moneymarket", "cashonhand",
+        "trustaccounts", "moneyinaccount",
+        "creditcard",
+    }
+
     def _row(a: dict, direct_amount: float, parent_code: str | None = None,
               parent_id: str | None = None):
         r = {
@@ -1085,6 +1091,19 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
             r["parent_code"] = parent_code
         if parent_id:
             r["parent_id"] = parent_id
+        # Bank/CC-JE-variance annotation. See PRD.md "Known Variance #1
+        # — Bank/CC JE Rendering" (Feb 27 2026): QBO's own BS report
+        # excludes Journal Entries when computing bank/CC account
+        # balances, whereas our engine sums every JE line for GAAP
+        # completeness. On QBO-imported companies with year-end
+        # adjustment JEs against banks/CCs (e.g. BM QBO 2 LLC's
+        # opening-balance JE#7 + Q1-adjustment JE#12), this produces
+        # a small documented variance. The UI can look for this flag
+        # to render a "matches ledger; may differ from QBO's own BS
+        # for accounts with adjustment JEs" tooltip.
+        subtype_l = (a.get("subtype") or "").strip().lower()
+        if subtype_l in _BANK_LIKE_SUBTYPES and a.get("source") == "qbo":
+            r["variance_note"] = "bank_je_rendering"
         return r
 
     def _emit_section(section_type: str) -> tuple[list[dict], float]:

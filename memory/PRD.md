@@ -49,6 +49,30 @@ Root-caused a systemic parity gap on BM QBO 2 LLC where our P&L was off by $60k-
 4. Undeposited Funds ↔ Stripe Clearing swap (`~$37k` both sides, nets to 0 on total)
 5. AP header-account $188 phantom row
 
+### Feb 27 2026 — Known Variance #1: Bank/CC JE Rendering (Accepted)
+
+**Status:** ACCEPTED / DOCUMENTED. Not a bug, structural convention mismatch.
+
+**What it is:** On QBO-imported companies, bank and credit-card accounts may show slightly different balances on Axiom's BS than QBO's own BS report — specifically when there are Journal Entries with lines targeting those bank/CC accounts (opening balances, adjusting entries, bank-fee JEs booked directly to the bank register).
+
+**Root cause:** QBO's report engine excludes Journal Entries from bank/CC account balances (verified via QBO's own TransactionList filtered on `AMEX Operations` — 295 rows across 7 transaction types, zero JEs). Our engine sums every ledger post per GAAP standard, so JE lines to bank/CC accounts DO show in our BS. Both approaches are internally consistent; they disagree only on which is "source of truth" for a bank balance.
+
+**Dollar impact on BM QBO 2 LLC:**
+- Skyward AMEX Operations: ours $32,405.82 vs QBO $5,076.88 (over $27,328.94)
+- Skyward Bluevine Checking: ours $4,729.05 vs QBO $0 (over $4,729.05)
+- Skyward AMEX Gold Card (liab): ours $35,313.20 vs QBO $3,255.32 (over $32,057.88)
+- Net BS imbalance impact: symmetric (~$32k on both sides), does NOT unbalance the sheet
+
+**Options considered & rejected this session:**
+- **Skip JE lines to bank/CC accounts in `_signed_balances`** — would unbalance the BS (offsetting income/expense/equity legs would still post without their bank counterpart)
+- **Trust `Account.CurrentBalance` for banks/CCs + equity-plug the delta** — matches QBO at import time but slowly rots as native activity in Axiom diverges from the frozen QBO snapshot; also forces a permanent branch to handle native/non-QBO companies
+
+**Mitigation shipped (Feb 27 2026):**
+- Backend (`reports.compute_balance_sheet::_row`) now stamps `variance_note: "bank_je_rendering"` on every QBO-imported bank/CC row (subtypes: Checking, Savings, MoneyMarket, CashOnHand, TrustAccounts, MoneyInAccount, CreditCard) with `source=qbo`.
+- Frontend (`ReportView.jsx::Row`) renders a small amber Info icon next to those rows with a tooltip explaining the variance.
+
+**Proper long-term fix (deferred):** Classify JE lines against bank/CC accounts by type (opening balance, bank reconciliation adjustment, book-only adjustment) and handle each per its actual accounting meaning. Requires new fixtures for both QBO-imported and native companies, and staged rollout with dry-run diff output.
+
 ### Feb 27 2026 — Undeposited Funds Detection Fix (Stripe/UF $37k Row Swap)
 
 **Root cause**: `resolve_deposit_splits` and `resolve_payment_undeposited` (and `_signed_balances`'s UF lookup) all used a loose Mongo query `{$or: [{detail_type:"money_in_transit"}, {name:/^Undeposited Funds$/i}]}`. On BM QBO 2 LLC three accounts matched (`Stripe Clearing Account`, `Undeposited Funds`, `Payment Clearing Account (deleted)` all carry `detail_type=money_in_transit`), and `find_one` non-deterministically returned Stripe Clearing. All 47 LinkedTxn-only Deposits (sweep-from-UF pattern) fell back to Stripe Clearing instead of UF → BS showed UF `+$37,196` and Stripe Clearing `-$37,196`, both wrong.
