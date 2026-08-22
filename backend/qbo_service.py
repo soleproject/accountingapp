@@ -1146,7 +1146,21 @@ def _bank_account_qbo_id(obj: dict, txn_type: str) -> str | None:
       Deposit         → `DepositToAccountRef` (destination bank)
       SalesReceipt    → `DepositToAccountRef` (destination bank)
       RefundReceipt   → `DepositToAccountRef` (source bank)
-      Transfer        → `FromAccountRef` (outbound leg)
+      Transfer        → `ToAccountRef` (destination bank; the FROM
+                         side is emitted as a synthesized line_item
+                         so `resolve_transaction_categories` posts
+                         it as the category leg, mirroring how
+                         Deposits work. Fix Feb 27 2026: earlier
+                         convention was `FromAccountRef` with no
+                         category, which meant `_signed_balances`
+                         only posted the outbound leg to the wrong
+                         account and the destination bank was never
+                         credited. Nicole Pettyjohn canary caught
+                         it — 76 transfers × $145k missing from
+                         Savings, all landing back on Checking.
+                         Aligning to ToAccountRef makes Transfer
+                         behave identically to Deposit at the
+                         reporting layer.)
       CreditMemo      → `ARAccountRef` (AR side)
     """
     key = {
@@ -1154,7 +1168,7 @@ def _bank_account_qbo_id(obj: dict, txn_type: str) -> str | None:
         "Deposit":           "DepositToAccountRef",
         "SalesReceipt":      "DepositToAccountRef",
         "RefundReceipt":     "DepositToAccountRef",
-        "Transfer":          "FromAccountRef",
+        "Transfer":          "ToAccountRef",
         "CreditMemo":        "ARAccountRef",
         # New Aug 22 2026 — production parity for enterprise drift.
         # CreditCardPayment: source of funds (Bank) → `BankAccountRef`,
@@ -1177,7 +1191,17 @@ def map_generic_txn(cid: str, realm_id: str, obj: dict, txn_type: str) -> dict:
     can build type-specific detail views without re-fetching."""
     ref = (obj.get("CustomerRef") or obj.get("VendorRef")
            or obj.get("EntityRef") or {})
-    magnitude = round(float(obj.get("TotalAmt") or 0), 2)
+    # QBO's Transfer entity is the only txn type that stores its dollar
+    # value in `Amount` instead of `TotalAmt`. Without this fallback,
+    # every migrated Transfer landed with `amount=0` — the transfers
+    # existed in our txn table but contributed nothing to `_signed_
+    # balances`, leaving Checking over-inflated and Savings under-
+    # counted by the transfer total. Nicole Pettyjohn canary
+    # Feb 27 2026: 76 Transfers × avg $1,900 = $145k missing.
+    total_amt = obj.get("TotalAmt")
+    if total_amt is None and txn_type == "Transfer":
+        total_amt = obj.get("Amount")
+    magnitude = round(float(total_amt or 0), 2)
     # QBO's `Purchase` object doubles as both a normal expense (Credit
     # missing / false) AND a "Credit Card Credit" refund back to the
     # source account (Credit=true, PaymentType=CreditCard). In the
@@ -1214,6 +1238,26 @@ def map_generic_txn(cid: str, realm_id: str, obj: dict, txn_type: str) -> dict:
         # Expense/COGS side lives in the QBO Line array, same shape
         # as Bill — reuse the standard `_map_lines` output later.
         pass
+    elif txn_type == "Transfer":
+        # QBO Transfers don't carry a `Line` array — they're described
+        # entirely by ToAccountRef + FromAccountRef + Amount. To flow
+        # through the same `resolve_transaction_categories` pipeline
+        # every other txn type uses, we synthesize the FROM (source)
+        # side as a line_item. `bank_account_qbo_id` above already
+        # points at TO (destination), so this pairs the ledger:
+        #    DR ToAccountRef (bank leg, positive amt)
+        #    CR FromAccountRef (category leg, resolver flips sign)
+        # Nicole Pettyjohn canary Feb 27 2026 — see `_bank_account_
+        # qbo_id` comment above for why.
+        from_ref = obj.get("FromAccountRef") or {}
+        from_qid = from_ref.get("value")
+        if from_qid:
+            synth_lines = [{
+                "description": "Transfer",
+                "amount": magnitude,
+                "account_qbo_id": from_qid,
+                "account_name": from_ref.get("name") or "",
+            }]
     return {
         "company_id": cid, "source": "qbo",
         "qbo_id": obj["Id"],

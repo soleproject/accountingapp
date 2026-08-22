@@ -49,6 +49,31 @@ Root-caused a systemic parity gap on BM QBO 2 LLC where our P&L was off by $60k-
 4. Undeposited Funds ↔ Stripe Clearing swap (`~$37k` both sides, nets to 0 on total)
 5. AP header-account $188 phantom row
 
+### Feb 27 2026 — Nicole Pettyjohn Canary + Transfer Amount Bug Fix
+
+**Canary target:** cloned prod company `Nicole Pettyjohn` (realm `9341456698264639`) into preview → ran full migration under new code → compared to QBO's own reports.
+
+**Bug caught by canary:** QBO's Transfer entity carries its dollar value in `Amount` (unlike every other txn type which uses `TotalAmt`). Our `map_generic_txn` only read `TotalAmt`, so every migrated Transfer landed with `amount = 0`. In addition, `_bank_account_qbo_id` mapped Transfer to `FromAccountRef` with no corresponding category line — so even with a non-zero amount, only the FROM side would post and it'd post in the wrong direction. Nicole Pettyjohn: 76 Transfers moving $145k+ between Checking and Savings entirely lost, showing as Checking over-inflated by $160k and Savings under by $145k.
+
+**Fix (`qbo_service.py`)**:
+1. `map_generic_txn` — pull `Amount` fallback for Transfer when `TotalAmt` is missing
+2. `_bank_account_qbo_id` — Transfer now maps to `ToAccountRef` (destination bank), matching Deposit convention. Aligns with `_signed_balances` reading `by[bank] += amt` (destination up)
+3. `map_generic_txn` — synthesize a `line_items[]` entry pointing at `FromAccountRef` so `resolve_transaction_categories` posts the source-side credit (`by[from_bank] += -amt` → source down)
+
+**Data patch on Nicole Pettyjohn**: re-mapped 76 Transfers, re-resolved banks + categories.
+
+**Canary result — after fix:**
+| | Ours | QBO | Δ |
+|---|---:|---:|---:|
+| Accrual Total Assets | $172,966.17 | $172,966.17 | **$0.00** ✅ |
+| Cash Total Assets | $172,966.17 | $172,966.17 | **$0.00** ✅ |
+| BS Imbalance | $0.00 | $0.00 | **$0.00** ✅ |
+| Accrual NI | $372,331.58 | $383,393.92 | -$11,062.34 (bill-timing) |
+
+**Assessment:** This fix is critical infrastructure — every prod company with Transfers between banks (which is essentially every company) has this bug in their pre-fix migration data. The `full-backfill` endpoint's `resolve_transaction_categories` step won't catch it because the underlying `amount` field is still 0. A **new backfill step is needed** to re-map QBO Transfer transactions using the fixed mapper.
+
+**Recommended next**: extend `POST /api/admin/qbo/full-backfill` with a Step 3.5 that re-maps existing Transfers via `map_generic_txn`, then re-resolves banks + categories. Same pattern I did for Nicole Pettyjohn.
+
 ### Feb 27 2026 — QBO Full-Backfill Endpoint (Broadcast the Parity Fixes)
 
 **What:** New superadmin endpoint `POST /api/admin/qbo/full-backfill` that runs the entire Feb 27 2026 parity-fix chain across every QBO-connected company (or a single company via `company_id`), with an explicit `dry_run` mode that captures before/after BS + P&L totals per company without mutating anything.
