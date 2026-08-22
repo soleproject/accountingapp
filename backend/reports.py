@@ -186,7 +186,16 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
     # Feb 28 2026 — Undeposited Funds workflow, Phase 2 QBO parity.
     undep_acct = await db.accounts.find_one({
         "company_id": company_id,
-        "$or": [{"detail_type": "money_in_transit"},
+        # QBO's authoritative "this IS Undeposited Funds" signal is
+        # `AccountSubType=UndepositedFunds`. Some CoAs also carry
+        # unrelated `detail_type=money_in_transit` accounts (Stripe
+        # Clearing, Payment Clearing, etc.) that would falsely match
+        # a looser query — on BM QBO 2 LLC that non-determinism sent
+        # all 47 sweep-from-UF deposits into Stripe Clearing instead
+        # of UF, inflating both by $37k on the BS. Prefer subtype
+        # first, fall back to the exact name only. Feb 27 2026.
+        "$or": [{"subtype": {"$regex": "^UndepositedFunds$",
+                              "$options": "i"}},
                 {"name": {"$regex": "^Undeposited Funds$",
                           "$options": "i"}}],
     })

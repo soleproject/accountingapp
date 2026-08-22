@@ -2345,7 +2345,14 @@ async def resolve_payment_undeposited(company_id: str) -> dict:
     """
     undep = await db.accounts.find_one({
         "company_id": company_id,
-        "$or": [{"detail_type": "money_in_transit"},
+        # See reports._signed_balances for the full rationale — QBO's
+        # authoritative Undeposited Funds signal is
+        # `AccountSubType=UndepositedFunds`. Loose `detail_type=
+        # money_in_transit` matches other clearing accounts (Stripe
+        # Clearing, Payment Clearing, etc.) and causes payments to
+        # land in the wrong place. Feb 27 2026.
+        "$or": [{"subtype": {"$regex": "^UndepositedFunds$",
+                              "$options": "i"}},
                 {"name": {"$regex": "^Undeposited Funds$",
                           "$options": "i"}}],
     })
@@ -2449,9 +2456,16 @@ async def resolve_deposit_splits(company_id: str) -> dict:
     `splits` are skipped.
     """
     # Cache the company's Undeposited Funds and account-by-qbo_id map.
+    # See reports._signed_balances — QBO's `AccountSubType=
+    # UndepositedFunds` is the authoritative signal. A looser
+    # `detail_type=money_in_transit` match picks up Stripe/Payment
+    # clearing accounts too, and `find_one` returned one of those
+    # instead of UF on BM QBO 2 LLC, silently routing 47 sweep
+    # deposits into Stripe Clearing. Feb 27 2026.
     undep = await db.accounts.find_one({
         "company_id": company_id,
-        "$or": [{"detail_type": "money_in_transit"},
+        "$or": [{"subtype": {"$regex": "^UndepositedFunds$",
+                              "$options": "i"}},
                 {"name": {"$regex": "^Undeposited Funds$",
                           "$options": "i"}}],
     })

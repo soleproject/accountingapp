@@ -49,6 +49,34 @@ Root-caused a systemic parity gap on BM QBO 2 LLC where our P&L was off by $60k-
 4. Undeposited Funds ↔ Stripe Clearing swap (`~$37k` both sides, nets to 0 on total)
 5. AP header-account $188 phantom row
 
+### Feb 27 2026 — Undeposited Funds Detection Fix (Stripe/UF $37k Row Swap)
+
+**Root cause**: `resolve_deposit_splits` and `resolve_payment_undeposited` (and `_signed_balances`'s UF lookup) all used a loose Mongo query `{$or: [{detail_type:"money_in_transit"}, {name:/^Undeposited Funds$/i}]}`. On BM QBO 2 LLC three accounts matched (`Stripe Clearing Account`, `Undeposited Funds`, `Payment Clearing Account (deleted)` all carry `detail_type=money_in_transit`), and `find_one` non-deterministically returned Stripe Clearing. All 47 LinkedTxn-only Deposits (sweep-from-UF pattern) fell back to Stripe Clearing instead of UF → BS showed UF `+$37,196` and Stripe Clearing `-$37,196`, both wrong.
+
+**Fix**: tightened the query to `AccountSubType=UndepositedFunds` (QBO's authoritative signal) with `name=Undeposited Funds` as secondary fallback. Applied in three call sites: `qbo_service.resolve_deposit_splits`, `qbo_service.resolve_payment_undeposited`, `reports._signed_balances`.
+
+**Data patch**: cleared and re-computed splits on all 117 QBO Deposits — 47 now correctly attribute to UF, 70 direct-income splits unchanged.
+
+**Impact on BM QBO 2 LLC**:
+- Undeposited Funds: `$37,196.03 → $0.00` ✅ matches QBO
+- Stripe Clearing Account: `-$37,196.03 → $0.00` ✅ matches QBO
+- 47/47 QBO parity tests pass
+
+### Feb 27 2026 — Remaining BS Drift Investigation (Bank/CC Adjustment JEs)
+
+Investigation of the last symmetric ~$32k drift (Skyward AMEX Ops `+$27k` asset overshoot + AMEX Gold Card `+$32k` liability overshoot + Bluevine `+$4.7k` asset overshoot) traced to **QBO Adjustment=True JEs** (JE#7 2025-05-23 opening balance, JE#12 2026-03-31 Q1 adjustment). Both carry sizable debits to Skyward bank/CC accounts.
+
+**Hypothesis** (unconfirmed): QBO's BS report renders bank/CC accounts via `Account.CurrentBalance` (bank-reconciliation-authoritative) rather than the recomputed GL sum, and adjustment JEs are reflected via a hidden offset. Our engine sums the raw ledger which includes these adjustment debits, causing the overshoot.
+
+**Decision**: paused further investigation — this fix requires either (a) special-case treatment for Adjustment=True JEs on bank/CC accounts, or (b) trusting `Account.CurrentBalance` directly for banks/CCs on the BS. Both are structural changes with regression risk on native/non-QBO companies. Deferred to a follow-up session.
+
+**Current parity state (BM QBO 2 LLC)**:
+- P&L Accrual: 68/83 accounts match; NI $244,346 vs QBO $240,617 (Δ $3,728 — matches Uncategorized Expense residual)
+- P&L Cash: 67/83 accounts match; NI $75,546 vs QBO $130,317
+- BS Accrual: assets $365,538 vs $334,491, L $122,846 vs $90,600, equity $246,420 vs $243,891 (equity within $2.5k) — imbalance -$3,728.53 (same Uncategorized Expense residual)
+- BS Cash: imbalance -$3,728.53
+- 47/47 QBO parity tests pass
+
 ### Feb 27 2026 — Grandchild Rollup Fix (Multi-Level BS Nesting)
 
 **Fix**: rewrote `reports.compute_balance_sheet::_emit_section` as a recursive tree walker so grandchildren of top-level accounts render under their DIRECT parent (with their own `Total {parent}` subtotal) instead of being silently dropped by the previous single-level implementation.
