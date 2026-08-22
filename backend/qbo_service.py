@@ -3118,7 +3118,24 @@ def _flatten_gl_rows(rows: list) -> list[dict]:
     as `{txn_type, doc_num, name, memo, amount}`. GL rows are grouped
     by account under nested `Header` sections — we don't care about
     the grouping here because the caller pins the fetch to one
-    account at a time."""
+    account at a time.
+
+    QBO returns TWO variants of the GL column layout depending on
+    company preferences:
+
+    * 8 columns: [date, type, num, name, memo, split, amount, balance]
+    * 9 columns: [date, type, num, Adj, name, memo, split, amount, balance]
+
+    The `Adj` column (Boolean, "Yes"/"No") appears on books where
+    QBO's "Show Adjustments" toggle is enabled. Reading `amount`
+    from a hardcoded index[6] silently drops EVERY row on 9-col
+    books because col 6 is the split-account name (unparseable as
+    float). Feb 27 2026 — Emeral Coast GL-diff caught this bug.
+
+    Fix: read positional-fixed cols from the front (date/type/num)
+    and money cols from the back (balance = -1, amount = -2, etc.)
+    so both layouts parse correctly.
+    """
     out: list[dict] = []
     def walk(rs):
         for r in rs or []:
@@ -3127,23 +3144,24 @@ def _flatten_gl_rows(rows: list) -> list[dict]:
                 walk(inner)
             cd = r.get("ColData")
             if cd:
-                # Column shape: [tx_date, txn_type, doc_num, name,
-                #                memo, split_account, amount, balance]
                 v = [c.get("value", "") for c in cd]
+                # Need at minimum: date, type, num, ..., split, amount,
+                # balance = 7 cols. Everything shorter is a summary or
+                # header row we should skip.
                 if len(v) < 7:
                     continue
                 try:
-                    amt = float(v[6] or 0)
+                    amt = float(v[-2] or 0)
                 except (ValueError, TypeError):
                     continue
                 out.append({
-                    "date": v[0],
+                    "date":     v[0],
                     "txn_type": v[1],
-                    "doc_num": v[2],
-                    "name": v[3],
-                    "memo": v[4],
-                    "split": v[5],
-                    "amount": amt,
+                    "doc_num":  v[2],
+                    "name":     v[-5],
+                    "memo":     v[-4],
+                    "split":    v[-3],
+                    "amount":   amt,
                 })
     walk(rows)
     return out

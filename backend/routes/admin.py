@@ -809,8 +809,6 @@ class QboGlDiffIn(BaseModel):
     top_n: int = Field(
         default=25,
         description="Return the top N accounts by absolute drift.")
-
-
 @router.post("/companies/{cid}/qbo/gl-diff")
 async def companies_qbo_gl_diff(
     cid: str, inp: QboGlDiffIn | None = None,
@@ -847,6 +845,32 @@ async def companies_qbo_gl_diff(
     # done ONCE, not per-account.
     local_by_acct = await R._signed_balances(cid, inp.start_date, inp.end_date)
 
+    # Sign convention: QBO GL renders each account in its OWN natural
+    # direction — income/equity/liab as positive on their normal
+    # (credit) side, assets/expenses as positive on their normal
+    # (debit) side. Axiom's `_signed_balances` uses debit-positive
+    # throughout, so credit-normal accounts read as negative there.
+    # Without this normalization, every credit-normal account with
+    # correct data shows as a full-magnitude "delta" (false positive
+    # — Owner's Investment $854k on Emeral Coast). Multiplying the
+    # Axiom side by -1 for credit-normal types makes both sides
+    # comparable in QBO's convention.
+    _CREDIT_NORMAL = {"liability", "equity", "income", "revenue",
+                      "other_income", "other_income_other"}
+
+    def _norm_axiom(raw: float, acct_type: str) -> float:
+        """Flip sign for credit-normal accounts so both sources
+        compare in QBO's convention. `_signed_balances` is
+        debit-positive; QBO GL returns each account signed toward
+        its natural balance."""
+        t = (acct_type or "").lower()
+        if t in _CREDIT_NORMAL:
+            return -raw
+        # Also treat CreditCard subtype as credit-normal even though
+        # it's stored under `type=liability` — the account name path
+        # covers the mixed cases like AMEX CC 1000.
+        return raw
+
     account_diffs: list[dict] = []
     walk_errors: list[dict] = []
 
@@ -854,7 +878,11 @@ async def companies_qbo_gl_diff(
         qbo_id = str(a.get("qbo_id") or "")
         local_id = a.get("id")
         acct_name = a.get("name") or ""
-        acct_type = a.get("account_type") or ""
+        # Accounts store the internal classification on `type`
+        # (`asset`, `equity`, `revenue`, etc.) — the QBO
+        # `AccountType` string lives on `raw.AccountType`. `type` is
+        # the one our reports use.
+        acct_type = a.get("type") or a.get("account_type") or ""
 
         try:
             gl = await Q.fetch_report(
@@ -875,7 +903,8 @@ async def companies_qbo_gl_diff(
         rows = (gl.get("Rows") or {}).get("Row") or []
         postings = Q._flatten_gl_rows(rows)
         qbo_total = round(sum(p.get("amount", 0.0) for p in postings), 2)
-        axiom_total = round(local_by_acct.get(local_id, 0.0), 2)
+        axiom_raw = round(local_by_acct.get(local_id, 0.0), 2)
+        axiom_total = round(_norm_axiom(axiom_raw, acct_type), 2)
         delta = round(qbo_total - axiom_total, 2)
 
         # Only include accounts that have some activity in either
@@ -890,6 +919,7 @@ async def companies_qbo_gl_diff(
             "account_type": acct_type,
             "qbo_total": qbo_total,
             "axiom_total": axiom_total,
+            "axiom_raw_signed": axiom_raw,
             "delta": delta,
             "qbo_posting_count": len(postings),
             # Small sample of postings so the operator can eyeball
