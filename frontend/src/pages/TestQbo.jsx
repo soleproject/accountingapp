@@ -208,9 +208,15 @@ export default function TestQbo() {
 
   const refreshReports = async () => {
     setRunningReports(true);
+    // When the user reached this panel via "Import from Production
+    // Connection" (no test OAuth) reuse those prod tokens for the
+    // reports fetch too. Writes still land in qbo_test_reports.
+    const useProd = !preview?.connected && preview?.prod_connected;
     try {
       const r = await api.post(
         `/companies/${currentId}/qbo-test/reports/refresh`,
+        null,
+        useProd ? { params: { use_prod: true } } : undefined,
       );
       if (r.data.ok) {
         toast.success(`Pulled ${r.data.fetched.length} report views`);
@@ -447,8 +453,10 @@ export default function TestQbo() {
         })}
       </div>
 
-      {/* Reports section — visible when connected */}
-      {preview?.connected && (
+      {/* Reports section — visible when EITHER the isolated Test QBO
+          connection exists OR the production QBO connection is
+          reusable (Import-from-Prod flow). Aug 22 2026 fix. */}
+      {(preview?.connected || preview?.prod_connected) && (
         <ReportsPanel
           cid={currentId}
           report={report}
@@ -459,6 +467,7 @@ export default function TestQbo() {
           refresh={refreshReports}
           running={runningReports}
           fetchedAt={preview?.reports_available?.[report.name]?.[report.basis]?.fetched_at}
+          useProd={!preview?.connected && preview?.prod_connected}
         />
       )}
 
