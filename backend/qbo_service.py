@@ -759,6 +759,17 @@ _PIPELINE: list[tuple[str, callable, str]] = [
     # caused by these two categories previously being un-imported.
     ("VendorCredit",       lambda c, r, o: map_generic_txn(c, r, o, "VendorCredit"),       "transactions"),
     ("CreditCardPayment",  lambda c, r, o: map_generic_txn(c, r, o, "CreditCardPayment"),  "transactions"),
+    # Aug 22 2026 — Complete GL parity + non-posting round-trip.
+    # InventoryAdjustment has REAL GL impact (DR/CR Inventory Asset)
+    # and was the last posting entity missing from production.
+    # Estimate / PurchaseOrder / RecurringTransaction are non-posting
+    # (marked `posted=False` in the mapper so `_signed_balances`
+    # ignores them) — pulled so the existing Estimates / Purchase
+    # Orders / Recurring pages have data.
+    ("InventoryAdjustment", lambda c, r, o: map_inventory_adjustment_txn(c, r, o), "transactions"),
+    ("Estimate",            lambda c, r, o: map_non_posting_txn(c, r, o, "Estimate"),            "transactions"),
+    ("PurchaseOrder",       lambda c, r, o: map_non_posting_txn(c, r, o, "PurchaseOrder"),       "transactions"),
+    ("RecurringTransaction",lambda c, r, o: map_non_posting_txn(c, r, o, "RecurringTransaction"),"transactions"),
 ]
 
 
@@ -1213,6 +1224,100 @@ def map_generic_txn(cid: str, realm_id: str, obj: dict, txn_type: str) -> dict:
         "raw": obj,
         "created_at": now_iso(), "updated_at": now_iso(),
     }
+
+
+def map_inventory_adjustment_txn(cid: str, realm_id: str, obj: dict) -> dict:
+    """InventoryAdjustment maps DR/CR of Inventory Asset against the
+    `AdjustAccountRef` (typically Inventory Shrinkage / Adjustments
+    Expense). Each `Line` carries `ItemAdjustmentLineDetail` with an
+    `AmountDiff` (positive = write-up, negative = write-down); we sum
+    them to derive the net inventory-asset movement. The bank side of
+    `_signed_balances` sees this via `bank_account_qbo_id` (adjust
+    account) and the offset via a synthetic split line pointing at
+    Inventory Asset (resolved from `AccountRef`).
+
+    Supersedes the older `map_inventory_adjustment` (which produced a
+    journal_entries doc with empty lines and required a separate cost-
+    resolution step). This one produces a fully-formed transaction
+    record ready for `_signed_balances`. Aug 22 2026.
+    """
+    adj_ref  = obj.get("AdjustAccountRef") or {}
+    inv_ref  = obj.get("AccountRef") or {}  # Inventory Asset account
+    lines = obj.get("Line") or []
+    net_amount = 0.0
+    synth_lines: list[dict] = []
+    for ln in lines:
+        detail = ln.get("ItemAdjustmentLineDetail") or {}
+        amt_diff = float(detail.get("AmountDiff") or 0)
+        qty_diff = float(detail.get("QtyDiff") or 0)
+        net_amount += amt_diff
+        item_ref = detail.get("ItemRef") or {}
+        synth_lines.append({
+            "description": item_ref.get("name") or "Inventory Adjustment",
+            "quantity": qty_diff,
+            "amount": amt_diff,
+            "item_qbo_id": item_ref.get("value"),
+            "account_qbo_id": inv_ref.get("value"),
+            "account_name": inv_ref.get("name") or "Inventory Asset",
+        })
+    magnitude = round(abs(net_amount), 2)
+    return {
+        "company_id": cid, "source": "qbo",
+        "qbo_id": obj["Id"],
+        "id": f"qbo-{cid[:8]}-inventoryadjustment-{obj['Id']}",
+        "realm_id": realm_id,
+        "txn_type": "InventoryAdjustment",
+        "number": obj.get("DocNumber") or f"IA-{obj['Id']}",
+        "date": obj.get("TxnDate") or "",
+        # `amount` is signed: positive net_amount = inventory write-up
+        # (DR Inventory Asset / CR Adjust account), negative = write-
+        # down (opposite). `bank_account_qbo_id` points at the ADJUST
+        # account so `_signed_balances` posts the offsetting side.
+        "amount": round(net_amount, 2),
+        "direction": "in" if net_amount >= 0 else "out",
+        "bank_account_qbo_id": adj_ref.get("value"),
+        "posted": True,
+        "needs_review": True,
+        "memo": obj.get("PrivateNote") or "",
+        "line_items": synth_lines,
+        "raw": obj,
+        "created_at": now_iso(), "updated_at": now_iso(),
+    }
+
+
+def map_non_posting_txn(cid: str, realm_id: str, obj: dict,
+                         txn_type: str) -> dict:
+    """Estimate / PurchaseOrder / RecurringTransaction — pulled for
+    UI round-trip but flagged `posted=False` so `_signed_balances`
+    ignores them (they never touch the GL). Standard shape otherwise
+    so existing entity list pages (`/estimates`, `/purchase-orders`,
+    `/recurring`) can render them unchanged.
+    """
+    ref = (obj.get("CustomerRef") or obj.get("VendorRef") or {})
+    return {
+        "company_id": cid, "source": "qbo",
+        "qbo_id": obj["Id"],
+        "id": f"qbo-{cid[:8]}-{txn_type.lower()}-{obj['Id']}",
+        "realm_id": realm_id,
+        "txn_type": txn_type,
+        "number": obj.get("DocNumber") or f"{txn_type}-{obj['Id']}",
+        "date": obj.get("TxnDate") or "",
+        "contact_qbo_id": ref.get("value"),
+        "contact_name": ref.get("name") or "",
+        "amount": round(float(obj.get("TotalAmt") or 0), 2),
+        "direction": "in" if txn_type == "Estimate" else "out",
+        # Critical — `posted=False` keeps these out of the ledger
+        # aggregations (`_signed_balances`, IS, BS, GL). They exist
+        # purely as UI records.
+        "posted": False,
+        "needs_review": False,
+        "memo": obj.get("PrivateNote") or obj.get("CustomerMemo", {}).get("value") or "",
+        "line_items": _map_lines(obj.get("Line") or []),
+        "raw": obj,
+        "created_at": now_iso(), "updated_at": now_iso(),
+    }
+
+
 
 
 async def _notify_migration_result(
