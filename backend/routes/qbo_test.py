@@ -177,17 +177,35 @@ class MigrateResponse(BaseModel):
 @router.post("/companies/{cid}/qbo-test/migrate",
               response_model=MigrateResponse)
 async def qbo_test_migrate(cid: str,
+                            use_prod: bool = False,
                             user: dict = Depends(get_current_user)):
     """Wipe existing test data then pull every supported entity fresh
-    from QBO into `qbo_test_raw`. Uses the isolated `qbo_test_connections`
-    OAuth connection.
+    from QBO into `qbo_test_raw`.
+
+    Two source modes:
+    - `use_prod=false` (default): pull via the isolated
+      `qbo_test_connections` OAuth link. Requires the user to first
+      click "Connect to QuickBooks Online" on the Test QBO page.
+    - `use_prod=true`: pull via the EXISTING production QBO connection
+      (`qbo_connections`). Saves the user a second OAuth handshake
+      when they already have prod connected. Writes still land in
+      the isolated `qbo_test_raw` collection — production ledger is
+      never touched. Aug 22 2026 — user request.
     """
     await require_company(user, cid)
-    _use_test_conn()
-    conn = await db.qbo_test_connections.find_one({"company_id": cid})
-    if not conn:
-        raise HTTPException(400, "Test QBO is not connected — click "
-                                   "Connect to QuickBooks Online first")
+    if use_prod:
+        # Reads via production tokens (default ContextVar). Writes
+        # are hardcoded into `qbo_test_raw` so isolation is preserved.
+        conn = await db.qbo_connections.find_one({"company_id": cid})
+        if not conn:
+            raise HTTPException(400,
+                "No production QBO connection to import from")
+    else:
+        _use_test_conn()
+        conn = await db.qbo_test_connections.find_one({"company_id": cid})
+        if not conn:
+            raise HTTPException(400, "Test QBO is not connected — click "
+                                       "Connect to QuickBooks Online first")
     realm_id = conn["realm_id"]
     environment = (conn.get("env")
                     or conn.get("environment")
@@ -223,6 +241,7 @@ async def qbo_test_preview(cid: str,
     fetched_at + environment when data is present."""
     await require_company(user, cid)
     conn = await db.qbo_test_connections.find_one({"company_id": cid})
+    prod_conn = await db.qbo_connections.find_one({"company_id": cid})
     counts: dict[str, int] = {}
     for entity in _ENTITIES:
         counts[entity] = await db.qbo_test_raw.count_documents({
@@ -246,6 +265,11 @@ async def qbo_test_preview(cid: str,
                         or (conn or {}).get("environment")
                         or "sandbox",
         "reports_available": reports_available,
+        # `prod_connected` unlocks the "Import from Production
+        # Connection" button on the Test QBO page — reuse the prod
+        # OAuth tokens for the pull without a second handshake.
+        "prod_connected": bool(prod_conn),
+        "prod_realm_id":  (prod_conn or {}).get("realm_id"),
     }
 
 
@@ -385,17 +409,24 @@ _DEFAULT_END = "2099-12-31"
 
 @router.post("/companies/{cid}/qbo-test/reports/refresh")
 async def qbo_test_reports_refresh(cid: str,
+                                     use_prod: bool = False,
                                      start_date: str = _DEFAULT_START,
                                      end_date: str = _DEFAULT_END,
                                      user: dict = Depends(get_current_user)):
     """Pull Balance Sheet + Profit & Loss (both Accrual and Cash) from
-    QBO and store the raw payload in `qbo_test_reports`. Idempotent —
-    re-runs replace the prior snapshot for the same (report, basis)."""
+    QBO and store the raw payload in `qbo_test_reports`. Idempotent.
+    `use_prod=true` uses the production QBO OAuth link instead of the
+    isolated Test QBO one — writes still land in the test collection."""
     await require_company(user, cid)
-    _use_test_conn()
-    conn = await db.qbo_test_connections.find_one({"company_id": cid})
-    if not conn:
-        raise HTTPException(400, "Test QBO is not connected")
+    if use_prod:
+        conn = await db.qbo_connections.find_one({"company_id": cid})
+        if not conn:
+            raise HTTPException(400, "No production QBO connection")
+    else:
+        _use_test_conn()
+        conn = await db.qbo_test_connections.find_one({"company_id": cid})
+        if not conn:
+            raise HTTPException(400, "Test QBO is not connected")
     realm_id = conn["realm_id"]
     fetched: list[dict] = []
     errors: list[dict] = []
