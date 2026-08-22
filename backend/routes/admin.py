@@ -762,6 +762,166 @@ async def admin_qbo_full_backfill(
     }
 
 
+# ------------------------------------------------------------------
+# QBO GL Diff Diagnostic
+# ------------------------------------------------------------------
+#
+# READ-ONLY diagnostic that answers the question: "of the drift on
+# Axiom's Balance Sheet vs QBO's Balance Sheet for a given company,
+# where does it come from — which accounts, and what's the composition
+# per account (posted-in-QBO-but-not-Axiom, wrong-amount, wrong-sign,
+# etc.)?"
+#
+# Approach:
+#   1. Iterate every account in `db.accounts` for the company that has
+#      a `qbo_id` (i.e. was originally sourced from QBO).
+#   2. Fetch QBO's `GeneralLedger` report scoped to that account for
+#      the requested window. Flatten the nested Row tree into a list
+#      of `{date, txn_type, doc_num, name, memo, amount}` postings.
+#   3. Compute QBO's signed running balance for the account by summing
+#      those postings.
+#   4. Read Axiom's local signed balance for the same account via
+#      the existing `_signed_balances` engine.
+#   5. Emit `qbo_total - axiom_total` per account. Rank by absolute
+#      drift so the caller sees the biggest offenders at the top.
+#
+# Feb 27 2026 — built after Emeral Coast backfill showed $463K
+# residual drift we couldn't classify. Answers "what specifically
+# is still missing from Axiom that QBO shows?"
+class QboGlDiffIn(BaseModel):
+    start_date: str = Field(
+        default="2000-01-01",
+        description="Start of the GL window (inclusive). 2000-01-01 "
+                    "is pre-QBO-launch (2001) — safe floor.")
+    end_date: str = Field(
+        default="2099-12-31",
+        description="End of the GL window (inclusive). Wide default "
+                    "so no history is truncated on legacy books.")
+    accounting_method: str = Field(
+        default="Accrual",
+        description="Accrual | Cash — QBO's GL renders differently "
+                    "on each basis, so the diff must match the "
+                    "report the user is looking at.")
+    account_qbo_id: str | None = Field(
+        default=None,
+        description="Restrict diff to ONE account (by QBO id) to iterate "
+                    "fast when investigating a specific offender.")
+    top_n: int = Field(
+        default=25,
+        description="Return the top N accounts by absolute drift.")
+
+
+@router.post("/companies/{cid}/qbo/gl-diff")
+async def companies_qbo_gl_diff(
+    cid: str, inp: QboGlDiffIn | None = None,
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Per-account drift diagnostic: QBO GL signed total vs local
+    signed balance. Read-only.
+
+    Returns:
+      - `overall`: totals + net drift across every account walked
+      - `accounts`: ranked list of top-N accounts by absolute drift,
+                    each with QBO total, Axiom total, delta, and a
+                    small sample of QBO postings for eyeballing.
+    """
+    import qbo_service as Q
+
+    inp = inp or QboGlDiffIn()
+
+    conn = await db.qbo_connections.find_one({"company_id": cid})
+    if not conn or conn.get("status") != "connected":
+        raise HTTPException(400, "Company has no active QBO connection")
+    realm_id = conn["realm_id"]
+
+    # Collect QBO-sourced accounts. `qbo_id` presence is the marker.
+    acct_q: dict = {"company_id": cid, "qbo_id": {"$ne": None}}
+    if inp.account_qbo_id:
+        acct_q["qbo_id"] = str(inp.account_qbo_id)
+    accounts = await db.accounts.find(acct_q).to_list(5000)
+    if not accounts:
+        raise HTTPException(400, "No QBO-sourced accounts found on company")
+
+    # Precompute the local signed balances for the same window (one
+    # pass over all txns + JEs). This is expensive on big books —
+    # done ONCE, not per-account.
+    local_by_acct = await R._signed_balances(cid, inp.start_date, inp.end_date)
+
+    account_diffs: list[dict] = []
+    walk_errors: list[dict] = []
+
+    for a in accounts:
+        qbo_id = str(a.get("qbo_id") or "")
+        local_id = a.get("id")
+        acct_name = a.get("name") or ""
+        acct_type = a.get("account_type") or ""
+
+        try:
+            gl = await Q.fetch_report(
+                cid, realm_id, "GeneralLedger",
+                {"start_date": inp.start_date,
+                 "end_date": inp.end_date,
+                 "account": qbo_id,
+                 "accounting_method": inp.accounting_method},
+            )
+        except Exception as e:  # noqa: BLE001
+            walk_errors.append({
+                "account_qbo_id": qbo_id,
+                "account_name": acct_name,
+                "error": str(e)[:200],
+            })
+            continue
+
+        rows = (gl.get("Rows") or {}).get("Row") or []
+        postings = Q._flatten_gl_rows(rows)
+        qbo_total = round(sum(p.get("amount", 0.0) for p in postings), 2)
+        axiom_total = round(local_by_acct.get(local_id, 0.0), 2)
+        delta = round(qbo_total - axiom_total, 2)
+
+        # Only include accounts that have some activity in either
+        # source. Zero-vs-zero rows just add noise.
+        if abs(qbo_total) < 0.01 and abs(axiom_total) < 0.01:
+            continue
+
+        account_diffs.append({
+            "account_qbo_id": qbo_id,
+            "account_local_id": local_id,
+            "account_name": acct_name,
+            "account_type": acct_type,
+            "qbo_total": qbo_total,
+            "axiom_total": axiom_total,
+            "delta": delta,
+            "qbo_posting_count": len(postings),
+            # Small sample of postings so the operator can eyeball
+            # what QBO thinks lives on the account. Full drilldown
+            # is the v2 line-level diff.
+            "qbo_sample": postings[:5],
+        })
+
+    account_diffs.sort(key=lambda r: abs(r["delta"]), reverse=True)
+    ranked = account_diffs[: inp.top_n]
+
+    overall = {
+        "accounts_walked": len(accounts),
+        "accounts_with_activity": len(account_diffs),
+        "accounts_with_walk_error": len(walk_errors),
+        "sum_qbo": round(sum(r["qbo_total"] for r in account_diffs), 2),
+        "sum_axiom": round(sum(r["axiom_total"] for r in account_diffs), 2),
+        "sum_abs_delta": round(
+            sum(abs(r["delta"]) for r in account_diffs), 2),
+        "net_delta": round(
+            sum(r["delta"] for r in account_diffs), 2),
+    }
+
+    return {
+        "company_id": cid,
+        "start_date": inp.start_date,
+        "end_date": inp.end_date,
+        "accounting_method": inp.accounting_method,
+        "overall": overall,
+        "accounts": ranked,
+        "walk_errors": walk_errors,
+    }
 
 
 class AiCapOverrideIn(BaseModel):
