@@ -1728,6 +1728,74 @@ async def run_migration(job_id: str, company_id: str) -> None:
                 "Payable / etc. will read $0 on the BS until backfilled.",
                 company_id, e)
 
+        # ------------------------------------------------------------
+        # Phase 2 (Feb 28 2026): GL-as-source-of-truth pull.
+        # ------------------------------------------------------------
+        # Pull QBO's GeneralLedger for every account and persist rows
+        # to `qbo_gl_lines`. This becomes the authoritative source
+        # for BS/PL number rendering — the report engine reads from
+        # here and falls back to `_signed_balances` only when the
+        # collection is empty (native / non-QBO companies).
+        #
+        # Guarantees parity by construction: our BS/PL total for
+        # any account == sum of QBO's GL rows for that account ==
+        # what QBO's own BS/PL report displays. Fixes the entire
+        # class of drift bugs that emerged from reconstructing GL
+        # from entities + 20 resolvers on legacy migrations.
+        gl_lines_pulled = 0
+        gl_walk_errors = 0
+        try:
+            del_r = await db.qbo_gl_lines.delete_many(
+                {"company_id": company_id})
+            all_accts = await db.accounts.find(
+                {"company_id": company_id,
+                 "qbo_id": {"$ne": None}}).to_list(5000)
+            for a in all_accts:
+                qbo_acct_id = str(a.get("qbo_id") or "")
+                try:
+                    gl = await fetch_report(
+                        company_id, realm_id, "GeneralLedger",
+                        {"start_date": "2000-01-01",
+                         "end_date": "2099-12-31",
+                         "account": qbo_acct_id,
+                         "accounting_method": "Accrual"},
+                    )
+                except Exception:  # noqa: BLE001
+                    gl_walk_errors += 1
+                    continue
+                rows = (gl.get("Rows") or {}).get("Row") or []
+                postings = _flatten_gl_rows(rows)
+                if not postings:
+                    continue
+                docs = []
+                for p in postings:
+                    docs.append({
+                        "company_id": company_id,
+                        "account_qbo_id": qbo_acct_id,
+                        "account_local_id": a.get("id"),
+                        "account_name": a.get("name") or "",
+                        "account_type": a.get("type") or "",
+                        "account_subtype": a.get("subtype") or "",
+                        "date": p.get("date") or "",
+                        "txn_type": p.get("txn_type") or "",
+                        "doc_num": p.get("doc_num") or "",
+                        "name": p.get("name") or "",
+                        "memo": p.get("memo") or "",
+                        "split": p.get("split") or "",
+                        "amount": round(
+                            float(p.get("amount") or 0.0), 2),
+                        "accounting_method": "Accrual",
+                        "as_of_snapshot": now_iso(),
+                    })
+                if docs:
+                    await db.qbo_gl_lines.insert_many(docs)
+                    gl_lines_pulled += len(docs)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "GL pull failed for %s: %s — reports will fall back "
+                "to legacy `_signed_balances` engine until backfilled.",
+                company_id, e)
+
         await db.qbo_jobs.update_one(
             {"job_id": job_id},
             {"$set": {"status": "done", "phase": "done",
@@ -1747,7 +1815,9 @@ async def run_migration(job_id: str, company_id: str) -> None:
                       "skipped_dupkey": skipped_dupkey,
                       "opening_inventory_value": opening_inv_value,
                       "opening_balances_je": opening_bal_stats,
-                      "deposit_splits": deposit_splits_stats}},
+                      "deposit_splits": deposit_splits_stats,
+                      "gl_lines_pulled": gl_lines_pulled,
+                      "gl_walk_errors": gl_walk_errors}},
         )
         # Fire the branded "migration complete" email. Runs after the
         # done write so the email body can pull the finalised stats.

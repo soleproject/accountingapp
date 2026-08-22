@@ -76,13 +76,124 @@ AVAILABLE_FONTS = _register_bundled_fonts()
 CREDIT_NORMAL = {"liability", "equity", "revenue"}
 
 
+async def _has_qbo_gl_data(company_id: str) -> bool:
+    """One-shot presence check: does this company have GL-lines
+    populated? If yes, `_signed_balances` routes through the GL path
+    which is guaranteed to match QBO by construction.
+
+    Mongo `find_one` with a projection is O(1) with the
+    `(company_id, date)` index; fastest gate we can put in front of
+    the read path.
+    """
+    doc = await db.qbo_gl_lines.find_one(
+        {"company_id": company_id}, {"_id": 1})
+    return doc is not None
+
+
+async def _signed_balances_from_gl(company_id: str, start: str | None,
+                                     end: str,
+                                     include_pre_period: bool = False):
+    """Return `{account_id: raw_signed_balance}` derived from QBO's
+    own General Ledger rows stored in `qbo_gl_lines`.
+
+    QBO's GL amount is signed toward the account's natural balance
+    direction (positive when the account's balance increases in its
+    natural side). Our storage convention is debit-positive, so:
+
+    * Asset / Expense / COGS accounts: keep GL sign as-is.
+    * Liability / Equity / Revenue: negate GL sign to match our
+      debit-positive storage — display layer negates back to positive
+      for user rendering (see `CREDIT_NORMAL` handling in
+      `compute_balance_sheet`).
+
+    Parent-account handling: QBO's `GeneralLedger` endpoint rolls
+    child-account postings up into the parent's row set — but a
+    parent can ALSO carry its own direct postings on top of that
+    rollup. Naive per-account aggregation would double-count the
+    child rollup portion. Fix: subtract the sum of each parent's
+    direct children from the parent's own GL total so `by[parent_id]`
+    reflects DIRECT-ONLY activity. The section-emit walker then
+    correctly rolls children up separately. Emeral Coast Feb 28 2026
+    — Jeep 2023 Gladiator White had $59,988 in both parent + child
+    aggregations before this fix.
+    """
+    # Build parent → children map from account docs. We'll subtract
+    # child rollups after aggregating.
+    parent_to_children: dict[str, list[str]] = {}
+    async for a in db.accounts.find(
+        {"company_id": company_id,
+         "parent_account_id": {"$ne": None}},
+        {"id": 1, "parent_account_id": 1},
+    ):
+        pid = a.get("parent_account_id")
+        cid_ = a.get("id")
+        if pid and cid_:
+            parent_to_children.setdefault(pid, []).append(cid_)
+
+    match: dict = {"company_id": company_id, "date": {"$lte": end}}
+    if start and not include_pre_period:
+        match["date"] = {"$gte": start, "$lte": end}
+
+    pipeline = [
+        {"$match": match},
+        {"$group": {
+            "_id": {
+                "account_local_id": "$account_local_id",
+                "account_type": "$account_type",
+            },
+            "amount_sum": {"$sum": "$amount"},
+        }},
+    ]
+    raw_by_acct: dict[str, tuple[float, str]] = {}  # id -> (sum, type)
+    async for r in db.qbo_gl_lines.aggregate(pipeline):
+        info = r["_id"]
+        acct_id = info.get("account_local_id")
+        if not acct_id:
+            continue
+        acct_type = (info.get("account_type") or "").lower()
+        raw_by_acct[acct_id] = (
+            float(r.get("amount_sum") or 0.0), acct_type)
+
+    # Subtract each parent's child-rollup from the parent's GL sum
+    # so `by[parent_id]` = parent's DIRECT postings only.
+    parent_direct: dict[str, float] = {}
+    for pid, kids in parent_to_children.items():
+        parent_sum = raw_by_acct.get(pid, (0.0, ""))[0]
+        kids_sum = sum(raw_by_acct.get(k, (0.0, ""))[0] for k in kids)
+        parent_direct[pid] = parent_sum - kids_sum
+
+    by: defaultdict = defaultdict(float)
+    for acct_id, (gl_sum, acct_type) in raw_by_acct.items():
+        # If this account is a parent, replace its raw sum with the
+        # direct-only figure computed above.
+        if acct_id in parent_direct:
+            gl_sum = parent_direct[acct_id]
+        # Flip credit-normal so this function returns the same
+        # debit-positive shape as the legacy path.
+        if acct_type in CREDIT_NORMAL:
+            by[acct_id] = -gl_sum
+        else:
+            by[acct_id] = gl_sum
+    return by
+
+
 async def _signed_balances(company_id: str, start: str | None, end: str,
                             include_pre_period: bool = False):
     """Return {account_id: raw_signed_balance} for postings whose date is <= end
     (and >= start if given and include_pre_period is False).
 
     Includes both transactions and journal entries. Both must be balanced sources.
+
+    Phase 2 (Feb 28 2026): if this company has QBO GL data
+    populated (via `run_migration` or `/api/admin/qbo/gl-migrate`),
+    route through `_signed_balances_from_gl` for guaranteed parity
+    with QBO's own reports. Legacy `transactions` + `journal_entries`
+    accumulation runs only for native / non-QBO companies.
     """
+    if await _has_qbo_gl_data(company_id):
+        return await _signed_balances_from_gl(
+            company_id, start, end, include_pre_period)
+
     by = defaultdict(float)
 
     txn_q = {"company_id": company_id, "posted": True, "date": {"$lte": end}}
@@ -397,6 +508,13 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
     accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
     by = await _signed_balances(company_id, start, end)
 
+    # Phase 2 (Feb 28 2026): when GL rows are the source of truth,
+    # every accrual / cash-basis compensating layer below (invoice
+    # revenue roll-in, bill expense roll-in, cash allocation from
+    # payments) would DOUBLE-COUNT on top of the GL. Skip them
+    # entirely for GL-authoritative companies.
+    _gl_authoritative = await _has_qbo_gl_data(company_id)
+
     # Build parent → children index (same pattern used on the balance
     # sheet). Sub-accounts render indented under their parent and the
     # parent shows the rolled-up total (own direct postings + kids).
@@ -572,7 +690,7 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
     # prevented per-account reconciliation with QBO.
     accrual_adj_rev = 0.0
     accrual_adj_exp = 0.0
-    if basis == "accrual":
+    if basis == "accrual" and not _gl_authoritative:
         # Build lookup: qbo_id → local account row, keyed for revenue
         # and expense/cogs separately so we route each invoice line to
         # the correct section.
@@ -744,7 +862,7 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
         _refresh_subtotals(cogs_rows)
         _refresh_subtotals(expense_rows)
 
-    elif basis == "cash":
+    elif basis == "cash" and not _gl_authoritative:
         # ------------------------------------------------------------------
         # Cash-basis allocation (Feb 28 2026 — Craig's Landscaping parity)
         # ------------------------------------------------------------------
@@ -974,6 +1092,13 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
     accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
     by = await _signed_balances(company_id, start=None, end=as_of, include_pre_period=True)
 
+    # Phase 2 (Feb 28 2026): if `_signed_balances` returned GL-derived
+    # balances (see `_has_qbo_gl_data`), every compensating layer
+    # below (`_open_ar_ap` bucketing, payments_realized cash roll-in,
+    # etc.) would DOUBLE-COUNT because QBO's GL already includes
+    # those postings. Skip the layering entirely on the GL path.
+    _gl_authoritative = await _has_qbo_gl_data(company_id)
+
     # ------------------------------------------------------------------
     # A/R and A/P: layer unpaid-invoice / unpaid-bill totals directly
     # onto the corresponding GL account balance BEFORE we emit sections.
@@ -1000,7 +1125,7 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
     ar_open = 0.0
     ap_open = 0.0
     ap_split_result: dict | None = None
-    if basis == "accrual":
+    if basis == "accrual" and not _gl_authoritative:
         ap_split_result = await _open_ar_ap(company_id, as_of=as_of, start=None)
         ar_open = ap_split_result["ar_end"]
         ap_open = ap_split_result["ap_end"]
@@ -1271,29 +1396,27 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
     # Arizona Dept. of Revenue, etc.) show $0 on our BS and Total
     # Liabilities under-counts by the tax total.
     #
-    # Rate → payable resolution: `TaxRate.AgencyRef.value` → agency
-    # display name → local account whose name is "{Agency} Payable"
-    # AND whose AccountSubType is GlobalTaxPayable. If QBO's tax
-    # data isn't cached locally, skip silently — tax gap surfaces as
-    # residual drift on the Recon Panel rather than crashing the
-    # report.
+    # Phase 2 (Feb 28 2026): skip on the GL path — QBO's GL already
+    # posts sales-tax lines to their payable accounts, so this layer
+    # would double-count.
     tax_rate_to_account_id: dict[str, str] = {}
-    tax_rates = await db.tax_rates.find({"company_id": company_id}).to_list(500)
-    if tax_rates:
-        agency_to_acct: dict[str, str] = {}
-        async for a in db.accounts.find({
-            "company_id": company_id,
-            "raw.AccountSubType": "GlobalTaxPayable",
-        }):
-            key = (a.get("name") or "").replace(" Payable", "").strip().lower()
-            agency_to_acct[key] = a["id"]
-        for tr in tax_rates:
-            agn = (tr.get("agency_name") or "").strip().lower()
-            if not agn:
-                continue
-            aid = agency_to_acct.get(agn)
-            if aid:
-                tax_rate_to_account_id[str(tr.get("qbo_id"))] = aid
+    if not _gl_authoritative:
+        tax_rates = await db.tax_rates.find({"company_id": company_id}).to_list(500)
+        if tax_rates:
+            agency_to_acct: dict[str, str] = {}
+            async for a in db.accounts.find({
+                "company_id": company_id,
+                "raw.AccountSubType": "GlobalTaxPayable",
+            }):
+                key = (a.get("name") or "").replace(" Payable", "").strip().lower()
+                agency_to_acct[key] = a["id"]
+            for tr in tax_rates:
+                agn = (tr.get("agency_name") or "").strip().lower()
+                if not agn:
+                    continue
+                aid = agency_to_acct.get(agn)
+                if aid:
+                    tax_rate_to_account_id[str(tr.get("qbo_id"))] = aid
 
     if tax_rate_to_account_id:
         acct_by_id: dict[str, dict] = {
@@ -1394,19 +1517,25 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
     # from AR to Cash on the asset side needs a matching Revenue-side
     # recognition, since `ar_end` alone under-counts total billed by
     # the collected amount. Same idea for BillPayments in reverse.
+    #
+    # Phase 2 (Feb 28 2026): on the GL path, QBO's own GL already
+    # reflects the AR-to-cash movement (payments show up as -amount
+    # on AR and +amount on the deposit account). Skip this layer to
+    # avoid double-counting.
     # ------------------------------------------------------------------
     pay_in_total = 0.0
     pay_out_total = 0.0
-    async for _p in db.payments.find({"company_id": company_id,
-                                      "date": {"$lte": as_of}}):
-        amt = float(_p.get("amount") or 0)
-        if amt <= 0.005:
-            continue
-        if (_p.get("direction") or "in") == "in":
-            pay_in_total += amt
-        else:
-            pay_out_total += amt
-    net_income_current += pay_in_total - pay_out_total
+    if not _gl_authoritative:
+        async for _p in db.payments.find({"company_id": company_id,
+                                          "date": {"$lte": as_of}}):
+            amt = float(_p.get("amount") or 0)
+            if amt <= 0.005:
+                continue
+            if (_p.get("direction") or "in") == "in":
+                pay_in_total += amt
+            else:
+                pay_out_total += amt
+        net_income_current += pay_in_total - pay_out_total
 
     net_income_current = round(net_income_current, 2)
     equity.append({

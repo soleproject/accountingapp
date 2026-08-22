@@ -633,6 +633,7 @@ async def admin_qbo_full_backfill(
                 "remap_qbo_transfers",
                 "reset_and_resolve_deposit_splits",
                 "post_opening_balances_je",
+                "pull_qbo_gl_lines",  # Phase 2 GL-as-source-of-truth
             ]
             results.append(entry)
             continue
@@ -736,6 +737,53 @@ async def admin_qbo_full_backfill(
             # posted JE before recomputing).
             step_stats["opening_balances_je"] = \
                 await Q._post_opening_balances_je(cid)
+
+            # Step 6 (Feb 28 2026) — GL-as-source-of-truth pull.
+            # Populates `qbo_gl_lines` so the report engine reads
+            # from QBO's own GL going forward. Idempotent — wipes
+            # prior GL rows before re-pulling.
+            gl_lines = 0
+            gl_errs = 0
+            await db.qbo_gl_lines.delete_many({"company_id": cid})
+            for a in await db.accounts.find({
+                "company_id": cid, "qbo_id": {"$ne": None},
+            }).to_list(5000):
+                try:
+                    gl = await Q.fetch_report(
+                        cid, realm_id, "GeneralLedger",
+                        {"start_date": "2000-01-01",
+                         "end_date": "2099-12-31",
+                         "account": str(a.get("qbo_id") or ""),
+                         "accounting_method": "Accrual"},
+                    )
+                except Exception:  # noqa: BLE001
+                    gl_errs += 1
+                    continue
+                postings = Q._flatten_gl_rows(
+                    (gl.get("Rows") or {}).get("Row") or [])
+                if not postings:
+                    continue
+                docs = [{
+                    "company_id": cid,
+                    "account_qbo_id": str(a.get("qbo_id") or ""),
+                    "account_local_id": a.get("id"),
+                    "account_name": a.get("name") or "",
+                    "account_type": a.get("type") or "",
+                    "account_subtype": a.get("subtype") or "",
+                    "date": p.get("date") or "",
+                    "txn_type": p.get("txn_type") or "",
+                    "doc_num": p.get("doc_num") or "",
+                    "name": p.get("name") or "",
+                    "memo": p.get("memo") or "",
+                    "split": p.get("split") or "",
+                    "amount": round(float(p.get("amount") or 0.0), 2),
+                    "accounting_method": "Accrual",
+                    "as_of_snapshot": now_iso(),
+                } for p in postings]
+                await db.qbo_gl_lines.insert_many(docs)
+                gl_lines += len(docs)
+            step_stats["gl_lines_pulled"] = gl_lines
+            step_stats["gl_walk_errors"] = gl_errs
 
             entry["steps"] = step_stats
             entry["after"] = await _bs_snapshot(cid)
