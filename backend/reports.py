@@ -1079,54 +1079,77 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
         return r
 
     def _emit_section(section_type: str) -> tuple[list[dict], float]:
-        """Return (rows, section_total) for one type — assets, liabilities, equity."""
+        """Return (rows, section_total) for one type — assets, liabilities, equity.
+
+        Renders the CoA as a nested tree so grandchildren (e.g. an
+        `Allowance` sub-account under `Note Receivable - 72 Holdings`
+        under `Client Note Receivables`) roll into their direct parent's
+        subtotal, not into the top-level ancestor. Prior single-level
+        implementation orphaned every grandchild — a QBO-real pattern
+        that put $60k of unmapped activity on BM QBO 2 LLC's BS
+        (Feb 27 2026).
+
+        Rendering per subtree (`_walk`):
+          * Parent header row → direct amount only (no descendant roll-in)
+          * Recursive child rows (with their own subtotals for THEIR
+            descendants)
+          * `Total {parent}` subtotal row → direct + all descendants
+        Suppresses subtrees whose rolled total is ~0.
+        """
+        def _walk(a: dict, parent_code: str | None,
+                  parent_id: str | None) -> tuple[list[dict], float]:
+            direct = _display_amount(a, by.get(a["id"], 0.0))
+            kids_sorted = sorted(
+                (k for k in children_of.get(a["id"], [])
+                 if k["type"] == section_type),
+                key=lambda x: (x.get("code") or "", x.get("name") or ""),
+            )
+            child_rows: list[dict] = []
+            kids_total = 0.0
+            for k in kids_sorted:
+                k_rows, k_rolled = _walk(k, parent_code=a.get("code") or "",
+                                          parent_id=a["id"])
+                child_rows.extend(k_rows)
+                kids_total += k_rolled
+            rolled = direct + kids_total
+            keep = abs(rolled) >= 0.005 or a["code"] == "3100"
+            if not keep:
+                return [], 0.0
+            emitted: list[dict] = []
+            # Parent header row (direct only). Suppress if this account
+            # has neither its own posts nor any visible descendant —
+            # avoids empty "container" rows.
+            if abs(direct) >= 0.005 or child_rows or a["code"] == "3100":
+                emitted.append(_row(a, direct,
+                                     parent_code=parent_code,
+                                     parent_id=parent_id))
+            emitted.extend(child_rows)
+            if child_rows:
+                sub = _row(a, rolled,
+                            parent_code=a.get("code") or "",
+                            parent_id=a["id"])
+                sub["name"] = f"Total {a['name']}"
+                sub["is_subtotal"] = True
+                emitted.append(sub)
+            return emitted, rolled
+
         rows: list[dict] = []
         top_total = 0.0
-        # Sort parents (top-level accounts of this type) by code.
         top_level = [a for a in accts
-                     if a["type"] == section_type and not a.get("parent_account_id")]
+                     if a["type"] == section_type
+                     and not a.get("parent_account_id")]
         # Sort by (detail_type, code) so accounts sharing a Wave-style
         # sub-type end up contiguous — required for the grouped
         # renderer to emit clean sub-type banners in the PDF.
-        top_level.sort(key=lambda x: ((x.get("detail_type") or "zzz").lower(), (x.get("code") or "")))
+        top_level.sort(
+            key=lambda x: ((x.get("detail_type") or "zzz").lower(),
+                            (x.get("code") or "")))
         for a in top_level:
-            direct = _display_amount(a, by.get(a["id"], 0.0))
-            kids = sorted(children_of.get(a["id"], []), key=lambda x: x["code"])
-            kids_rows: list[dict] = []
-            kids_total = 0.0
-            for k in kids:
-                if k["type"] != section_type:
-                    continue  # defensive
-                kd = _display_amount(k, by.get(k["id"], 0.0))
-                if abs(kd) < 0.005:
-                    continue
-                kids_rows.append(_row(k, kd,
-                                       parent_code=a["code"],
-                                       parent_id=a["id"]))
-                kids_total += kd
-            rolled = direct + kids_total
-            # Match QBO's rendering convention on Balance Sheet as well:
-            # parent = direct-only, then children, then "Total {parent}"
-            # subtotal row. Special-case Retained Earnings (3100) which
-            # QBO always emits even at $0.
-            keep_parent = abs(rolled) >= 0.005 or a["code"] == "3100"
-            if keep_parent:
-                if abs(direct) >= 0.005 or kids_rows or a["code"] == "3100":
-                    rows.append(_row(a, direct))
-                rows.extend(kids_rows)
-                if kids_rows:
-                    subtotal_row = _row(a, rolled, parent_code=a["code"], parent_id=a["id"])
-                    subtotal_row["name"] = f"Total {a['name']}"
-                    subtotal_row["is_subtotal"] = True
-                    rows.append(subtotal_row)
-                top_total += rolled
-            else:
-                # Parent is zero + no visible children: still emit visible children
-                # (they had activity even if it netted at the parent).
-                for kr in kids_rows:
-                    rows.append(kr)
-                    top_total += kr["amount"]
+            sub_rows, sub_total = _walk(a, parent_code=None, parent_id=None)
+            rows.extend(sub_rows)
+            top_total += sub_total
         return rows, top_total
+
 
     assets, total_assets_raw = _emit_section("asset")
     liabilities, total_liabilities_raw = _emit_section("liability")

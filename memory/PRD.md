@@ -49,6 +49,26 @@ Root-caused a systemic parity gap on BM QBO 2 LLC where our P&L was off by $60k-
 4. Undeposited Funds ↔ Stripe Clearing swap (`~$37k` both sides, nets to 0 on total)
 5. AP header-account $188 phantom row
 
+### Feb 27 2026 — Grandchild Rollup Fix (Multi-Level BS Nesting)
+
+**Fix**: rewrote `reports.compute_balance_sheet::_emit_section` as a recursive tree walker so grandchildren of top-level accounts render under their DIRECT parent (with their own `Total {parent}` subtotal) instead of being silently dropped by the previous single-level implementation.
+
+**Impact on BM QBO 2 LLC:**
+- Note Receivable tree now renders correctly:
+  - `Note Receivable - 72 Holdings, LLC` $120,151.26
+  - `Allowance Note Receivable` -$60,075.63 (grandchild — was previously orphaned)
+  - `Total Note Receivable - 72 Holdings, LLC` = **$60,075.63** ✅ matches QBO to the penny
+  - `Total Client Note Receivables` = **$145,075.63** ✅ matches QBO to the penny
+- BS imbalance: **$103,751 → $43,676** ($60,075 closed in one shot — exactly the Allowance amount previously orphaned)
+- 47/47 QBO parity pytest tests still pass
+
+**Remaining BS drift after Grandchild fix** (~$43,676 imbalance):
+1. TEMPORARY-BP-Cash (deleted-account activity, ~$47k) — QBO hides these from reports
+2. Skyward AMEX Operations $32,405 vs QBO $5,076 (~$27k over) + AMEX Gold Card liability $35,313 vs QBO $3,255 (~$32k over) — offsetting bank/CC drift
+3. Skyward Bluevine Checking $4,729 vs QBO $0
+4. Undeposited Funds $37,196 vs Stripe Clearing -$37,196 — payment sweep routing (nets to 0 on total assets)
+5. AP header-account $188 phantom row
+
 
 
 
