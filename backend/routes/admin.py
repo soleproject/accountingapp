@@ -509,6 +509,204 @@ async def admin_qbo_opening_balances_backfill(
 
 
 
+class QboFullBackfillIn(BaseModel):
+    """Multi-step BS/PL parity backfill for legacy QBO-migrated
+    companies. Runs the chain of fixes shipped Feb 27 2026:
+      1. Re-pull `Account` entity with `Active IN (true, false)` so
+         deleted/inactive accounts referenced by historical JEs get
+         imported (previously silently dropped, orphaning JE lines
+         and leaving BS out of balance by their aggregate).
+      2. `resolve_transaction_categories` — hydrates `account_id` on
+         `transactions.line_items[]` so drill-downs / category
+         filters / P&L work.
+      3. `resolve_journal_entry_line_accounts` — writes the local
+         `account_id` on each `journal_entries.lines[i]`. Fix #1
+         from BM QBO 2 LLC investigation: `_signed_balances` reads
+         `account_id` (not `account_qbo_id`), so 98% of JE line
+         impact was silently dropped from the ledger on legacy data.
+      4. Clear + re-run `resolve_deposit_splits` — corrects the
+         Undeposited Funds fallback that previously non-
+         deterministically routed sweep-from-UF deposits into
+         Stripe Clearing on companies with multiple `money_in_transit`
+         accounts.
+      5. Re-run `_post_opening_balances_je` — idempotent purge of
+         any stale over-plug from the pre-fix-#1 migration where
+         `_signed_balances` was reading zero JE activity.
+    """
+    company_id: str | None = Field(
+        default=None,
+        description="Restrict backfill to a single company. Null = "
+                    "all QBO-connected companies.")
+    dry_run: bool = Field(
+        default=True,
+        description="If true, only compute BEFORE totals and skip the "
+                    "chain. Use to preview blast radius before "
+                    "committing changes.")
+
+
+async def _bs_snapshot(cid: str) -> dict:
+    """Small helper: capture the four headline BS/PL numbers we care
+    about for the diff report. Uses the same as-of range Test QBO
+    and the Compare panel now share (2020-01-01 → 2099-12-31)."""
+    end = "2099-12-31"
+    out: dict = {}
+    for basis in ("accrual", "cash"):
+        try:
+            bs = await R.compute_balance_sheet(cid, end, basis)
+            pl = await R.compute_income_statement(
+                cid, "2020-01-01", end, basis)
+            out[basis] = {
+                "total_assets": bs.get("total_assets"),
+                "total_liabilities": bs.get("total_liabilities"),
+                "total_equity": bs.get("total_equity"),
+                "imbalance": bs.get("imbalance"),
+                "net_income": pl.get("net_income"),
+            }
+        except Exception as e:  # noqa: BLE001
+            out[basis] = {"error": str(e)}
+    return out
+
+
+@router.post("/admin/qbo/full-backfill")
+async def admin_qbo_full_backfill(
+    inp: QboFullBackfillIn | None = None,
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Run the Feb 27 2026 parity fix chain across QBO-migrated
+    companies. Returns before/after BS+P&L totals per company so the
+    operator can eyeball each swing before deploying to production.
+
+    Recommended workflow:
+      1. `POST /admin/qbo/full-backfill` with `dry_run=true` → see
+         each company's current parity gap without touching anything.
+      2. Review diffs; if they look sane, run again with
+         `dry_run=false` to commit.
+
+    Uses `Q.query_all("Account")` to re-pull accounts including
+    inactive ones — that step requires a live QBO OAuth connection
+    per company, so companies with `status != "connected"` are
+    listed but skipped with `error: "not_connected"`.
+    """
+    import qbo_service as Q
+
+    inp = inp or QboFullBackfillIn()
+
+    # Company selection: single-company mode always includes the
+    # named company (even if its qbo_connection status is off, so
+    # the operator can still see the current state); bulk mode
+    # only touches connected ones.
+    if inp.company_id:
+        target_cids = [inp.company_id]
+    else:
+        target_cids = await db.qbo_connections.distinct(
+            "company_id", {"status": "connected"})
+
+    results: list[dict] = []
+    for cid in target_cids:
+        c = await db.companies.find_one({"id": cid})
+        company_name = c.get("name") if c else None
+        conn = await db.qbo_connections.find_one({"company_id": cid})
+        realm_id = conn.get("realm_id") if conn else None
+
+        entry: dict = {
+            "company_id": cid,
+            "company_name": company_name,
+            "before": await _bs_snapshot(cid),
+        }
+
+        if not conn or conn.get("status") != "connected":
+            entry["error"] = "not_connected"
+            entry["skipped"] = True
+            results.append(entry)
+            continue
+
+        if inp.dry_run:
+            entry["dry_run"] = True
+            entry["planned_steps"] = [
+                "re_pull_accounts_incl_inactive",
+                "resolve_transaction_categories",
+                "resolve_journal_entry_line_accounts",
+                "reset_and_resolve_deposit_splits",
+                "post_opening_balances_je",
+            ]
+            results.append(entry)
+            continue
+
+        step_stats: dict = {}
+        try:
+            # Step 1 — re-pull Account (picks up deleted accounts).
+            n_new = 0
+            n_upd = 0
+            async for obj in Q.query_all(cid, realm_id, "Account"):
+                doc = Q.map_account(cid, realm_id, obj)
+                existing = await db.accounts.find_one({
+                    "company_id": cid, "qbo_id": doc.get("qbo_id")})
+                if not existing:
+                    n_new += 1
+                else:
+                    n_upd += 1
+                await Q.upsert("accounts", doc)
+            step_stats["accounts_repulled"] = {
+                "new": n_new, "updated": n_upd}
+            # Re-link parents in case the deleted-included pull
+            # brought in previously-orphaned children too.
+            step_stats["accounts_parents_linked"] = \
+                await Q.resolve_account_parents(cid)
+
+            # Step 2 — refresh transaction categories + line_items[].
+            step_stats["transaction_categories"] = \
+                await Q.resolve_transaction_categories(cid)
+
+            # Step 3 — JE line account_id backfill.
+            step_stats["je_lines_resolved"] = \
+                await Q.resolve_journal_entry_line_accounts(cid)
+
+            # Step 4 — clear + re-resolve deposit splits so the UF
+            # fallback picks the correct account (see the loose-query
+            # bug we hit on BM QBO 2 LLC where Stripe Clearing was
+            # returned first). Only clears QBO-source Deposits so
+            # native Deposit splits are preserved.
+            reset = await db.transactions.update_many(
+                {"company_id": cid,
+                 "source": "qbo",
+                 "txn_type": "Deposit"},
+                {"$unset": {"splits": ""}})
+            step_stats["deposits_reset"] = reset.modified_count
+            step_stats["deposit_splits"] = \
+                await Q.resolve_deposit_splits(cid)
+
+            # Step 5 — opening balances (idempotent — deletes prior
+            # posted JE before recomputing).
+            step_stats["opening_balances_je"] = \
+                await Q._post_opening_balances_je(cid)
+
+            entry["steps"] = step_stats
+            entry["after"] = await _bs_snapshot(cid)
+        except Exception as err:  # noqa: BLE001
+            entry["error"] = f"backfill_failed: {err}"
+            entry["partial_steps"] = step_stats
+            entry["after"] = await _bs_snapshot(cid)
+        results.append(entry)
+
+    # Summary counters — quick eyeball metric so the operator sees
+    # blast radius at the top of the response without scrolling
+    # every company entry.
+    n_ok = sum(1 for r in results if not r.get("error"))
+    n_err = sum(1 for r in results if r.get("error"))
+    n_dry = sum(1 for r in results if r.get("dry_run"))
+
+    return {
+        "companies_processed": len(target_cids),
+        "companies_ok": n_ok,
+        "companies_errored": n_err,
+        "companies_dry_run": n_dry,
+        "dry_run": inp.dry_run,
+        "results": results,
+    }
+
+
+
+
 class AiCapOverrideIn(BaseModel):
     """One-click override — used from the admin UI to raise/lower a
     specific company's cap without a deploy. Cap is stored in CENTS on

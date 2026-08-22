@@ -49,6 +49,41 @@ Root-caused a systemic parity gap on BM QBO 2 LLC where our P&L was off by $60k-
 4. Undeposited Funds ↔ Stripe Clearing swap (`~$37k` both sides, nets to 0 on total)
 5. AP header-account $188 phantom row
 
+### Feb 27 2026 — QBO Full-Backfill Endpoint (Broadcast the Parity Fixes)
+
+**What:** New superadmin endpoint `POST /api/admin/qbo/full-backfill` that runs the entire Feb 27 2026 parity-fix chain across every QBO-connected company (or a single company via `company_id`), with an explicit `dry_run` mode that captures before/after BS + P&L totals per company without mutating anything.
+
+**Chain executed (in order) when `dry_run=false`:**
+1. Re-pull `Account` entity with `Active IN (true, false)` — imports deleted/inactive accounts referenced by historical JEs
+2. `resolve_account_parents` — re-links parent hierarchy for any newly-imported accounts
+3. `resolve_transaction_categories` — hydrates `account_id` on `transactions.line_items[]`
+4. `resolve_journal_entry_line_accounts` — hydrates `account_id` on `journal_entries.lines[]` (Fix #1)
+5. Clear + re-run `resolve_deposit_splits` — corrects UF-fallback misroutes
+6. `_post_opening_balances_je` — idempotent purge of stale over-plugs
+
+**Response shape (per company):**
+- `before` / `after` — BS + P&L totals on both bases (accrual + cash) with `total_assets`, `total_liabilities`, `total_equity`, `imbalance`, `net_income`
+- `steps` — counters per step so the operator can eyeball what changed (new accounts, JE lines resolved, deposits reset, UF fallbacks, opening balance lines)
+- Top-level `companies_ok`, `companies_errored`, `companies_dry_run` summary
+
+**Verified idempotent on BM QBO 2 LLC (already backfilled)** — before/after totals byte-identical after a real run. Safe to re-invoke.
+
+**Not-connected companies** included in the response with `error: "not_connected"` and skipped — they show up in operator's list so they know to reconnect QBO.
+
+**Test workflow:**
+```bash
+# 1. Dry-run against all connected companies to see current parity gaps
+curl -X POST $API/api/admin/qbo/full-backfill \
+  -H "Authorization: Bearer $SUPERADMIN_TOKEN" \
+  -H "Content-Type: application/json" -d '{"dry_run":true}'
+
+# 2. Review each company's `before` block; if the imbalances look
+#    like the same class of issue we fixed on BM QBO 2 LLC, run for real
+curl -X POST $API/api/admin/qbo/full-backfill \
+  -H "Authorization: Bearer $SUPERADMIN_TOKEN" \
+  -H "Content-Type: application/json" -d '{"dry_run":false}'
+```
+
 ### Feb 27 2026 — Known Variance #1: Bank/CC JE Rendering (Accepted)
 
 **Status:** ACCEPTED / DOCUMENTED. Not a bug, structural convention mismatch.
