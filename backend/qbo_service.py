@@ -20,6 +20,7 @@ import asyncio
 import inspect
 import random
 import logging
+from contextvars import ContextVar
 from datetime import datetime, timezone, timedelta
 from typing import Any, AsyncIterator, Optional
 
@@ -29,6 +30,22 @@ from intuitlib.enums import Scopes
 
 from db import db, now_iso
 from crypto_service import encrypt, decrypt
+
+
+# ContextVar for connection-collection swap. Test QBO sets this to
+# `"qbo_test_connections"` for the duration of a request so its
+# OAuth/refresh/API calls persist against an isolated table and NEVER
+# touch the production `qbo_connections` collection.
+_conn_coll_var: ContextVar[str] = ContextVar(
+    "qbo_conn_coll", default="qbo_connections")
+
+
+def _conn_coll():
+    """Return the currently-active connection collection (production
+    by default; `qbo_test_connections` when the Test QBO ContextVar
+    is set on the request). Any function that previously reached into
+    `db.qbo_connections` directly must route through this helper."""
+    return getattr(db, _conn_coll_var.get())
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +241,11 @@ async def save_connection(company_id: str, realm_id: str, tokens: dict,
     """Persist a QBO connection. `env` stamps the row so every future
     refresh/API call resolves against the same Intuit app the token
     was minted on. Existing sandbox connections keep their env after
-    the Feb 2026 backfill; new prod connections stamp "production"."""
+    the Feb 2026 backfill; new prod connections stamp "production".
+
+    Honors `qbo_conn_coll` ContextVar so Test QBO can persist into an
+    isolated `qbo_test_connections` collection without touching prod.
+    """
     now = datetime.now(timezone.utc)
     resolved_env = _norm_env(env)
     doc = {
@@ -240,7 +261,7 @@ async def save_connection(company_id: str, realm_id: str, tokens: dict,
         "status": "connected",
         "updated_at": now_iso(),
     }
-    await db.qbo_connections.update_one(
+    await _conn_coll().update_one(
         {"company_id": company_id},
         {"$set": doc, "$setOnInsert": {"created_at": now_iso()}},
         upsert=True,
@@ -248,7 +269,7 @@ async def save_connection(company_id: str, realm_id: str, tokens: dict,
 
 
 async def get_connection(company_id: str) -> Optional[dict]:
-    return await db.qbo_connections.find_one({"company_id": company_id})
+    return await _conn_coll().find_one({"company_id": company_id})
 
 
 def env_from_connection(conn: Optional[dict]) -> str:
@@ -284,7 +305,7 @@ async def get_access_token(company_id: str) -> str:
         new = await _refresh(company_id, decrypt(conn["refresh_token_enc"]),
                              env=conn_env)
         now = datetime.now(timezone.utc)
-        await db.qbo_connections.update_one(
+        await _conn_coll().update_one(
             {"company_id": company_id},
             {"$set": {
                 "access_token_enc": encrypt(new["access_token"]),
@@ -319,7 +340,7 @@ async def _get(company_id: str, realm_id: str, path: str, params: dict) -> dict:
                 )
             if r.status_code == 401 and attempt == 0:
                 # Force refresh on next iteration.
-                await db.qbo_connections.update_one(
+                await _conn_coll().update_one(
                     {"company_id": company_id},
                     {"$set": {"access_expires_at": now_iso()}},
                 )
