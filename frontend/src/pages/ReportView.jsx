@@ -970,6 +970,31 @@ function RolledUpRows({ rows, onDrilldown, onDrilldownGroup }) {
 
   const toggle = (code) => setExpanded(x => ({ ...x, [code]: !x[code] }));
 
+  // For each group, precompute the ROLLED-UP total so we can show it on
+  // the parent row when it's collapsed. The backend follows QBO's
+  // convention of emitting the parent with its DIRECT amount only and
+  // adding a "Total X" subtotal row (is_subtotal=true) whose amount
+  // equals direct + all children. That's the number we want on the
+  // collapsed parent — otherwise a parent with all activity on its
+  // sub-accounts (e.g. Business Checking → BOA ···6084 + BOA ···9917)
+  // shows $0.00 on the collapsed row, which looks like a data bug.
+  // Expanded view still renders exactly QBO's shape so the recon panel
+  // keeps line-matching. (Aug 23 2026.)
+  const rolledUpFor = new Map();
+  for (const g of groups) {
+    if (!g.children.length) continue;
+    const subtotalRow = g.children.find(c => c.is_subtotal);
+    if (subtotalRow) {
+      rolledUpFor.set(g.parent.code, subtotalRow.amount);
+    } else {
+      // Fallback: sum non-subtotal children + parent direct.
+      const kidsSum = g.children
+        .filter(c => !c.is_subtotal)
+        .reduce((acc, c) => acc + (Number(c.amount) || 0), 0);
+      rolledUpFor.set(g.parent.code, (Number(g.parent.amount) || 0) + kidsSum);
+    }
+  }
+
   // Wave-style sub-type banding — only kicks in when the backend
   // provides `detail_type` values. Legacy sections keep the flat look.
   const hasAnyDetail = groups.some(g => g.parent.detail_type);
@@ -983,6 +1008,12 @@ function RolledUpRows({ rows, onDrilldown, onDrilldownGroup }) {
         const dt = g.parent.detail_type || "";
         const showDetailHeader = hasAnyDetail && dt !== currentDetail;
         if (showDetailHeader) currentDetail = dt;
+        // Collapsed parent shows the rolled-up total (direct + kids);
+        // expanded parent keeps the direct-only amount so the visible
+        // sum still adds up correctly when kids are rendered below.
+        const parentAmount = hasKids && !isOpen && rolledUpFor.has(g.parent.code)
+          ? rolledUpFor.get(g.parent.code)
+          : g.parent.amount;
         return (
           <React.Fragment key={`${g.parent.code}-${g.parent.parent_code || ""}-${gi}`}>
             {showDetailHeader && dt && (
@@ -1005,16 +1036,22 @@ function RolledUpRows({ rows, onDrilldown, onDrilldownGroup }) {
             )}
             <Row
               {...g.parent}
+              amount={parentAmount}
               onClick={onDrilldown}
               expandable={hasKids}
               expanded={isOpen}
               onToggleExpand={hasKids ? () => toggle(g.parent.code) : undefined}
-              childCount={g.children.length}
+              childCount={g.children.filter(c => !c.is_subtotal).length}
             />
             {hasKids && isOpen && g.children.map(child => (
               <Row
-                key={`${child.code}-${child.parent_code || ""}`}
+                key={`${child.code}-${child.parent_code || ""}-${child.is_subtotal ? "sub" : "kid"}`}
                 {...child}
+                // Blank the code column on "Total X" subtotal rows so it
+                // matches QBO's rendering (they leave code empty on the
+                // subtotal). Backend still ships the parent's code for
+                // recon-panel row-matching — we just hide it visually.
+                code={child.is_subtotal ? "" : child.code}
                 onClick={onDrilldown}
               />
             ))}
