@@ -71,6 +71,10 @@ const POINT_PRESETS = {
   "end-of-last-month":         () => ({ end: iso(endOf.lastMonth()) }),
   "end-of-last-quarter":       () => ({ end: iso(endOf.lastQuarter()) }),
   "end-of-last-year":          () => ({ end: iso(endOf.lastYear()) }),
+  // "All Time" for BS: set `end` far-future so any post-dated JE
+  // still shows up on the snapshot (matches the default our
+  // Phase 2 QBO snapshot fetcher uses for BS parity).
+  "all-time":                  () => ({ end: "2099-12-31" }),
 };
 
 const PERIOD_LABELS = [
@@ -88,6 +92,7 @@ const POINT_LABELS = [
   ["end-of-last-month",    "End of Last Month"],
   ["end-of-last-quarter",  "End of Last Quarter"],
   ["end-of-last-year",     "End of Last Year"],
+  ["all-time",             "All Dates"],
 ];
 
 /** Best-effort reverse lookup: does the current {start, end} pair
