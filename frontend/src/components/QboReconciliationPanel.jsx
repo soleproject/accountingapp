@@ -14,7 +14,7 @@ import { useEffect, useState, useMemo } from "react";
 import { api } from "@/lib/api";
 import { useMoneyFmt } from "@/lib/company";
 import {
-  RefreshCw, CheckCircle2, AlertTriangle, Loader2, ExternalLink,
+  RefreshCw, CheckCircle2, AlertTriangle, Loader2, ExternalLink, Download,
 } from "lucide-react";
 
 /** Map local report kind → QBO report code. */
@@ -87,7 +87,71 @@ function flattenQboRows(rows, out = [], depth = 0, section = "") {
 const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
 /** Compare QBO totals vs our totals side by side, scoped by section. */
-function ReconciliationTable({ qboRows, ourRows, fmt }) {
+/**
+ * Build the CSV rows for the currently-rendered reconciliation
+ * table. Uses the same section-scoped `lookup` closure the table
+ * itself uses, so the exported file mirrors the on-screen data
+ * exactly — including which QBO row matched which Axiom row.
+ *
+ * Header rows use `null` in the numeric columns; QBO section
+ * headers ("ASSETS", "LIABILITIES") export as a single-cell label.
+ */
+function buildCsvRows(qboRows, lookup) {
+  const rows = [];
+  rows.push(["Section", "Line", "Depth", "Official QBO", "Our Report",
+             "Difference", "Match"]);
+  for (const r of qboRows) {
+    if (r.header) {
+      rows.push([r.label, "", "", "", "", "", ""]);
+      continue;
+    }
+    if (r.value === null || r.value === undefined) {
+      rows.push([r.section || "", r.label, r.depth, "", "", "", ""]);
+      continue;
+    }
+    const ours = lookup(r.section, r.label);
+    const has = ours !== undefined && ours !== null;
+    const diff = has ? Math.abs(r.value - ours) : null;
+    const matches = has && diff < 0.01;
+    rows.push([
+      r.section || "",
+      r.label,
+      r.depth,
+      Number(r.value).toFixed(2),
+      has ? Number(ours).toFixed(2) : "",
+      has ? Number(diff).toFixed(2) : "",
+      has ? (matches ? "MATCH" : "DRIFT") : "N/A",
+    ]);
+  }
+  return rows;
+}
+
+/** RFC-4180 CSV: quote every cell, escape embedded quotes by
+ *  doubling them, join with `,` and separate rows with CRLF so
+ *  Excel opens the file without prompting. */
+function rowsToCsv(rows) {
+  const esc = (v) => {
+    const s = v == null ? "" : String(v);
+    return `"${s.replace(/"/g, '""')}"`;
+  };
+  return rows.map((r) => r.map(esc).join(",")).join("\r\n");
+}
+
+function triggerCsvDownload(csv, filename) {
+  // Prepend UTF-8 BOM so Excel treats the file as UTF-8 by default.
+  const blob = new Blob(["\ufeff" + csv],
+                        { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function ReconciliationTable({ qboRows, ourRows, fmt, onExport }) {
   // Key rows by `${section}::${normLabel}` so an income "Plants and
   // Soil" doesn't collide with an expense "Plants and Soil". Falls
   // back to plain label-only for rows that have no section context
@@ -113,6 +177,14 @@ function ReconciliationTable({ qboRows, ourRows, fmt }) {
     }
     return ourBy.bare.get(l);
   };
+
+  // Register the current lookup with the parent so its Export CSV
+  // button can produce a CSV that mirrors exactly what's on screen
+  // (same section-scoped matching rules, same rows shown).
+  useEffect(() => {
+    if (onExport) onExport(() => buildCsvRows(qboRows, lookup));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qboRows, ourRows]);
 
   return (
     <table className="w-full text-sm">
@@ -173,6 +245,11 @@ export default function QboReconciliationPanel({ companyId, reportKind, basis, o
   const [snapshot, setSnapshot] = useState(null);
   const [error, setError] = useState(null);
   const [qboStatus, setQboStatus] = useState(null);
+  // Ref-style holder — the table registers a getter that returns
+  // the CSV rows for the current on-screen match. We call it on
+  // export so the file always reflects what the user sees, even
+  // if they've toggled a fresh snapshot in and out.
+  const [csvGetter, setCsvGetter] = useState(null);
   const fmt = useMoneyFmt();
 
   const qboReportName = KIND_TO_QBO[reportKind];
@@ -287,15 +364,37 @@ export default function QboReconciliationPanel({ companyId, reportKind, basis, o
                 </>
               ) : "No snapshot yet."}
             </div>
-            <button
-              onClick={fetchFresh}
-              disabled={loading}
-              data-testid="recon-refresh"
-              className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-              {snapshot ? "Refresh from QBO" : "Fetch official QBO report"}
-            </button>
+            <div className="flex items-center gap-2">
+              {snapshot && csvGetter && (
+                <button
+                  onClick={() => {
+                    const rows = csvGetter();
+                    const kindLabel = reportKind === "balance-sheet"
+                      ? "balance-sheet" : "profit-and-loss";
+                    const stamp = (snapshot.snapshot_at || "")
+                      .slice(0, 10) || new Date().toISOString().slice(0, 10);
+                    const filename =
+                      `axiom-vs-qbo_${kindLabel}_${method.toLowerCase()}_${stamp}.csv`;
+                    triggerCsvDownload(rowsToCsv(rows), filename);
+                  }}
+                  data-testid="recon-export-csv"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  title="Download the current comparison as CSV"
+                >
+                  <Download size={12} />
+                  Export CSV
+                </button>
+              )}
+              <button
+                onClick={fetchFresh}
+                disabled={loading}
+                data-testid="recon-refresh"
+                className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                {snapshot ? "Refresh from QBO" : "Fetch official QBO report"}
+              </button>
+            </div>
           </div>
 
           {error && (
@@ -305,7 +404,12 @@ export default function QboReconciliationPanel({ companyId, reportKind, basis, o
           )}
 
           {snapshot && qboFlat.length > 0 && (
-            <ReconciliationTable qboRows={qboFlat} ourRows={ourFlat} fmt={fmt} />
+            <ReconciliationTable
+              qboRows={qboFlat}
+              ourRows={ourFlat}
+              fmt={fmt}
+              onExport={(getter) => setCsvGetter(() => getter)}
+            />
           )}
         </div>
       )}
