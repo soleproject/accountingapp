@@ -269,6 +269,13 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
     je_q = {"company_id": company_id, "date": {"$lte": end}}
     if start and not include_pre_period:
         je_q["date"] = {"$gte": start, "$lte": end}
+    # Cash-basis reports MUST NOT see accrual-only JEs (invoice-at-issue
+    # revenue postings, bill-at-issue expense postings from
+    # `posting_service`). Those recognize on the accrual axis only; the
+    # cash P&L / BS uses direct cash movements + the allocation pass
+    # in `compute_income_statement`. Feb 28 2026.
+    if str(basis).lower() == "cash":
+        je_q["posted_by"] = {"$ne": "auto_accrual"}
     jes = await db.journal_entries.find(je_q).to_list(100000)
     for j in jes:
         for line in j.get("lines", []):
@@ -365,6 +372,19 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
         # unbalancing the BS by exactly the payment amount.
         if p.get("source") != "qbo" and p.get("source_transaction_id"):
             continue
+        # Native payments posted via `posting_service.post_payment_je`
+        # already have both cash + AR/AP legs sitting in
+        # `journal_entries` (rolled up at line 272 above). Rolling
+        # the cash side in here too would double-count. Only skip on
+        # ACCRUAL basis — on cash basis the JE is filtered out of the
+        # roll-in above (auto_accrual JEs excluded from cash reports),
+        # so we still need this block to surface the cash side.
+        # QBO-sourced payments never post local JEs so they always
+        # flow through this block. Feb 28 2026.
+        if (p.get("posted") is True
+                and p.get("source") != "qbo"
+                and str(basis).lower() != "cash"):
+            continue
         aid = _pay_account_id(p)
         direction = p.get("direction") or "in"
         # Direction='in' with no resolvable deposit account →
@@ -412,8 +432,19 @@ async def _open_ar_ap(company_id: str, as_of: str, start: str | None = None):
     """
     from datetime import date as _date
 
-    invs = await db.invoices.find({"company_id": company_id}).to_list(20000)
-    bills = await db.bills.find({"company_id": company_id}).to_list(20000)
+    # Once an invoice/bill has been posted as a real JE (via
+    # `posting_service.post_invoice_je` / `post_bill_je` on
+    # create), the JE drives A/R and A/P in the report — the
+    # synthesis below would double-count. Skip posted docs.
+    # Feb 28 2026.
+    invs = await db.invoices.find({
+        "company_id": company_id,
+        "posted": {"$ne": True},
+    }).to_list(20000)
+    bills = await db.bills.find({
+        "company_id": company_id,
+        "posted": {"$ne": True},
+    }).to_list(20000)
 
     ar_end = 0.0
     ap_end = 0.0
@@ -725,8 +756,14 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
         exp_row_by_id = {r["id"]: r for r in expense_rows if r.get("id")}
 
         # 1) Invoices issued in the period → revenue side.
+        # Posted invoices (JEs auto-written by `posting_service`) already
+        # drive their income account through `_signed_balances`'s JE
+        # roll-in, so we must skip them here to avoid double-counting.
+        # Feb 28 2026.
         rev_uncategorized = 0.0
         async for inv in db.invoices.find({"company_id": company_id}):
+            if inv.get("posted") is True:
+                continue
             issue = inv.get("issue_date") or ""
             if not (issue and start <= issue <= end):
                 continue
@@ -820,8 +857,12 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
                 accrual_adj_rev -= amt
 
         # 2) Bills issued in the period → expense/COGS side.
+        # Skip posted bills — JE roll-in already covers their expense
+        # side. Feb 28 2026.
         exp_uncategorized = 0.0
         async for bill in db.bills.find({"company_id": company_id}):
+            if bill.get("posted") is True:
+                continue
             issue = bill.get("issue_date") or ""
             if not (issue and start <= issue <= end):
                 continue
@@ -1547,6 +1588,17 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
                                           "date": {"$lte": as_of}}):
             amt = float(_p.get("amount") or 0)
             if amt <= 0.005:
+                continue
+            # Native payments posted via `posting_service.post_payment_je`
+            # now carry BOTH legs (cash + AR/AP) in `journal_entries`.
+            # `_signed_balances` folds those in directly, so the AR/AP
+            # side no longer stays in `invoice.balance_due` — meaning
+            # the historical "realized-revenue" adjustment below would
+            # over-recognize NI by the payment amount. Skip posted
+            # native payments; QBO payments still need the offset
+            # because their AR side lives implicitly in balance_due.
+            # Feb 28 2026.
+            if _p.get("posted") is True and _p.get("source") != "qbo":
                 continue
             if (_p.get("direction") or "in") == "in":
                 pay_in_total += amt

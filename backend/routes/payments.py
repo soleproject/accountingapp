@@ -176,6 +176,21 @@ async def create_payment(cid: str, inp: PaymentCreate, user: dict = Depends(get_
                 }},
                 session=_s,
             )
+    # Post the accrual JE (DR bank / CR A/R  OR  DR A/P / CR bank) so
+    # native ledgers see the AR/AP-and-cash movement on the BS the
+    # moment the payment lands. Silently no-ops for unlinked payments
+    # or payments already covered by their source bank transaction.
+    # Idempotent — safe on retries. Feb 28 2026.
+    try:
+        fresh = await db.payments.find_one({"id": pid, "company_id": cid})
+        if fresh:
+            from posting_service import post_payment_je
+            await post_payment_je(cid, fresh)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning(
+            "payment JE post failed for %s: %s", pid, e)
+
     # Fire-and-forget mirror push (both directions). Unlinked
     # payments are silently skipped by `_payment_mirror_entity`.
     entity = _payment_mirror_entity(inp.model_dump())
@@ -262,6 +277,21 @@ async def update_payment(cid: str, pid: str, payload: dict, user: dict = Depends
                 await db.bills.update_one({"id": bill["id"]},
                     {"$set": {"balance_due": round(bal, 2), "status": status,
                               "updated_at": now_iso()}})
+    # Reverse and re-post the accrual JE so the ledger reflects the
+    # new amount / linkage. Cheap no-op if no JE existed. Feb 28 2026.
+    if balance_dirty:
+        try:
+            from posting_service import (
+                reverse_document_je, post_payment_je,
+            )
+            await reverse_document_je(cid, "payment", pid)
+            fresh_pay = await db.payments.find_one({"id": pid, "company_id": cid})
+            if fresh_pay:
+                await post_payment_je(cid, fresh_pay)
+        except Exception as e:  # noqa: BLE001
+            import logging
+            logging.getLogger(__name__).warning(
+                "payment JE repost failed for %s: %s", pid, e)
     # Fire-and-forget mirror update. If the payment has no qbo_id
     # yet (initial autopush failed) this routes through fresh-push.
     # Otherwise it's a documented no-op — payment linkage updates
@@ -307,6 +337,14 @@ async def delete_payment(cid: str, pid: str, user: dict = Depends(get_current_us
         {"$set": {"linked_payment_id": None, "updated_at": now_iso()}},
     )
     await db.payments.delete_one({"id": pid, "company_id": cid})
+    # Reverse the auto-posted JE if one existed (idempotent no-op if
+    # this payment never got posted). Prevents deleted native payments
+    # from leaving orphan ledger lines. Feb 28 2026.
+    try:
+        from posting_service import reverse_document_je
+        await reverse_document_je(cid, "payment", pid)
+    except Exception:  # noqa: BLE001
+        pass
     # Mirror delete on QBO if this payment was previously synced.
     if entity and qbo_id:
         try_auto_delete(cid, entity, qbo_id, "")
@@ -324,10 +362,20 @@ async def list_receipts(cid: str, user: dict = Depends(get_current_user)):
 async def create_receipt(cid: str, inp: ReceiptCreate, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     rid = str(uuid.uuid4()); now = now_iso()
-    await db.receipts.insert_one({
+    doc = {
         "id": rid, "company_id": cid, **inp.model_dump(),
         "created_at": now, "updated_at": now,
-    })
+    }
+    await db.receipts.insert_one(doc)
+    # Post the accrual JE (DR bank / CR Income) so a native sales
+    # receipt shows up on both the P&L and BS immediately. Feb 28 2026.
+    try:
+        from posting_service import post_receipt_je
+        await post_receipt_je(cid, doc)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning(
+            "receipt JE post failed for %s: %s", rid, e)
     return {"id": rid}
 
 
@@ -348,6 +396,17 @@ async def update_receipt(
         {"id": rid, "company_id": cid},
         {"$set": {**inp.model_dump(), "updated_at": now_iso()}},
     )
+    # Reverse + repost the accrual JE so amount / accounts stay in sync.
+    try:
+        from posting_service import reverse_document_je, post_receipt_je
+        await reverse_document_je(cid, "receipt", rid)
+        fresh = await db.receipts.find_one({"id": rid, "company_id": cid})
+        if fresh:
+            await post_receipt_je(cid, fresh)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning(
+            "receipt JE repost failed for %s: %s", rid, e)
     return {"id": rid, "ok": True}
 
 
@@ -355,6 +414,11 @@ async def update_receipt(
 async def delete_receipt(cid: str, rid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     await db.receipts.delete_one({"id": rid, "company_id": cid})
+    try:
+        from posting_service import reverse_document_je
+        await reverse_document_je(cid, "receipt", rid)
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True}
 
 

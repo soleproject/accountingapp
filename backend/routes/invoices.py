@@ -346,6 +346,20 @@ async def create_invoice(cid: str, inp: InvoiceCreate, user: dict = Depends(get_
     except Exception as e:
         await db.invoices.update_one({"id": iid, "company_id": cid},
                                      {"$set": {"inventory_error": str(e)}})
+
+    # Post the accrual JE (DR A/R / CR Income) so the ledger balances.
+    # See `posting_service.post_invoice_je` for full rationale — this
+    # closes the day-one bug where non-QBO companies got invoices
+    # that never landed on the balance sheet. Idempotent + safe on
+    # drafts (helper no-ops on empty/zero-total docs). Feb 28 2026.
+    try:
+        from posting_service import post_invoice_je
+        await post_invoice_je(cid, doc)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning(
+            "invoice JE post failed for %s: %s", iid, e)
+
     # Fire-and-forget mirror push. Silent no-op if QBO Mirror is
     # disabled or the invoice is a draft; the autopush guard filters
     # on doc.status internally.
@@ -434,6 +448,23 @@ async def update_invoice(cid: str, iid: str, payload: dict, user: dict = Depends
     # Fire-and-forget mirror update (doc-level fields only; line drift
     # is skipped in Phase 2c — see autopush._run_auto_update).
     try_auto_update(cid, "invoice", iid)
+    # If totals-affecting fields changed, reverse the auto-posted JE
+    # and re-post it so the ledger reflects the new numbers. No-op if
+    # the invoice never posted (e.g. it was a QBO-mirrored doc that
+    # relies on GL rather than the local JE path). Feb 28 2026.
+    if totals_fields & set(payload.keys()):
+        try:
+            from posting_service import (
+                reverse_document_je, post_invoice_je,
+            )
+            await reverse_document_je(cid, "invoice", iid)
+            fresh_inv = await db.invoices.find_one({"id": iid, "company_id": cid})
+            if fresh_inv:
+                await post_invoice_je(cid, fresh_inv)
+        except Exception as e:  # noqa: BLE001
+            import logging
+            logging.getLogger(__name__).warning(
+                "invoice JE repost failed for %s: %s", iid, e)
     # Audit — capture before/after diff.
     try:
         import audit as _audit
@@ -465,6 +496,12 @@ async def delete_invoice(cid: str, iid: str, user: dict = Depends(get_current_us
         pass
     cascade = await cascade_on_doc_delete(cid, "invoice", iid)
     await db.invoices.delete_one({"id": iid, "company_id": cid})
+    # Reverse the accrual JE that create_invoice posted (idempotent).
+    try:
+        from posting_service import reverse_document_je
+        await reverse_document_je(cid, "invoice", iid)
+    except Exception:  # noqa: BLE001
+        pass
     # Mirror delete on QBO if this invoice was previously synced.
     try_auto_delete(cid, "invoice", qbo_id, inv_number)
     # Audit — delete gets a FULL snapshot per policy.

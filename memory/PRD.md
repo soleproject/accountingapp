@@ -23,6 +23,16 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
 - QBO Reconciliation panel with CSV export + auto-refresh.
 - Full backfill endpoint (`POST /api/admin/qbo/full-backfill`) with per-company parity output.
 - **Preview DB cleanup (2026-08-23)** — purged 945 test companies + 248 orphan users + 22 test enterprises. Backups in `/app/backups/`.
+- **Native document JE posting (2026-08-23)** — `posting_service.py` now auto-posts double-entry JEs on:
+   invoice create/update/delete, bill create/update/delete, payment (in/out) create/update/delete,
+   sales receipt create/update/delete, estimate → invoice conversion, and PO → bill conversion.
+   Reports engine gated on `posted: True` to prevent double-counting. Native Accrual Balance Sheet
+   now balances (Assets = L + E) end-to-end. Includes:
+   - Type-scoped `_resolve_account` (was accidentally matching "Sales Tax Payable" for revenue).
+   - Cash-basis filter for `auto_accrual` JEs (invoice-at-issue only recognizes on accrual).
+   - `auto_cash` tag on receipt JEs so cash-basis P&L still surfaces sales receipts.
+   - QBO-sourced docs defensively skip local JE posting (they use the GL / synthesis path).
+   - Backfill script `scripts/backfill_document_jes.py` re-postable across all doc types.
 
 ## Prioritized Backlog
 
