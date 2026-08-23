@@ -181,7 +181,7 @@ export default function Contacts() {
     : typeFilter === "vendor" ? "Vendors" : "Contacts";
   const pageSubtitle = typeFilter === "customer"
     ? "People and companies you sell to."
-    : typeFilter === "vendor" ? "Suppliers you buy from." : "Customers & vendors.";
+    : typeFilter === "vendor" ? "Suppliers you buy from." : "Every contact — customers, vendors, and un-tagged.";
 
   // Renders a contacts table for the given row set. Extracted so we can
   // stack Customers + Vendors on the same page without duplicating markup.
@@ -492,8 +492,14 @@ export default function Contacts() {
           data-testid="contacts-type-toggle"
         >
           <button
+            onClick={() => setTypeFilter("all")}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 ${typeFilter === "all" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50"}`}
+            data-testid="contacts-type-all"
+            title="Every contact — includes ones not tagged as customer or vendor"
+          >All</button>
+          <button
             onClick={() => setTypeFilter("customer")}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 ${typeFilter === "customer" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50"}`}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 border-l border-slate-300 ${typeFilter === "customer" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50"}`}
             data-testid="contacts-type-customer"
           ><UserCircle size={12} /> Customers</button>
           <button
@@ -501,11 +507,6 @@ export default function Contacts() {
             className={`inline-flex items-center gap-1.5 px-3 py-1.5 border-l border-slate-300 ${typeFilter === "vendor" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50"}`}
             data-testid="contacts-type-vendor"
           ><Store size={12} /> Vendors</button>
-          <button
-            onClick={() => setTypeFilter("all")}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 border-l border-slate-300 ${typeFilter === "all" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50"}`}
-            data-testid="contacts-type-both"
-          >Both</button>
         </div>
         <div className="relative flex-1 min-w-[220px] max-w-md">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -528,12 +529,36 @@ export default function Contacts() {
         </div>
         {query && (
           <span className="text-[11px] text-slate-500" data-testid="contacts-search-count">
-            {customerList.length + vendorList.length} match{customerList.length + vendorList.length === 1 ? "" : "es"}
+            {typeFilter === "all"
+              ? items.filter(matchesQuery).length
+              : customerList.length + vendorList.length} match{(typeFilter === "all" ? items.filter(matchesQuery).length : customerList.length + vendorList.length) === 1 ? "" : "es"}
           </span>
         )}
       </div>
 
-      {(typeFilter === "customer" || typeFilter === "all") && (
+      {/* "All" tab — one flat table listing EVERY contact, including
+          ones that don't yet have a customer/vendor classification.
+          This is essential after a Plaid connect: bank txns produce
+          contacts with `type: null` (bare merchant names) that would
+          otherwise be invisible on Customers/Vendors/Both. Feb 28 2026. */}
+      {typeFilter === "all" && (
+        <div className="rounded-xl border bg-white overflow-hidden" data-testid="contacts-all-card">
+          <div className="px-4 py-3 border-b bg-slate-50/60">
+            <div className="font-heading font-semibold text-slate-800 text-sm">All contacts</div>
+            <div className="text-[11px] text-slate-500">
+              Every contact on file · {items.filter(matchesQuery).length} contact{items.filter(matchesQuery).length === 1 ? "" : "s"}
+              <span className="ml-2 text-slate-400">
+                ({customerList.length} customer{customerList.length === 1 ? "" : "s"},{" "}
+                {vendorList.length} vendor{vendorList.length === 1 ? "" : "s"},{" "}
+                {items.filter(c => !c.type || (c.type !== "customer" && c.type !== "vendor" && c.type !== "both")).filter(matchesQuery).length} untagged)
+              </span>
+            </div>
+          </div>
+          {renderContactsTable(items.filter(matchesQuery), { emptyMsg: query ? "No matching contacts." : "No contacts yet." })}
+        </div>
+      )}
+
+      {typeFilter === "customer" && (
         <div className="rounded-xl border bg-white overflow-hidden" data-testid="contacts-customers-card">
           <div className="px-4 py-3 border-b bg-slate-50/60">
             <div className="font-heading font-semibold text-slate-800 text-sm">Customers</div>
@@ -543,20 +568,13 @@ export default function Contacts() {
         </div>
       )}
 
-      {(typeFilter === "vendor" || typeFilter === "all") && (
+      {typeFilter === "vendor" && (
         <div className="rounded-xl border bg-white overflow-hidden" data-testid="contacts-vendors-card">
           <div className="px-4 py-3 border-b bg-slate-50/60 flex items-center justify-between">
             <div>
               <div className="font-heading font-semibold text-slate-800 text-sm">Vendors</div>
               <div className="text-[11px] text-slate-500">Suppliers you buy from · {vendorList.length} contact{vendorList.length === 1 ? "" : "s"}</div>
             </div>
-            {typeFilter === "all" && (
-              <button
-                onClick={() => setTypeFilter("vendor")}
-                className="text-[11px] text-indigo-600 hover:underline"
-                data-testid="contacts-vendors-viewall"
-              >View all vendors →</button>
-            )}
           </div>
           {renderContactsTable(vendorList, { emptyMsg: query ? "No matching vendors." : "No vendors yet." })}
         </div>
