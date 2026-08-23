@@ -339,11 +339,28 @@ export default function QboReconciliationPanel({ companyId, reportKind, basis, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startDate, endDate, method, open]);
 
+  // Memoize the flattened row arrays so their references stay stable
+  // across parent re-renders. The child `ReconciliationTable`'s
+  // `useEffect([qboRows, ourRows])` fires on every render otherwise
+  // (new array on every parent render), its `setCsvGetter(() => getter)`
+  // triggers another parent re-render, and the loop saturates React's
+  // scheduler — sidebar clicks update the URL but the route never
+  // unmounts. MUST sit above the `return null` guards below so the
+  // hook call order is stable. Feb 28 2026.
+  const qboFlatMemo = useMemo(
+    () => (snapshot?.payload ? flattenQboRows(snapshot.payload.Rows) : []),
+    [snapshot],
+  );
+  const ourFlatMemo = useMemo(
+    () => (ourReport ? flattenOurReport(ourReport, reportKind) : []),
+    [ourReport, reportKind],
+  );
+
   if (!qboReportName) return null;   // Only P&L + BS are supported today
   if (qboStatus !== "connected") return null;   // Hide if no QBO connection
 
-  const qboFlat = snapshot?.payload ? flattenQboRows(snapshot.payload.Rows) : [];
-  const ourFlat = ourReport ? flattenOurReport(ourReport, reportKind) : [];
+  const qboFlat = qboFlatMemo;
+  const ourFlat = ourFlatMemo;
 
   // Overall match indicator — compare Net Income (P&L) or Total Equity (BS)
   const matchStatus = (() => {
