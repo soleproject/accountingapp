@@ -62,7 +62,7 @@ const GROUPS = [
       { to: "/connections", label: "Connect Accounts", icon: Link2, exact: true },
       { to: "/connections?view=imports", label: "Import Statements", icon: Download, matchPath: "/connections", exact: true },
       { to: "/connections/qbo", label: "Connect QBO", icon: Link2, matchPath: "/connections/qbo" },
-      { to: "/test-qbo", label: "Test QBO", icon: FlaskConical, matchPath: "/test-qbo" },
+      { to: "/test-qbo", label: "Test QBO", icon: FlaskConical, matchPath: "/test-qbo", superadminOnly: true },
     ],
   },
   {
@@ -342,6 +342,10 @@ export default function Sidebar({ collapsed, onToggle }) {
               // when the company is in "simple" accounting mode. Keeps
               // the sidebar uncluttered for regular business owners.
               .filter((it) => isAdvancedMode || !it.advancedOnly)
+              // Hide superadmin-only items (Test QBO raw migration
+              // workbench) from every non-superadmin persona so pros,
+              // partners, and clients don't see internal tooling.
+              .filter((it) => !it.superadminOnly || user?.role === "superadmin")
               .map((it) => (
                 <Item key={it.label} item={it} group={group} indent />
               ))}
