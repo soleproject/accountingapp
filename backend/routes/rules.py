@@ -164,3 +164,20 @@ async def dismiss_rule_candidate(cid: str, candidate_id: str,
     return {"ok": True, "deleted": r.deleted_count}
 
 
+@router.post("/companies/{cid}/rules/mine")
+async def mine_rules_endpoint(cid: str,
+                               user: dict = Depends(get_current_user)):
+    """Manually re-run the rules miner for a company.
+
+    Fired automatically at the end of every QBO migration, but exposed
+    here so pros can trigger it after bulk reclassifies without waiting
+    for the next migration. Idempotent. Superadmin OR company member.
+    """
+    await require_company(user, cid)
+    from rules_miner import mine_rule_candidates
+    result = await mine_rule_candidates(cid)
+    await log_ai(cid, "rules_mined", result.get("candidates", 0)
+                 + result.get("auto_applied", 0))
+    return {"ok": True, **result}
+
+

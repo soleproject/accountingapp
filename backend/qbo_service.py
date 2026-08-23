@@ -1896,6 +1896,31 @@ async def run_migration(job_id: str, company_id: str) -> None:
                 "Books-close auto-approve failed for %s: %s",
                 company_id, e)
 
+        # ------------------------------------------------------------
+        # Phase 2c (Feb 28 2026): Mine bank-rule patterns from history.
+        # ------------------------------------------------------------
+        # QBO doesn't expose Bank Rules via any API. We recover the
+        # information by mining the *outcome* — every posted txn on
+        # the ledger — and codifying the majority (merchant → category)
+        # patterns as our own rules. High-confidence patterns auto-
+        # apply; the rest surface as suggestions on the Rules page.
+        rule_miner_result = None
+        try:
+            from rules_miner import mine_rule_candidates
+            rule_miner_result = await mine_rule_candidates(company_id)
+            logger.info(
+                "Rule miner (%s): scanned=%d clusters=%d "
+                "candidates=%d auto_applied=%d skipped_existing=%d",
+                company_id,
+                rule_miner_result["scanned"],
+                rule_miner_result["clusters"],
+                rule_miner_result["candidates"],
+                rule_miner_result["auto_applied"],
+                rule_miner_result["skipped_existing"],
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Rule miner failed for %s: %s", company_id, e)
+
         await db.qbo_jobs.update_one(
             {"job_id": job_id},
             {"$set": {"status": "done", "phase": "done",
@@ -1919,7 +1944,8 @@ async def run_migration(job_id: str, company_id: str) -> None:
                       "gl_lines_pulled": gl_lines_pulled,
                       "gl_walk_errors": gl_walk_errors,
                       "books_closed_through": books_closed_through,
-                      "books_closed_auto_approved": auto_approved}},
+                      "books_closed_auto_approved": auto_approved,
+                      "rule_miner": rule_miner_result}},
         )
         # Fire the branded "migration complete" email. Runs after the
         # done write so the email body can pull the finalised stats.
