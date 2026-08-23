@@ -26,13 +26,23 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
 - **Native document JE posting (2026-08-23)** — `posting_service.py` now auto-posts double-entry JEs on:
    invoice create/update/delete, bill create/update/delete, payment (in/out) create/update/delete,
    sales receipt create/update/delete, estimate → invoice conversion, and PO → bill conversion.
-   Reports engine gated on `posted: True` to prevent double-counting. Native Accrual Balance Sheet
-   now balances (Assets = L + E) end-to-end. Includes:
+   Cascade helpers in `link_cascade.py` and `transactions.py::_reverse_and_delete_payment` also
+   reverse the JE so orphan ledger legs can't survive a cascade delete. Reports engine gated on
+   `posted: True` to prevent double-counting. Native Accrual Balance Sheet now balances
+   (Assets = L + E) end-to-end. Includes:
    - Type-scoped `_resolve_account` (was accidentally matching "Sales Tax Payable" for revenue).
    - Cash-basis filter for `auto_accrual` JEs (invoice-at-issue only recognizes on accrual).
    - `auto_cash` tag on receipt JEs so cash-basis P&L still surfaces sales receipts.
    - QBO-sourced docs defensively skip local JE posting (they use the GL / synthesis path).
    - Backfill script `scripts/backfill_document_jes.py` re-postable across all doc types.
+- **Deposit guard + UF safety net (2026-08-23)** — `merchant_cache.categorize_with_cache` now
+   force-routes every positive-amount Plaid txn to `4999 Uncategorized Income` (with
+   `needs_review=true`) unless a deterministic rule matches (Interest, Bank Fee reversal).
+   The LLM is never asked to guess an income account. Belt-and-suspenders post-LLM override
+   refuses any account whose `detail_type=money_in_transit` for a bank-feed txn. Historical
+   sweep on Plaid Test LLC re-routed 8 mis-categorized DDA→DDA deposits to 4999; UF is no
+   longer negative and BS now balances. Rules Miner also blocks learning rules that target
+   `4999 / 6999 / money_in_transit` so bad historical patterns can't get codified.
 
 ## Prioritized Backlog
 

@@ -191,8 +191,28 @@ async def categorize_with_cache(
     Precedence:
       1. Deterministic merchant/regex rules (`merchant_rules.rules_lookup`) —
          zero-cost, 100% confidence, no LLM. This is Rocketbooks' core lever.
-      2. Per-org learned cache (`lookup`) — user overrides + prior LLM results.
-      3. LLM fallback — only when the first two miss.
+      2. **Deposit guard (Feb 28 2026)** — any positive-amount bank txn that
+         hasn't matched a deterministic rule is force-routed to
+         ``4999 Uncategorized Income`` with ``needs_review=true``. The LLM is
+         never asked to guess an income account: deposits from unlinked
+         external accounts (customer ACH, owner contribution, loan proceeds,
+         unmatched bank-to-bank transfers where the other leg isn't in this
+         company) must be reclassified by the CPA. This mirrors the rule
+         already documented in ``pfc_mapping.py:167-173`` for the PFC path
+         (``TRANSFER_IN_DEPOSIT → 4999``); we're now enforcing it in the LLM
+         path too so a missing PFC tag can no longer let the LLM invent an
+         income account. ``detect_transfer_pairs`` still runs post-sync and
+         re-classifies any deposit whose opposite leg exists on another
+         connected company bank account into a proper transfer.
+      3. Per-org learned cache (`lookup`) — user overrides + prior LLM results.
+      4. LLM fallback — only when the first three miss.
+
+    Post-LLM safety net: if the LLM ever returns an account whose
+    ``detail_type == 'money_in_transit'`` (Undeposited Funds and friends) for
+    a Plaid bank-feed txn, we override to 4999. UF is a customer-check-
+    workflow account only; a bank-feed txn already lives on a bank, so
+    posting it to UF drives UF negative — the exact drift we hit on
+    Plaid Test LLC in Aug 2026.
     """
     # 1) Rules-first — deterministic, no cost, no cache pollution.
     rule = merchant_rules.rules_lookup(merchant, description, amount)
@@ -202,17 +222,64 @@ async def categorize_with_cache(
         if any(a["code"] == rule["account_code"] for a in coa):
             return rule
 
+    # 2) Deposit guard.
+    if amount is not None and float(amount) > 0:
+        # Deposit from a source that hasn't matched a deterministic rule ⇒
+        # holding pen for CPA review. Skip the merchant cache too — a prior
+        # bad LLM pick would otherwise stick.
+        is_transfer_pattern = merchant_rules.is_internal_transfer(description)
+        reasoning = (
+            "Internal-transfer pattern detected; other leg not linked to this "
+            "company — flagged for CPA reclassification."
+            if is_transfer_pattern else
+            "Deposit from an external / unlinked account — flagged for CPA "
+            "reclassification (revenue, owner contribution, loan proceeds, or "
+            "matched to invoice)."
+        )
+        if any(a["code"] == "4999" for a in coa):
+            return {
+                "account_code": "4999",
+                "confidence": 1.0 if is_transfer_pattern else 0.9,
+                "reasoning": reasoning,
+                "cache_hit": False,
+                "source": "deposit_guard",
+                "needs_review": True,
+            }
+
+    # 3) Cache lookup (expenses only — deposits already handled above).
     hit = await lookup(company_id, merchant)
     if hit:
         return hit
+
+    # 4) LLM fallback.
     result = await llm_fn(merchant, amount, description, coa)
+
+    # Post-LLM safety net: refuse UF / money_in_transit for bank-feed txns.
+    # This is belt-and-suspenders — the deposit guard above already prevents
+    # positive-amount txns from reaching the LLM, but a future caller might
+    # invoke the LLM directly with a mislabeled amount sign.
+    picked_code = str(result.get("account_code") or "")
+    picked_acct = next((a for a in coa if a["code"] == picked_code), None)
+    if picked_acct and (picked_acct.get("detail_type") or "").lower() == "money_in_transit":
+        if any(a["code"] == "4999" for a in coa):
+            result = {
+                "account_code": "4999",
+                "confidence": 0.6,
+                "reasoning": (
+                    "LLM suggested Undeposited Funds for a bank-feed txn; "
+                    "overridden to 4999 — UF is customer-check-workflow only."
+                ),
+                "cache_hit": False,
+                "source": "uf_safety_net",
+                "needs_review": True,
+            }
     try:
         await upsert(
             company_id, merchant,
             account_code=result["account_code"],
             account_name=next((a["name"] for a in coa if a["code"] == result["account_code"]), None),
             confidence=float(result.get("confidence") or 0.85),
-            source="llm",
+            source=result.get("source") or "llm",
         )
     except Exception:  # noqa: BLE001
         pass  # cache upsert never blocks the categorization return
