@@ -40,6 +40,7 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
 - Real-time inbound webhooks for QBO (Phase 4)
 - `_signed_balances` rewrite to Mongo `$group` aggregation
 - AI rule confidence sort on Rules page (sort miner rules by `mined_confidence` DESC)
+- **Runtime Rules Precedence** — wire `db.rules` into `merchant_cache.categorize_with_cache` as Step 0 (before static merchant_rules → cache → PFC → LLM), so user-created rules from the Rules page apply to incoming Plaid txns instead of only retroactively via `apply_to_existing`. ~20-line change + Mongo index on `(company_id, match_type, match_value)`. Discovered 2026-08-23 during rules-flow audit.
 
 ### P2
 - Dead OAuth orphans cleanup (`qbo_connections` for deleted companies)
