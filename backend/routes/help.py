@@ -39,7 +39,12 @@ _VERB_PATTERNS = {
     "where": re.compile(r"\b(where\s+do\s+(?:i|you|we)|where\s+is|where\s+can\s+(?:i|you|we)|where\s+to)\b", re.I),
     "can":  re.compile(r"\b(can\s+(?:i|you|we)|is\s+it\s+possible|do\s+you\s+support)\b", re.I),
     "what": re.compile(r"\b(what\s+is|what\s+does|what\s+are|what's|whats)\b", re.I),
-    "show": re.compile(r"\b(show\s+me|show\s+the|open\s+the|take\s+me\s+to)\b", re.I),
+    # NOTE: "show me" / "take me to" / "open the" are deliberately NOT
+    # here. Those are direct-imperative NAVIGATE commands handled by
+    # the existing `voiceCommands.resolveVoiceCommand()` on the client.
+    # Stealing them would break long-standing behavior where "take me
+    # to the invoices page" just navigates instead of returning help
+    # copy. Feb 28 2026.
 }
 
 
@@ -137,9 +142,6 @@ def _build_response(task: dict, verb: str | None) -> dict:
     elif verb == "what":
         body = task.get("what") or task.get("how", "")
         heading = title
-    elif verb == "show":
-        body = task.get("where") or task.get("how", "")
-        heading = f"Opening {title}"
     else:  # "how" or fallback
         body = task.get("how") or task.get("what", "")
         heading = f"How to {title.lower()}"

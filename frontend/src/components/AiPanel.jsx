@@ -1433,7 +1433,7 @@ export default function AiPanel({ collapsed, onToggle }) {
     // falls through untouched. Renders navigation + "do it for me" pills
     // via the existing `panel-action` event bus so the AiPanel doesn't
     // need custom rendering code. Feb 28 2026.
-    if (/^(?:how\s+(?:do|to|can)|where\s+(?:do|is|can|to)|can\s+(?:i|you|we)|is\s+it\s+possible|do\s+you\s+support|what\s+(?:is|does|are)|what'?s|show\s+me|open\s+the|take\s+me\s+to)\b/i.test(userMsg)) {
+    if (/^(?:how\s+(?:do|to|can)|where\s+(?:do|is|can|to)|can\s+(?:i|you|we)|is\s+it\s+possible|do\s+you\s+support|what\s+(?:is|does|are)|what'?s)\b/i.test(userMsg)) {
       try {
         const r = await api.post(`/help/ask`, { query: userMsg });
         const help = r.data;
