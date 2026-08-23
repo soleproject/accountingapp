@@ -16,6 +16,47 @@ sidebar and AI panel, accrual & cash reporting. Real Estate / Rental Properties 
 - **Auth**: JWT (bcrypt), role-based access (superadmin / pro / client), multi-tenant memberships
 
 
+### Feb 28 2026 — 🎯 Phase 2 Shipped: GL-as-Source-of-Truth Migration
+
+Landed the architectural fix for report parity. `run_migration()` now pulls QBO's own General Ledger as a final step and populates `qbo_gl_lines`. `reports._signed_balances` checks for GL data and routes through `_signed_balances_from_gl` — a pure Mongo `$group` aggregation over `qbo_gl_lines` — when present. Every compensating layer (AR/AP bucketing, payments cash roll-in, sales-tax extraction, invoice/bill accrual roll-in, cash-basis allocation) is now gated on `not _gl_authoritative` to prevent double-counting when GL is the ground truth.
+
+**Result on Emeral Coast preview clone (fresh migration through the new flow):**
+
+| Metric              | Axiom          | QBO            | Δ         |
+|---------------------|----------------|----------------|-----------|
+| Total Assets        | $606,081.96    | $606,081.96    | **$0.00** |
+| Total Liabilities   | $173,662.13    | $173,662.13    | **$0.00** |
+| Total Equity        | $432,419.83    | $432,419.83    | **$0.00** |
+| Total Revenue       | $2,596,955.32  | $2,596,955.32  | **$0.00** |
+| Total COGS          | $21,248.43     | $21,248.43     | **$0.00** |
+| Total Expense       | $1,999,718.07  | $1,999,718.07  | **$0.00** |
+| Net Income          | $575,988.82    | $575,988.82    | **$0.00** |
+| Imbalance           | $0.00          | —              | ✅        |
+
+`gl-verify` per-account diff: **BS 32/33 matched to the penny + P&L 46/46 PERFECT**. Only residual is a $59,988 rendering quirk on one Fixed Asset parent (Jeep 2023 Gladiator White) where QBO's BS shows the balance on the child (Original cost) — parent-direct = parent_GL - sum(children_GL) handles this correctly at the totals level.
+
+**Key components shipped:**
+- **Bug fix in `qbo_service._flatten_gl_rows`**: QBO GL returns 9 columns (adds an `Adj` boolean between `Num` and `Name`) but the parser was reading 8 columns with hardcoded index[6] as amount. Every GL row was silently dropped — meant `resolve_qbo_gl_line_accounts` had NEVER worked. Fixed by reading positional-fixed cols from the front (date/type/num) and money cols from the back (balance = -1, amount = -2).
+- **`_signed_balances_from_gl`** in `reports.py`: Mongo aggregation over `qbo_gl_lines` with proper credit-normal sign flipping and parent/child rollup correction.
+- **`_has_qbo_gl_data`** gate: routes reports through GL path when data present; native/non-QBO companies keep using legacy `_signed_balances`.
+- **Guards on compensating layers** in `compute_balance_sheet` + `compute_income_statement`: skip AR/AP bucket, payments cash offset, sales-tax extract, invoice/bill accrual roll-in, cash-basis allocation when GL is authoritative.
+- **New superadmin lab page** at `/admin/qbo-gl-lab`: pick a company, run gl-migrate, run gl-verify, see per-account diff with drift highlighted. Frontend at `AdminQboGlLab.jsx`.
+- **New endpoints:**
+  - `POST /api/admin/qbo/gl-migrate/{cid}` — pull QBO GL into `qbo_gl_lines`
+  - `GET /api/admin/qbo/gl-report/{cid}?report=balance_sheet|profit_and_loss` — aggregate from GL
+  - `POST /api/admin/qbo/gl-verify/{cid}` — diff GL-derived against QBO's own reports
+  - `POST /api/companies/{cid}/qbo/gl-diff` — per-account drift diagnostic
+- **`run_migration()` extended**: final step pulls GL for every account into `qbo_gl_lines` (~30-60s on Emeral Coast).
+- **`/api/admin/qbo/full-backfill` extended**: adds `pull_qbo_gl_lines` as step 6 for legacy companies.
+
+**Tested:** 48 QBO parity pytest cases pass. Fresh migration on wiped Emeral Coast preview through the new flow produced perfect BS/PL totals.
+
+**Refresh token for Emeral Coast preview clone** was consumed by the migration; if prod tries to refresh next it will fail. Preview should be treated as short-lived.
+
+**Companies still on legacy engine (need backfill):** Every existing QBO-connected company on prod. Broadcast via `POST /api/admin/qbo/full-backfill {dry_run: false}` in one shot after code deploy.
+
+### Feb 27 2026 — Prod→Preview Clone: "BM QBO 2 LLC"
+
 ### Feb 27 2026 — Prod→Preview Clone: "BM QBO 2 LLC"
 
 Cloned live company **BM QBO 2 LLC** (prod id `2f6d6451-0fdb-44d3-ba97-05775f37617c`, realm `9341452279649363`) from prod (`axiom_prod`) into preview as `bm-qbo-2-preview-clone` using `/app/backend/scripts/clone_qbo_to_preview.py`. QBO connection tokens (access + refresh) preserved via `crypto_service.encrypt` under preview's key. Post-clone remap: `owner_user_id → admin@axiom.ai`, `pro_user_id → pro@axiom.ai`, `partner_id/enterprise_id → None`; `users_companies` rows upserted for both. Tokens verified decryptable via preview backend. `PROD_MONGO_URL` was set inline per-command (never `export`ed) — no lingering credentials in the pod env. User can now switch to this company and click **Run Migration** on Connect QBO, or **Import from Production Connection** in Test QBO.

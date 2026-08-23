@@ -25,6 +25,7 @@ import Onboarding from "@/pages/Onboarding";
 import SuperadminDash from "@/pages/SuperadminDash";
 import SuperadminUsage from "@/pages/SuperadminUsage";
 import SuperadminStripeWebhooks from "@/pages/SuperadminStripeWebhooks";
+import AdminQboGlLab from "@/pages/AdminQboGlLab";
 import PartnerDash from "@/pages/PartnerDash";
 import PartnerFinancials from "@/pages/PartnerFinancials";
 import AdminPartnerDetail from "@/pages/AdminPartnerDetail";
@@ -137,6 +138,7 @@ function App() {
               <Route path="/admin" element={<SuperadminDash />} />
               <Route path="/admin/usage" element={<SuperadminUsage />} />
               <Route path="/admin/stripe-webhooks" element={<SuperadminStripeWebhooks />} />
+              <Route path="/admin/qbo-gl-lab" element={<AdminQboGlLab />} />
               <Route path="/partner" element={<PartnerDash />} />
               <Route path="/partner/financials" element={<PartnerFinancials />} />
               <Route path="/admin/partners/:pid" element={<AdminPartnerDetail />} />
