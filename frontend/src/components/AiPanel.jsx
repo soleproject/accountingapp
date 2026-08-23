@@ -1426,7 +1426,46 @@ export default function AiPanel({ collapsed, onToggle }) {
       return;
     }
 
-    // Live-accountant onboarding coach — fire the user's message to any
+    // ------ HELP-ROUTER interceptor -----------------------------------
+    // Route "how do I / where do I / can I / what is / show me" questions
+    // to the 34-task help catalog. Only fires on those verb prefixes; any
+    // other input (imperatives, cleanup answers, business-profile chat)
+    // falls through untouched. Renders navigation + "do it for me" pills
+    // via the existing `panel-action` event bus so the AiPanel doesn't
+    // need custom rendering code. Feb 28 2026.
+    if (/^(?:how\s+(?:do|to|can)|where\s+(?:do|is|can|to)|can\s+(?:i|you|we)|is\s+it\s+possible|do\s+you\s+support|what\s+(?:is|does|are)|what'?s|show\s+me|open\s+the|take\s+me\s+to)\b/i.test(userMsg)) {
+      try {
+        const r = await api.post(`/help/ask`, { query: userMsg });
+        const help = r.data;
+        if (help?.matched) {
+          // Build a markdown-ish assistant bubble. Actions expressed
+          // via the existing quick-actions/action buttons that AiPanel
+          // already renders — reuse the `.actions` field.
+          const actions = [];
+          if (help.take_me_there) {
+            actions.push({ label: "Take me there →", to: help.take_me_there });
+          }
+          if (help.do_it_for_me) {
+            actions.push({
+              label: help.do_it_for_me.label,
+              to: help.do_it_for_me.url,
+              variant: help.do_it_for_me.tier === "green" ? "primary" : "secondary",
+            });
+          }
+          const heading = help.heading ? `**${help.heading}**\n\n` : "";
+          setMessages(m => [
+            ...m,
+            { role: "user", content: userMsg },
+            { role: "assistant", content: heading + (help.body || ""), actions },
+          ]);
+          if (voiceOnRef.current && help.body) {
+            speakOne(help.body.replace(/\*\*/g, "").split("\n")[0]);
+          }
+          return;
+        }
+      } catch { /* fall through to LLM */ }
+    }
+
     // coach listener on either the onboarding page (Business Profile
     // extractor) OR the dashboard's onboarding-not-complete nudge. In BOTH
     // contexts we suppress the normal LLM chat so the coach's clean
@@ -2910,6 +2949,33 @@ export default function AiPanel({ collapsed, onToggle }) {
                 >
                   {m.cta.label}
                 </button>
+              </div>
+            )}
+            {/* Help-router action pills. Each button navigates via the
+                normal React Router `navigate()` so the destination page
+                mounts correctly (not just a shallow URL change).
+                Feb 28 2026. */}
+            {m.actions?.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5" data-testid="chat-help-actions">
+                {m.actions.map((a, ai) => (
+                  <button
+                    key={ai}
+                    data-testid={`chat-help-action-${ai}`}
+                    onClick={() => {
+                      if (a.to) navigate(a.to);
+                      setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, actions: null } : mm2));
+                    }}
+                    className={`inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full border ${
+                      a.variant === "primary"
+                        ? "bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100"
+                        : a.variant === "secondary"
+                        ? "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"
+                        : "bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100"
+                    }`}
+                  >
+                    {a.label}
+                  </button>
+                ))}
               </div>
             )}
             {m.card?.kind === "bulk-approve-confirm" && (

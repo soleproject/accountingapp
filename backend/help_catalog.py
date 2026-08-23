@@ -41,7 +41,7 @@ HELP_CATALOG = [
                "2. Click **+ Connect a bank** to launch Plaid Link.\n"
                "3. Search your bank, sign in, and pick which accounts to sync.\n"
                "4. Transactions from the last 90 days start streaming in automatically.",
-        "deep_link": "/connect-accounts",
+        "deep_link": "/connections",
         "action_tier": "green",
         "action_hint": "Open Connect Accounts",
     },
@@ -57,7 +57,7 @@ HELP_CATALOG = [
                "3. Grant access and you'll bounce back here.\n"
                "4. The full migration (accounts, txns, invoices, bills, GL) runs automatically. "
                "You can watch progress on the same page.",
-        "deep_link": "/connect-qbo",
+        "deep_link": "/connections/qbo",
         "action_tier": "green",
         "action_hint": "Open Connect QBO",
     },
@@ -71,7 +71,7 @@ HELP_CATALOG = [
         "how": "1. Go to the connection page (Connect Accounts for banks, Connect QBO for QuickBooks).\n"
                "2. Click the **⋯ menu** on the connection you want to remove.\n"
                "3. Choose **Disconnect**. Historical transactions stay — future syncs stop.",
-        "deep_link": "/connect-accounts",
+        "deep_link": "/connections",
         "action_tier": "red",
         "action_hint": None,  # destructive — navigate only
     },
@@ -189,7 +189,7 @@ HELP_CATALOG = [
                "2. Open the inventory item.\n"
                "3. Click **Adjust Quantity**, enter the new on-hand count and a reason.\n"
                "4. Save — creates an Inventory Adjustment journal entry.",
-        "deep_link": "/products",
+        "deep_link": "/items",
         "action_tier": "green",
         "action_hint": "Open Products & Services",
     },
@@ -204,7 +204,7 @@ HELP_CATALOG = [
                "2. Click **+ New Item**.\n"
                "3. Choose **Inventory** as the type, set opening quantity, unit cost, and sales price.\n"
                "4. Save. Axiom will track quantity on-hand and average cost across every sale and purchase.",
-        "deep_link": "/products",
+        "deep_link": "/items",
         "action_tier": "green",
         "action_hint": "New inventory item",
     },
@@ -219,7 +219,7 @@ HELP_CATALOG = [
                "2. Click **+ New Item**.\n"
                "3. Pick Service (non-inventory) or Non-Inventory or Inventory.\n"
                "4. Set name, sales price, and income account. Save.",
-        "deep_link": "/products",
+        "deep_link": "/items",
         "action_tier": "green",
         "action_hint": "New item",
     },
@@ -317,7 +317,7 @@ HELP_CATALOG = [
                "2. Pick the bank/CC account and statement end date.\n"
                "3. Enter the statement ending balance.\n"
                "4. Check off cleared items until the difference is $0. Finish to lock the period.",
-        "deep_link": "/accounting/reconcile",
+        "deep_link": "/accounting/reconciliation",
         "action_tier": "green",
         "action_hint": "Open Reconciliation",
     },
@@ -388,7 +388,7 @@ HELP_CATALOG = [
         "how": "1. Go to **Settings → Team**.\n"
                "2. Click **+ Invite**, enter their email and pick a role (Pro, Client, Partner).\n"
                "3. They get an email with a set-password link.",
-        "deep_link": "/settings/team",
+        "deep_link": "/team",
         "action_tier": "green",
         "action_hint": "Open Team",
     },
@@ -402,7 +402,7 @@ HELP_CATALOG = [
                "1. Go to **Settings → Company**.\n"
                "2. Set **Reporting basis** to Cash or Accrual.\n"
                "3. Save. New report opens will default to that basis.",
-        "deep_link": "/settings/company",
+        "deep_link": "/settings",
         "action_tier": "red",
         "action_hint": None,
     },
@@ -415,7 +415,7 @@ HELP_CATALOG = [
         "how": "1. Go to **Settings → Company**.\n"
                "2. Set **Books closing date** to the last day of your closed period.\n"
                "3. Transactions on/before that date are locked from editing (superadmin can still override).",
-        "deep_link": "/settings/company",
+        "deep_link": "/settings",
         "action_tier": "red",
         "action_hint": None,
     },
