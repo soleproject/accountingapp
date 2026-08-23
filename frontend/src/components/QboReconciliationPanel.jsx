@@ -307,6 +307,38 @@ export default function QboReconciliationPanel({ companyId, reportKind, basis, o
     }
   };
 
+  // Auto-refresh the QBO snapshot when the report's date range or
+  // basis changes AFTER the user has already opened a snapshot in
+  // this session. Prevents the "silent stale" trap where a user
+  // picks Last Quarter, sees the P&L update, and the Compare panel
+  // still shows the previous YTD snapshot they took an hour ago.
+  //
+  // Guards:
+  //   * Only fires if a snapshot exists (avoids auto-fetch on
+  //     initial page load — user must have manually pulled once).
+  //   * Only fires if the panel is open (out-of-sight = no wasted
+  //     QBO API calls).
+  //   * Skipped while another refresh is in-flight.
+  //
+  // Must sit ABOVE the early `return null` guards below — React
+  // hooks are order-sensitive and can't be called conditionally.
+  //
+  // Feb 28 2026.
+  useEffect(() => {
+    if (!open || !snapshot || loading) return;
+    const snapStart = snapshot.start_date || "";
+    const snapEnd = snapshot.end_date || "";
+    const snapMethod = snapshot.accounting_method || "";
+    const isPl = reportKind === "income-statement";
+    const startChanged = isPl && startDate && snapStart && snapStart !== startDate;
+    const endChanged = endDate && snapEnd && snapEnd !== endDate;
+    const methodChanged = snapMethod && snapMethod !== method;
+    if (startChanged || endChanged || methodChanged) {
+      fetchFresh();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startDate, endDate, method, open]);
+
   if (!qboReportName) return null;   // Only P&L + BS are supported today
   if (qboStatus !== "connected") return null;   // Hide if no QBO connection
 
@@ -323,6 +355,7 @@ export default function QboReconciliationPanel({ companyId, reportKind, basis, o
     if (q == null || o == null) return "partial";
     return Math.abs(q - o) < 0.01 ? "match" : "drift";
   })();
+
 
   return (
     <div
