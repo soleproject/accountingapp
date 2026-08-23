@@ -406,6 +406,39 @@ async def fetch_report(
     return await _get(company_id, realm_id, path, params or {})
 
 
+async def fetch_books_close_date(
+    company_id: str, realm_id: str,
+) -> str | None:
+    """Read QBO's books-closing date from Preferences.
+
+    QBO doesn't expose per-transaction reconciliation state via any
+    public API, but ``Preferences.AccountingInfoPrefs.BookCloseDate``
+    gives us the accountant's authoritative "closed through" line —
+    every txn on or before this date has been reviewed and locked in
+    QBO's own workflow. We use it as the equivalent signal to mark
+    those transactions ``human_reviewed=True`` in Axiom.
+
+    Returns the ``YYYY-MM-DD`` string, or ``None`` if the company
+    hasn't set a close date. Feb 28 2026.
+    """
+    try:
+        path = f"/company/{realm_id}/query"
+        data = await _get(
+            company_id, realm_id, path,
+            {"query": "SELECT * FROM Preferences"},
+        )
+        prefs_list = (data.get("QueryResponse") or {}).get(
+            "Preferences", []) or []
+        if not prefs_list:
+            return None
+        # Preferences is a singleton per company
+        acc = (prefs_list[0].get("AccountingInfoPrefs") or {})
+        d = acc.get("BookCloseDate") or ""
+        return d if d else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 async def snapshot_reports(
     company_id: str, realm_id: str,
     start_date: str | None = None, end_date: str | None = None,
@@ -1821,6 +1854,92 @@ async def run_migration(job_id: str, company_id: str) -> None:
                 "to legacy `_signed_balances` engine until backfilled.",
                 company_id, e)
 
+        # ------------------------------------------------------------
+        # Phase 2b (Feb 28 2026): Books-closing-date auto-approve.
+        # ------------------------------------------------------------
+        # QBO doesn't expose per-txn reconciliation status via any
+        # public API. It DOES expose `AccountingInfoPrefs.BookCloseDate`
+        # via Preferences — the accountant's "closed through" line.
+        # Every txn on/before that date has been formally locked in
+        # QBO's own workflow (that's what closing the books means).
+        # We mirror that signal here by marking every QBO-imported
+        # transaction dated on/before the close date as
+        # `human_reviewed=True`, `needs_review=False`, `ai_confidence=1.0`,
+        # and stamping `qbo_closed_through` so the UI can render the
+        # "Reviewed · 100%" green chip and lock the approve action.
+        #
+        # One-way ratchet: never un-approves (`human_reviewed: {"$ne": True}`
+        # filter on the update). If the user rolls back the QBO
+        # closing date later, our approvals persist. This matches the
+        # explicit UX decision made 2026-08-23.
+        books_closed_through = None
+        auto_approved = 0
+        try:
+            books_closed_through = await fetch_books_close_date(
+                company_id, realm_id)
+            if books_closed_through:
+                # Persist on qbo_connections for the UI + future runs.
+                await db.qbo_connections.update_one(
+                    {"company_id": company_id},
+                    {"$set": {
+                        "books_closed_through": books_closed_through,
+                        "books_closed_synced_at": now_iso(),
+                    }},
+                )
+                # Auto-approve every QBO-imported txn on/before the
+                # close date that isn't already approved. Skips already-
+                # reviewed rows so the ratchet is truly one-way.
+                res = await db.transactions.update_many(
+                    {
+                        "company_id": company_id,
+                        "source": "qbo",
+                        "date": {"$lte": books_closed_through},
+                        "human_reviewed": {"$ne": True},
+                    },
+                    {"$set": {
+                        "human_reviewed": True,
+                        "needs_review": False,
+                        "ai_confidence": 1.0,
+                        "qbo_closed_through": books_closed_through,
+                        "qbo_closed_approved_at": now_iso(),
+                    }},
+                )
+                auto_approved = res.modified_count
+                logger.info(
+                    "Books close date %s applied to %s — auto-approved "
+                    "%d transaction(s).",
+                    books_closed_through, company_id, auto_approved,
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Books-close auto-approve failed for %s: %s",
+                company_id, e)
+
+        # ------------------------------------------------------------
+        # Phase 2c (Feb 28 2026): Mine bank-rule patterns from history.
+        # ------------------------------------------------------------
+        # QBO doesn't expose Bank Rules via any API. We recover the
+        # information by mining the *outcome* — every posted txn on
+        # the ledger — and codifying the majority (merchant → category)
+        # patterns as our own rules. High-confidence patterns auto-
+        # apply; the rest surface as suggestions on the Rules page.
+        rule_miner_result = None
+        try:
+            from rules_miner import mine_rule_candidates
+            rule_miner_result = await mine_rule_candidates(company_id)
+            logger.info(
+                "Rule miner (%s): scanned=%d clusters=%d "
+                "candidates=%d auto_applied=%d skipped_existing=%d",
+                company_id,
+                rule_miner_result["scanned"],
+                rule_miner_result["clusters"],
+                rule_miner_result["candidates"],
+                rule_miner_result["auto_applied"],
+                rule_miner_result["skipped_existing"],
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Rule miner failed for %s: %s", company_id, e)
+
         await db.qbo_jobs.update_one(
             {"job_id": job_id},
             {"$set": {"status": "done", "phase": "done",
@@ -1842,7 +1961,10 @@ async def run_migration(job_id: str, company_id: str) -> None:
                       "opening_balances_je": opening_bal_stats,
                       "deposit_splits": deposit_splits_stats,
                       "gl_lines_pulled": gl_lines_pulled,
-                      "gl_walk_errors": gl_walk_errors}},
+                      "gl_walk_errors": gl_walk_errors,
+                      "books_closed_through": books_closed_through,
+                      "books_closed_auto_approved": auto_approved,
+                      "rule_miner": rule_miner_result}},
         )
         # Fire the branded "migration complete" email. Runs after the
         # done write so the email body can pull the finalised stats.

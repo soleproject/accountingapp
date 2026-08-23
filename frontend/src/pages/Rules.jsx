@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Wand2, Trash2, Plus, X, Sparkles, Check, ChevronDown } from "lucide-react";
+import { Wand2, Trash2, Plus, X, Sparkles, Check, ChevronDown, Bot } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Rules() {
@@ -188,9 +188,34 @@ export default function Rules() {
                 </td>
                 <td className="px-3 py-2 font-mono-num">{r.account_code} <span className="text-slate-600 font-sans">{r.account_name}</span></td>
                 <td className="px-3 py-2">
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${r.created_by === "ai" ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-600"}`}>
-                    {r.created_by === "ai" ? <><Wand2 size={9} className="inline mr-1" />AI</> : "Human"}
-                  </span>
+                  {r.created_by === "ai_miner" ? (
+                    // "Auto-applied by AI" — the miner surfaced a
+                    // high-confidence (≥98%, ≥10 hits) pattern from
+                    // ledger history and promoted it directly to a
+                    // real rule without needing a pro to approve.
+                    // Emerald so it visually pops vs the plain
+                    // indigo "AI" chip used for seeded/manual-AI
+                    // rules. Feb 28 2026.
+                    <span
+                      data-testid="rule-source-badge"
+                      title={
+                        r.mined_confidence
+                          ? `Confidence ${(r.mined_confidence * 100).toFixed(0)}% across ${r.hits} historical txns`
+                          : "Promoted directly by the AI rules miner"
+                      }
+                      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200"
+                    >
+                      <Bot size={9} />
+                      Auto-applied by AI
+                    </span>
+                  ) : (
+                    <span
+                      data-testid="rule-source-badge"
+                      className={`text-[10px] px-1.5 py-0.5 rounded ${r.created_by === "ai" ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-600"}`}
+                    >
+                      {r.created_by === "ai" ? <><Wand2 size={9} className="inline mr-1" />AI</> : "Human"}
+                    </span>
+                  )}
                 </td>
                 <td className="px-3 py-2 text-right font-mono-num">{r.hits}</td>
                 <td className="px-3 py-2 text-right">
