@@ -239,7 +239,7 @@ function ReconciliationTable({ qboRows, ourRows, fmt, onExport }) {
   );
 }
 
-export default function QboReconciliationPanel({ companyId, reportKind, basis, ourReport }) {
+export default function QboReconciliationPanel({ companyId, reportKind, basis, ourReport, startDate, endDate }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [snapshot, setSnapshot] = useState(null);
@@ -278,14 +278,23 @@ export default function QboReconciliationPanel({ companyId, reportKind, basis, o
   const fetchFresh = async () => {
     setLoading(true); setError(null);
     try {
-      // Let the backend apply the "since inception → far future"
-      // defaults so this snapshot lines up with Test QBO's date
-      // range. Previously we passed YTD-of-today here, which
-      // produced snapshots that visually mismatched Test QBO
-      // and made real drift indistinguishable from date-range
-      // truncation. Feb 27 2026.
+      // For P&L, pass the report's actual date range so the QBO
+      // snapshot spans the same period the user is looking at.
+      // Otherwise the default (`2000-01-01 → 2099-12-31`, chosen
+      // for BS so no legacy history is truncated) would produce
+      // "lifetime" QBO totals while our side shows YTD, and the
+      // reconciliation table looks like massive drift when the
+      // real reports actually tie. Feb 28 2026.
+      // BS stays on the default range because it's inherently
+      // point-in-time — the `end_date` (=`as_of`) alone determines
+      // the balance; opening the window all the way back to 2000
+      // costs nothing and avoids truncating legacy books.
+      const isPl = reportKind === "income-statement";
+      const params = { accounting_method: method };
+      if (isPl && startDate) params.start_date = startDate;
+      if (isPl && endDate) params.end_date = endDate;
       await api.post(`/companies/${companyId}/qbo/reports/snapshot`, null, {
-        params: { accounting_method: method },
+        params,
       });
       const r = await api.get(`/companies/${companyId}/qbo/reports/latest`, {
         params: { report_name: qboReportName, accounting_method: method },

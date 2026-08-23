@@ -657,6 +657,8 @@ export default function ReportView() {
               reportKind={kind}
               basis={basis}
               ourReport={data}
+              startDate={start}
+              endDate={end}
             />
           )}
           {kind === "account-detail" && Array.isArray(data.rows) && data.account !== undefined && (
