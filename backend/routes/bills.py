@@ -157,6 +157,19 @@ async def create_bill(cid: str, inp: BillCreate, user: dict = Depends(get_curren
         # the error into the doc so the UI can prompt the user.
         await db.bills.update_one({"id": bid, "company_id": cid},
                                   {"$set": {"inventory_error": str(e)}})
+
+    # Post the accrual JE (DR Expense / CR A/P). Mirror of the invoice
+    # fix above — closes the day-one bug where non-QBO companies got
+    # bills that never landed on the balance sheet. Idempotent, safe
+    # on drafts. Feb 28 2026.
+    try:
+        from posting_service import post_bill_je
+        await post_bill_je(cid, doc)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning(
+            "bill JE post failed for %s: %s", bid, e)
+
     # Fire-and-forget mirror push. Silent no-op if QBO Mirror is
     # disabled or bill is voided.
     try_auto_push(cid, "bill", bid)
@@ -235,6 +248,21 @@ async def update_bill(cid: str, bid: str, payload: dict, user: dict = Depends(ge
                                   {"$set": {"inventory_error": str(e)}})
     # Fire-and-forget mirror update.
     try_auto_update(cid, "bill", bid)
+    # If totals-affecting fields changed, reverse + repost the accrual
+    # JE so the ledger stays in sync with the fresh amount. Feb 28 2026.
+    if totals_fields & set(payload.keys()):
+        try:
+            from posting_service import (
+                reverse_document_je, post_bill_je,
+            )
+            await reverse_document_je(cid, "bill", bid)
+            fresh_b = await db.bills.find_one({"id": bid, "company_id": cid})
+            if fresh_b:
+                await post_bill_je(cid, fresh_b)
+        except Exception as e:  # noqa: BLE001
+            import logging
+            logging.getLogger(__name__).warning(
+                "bill JE repost failed for %s: %s", bid, e)
     # Audit — capture before/after diff.
     try:
         import audit as _audit
@@ -267,6 +295,12 @@ async def delete_bill(cid: str, bid: str, user: dict = Depends(get_current_user)
         pass
     cascade = await cascade_on_doc_delete(cid, "bill", bid)
     await db.bills.delete_one({"id": bid, "company_id": cid})
+    # Reverse the accrual JE that create_bill posted (idempotent).
+    try:
+        from posting_service import reverse_document_je
+        await reverse_document_je(cid, "bill", bid)
+    except Exception:  # noqa: BLE001
+        pass
     # Mirror delete on QBO if this bill was previously synced.
     try_auto_delete(cid, "bill", qbo_id, bill_number)
     # Audit — full snapshot on delete per policy.

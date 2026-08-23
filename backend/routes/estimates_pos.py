@@ -194,6 +194,15 @@ async def convert_estimate_to_invoice(
         "created_at": now_iso(), "updated_at": now_iso(),
     }
     await db.invoices.insert_one(invoice)
+    # Post the accrual JE for the freshly-created invoice — mirrors
+    # what `create_invoice` does. Feb 28 2026.
+    try:
+        from posting_service import post_invoice_je
+        await post_invoice_je(cid, invoice)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning(
+            "estimate→invoice JE post failed for %s: %s", iid, e)
     # Flip the source estimate to converted and back-link.
     await db.estimates.update_one(
         {"id": eid, "company_id": cid},
@@ -331,6 +340,15 @@ async def convert_po_to_bill(
         "created_at": now_iso(), "updated_at": now_iso(),
     }
     await db.bills.insert_one(bill)
+    # Post the accrual JE for the freshly-created bill — mirrors
+    # what `create_bill` does. Feb 28 2026.
+    try:
+        from posting_service import post_bill_je
+        await post_bill_je(cid, bill)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning(
+            "PO→bill JE post failed for %s: %s", bid, e)
     await db.purchase_orders.update_one(
         {"id": pid, "company_id": cid},
         {"$set": {"status": "converted",
