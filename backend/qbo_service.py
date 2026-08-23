@@ -1758,9 +1758,14 @@ async def run_migration(job_id: str, company_id: str) -> None:
         #
         # Guarantees parity by construction: our BS/PL total for
         # any account == sum of QBO's GL rows for that account ==
-        # what QBO's own BS/PL report displays. Fixes the entire
-        # class of drift bugs that emerged from reconstructing GL
-        # from entities + 20 resolvers on legacy migrations.
+        # what QBO's own BS/PL report displays.
+        #
+        # Both Accrual AND Cash bases are pulled and tagged on each
+        # row so basis-scoped reports read the correct GL slice
+        # (`accounting_method: "Cash"` for cash reports; "Accrual"
+        # for accrual). Without the second pull, cash-basis reports
+        # on QBO-connected companies would show Accrual-flavored
+        # numbers and drift against QBO's own Cash BS/PL.
         gl_lines_pulled = 0
         gl_walk_errors = 0
         try:
@@ -1769,46 +1774,47 @@ async def run_migration(job_id: str, company_id: str) -> None:
             all_accts = await db.accounts.find(
                 {"company_id": company_id,
                  "qbo_id": {"$ne": None}}).to_list(5000)
-            for a in all_accts:
-                qbo_acct_id = str(a.get("qbo_id") or "")
-                try:
-                    gl = await fetch_report(
-                        company_id, realm_id, "GeneralLedger",
-                        {"start_date": "2000-01-01",
-                         "end_date": "2099-12-31",
-                         "account": qbo_acct_id,
-                         "accounting_method": "Accrual"},
-                    )
-                except Exception:  # noqa: BLE001
-                    gl_walk_errors += 1
-                    continue
-                rows = (gl.get("Rows") or {}).get("Row") or []
-                postings = _flatten_gl_rows(rows)
-                if not postings:
-                    continue
-                docs = []
-                for p in postings:
-                    docs.append({
-                        "company_id": company_id,
-                        "account_qbo_id": qbo_acct_id,
-                        "account_local_id": a.get("id"),
-                        "account_name": a.get("name") or "",
-                        "account_type": a.get("type") or "",
-                        "account_subtype": a.get("subtype") or "",
-                        "date": p.get("date") or "",
-                        "txn_type": p.get("txn_type") or "",
-                        "doc_num": p.get("doc_num") or "",
-                        "name": p.get("name") or "",
-                        "memo": p.get("memo") or "",
-                        "split": p.get("split") or "",
-                        "amount": round(
-                            float(p.get("amount") or 0.0), 2),
-                        "accounting_method": "Accrual",
-                        "as_of_snapshot": now_iso(),
-                    })
-                if docs:
-                    await db.qbo_gl_lines.insert_many(docs)
-                    gl_lines_pulled += len(docs)
+            for basis in ("Accrual", "Cash"):
+                for a in all_accts:
+                    qbo_acct_id = str(a.get("qbo_id") or "")
+                    try:
+                        gl = await fetch_report(
+                            company_id, realm_id, "GeneralLedger",
+                            {"start_date": "2000-01-01",
+                             "end_date": "2099-12-31",
+                             "account": qbo_acct_id,
+                             "accounting_method": basis},
+                        )
+                    except Exception:  # noqa: BLE001
+                        gl_walk_errors += 1
+                        continue
+                    rows = (gl.get("Rows") or {}).get("Row") or []
+                    postings = _flatten_gl_rows(rows)
+                    if not postings:
+                        continue
+                    docs = []
+                    for p in postings:
+                        docs.append({
+                            "company_id": company_id,
+                            "account_qbo_id": qbo_acct_id,
+                            "account_local_id": a.get("id"),
+                            "account_name": a.get("name") or "",
+                            "account_type": a.get("type") or "",
+                            "account_subtype": a.get("subtype") or "",
+                            "date": p.get("date") or "",
+                            "txn_type": p.get("txn_type") or "",
+                            "doc_num": p.get("doc_num") or "",
+                            "name": p.get("name") or "",
+                            "memo": p.get("memo") or "",
+                            "split": p.get("split") or "",
+                            "amount": round(
+                                float(p.get("amount") or 0.0), 2),
+                            "accounting_method": basis,
+                            "as_of_snapshot": now_iso(),
+                        })
+                    if docs:
+                        await db.qbo_gl_lines.insert_many(docs)
+                        gl_lines_pulled += len(docs)
         except Exception as e:  # noqa: BLE001
             logger.warning(
                 "GL pull failed for %s: %s — reports will fall back "

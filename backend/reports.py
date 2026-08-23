@@ -92,7 +92,8 @@ async def _has_qbo_gl_data(company_id: str) -> bool:
 
 async def _signed_balances_from_gl(company_id: str, start: str | None,
                                      end: str,
-                                     include_pre_period: bool = False):
+                                     include_pre_period: bool = False,
+                                     basis: str = "Accrual"):
     """Return `{account_id: raw_signed_balance}` derived from QBO's
     own General Ledger rows stored in `qbo_gl_lines`.
 
@@ -106,6 +107,12 @@ async def _signed_balances_from_gl(company_id: str, start: str | None,
       for user rendering (see `CREDIT_NORMAL` handling in
       `compute_balance_sheet`).
 
+    Basis handling: `qbo_gl_lines` stores BOTH Accrual and Cash rows
+    (tagged with `accounting_method` at pull time). Filter to the
+    requested basis so cash-basis reports don't read accrual GL. The
+    default "Accrual" mirrors what `run_migration()` used to pull
+    single-basis, keeping older callers safe.
+
     Parent-account handling: QBO's `GeneralLedger` endpoint rolls
     child-account postings up into the parent's row set — but a
     parent can ALSO carry its own direct postings on top of that
@@ -117,6 +124,10 @@ async def _signed_balances_from_gl(company_id: str, start: str | None,
     — Jeep 2023 Gladiator White had $59,988 in both parent + child
     aggregations before this fix.
     """
+    # Normalize basis so callers can pass "accrual"/"cash"/"Accrual".
+    basis_norm = (basis or "Accrual").strip().lower()
+    basis_tag = "Cash" if basis_norm == "cash" else "Accrual"
+
     # Build parent → children map from account docs. We'll subtract
     # child rollups after aggregating.
     parent_to_children: dict[str, list[str]] = {}
@@ -130,7 +141,9 @@ async def _signed_balances_from_gl(company_id: str, start: str | None,
         if pid and cid_:
             parent_to_children.setdefault(pid, []).append(cid_)
 
-    match: dict = {"company_id": company_id, "date": {"$lte": end}}
+    match: dict = {"company_id": company_id,
+                    "accounting_method": basis_tag,
+                    "date": {"$lte": end}}
     if start and not include_pre_period:
         match["date"] = {"$gte": start, "$lte": end}
 
@@ -178,7 +191,8 @@ async def _signed_balances_from_gl(company_id: str, start: str | None,
 
 
 async def _signed_balances(company_id: str, start: str | None, end: str,
-                            include_pre_period: bool = False):
+                            include_pre_period: bool = False,
+                            basis: str = "Accrual"):
     """Return {account_id: raw_signed_balance} for postings whose date is <= end
     (and >= start if given and include_pre_period is False).
 
@@ -188,11 +202,14 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
     populated (via `run_migration` or `/api/admin/qbo/gl-migrate`),
     route through `_signed_balances_from_gl` for guaranteed parity
     with QBO's own reports. Legacy `transactions` + `journal_entries`
-    accumulation runs only for native / non-QBO companies.
+    accumulation runs only for native / non-QBO companies. The
+    `basis` argument is passed through so cash-basis reports read
+    the Cash-tagged GL slice and accrual reports read the Accrual
+    slice.
     """
     if await _has_qbo_gl_data(company_id):
         return await _signed_balances_from_gl(
-            company_id, start, end, include_pre_period)
+            company_id, start, end, include_pre_period, basis)
 
     by = defaultdict(float)
 
@@ -506,7 +523,7 @@ async def _open_ar_ap(company_id: str, as_of: str, start: str | None = None):
 async def compute_income_statement(company_id: str, start: str, end: str, basis: str = "accrual"):
     company = await db.companies.find_one({"id": company_id})
     accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
-    by = await _signed_balances(company_id, start, end)
+    by = await _signed_balances(company_id, start, end, basis=basis)
 
     # Phase 2 (Feb 28 2026): when GL rows are the source of truth,
     # every accrual / cash-basis compensating layer below (invoice
@@ -1090,7 +1107,7 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
 async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accrual"):
     company = await db.companies.find_one({"id": company_id})
     accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
-    by = await _signed_balances(company_id, start=None, end=as_of, include_pre_period=True)
+    by = await _signed_balances(company_id, start=None, end=as_of, include_pre_period=True, basis=basis)
 
     # Phase 2 (Feb 28 2026): if `_signed_balances` returned GL-derived
     # balances (see `_has_qbo_gl_data`), every compensating layer

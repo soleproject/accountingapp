@@ -741,47 +741,51 @@ async def admin_qbo_full_backfill(
             # Step 6 (Feb 28 2026) — GL-as-source-of-truth pull.
             # Populates `qbo_gl_lines` so the report engine reads
             # from QBO's own GL going forward. Idempotent — wipes
-            # prior GL rows before re-pulling.
+            # prior GL rows before re-pulling. Both Accrual + Cash
+            # bases are pulled and tagged per row so basis-scoped
+            # reports read the correct slice.
             gl_lines = 0
             gl_errs = 0
             await db.qbo_gl_lines.delete_many({"company_id": cid})
-            for a in await db.accounts.find({
+            _accts_for_gl = await db.accounts.find({
                 "company_id": cid, "qbo_id": {"$ne": None},
-            }).to_list(5000):
-                try:
-                    gl = await Q.fetch_report(
-                        cid, realm_id, "GeneralLedger",
-                        {"start_date": "2000-01-01",
-                         "end_date": "2099-12-31",
-                         "account": str(a.get("qbo_id") or ""),
-                         "accounting_method": "Accrual"},
-                    )
-                except Exception:  # noqa: BLE001
-                    gl_errs += 1
-                    continue
-                postings = Q._flatten_gl_rows(
-                    (gl.get("Rows") or {}).get("Row") or [])
-                if not postings:
-                    continue
-                docs = [{
-                    "company_id": cid,
-                    "account_qbo_id": str(a.get("qbo_id") or ""),
-                    "account_local_id": a.get("id"),
-                    "account_name": a.get("name") or "",
-                    "account_type": a.get("type") or "",
-                    "account_subtype": a.get("subtype") or "",
-                    "date": p.get("date") or "",
-                    "txn_type": p.get("txn_type") or "",
-                    "doc_num": p.get("doc_num") or "",
-                    "name": p.get("name") or "",
-                    "memo": p.get("memo") or "",
-                    "split": p.get("split") or "",
-                    "amount": round(float(p.get("amount") or 0.0), 2),
-                    "accounting_method": "Accrual",
-                    "as_of_snapshot": now_iso(),
-                } for p in postings]
-                await db.qbo_gl_lines.insert_many(docs)
-                gl_lines += len(docs)
+            }).to_list(5000)
+            for basis in ("Accrual", "Cash"):
+                for a in _accts_for_gl:
+                    try:
+                        gl = await Q.fetch_report(
+                            cid, realm_id, "GeneralLedger",
+                            {"start_date": "2000-01-01",
+                             "end_date": "2099-12-31",
+                             "account": str(a.get("qbo_id") or ""),
+                             "accounting_method": basis},
+                        )
+                    except Exception:  # noqa: BLE001
+                        gl_errs += 1
+                        continue
+                    postings = Q._flatten_gl_rows(
+                        (gl.get("Rows") or {}).get("Row") or [])
+                    if not postings:
+                        continue
+                    docs = [{
+                        "company_id": cid,
+                        "account_qbo_id": str(a.get("qbo_id") or ""),
+                        "account_local_id": a.get("id"),
+                        "account_name": a.get("name") or "",
+                        "account_type": a.get("type") or "",
+                        "account_subtype": a.get("subtype") or "",
+                        "date": p.get("date") or "",
+                        "txn_type": p.get("txn_type") or "",
+                        "doc_num": p.get("doc_num") or "",
+                        "name": p.get("name") or "",
+                        "memo": p.get("memo") or "",
+                        "split": p.get("split") or "",
+                        "amount": round(float(p.get("amount") or 0.0), 2),
+                        "accounting_method": basis,
+                        "as_of_snapshot": now_iso(),
+                    } for p in postings]
+                    await db.qbo_gl_lines.insert_many(docs)
+                    gl_lines += len(docs)
             step_stats["gl_lines_pulled"] = gl_lines
             step_stats["gl_walk_errors"] = gl_errs
 
@@ -891,7 +895,8 @@ async def companies_qbo_gl_diff(
     # Precompute the local signed balances for the same window (one
     # pass over all txns + JEs). This is expensive on big books —
     # done ONCE, not per-account.
-    local_by_acct = await R._signed_balances(cid, inp.start_date, inp.end_date)
+    local_by_acct = await R._signed_balances(
+        cid, inp.start_date, inp.end_date, basis=inp.accounting_method)
 
     # Sign convention: QBO GL renders each account in its OWN natural
     # direction — income/equity/liab as positive on their normal
@@ -1028,13 +1033,10 @@ class QboGlOnlyMigrateIn(BaseModel):
     """Wipe + re-pull QBO GeneralLedger into `qbo_gl_lines` for the
     company. Iterates every QBO-sourced account and calls
     `GeneralLedger` with `account=<qbo_id>` so QBO returns rows for
-    that account only."""
+    that account only. Pulls both Accrual and Cash bases so basis-
+    scoped reports read the right slice."""
     start_date: str = Field(default="2000-01-01")
     end_date: str = Field(default="2099-12-31")
-    accounting_method: str = Field(
-        default="Accrual",
-        description="Accrual | Cash — QBO's GL renders differently "
-                    "on each basis. Pull the basis you want to verify.")
 
 
 @router.post("/admin/qbo/gl-migrate/{cid}")
@@ -1071,7 +1073,8 @@ async def admin_qbo_gl_only_migrate(
     walk_errors: list[dict] = []
     per_account: list[dict] = []
 
-    for a in accounts:
+    for basis in ("Accrual", "Cash"):
+     for a in accounts:
         qbo_id = str(a.get("qbo_id") or "")
         local_id = a.get("id")
         acct_name = a.get("name") or ""
@@ -1083,10 +1086,11 @@ async def admin_qbo_gl_only_migrate(
                 {"start_date": inp.start_date,
                  "end_date": inp.end_date,
                  "account": qbo_id,
-                 "accounting_method": inp.accounting_method},
+                 "accounting_method": basis},
             )
         except Exception as e:  # noqa: BLE001
             walk_errors.append({
+                "basis": basis,
                 "account_qbo_id": qbo_id,
                 "account_name": acct_name,
                 "error": str(e)[:200],
@@ -1096,9 +1100,10 @@ async def admin_qbo_gl_only_migrate(
         rows = (gl.get("Rows") or {}).get("Row") or []
         postings = Q._flatten_gl_rows(rows)
         if not postings:
-            per_account.append({
-                "account_qbo_id": qbo_id, "account_name": acct_name,
-                "line_count": 0, "balance": 0.0})
+            if basis == "Accrual":  # only tally per-account once
+                per_account.append({
+                    "account_qbo_id": qbo_id, "account_name": acct_name,
+                    "line_count": 0, "balance": 0.0})
             continue
 
         docs = []
@@ -1120,19 +1125,20 @@ async def admin_qbo_gl_only_migrate(
                 "memo": p.get("memo") or "",
                 "split": p.get("split") or "",
                 "amount": round(amt, 2),
-                "accounting_method": inp.accounting_method,
+                "accounting_method": basis,
                 "as_of_snapshot": started_at,
             })
         if docs:
             await db.qbo_gl_lines.insert_many(docs)
         total_lines += len(docs)
-        per_account.append({
-            "account_qbo_id": qbo_id,
-            "account_name": acct_name,
-            "account_type": acct_type,
-            "line_count": len(docs),
-            "balance": round(acct_bal, 2),
-        })
+        if basis == "Accrual":
+            per_account.append({
+                "account_qbo_id": qbo_id,
+                "account_name": acct_name,
+                "account_type": acct_type,
+                "line_count": len(docs),
+                "balance": round(acct_bal, 2),
+            })
 
     finished_at = now_iso()
     return {
@@ -1144,7 +1150,7 @@ async def admin_qbo_gl_only_migrate(
         "total_lines_pulled": total_lines,
         "walk_errors": walk_errors,
         "per_account": per_account,
-        "accounting_method": inp.accounting_method,
+        "bases_pulled": ["Accrual", "Cash"],
         "start_date": inp.start_date,
         "end_date": inp.end_date,
     }
@@ -1156,6 +1162,7 @@ async def admin_qbo_gl_only_report(
     report: str = "balance_sheet",
     start_date: str = "2000-01-01",
     end_date: str = "2099-12-31",
+    accounting_method: str = "Accrual",
     user: dict = Depends(require_role("superadmin")),
 ):
     """Aggregate `qbo_gl_lines` into a BS or P&L. Uses Mongo `$group`
@@ -1167,11 +1174,17 @@ async def admin_qbo_gl_only_report(
     * `profit_and_loss`: sum rows in `[start_date, end_date]`,
       filter to `type in (revenue, expense, cogs, other_income,
       other_expense)`.
+
+    `accounting_method` filters `qbo_gl_lines` to the requested
+    basis so Accrual/Cash reports each read their own slice.
     """
     if report not in ("balance_sheet", "profit_and_loss"):
         raise HTTPException(400, "report must be balance_sheet or profit_and_loss")
 
-    match: dict[str, object] = {"company_id": cid}
+    basis_tag = "Cash" if (accounting_method or "").lower() == "cash" else "Accrual"
+
+    match: dict[str, object] = {
+        "company_id": cid, "accounting_method": basis_tag}
     if report == "balance_sheet":
         match["date"] = {"$lte": end_date}
     else:
@@ -1304,10 +1317,12 @@ async def admin_qbo_gl_verify(
     # Aggregate our GL-derived numbers for the same window.
     bs = await admin_qbo_gl_only_report(
         cid, report="balance_sheet",
-        start_date=start_date, end_date=end_date, user=user)
+        start_date=start_date, end_date=end_date,
+        accounting_method=accounting_method, user=user)
     pl = await admin_qbo_gl_only_report(
         cid, report="profit_and_loss",
-        start_date=start_date, end_date=end_date, user=user)
+        start_date=start_date, end_date=end_date,
+        accounting_method=accounting_method, user=user)
 
     # QBO renders BS with a "Net Income" line under Equity — it's a
     # DERIVED value (not a GL-posted line), computed on-the-fly from
