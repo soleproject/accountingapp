@@ -67,6 +67,14 @@ async def cascade_on_doc_delete(cid: str, kind: str, doc_id: str) -> dict:
         {"$set": txn_field_clear},
     )
     await db.payments.delete_many({"company_id": cid, "id": {"$in": pids}})
+    # Reverse any auto-posted JEs for these payments so the ledger
+    # doesn't retain orphan cash/AR/AP legs after cascade. Feb 28 2026.
+    try:
+        from posting_service import reverse_document_je
+        for pid in pids:
+            await reverse_document_je(cid, "payment", pid)
+    except Exception:  # noqa: BLE001
+        pass
     return {"payments_deleted": len(pids), "transactions_cleared": txn_res.modified_count}
 
 
@@ -82,4 +90,10 @@ async def cascade_on_transaction_delete(cid: str, txn: dict) -> dict:
         return {"payments_deleted": 0}
     await _reverse_payment_impact(cid, payment)
     await db.payments.delete_one({"id": pid, "company_id": cid})
+    # Reverse the payment's auto-posted JE if one existed.
+    try:
+        from posting_service import reverse_document_je
+        await reverse_document_je(cid, "payment", pid)
+    except Exception:  # noqa: BLE001
+        pass
     return {"payments_deleted": 1}

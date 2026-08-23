@@ -1673,6 +1673,14 @@ async def link_transaction(
                     except Exception:
                         pass
         await _db.payments.delete_one({"id": payment_id_to_delete})
+        # Reverse the auto-posted JE so the ledger doesn't keep an
+        # orphan cash/AR/AP leg after the txn-driven cascade.
+        # Feb 28 2026.
+        try:
+            from posting_service import reverse_document_je
+            await reverse_document_je(cid, "payment", payment_id_to_delete)
+        except Exception:  # noqa: BLE001
+            pass
 
     # If the txn had an auto-payment and the link is now cleared or
     # switched, delete + reverse the old one first.
