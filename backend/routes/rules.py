@@ -164,6 +164,50 @@ async def dismiss_rule_candidate(cid: str, candidate_id: str,
     return {"ok": True, "deleted": r.deleted_count}
 
 
+@router.get("/companies/{cid}/miner-notification")
+async def miner_notification(cid: str,
+                              user: dict = Depends(get_current_user)):
+    """Dashboard banner payload: how many rules the miner has silently
+    auto-applied since the pro last dismissed the notification.
+
+    Zero count → banner hides. Feb 28 2026.
+    """
+    await require_company(user, cid)
+    company = await db.companies.find_one(
+        {"id": cid},
+        {"_id": 0, "miner_banner_dismissed_at": 1},
+    ) or {}
+    dismissed_at = company.get("miner_banner_dismissed_at") or ""
+
+    q: dict[str, Any] = {"company_id": cid, "created_by": "ai_miner"}
+    if dismissed_at:
+        q["mined_at"] = {"$gt": dismissed_at}
+
+    new_count = await db.rules.count_documents(q)
+    # Latest 3 for the banner's example strip
+    samples = await db.rules.find(
+        q, {"_id": 0, "match_value": 1, "account_name": 1, "hits": 1},
+    ).sort("mined_at", -1).limit(3).to_list(3)
+    return {
+        "new_rules_count": new_count,
+        "sample_rules": samples,
+        "last_dismissed_at": dismissed_at,
+    }
+
+
+@router.post("/companies/{cid}/miner-notification/dismiss")
+async def dismiss_miner_notification(
+    cid: str, user: dict = Depends(get_current_user),
+):
+    """Mark the current miner-notification stream as seen."""
+    await require_company(user, cid)
+    await db.companies.update_one(
+        {"id": cid},
+        {"$set": {"miner_banner_dismissed_at": now_iso()}},
+    )
+    return {"ok": True}
+
+
 @router.post("/companies/{cid}/rules/mine")
 async def mine_rules_endpoint(cid: str,
                                user: dict = Depends(get_current_user)):

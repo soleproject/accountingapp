@@ -58,6 +58,7 @@ function labelFor(anchor, mode) {
   return `${monthName} ${y}`;
 }
 import FirstConnectWelcome from "@/components/FirstConnectWelcome";
+import MinerBanner from "@/components/MinerBanner";
 import FirmAtAGlance from "@/components/FirmAtAGlance";
 import BusinessOverview from "@/components/BusinessOverview";
 import DashboardTodos from "@/components/DashboardTodos";
@@ -320,6 +321,7 @@ export default function Dashboard() {
         companyId={currentId}
         companyName={current?.name}
       />
+      <MinerBanner />
 
       {/* View toggle — Classic vs Firm at a Glance */}
       <div className="flex justify-end">
