@@ -187,26 +187,26 @@ export default function ReportDateRangePicker({
         )}
       </div>
 
-      {/* Custom mode: reveal raw inputs */}
+      {/* Custom mode: reveal raw inputs. Balance Sheet is
+          point-in-time (only `end` drives the report), but users
+          still expect a start/end pair — it lets them think in
+          "period" terms and keeps the UX identical across all
+          report types. The BS engine safely ignores `start` when
+          computing the point-in-time snapshot. Feb 28 2026. */}
       {selected === "custom" && (
         <>
-          {!isPoint && (
-            <input
-              type="date"
-              value={start || ""}
-              data-testid={`${testId}-custom-start`}
-              onChange={(e) => onChange({ start: e.target.value, end })}
-              className="border rounded px-2 py-1 text-xs"
-            />
-          )}
+          <input
+            type="date"
+            value={start || ""}
+            data-testid={`${testId}-custom-start`}
+            onChange={(e) => onChange({ start: e.target.value, end })}
+            className="border rounded px-2 py-1 text-xs"
+          />
           <input
             type="date"
             value={end || ""}
             data-testid={`${testId}-custom-end`}
-            onChange={(e) => onChange({
-              ...(isPoint ? {} : { start }),
-              end: e.target.value,
-            })}
+            onChange={(e) => onChange({ start, end: e.target.value })}
             className="border rounded px-2 py-1 text-xs"
           />
         </>
