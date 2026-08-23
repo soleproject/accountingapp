@@ -7,6 +7,7 @@ import { TID } from "@/constants/testIds";
 import { Download, Loader2, ArrowRightCircle, ChevronLeft, ChevronDown, ChevronRight, Search, SlidersHorizontal, X, Info } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import QboReconciliationPanel from "@/components/QboReconciliationPanel";
+import ReportDateRangePicker from "@/components/ReportDateRangePicker";
 import { toast } from "sonner";
 
 const startYtd = () => new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0, 10);
@@ -598,11 +599,17 @@ export default function ReportView() {
               ))}
             </div>
           )}
-          {kind !== "balance-sheet" && kind !== "account-detail" && (
-            <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className="border rounded px-2 py-1 text-xs" />
-          )}
           {kind !== "account-detail" && (
-            <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="border rounded px-2 py-1 text-xs" />
+            <ReportDateRangePicker
+              mode={kind === "balance-sheet" ? "point" : "period"}
+              start={start}
+              end={end}
+              onChange={({ start: s, end: e }) => {
+                if (s !== undefined) setStart(s);
+                if (e !== undefined) setEnd(e);
+              }}
+              testId={TID.reportDateRange || "report-date-range"}
+            />
           )}
           <button data-testid={TID.reportApply} onClick={fetchData} className="px-3 py-1.5 rounded-md border bg-white text-xs">Apply</button>
           <button data-testid={TID.reportExportPdf} onClick={downloadPdf}
