@@ -27,19 +27,19 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
 ## Prioritized Backlog
 
 ### P0 — In progress
-- Hide **Test QBO** sidebar link to superadmin-only (`Sidebar.jsx`)
+- (none active)
 
 ### P0 — Awaits user action
-- Re-authorize **Emeral Coast** OAuth on prod, then re-run backfill for that one company.
+- (none — Emeral Coast re-auth dropped 2026-08-23; parity gap accepted as-is on prod)
 
 ### P1
 - QBO Piece 2: AI Merchant → Contact match (removes "?" placeholders)
 - Recon panel label alias map (Advertising ↔ Advertising & Marketing)
 - Enterprise WL self-service toggle
 - PDF export on QBO Reconciliation panel
-- Sidebar link → GL Lab (`/admin/qbo-gl-lab`) for superadmins
 - Real-time inbound webhooks for QBO (Phase 4)
 - `_signed_balances` rewrite to Mongo `$group` aggregation
+- AI rule confidence sort on Rules page (sort miner rules by `mined_confidence` DESC)
 
 ### P2
 - Dead OAuth orphans cleanup (`qbo_connections` for deleted companies)
