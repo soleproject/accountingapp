@@ -252,14 +252,19 @@ function ProposalPill({ proposal, onAccept, onDismiss }) {
   );
 }
 
-function ConfidenceChip({ conf, needs_review }) {
+function ConfidenceChip({ conf, needs_review, human_reviewed }) {
   const v = Number(conf || 0);
   // Needs-review always renders in an attention color regardless of the raw
   // confidence value. Some rows (transfers auto-routed to Uncategorized) have
   // conf=0.95 by design — the chip must not go green on them because the row
   // still requires an accountant to reclassify.
   let cls, label;
-  if (needs_review) {
+  if (human_reviewed) {
+    // Green "Reviewed" chip — human (or QBO books-close ratchet) has
+    // signed off. Confidence is display-only at this point. Feb 28 2026.
+    cls = "confidence-high";
+    label = "Reviewed";
+  } else if (needs_review) {
     cls = v < 0.70 ? "confidence-low" : "confidence-med";  // rose vs amber
     label = "Needs review";
   } else {
@@ -268,7 +273,7 @@ function ConfidenceChip({ conf, needs_review }) {
   }
   return (
     <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${cls}`}>
-      {needs_review ? <AlertTriangle size={10} /> : <ShieldCheck size={10} />}
+      {(human_reviewed || !needs_review) ? <ShieldCheck size={10} /> : <AlertTriangle size={10} />}
       {label} · {(v * 100).toFixed(0)}%
     </span>
   );
@@ -1745,7 +1750,7 @@ export default function Transactions() {
                     </div>
                   </td>
                   <td className="px-3 py-2">
-                    <ConfidenceChip conf={t.ai_confidence} needs_review={t.needs_review} />
+                    <ConfidenceChip conf={t.ai_confidence} needs_review={t.needs_review} human_reviewed={t.human_reviewed} />
                     {t.ai_proposal_from_answer && (
                       <ProposalPill
                         proposal={t.ai_proposal_from_answer}
