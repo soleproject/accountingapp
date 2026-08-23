@@ -95,10 +95,21 @@ async def mine_rule_candidates(
     # QBO-imported rows (which have `code` empty).
     accounts = await db.accounts.find(
         {"company_id": company_id},
-        {"_id": 0, "id": 1, "code": 1, "name": 1},
+        {"_id": 0, "id": 1, "code": 1, "name": 1, "detail_type": 1},
     ).to_list(1000)
     acct_by_id = {a["id"]: a for a in accounts if a.get("id")}
     acct_by_code = {a["code"]: a for a in accounts if a.get("code")}
+    # Blocklist: never learn rules that route to holding-pen or
+    # customer-check-workflow accounts. Rules that target these would
+    # codify the exact miscategorization we just fixed on Plaid Test LLC
+    # (WF→BOA deposits routed to Undeposited Funds). Feb 28 2026.
+    _BLOCKED_CODES = {"4999", "6999"}  # Uncategorized Income / Expense
+    _BLOCKED_DETAIL_TYPES = {"money_in_transit"}
+    def _code_is_blocked(code: str) -> bool:
+        if code in _BLOCKED_CODES:
+            return True
+        a = acct_by_code.get(code) or {}
+        return (a.get("detail_type") or "").lower() in _BLOCKED_DETAIL_TYPES
 
     # merchant_key -> Counter({account_code: hits})
     tallies: dict[str, Counter] = defaultdict(Counter)
@@ -155,6 +166,11 @@ async def mine_rule_candidates(
         total = sum(counter.values())
         conf = top_hits / total if total else 0
         if top_hits < min_hits or conf < min_confidence:
+            continue
+        # Blocked target: skip so we never learn a rule that routes to
+        # Undeposited Funds / Uncategorized. See _code_is_blocked() +
+        # ``merchant_cache.categorize_with_cache`` deposit guard.
+        if _code_is_blocked(top_code):
             continue
         # Skip if a rule already exists for this exact pair.
         if (key, top_code) in existing_rule_keys:
