@@ -222,6 +222,44 @@ export default function InsightsChatWidget() {
     setMessages(m => [...m, { role: "user", text: question }]);
     setQ("");
     setBusy(true);
+
+    // -----------------------------------------------------------------
+    // Help-router intercept — try the /api/help/ask classifier first.
+    // Only fires when the question starts with a help-verb (how/where/
+    // can/what/show). Everything else falls through to the existing
+    // insights streaming pipeline so we never break the data-Q flow
+    // or the voice-command router. Feb 28 2026.
+    // -----------------------------------------------------------------
+    try {
+      const authToken = localStorage.getItem("axiom_token")
+        || localStorage.getItem("token")
+        || sessionStorage.getItem("token") || "";
+      const apiBase = process.env.REACT_APP_BACKEND_URL || "";
+      const helpResp = await fetch(`${apiBase}/api/help/ask`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ query: question }),
+      });
+      if (helpResp.ok) {
+        const help = await helpResp.json();
+        if (help.matched) {
+          setMessages(m => [...m, {
+            role: "assistant",
+            help,
+            text: help.body || "",
+            streaming: false,
+          }]);
+          setBusy(false);
+          return;
+        }
+      }
+    } catch {
+      // Silent fall-through to insights pipeline.
+    }
+
     const assistantIdx = messages.length + 1;
     setMessages(m => [...m, { role: "assistant", text: "", streaming: true }]);
     try {
@@ -501,6 +539,55 @@ function MessageBubble({ msg, navigate }) {
       <div className="flex justify-end">
         <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-indigo-600 text-white px-3 py-2 text-sm">
           {msg.text}
+        </div>
+      </div>
+    );
+  }
+  // Help-router answer bubble — richer than plain text: markdown-lite
+  // body + [Take me there] + [Do it for me] action buttons. Green tier
+  // actions auto-navigate; yellow tier navigates then relies on the
+  // destination page's own confirm/preview UX. Red tier renders no
+  // action button (destructive — must be user-initiated). Feb 28 2026.
+  if (msg.help) {
+    const h = msg.help;
+    return (
+      <div className="max-w-[85%] rounded-2xl rounded-tl-sm border border-slate-200 bg-white text-slate-800 px-3 py-2.5 text-sm space-y-2" data-testid="help-answer">
+        {h.heading && (
+          <div className="font-semibold text-slate-900 text-[13px]">{h.heading}</div>
+        )}
+        <div className="whitespace-pre-wrap text-slate-700 leading-relaxed">
+          {(h.body || "").split(/(\*\*[^*]+\*\*)/g).map((chunk, i) =>
+            chunk.startsWith("**") && chunk.endsWith("**") ? (
+              <strong key={i} className="text-slate-900 font-semibold">{chunk.slice(2, -2)}</strong>
+            ) : (
+              <span key={i}>{chunk}</span>
+            )
+          )}
+        </div>
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          {h.take_me_there && (
+            <button
+              data-testid="help-take-me-there"
+              onClick={() => navigate(h.take_me_there)}
+              className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200"
+            >
+              Take me there →
+            </button>
+          )}
+          {h.do_it_for_me && (
+            <button
+              data-testid="help-do-it-for-me"
+              onClick={() => navigate(h.do_it_for_me.url)}
+              className={`inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full border ${
+                h.do_it_for_me.tier === "green"
+                  ? "bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100"
+                  : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"
+              }`}
+              title={h.do_it_for_me.tier === "yellow" ? "You'll confirm on the next screen" : "Opens the tool directly"}
+            >
+              {h.do_it_for_me.label}
+            </button>
+          )}
         </div>
       </div>
     );
