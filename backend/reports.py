@@ -192,7 +192,8 @@ async def _signed_balances_from_gl(company_id: str, start: str | None,
 
 async def _signed_balances(company_id: str, start: str | None, end: str,
                             include_pre_period: bool = False,
-                            basis: str = "Accrual"):
+                            basis: str = "Accrual",
+                            imported_only: bool = False):
     """Return {account_id: raw_signed_balance} for postings whose date is <= end
     (and >= start if given and include_pre_period is False).
 
@@ -213,6 +214,11 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
     See `_signed_balances_native_layer` for the source-filter guards
     that prevent double-counting.
 
+    ``imported_only=True`` returns ONLY the QBO GL slice — used by the
+    Reconciliation panel's "Imported QBO" column so we can prove the
+    migration matches QBO exactly, and any drift vs OUR REPORT is
+    100% attributable to native activity. Aug 23 2026.
+
     The `basis` argument is passed through so cash-basis reports
     read the Cash-tagged GL slice and accrual reports read the
     Accrual slice.
@@ -222,6 +228,8 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
         # Start from the QBO GL (migrated + previously-mirrored activity).
         by = await _signed_balances_from_gl(
             company_id, start, end, include_pre_period, basis)
+        if imported_only:
+            return by
         # Layer native contributions on top. `skip_qbo_sourced=True`
         # filters out QBO-imported docs (already in the GL above) and
         # any native doc whose QBO twin now lives in `qbo_gl_lines`.
@@ -233,7 +241,8 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
             by[aid] += delta
         return by
 
-    # Native / non-QBO company: run the native layer alone.
+    # Native / non-QBO company: run the native layer alone. ``imported_only``
+    # has no meaning here — there's nothing to strip.
     return await _signed_balances_native_layer(
         company_id, start, end, include_pre_period, basis,
         skip_qbo_sourced=False)
@@ -697,17 +706,25 @@ async def _open_ar_ap(company_id: str, as_of: str, start: str | None = None):
 
 # ---------- Income Statement ----------
 
-async def compute_income_statement(company_id: str, start: str, end: str, basis: str = "accrual"):
+async def compute_income_statement(company_id: str, start: str, end: str, basis: str = "accrual",
+                                   imported_only: bool = False):
     company = await db.companies.find_one({"id": company_id})
     accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
-    by = await _signed_balances(company_id, start, end, basis=basis)
+    by = await _signed_balances(company_id, start, end, basis=basis,
+                                 imported_only=imported_only)
 
     # Phase 2 (Feb 28 2026): when GL rows are the source of truth,
     # every accrual / cash-basis compensating layer below (invoice
     # revenue roll-in, bill expense roll-in, cash allocation from
     # payments) would DOUBLE-COUNT on top of the GL. Skip them
     # entirely for GL-authoritative companies.
+    #
+    # ``imported_only`` requests the "QBO-imported slice" view for
+    # the Reconciliation panel; native activity must also be skipped
+    # for that view — the panel's "+ NATIVE" column surfaces those
+    # numbers separately. Aug 23 2026.
     _gl_authoritative = await _has_qbo_gl_data(company_id)
+    _skip_native_layer = _gl_authoritative or imported_only
 
     # Build parent → children index (same pattern used on the balance
     # sheet). Sub-accounts render indented under their parent and the
@@ -1288,10 +1305,13 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
 
 # ---------- Balance Sheet ----------
 
-async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accrual"):
+async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accrual",
+                                 imported_only: bool = False):
     company = await db.companies.find_one({"id": company_id})
     accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
-    by = await _signed_balances(company_id, start=None, end=as_of, include_pre_period=True, basis=basis)
+    by = await _signed_balances(company_id, start=None, end=as_of,
+                                 include_pre_period=True, basis=basis,
+                                 imported_only=imported_only)
 
     # Phase 2 (Feb 28 2026): if `_signed_balances` returned GL-derived
     # balances (see `_has_qbo_gl_data`), every compensating layer

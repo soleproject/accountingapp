@@ -93,10 +93,16 @@ def _default_range() -> tuple[str, str]:
 
 @router.get("/companies/{cid}/reports/income-statement")
 async def rep_income(cid: str, start: Optional[str] = None, end: Optional[str] = None,
-                     basis: str = "accrual", user: dict = Depends(get_current_user)):
+                     basis: str = "accrual", imported_only: bool = False,
+                     user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     s, e = _default_range()
     start_eff, end_eff = start or s, end or e
+    # `imported_only` requests the QBO-imported-slice view for the
+    # Reconciliation panel — bypass the shared cache so we don't hand
+    # back the combined view. Aug 23 2026.
+    if imported_only:
+        return await R.compute_income_statement(cid, start_eff, end_eff, basis, imported_only=True)
     cache = get_cache()
     key = cache.key("income_stmt", company_id=cid, s=start_eff, e=end_eff, b=basis)
     return await cache.get_or_compute(
@@ -120,10 +126,11 @@ async def rep_income_pdf(cid: str, request: Request, start: Optional[str] = None
 
 @router.get("/companies/{cid}/reports/balance-sheet")
 async def rep_bs(cid: str, as_of: Optional[str] = None, basis: str = "accrual",
+                 imported_only: bool = False,
                  user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     _, e = _default_range()
-    return await R.compute_balance_sheet(cid, as_of or e, basis)
+    return await R.compute_balance_sheet(cid, as_of or e, basis, imported_only=imported_only)
 
 
 @router.get("/companies/{cid}/reports/balance-sheet/pdf")
