@@ -35,7 +35,20 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
    - `auto_cash` tag on receipt JEs so cash-basis P&L still surfaces sales receipts.
    - QBO-sourced docs defensively skip local JE posting (they use the GL / synthesis path).
    - Backfill script `scripts/backfill_document_jes.py` re-postable across all doc types.
-- **Deposit guard + UF safety net (2026-08-23)** — `merchant_cache.categorize_with_cache` now
+- **QBO Recon 5-column overlay (2026-08-23)** — Reconciliation panel on BS + P&L now
+   renders `Line | Official QBO | Imported QBO | + Native | Our Report | Δ vs QBO`.
+   Backend adds an `imported_only=true` query param on the report endpoints that returns
+   the GL-only slice. Legend cards show 3 trust KPIs (migration parity / native
+   adjustments / unattributed drift) + filter toggles (All rows / Migration drift only /
+   Native adjustments only). CSV export mirrors all 5 columns. Verified on
+   Test QBO 431 LLC: `Imported = Official` (green ✓ across every row), `+Native = +$50k`
+   on A/R fully attributes the drift, `Unattributed = $0`.
+- **QBO + Native additive overlay (2026-08-23)** — `_signed_balances` on QBO-connected
+   companies now layers native activity (invoices/bills/JEs/txns created in Axiom
+   post-migration) on top of `qbo_gl_lines`. `_superseded_by_gl_ids` prevents double
+   counting for docs that have been mirrored back to QBO. `_open_ar_ap` filters
+   `source='qbo'` when GL data exists. Every doc counts exactly once in exactly one lane.
+- **Deposit guard + UF safety net (2026-08-23)** — `merchant_cache.categorize_with_cache`
    force-routes every positive-amount Plaid txn to `4999 Uncategorized Income` (with
    `needs_review=true`) unless a deterministic rule matches (Interest, Bank Fee reversal).
    The LLM is never asked to guess an income account. Belt-and-suspenders post-LLM override

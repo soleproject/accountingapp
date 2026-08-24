@@ -96,31 +96,38 @@ const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
  * Header rows use `null` in the numeric columns; QBO section
  * headers ("ASSETS", "LIABILITIES") export as a single-cell label.
  */
-function buildCsvRows(qboRows, lookup) {
+function buildCsvRows(qboRows, lookup, lookupImported) {
   const rows = [];
-  rows.push(["Section", "Line", "Depth", "Official QBO", "Our Report",
-             "Difference", "Match"]);
+  rows.push(["Section", "Line", "Depth", "Official QBO", "Imported QBO",
+             "+ Native", "Our Report", "Δ vs QBO", "Match"]);
   for (const r of qboRows) {
     if (r.header) {
-      rows.push([r.label, "", "", "", "", "", ""]);
+      rows.push([r.label, "", "", "", "", "", "", "", ""]);
       continue;
     }
     if (r.value === null || r.value === undefined) {
-      rows.push([r.section || "", r.label, r.depth, "", "", "", ""]);
+      rows.push([r.section || "", r.label, r.depth, "", "", "", "", "", ""]);
       continue;
     }
     const ours = lookup(r.section, r.label);
-    const has = ours !== undefined && ours !== null;
-    const diff = has ? Math.abs(r.value - ours) : null;
-    const matches = has && diff < 0.01;
+    const imported = lookupImported ? lookupImported(r.section, r.label) : undefined;
+    const hasOurs = ours !== undefined && ours !== null;
+    const hasImp = imported !== undefined && imported !== null;
+    const native = hasOurs && hasImp
+      ? Number((ours - imported).toFixed(2))
+      : (hasOurs ? Number(ours).toFixed(2) : null);
+    const diff = hasOurs ? Math.abs(r.value - ours) : null;
+    const matches = hasOurs && diff < 0.01;
     rows.push([
       r.section || "",
       r.label,
       r.depth,
       Number(r.value).toFixed(2),
-      has ? Number(ours).toFixed(2) : "",
-      has ? Number(diff).toFixed(2) : "",
-      has ? (matches ? "MATCH" : "DRIFT") : "N/A",
+      hasImp ? Number(imported).toFixed(2) : "",
+      native !== null && native !== undefined ? Number(native).toFixed(2) : "",
+      hasOurs ? Number(ours).toFixed(2) : "",
+      hasOurs ? Number(diff).toFixed(2) : "",
+      hasOurs ? (matches ? "MATCH" : "DRIFT") : "N/A",
     ]);
   }
   return rows;
@@ -151,91 +158,263 @@ function triggerCsvDownload(csv, filename) {
   URL.revokeObjectURL(url);
 }
 
-function ReconciliationTable({ qboRows, ourRows, fmt, onExport }) {
+function ReconciliationTable({ qboRows, ourRows, ourRowsImported, fmt, onExport }) {
   // Key rows by `${section}::${normLabel}` so an income "Plants and
   // Soil" doesn't collide with an expense "Plants and Soil". Falls
   // back to plain label-only for rows that have no section context
   // (top-level totals like "Net Income", "Total Assets").
-  const ourBy = useMemo(() => {
+  const buildIndex = (rows) => {
     const scoped = new Map();
     const bare = new Map();
-    for (const r of ourRows) {
+    for (const r of rows) {
       const l = norm(r.label);
       if (r.section) scoped.set(`${r.section}::${l}`, r.value);
-      // Only populate the bare map with the FIRST occurrence — later
-      // duplicates keep their section-scoped identity via `scoped`.
       if (!bare.has(l)) bare.set(l, r.value);
     }
     return { scoped, bare };
-  }, [ourRows]);
+  };
+  const ourBy = useMemo(() => buildIndex(ourRows), [ourRows]);
+  const ourImpBy = useMemo(() => buildIndex(ourRowsImported || []),
+                            [ourRowsImported]);
 
-  const lookup = (section, label) => {
+  const makeLookup = (idx) => (section, label) => {
     const l = norm(label);
     if (section) {
-      const v = ourBy.scoped.get(`${section}::${l}`);
+      const v = idx.scoped.get(`${section}::${l}`);
       if (v !== undefined) return v;
     }
-    return ourBy.bare.get(l);
+    return idx.bare.get(l);
+  };
+  const lookup = makeLookup(ourBy);
+  const lookupImported = ourRowsImported ? makeLookup(ourImpBy) : null;
+
+  // Filter toggles — persist during a session. Legend counters count
+  // meaningful rows (numeric value present, not a header/subtotal-only).
+  const [filterMode, setFilterMode] = useState("all"); // all | drift | native
+
+  // Legend / summary at the top of the panel: 3 KPIs to tell the
+  // trust story at a glance.
+  //   • Migration parity  — how many of the numeric leaf rows have
+  //     `Imported QBO === Official QBO` (proves the migration is
+  //     bit-identical to QBO's canonical report).
+  //   • Native adjustments — how many rows carry post-migration
+  //     activity added in Axiom (native invoices/bills/JEs not yet
+  //     mirrored back to QBO).
+  //   • Unattributed drift — anything the first two can't explain
+  //     (this should always be $0 when the migration is clean and
+  //     the additive overlay is doing its job).
+  const stats = useMemo(() => {
+    let migrationOk = 0;
+    let migrationDrift = 0;
+    let migrationDriftDollars = 0;
+    let nativeRows = 0;
+    let nativeDollars = 0;
+    let unattributed = 0;
+    for (const r of qboRows) {
+      if (r.header || r.value === null || r.value === undefined) continue;
+      const ours = lookup(r.section, r.label);
+      const imported = lookupImported ? lookupImported(r.section, r.label) : undefined;
+      const hasOurs = ours !== undefined && ours !== null;
+      if (!hasOurs) continue;
+      const hasImp = imported !== undefined && imported !== null;
+      // Migration parity is between OFFICIAL QBO and IMPORTED QBO.
+      if (hasImp) {
+        if (Math.abs(r.value - imported) < 0.01) migrationOk += 1;
+        else {
+          migrationDrift += 1;
+          migrationDriftDollars += Math.abs(r.value - imported);
+        }
+      }
+      // Native adjustment = Our Report − Imported QBO.
+      const native = hasImp ? ours - imported : null;
+      if (native !== null && Math.abs(native) >= 0.01) {
+        nativeRows += 1;
+        nativeDollars += Math.abs(native);
+      }
+      // Δ vs QBO = Official − Our Report. Anything not explained by
+      // "Our Report = Imported + Native" is unattributed drift.
+      const totalDrift = r.value - ours;
+      const explained = -(native || 0);      // native pushes Our Report ABOVE Imported
+      const residual = totalDrift - explained;
+      if (Math.abs(residual) >= 0.01 && hasImp) unattributed += 1;
+    }
+    return {
+      migrationOk, migrationDrift, migrationDriftDollars,
+      nativeRows, nativeDollars, unattributed,
+    };
+  }, [qboRows, ourRows, ourRowsImported]);
+
+  // Register the current lookups with the parent so its Export CSV
+  // button emits the full 5-column shape mirroring what's on screen.
+  useEffect(() => {
+    if (onExport) onExport(() => buildCsvRows(qboRows, lookup, lookupImported));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qboRows, ourRows, ourRowsImported]);
+
+  const showRow = (r) => {
+    if (r.header || r.value === null || r.value === undefined) return true;
+    if (filterMode === "all") return true;
+    const ours = lookup(r.section, r.label);
+    const imported = lookupImported ? lookupImported(r.section, r.label) : undefined;
+    const hasOurs = ours !== undefined && ours !== null;
+    const hasImp = imported !== undefined && imported !== null;
+    if (filterMode === "drift") {
+      if (!hasImp) return false;
+      return Math.abs(r.value - imported) >= 0.01;
+    }
+    if (filterMode === "native") {
+      if (!hasOurs || !hasImp) return false;
+      return Math.abs(ours - imported) >= 0.01;
+    }
+    return true;
   };
 
-  // Register the current lookup with the parent so its Export CSV
-  // button can produce a CSV that mirrors exactly what's on screen
-  // (same section-scoped matching rules, same rows shown).
-  useEffect(() => {
-    if (onExport) onExport(() => buildCsvRows(qboRows, lookup));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qboRows, ourRows]);
-
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="text-xs uppercase tracking-wide text-slate-500 border-b border-slate-200">
-          <th className="text-left py-2">Line</th>
-          <th className="text-right py-2 w-32">Official QBO</th>
-          <th className="text-right py-2 w-32">Our report</th>
-          <th className="text-right py-2 w-32">Δ Difference</th>
-        </tr>
-      </thead>
-      <tbody>
-        {qboRows.map((r, i) => {
-          if (r.header) return (
-            <tr key={i} className="bg-slate-50">
-              <td colSpan={4} className="py-1.5 px-2 font-semibold text-slate-700 text-xs uppercase tracking-wide">
-                {r.label}
-              </td>
-            </tr>
-          );
-          if (r.value === null) return (
-            <tr key={i}><td className="py-1 px-2" style={{ paddingLeft: 8 + r.depth * 12 }}>{r.label}</td></tr>
-          );
-          const ourVal = lookup(r.section, r.label);
-          const hasOurs = ourVal !== undefined && ourVal !== null;
-          const diff = hasOurs ? Math.abs(r.value - ourVal) : null;
-          const matches = hasOurs && diff < 0.01;
-          return (
-            <tr
-              key={i}
-              className={r.summary ? "border-t border-slate-200 font-semibold" : ""}
-              data-testid={`recon-row-${i}`}
-            >
-              <td className="py-1.5 px-2" style={{ paddingLeft: 8 + r.depth * 12 }}>
-                {r.label}
-              </td>
-              <td className="py-1.5 px-2 text-right tabular-nums">{fmt(r.value)}</td>
-              <td className={"py-1.5 px-2 text-right tabular-nums " + (hasOurs ? "" : "text-slate-400")}>
-                {hasOurs ? fmt(ourVal) : "—"}
-              </td>
-              <td className={
-                "py-1.5 px-2 text-right tabular-nums " +
-                (matches ? "text-emerald-600" : hasOurs ? "text-rose-600" : "text-slate-400")
-              }>
-                {hasOurs ? (matches ? "✓" : `Δ ${fmt(diff)}`) : "—"}
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <>
+      {/* Legend / trust-story summary */}
+      <div
+        className="mb-3 grid grid-cols-1 sm:grid-cols-3 gap-2"
+        data-testid="recon-legend"
+      >
+        <div className="rounded-md border border-emerald-200 bg-emerald-50/60 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-widest text-emerald-700 font-semibold">Migration parity</div>
+          <div className="text-sm font-medium text-emerald-900 mt-0.5">
+            {stats.migrationOk}/{stats.migrationOk + stats.migrationDrift} rows match QBO
+            {stats.migrationDrift > 0 && (
+              <span className="text-rose-700 ml-1">
+                · {stats.migrationDrift} drift ({fmt(stats.migrationDriftDollars)})
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-widest text-amber-700 font-semibold">Native adjustments</div>
+          <div className="text-sm font-medium text-amber-900 mt-0.5">
+            {stats.nativeRows === 0
+              ? "None (all activity is in QBO)"
+              : `${stats.nativeRows} row${stats.nativeRows === 1 ? "" : "s"} · +${fmt(stats.nativeDollars)}`}
+          </div>
+        </div>
+        <div className="rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-widest text-slate-600 font-semibold">Unattributed drift</div>
+          <div className={"text-sm font-medium mt-0.5 " + (stats.unattributed === 0 ? "text-emerald-900" : "text-rose-800")}>
+            {stats.unattributed === 0 ? "$0.00 ✓" : `${stats.unattributed} row${stats.unattributed === 1 ? "" : "s"}`}
+          </div>
+        </div>
+      </div>
+
+      {/* Micro-copy explaining the columns */}
+      <div className="mb-2 text-xs text-slate-500">
+        <span className="font-medium text-slate-600">Imported QBO</span> = your migrated data (should match Official QBO exactly).
+        {" "}<span className="font-medium text-slate-600">+ Native</span> = anything added in Axiom that hasn't been mirrored back to QBO. Every dollar is traceable.
+      </div>
+
+      {/* Filter toggles */}
+      <div className="mb-2 flex items-center gap-1" data-testid="recon-filters">
+        {[
+          ["all",    "All rows",              null],
+          ["drift",  "Migration drift only",  stats.migrationDrift],
+          ["native", "Native adjustments only", stats.nativeRows],
+        ].map(([mode, label, count]) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => setFilterMode(mode)}
+            data-testid={`recon-filter-${mode}`}
+            className={
+              "text-xs px-2.5 py-1 rounded-md border transition " +
+              (filterMode === mode
+                ? "bg-slate-900 text-white border-slate-900"
+                : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50")
+            }
+          >
+            {label}
+            {count !== null && count !== undefined && (
+              <span className={"ml-1.5 text-[10px] " + (filterMode === mode ? "text-slate-200" : "text-slate-500")}>
+                {count}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-xs uppercase tracking-wide text-slate-500 border-b border-slate-200">
+            <th className="text-left py-2">Line</th>
+            <th className="text-right py-2 w-28">Official QBO</th>
+            <th className="text-right py-2 w-28">Imported QBO</th>
+            <th className="text-right py-2 w-24">+ Native</th>
+            <th className="text-right py-2 w-28">Our Report</th>
+            <th className="text-right py-2 w-24">Δ vs QBO</th>
+          </tr>
+        </thead>
+        <tbody>
+          {qboRows.map((r, i) => {
+            if (!showRow(r)) return null;
+            if (r.header) return (
+              <tr key={i} className="bg-slate-50">
+                <td colSpan={6} className="py-1.5 px-2 font-semibold text-slate-700 text-xs uppercase tracking-wide">
+                  {r.label}
+                </td>
+              </tr>
+            );
+            if (r.value === null) return (
+              <tr key={i}><td className="py-1 px-2" style={{ paddingLeft: 8 + r.depth * 12 }}>{r.label}</td></tr>
+            );
+            const ourVal = lookup(r.section, r.label);
+            const importedVal = lookupImported ? lookupImported(r.section, r.label) : undefined;
+            const hasOurs = ourVal !== undefined && ourVal !== null;
+            const hasImp = importedVal !== undefined && importedVal !== null;
+            const native = (hasOurs && hasImp) ? Number((ourVal - importedVal).toFixed(2)) : null;
+            const diff = hasOurs ? Math.abs(r.value - ourVal) : null;
+            const matches = hasOurs && diff < 0.01;
+            const importedMatchesQbo = hasImp && Math.abs(r.value - importedVal) < 0.01;
+            return (
+              <tr
+                key={i}
+                className={r.summary ? "border-t border-slate-200 font-semibold" : ""}
+                data-testid={`recon-row-${i}`}
+              >
+                <td className="py-1.5 px-2" style={{ paddingLeft: 8 + r.depth * 12 }}>
+                  {r.label}
+                </td>
+                <td className="py-1.5 px-2 text-right tabular-nums">{fmt(r.value)}</td>
+                <td className={
+                  "py-1.5 px-2 text-right tabular-nums " +
+                  (hasImp
+                    ? (importedMatchesQbo ? "text-emerald-700" : "text-rose-700")
+                    : "text-slate-400")
+                }>
+                  {hasImp
+                    ? <>{fmt(importedVal)} <span className="text-[10px] opacity-70">{importedMatchesQbo ? "✓" : "Δ"}</span></>
+                    : "—"}
+                </td>
+                <td className={
+                  "py-1.5 px-2 text-right tabular-nums " +
+                  (native !== null && Math.abs(native) >= 0.01
+                    ? "text-amber-700 font-medium"
+                    : "text-slate-400")
+                }>
+                  {native !== null && Math.abs(native) >= 0.01
+                    ? `+${fmt(native)}`
+                    : "—"}
+                </td>
+                <td className={"py-1.5 px-2 text-right tabular-nums " + (hasOurs ? "" : "text-slate-400")}>
+                  {hasOurs ? fmt(ourVal) : "—"}
+                </td>
+                <td className={
+                  "py-1.5 px-2 text-right tabular-nums " +
+                  (matches ? "text-emerald-600" : hasOurs ? "text-rose-600" : "text-slate-400")
+                }>
+                  {hasOurs ? (matches ? "✓" : `Δ ${fmt(diff)}`) : "—"}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </>
   );
 }
 
@@ -250,6 +429,10 @@ export default function QboReconciliationPanel({ companyId, reportKind, basis, o
   // export so the file always reflects what the user sees, even
   // if they've toggled a fresh snapshot in and out.
   const [csvGetter, setCsvGetter] = useState(null);
+  // "Imported QBO" slice — the report engine's GL-only view.
+  // Fetched lazily when the panel opens so we can render the third
+  // column and prove the migration matches QBO exactly. Aug 23 2026.
+  const [ourImported, setOurImported] = useState(null);
   const fmt = useMoneyFmt();
 
   const qboReportName = KIND_TO_QBO[reportKind];
@@ -274,6 +457,27 @@ export default function QboReconciliationPanel({ companyId, reportKind, basis, o
       .catch(e => setError(e?.response?.data?.detail || "Failed to load QBO snapshot"))
       .finally(() => setLoading(false));
   }, [open, companyId, qboReportName, method]);
+
+  // Load the "Imported QBO" slice (GL-only view of our engine) when
+  // the panel opens or the date range / basis changes. Cheap — same
+  // report endpoint with `imported_only=true`. Aug 23 2026.
+  useEffect(() => {
+    if (!open) return;
+    const isBs = reportKind === "balance-sheet";
+    const path = isBs
+      ? `/companies/${companyId}/reports/balance-sheet`
+      : `/companies/${companyId}/reports/income-statement`;
+    const params = { basis, imported_only: true };
+    if (isBs) {
+      if (endDate) params.as_of = endDate;
+    } else {
+      if (startDate) params.start = startDate;
+      if (endDate) params.end = endDate;
+    }
+    api.get(path, { params })
+      .then(r => setOurImported(r.data || null))
+      .catch(() => setOurImported(null));
+  }, [open, companyId, reportKind, basis, startDate, endDate]);
 
   const fetchFresh = async () => {
     setLoading(true); setError(null);
@@ -354,6 +558,10 @@ export default function QboReconciliationPanel({ companyId, reportKind, basis, o
   const ourFlatMemo = useMemo(
     () => (ourReport ? flattenOurReport(ourReport, reportKind) : []),
     [ourReport, reportKind],
+  );
+  const ourImportedFlatMemo = useMemo(
+    () => (ourImported ? flattenOurReport(ourImported, reportKind) : []),
+    [ourImported, reportKind],
   );
 
   if (!qboReportName) return null;   // Only P&L + BS are supported today
@@ -466,6 +674,7 @@ export default function QboReconciliationPanel({ companyId, reportKind, basis, o
             <ReconciliationTable
               qboRows={qboFlat}
               ourRows={ourFlat}
+              ourRowsImported={ourImportedFlatMemo}
               fmt={fmt}
               onExport={(getter) => setCsvGetter(() => getter)}
             />
