@@ -198,24 +198,136 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
 
     Includes both transactions and journal entries. Both must be balanced sources.
 
-    Phase 2 (Feb 28 2026): if this company has QBO GL data
-    populated (via `run_migration` or `/api/admin/qbo/gl-migrate`),
-    route through `_signed_balances_from_gl` for guaranteed parity
-    with QBO's own reports. Legacy `transactions` + `journal_entries`
-    accumulation runs only for native / non-QBO companies. The
-    `basis` argument is passed through so cash-basis reports read
-    the Cash-tagged GL slice and accrual reports read the Accrual
-    slice.
-    """
-    if await _has_qbo_gl_data(company_id):
-        return await _signed_balances_from_gl(
-            company_id, start, end, include_pre_period, basis)
+    Phase 2 (Feb 28 2026): if this company has QBO GL data populated
+    (via `run_migration` or `/api/admin/qbo/gl-migrate`), start from
+    `_signed_balances_from_gl` for guaranteed parity with QBO's own
+    reports.
 
+    Phase 2c (Aug 23 2026): the GL is no longer the *only* source for
+    QBO companies. Native activity created in Axiom AFTER migration
+    (a manually-added invoice/bill/JE/txn that hasn't been mirrored
+    back to QBO) is layered on top of the GL as an additive overlay.
+    Every doc counts exactly once, in exactly one lane:
+      • QBO-imported / mirrored-back-to-QBO  → GL lane
+      • Native + not-yet-mirrored           → native lane
+    See `_signed_balances_native_layer` for the source-filter guards
+    that prevent double-counting.
+
+    The `basis` argument is passed through so cash-basis reports
+    read the Cash-tagged GL slice and accrual reports read the
+    Accrual slice.
+    """
+    has_gl = await _has_qbo_gl_data(company_id)
+    if has_gl:
+        # Start from the QBO GL (migrated + previously-mirrored activity).
+        by = await _signed_balances_from_gl(
+            company_id, start, end, include_pre_period, basis)
+        # Layer native contributions on top. `skip_qbo_sourced=True`
+        # filters out QBO-imported docs (already in the GL above) and
+        # any native doc whose QBO twin now lives in `qbo_gl_lines`.
+        native = await _signed_balances_native_layer(
+            company_id, start, end, include_pre_period, basis,
+            skip_qbo_sourced=True)
+        by = defaultdict(float, by)
+        for aid, delta in native.items():
+            by[aid] += delta
+        return by
+
+    # Native / non-QBO company: run the native layer alone.
+    return await _signed_balances_native_layer(
+        company_id, start, end, include_pre_period, basis,
+        skip_qbo_sourced=False)
+
+
+async def _superseded_by_gl_ids(company_id: str) -> set[str]:
+    """Return the set of local doc ids whose QBO twin already appears in
+    `qbo_gl_lines` — for those, the native JE would double-count so we
+    exclude it from the native overlay.
+
+    Match is by `qbo_id` on the source doc against `doc_num` in the
+    GL (QBO's GL rows carry the doc number, not the internal Id). This
+    is stable enough for the auto-push+auto-pull happy path: when the
+    mirror-push finishes, we stamp `qbo_id`; when the next GL backfill
+    runs, the twin's `doc_num` shows up. Between those two events the
+    native doc is still visible via the native lane, so there's no
+    invisibility window.
+
+    Returns an empty set if the company has no GL data (the caller
+    should skip this entirely on native companies).
+    """
+    result: set[str] = set()
+    # Only invoices, bills, and manually-posted JEs get mirrored back
+    # to QBO today; payments/receipts share the invoice/bill lifecycle.
+    coll_txn_type = [
+        ("invoices", "Invoice"),
+        ("bills", "Bill"),
+        # QBO journal entries mirror as txn_type='Journal Entry'
+        ("journal_entries", "Journal Entry"),
+    ]
+    for coll, _ in coll_txn_type:
+        async for d in db[coll].find(
+            {"company_id": company_id, "qbo_id": {"$ne": None},
+             "_sync_status": "synced"},
+            {"_id": 0, "id": 1, "qbo_id": 1},
+        ):
+            # We match by qbo_id below via a separate qbo_gl_lines lookup.
+            result.add(d["id"])
+    if not result:
+        return result
+    # For each candidate doc, keep it in the superseded set ONLY if its
+    # qbo_id actually appears in qbo_gl_lines (i.e. the GL has been
+    # refreshed since the mirror-push). Otherwise the native lane
+    # still carries the doc.
+    qbo_ids_in_gl: set[str] = set()
+    async for row in db.qbo_gl_lines.find(
+        {"company_id": company_id},
+        {"_id": 0, "doc_num": 1, "txn_id": 1},
+    ):
+        for k in ("txn_id", "doc_num"):
+            v = row.get(k)
+            if v is not None:
+                qbo_ids_in_gl.add(str(v))
+    truly_superseded: set[str] = set()
+    # Re-walk the candidates to keep only those whose qbo_id is in the GL.
+    for coll, _ in coll_txn_type:
+        async for d in db[coll].find(
+            {"company_id": company_id, "qbo_id": {"$ne": None},
+             "_sync_status": "synced"},
+            {"_id": 0, "id": 1, "qbo_id": 1, "number": 1},
+        ):
+            qid = str(d.get("qbo_id") or "")
+            num = str(d.get("number") or "")
+            if qid in qbo_ids_in_gl or (num and num in qbo_ids_in_gl):
+                truly_superseded.add(d["id"])
+    return truly_superseded
+
+
+async def _signed_balances_native_layer(
+    company_id: str, start: str | None, end: str,
+    include_pre_period: bool = False,
+    basis: str = "Accrual",
+    skip_qbo_sourced: bool = False,
+):
+    """Native ledger walk — the historic `_signed_balances` body, now
+    extracted so it can be used both standalone (native companies) and
+    as an additive overlay (QBO companies with post-migration native
+    activity).
+
+    When ``skip_qbo_sourced=True``:
+      • ``transactions.source == 'qbo'`` → skipped (already in GL)
+      • ``journal_entries.source in {'qbo', 'qbo_inv_adj'}`` → skipped
+      • Any native doc whose QBO twin now lives in ``qbo_gl_lines``
+        (see `_superseded_by_gl_ids`) → its JE and payment contributions
+        are also skipped
+    """
     by = defaultdict(float)
+    superseded = await _superseded_by_gl_ids(company_id) if skip_qbo_sourced else set()
 
     txn_q = {"company_id": company_id, "posted": True, "date": {"$lte": end}}
     if start and not include_pre_period:
         txn_q["date"] = {"$gte": start, "$lte": end}
+    if skip_qbo_sourced:
+        txn_q["source"] = {"$ne": "qbo"}
     txns = await db.transactions.find(txn_q).to_list(100000)
 
     for t in txns:
@@ -276,8 +388,18 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
     # in `compute_income_statement`. Feb 28 2026.
     if str(basis).lower() == "cash":
         je_q["posted_by"] = {"$ne": "auto_accrual"}
+    # On QBO companies, filter out the JEs that are already represented
+    # in `qbo_gl_lines`: (a) directly-imported QBO JEs, (b) QBO
+    # inventory-adjustment JEs, (c) native JEs whose source doc has
+    # been mirror-pushed and appears in the GL cache. Aug 23 2026.
+    if skip_qbo_sourced:
+        je_q["source"] = {"$nin": ["qbo", "qbo_inv_adj"]}
     jes = await db.journal_entries.find(je_q).to_list(100000)
     for j in jes:
+        # Native JE whose source doc's QBO twin is now in the GL →
+        # skip to avoid double-count.
+        if skip_qbo_sourced and j.get("source_id") in superseded:
+            continue
         for line in j.get("lines", []):
             aid = line.get("account_id")
             d = float(line.get("debit", 0) or 0)
@@ -307,6 +429,12 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
     pay_q = {"company_id": company_id, "date": {"$lte": end}}
     if start and not include_pre_period:
         pay_q["date"] = {"$gte": start, "$lte": end}
+    # On QBO companies, QBO-imported payments are already in the GL —
+    # skip them here. Native payments still contribute their cash-side
+    # roll-in (below) unless they've been mirror-pushed and appear in
+    # the GL (superseded set). Aug 23 2026.
+    if skip_qbo_sourced:
+        pay_q["source"] = {"$ne": "qbo"}
     # Prefetch account-by-qbo_id lookup for fast deposit-account resolution.
     acct_by_qbo_id: dict[str, str] = {}
     async for a in db.accounts.find({"company_id": company_id, "qbo_id": {"$ne": None}}):
@@ -362,6 +490,12 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
         return p.get("deposit_to_account_id") or None
 
     async for p in db.payments.find(pay_q):
+        # Native payment whose linked invoice/bill now lives in the
+        # GL → skip so its cash-side roll-in doesn't double-count.
+        if skip_qbo_sourced:
+            linked_id = p.get("linked_invoice_id") or p.get("linked_bill_id")
+            if linked_id and linked_id in superseded:
+                continue
         amt = float(p.get("amount") or 0)
         if amt <= 0.005:
             continue
@@ -437,13 +571,25 @@ async def _open_ar_ap(company_id: str, as_of: str, start: str | None = None):
     # create), the JE drives A/R and A/P in the report — the
     # synthesis below would double-count. Skip posted docs.
     # Feb 28 2026.
+    #
+    # QBO-imported invoices/bills (source='qbo') are also excluded on
+    # companies with `qbo_gl_lines` because those docs already carry
+    # A/R and A/P through the GL. This helper is called from
+    # compute_balance_sheet even for QBO companies now (as part of the
+    # additive-native overlay) so it must filter out QBO-sourced docs
+    # there. Aug 23 2026.
+    doc_query_extra: dict = {}
+    if await _has_qbo_gl_data(company_id):
+        doc_query_extra["source"] = {"$ne": "qbo"}
     invs = await db.invoices.find({
         "company_id": company_id,
         "posted": {"$ne": True},
+        **doc_query_extra,
     }).to_list(20000)
     bills = await db.bills.find({
         "company_id": company_id,
         "posted": {"$ne": True},
+        **doc_query_extra,
     }).to_list(20000)
 
     ar_end = 0.0
@@ -739,9 +885,6 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
     accrual_adj_rev = 0.0
     accrual_adj_exp = 0.0
     if basis == "accrual" and not _gl_authoritative:
-        # Build lookup: qbo_id → local account row, keyed for revenue
-        # and expense/cogs separately so we route each invoice line to
-        # the correct section.
         rev_by_qbo: dict[str, dict] = {}
         exp_by_qbo: dict[str, dict] = {}
         for a in accts:
