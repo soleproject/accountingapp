@@ -22,6 +22,7 @@ Auto-promote flow (Rocketsuite-style):
 """
 from __future__ import annotations
 import logging
+import re as _re
 import uuid
 from datetime import datetime, timezone
 
@@ -36,6 +37,118 @@ from ai_activity import log_ai_event
 
 
 MAX_BYTES = 25 * 1024 * 1024
+
+
+# ---------- Veryfi OCR sanity guards (Aug 23 2026) ----------
+# Bank-statement OCR is Veryfi's hardest problem — 4,000+ US banks
+# render statements differently. Three known failure modes leak
+# phantom or bogus rows into the ledger unless we defend upstream:
+#
+#   1) "Recent Deposits" / YTD summary sidebars get read as a single
+#      transaction. Signature: description is a chain of `MM-DD
+#      amount MM-DD amount ...` with 3+ pairs. Killed the exact bug
+#      on 30A Landscaping LLC where a $1,100 phantom duplicated the
+#      real $1,100 deposit already booked elsewhere in the same PDF.
+#   2) Descriptions with no alpha content. A legit txn has letters
+#      ("VENMO", "POINT OF SALE", "External Withdrawal"). If the
+#      description is 100% digits/punctuation/spaces, it's OCR of a
+#      balance column, ad footer, or YTD summary that got sliced
+#      into a row.
+#   3) Self-consistency check against Veryfi's OWN extracted summary
+#      totals (`beginning_balance + Σ deposits − Σ withdrawals`
+#      should equal `ending_balance`). If it drifts we flag the
+#      whole import for review. DIFFERENT from Axiom's monthly auto-
+#      reconciliation (which compares the ledger to Plaid feeds);
+#      this check compares Veryfi's line items to Veryfi's summary
+#      totals from the SAME PDF, before the rows enter the ledger.
+_SUMMARY_SIDEBAR_RX = _re.compile(r"\b\d{1,2}-\d{1,2}\s+[\d,]+\.\d{2}\b")
+_ALPHA_RX = _re.compile(r"[A-Za-z]")
+
+
+def _looks_like_summary_sidebar(desc: str) -> bool:
+    """3+ date-amount pairs strung together = "Recent Deposits" box."""
+    return len(_SUMMARY_SIDEBAR_RX.findall(desc or "")) >= 3
+
+
+def _has_alpha_content(desc: str) -> bool:
+    """Real txn descriptions carry merchant / verb text."""
+    return bool(_ALPHA_RX.search(desc or ""))
+
+
+def _apply_veryfi_row_guards(lines: list[dict]) -> tuple[list[dict], dict[str, int]]:
+    """Layers 1 + 2: drop OCR rows that clearly aren't real
+    transactions (summary sidebars, no-alpha descriptions).
+    Returns (kept_lines, {reason: count_dropped}).
+    """
+    dropped: dict[str, int] = {}
+    kept: list[dict] = []
+    for ln in lines:
+        desc = str(ln.get("description") or ln.get("merchant") or "").strip()
+        if _looks_like_summary_sidebar(desc):
+            dropped["summary_sidebar"] = dropped.get("summary_sidebar", 0) + 1
+            continue
+        if not _has_alpha_content(desc):
+            dropped["no_alpha_content"] = dropped.get("no_alpha_content", 0) + 1
+            continue
+        kept.append(ln)
+    return kept, dropped
+
+
+def _statement_ocr_reconcile(
+    veryfi_data: dict, lines: list[dict], dropped: dict[str, int],
+) -> dict | None:
+    """Layer 3: reconcile Veryfi's line items against its OWN summary
+    totals extracted from the same PDF. Returns a flag dict when
+    drift is detected (so the caller can persist it on the import
+    row and surface a review banner); returns ``None`` when clean.
+    """
+    _fields = statement_account_resolver._statement_fields(veryfi_data)
+    # `_statement_fields` returns `starting_balance` (not
+    # `beginning_balance`) after normalizing across Veryfi's two doc
+    # shapes. `total_deposits` / `total_withdrawals` aren't normalized
+    # there — pull them opportunistically from the raw doc / accounts.
+    bb = _fields.get("starting_balance")
+    eb = _fields.get("ending_balance")
+    _acct = (veryfi_data.get("accounts") or [{}])
+    _acct0 = _acct[0] if _acct and isinstance(_acct[0], dict) else {}
+    _summaries = _acct0.get("summaries") or {}
+    v_dep = (
+        veryfi_data.get("total_deposits")
+        or _acct0.get("total_deposits")
+        or _summaries.get("total_deposits")
+    )
+    v_wd = (
+        veryfi_data.get("total_withdrawals")
+        or _acct0.get("total_withdrawals")
+        or _summaries.get("total_withdrawals")
+    )
+    if bb is None or eb is None:
+        return None
+    try:
+        bb_f = float(bb); eb_f = float(eb)
+    except (TypeError, ValueError):
+        return None
+    actual_dep = round(sum(float(ln.get("amount") or 0) for ln in lines
+                           if float(ln.get("amount") or 0) > 0), 2)
+    actual_wd = round(-sum(float(ln.get("amount") or 0) for ln in lines
+                           if float(ln.get("amount") or 0) < 0), 2)
+    computed_ending = round(bb_f + actual_dep - actual_wd, 2)
+    drift = round(computed_ending - eb_f, 2)
+    if abs(drift) <= 0.01:
+        return None
+    return {
+        "beginning_balance": bb_f,
+        "ending_balance": eb_f,
+        "extracted_deposits": actual_dep,
+        "extracted_withdrawals": actual_wd,
+        "veryfi_reported_deposits": (
+            float(v_dep) if v_dep is not None else None),
+        "veryfi_reported_withdrawals": (
+            float(v_wd) if v_wd is not None else None),
+        "computed_ending": computed_ending,
+        "drift": drift,
+        "dropped_rows": dict(dropped),
+    }
 
 
 async def upload_statement(
@@ -114,6 +227,24 @@ async def upload_statement(
         )
 
     lines = veryfi_service.extract_transactions(veryfi_data)
+    # Veryfi OCR sanity guards — see module-level docstring on
+    # `_apply_veryfi_row_guards` and `_statement_ocr_reconcile`. Layers
+    # 1+2 drop phantom rows before insert; Layer 3 attaches an
+    # `ocr_reconcile_flag` to the import row when Veryfi's line items
+    # can't be reconciled to its own summary totals, so the CPA sees a
+    # banner to review. Aug 23 2026.
+    lines, _dropped_rows = _apply_veryfi_row_guards(lines)
+    if _dropped_rows:
+        logging.getLogger(__name__).info(
+            "Statements: dropped %d Veryfi rows before insert (%s) — company=%s",
+            sum(_dropped_rows.values()), _dropped_rows, cid,
+        )
+    _reconcile_flag = _statement_ocr_reconcile(veryfi_data, lines, _dropped_rows)
+    if _reconcile_flag:
+        logging.getLogger(__name__).warning(
+            "Statements: OCR self-consistency FAILED — drift=$%.2f (%s)",
+            _reconcile_flag["drift"], cid,
+        )
 
     # -------- Period extraction --------
     # Veryfi's `period_start_date` / `period_end_date` come from OCR on the
@@ -291,6 +422,13 @@ async def upload_statement(
             "last4": resolved.get("last4"),
             "starting_balance": starting_balance_v,
             "ending_balance": ending_balance_v,
+            # OCR self-consistency status (Layer 3). ``None`` → clean;
+            # a dict → Veryfi's line items don't reconcile to its own
+            # summary totals, and the UI should surface a review banner.
+            # `dropped_rows` inside the flag shows what Layers 1+2
+            # already filtered out. Aug 23 2026.
+            "ocr_reconcile_flag": _reconcile_flag,
+            "ocr_dropped_rows": _dropped_rows or None,
             "veryfi_document_id": (
                 str(veryfi_data.get("id")) if veryfi_data.get("id") else None
             ),
@@ -848,6 +986,10 @@ async def reprocess_import(
 
     # 4) Re-run the categorize+insert loop on the cached candidates.
     lines = veryfi_service.extract_transactions(veryfi_data)
+    # Apply the same OCR sanity guards on re-run so a bank-hint fix
+    # never smuggles phantom rows back in. Aug 23 2026.
+    lines, _dropped_rows2 = _apply_veryfi_row_guards(lines)
+    _reconcile_flag2 = _statement_ocr_reconcile(veryfi_data, lines, _dropped_rows2)
 
     # Recompute the statement period from the (now year-corrected) txn
     # dates, applying the same sanity check as the initial upload path:
@@ -919,6 +1061,8 @@ async def reprocess_import(
             "period_end": _period_end,
             "reprocessed_at": now_iso(),
             "reprocess_hint": account_kind_hint,
+            "ocr_reconcile_flag": _reconcile_flag2,
+            "ocr_dropped_rows": _dropped_rows2 or None,
             "updated_at": now_iso(),
         }},
     )
