@@ -99,6 +99,62 @@ export default function StatementImportDetail() {
         } />
       </div>
 
+      {/* OCR sanity banner — surfaces when Veryfi's line items don't
+          reconcile to its own summary totals for this PDF, or when
+          Layers 1+2 dropped rows that looked like phantom sidebars /
+          balance columns. Aug 23 2026. */}
+      {(doc.ocr_reconcile_flag || (doc.ocr_dropped_rows && Object.keys(doc.ocr_dropped_rows).length > 0)) && (
+        <div
+          className={
+            "rounded-xl border p-4 " +
+            (doc.ocr_reconcile_flag
+              ? "border-rose-200 bg-rose-50/60"
+              : "border-amber-200 bg-amber-50/60")
+          }
+          data-testid="ocr-sanity-banner"
+        >
+          <div className={
+            "text-xs uppercase tracking-widest font-semibold mb-1 " +
+            (doc.ocr_reconcile_flag ? "text-rose-800" : "text-amber-800")
+          }>
+            {doc.ocr_reconcile_flag
+              ? "This statement doesn't reconcile — review before finalizing"
+              : "OCR cleaned up phantom rows from this statement"}
+          </div>
+          <div className={
+            "text-sm " + (doc.ocr_reconcile_flag ? "text-rose-900" : "text-amber-900")
+          }>
+            {doc.ocr_reconcile_flag && (
+              <>
+                Veryfi's extracted line items don't add up to its own summary
+                totals on this PDF — expected ending balance{" "}
+                <span className="font-mono">${Number(doc.ocr_reconcile_flag.ending_balance).toFixed(2)}</span>,
+                computed{" "}
+                <span className="font-mono">${Number(doc.ocr_reconcile_flag.computed_ending).toFixed(2)}</span>
+                {" "}(drift{" "}
+                <span className="font-mono font-semibold">
+                  ${Math.abs(Number(doc.ocr_reconcile_flag.drift)).toFixed(2)}
+                </span>).
+                Some rows below may be phantom duplicates or the OCR may have
+                missed a real transaction. Compare against the PDF before
+                relying on the numbers.
+              </>
+            )}
+            {!doc.ocr_reconcile_flag && doc.ocr_dropped_rows && (
+              <>
+                We dropped{" "}
+                {Object.entries(doc.ocr_dropped_rows)
+                  .map(([reason, n]) => `${n} ${reason.replace(/_/g, " ")}`)
+                  .join(", ")}
+                {" "}row(s) that Veryfi produced from "Recent Deposits"
+                summary boxes or balance columns — not real transactions.
+                The remaining rows reconciled cleanly to the statement's own totals.
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {veryfi && (veryfi.bank_name || veryfi.account_holder_name || veryfi.starting_balance != null) && (
         <div className="rounded-xl border bg-white p-5 space-y-3">
           <div className="text-xs uppercase tracking-wide text-slate-500 font-semibold">
