@@ -99,7 +99,7 @@ const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 function buildCsvRows(qboRows, lookup, lookupImported) {
   const rows = [];
   rows.push(["Section", "Line", "Depth", "Official QBO", "Imported QBO",
-             "+ Native", "Our Report", "Δ vs QBO", "Match"]);
+             "Difference", "+ Native", "Our Report", "Match"]);
   for (const r of qboRows) {
     if (r.header) {
       rows.push([r.label, "", "", "", "", "", "", "", ""]);
@@ -113,21 +113,21 @@ function buildCsvRows(qboRows, lookup, lookupImported) {
     const imported = lookupImported ? lookupImported(r.section, r.label) : undefined;
     const hasOurs = ours !== undefined && ours !== null;
     const hasImp = imported !== undefined && imported !== null;
+    const difference = hasImp ? Number((r.value - imported).toFixed(2)) : null;
     const native = hasOurs && hasImp
       ? Number((ours - imported).toFixed(2))
-      : (hasOurs ? Number(ours).toFixed(2) : null);
-    const diff = hasOurs ? Math.abs(r.value - ours) : null;
-    const matches = hasOurs && diff < 0.01;
+      : null;
+    const migMatch = hasImp && Math.abs(difference) < 0.01;
     rows.push([
       r.section || "",
       r.label,
       r.depth,
       Number(r.value).toFixed(2),
       hasImp ? Number(imported).toFixed(2) : "",
-      native !== null && native !== undefined ? Number(native).toFixed(2) : "",
+      difference !== null ? Number(difference).toFixed(2) : "",
+      native !== null ? Number(native).toFixed(2) : "",
       hasOurs ? Number(ours).toFixed(2) : "",
-      hasOurs ? Number(diff).toFixed(2) : "",
-      hasOurs ? (matches ? "MATCH" : "DRIFT") : "N/A",
+      hasImp ? (migMatch ? "MATCH" : "DRIFT") : "N/A",
     ]);
   }
   return rows;
@@ -344,9 +344,9 @@ function ReconciliationTable({ qboRows, ourRows, ourRowsImported, fmt, onExport 
             <th className="text-left py-2">Line</th>
             <th className="text-right py-2 w-28">Official QBO</th>
             <th className="text-right py-2 w-28">Imported QBO</th>
+            <th className="text-right py-2 w-24">Difference</th>
             <th className="text-right py-2 w-24">+ Native</th>
             <th className="text-right py-2 w-28">Our Report</th>
-            <th className="text-right py-2 w-24">Δ vs QBO</th>
           </tr>
         </thead>
         <tbody>
@@ -366,10 +366,16 @@ function ReconciliationTable({ qboRows, ourRows, ourRowsImported, fmt, onExport 
             const importedVal = lookupImported ? lookupImported(r.section, r.label) : undefined;
             const hasOurs = ourVal !== undefined && ourVal !== null;
             const hasImp = importedVal !== undefined && importedVal !== null;
-            const native = (hasOurs && hasImp) ? Number((ourVal - importedVal).toFixed(2)) : null;
-            const diff = hasOurs ? Math.abs(r.value - ourVal) : null;
-            const matches = hasOurs && diff < 0.01;
-            const importedMatchesQbo = hasImp && Math.abs(r.value - importedVal) < 0.01;
+            // Difference = Official QBO − Imported QBO (migration parity)
+            const difference = hasImp ? Number((r.value - importedVal).toFixed(2)) : null;
+            const migrationMatch = hasImp && Math.abs(difference) < 0.01;
+            // + Native = Our Report − Imported QBO (post-migration activity)
+            const native = (hasOurs && hasImp)
+              ? Number((ourVal - importedVal).toFixed(2)) : null;
+            // Integrity: Our Report should always equal Imported + Native.
+            // If it doesn't, something's fundamentally off in the overlay.
+            const integrityOk = hasOurs && hasImp && native !== null
+              && Math.abs(ourVal - (importedVal + native)) < 0.01;
             return (
               <tr
                 key={i}
@@ -382,12 +388,20 @@ function ReconciliationTable({ qboRows, ourRows, ourRowsImported, fmt, onExport 
                 <td className="py-1.5 px-2 text-right tabular-nums">{fmt(r.value)}</td>
                 <td className={
                   "py-1.5 px-2 text-right tabular-nums " +
+                  (hasImp ? "" : "text-slate-400")
+                }>
+                  {hasImp ? fmt(importedVal) : "—"}
+                </td>
+                <td className={
+                  "py-1.5 px-2 text-right tabular-nums " +
                   (hasImp
-                    ? (importedMatchesQbo ? "text-emerald-700" : "text-rose-700")
+                    ? (migrationMatch ? "text-emerald-700" : "text-rose-700 font-medium")
                     : "text-slate-400")
                 }>
                   {hasImp
-                    ? <>{fmt(importedVal)} <span className="text-[10px] opacity-70">{importedMatchesQbo ? "✓" : "Δ"}</span></>
+                    ? (migrationMatch
+                        ? <>$0.00 <span className="text-[10px] opacity-70">✓</span></>
+                        : `Δ ${fmt(Math.abs(difference))}`)
                     : "—"}
                 </td>
                 <td className={
@@ -400,14 +414,15 @@ function ReconciliationTable({ qboRows, ourRows, ourRowsImported, fmt, onExport 
                     ? `+${fmt(native)}`
                     : "—"}
                 </td>
-                <td className={"py-1.5 px-2 text-right tabular-nums " + (hasOurs ? "" : "text-slate-400")}>
-                  {hasOurs ? fmt(ourVal) : "—"}
-                </td>
                 <td className={
                   "py-1.5 px-2 text-right tabular-nums " +
-                  (matches ? "text-emerald-600" : hasOurs ? "text-rose-600" : "text-slate-400")
+                  (hasOurs
+                    ? (integrityOk ? "text-emerald-800" : "text-rose-700 font-medium")
+                    : "text-slate-400")
                 }>
-                  {hasOurs ? (matches ? "✓" : `Δ ${fmt(diff)}`) : "—"}
+                  {hasOurs
+                    ? <>{fmt(ourVal)}{integrityOk && <span className="text-[10px] opacity-60 ml-1">✓</span>}</>
+                    : "—"}
                 </td>
               </tr>
             );
