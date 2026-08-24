@@ -146,9 +146,9 @@ export default function StatementImportDetail() {
                 {Object.entries(doc.ocr_dropped_rows)
                   .map(([reason, n]) => `${n} ${reason.replace(/_/g, " ")}`)
                   .join(", ")}
-                {" "}row(s) that Veryfi produced from "Recent Deposits"
-                summary boxes or balance columns — not real transactions.
-                The remaining rows reconciled cleanly to the statement's own totals.
+                {" "}row(s) — either "Recent Deposits" summary boxes, balance
+                columns, or duplicates Veryfi emitted across a page break. The
+                remaining rows reconciled cleanly to the statement's own totals.
               </>
             )}
           </div>

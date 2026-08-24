@@ -61,8 +61,59 @@ MAX_BYTES = 25 * 1024 * 1024
 #      reconciliation (which compares the ledger to Plaid feeds);
 #      this check compares Veryfi's line items to Veryfi's summary
 #      totals from the SAME PDF, before the rows enter the ledger.
+_REFNUM_RX = _re.compile(r"\bL\d{5,}\b|Trace\s*#\s*\d{5,}|#\s*\d{5,}")
 _SUMMARY_SIDEBAR_RX = _re.compile(r"\b\d{1,2}-\d{1,2}\s+[\d,]+\.\d{2}\b")
 _ALPHA_RX = _re.compile(r"[A-Za-z]")
+
+
+def _extract_ref_number(desc: str) -> str | None:
+    """Pull a stable reference number out of a Veryfi txn description
+    (Square "L82936", check trace numbers, POS #). Used by Layer 4 to
+    detect duplicate rows that Veryfi split across a page boundary.
+    """
+    m = _REFNUM_RX.search(desc or "")
+    return m.group(0).strip() if m else None
+
+
+def _apply_veryfi_dup_guard(lines: list[dict]) -> tuple[list[dict], int]:
+    """Layer 4 (Aug 24 2026) — collapse Veryfi-emitted duplicates that
+    the row-shape guards can't see. Two failure modes:
+
+    (a) Same reference number + same date → cross-page duplicate. Veryfi
+        occasionally re-emits the last row of page N as the first row of
+        page N+1 when the "Continued" marker is faint.
+    (b) Same date + same amount + same merchant prefix (first 8 chars) →
+        multi-line merge where Veryfi split one row into two by picking
+        up a running-balance number as a second amount.
+
+    Keeps the FIRST occurrence, drops the second. Returns
+    (kept_lines, dropped_count). Idempotent.
+    """
+    seen_refs: set[tuple[str, str]] = set()
+    seen_shape: set[tuple[str, float, str]] = set()
+    kept: list[dict] = []
+    dropped = 0
+    for ln in lines:
+        desc = str(ln.get("description") or ln.get("merchant") or "").strip()
+        date = str(ln.get("date") or "")[:10]
+        try:
+            amt = round(float(ln.get("amount") or 0), 2)
+        except (TypeError, ValueError):
+            amt = 0.0
+        ref = _extract_ref_number(desc)
+        if ref and date:
+            key = (date, ref)
+            if key in seen_refs:
+                dropped += 1
+                continue
+            seen_refs.add(key)
+        shape = (date, amt, desc[:8].upper())
+        if amt and date and shape in seen_shape:
+            dropped += 1
+            continue
+        seen_shape.add(shape)
+        kept.append(ln)
+    return kept, dropped
 
 
 def _looks_like_summary_sidebar(desc: str) -> bool:
@@ -234,6 +285,10 @@ async def upload_statement(
     # can't be reconciled to its own summary totals, so the CPA sees a
     # banner to review. Aug 23 2026.
     lines, _dropped_rows = _apply_veryfi_row_guards(lines)
+    # Layer 4 — dedup Veryfi-emitted cross-page and multi-line duplicates.
+    lines, _dup_dropped = _apply_veryfi_dup_guard(lines)
+    if _dup_dropped:
+        _dropped_rows["duplicate_row"] = _dup_dropped
     if _dropped_rows:
         logging.getLogger(__name__).info(
             "Statements: dropped %d Veryfi rows before insert (%s) — company=%s",
@@ -989,6 +1044,9 @@ async def reprocess_import(
     # Apply the same OCR sanity guards on re-run so a bank-hint fix
     # never smuggles phantom rows back in. Aug 23 2026.
     lines, _dropped_rows2 = _apply_veryfi_row_guards(lines)
+    lines, _dup_dropped2 = _apply_veryfi_dup_guard(lines)
+    if _dup_dropped2:
+        _dropped_rows2["duplicate_row"] = _dup_dropped2
     _reconcile_flag2 = _statement_ocr_reconcile(veryfi_data, lines, _dropped_rows2)
 
     # Recompute the statement period from the (now year-corrected) txn
