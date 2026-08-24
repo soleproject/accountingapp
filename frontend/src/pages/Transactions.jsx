@@ -665,8 +665,13 @@ export default function Transactions() {
   useEffect(() => {
     reviewCtxRef.current = {
       isLetsReview, isNoContactReview, lrContactId, ncrGroupKey, navigate,
+      // Ferry the Let's Review navigator so the auto-advance can jump
+      // to the NEXT contact (idx+1) after Approve, instead of dropping
+      // back to the first uncleared group at idx=0. Aug 24 2026 — the
+      // "Contact 4 of 48 → 1 of 48" jump-back bug.
+      letsReviewNav,
     };
-  }, [isLetsReview, isNoContactReview, lrContactId, ncrGroupKey, navigate]);
+  }, [isLetsReview, isNoContactReview, lrContactId, ncrGroupKey, navigate, letsReviewNav]);
   useActionListener("cleanup-completed", (payload) => {
     const ctx = reviewCtxRef.current;
     if (!ctx.isLetsReview && !ctx.isNoContactReview) return;
@@ -674,7 +679,17 @@ export default function Transactions() {
     if (ctx.isLetsReview && completedCid && completedCid === ctx.lrContactId) {
       // Delay slightly so the toast + "Done" chat message land before the
       // page jumps — matches the 1.2s auto-advance timer in CleanupCopilot.
-      setTimeout(() => ctx.navigate("/accounting/lets-review", { replace: true }), 900);
+      setTimeout(() => {
+        // Advance to the NEXT contact in the stepper if one exists,
+        // otherwise fall back to the base URL (which surfaces "queue
+        // complete" state). Fixes the user-reported "Contact 4 of 48 →
+        // 1 of 48" regression on Approve. Aug 24 2026.
+        if (ctx.letsReviewNav?.next) {
+          ctx.letsReviewNav.next();
+        } else {
+          ctx.navigate("/accounting/lets-review", { replace: true });
+        }
+      }, 900);
     } else if (ctx.isNoContactReview && (payload?.kind === "no_contact_group" || payload?.group_key)) {
       setTimeout(() => ctx.navigate("/accounting/no-contact-review", { replace: true }), 900);
     }
