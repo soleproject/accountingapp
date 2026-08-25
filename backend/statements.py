@@ -135,22 +135,34 @@ def _has_alpha_content(desc: str) -> bool:
 
 
 def _apply_veryfi_row_guards(lines: list[dict]) -> tuple[list[dict], dict[str, int]]:
-    """Layers 1 + 2: drop OCR rows that clearly aren't real
-    transactions (summary sidebars, no-alpha descriptions).
-    Returns (kept_lines, {reason: count_dropped}).
+    """Layer 1 (hard-drop) + Layer 2 (soft-flag) row-shape guards.
+
+    • Layer 1 — "Recent Deposits" summary sidebars (3+ `MM-DD amount`
+      pairs strung together). This pattern is essentially never a real
+      transaction. HARD DROP. Killed the 30A $1,100 phantom.
+    • Layer 2 — descriptions with zero alpha content. Usually OCR
+      noise (balance columns, ad footers) BUT sometimes a legit
+      check-only row Veryfi mangled to bare digits. SOFT FLAG
+      (Aug 25 2026 change) — keep the row, tag
+      ``probable_ocr_noise=True`` so the CPA can verify. Prevents the
+      $95 check-row miss that broke 30A Landscaping 3's reconciliation.
+
+    Returns ``(lines, {reason: count})`` where counts include
+    drops AND flags for banner/log surfacing.
     """
-    dropped: dict[str, int] = {}
+    counts: dict[str, int] = {}
     kept: list[dict] = []
     for ln in lines:
         desc = str(ln.get("description") or ln.get("merchant") or "").strip()
         if _looks_like_summary_sidebar(desc):
-            dropped["summary_sidebar"] = dropped.get("summary_sidebar", 0) + 1
+            counts["summary_sidebar"] = counts.get("summary_sidebar", 0) + 1
             continue
         if not _has_alpha_content(desc):
-            dropped["no_alpha_content"] = dropped.get("no_alpha_content", 0) + 1
-            continue
+            ln["probable_ocr_noise"] = True
+            ln["ocr_noise_reason"] = "no_alpha_content"
+            counts["no_alpha_flagged"] = counts.get("no_alpha_flagged", 0) + 1
         kept.append(ln)
-    return kept, dropped
+    return kept, counts
 
 
 def _statement_ocr_reconcile(
