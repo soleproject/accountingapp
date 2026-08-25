@@ -100,11 +100,13 @@ def _is_cardholder_subtotal(desc: str, *, card_number: str | None = None) -> boo
 
 VERYFI_BASE = "https://api.veryfi.com"
 BANK_STMT_PATH = "/api/v8/partner/bank-statements/"
+BANK_STMT_SET_PATH = "/api/v8/partner/bank-statements-set"
 DOCS_PATH = "/api/v8/partner/documents/"
 
 _CLIENT_ID = os.environ["VERYFI_CLIENT_ID"]
 _USERNAME = os.environ["VERYFI_USERNAME"]
 _API_KEY = os.environ["VERYFI_API_KEY"]
+_CLIENT_SECRET = os.environ.get("VERYFI_CLIENT_SECRET", "")
 
 
 def _headers() -> dict:
@@ -146,6 +148,175 @@ async def process_generic_document(file_bytes: bytes, filename: str, content_typ
     except Exception:
         pass
     return r.json()
+
+
+def iter_statement_accounts(veryfi_data: dict) -> list[dict]:
+    """Split a Veryfi bank-statement JSON into a list of per-account
+    "sub-docs", one entry per real account on the statement.
+
+    Returns ``[{"account_ref": {...}, "lines": [...]}]`` where
+    ``account_ref`` mirrors the fields
+    :func:`statement_account_resolver._statement_fields` looks at (so it
+    can be passed straight through as a synthetic single-account doc),
+    and ``lines`` are the normalized transaction rows for that account
+    only.
+
+    Handles three cases:
+
+    * ``accounts[]`` with 2+ entries → true multi-account combined
+      statement (Wells Fargo Combined, Amex Blue + Gold on one PDF,
+      Chase Total Checking + Savings, etc.). Each entry becomes its own
+      sub-doc with its own beginning/ending balance, summaries, and
+      transactions. Downstream code (resolver, OCR guards, reconcile,
+      OBE) then runs per-account.
+    * ``accounts[]`` with exactly 1 entry → routed as a single-account
+      list of length 1. Preserves the current single-statement code
+      path unchanged.
+    * No ``accounts[]`` at all → falls back to the top-level fields +
+      :func:`extract_transactions` output (older bank-statement shape
+      and the ``line_items[]`` documents-endpoint fallback).
+    """
+    accts = veryfi_data.get("accounts") or []
+    # No `accounts[]` → single implicit account, use existing extractor.
+    if not accts or not isinstance(accts, list):
+        return [{
+            "account_ref": veryfi_data,
+            "lines": extract_transactions(veryfi_data),
+        }]
+    top_bank = (
+        veryfi_data.get("bank_name")
+        or (veryfi_data.get("vendor") or {}).get("name")
+    )
+    top_period_start = (
+        veryfi_data.get("period_start_date")
+        or veryfi_data.get("start_date")
+    )
+    top_period_end = (
+        veryfi_data.get("period_end_date")
+        or veryfi_data.get("end_date")
+        or veryfi_data.get("statement_date")
+    )
+    groups: list[dict] = []
+    for i, acct in enumerate(accts):
+        if not isinstance(acct, dict):
+            continue
+        # Build a synthetic "sub-doc" that looks like a single-account
+        # Veryfi response — `_statement_fields` will pick it up correctly.
+        sub_doc = {
+            **veryfi_data,
+            "accounts": [acct],
+            # Prefer per-account bank_name if Veryfi ever emits it,
+            # otherwise fall back to the statement-level bank name.
+            "bank_name": acct.get("bank_name") or top_bank,
+            # Roll balances up to top-level too so any callsite that
+            # reads them without going through `_statement_fields` still
+            # sees the per-account values (not `accounts[0]`).
+            "starting_balance": (
+                acct.get("beginning_balance")
+                or acct.get("starting_balance")
+            ),
+            "ending_balance": (
+                acct.get("ending_balance")
+                or acct.get("closing_balance")
+            ),
+            # Period is a statement-level attribute on combined statements
+            # (all accounts share the same billing period), so re-project
+            # the top-level dates onto the sub-doc.
+            "period_start_date": top_period_start,
+            "period_end_date": top_period_end,
+            "_multi_account_index": i,
+            "_multi_account_total": len(accts),
+        }
+        # Extract lines for THIS account only.
+        sub_lines: list[dict] = []
+        for t in (acct.get("transactions") or []):
+            # Re-use `extract_transactions` on a single-txn sub-doc so
+            # cardholder-subtotal filtering + year-wrap correction still
+            # fire per-transaction.
+            micro = {"transactions": [t],
+                     "statement_date": veryfi_data.get("statement_date")
+                                       or top_period_end}
+            sub_lines.extend(extract_transactions(micro))
+        groups.append({"account_ref": sub_doc, "lines": sub_lines})
+    return groups
+
+
+async def process_bank_statement_set(
+    file_bytes: bytes, filename: str, content_type: str,
+) -> dict:
+    """Upload a multi-statement PDF (or a .zip of statements) to Veryfi's
+    ``bank-statements-set`` splitter endpoint. Returns immediately with a
+    JSON body containing ``id`` (the document-set id) and ``status``
+    (typically ``'split_in_progress'``). The actual per-statement OCR
+    results arrive later via the Veryfi webhook, handled in
+    :func:`routes.veryfi_webhooks.bank_statement_set`.
+    """
+    url = f"{VERYFI_BASE}{BANK_STMT_SET_PATH}"
+    files = {"file": (filename, io.BytesIO(file_bytes), content_type)}
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        r = await client.post(url, headers=_headers(), files=files)
+    if r.status_code >= 400:
+        raise RuntimeError(
+            f"Veryfi splitter returned {r.status_code}: {r.text[:400]}"
+        )
+    try:
+        from ai_usage import record_service
+        # Splitter is charged per resulting statement, but we don't know
+        # the count yet — we log a placeholder of 1 here and the webhook
+        # handler will log the true per-child count. Kept conservative
+        # to avoid double-billing internal telemetry.
+        await record_service(
+            feature="veryfi-bank-statement-set", service="veryfi_ocr",
+            quantity=1, unit="document_set",
+        )
+    except Exception:
+        pass
+    return r.json()
+
+
+async def fetch_bank_statement(document_id: int | str) -> dict:
+    """GET the parsed JSON for a single Veryfi bank-statement document.
+
+    Used by the async splitter webhook: Veryfi's ``bank_statement_set``
+    payload only gives us the child ``document_id``s, so we must fetch
+    each one's full JSON before running it through the shared
+    :func:`statements._process_veryfi_result` pipeline.
+    """
+    url = f"{VERYFI_BASE}{BANK_STMT_PATH}{document_id}/"
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        r = await client.get(url, headers=_headers())
+    if r.status_code >= 400:
+        raise RuntimeError(
+            f"Veryfi GET {document_id} returned {r.status_code}: {r.text[:400]}"
+        )
+    return r.json()
+
+
+def verify_webhook_signature(data_payload: dict, signature_header: str) -> bool:
+    """Verify a Veryfi webhook signature.
+
+    Veryfi HMACs ``str(data_payload)`` (i.e. Python's ``str()`` of the
+    ``data`` sub-object of the webhook JSON) with the ``client_secret``
+    as the key, then base64-encodes the result and sends it in the
+    ``x-veryfi-signature`` header. Constant-time comparison. Returns
+    False (never raises) when the secret isn't configured — the caller
+    then decides whether to reject or accept in dev.
+    """
+    import hmac
+    import hashlib
+    import base64
+    if not _CLIENT_SECRET or not signature_header:
+        return False
+    try:
+        expected = hmac.new(
+            _CLIENT_SECRET.encode("utf-8"),
+            msg=str(data_payload).encode("utf-8"),
+            digestmod=hashlib.sha256,
+        ).digest()
+        expected_b64 = base64.b64encode(expected).decode("utf-8").strip()
+        return hmac.compare_digest(expected_b64, signature_header.strip())
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def extract_transactions(veryfi_data: dict) -> list[dict]:

@@ -76,23 +76,26 @@ def _extract_ref_number(desc: str) -> str | None:
 
 
 def _apply_veryfi_dup_guard(lines: list[dict]) -> tuple[list[dict], int]:
-    """Layer 4 (Aug 24 2026) — collapse Veryfi-emitted duplicates that
-    the row-shape guards can't see. Two failure modes:
+    """Layer 4 (Aug 24 2026 → softened Aug 25 2026): flag Veryfi-emitted
+    likely-duplicate rows instead of hard-dropping them. Two signals:
 
-    (a) Same reference number + same date → cross-page duplicate. Veryfi
-        occasionally re-emits the last row of page N as the first row of
-        page N+1 when the "Continued" marker is faint.
-    (b) Same date + same amount + same merchant prefix (first 8 chars) →
-        multi-line merge where Veryfi split one row into two by picking
-        up a running-balance number as a second amount.
+    (a) Same reference number + same date → cross-page duplicate
+        candidate.
+    (b) Same date + same amount + same merchant prefix (first 8 chars)
+        → multi-line merge candidate.
 
-    Keeps the FIRST occurrence, drops the second. Returns
-    (kept_lines, dropped_count). Idempotent.
+    A row is kept but tagged ``probable_duplicate=True`` with a
+    ``dup_reason``. Downstream UI surfaces a soft badge so the CPA can
+    review; hard-dropping burned three legit rows on 30A Landscaping
+    and threw off previously-reconciled periods, so we never drop.
+
+    Returns ``(lines, flagged_count)`` — signature kept for backward
+    compatibility with call sites (dropped_count == flagged_count for
+    banner/log purposes).
     """
     seen_refs: set[tuple[str, str]] = set()
     seen_shape: set[tuple[str, float, str]] = set()
-    kept: list[dict] = []
-    dropped = 0
+    flagged = 0
     for ln in lines:
         desc = str(ln.get("description") or ln.get("merchant") or "").strip()
         date = str(ln.get("date") or "")[:10]
@@ -101,19 +104,24 @@ def _apply_veryfi_dup_guard(lines: list[dict]) -> tuple[list[dict], int]:
         except (TypeError, ValueError):
             amt = 0.0
         ref = _extract_ref_number(desc)
+        dup_reason: str | None = None
         if ref and date:
-            key = (date, ref)
-            if key in seen_refs:
-                dropped += 1
-                continue
-            seen_refs.add(key)
-        shape = (date, amt, desc[:8].upper())
-        if amt and date and shape in seen_shape:
-            dropped += 1
-            continue
-        seen_shape.add(shape)
-        kept.append(ln)
-    return kept, dropped
+            key_ref = (date, ref)
+            if key_ref in seen_refs:
+                dup_reason = "same_ref_same_date"
+            else:
+                seen_refs.add(key_ref)
+        if not dup_reason and amt and date:
+            shape = (date, amt, desc[:8].upper())
+            if shape in seen_shape:
+                dup_reason = "same_shape_same_date"
+            else:
+                seen_shape.add(shape)
+        if dup_reason:
+            ln["probable_duplicate"] = True
+            ln["dup_reason"] = dup_reason
+            flagged += 1
+    return lines, flagged
 
 
 def _looks_like_summary_sidebar(desc: str) -> bool:
@@ -127,49 +135,90 @@ def _has_alpha_content(desc: str) -> bool:
 
 
 def _apply_veryfi_row_guards(lines: list[dict]) -> tuple[list[dict], dict[str, int]]:
-    """Layers 1 + 2: drop OCR rows that clearly aren't real
-    transactions (summary sidebars, no-alpha descriptions).
-    Returns (kept_lines, {reason: count_dropped}).
+    """Layer 1 (hard-drop) + Layer 2 (soft-flag) row-shape guards.
+
+    • Layer 1 — "Recent Deposits" summary sidebars (3+ `MM-DD amount`
+      pairs strung together). This pattern is essentially never a real
+      transaction. HARD DROP. Killed the 30A $1,100 phantom.
+    • Layer 2 — descriptions with zero alpha content. Usually OCR
+      noise (balance columns, ad footers) BUT sometimes a legit
+      check-only row Veryfi mangled to bare digits. SOFT FLAG
+      (Aug 25 2026 change) — keep the row, tag
+      ``probable_ocr_noise=True`` so the CPA can verify. Prevents the
+      $95 check-row miss that broke 30A Landscaping 3's reconciliation.
+
+    Returns ``(lines, {reason: count})`` where counts include
+    drops AND flags for banner/log surfacing.
     """
-    dropped: dict[str, int] = {}
+    counts: dict[str, int] = {}
     kept: list[dict] = []
     for ln in lines:
         desc = str(ln.get("description") or ln.get("merchant") or "").strip()
         if _looks_like_summary_sidebar(desc):
-            dropped["summary_sidebar"] = dropped.get("summary_sidebar", 0) + 1
+            counts["summary_sidebar"] = counts.get("summary_sidebar", 0) + 1
             continue
         if not _has_alpha_content(desc):
-            dropped["no_alpha_content"] = dropped.get("no_alpha_content", 0) + 1
-            continue
+            ln["probable_ocr_noise"] = True
+            ln["ocr_noise_reason"] = "no_alpha_content"
+            counts["no_alpha_flagged"] = counts.get("no_alpha_flagged", 0) + 1
         kept.append(ln)
-    return kept, dropped
+    return kept, counts
 
 
 def _statement_ocr_reconcile(
     veryfi_data: dict, lines: list[dict], dropped: dict[str, int],
 ) -> dict | None:
     """Layer 3: reconcile Veryfi's line items against its OWN summary
-    totals extracted from the same PDF. Returns a flag dict when
-    drift is detected (so the caller can persist it on the import
-    row and surface a review banner); returns ``None`` when clean.
+    totals extracted from the same PDF. Advisory only — MUST NEVER
+    raise or block an upload. On any shape drift (list-vs-dict,
+    missing fields, malformed numerics) returns ``None`` and lets
+    the import proceed. Aug 24 2026.
     """
+    try:
+        return _statement_ocr_reconcile_impl(veryfi_data, lines, dropped)
+    except Exception as e:  # noqa: BLE001
+        logging.getLogger(__name__).warning(
+            "Layer 3 reconcile skipped (shape drift): %s", e)
+        return None
+
+
+def _statement_ocr_reconcile_impl(
+    veryfi_data: dict, lines: list[dict], dropped: dict[str, int],
+) -> dict | None:
+    if not isinstance(veryfi_data, dict):
+        return None
     _fields = statement_account_resolver._statement_fields(veryfi_data)
     # `_statement_fields` returns `starting_balance` (not
     # `beginning_balance`) after normalizing across Veryfi's two doc
     # shapes. `total_deposits` / `total_withdrawals` aren't normalized
     # there — pull them opportunistically from the raw doc / accounts.
+    # Veryfi sometimes returns the whole doc as a list-of-accounts
+    # (multi-account statement); tolerate both shapes so this guard
+    # can't 500 the upload. Aug 24 2026.
     bb = _fields.get("starting_balance")
     eb = _fields.get("ending_balance")
-    _acct = (veryfi_data.get("accounts") or [{}])
-    _acct0 = _acct[0] if _acct and isinstance(_acct[0], dict) else {}
-    _summaries = _acct0.get("summaries") or {}
+    _root = veryfi_data if isinstance(veryfi_data, dict) else {}
+    _acct_list = _root.get("accounts") if _root else None
+    if not _acct_list and isinstance(veryfi_data, list):
+        _acct_list = veryfi_data
+    _acct_list = _acct_list or [{}]
+    _acct0 = _acct_list[0] if _acct_list and isinstance(_acct_list[0], dict) else {}
+    _summaries_raw = _acct0.get("summaries")
+    # Veryfi returns `summaries` as either a dict or a list-of-dicts
+    # depending on account type — normalize to dict-lookup.
+    if isinstance(_summaries_raw, dict):
+        _summaries = _summaries_raw
+    elif isinstance(_summaries_raw, list) and _summaries_raw and isinstance(_summaries_raw[0], dict):
+        _summaries = _summaries_raw[0]
+    else:
+        _summaries = {}
     v_dep = (
-        veryfi_data.get("total_deposits")
+        _root.get("total_deposits")
         or _acct0.get("total_deposits")
         or _summaries.get("total_deposits")
     )
     v_wd = (
-        veryfi_data.get("total_withdrawals")
+        _root.get("total_withdrawals")
         or _acct0.get("total_withdrawals")
         or _summaries.get("total_withdrawals")
     )
@@ -199,6 +248,90 @@ def _statement_ocr_reconcile(
         "computed_ending": computed_ending,
         "drift": drift,
         "dropped_rows": dict(dropped),
+    }
+
+
+async def upload_statement_multi(
+    cid: str,
+    file: UploadFile,
+    categorize_fn,
+    is_period_closed_fn,
+    account_kind_hint: str | None = None,
+) -> dict:
+    """Async multi-statement upload — dispatches the PDF/zip to Veryfi's
+    ``bank-statements-set`` (splitter) endpoint. Returns immediately with
+    a parent import row in ``status='splitting'``; when Veryfi finishes
+    it fires a webhook that our
+    :func:`~routes.veryfi_webhooks.bank_statement_set` handler picks up,
+    creates one child :class:`statement_imports` row per split, and runs
+    each child through :func:`_process_veryfi_result`.
+
+    Kept as a dedicated function (rather than a branch inside
+    :func:`upload_statement`) because the two paths have entirely
+    different return contracts: this one returns immediately with a
+    ``status='splitting'`` payload, while the sync path returns a full
+    completed import summary. Splitting the entry points keeps that
+    contract explicit at both call sites.
+    """
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(400, "Empty file")
+    # Veryfi splitter caps at 50 MB.
+    if len(file_bytes) > 50 * 1024 * 1024:
+        raise HTTPException(400, "File too large (max 50 MB for multi-statement)")
+
+    import_id = str(uuid.uuid4())
+    now = now_iso()
+    await db.statement_imports.insert_one({
+        "id": import_id,
+        "company_id": cid,
+        "filename": file.filename or "statement.pdf",
+        "size": len(file_bytes),
+        "method": "veryfi_split",
+        "status": "splitting",
+        "is_multi": True,
+        "account_kind_hint": account_kind_hint,
+        "child_import_ids": [],
+        "child_document_ids": [],
+        "transaction_count": None,
+        "period_start": None,
+        "period_end": None,
+        "account_id": None,
+        "account_name": None,
+        "veryfi_document_set_id": None,
+        "created_at": now,
+        "updated_at": now,
+    })
+
+    # -------- Veryfi splitter (async, returns doc_set_id immediately) --------
+    try:
+        set_response = await veryfi_service.process_bank_statement_set(
+            file_bytes, file.filename or "statement.pdf",
+            file.content_type or "application/pdf",
+        )
+    except Exception as e:  # noqa: BLE001
+        await db.statement_imports.update_one(
+            {"id": import_id},
+            {"$set": {"status": "failed", "error": f"Veryfi splitter: {e}",
+                      "updated_at": now_iso()}},
+        )
+        raise HTTPException(502, f"Veryfi splitter error: {e}")
+
+    doc_set_id = set_response.get("id")
+    await db.statement_imports.update_one(
+        {"id": import_id},
+        {"$set": {"veryfi_document_set_id": doc_set_id,
+                  "veryfi_set_raw": set_response,
+                  "updated_at": now_iso()}},
+    )
+    return {
+        "import_id": import_id,
+        "status": "splitting",
+        "veryfi_document_set_id": doc_set_id,
+        "message": (
+            "PDF sent to Veryfi splitter. Individual statements will "
+            "appear here as they finish processing (typically 1–3 min)."
+        ),
     }
 
 
@@ -260,6 +393,181 @@ async def upload_statement(
         )
         raise HTTPException(502, f"Veryfi error: {e}")
 
+    return await _process_veryfi_result(
+        cid, import_id, veryfi_data, account_id,
+        categorize_fn=categorize_fn,
+        is_period_closed_fn=is_period_closed_fn,
+        account_kind_hint=account_kind_hint,
+    )
+
+
+async def _fan_out_multi_account(
+    cid: str,
+    parent_import_id: str,
+    veryfi_data: dict,
+    categorize_fn,
+    is_period_closed_fn,
+    account_kind_hint: str | None = None,
+) -> dict:
+    """Handle a combined multi-account statement (Wells Fargo Combined,
+    Amex Blue + Gold, Chase Checking + Savings on one PDF) by promoting
+    the current import row to a PARENT and running
+    :func:`_process_veryfi_result` once per account against a synthetic
+    single-account sub-doc.
+
+    Contract mirrors the splitter parent/child model (same
+    ``parent_import_id``/``child_import_ids`` fields on
+    ``statement_imports``) so the imports table renders them the same
+    way — a ``multi · N`` badge on the parent + indented children.
+    """
+    import uuid as _uuid
+    groups = veryfi_service.iter_statement_accounts(veryfi_data)
+    parent = await db.statement_imports.find_one({"id": parent_import_id})
+    parent_filename = (parent or {}).get("filename") or "statement.pdf"
+
+    # Promote current row to parent immediately so it appears in the
+    # imports table as "multi · N accounts" while the children run.
+    await db.statement_imports.update_one(
+        {"id": parent_import_id},
+        {"$set": {
+            "is_multi_account": True,
+            "is_multi": True,   # UI reuses the same badge as the splitter
+            "status": "processing",
+            "child_import_ids": [],
+            "multi_account_count": len(groups),
+            "veryfi_raw": veryfi_data,
+            "updated_at": now_iso(),
+        }},
+    )
+
+    child_import_ids: list[str] = []
+    successes = 0
+    failures = 0
+    total_txns = 0
+    for i, grp in enumerate(groups):
+        child_id = str(_uuid.uuid4())
+        acct_ref = grp["account_ref"]
+        # Human-readable child filename hint: "statement.pdf [Checking ···6084]"
+        acct_num = (
+            acct_ref.get("account_number")
+            or (acct_ref.get("accounts") or [{}])[0].get("account_number")
+            or (acct_ref.get("accounts") or [{}])[0].get("number")
+            or ""
+        )
+        acct_type = (
+            (acct_ref.get("accounts") or [{}])[0].get("account_type")
+            or acct_ref.get("account_type")
+            or f"acct #{i + 1}"
+        )
+        last4 = str(acct_num)[-4:] if acct_num else ""
+        child_label = f"{acct_type}{f' ···{last4}' if last4 else ''}".strip()
+        now = now_iso()
+        await db.statement_imports.insert_one({
+            "id": child_id,
+            "company_id": cid,
+            "parent_import_id": parent_import_id,
+            "filename": f"{parent_filename} [{child_label}]",
+            "size": None,
+            "method": "veryfi_multiacct_child",
+            "status": "processing",
+            "transaction_count": None,
+            "period_start": None,
+            "period_end": None,
+            "account_id": None,
+            "account_name": None,
+            "veryfi_document_id": None,
+            "multi_account_index": i,
+            "multi_account_total": len(groups),
+            "created_at": now,
+            "updated_at": now,
+        })
+        child_import_ids.append(child_id)
+        try:
+            child_result = await _process_veryfi_result(
+                cid, child_id, acct_ref, account_id=None,
+                categorize_fn=categorize_fn,
+                is_period_closed_fn=is_period_closed_fn,
+                account_kind_hint=account_kind_hint,
+            )
+            successes += 1
+            total_txns += int(child_result.get("transaction_count") or 0)
+        except Exception as e:  # noqa: BLE001 — one bad account can't kill the batch
+            logging.getLogger(__name__).exception(
+                "Multi-account child failed cid=%s parent=%s idx=%d: %s",
+                cid, parent_import_id, i, e,
+            )
+            failures += 1
+            await db.statement_imports.update_one(
+                {"id": child_id},
+                {"$set": {"status": "failed",
+                          "error": f"pipeline: {e}",
+                          "updated_at": now_iso()}},
+            )
+
+    final_status = (
+        "completed" if failures == 0 and successes > 0
+        else ("failed" if successes == 0 else "partial")
+    )
+    await db.statement_imports.update_one(
+        {"id": parent_import_id},
+        {"$set": {
+            "status": final_status,
+            "child_import_ids": child_import_ids,
+            "transaction_count": total_txns,
+            "children_success": successes,
+            "children_failed": failures,
+            "updated_at": now_iso(),
+        }},
+    )
+    return {
+        "import_id": parent_import_id,
+        "status": final_status,
+        "is_multi_account": True,
+        "transaction_count": total_txns,
+        "children_success": successes,
+        "children_failed": failures,
+        "child_import_ids": child_import_ids,
+    }
+
+
+async def _process_veryfi_result(
+    cid: str,
+    import_id: str,
+    veryfi_data: dict,
+    account_id: str | None,
+    categorize_fn,
+    is_period_closed_fn,
+    account_kind_hint: str | None = None,
+) -> dict:
+    """Post-Veryfi pipeline: resolve account, apply OCR guards, extract
+    transactions, categorize + insert, finalize the import row, auto-post
+    opening-balance JE, auto-create reconciliation.
+
+    Extracted from :func:`upload_statement` so the async splitter webhook
+    (which fetches each child statement's parsed JSON via a GET) can
+    reuse the exact same pipeline as the sync single-file path.
+
+    Multi-account statements (Wells Fargo Combined, Amex Blue + Gold on
+    one PDF, Chase Total Checking + Savings) fan out here: when Veryfi
+    returns 2+ entries in ``accounts[]``, the current ``import_id`` is
+    promoted to a parent row (``is_multi_account=True``) and one child
+    ``statement_imports`` row is created per account, each running
+    through this same function with a synthetic single-account sub-doc.
+    """
+    # -------- Multi-account fan-out (combined statements) --------
+    # Detect BEFORE running the single-account path so we route Wells
+    # Combined-style statements into per-account children instead of
+    # flattening every transaction into one CoA row.
+    _accts = veryfi_data.get("accounts") or []
+    _valid_accts = [a for a in _accts if isinstance(a, dict)]
+    if len(_valid_accts) > 1 and not account_id:
+        return await _fan_out_multi_account(
+            cid, import_id, veryfi_data,
+            categorize_fn=categorize_fn,
+            is_period_closed_fn=is_period_closed_fn,
+            account_kind_hint=account_kind_hint,
+        )
+
     # -------- Resolve/create the target CoA account --------
     if account_id:
         acct = await db.accounts.find_one({"id": account_id, "company_id": cid})
@@ -285,13 +593,15 @@ async def upload_statement(
     # can't be reconciled to its own summary totals, so the CPA sees a
     # banner to review. Aug 23 2026.
     lines, _dropped_rows = _apply_veryfi_row_guards(lines)
-    # Layer 4 — dedup Veryfi-emitted cross-page and multi-line duplicates.
-    lines, _dup_dropped = _apply_veryfi_dup_guard(lines)
-    if _dup_dropped:
-        _dropped_rows["duplicate_row"] = _dup_dropped
+    # Layer 4 — soft-flag likely duplicates (was hard-drop until Aug 25).
+    # Rows stay in the ledger; a `probable_duplicate` badge lets the CPA
+    # review manually. See `_apply_veryfi_dup_guard` docstring for why.
+    lines, _dup_flagged = _apply_veryfi_dup_guard(lines)
+    if _dup_flagged:
+        _dropped_rows["duplicate_row_flagged"] = _dup_flagged
     if _dropped_rows:
         logging.getLogger(__name__).info(
-            "Statements: dropped %d Veryfi rows before insert (%s) — company=%s",
+            "Statements: dropped/flagged %d Veryfi rows (%s) — company=%s",
             sum(_dropped_rows.values()), _dropped_rows, cid,
         )
     _reconcile_flag = _statement_ocr_reconcile(veryfi_data, lines, _dropped_rows)
@@ -931,6 +1241,10 @@ async def _categorize_and_insert_veryfi_lines(
             "splits": [], "linked_invoice_id": None,
             "linked_bill_id": None, "linked_payment_id": None, "tags": [],
             "cache_hit": r.get("cache_hit", False),
+            # Layer 4 soft-flag — carries through so the UI can show a
+            # "possible duplicate" badge on the txn row for CPA review.
+            "probable_duplicate": bool(cand.get("probable_duplicate")),
+            "dup_reason": cand.get("dup_reason"),
             "created_at": now, "updated_at": now,
         })
 
@@ -1044,9 +1358,9 @@ async def reprocess_import(
     # Apply the same OCR sanity guards on re-run so a bank-hint fix
     # never smuggles phantom rows back in. Aug 23 2026.
     lines, _dropped_rows2 = _apply_veryfi_row_guards(lines)
-    lines, _dup_dropped2 = _apply_veryfi_dup_guard(lines)
-    if _dup_dropped2:
-        _dropped_rows2["duplicate_row"] = _dup_dropped2
+    lines, _dup_flagged2 = _apply_veryfi_dup_guard(lines)
+    if _dup_flagged2:
+        _dropped_rows2["duplicate_row_flagged"] = _dup_flagged2
     _reconcile_flag2 = _statement_ocr_reconcile(veryfi_data, lines, _dropped_rows2)
 
     # Recompute the statement period from the (now year-corrected) txn

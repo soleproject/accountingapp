@@ -15,7 +15,20 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
 - **3-tier branding cascade**: Enterprise → Partner → Company overrides.
 - **Preview → Prod hydration**: Real prod companies are cloned into preview with `id` suffix `-preview-clone` (Emeral Coast, BM QBO 2, Nicole Pettyjohn).
 
-## What's Implemented (as of 2026-08-23)
+## What's Implemented (as of 2026-08-25)
+- **Multi-Account Combined Statement Fan-Out (2026-08-25)** — A single Veryfi bank-statement that lists MULTIPLE accounts on one PDF (Wells Fargo Combined, Amex Blue + Gold, Chase Checking + Savings, etc.) is now handled correctly.
+   • Detection: When `veryfi_data.accounts[]` has 2+ entries and no explicit `account_id` was pinned, `_process_veryfi_result` fans out to `_fan_out_multi_account` instead of flattening.
+   • Per-account child rows: The current import becomes a PARENT (`is_multi_account=True`, `is_multi=True`) and each account gets its own child `statement_imports` row with a synthetic single-account sub-doc via `veryfi_service.iter_statement_accounts`. Each child runs the full existing pipeline unchanged — resolver, OCR guards (Layers 1–4), Layer 3 reconcile against its OWN per-account totals, OBE JE, auto-recon, categorization.
+   • New helper: `veryfi_service.iter_statement_accounts(veryfi_doc)` returns `[{account_ref, lines}]` — one entry per account, or a single entry for legacy/single-account shapes. Regression tests in `tests/test_multi_account_statement.py`.
+   • UI: Parent renders with a `multi · N` badge and children indent with `↳` — same visual treatment as the splitter parent/child rows.
+
+- **Veryfi Multi-Statement Splitter (2026-08-25)** — Support for combined-PDF or `.zip` bank-statement uploads via Veryfi's `/api/v8/partner/bank-statements-set` async endpoint.
+   • UI: `☐ This file contains multiple separate statements` checkbox in the pre-check modal (default OFF, auto-ON for `.zip`). Copy explicitly warns NOT to use for combined-account statements — those are auto-handled by the new fan-out.
+   • Backend: `statements.upload_statement_multi()` posts to splitter, creates a parent `statement_imports` row with `status='splitting'`. Returns immediately.
+   • Webhook: `POST /api/webhooks/veryfi/bank-statement-set` (public, HMAC-SHA256 verified via `VERYFI_CLIENT_SECRET`) fetches each child `document_id` and runs `_process_veryfi_result()` per child. Children of the splitter can themselves be multi-account statements and fan out again automatically.
+   • Refactor: Extracted post-Veryfi logic in `upload_statement()` into `_process_veryfi_result()` so sync + splitter + multi-account paths all share the same pipeline.
+
+
 - Phase 2 hybrid QBO migration with dual-basis GL pull (`qbo_gl_lines`).
 - Report engine reads directly from GL for QBO companies; legacy `_signed_balances` for native/Plaid.
 - Superadmin GL Lab (`/admin/qbo-gl-lab`) for parity spot-checks.
