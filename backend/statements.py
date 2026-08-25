@@ -76,23 +76,26 @@ def _extract_ref_number(desc: str) -> str | None:
 
 
 def _apply_veryfi_dup_guard(lines: list[dict]) -> tuple[list[dict], int]:
-    """Layer 4 (Aug 24 2026) — collapse Veryfi-emitted duplicates that
-    the row-shape guards can't see. Two failure modes:
+    """Layer 4 (Aug 24 2026 → softened Aug 25 2026): flag Veryfi-emitted
+    likely-duplicate rows instead of hard-dropping them. Two signals:
 
-    (a) Same reference number + same date → cross-page duplicate. Veryfi
-        occasionally re-emits the last row of page N as the first row of
-        page N+1 when the "Continued" marker is faint.
-    (b) Same date + same amount + same merchant prefix (first 8 chars) →
-        multi-line merge where Veryfi split one row into two by picking
-        up a running-balance number as a second amount.
+    (a) Same reference number + same date → cross-page duplicate
+        candidate.
+    (b) Same date + same amount + same merchant prefix (first 8 chars)
+        → multi-line merge candidate.
 
-    Keeps the FIRST occurrence, drops the second. Returns
-    (kept_lines, dropped_count). Idempotent.
+    A row is kept but tagged ``probable_duplicate=True`` with a
+    ``dup_reason``. Downstream UI surfaces a soft badge so the CPA can
+    review; hard-dropping burned three legit rows on 30A Landscaping
+    and threw off previously-reconciled periods, so we never drop.
+
+    Returns ``(lines, flagged_count)`` — signature kept for backward
+    compatibility with call sites (dropped_count == flagged_count for
+    banner/log purposes).
     """
     seen_refs: set[tuple[str, str]] = set()
     seen_shape: set[tuple[str, float, str]] = set()
-    kept: list[dict] = []
-    dropped = 0
+    flagged = 0
     for ln in lines:
         desc = str(ln.get("description") or ln.get("merchant") or "").strip()
         date = str(ln.get("date") or "")[:10]
@@ -101,19 +104,24 @@ def _apply_veryfi_dup_guard(lines: list[dict]) -> tuple[list[dict], int]:
         except (TypeError, ValueError):
             amt = 0.0
         ref = _extract_ref_number(desc)
+        dup_reason: str | None = None
         if ref and date:
-            key = (date, ref)
-            if key in seen_refs:
-                dropped += 1
-                continue
-            seen_refs.add(key)
-        shape = (date, amt, desc[:8].upper())
-        if amt and date and shape in seen_shape:
-            dropped += 1
-            continue
-        seen_shape.add(shape)
-        kept.append(ln)
-    return kept, dropped
+            key_ref = (date, ref)
+            if key_ref in seen_refs:
+                dup_reason = "same_ref_same_date"
+            else:
+                seen_refs.add(key_ref)
+        if not dup_reason and amt and date:
+            shape = (date, amt, desc[:8].upper())
+            if shape in seen_shape:
+                dup_reason = "same_shape_same_date"
+            else:
+                seen_shape.add(shape)
+        if dup_reason:
+            ln["probable_duplicate"] = True
+            ln["dup_reason"] = dup_reason
+            flagged += 1
+    return lines, flagged
 
 
 def _looks_like_summary_sidebar(desc: str) -> bool:
@@ -314,13 +322,15 @@ async def upload_statement(
     # can't be reconciled to its own summary totals, so the CPA sees a
     # banner to review. Aug 23 2026.
     lines, _dropped_rows = _apply_veryfi_row_guards(lines)
-    # Layer 4 — dedup Veryfi-emitted cross-page and multi-line duplicates.
-    lines, _dup_dropped = _apply_veryfi_dup_guard(lines)
-    if _dup_dropped:
-        _dropped_rows["duplicate_row"] = _dup_dropped
+    # Layer 4 — soft-flag likely duplicates (was hard-drop until Aug 25).
+    # Rows stay in the ledger; a `probable_duplicate` badge lets the CPA
+    # review manually. See `_apply_veryfi_dup_guard` docstring for why.
+    lines, _dup_flagged = _apply_veryfi_dup_guard(lines)
+    if _dup_flagged:
+        _dropped_rows["duplicate_row_flagged"] = _dup_flagged
     if _dropped_rows:
         logging.getLogger(__name__).info(
-            "Statements: dropped %d Veryfi rows before insert (%s) — company=%s",
+            "Statements: dropped/flagged %d Veryfi rows (%s) — company=%s",
             sum(_dropped_rows.values()), _dropped_rows, cid,
         )
     _reconcile_flag = _statement_ocr_reconcile(veryfi_data, lines, _dropped_rows)
@@ -960,6 +970,10 @@ async def _categorize_and_insert_veryfi_lines(
             "splits": [], "linked_invoice_id": None,
             "linked_bill_id": None, "linked_payment_id": None, "tags": [],
             "cache_hit": r.get("cache_hit", False),
+            # Layer 4 soft-flag — carries through so the UI can show a
+            # "possible duplicate" badge on the txn row for CPA review.
+            "probable_duplicate": bool(cand.get("probable_duplicate")),
+            "dup_reason": cand.get("dup_reason"),
             "created_at": now, "updated_at": now,
         })
 
@@ -1073,9 +1087,9 @@ async def reprocess_import(
     # Apply the same OCR sanity guards on re-run so a bank-hint fix
     # never smuggles phantom rows back in. Aug 23 2026.
     lines, _dropped_rows2 = _apply_veryfi_row_guards(lines)
-    lines, _dup_dropped2 = _apply_veryfi_dup_guard(lines)
-    if _dup_dropped2:
-        _dropped_rows2["duplicate_row"] = _dup_dropped2
+    lines, _dup_flagged2 = _apply_veryfi_dup_guard(lines)
+    if _dup_flagged2:
+        _dropped_rows2["duplicate_row_flagged"] = _dup_flagged2
     _reconcile_flag2 = _statement_ocr_reconcile(veryfi_data, lines, _dropped_rows2)
 
     # Recompute the statement period from the (now year-corrected) txn
