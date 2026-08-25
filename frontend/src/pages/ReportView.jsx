@@ -497,7 +497,7 @@ export default function ReportView() {
   useEffect(() => { setData(null); }, [kind, acctParam]);
   useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [currentId, kind, basis, start, end, acctParam, urlQ, urlMinAmount, urlMaxAmount, urlStart, urlEnd]);
 
-  const downloadReport = async (fmt /* "pdf" | "csv" */) => {
+  const downloadReport = async (fmt /* "pdf" | "csv" */, { print = false } = {}) => {
     let params;
     if (kind === "balance-sheet") params = `as_of=${end}&basis=${basis}`;
     else if (kind === "account-detail") {
@@ -521,6 +521,38 @@ export default function ReportView() {
     }
     const blob = await r.blob();
     const url = URL.createObjectURL(blob);
+    if (print) {
+      // Load the PDF into a hidden iframe and pop the native print
+      // dialog from that context — the user's browser handles the
+      // actual printer selection, page-range, and preview. Avoids
+      // window.open (blocked by most popup blockers).
+      const iframe = document.createElement("iframe");
+      iframe.style.position = "fixed";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.width = "0";
+      iframe.style.height = "0";
+      iframe.style.border = "0";
+      iframe.src = url;
+      iframe.onload = () => {
+        try {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+        } catch (e) {
+          // Some browsers (esp. Safari) refuse blob-based print from
+          // an iframe → fall back to a new-tab open.
+          window.open(url, "_blank");
+        }
+      };
+      document.body.appendChild(iframe);
+      // Iframe + object URL cleaned up after the print dialog has had
+      // time to grab them. 60s covers slow printer selection.
+      setTimeout(() => {
+        try { document.body.removeChild(iframe); } catch { /* ignore */ }
+        URL.revokeObjectURL(url);
+      }, 60_000);
+      return;
+    }
     const a = document.createElement("a");
     a.href = url;
     const suffix = kind === "account-detail" ? `-${(data?.account?.code || "acct")}` : "";
@@ -529,6 +561,7 @@ export default function ReportView() {
   };
   const downloadPdf = () => downloadReport("pdf");
   const downloadCsv = () => downloadReport("csv");
+  const printPdf = () => downloadReport("pdf", { print: true });
 
   const defaultTitle = {
     "trial-balance": tr("trial_balance", region),
@@ -618,7 +651,7 @@ export default function ReportView() {
             />
           )}
           <button data-testid={TID.reportApply} onClick={fetchData} className="px-3 py-1.5 rounded-md border bg-white text-xs">Apply</button>
-          <ExportMenu onPdf={downloadPdf} onCsv={downloadCsv} />
+          <ExportMenu onPdf={downloadPdf} onCsv={downloadCsv} onPrint={printPdf} />
         </div>
       </div>
 
@@ -706,7 +739,7 @@ export default function ReportView() {
 // Export dropdown — same visual weight as the old "Export PDF" button
 // but reveals a small popover with PDF + CSV. Closes on Escape or any
 // outside click so it doesn't need an explicit close affordance.
-function ExportMenu({ onPdf, onCsv }) {
+function ExportMenu({ onPdf, onCsv, onPrint }) {
   const [open, setOpen] = React.useState(false);
   const wrapRef = React.useRef(null);
   React.useEffect(() => {
@@ -756,6 +789,19 @@ function ExportMenu({ onPdf, onCsv }) {
           >
             Download as CSV
           </button>
+          {onPrint && (
+            <>
+              <div className="border-t my-1" role="separator" />
+              <button
+                role="menuitem"
+                data-testid="report-export-menu-print"
+                onClick={() => pick(onPrint)}
+                className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 text-slate-800"
+              >
+                Print (PDF)
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>
