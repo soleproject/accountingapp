@@ -497,7 +497,7 @@ export default function ReportView() {
   useEffect(() => { setData(null); }, [kind, acctParam]);
   useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [currentId, kind, basis, start, end, acctParam, urlQ, urlMinAmount, urlMaxAmount, urlStart, urlEnd]);
 
-  const downloadPdf = async () => {
+  const downloadReport = async (fmt /* "pdf" | "csv" */) => {
     let params;
     if (kind === "balance-sheet") params = `as_of=${end}&basis=${basis}`;
     else if (kind === "account-detail") {
@@ -512,17 +512,23 @@ export default function ReportView() {
       params = parts.join("&");
     } else params = `start=${start}&end=${end}&basis=${basis}`;
     const token = localStorage.getItem("axiom_token");
-    const r = await fetch(`${BACKEND_URL}/api/companies/${currentId}/reports/${kind}/pdf?${params}`, {
+    const r = await fetch(`${BACKEND_URL}/api/companies/${currentId}/reports/${kind}/${fmt}?${params}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
+    if (!r.ok) {
+      toast.error(`Export failed (${r.status})`);
+      return;
+    }
     const blob = await r.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     const suffix = kind === "account-detail" ? `-${(data?.account?.code || "acct")}` : "";
-    a.download = `${kind}${suffix}.pdf`; a.click();
+    a.download = `${kind}${suffix}.${fmt}`; a.click();
     URL.revokeObjectURL(url);
   };
+  const downloadPdf = () => downloadReport("pdf");
+  const downloadCsv = () => downloadReport("csv");
 
   const defaultTitle = {
     "trial-balance": tr("trial_balance", region),
@@ -612,10 +618,7 @@ export default function ReportView() {
             />
           )}
           <button data-testid={TID.reportApply} onClick={fetchData} className="px-3 py-1.5 rounded-md border bg-white text-xs">Apply</button>
-          <button data-testid={TID.reportExportPdf} onClick={downloadPdf}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs">
-            <Download size={13} /> Export PDF
-          </button>
+          <ExportMenu onPdf={downloadPdf} onCsv={downloadCsv} />
         </div>
       </div>
 
@@ -698,6 +701,67 @@ export default function ReportView() {
     </div>
   );
 }
+
+
+// Export dropdown — same visual weight as the old "Export PDF" button
+// but reveals a small popover with PDF + CSV. Closes on Escape or any
+// outside click so it doesn't need an explicit close affordance.
+function ExportMenu({ onPdf, onCsv }) {
+  const [open, setOpen] = React.useState(false);
+  const wrapRef = React.useRef(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  const pick = (fn) => { setOpen(false); fn(); };
+  return (
+    <div ref={wrapRef} className="relative inline-block">
+      <button
+        data-testid={TID.reportExportPdf}
+        onClick={() => setOpen(o => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs hover:bg-slate-800"
+      >
+        <Download size={13} /> Export <ChevronDown size={12} />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          data-testid="report-export-menu"
+          className="absolute right-0 mt-1 w-40 rounded-md border bg-white shadow-lg z-30 py-1"
+        >
+          <button
+            role="menuitem"
+            data-testid="report-export-menu-pdf"
+            onClick={() => pick(onPdf)}
+            className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 text-slate-800"
+          >
+            Download as PDF
+          </button>
+          <button
+            role="menuitem"
+            data-testid="report-export-menu-csv"
+            onClick={() => pick(onCsv)}
+            className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 text-slate-800"
+          >
+            Download as CSV
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 function Section({ title }) {
   return (
