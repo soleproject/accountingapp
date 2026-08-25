@@ -21,7 +21,7 @@ import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
 import { ContactBadge } from "@/components/ContactBadge";
 import { emitAction, useActionListener } from "@/lib/createBus";
 import { useLetsReviewNav } from "@/pages/LetsReview";
-import { useNoContactReviewNav } from "@/pages/NoContactReview";
+import { useNoContactReviewNav, NoContactReviewListToggle } from "@/pages/NoContactReview";
 import Step2Tour, { hasSeenStep2Tour } from "@/components/Step2Tour";
 import Step3BTour, { hasSeenStep3BTour } from "@/components/Step3BTour";
 import { useAuth } from "@/lib/auth";
@@ -1278,6 +1278,7 @@ export default function Transactions() {
               >
                 Next →
               </button>
+              <NoContactReviewListToggle />
             </div>
           </div>
         )}

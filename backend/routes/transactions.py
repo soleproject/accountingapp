@@ -447,6 +447,184 @@ async def no_contact_groups(cid: str, user: dict = Depends(get_current_user)):
 
 
 
+@router.get("/companies/{cid}/transactions/no-contact-group-transactions")
+async def no_contact_group_transactions(
+    cid: str, group_key: str, user: dict = Depends(get_current_user),
+):
+    """Expand a No-Contact Review group into its individual transactions.
+
+    Same server-side membership rule as :func:`no_contact_groups` +
+    :func:`apply_no_contact_group` — we recompute ``_desc_group_key``
+    per row here rather than trusting a client-supplied txn-id list, so
+    a page that's been sitting open while the CPA worked elsewhere
+    silently drops any row that already got reviewed.
+
+    Powers the row-level expand-and-edit table on
+    ``/accounting/no-contact-review?view=list``.
+    """
+    await require_company(user, cid)
+    group_key = (group_key or "").strip()
+    if not group_key:
+        raise HTTPException(400, "group_key is required")
+    UNCAT_CODES = {"9999", "6999", "4999"}
+    cursor = db.transactions.find(
+        {
+            "company_id": cid,
+            "$or": [
+                {"contact_id": None},
+                {"contact_id": {"$exists": False}},
+                {"contact_id": ""},
+            ],
+            "human_reviewed": {"$ne": True},
+        },
+    ).sort("date", -1)
+    rows: list[dict] = []
+    async for t in cursor:
+        code = t.get("category_account_code")
+        has_cat_id = bool(t.get("category_account_id"))
+        is_uncategorized = (not has_cat_id) or (code in UNCAT_CODES)
+        needs_review = bool(t.get("needs_review"))
+        if not (is_uncategorized or needs_review):
+            continue
+        desc = t.get("description") or t.get("merchant") or ""
+        key, _ = _desc_group_key(desc)
+        if key != group_key:
+            continue
+        rows.append({
+            "id": t["id"],
+            "date": t.get("date"),
+            "description": t.get("description"),
+            "merchant": t.get("merchant"),
+            "amount": t.get("amount"),
+            "contact_id": t.get("contact_id"),
+            "contact_name": t.get("contact_name"),
+            "category_account_id": t.get("category_account_id"),
+            "category_account_code": t.get("category_account_code"),
+            "category_account_name": t.get("category_account_name"),
+            "needs_review": bool(t.get("needs_review")),
+            "bank_account_name": t.get("bank_account_name"),
+        })
+    return {"rows": rows, "count": len(rows)}
+
+
+
+
+@router.post("/companies/{cid}/transactions/no-contact-group/apply")
+async def apply_no_contact_group(cid: str, payload: dict, user: dict = Depends(get_current_user)):
+    """Bulk-apply contact and/or category to every transaction that
+    belongs to a No-Contact Review group.
+
+    Body: ``{"group_key": str, "contact_id"?: str|null, "category_account_id"?: str}``
+
+    Recomputes ``_desc_group_key`` on the server for every candidate row
+    so the client can't spoof a group-key to touch unrelated txns.
+    Enforces the same closed-period + "uncategorized-or-needs-review"
+    filter used by ``no_contact_groups`` — a row the CPA already
+    reviewed since the list rendered silently drops out.
+
+    Returns ``{ok, updated, skipped_closed}``. Powers the new
+    all-groups list view on the No-Contact Review page.
+    """
+    await require_company(user, cid)
+    group_key = (payload.get("group_key") or "").strip()
+    if not group_key:
+        raise HTTPException(400, "group_key is required")
+    contact_id = payload.get("contact_id")
+    category_id = payload.get("category_account_id")
+    # At least one field must actually change.
+    if contact_id is None and not category_id and "contact_id" not in payload:
+        raise HTTPException(400, "contact_id or category_account_id is required")
+
+    contact = None
+    if contact_id:
+        contact = await db.contacts.find_one({"id": contact_id, "company_id": cid})
+        if not contact:
+            raise HTTPException(404, "Contact not found in this company")
+
+    acct = None
+    if category_id:
+        acct = await db.accounts.find_one({"id": category_id, "company_id": cid})
+        if not acct:
+            raise HTTPException(404, "Target category account not found in this company")
+
+    # Recompute the group on the SERVER — never trust client-supplied
+    # txn-id lists here since the whole point of `group_key` is that the
+    # server owns the membership rule.
+    UNCAT_CODES = {"9999", "6999", "4999"}
+    cursor = db.transactions.find(
+        {
+            "company_id": cid,
+            "$or": [
+                {"contact_id": None},
+                {"contact_id": {"$exists": False}},
+                {"contact_id": ""},
+            ],
+            "human_reviewed": {"$ne": True},
+        },
+        {"id": 1, "date": 1, "description": 1, "merchant": 1,
+         "category_account_id": 1, "category_account_code": 1, "needs_review": 1},
+    )
+    candidate_ids: list[str] = []
+    async for t in cursor:
+        code = t.get("category_account_code")
+        has_cat_id = bool(t.get("category_account_id"))
+        is_uncategorized = (not has_cat_id) or (code in UNCAT_CODES)
+        needs_review = bool(t.get("needs_review"))
+        if not (is_uncategorized or needs_review):
+            continue
+        desc = t.get("description") or t.get("merchant") or ""
+        key, _ = _desc_group_key(desc)
+        if key == group_key:
+            candidate_ids.append(t["id"])
+    if not candidate_ids:
+        return {"ok": True, "updated": 0, "skipped_closed": [], "message": "Group is empty"}
+
+    # Closed-period guard: skip individually rather than failing the batch.
+    dates = await db.transactions.find(
+        {"id": {"$in": candidate_ids}, "company_id": cid}, {"id": 1, "date": 1}
+    ).to_list(len(candidate_ids))
+    editable_ids: list[str] = []
+    skipped_closed: list[str] = []
+    for t in dates:
+        if await is_period_closed(cid, t.get("date")):
+            skipped_closed.append(t["id"])
+        else:
+            editable_ids.append(t["id"])
+    if not editable_ids:
+        return {"ok": True, "updated": 0, "skipped_closed": skipped_closed}
+
+    # Build the field update. When category is set we also flip
+    # `human_reviewed=True + posted=True + needs_review=False` (same
+    # semantics as `bulk-reclassify`) so the CPA gets a proper Step-3
+    # burn-down. Contact-only assignment does NOT mark reviewed —
+    # the CPA may still want to look at the category afterwards.
+    now = now_iso()
+    updates: dict = {"updated_at": now}
+    if "contact_id" in payload:  # allow explicit `null` to clear
+        updates["contact_id"] = contact["id"] if contact else None
+        updates["contact_name"] = contact["name"] if contact else None
+    if acct:
+        updates["category_account_id"] = acct["id"]
+        updates["category_account_code"] = acct.get("code")
+        updates["category_account_name"] = acct.get("name")
+        updates["human_reviewed"] = True
+        updates["needs_review"] = False
+        updates["posted"] = True
+
+    await db.transactions.update_many(
+        {"id": {"$in": editable_ids}, "company_id": cid},
+        {"$set": updates},
+    )
+    await _invalidate_dash(cid)
+    return {
+        "ok": True,
+        "updated": len(editable_ids),
+        "skipped_closed": skipped_closed,
+    }
+
+
+
+
 class BulkApproveAiReadyIn(BaseModel):
     dry_run: bool = False
     # DEPRECATED but kept for backwards-compat: when set, expands to every
