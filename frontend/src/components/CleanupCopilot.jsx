@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -234,6 +234,92 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   // the mega-approve call sends `overrides` and the vendor's row gets
   // recategorized to the target account (and snapshotted for Undo).
   const [megaOverrides, setMegaOverrides] = useState({});
+  // Expand-a-bucket: clicking the "N rows" number reveals the actual
+  // transactions in that bucket underneath so the CPA can edit contact
+  // and category per-row before approving. Keyed by bucket.key. Values:
+  // { loading, rows[], err }.
+  const [expandedBucket, setExpandedBucket] = useState(null);   // bucket key
+  const [expandedRows, setExpandedRows] = useState({});         // { [key]: {loading, rows, err} }
+  const [contactsList, setContactsList] = useState([]);
+  useEffect(() => {
+    if (!currentId) return;
+    api.get(`/companies/${currentId}/contacts`)
+       .then(r => setContactsList(r.data.contacts || r.data || []))
+       .catch(() => setContactsList([]));
+  }, [currentId]);
+  const toggleExpandBucket = async (bucket) => {
+    if (expandedBucket === bucket.key) {
+      setExpandedBucket(null);
+      return;
+    }
+    setExpandedBucket(bucket.key);
+    if (expandedRows[bucket.key]?.rows) return;   // already fetched
+    setExpandedRows(prev => ({ ...prev, [bucket.key]: { loading: true } }));
+    try {
+      const params = new URLSearchParams();
+      params.set("account_id", bucket.account?.id || "");
+      if (bucket.contact_id) params.set("contact_id", bucket.contact_id);
+      else params.set("merchant", bucket.contact_name || "");
+      const r = await api.get(
+        `/companies/${currentId}/transactions/cleanup-bucket?${params.toString()}`,
+      );
+      setExpandedRows(prev => ({
+        ...prev, [bucket.key]: { loading: false, rows: r.data.rows || [] },
+      }));
+    } catch (e) {
+      setExpandedRows(prev => ({
+        ...prev, [bucket.key]: { loading: false, err: e.response?.data?.detail || e.message },
+      }));
+    }
+  };
+  const updateBucketRow = async (bucketKey, txnId, patch) => {
+    // Optimistic — patch in-place so the picker doesn't blank while the
+    // request is in flight. Revert on error.
+    setExpandedRows(prev => {
+      const b = prev[bucketKey]; if (!b?.rows) return prev;
+      return { ...prev, [bucketKey]: {
+        ...b, rows: b.rows.map(r => r.id === txnId ? { ...r, ...patch } : r),
+      }};
+    });
+    try {
+      await api.patch(`/companies/${currentId}/transactions/${txnId}`, patch);
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("axiom:toast",
+        { detail: { message: `Update failed: ${e.response?.data?.detail || e.message}`, type: "error" } }));
+    }
+  };
+  const bulkUpdateBucketRows = async (bucketKey, txnIds, patch) => {
+    // Optimistic bulk patch — apply the same `patch` to every selected
+    // row in-memory, then fire the matching bulk endpoint. Rolls back
+    // on error by refetching the bucket.
+    setExpandedRows(prev => {
+      const b = prev[bucketKey]; if (!b?.rows) return prev;
+      const idSet = new Set(txnIds);
+      const rowPatch = { ...patch };
+      delete rowPatch.kind;
+      return { ...prev, [bucketKey]: {
+        ...b, rows: b.rows.map(r => idSet.has(r.id) ? { ...r, ...rowPatch } : r),
+      }};
+    });
+    try {
+      if (patch.kind === "contact") {
+        await api.post(`/companies/${currentId}/transactions/bulk-set-contact`, {
+          transaction_ids: txnIds,
+          contact_id: patch.contact_id,
+        });
+      } else if (patch.kind === "category") {
+        await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
+          transaction_ids: txnIds,
+          category_account_id: patch.category_account_id,
+        });
+      }
+      window.dispatchEvent(new CustomEvent("axiom:toast",
+        { detail: { message: `Updated ${txnIds.length} rows`, type: "success" } }));
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent("axiom:toast",
+        { detail: { message: `Bulk update failed: ${e.response?.data?.detail || e.message}`, type: "error" } }));
+    }
+  };
   // Guided-tour ("How To") state — non-null means a walkthrough is running
   // and this step's UI element gets the rainbow highlight. `howToTargetKey`
   // holds the vendor row we're using as the demo subject (the first bucket
@@ -1066,8 +1152,8 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                     // the target row visibly pops. Empty when not in tour.
                     const tourDimClass = (howToRunning && !isTourRow) ? "opacity-40" : "";
                     return (
+                      <React.Fragment key={c.key}>
                       <div
-                        key={c.key}
                         data-testid={`mega-vendor-${c.key}`}
                         className={`w-full flex md:grid md:grid-cols-[auto_240px_minmax(200px,1fr)_auto_auto_auto] items-center gap-2.5 rounded border px-3 py-2 text-sm transition-all ${tourDimClass} ${
                           isTourRow && howToStep === 0
@@ -1127,7 +1213,15 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                         </div>
                         <div className={`text-right shrink-0 rounded px-1 ${hi(4)}`}>
                           <div className="font-mono-num text-slate-900 text-sm flex items-center justify-end gap-1.5">
-                            {c.count} rows
+                            <button
+                              type="button"
+                              data-testid={`mega-vendor-expand-${c.key}`}
+                              onClick={(e) => { e.stopPropagation(); toggleExpandBucket(c); }}
+                              className="underline decoration-dotted decoration-slate-400 hover:decoration-slate-800 hover:text-indigo-700 cursor-pointer"
+                              title="Show these transactions below to edit contact / category per-row"
+                            >
+                              {c.count} rows
+                            </button>
                             {c.flagged_count > 0 && (
                               <span
                                 data-testid={`mega-vendor-flagged-${c.key}`}
@@ -1174,6 +1268,17 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                           Approve →
                         </button>
                       </div>
+                      {expandedBucket === c.key && (
+                        <BucketExpansion
+                          bucketKey={c.key}
+                          data={expandedRows[c.key]}
+                          accounts={accounts}
+                          contacts={contactsList}
+                          onUpdate={(txnId, patch) => updateBucketRow(c.key, txnId, patch)}
+                          onBulkUpdate={bulkUpdateBucketRows}
+                        />
+                      )}
+                    </React.Fragment>
                     );
                     };
                     if (filteredVendors.length === 0) {
@@ -1560,5 +1665,237 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         </div>
       )}
     </>
+  );
+}
+
+
+// Expansion panel: shows the actual transactions inside a bucket with
+// per-row Contact + Category pickers. Rendered as a sibling row right
+// under the clicked bucket header. Uses the passed-in `accounts` and
+// `contacts` arrays (already loaded once at parent level) so opening a
+// bucket is instant after the first fetch.
+function BucketExpansion({ bucketKey, data, accounts, contacts, onUpdate, onBulkUpdate }) {
+  const [selectedIds, setSelectedIds] = React.useState(new Set());
+  const [bulkContactId, setBulkContactId] = React.useState("");
+  const [bulkCategoryId, setBulkCategoryId] = React.useState("");
+  const [applying, setApplying] = React.useState(false);
+  // Reset selection whenever the bucket is re-opened with new rows.
+  const rowIdsKey = (data?.rows || []).map(r => r.id).join(",");
+  React.useEffect(() => { setSelectedIds(new Set()); setBulkContactId(""); setBulkCategoryId(""); }, [rowIdsKey]);
+  if (!data) return null;
+  if (data.loading) {
+    return (
+      <div className="w-full pl-8 pr-3 py-2 text-xs text-slate-500 bg-slate-50/50 rounded-b border-x border-b border-slate-200 -mt-1">
+        Loading transactions…
+      </div>
+    );
+  }
+  if (data.err) {
+    return (
+      <div className="w-full pl-8 pr-3 py-2 text-xs text-red-600 bg-red-50 rounded-b border-x border-b border-red-200 -mt-1">
+        {data.err}
+      </div>
+    );
+  }
+  const rows = data.rows || [];
+  if (!rows.length) {
+    return (
+      <div className="w-full pl-8 pr-3 py-2 text-xs text-slate-500 bg-slate-50/50 rounded-b border-x border-b border-slate-200 -mt-1">
+        No matching unreviewed transactions right now.
+      </div>
+    );
+  }
+  const allSelected = selectedIds.size > 0 && selectedIds.size === rows.length;
+  const toggleAll = () => {
+    setSelectedIds(prev => prev.size === rows.length ? new Set() : new Set(rows.map(r => r.id)));
+  };
+  const toggleOne = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const applyBulk = async (field /* "contact" | "category" */) => {
+    if (!selectedIds.size) return;
+    const ids = Array.from(selectedIds);
+    if (field === "contact") {
+      const contact = contacts.find(c => c.id === bulkContactId);
+      setApplying(true);
+      await onBulkUpdate(bucketKey, ids, {
+        kind: "contact",
+        contact_id: bulkContactId || null,
+        contact_name: contact?.name || null,
+      });
+      setApplying(false);
+    } else {
+      const acct = accounts.find(a => a.id === bulkCategoryId);
+      if (!acct) return;
+      setApplying(true);
+      await onBulkUpdate(bucketKey, ids, {
+        kind: "category",
+        category_account_id: bulkCategoryId,
+        category_account_code: acct.code || null,
+        category_account_name: acct.name || null,
+      });
+      setApplying(false);
+    }
+  };
+  return (
+    <div
+      data-testid={`bucket-expansion-${bucketKey}`}
+      className="w-full bg-slate-50/60 rounded-b border-x border-b border-slate-200 -mt-1"
+    >
+      {selectedIds.size > 0 && (
+        <div
+          className="flex flex-wrap items-center gap-2 px-4 py-2 bg-indigo-50 border-b border-indigo-200 text-xs"
+          data-testid={`bucket-bulk-bar-${bucketKey}`}
+        >
+          <span className="font-semibold text-indigo-900">
+            {selectedIds.size} selected
+          </span>
+          <span className="text-indigo-800">·</span>
+          <select
+            value={bulkContactId}
+            onChange={(e) => setBulkContactId(e.target.value)}
+            className="text-xs border border-indigo-300 rounded px-1.5 py-1 bg-white min-w-[160px]"
+            data-testid={`bucket-bulk-contact-${bucketKey}`}
+          >
+            <option value="">Change contact to…</option>
+            <option value="__clear__">— clear contact —</option>
+            {contacts.map(ct => (
+              <option key={ct.id} value={ct.id}>{ct.name}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            disabled={!bulkContactId || applying}
+            onClick={() => {
+              if (bulkContactId === "__clear__") {
+                onBulkUpdate(bucketKey, Array.from(selectedIds),
+                             { kind: "contact", contact_id: null, contact_name: null });
+              } else {
+                applyBulk("contact");
+              }
+            }}
+            className="px-2 py-1 rounded bg-indigo-700 hover:bg-indigo-800 text-white text-xs disabled:opacity-50"
+            data-testid={`bucket-bulk-contact-apply-${bucketKey}`}
+          >
+            Apply
+          </button>
+          <span className="text-indigo-800">·</span>
+          <select
+            value={bulkCategoryId}
+            onChange={(e) => setBulkCategoryId(e.target.value)}
+            className="text-xs border border-indigo-300 rounded px-1.5 py-1 bg-white min-w-[200px]"
+            data-testid={`bucket-bulk-category-${bucketKey}`}
+          >
+            <option value="">Change category to…</option>
+            {accounts.map(a => (
+              <option key={a.id} value={a.id}>{a.code} · {a.name}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            disabled={!bulkCategoryId || applying}
+            onClick={() => applyBulk("category")}
+            className="px-2 py-1 rounded bg-indigo-700 hover:bg-indigo-800 text-white text-xs disabled:opacity-50"
+            data-testid={`bucket-bulk-category-apply-${bucketKey}`}
+          >
+            Apply
+          </button>
+          <div className="flex-1" />
+          <button
+            type="button"
+            onClick={() => setSelectedIds(new Set())}
+            className="text-indigo-700 hover:text-indigo-900 text-xs underline"
+          >
+            Clear selection
+          </button>
+        </div>
+      )}
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-left text-[10px] uppercase tracking-wide text-slate-500 border-b border-slate-200">
+            <th className="pl-4 pr-1 py-1.5 font-normal w-6">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={toggleAll}
+                data-testid={`bucket-select-all-${bucketKey}`}
+                title={allSelected ? "Clear selection" : "Select all rows in this bucket"}
+              />
+            </th>
+            <th className="pr-2 py-1.5 font-normal w-[86px]">Date</th>
+            <th className="px-2 py-1.5 font-normal">Description</th>
+            <th className="px-2 py-1.5 font-normal w-[190px]">Contact</th>
+            <th className="px-2 py-1.5 font-normal w-[240px]">Category</th>
+            <th className="px-2 py-1.5 font-normal w-[100px] text-right pr-4">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.id} data-testid={`bucket-txn-${r.id}`} className={`border-b border-slate-100 last:border-b-0 hover:bg-white ${selectedIds.has(r.id) ? "bg-indigo-50/40" : ""}`}>
+              <td className="pl-4 pr-1 py-1.5">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(r.id)}
+                  onChange={() => toggleOne(r.id)}
+                  data-testid={`bucket-select-${r.id}`}
+                />
+              </td>
+              <td className="pr-2 py-1.5 tabular-nums text-slate-600">{r.date || "—"}</td>
+              <td className="px-2 py-1.5 text-slate-800 truncate max-w-[280px]" title={r.description}>
+                {r.merchant || r.description || "—"}
+              </td>
+              <td className="px-2 py-1.5">
+                <select
+                  value={r.contact_id || ""}
+                  onChange={(e) => {
+                    const cid = e.target.value || null;
+                    const contact = contacts.find(x => x.id === cid);
+                    onUpdate(r.id, {
+                      contact_id: cid,
+                      contact_name: contact?.name || null,
+                    });
+                  }}
+                  className="w-full text-xs border border-slate-300 rounded px-1.5 py-1 bg-white"
+                  data-testid={`bucket-row-contact-${r.id}`}
+                >
+                  <option value="">— none —</option>
+                  {contacts.map(ct => (
+                    <option key={ct.id} value={ct.id}>{ct.name}</option>
+                  ))}
+                </select>
+              </td>
+              <td className="px-2 py-1.5">
+                <select
+                  value={r.category_account_id || ""}
+                  onChange={(e) => {
+                    const aid = e.target.value || null;
+                    const acct = accounts.find(x => x.id === aid);
+                    onUpdate(r.id, {
+                      category_account_id: aid,
+                      category_account_code: acct?.code || null,
+                      category_account_name: acct?.name || null,
+                    });
+                  }}
+                  className="w-full text-xs border border-slate-300 rounded px-1.5 py-1 bg-white"
+                  data-testid={`bucket-row-category-${r.id}`}
+                >
+                  <option value="">— uncategorized —</option>
+                  {accounts.map(a => (
+                    <option key={a.id} value={a.id}>{a.code} · {a.name}</option>
+                  ))}
+                </select>
+              </td>
+              <td className={`px-2 py-1.5 text-right pr-4 tabular-nums ${(r.amount || 0) < 0 ? "text-slate-800" : "text-emerald-700"}`}>
+                {r.amount != null ? `$${Math.abs(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
