@@ -201,6 +201,67 @@ export default function Reconciliation() {
     } finally { setBusy(false); }
   };
 
+  // Save an in-progress recon (ticked txns + balances) so the CPA can
+  // step away and come back later. Idempotent per (acct, period) — one
+  // draft slot per period. Hydrated by the effect below on mount /
+  // period switch. Aug 24 2026.
+  const saveDraft = async () => {
+    if (!currentId) return;
+    if (!periodStart || !periodEnd) {
+      toast.error("Pick a period first.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/reconciliations/draft`, {
+        bank_account_id: acctId || null,
+        period_start: periodStart,
+        period_end: periodEnd,
+        opening_balance: openBal === "" ? null : parseFloat(openBal),
+        closing_balance: closeBal === "" ? null : parseFloat(closeBal),
+        cleared_txn_ids: [...checked],
+      });
+      toast.success(`Progress saved — ${r.data?.cleared_count || 0} ticked. Pick up any time.`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Save failed");
+    } finally { setBusy(false); }
+  };
+
+  // Hydrate a saved draft when the CPA opens a period they had paused.
+  // Fires whenever the active (acct, period) tuple changes.
+  useEffect(() => {
+    if (!currentId || !periodStart || !periodEnd) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.get(`/companies/${currentId}/reconciliations/draft`, {
+          params: {
+            bank_account_id: acctId || undefined,
+            period_start: periodStart,
+            period_end: periodEnd,
+          },
+        });
+        if (cancelled) return;
+        const d = r.data?.draft;
+        if (!d) return;
+        // Only hydrate fields the user hasn't already started editing —
+        // otherwise a background auto-load would clobber typed work.
+        if (openBal === "" && d.opening_balance !== null && d.opening_balance !== undefined) {
+          setOpenBal(String(d.opening_balance));
+        }
+        if (closeBal === "" && d.closing_balance !== null && d.closing_balance !== undefined) {
+          setCloseBal(String(d.closing_balance));
+        }
+        if (checked.size === 0 && Array.isArray(d.cleared_txn_ids) && d.cleared_txn_ids.length) {
+          setChecked(new Set(d.cleared_txn_ids));
+          toast.info(`Restored saved progress — ${d.cleared_txn_ids.length} ticked.`);
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId, acctId, periodStart, periodEnd]);
+
   const runAutoClear = async () => {
     setBusy(true);
     try {
@@ -497,7 +558,9 @@ export default function Reconciliation() {
                   opening={parseFloat(openBal) || 0}
                   closing={parseFloat(closeBal) || 0}
                   diff={diffLive} isBalanced={isBalanced}
-                  onFinish={async () => { await finish(); setStartOpen(false); }} busy={busy}
+                  onFinish={async () => { await finish(); setStartOpen(false); }}
+                  onSaveDraft={saveDraft}
+                  busy={busy}
                 />
               </div>
             )}
@@ -670,7 +733,7 @@ export default function Reconciliation() {
   );
 }
 
-function ScoreboardCard({ preview, clearedCount, clearedSum, opening, closing, diff, isBalanced, onFinish, busy }) {
+function ScoreboardCard({ preview, clearedCount, clearedSum, opening, closing, diff, isBalanced, onFinish, onSaveDraft, busy }) {
 
   const fmtMoney = useMoneyFmt();
   return (
@@ -701,6 +764,20 @@ function ScoreboardCard({ preview, clearedCount, clearedSum, opening, closing, d
         {busy ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
         Finish reconciliation
       </button>
+      {/* Save progress lets the CPA step away with everything ticked +
+          balances preserved. Restored automatically next time they
+          re-open this period. Doesn't require a balanced sheet. */}
+      {onSaveDraft && (
+        <button
+          onClick={onSaveDraft}
+          disabled={busy}
+          className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md border border-slate-300 bg-white text-slate-700 text-sm hover:bg-slate-50 disabled:opacity-40 mt-2"
+          data-testid="recon-save-draft-btn"
+          title="Save progress and come back later — nothing is finalized until you click Finish"
+        >
+          Save progress
+        </button>
+      )}
     </div>
   );
 }
