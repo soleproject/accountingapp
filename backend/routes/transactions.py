@@ -66,6 +66,68 @@ async def _invalidate_dash(cid: str) -> None:
         pass
 
 
+
+@router.get("/companies/{cid}/transactions/cleanup-bucket")
+async def cleanup_bucket_txns(
+    cid: str,
+    account_id: str,
+    contact_id: str | None = None,
+    merchant: str | None = None,
+    user: dict = Depends(get_current_user),
+):
+    """Expand a mega-preview bucket → the actual transactions inside it.
+
+    Same bucketing logic as ``/transactions/mega-approve`` (contact_id +
+    category_account_id, or normalized merchant for no-contact rows).
+    Returned rows have full contact + category context so the frontend
+    can render inline pickers and PATCH each one individually.
+
+    Only returns rows that are STILL in the AI-approvable slice
+    (unreviewed, categorized to a real account) — so a row the user
+    already reviewed while the bucket was open silently drops out on
+    the next expand, keeping the bucket count honest.
+    """
+    await require_company(user, cid)
+    query = {
+        "company_id": cid,
+        "human_reviewed": {"$ne": True},
+        "category_account_id": account_id,
+    }
+    if contact_id:
+        query["contact_id"] = contact_id
+    elif merchant:
+        # Match the mega-approve fallback: no contact → lowercase merchant
+        # substring (up to 60 chars). Anchor with case-insensitive regex.
+        import re as _re
+        query["contact_id"] = {"$in": [None, ""]}
+        query["$or"] = [
+            {"merchant": {"$regex": f"^{_re.escape(merchant[:60])}", "$options": "i"}},
+            {"description": {"$regex": f"^{_re.escape(merchant[:60])}", "$options": "i"}},
+        ]
+    else:
+        raise HTTPException(400, "contact_id or merchant is required")
+
+    rows = await db.transactions.find(query).sort("date", -1).to_list(500)
+    return {"rows": [
+        {
+            "id": t["id"],
+            "date": t.get("date"),
+            "description": t.get("description"),
+            "merchant": t.get("merchant"),
+            "amount": t.get("amount"),
+            "contact_id": t.get("contact_id"),
+            "contact_name": t.get("contact_name"),
+            "category_account_id": t.get("category_account_id"),
+            "category_account_code": t.get("category_account_code"),
+            "category_account_name": t.get("category_account_name"),
+            "needs_review": bool(t.get("needs_review")),
+            "bank_account_name": t.get("bank_account_name"),
+        }
+        for t in rows
+    ], "count": len(rows)}
+
+
+
 # ----------------------- Transactions -----------------------
 
 @router.get("/companies/{cid}/transactions/cleanup-suggestions")
