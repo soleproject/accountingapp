@@ -62,6 +62,27 @@ async def bank_statement_set_probe() -> dict:
     return {"ok": True, "service": "axiom-veryfi-webhook"}
 
 
+@router.get("/webhooks/veryfi/handshakes/latest")
+async def latest_veryfi_handshake() -> dict:
+    """Return the most recently received Veryfi subscription-handshake
+    payload. Used during the one-time webhook URL registration flow —
+    the user pastes the ``secret`` value into Veryfi's verification
+    modal to complete the save.
+    """
+    doc = await db.veryfi_handshakes.find_one(
+        {}, sort=[("received_at", -1)],
+    )
+    if not doc:
+        return {"ok": False, "message": "No Veryfi handshake received yet."}
+    return {
+        "ok": True,
+        "received_at": doc.get("received_at"),
+        "event": doc.get("event"),
+        "secret": doc.get("secret"),
+        "raw_payload": doc.get("raw_payload"),
+    }
+
+
 @router.post("/webhooks/veryfi/bank-statement-set")
 async def bank_statement_set(
     request: Request,
@@ -92,6 +113,38 @@ async def bank_statement_set(
     data = payload.get("data") or {}
     if not isinstance(data, dict):
         raise HTTPException(400, "webhook body.data must be object")
+
+    # ---- Subscription handshake (URL registration) ----
+    # Veryfi's dashboard validates a newly-registered webhook URL by
+    # POSTing a `subscription`-event payload containing a `secret` field.
+    # This payload is NOT HMAC-signed with our client_secret (that keys
+    # only DATA-flow events), so we short-circuit signature verification
+    # here, log the secret prominently, and persist it in Mongo so the
+    # user can retrieve it from
+    # ``GET /api/webhooks/veryfi/handshakes/latest`` and paste it into
+    # the Veryfi verification modal.
+    _is_handshake = (
+        "subscription" in event.lower()
+        or "secret" in data
+        or "secret" in payload
+    )
+    if _is_handshake:
+        secret_val = data.get("secret") or payload.get("secret") or ""
+        log.warning(
+            "Veryfi webhook HANDSHAKE received (event=%s). "
+            "Paste this secret into the Veryfi dashboard modal: %s",
+            event or "<no-event>", secret_val,
+        )
+        try:
+            await db.veryfi_handshakes.insert_one({
+                "received_at": now_iso(),
+                "event": event,
+                "secret": secret_val,
+                "raw_payload": payload,
+            })
+        except Exception:  # noqa: BLE001 — never fail the handshake response
+            pass
+        return {"ok": True, "handshake": True, "secret": secret_val, "echo": payload}
 
     # ---- Signature verification ----
     insecure_ok = os.environ.get("VERYFI_WEBHOOK_INSECURE") == "1"
