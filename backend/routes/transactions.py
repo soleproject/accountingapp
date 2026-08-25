@@ -2789,6 +2789,62 @@ async def bulk_approve(cid: str, ids: List[str], user: dict = Depends(get_curren
     return {"ok": True, "count": len(ids)}
 
 
+@router.post("/companies/{cid}/transactions/bulk-set-contact")
+async def bulk_set_contact(cid: str, payload: dict, user: dict = Depends(get_current_user)):
+    """Assign / clear the contact on a set of transactions in one shot.
+
+    Body: ``{"transaction_ids": [str, ...], "contact_id": str | null}``
+
+    A ``null`` / missing ``contact_id`` clears the contact on the target
+    rows (used when the CPA notices a bucket was wrongly tagged to a
+    merchant and wants to reset it before re-categorizing). Enforces
+    the closed-period lock per row so this can't retroactively rewrite
+    a locked historical period.
+    """
+    await require_company(user, cid)
+    ids = [x for x in (payload.get("transaction_ids") or []) if x]
+    contact_id = payload.get("contact_id")
+    if not ids:
+        raise HTTPException(400, "transaction_ids is required")
+
+    contact = None
+    if contact_id:
+        contact = await db.contacts.find_one({"id": contact_id, "company_id": cid})
+        if not contact:
+            raise HTTPException(404, "Contact not found in this company")
+
+    txns = await db.transactions.find(
+        {"id": {"$in": ids}, "company_id": cid}
+    ).to_list(len(ids))
+
+    skipped_closed: list[str] = []
+    editable_ids: list[str] = []
+    for t in txns:
+        if await is_period_closed(cid, t.get("date")):
+            skipped_closed.append(t["id"])
+        else:
+            editable_ids.append(t["id"])
+    if not editable_ids:
+        return {"ok": True, "updated": 0, "skipped_closed": skipped_closed}
+
+    await db.transactions.update_many(
+        {"id": {"$in": editable_ids}, "company_id": cid},
+        {"$set": {
+            "contact_id":   contact["id"]   if contact else None,
+            "contact_name": contact["name"] if contact else None,
+            "updated_at":   now_iso(),
+        }},
+    )
+    await _invalidate_dash(cid)
+    return {
+        "ok": True,
+        "updated": len(editable_ids),
+        "skipped_closed": skipped_closed,
+    }
+
+
+
+
 @router.post("/companies/{cid}/transactions/bulk-reclassify")
 async def bulk_reclassify(cid: str, payload: dict, user: dict = Depends(get_current_user)):
     """Reclassify multiple transactions to a new category in one shot.
