@@ -139,7 +139,7 @@ async def complete_reconciliation(
 ):
     await require_company(user, cid)
     try:
-        return await complete_recon(
+        result = await complete_recon(
             cid=cid,
             bank_account_id=inp.bank_account_id,
             period_start=inp.period_start,
@@ -151,6 +151,84 @@ async def complete_reconciliation(
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
+    # Successful complete → drop any resume-draft for this period so the
+    # CPA doesn't see stale saved state next time they open a fresh recon
+    # for the same account/period. Aug 24 2026.
+    await db.reconciliation_drafts.delete_one({
+        "company_id": cid,
+        "bank_account_id": inp.bank_account_id,
+        "period_start": inp.period_start,
+        "period_end": inp.period_end,
+    })
+    return result
+
+
+class ReconDraftIn(BaseModel):
+    bank_account_id: Optional[str] = None
+    period_start: str
+    period_end: str
+    opening_balance: Optional[float] = None
+    closing_balance: Optional[float] = None
+    cleared_txn_ids: List[str] = []
+
+
+@router.post("/companies/{cid}/reconciliations/draft")
+async def save_recon_draft(
+    cid: str, inp: ReconDraftIn, user: dict = Depends(get_current_user),
+):
+    """Save in-progress reconciliation state (ticked txns + balances) so a
+    CPA can pause and pick up later. Keyed by (company, bank_account,
+    period_start, period_end) — one draft per period. Idempotent upsert.
+    Aug 24 2026.
+    """
+    await require_company(user, cid)
+    now = now_iso()
+    key = {
+        "company_id": cid,
+        "bank_account_id": inp.bank_account_id,
+        "period_start": inp.period_start,
+        "period_end": inp.period_end,
+    }
+    await db.reconciliation_drafts.update_one(
+        key,
+        {
+            "$set": {
+                **key,
+                "opening_balance": inp.opening_balance,
+                "closing_balance": inp.closing_balance,
+                "cleared_txn_ids": inp.cleared_txn_ids,
+                "updated_at": now,
+                "updated_by": user.get("email") or user.get("id"),
+            },
+            "$setOnInsert": {"id": str(uuid.uuid4()), "created_at": now},
+        },
+        upsert=True,
+    )
+    return {"ok": True, "cleared_count": len(inp.cleared_txn_ids)}
+
+
+@router.get("/companies/{cid}/reconciliations/draft")
+async def get_recon_draft(
+    cid: str,
+    bank_account_id: Optional[str] = None,
+    period_start: str = "",
+    period_end: str = "",
+    user: dict = Depends(get_current_user),
+):
+    """Hydrate a saved draft for the given (bank_account, period). Returns
+    ``{"draft": null}`` when nothing is saved. Aug 24 2026.
+    """
+    await require_company(user, cid)
+    doc = await db.reconciliation_drafts.find_one({
+        "company_id": cid,
+        "bank_account_id": bank_account_id,
+        "period_start": period_start,
+        "period_end": period_end,
+    })
+    if not doc:
+        return {"draft": None}
+    doc.pop("_id", None)
+    return {"draft": doc}
 
 
 @router.post("/companies/{cid}/reconciliations/auto-clear")
