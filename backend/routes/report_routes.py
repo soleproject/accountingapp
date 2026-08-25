@@ -28,6 +28,7 @@ from ai_service import (
     parse_voice_intent,
 )
 import reports as R
+import report_csv as R_csv
 import plaid_service
 import plaid_connect
 import veryfi_service
@@ -289,3 +290,110 @@ async def rep_ap_aging(cid: str, as_of: Optional[str] = None, user: dict = Depen
     return await R.compute_ap_aging(cid, as_of or e)
 
 
+
+
+# ========================================================================
+# CSV exports — one route per report, mirrors the /pdf route contract.
+# The UI's Export dropdown flips between PDF and CSV by swapping the
+# extension in the URL; params are identical.
+# ========================================================================
+
+def _csv_response(csv_bytes: bytes, filename: str) -> Response:
+    return Response(
+        content=csv_bytes, media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.get("/companies/{cid}/reports/income-statement/csv")
+async def rep_income_csv(cid: str, request: Request, start: Optional[str] = None, end: Optional[str] = None,
+                         basis: str = "accrual", user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    s, e = _default_range()
+    data = await R.compute_income_statement(cid, start or s, end or e, basis)
+    _log_export(user, cid, "income-statement", "income_statement.csv", request,
+                {"start": start or s, "end": end or e, "basis": basis})
+    return _csv_response(R_csv.build_income_statement_csv(data), "income_statement.csv")
+
+
+@router.get("/companies/{cid}/reports/balance-sheet/csv")
+async def rep_bs_csv(cid: str, request: Request, as_of: Optional[str] = None, basis: str = "accrual",
+                     user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    _, e = _default_range()
+    data = await R.compute_balance_sheet(cid, as_of or e, basis)
+    _log_export(user, cid, "balance-sheet", "balance_sheet.csv", request,
+                {"as_of": as_of or e, "basis": basis})
+    return _csv_response(R_csv.build_balance_sheet_csv(data), "balance_sheet.csv")
+
+
+@router.get("/companies/{cid}/reports/account-detail/csv")
+async def rep_account_detail_csv(cid: str, request: Request, account_id: str,
+                                 start: Optional[str] = None, end: Optional[str] = None,
+                                 q: Optional[str] = None,
+                                 contact_id: Optional[str] = None,
+                                 min_amount: Optional[float] = None,
+                                 max_amount: Optional[float] = None,
+                                 user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    data = await R.compute_account_detail(cid, account_id, start, end,
+                                          q=q, contact_id=contact_id,
+                                          min_amount=min_amount, max_amount=max_amount)
+    fname = f"account_detail_{(data.get('account') or {}).get('code', 'x')}.csv"
+    _log_export(user, cid, "account-detail", fname, request,
+                {"account_id": account_id, "start": start, "end": end,
+                 "q": q, "contact_id": contact_id})
+    return _csv_response(R_csv.build_account_detail_csv(data), fname)
+
+
+@router.get("/companies/{cid}/reports/trial-balance/csv")
+async def rep_tb_csv(cid: str, request: Request, as_of: Optional[str] = None,
+                     user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    _, e = _default_range()
+    data = await R.compute_trial_balance(cid, as_of or e)
+    _log_export(user, cid, "trial-balance", "trial_balance.csv", request, {"as_of": as_of or e})
+    return _csv_response(R_csv.build_trial_balance_csv(data), "trial_balance.csv")
+
+
+@router.get("/companies/{cid}/reports/general-ledger/csv")
+async def rep_gl_csv(cid: str, request: Request, start: Optional[str] = None, end: Optional[str] = None,
+                     user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    s, e = _default_range()
+    data = await R.compute_general_ledger(cid, start or s, end or e)
+    _log_export(user, cid, "general-ledger", "general_ledger.csv", request,
+                {"start": start or s, "end": end or e})
+    return _csv_response(R_csv.build_general_ledger_csv(data), "general_ledger.csv")
+
+
+@router.get("/companies/{cid}/reports/cash-flow/csv")
+async def rep_cf_csv(cid: str, request: Request, start: Optional[str] = None, end: Optional[str] = None,
+                     user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    s, e = _default_range()
+    data = await R.compute_cash_flow(cid, start or s, end or e)
+    _log_export(user, cid, "cash-flow", "cash_flow.csv", request,
+                {"start": start or s, "end": end or e})
+    return _csv_response(R_csv.build_cash_flow_csv(data), "cash_flow.csv")
+
+
+@router.get("/companies/{cid}/reports/sales-tax/csv")
+async def rep_sales_tax_csv(cid: str, request: Request, start: Optional[str] = None, end: Optional[str] = None,
+                            user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    s, e = _default_range()
+    data = await R.compute_sales_tax(cid, start or s, end or e)
+    _log_export(user, cid, "sales-tax", "sales_tax_liability.csv", request,
+                {"start": start or s, "end": end or e})
+    return _csv_response(R_csv.build_sales_tax_csv(data), "sales_tax_liability.csv")
+
+
+@router.get("/companies/{cid}/reports/1099-summary/csv")
+async def rep_1099_csv(cid: str, request: Request, year: Optional[int] = None,
+                       user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    y = year or datetime.now(timezone.utc).year
+    data = await R.compute_1099_summary(cid, y)
+    _log_export(user, cid, "1099-summary", "1099_summary.csv", request, {"year": y})
+    return _csv_response(R_csv.build_1099_csv(data), "1099_summary.csv")

@@ -69,6 +69,21 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
    sweep on Plaid Test LLC re-routed 8 mis-categorized DDA→DDA deposits to 4999; UF is no
    longer negative and BS now balances. Rules Miner also blocks learning rules that target
    `4999 / 6999 / money_in_transit` so bad historical patterns can't get codified.
+- **Balance Sheet parent drill-down fix (2026-08-25)** — `reports.compute_account_detail`
+   now walks `parent_account_id → id` breadth-first to include every descendant sub-account
+   in the transaction query. Clicking a parent row on the BS ("Business Checking +1 sub")
+   surfaces the roll-up transactions instead of showing an empty "No transactions" page.
+   Sub-account clicks still stay scoped to their own id (no upward leak). Regression test
+   at `tests/test_account_drilldown_parent_sub.py`.
+
+## Explicitly Declined (do not resurface without user approval)
+- **Multi-account fan-out for combined statements** (server-side PDF page-range splitter,
+   "Option 2" from the Aug 25 discussion). User accepts that combined statements Veryfi
+   can't split automatically will be handled by manual pre-upload PDF splitting.
+- **False-RECONCILED status bug** (auto-recon marking as RECONCILED when |diff|>$0.01).
+   Known behavior; not fixing.
+- **Layer 6 OCR defense** (detect `account_numbers` plural mismatch and refuse auto-recon).
+   Not building; workflow is manual PDF split when Veryfi conflates accounts.
 
 ## Prioritized Backlog
 
