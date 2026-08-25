@@ -491,9 +491,15 @@ export default function StatementsTab({ companyId, bare = false }) {
                 data-testid="stmt-precheck-multi-toggle"
               />
               <span>
-                <b>This PDF contains multiple statements</b> — use Veryfi&apos;s
-                auto-splitter (recommended for year-end catch-up or shoebox
-                PDFs). Off by default; auto-on for <code>.zip</code>.
+                <b>This file contains multiple separate statements</b> (different
+                months or accounts as their own statements) — use Veryfi&apos;s
+                auto-splitter. Off by default; auto-on for <code>.zip</code>.
+                <br />
+                <span className="text-slate-500">
+                  Do <b>not</b> use this for a single &ldquo;combined&rdquo; statement
+                  that lists multiple accounts on one document — those are handled
+                  automatically.
+                </span>
               </span>
             </label>
             <label className="flex items-center gap-2 mt-2 text-xs text-slate-600 cursor-pointer">

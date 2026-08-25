@@ -150,6 +150,97 @@ async def process_generic_document(file_bytes: bytes, filename: str, content_typ
     return r.json()
 
 
+def iter_statement_accounts(veryfi_data: dict) -> list[dict]:
+    """Split a Veryfi bank-statement JSON into a list of per-account
+    "sub-docs", one entry per real account on the statement.
+
+    Returns ``[{"account_ref": {...}, "lines": [...]}]`` where
+    ``account_ref`` mirrors the fields
+    :func:`statement_account_resolver._statement_fields` looks at (so it
+    can be passed straight through as a synthetic single-account doc),
+    and ``lines`` are the normalized transaction rows for that account
+    only.
+
+    Handles three cases:
+
+    * ``accounts[]`` with 2+ entries → true multi-account combined
+      statement (Wells Fargo Combined, Amex Blue + Gold on one PDF,
+      Chase Total Checking + Savings, etc.). Each entry becomes its own
+      sub-doc with its own beginning/ending balance, summaries, and
+      transactions. Downstream code (resolver, OCR guards, reconcile,
+      OBE) then runs per-account.
+    * ``accounts[]`` with exactly 1 entry → routed as a single-account
+      list of length 1. Preserves the current single-statement code
+      path unchanged.
+    * No ``accounts[]`` at all → falls back to the top-level fields +
+      :func:`extract_transactions` output (older bank-statement shape
+      and the ``line_items[]`` documents-endpoint fallback).
+    """
+    accts = veryfi_data.get("accounts") or []
+    # No `accounts[]` → single implicit account, use existing extractor.
+    if not accts or not isinstance(accts, list):
+        return [{
+            "account_ref": veryfi_data,
+            "lines": extract_transactions(veryfi_data),
+        }]
+    top_bank = (
+        veryfi_data.get("bank_name")
+        or (veryfi_data.get("vendor") or {}).get("name")
+    )
+    top_period_start = (
+        veryfi_data.get("period_start_date")
+        or veryfi_data.get("start_date")
+    )
+    top_period_end = (
+        veryfi_data.get("period_end_date")
+        or veryfi_data.get("end_date")
+        or veryfi_data.get("statement_date")
+    )
+    groups: list[dict] = []
+    for i, acct in enumerate(accts):
+        if not isinstance(acct, dict):
+            continue
+        # Build a synthetic "sub-doc" that looks like a single-account
+        # Veryfi response — `_statement_fields` will pick it up correctly.
+        sub_doc = {
+            **veryfi_data,
+            "accounts": [acct],
+            # Prefer per-account bank_name if Veryfi ever emits it,
+            # otherwise fall back to the statement-level bank name.
+            "bank_name": acct.get("bank_name") or top_bank,
+            # Roll balances up to top-level too so any callsite that
+            # reads them without going through `_statement_fields` still
+            # sees the per-account values (not `accounts[0]`).
+            "starting_balance": (
+                acct.get("beginning_balance")
+                or acct.get("starting_balance")
+            ),
+            "ending_balance": (
+                acct.get("ending_balance")
+                or acct.get("closing_balance")
+            ),
+            # Period is a statement-level attribute on combined statements
+            # (all accounts share the same billing period), so re-project
+            # the top-level dates onto the sub-doc.
+            "period_start_date": top_period_start,
+            "period_end_date": top_period_end,
+            "_multi_account_index": i,
+            "_multi_account_total": len(accts),
+        }
+        # Extract lines for THIS account only.
+        sub_lines: list[dict] = []
+        for t in (acct.get("transactions") or []):
+            # Re-use `extract_transactions` on a single-txn sub-doc so
+            # cardholder-subtotal filtering + year-wrap correction still
+            # fire per-transaction.
+            micro = {"transactions": [t],
+                     "statement_date": veryfi_data.get("statement_date")
+                                       or top_period_end}
+            sub_lines.extend(extract_transactions(micro))
+        groups.append({"account_ref": sub_doc, "lines": sub_lines})
+    return groups
+
+
 async def process_bank_statement_set(
     file_bytes: bytes, filename: str, content_type: str,
 ) -> dict:

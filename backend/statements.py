@@ -401,6 +401,135 @@ async def upload_statement(
     )
 
 
+async def _fan_out_multi_account(
+    cid: str,
+    parent_import_id: str,
+    veryfi_data: dict,
+    categorize_fn,
+    is_period_closed_fn,
+    account_kind_hint: str | None = None,
+) -> dict:
+    """Handle a combined multi-account statement (Wells Fargo Combined,
+    Amex Blue + Gold, Chase Checking + Savings on one PDF) by promoting
+    the current import row to a PARENT and running
+    :func:`_process_veryfi_result` once per account against a synthetic
+    single-account sub-doc.
+
+    Contract mirrors the splitter parent/child model (same
+    ``parent_import_id``/``child_import_ids`` fields on
+    ``statement_imports``) so the imports table renders them the same
+    way — a ``multi · N`` badge on the parent + indented children.
+    """
+    import uuid as _uuid
+    groups = veryfi_service.iter_statement_accounts(veryfi_data)
+    parent = await db.statement_imports.find_one({"id": parent_import_id})
+    parent_filename = (parent or {}).get("filename") or "statement.pdf"
+
+    # Promote current row to parent immediately so it appears in the
+    # imports table as "multi · N accounts" while the children run.
+    await db.statement_imports.update_one(
+        {"id": parent_import_id},
+        {"$set": {
+            "is_multi_account": True,
+            "is_multi": True,   # UI reuses the same badge as the splitter
+            "status": "processing",
+            "child_import_ids": [],
+            "multi_account_count": len(groups),
+            "veryfi_raw": veryfi_data,
+            "updated_at": now_iso(),
+        }},
+    )
+
+    child_import_ids: list[str] = []
+    successes = 0
+    failures = 0
+    total_txns = 0
+    for i, grp in enumerate(groups):
+        child_id = str(_uuid.uuid4())
+        acct_ref = grp["account_ref"]
+        # Human-readable child filename hint: "statement.pdf [Checking ···6084]"
+        acct_num = (
+            acct_ref.get("account_number")
+            or (acct_ref.get("accounts") or [{}])[0].get("account_number")
+            or (acct_ref.get("accounts") or [{}])[0].get("number")
+            or ""
+        )
+        acct_type = (
+            (acct_ref.get("accounts") or [{}])[0].get("account_type")
+            or acct_ref.get("account_type")
+            or f"acct #{i + 1}"
+        )
+        last4 = str(acct_num)[-4:] if acct_num else ""
+        child_label = f"{acct_type}{f' ···{last4}' if last4 else ''}".strip()
+        now = now_iso()
+        await db.statement_imports.insert_one({
+            "id": child_id,
+            "company_id": cid,
+            "parent_import_id": parent_import_id,
+            "filename": f"{parent_filename} [{child_label}]",
+            "size": None,
+            "method": "veryfi_multiacct_child",
+            "status": "processing",
+            "transaction_count": None,
+            "period_start": None,
+            "period_end": None,
+            "account_id": None,
+            "account_name": None,
+            "veryfi_document_id": None,
+            "multi_account_index": i,
+            "multi_account_total": len(groups),
+            "created_at": now,
+            "updated_at": now,
+        })
+        child_import_ids.append(child_id)
+        try:
+            child_result = await _process_veryfi_result(
+                cid, child_id, acct_ref, account_id=None,
+                categorize_fn=categorize_fn,
+                is_period_closed_fn=is_period_closed_fn,
+                account_kind_hint=account_kind_hint,
+            )
+            successes += 1
+            total_txns += int(child_result.get("transaction_count") or 0)
+        except Exception as e:  # noqa: BLE001 — one bad account can't kill the batch
+            logging.getLogger(__name__).exception(
+                "Multi-account child failed cid=%s parent=%s idx=%d: %s",
+                cid, parent_import_id, i, e,
+            )
+            failures += 1
+            await db.statement_imports.update_one(
+                {"id": child_id},
+                {"$set": {"status": "failed",
+                          "error": f"pipeline: {e}",
+                          "updated_at": now_iso()}},
+            )
+
+    final_status = (
+        "completed" if failures == 0 and successes > 0
+        else ("failed" if successes == 0 else "partial")
+    )
+    await db.statement_imports.update_one(
+        {"id": parent_import_id},
+        {"$set": {
+            "status": final_status,
+            "child_import_ids": child_import_ids,
+            "transaction_count": total_txns,
+            "children_success": successes,
+            "children_failed": failures,
+            "updated_at": now_iso(),
+        }},
+    )
+    return {
+        "import_id": parent_import_id,
+        "status": final_status,
+        "is_multi_account": True,
+        "transaction_count": total_txns,
+        "children_success": successes,
+        "children_failed": failures,
+        "child_import_ids": child_import_ids,
+    }
+
+
 async def _process_veryfi_result(
     cid: str,
     import_id: str,
@@ -417,7 +546,28 @@ async def _process_veryfi_result(
     Extracted from :func:`upload_statement` so the async splitter webhook
     (which fetches each child statement's parsed JSON via a GET) can
     reuse the exact same pipeline as the sync single-file path.
+
+    Multi-account statements (Wells Fargo Combined, Amex Blue + Gold on
+    one PDF, Chase Total Checking + Savings) fan out here: when Veryfi
+    returns 2+ entries in ``accounts[]``, the current ``import_id`` is
+    promoted to a parent row (``is_multi_account=True``) and one child
+    ``statement_imports`` row is created per account, each running
+    through this same function with a synthetic single-account sub-doc.
     """
+    # -------- Multi-account fan-out (combined statements) --------
+    # Detect BEFORE running the single-account path so we route Wells
+    # Combined-style statements into per-account children instead of
+    # flattening every transaction into one CoA row.
+    _accts = veryfi_data.get("accounts") or []
+    _valid_accts = [a for a in _accts if isinstance(a, dict)]
+    if len(_valid_accts) > 1 and not account_id:
+        return await _fan_out_multi_account(
+            cid, import_id, veryfi_data,
+            categorize_fn=categorize_fn,
+            is_period_closed_fn=is_period_closed_fn,
+            account_kind_hint=account_kind_hint,
+        )
+
     # -------- Resolve/create the target CoA account --------
     if account_id:
         acct = await db.accounts.find_one({"id": account_id, "company_id": cid})
