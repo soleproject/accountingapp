@@ -426,7 +426,18 @@ export function NoContactReviewListToggle() {
     <button
       type="button"
       onClick={toggle}
-      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border bg-white text-slate-700 text-xs hover:bg-slate-50"
+      className={
+        "inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold shadow-sm transition-colors shrink-0 " +
+        (isList
+          // Toggling OUT of list mode — softer indigo outline reads
+          // as "return to the default flow" rather than the primary
+          // CTA the filled indigo would suggest.
+          ? "border border-indigo-500 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+          // Toggling INTO list mode — solid indigo so the CPA can
+          // spot the escape hatch immediately even after scrolling
+          // half the group's rows.
+          : "border border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700 hover:border-indigo-700")
+      }
       data-testid={isList ? "ncr-back-to-stepper" : "ncr-open-list"}
       title={isList
         ? "Back to walking one group at a time"

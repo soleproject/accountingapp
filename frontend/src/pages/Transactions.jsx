@@ -1216,9 +1216,16 @@ export default function Transactions() {
           >
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
-                Group {lrIdx} of {lrTotal}
+                {ncrIsListMode ? "All Groups View" : `Group ${lrIdx} of ${lrTotal}`}
               </span>
-              {(lrCount > 0 || lrTotalAmount) ? (
+              {ncrIsListMode ? (
+                <span
+                  className="text-[10px] text-slate-500 tabular-nums"
+                  data-testid="no-contact-review-all-groups-count"
+                >
+                  {lrTotal.toLocaleString()} group{lrTotal === 1 ? "" : "s"}
+                </span>
+              ) : (lrCount > 0 || lrTotalAmount) ? (
                 <span
                   className="text-[10px] text-slate-500 tabular-nums"
                   data-testid="no-contact-review-group-totals"
@@ -1235,9 +1242,9 @@ export default function Transactions() {
             </div>
             <div
               className="mt-0.5 font-heading font-semibold text-base text-slate-900 truncate"
-              title={ncrLabel}
+              title={ncrIsListMode ? "All no-contact groups" : ncrLabel}
             >
-              {ncrLabel}
+              {ncrIsListMode ? `All Groups View (${lrTotal})` : ncrLabel}
             </div>
             <div className="mt-2 flex items-center justify-between gap-2">
               <label className="text-[9px] uppercase tracking-wider text-slate-500 font-semibold">
