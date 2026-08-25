@@ -447,6 +447,68 @@ async def no_contact_groups(cid: str, user: dict = Depends(get_current_user)):
 
 
 
+@router.get("/companies/{cid}/transactions/no-contact-group-transactions")
+async def no_contact_group_transactions(
+    cid: str, group_key: str, user: dict = Depends(get_current_user),
+):
+    """Expand a No-Contact Review group into its individual transactions.
+
+    Same server-side membership rule as :func:`no_contact_groups` +
+    :func:`apply_no_contact_group` — we recompute ``_desc_group_key``
+    per row here rather than trusting a client-supplied txn-id list, so
+    a page that's been sitting open while the CPA worked elsewhere
+    silently drops any row that already got reviewed.
+
+    Powers the row-level expand-and-edit table on
+    ``/accounting/no-contact-review?view=list``.
+    """
+    await require_company(user, cid)
+    group_key = (group_key or "").strip()
+    if not group_key:
+        raise HTTPException(400, "group_key is required")
+    UNCAT_CODES = {"9999", "6999", "4999"}
+    cursor = db.transactions.find(
+        {
+            "company_id": cid,
+            "$or": [
+                {"contact_id": None},
+                {"contact_id": {"$exists": False}},
+                {"contact_id": ""},
+            ],
+            "human_reviewed": {"$ne": True},
+        },
+    ).sort("date", -1)
+    rows: list[dict] = []
+    async for t in cursor:
+        code = t.get("category_account_code")
+        has_cat_id = bool(t.get("category_account_id"))
+        is_uncategorized = (not has_cat_id) or (code in UNCAT_CODES)
+        needs_review = bool(t.get("needs_review"))
+        if not (is_uncategorized or needs_review):
+            continue
+        desc = t.get("description") or t.get("merchant") or ""
+        key, _ = _desc_group_key(desc)
+        if key != group_key:
+            continue
+        rows.append({
+            "id": t["id"],
+            "date": t.get("date"),
+            "description": t.get("description"),
+            "merchant": t.get("merchant"),
+            "amount": t.get("amount"),
+            "contact_id": t.get("contact_id"),
+            "contact_name": t.get("contact_name"),
+            "category_account_id": t.get("category_account_id"),
+            "category_account_code": t.get("category_account_code"),
+            "category_account_name": t.get("category_account_name"),
+            "needs_review": bool(t.get("needs_review")),
+            "bank_account_name": t.get("bank_account_name"),
+        })
+    return {"rows": rows, "count": len(rows)}
+
+
+
+
 @router.post("/companies/{cid}/transactions/no-contact-group/apply")
 async def apply_no_contact_group(cid: str, payload: dict, user: dict = Depends(get_current_user)):
     """Bulk-apply contact and/or category to every transaction that
