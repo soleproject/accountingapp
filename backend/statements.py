@@ -149,15 +149,22 @@ def _statement_ocr_reconcile(
     veryfi_data: dict, lines: list[dict], dropped: dict[str, int],
 ) -> dict | None:
     """Layer 3: reconcile Veryfi's line items against its OWN summary
-    totals extracted from the same PDF. Returns a flag dict when
-    drift is detected (so the caller can persist it on the import
-    row and surface a review banner); returns ``None`` when clean.
-
-    ``veryfi_data`` sometimes arrives as a list (multi-account PDF).
-    In that shape we can't extract stable summary totals — return
-    None instead of erroring so the upload can't 500 on Layer 3
-    alone. Aug 24 2026.
+    totals extracted from the same PDF. Advisory only — MUST NEVER
+    raise or block an upload. On any shape drift (list-vs-dict,
+    missing fields, malformed numerics) returns ``None`` and lets
+    the import proceed. Aug 24 2026.
     """
+    try:
+        return _statement_ocr_reconcile_impl(veryfi_data, lines, dropped)
+    except Exception as e:  # noqa: BLE001
+        logging.getLogger(__name__).warning(
+            "Layer 3 reconcile skipped (shape drift): %s", e)
+        return None
+
+
+def _statement_ocr_reconcile_impl(
+    veryfi_data: dict, lines: list[dict], dropped: dict[str, int],
+) -> dict | None:
     if not isinstance(veryfi_data, dict):
         return None
     _fields = statement_account_resolver._statement_fields(veryfi_data)
@@ -176,7 +183,15 @@ def _statement_ocr_reconcile(
         _acct_list = veryfi_data
     _acct_list = _acct_list or [{}]
     _acct0 = _acct_list[0] if _acct_list and isinstance(_acct_list[0], dict) else {}
-    _summaries = _acct0.get("summaries") or {}
+    _summaries_raw = _acct0.get("summaries")
+    # Veryfi returns `summaries` as either a dict or a list-of-dicts
+    # depending on account type — normalize to dict-lookup.
+    if isinstance(_summaries_raw, dict):
+        _summaries = _summaries_raw
+    elif isinstance(_summaries_raw, list) and _summaries_raw and isinstance(_summaries_raw[0], dict):
+        _summaries = _summaries_raw[0]
+    else:
+        _summaries = {}
     v_dep = (
         _root.get("total_deposits")
         or _acct0.get("total_deposits")
