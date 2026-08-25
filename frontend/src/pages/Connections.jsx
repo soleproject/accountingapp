@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import { Link2, CheckCircle2, ChevronDown, ChevronRight, PlugZap, CircleDashed, Loader2, FileText } from "lucide-react";
 
 export default function Connections() {
-  const { currentId } = useCompany();
+  const { currentId, current } = useCompany();
   const [searchParams] = useSearchParams();
   // `?view=imports` renders the Import Statements page — a focused
   // Load-Account-Statements experience without the Connect Accounts tab
@@ -208,7 +208,7 @@ export default function Connections() {
                         connected={status.connected} />
         <SyncHistoryPanel companyId={currentId} refreshKey={activeJob?.status} />
 
-        <PlaidLinkButton companyId={currentId} onSuccess={onLinked} />
+        <PlaidLinkButton companyId={currentId} companyName={current?.name} companyOwner={current?.owner_email} onSuccess={onLinked} />
 
         {/* Per-item editable "Download from" cutoff. Renders one row
             per linked institution with an inline date input. Feb 2026 —

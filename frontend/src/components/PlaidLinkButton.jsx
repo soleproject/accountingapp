@@ -19,7 +19,7 @@ import PlaidStartDateModal from "@/components/PlaidStartDateModal";
  *      import_start_date so it's stamped on the plaid_items row for
  *      every future sync to respect.
  */
-export default function PlaidLinkButton({ companyId, onSuccess, disabled, label }) {
+export default function PlaidLinkButton({ companyId, companyName, companyOwner, onSuccess, disabled, label }) {
   const [linkToken, setLinkToken] = useState(null);
   const [loading, setLoading] = useState(false);
   // Modal state + the chosen ISO date. `null` means the user hasn't
@@ -130,6 +130,8 @@ export default function PlaidLinkButton({ companyId, onSuccess, disabled, label 
         open={modalOpen}
         onOpenChange={setModalOpen}
         onConfirm={handleDateConfirmed}
+        companyName={companyName}
+        companyOwner={companyOwner}
       />
     </>
   );
