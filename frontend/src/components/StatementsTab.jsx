@@ -28,6 +28,11 @@ export default function StatementsTab({ companyId, bare = false }) {
   const [pending, setPending] = useState(null); // { files: File[], defaultChoice: string }
   const [modalChoice, setModalChoice] = useState("auto");
   const [skipModal, setSkipModal] = useState(false);
+  // Multi-statement PDF (Veryfi splitter) toggle. Default OFF — users
+  // must explicitly confirm they're uploading a combined-statement file
+  // to avoid burning splitter credits on regular monthly statements.
+  // Auto-forced ON in the modal when the dropped file is a .zip.
+  const [modalIsMulti, setModalIsMulti] = useState(false);
 
   const loadAssets = useCallback(async () => {
     try {
@@ -59,7 +64,7 @@ export default function StatementsTab({ companyId, bare = false }) {
     loadImports();
   }, [companyId, loadAssets, loadImports]);
 
-  const uploadOne = async (file, tempId = null, kindHintOverride = null) => {
+  const uploadOne = async (file, tempId = null, kindHintOverride = null, isMulti = false) => {
     // Reused for both first-time upload and retry — passing an existing
     // tempId flips the row back to "processing" instead of creating a new
     // one so ordering and any prior error state are preserved.
@@ -67,6 +72,8 @@ export default function StatementsTab({ companyId, bare = false }) {
     // to the specified account_kind_hint regardless of the top-of-page
     // dropdown value — used when the user confirms per-file that "this
     // is a credit card" or "this is a bank account".
+    // `isMulti` routes the file to Veryfi's async splitter endpoint —
+    // used when the user ticks "This PDF contains multiple statements".
     const id = tempId || `${file.name}::${Date.now()}::${Math.random()}`;
     if (tempId) {
       setUploading(u => u.map(x => x.tempId === tempId
@@ -83,6 +90,7 @@ export default function StatementsTab({ companyId, bare = false }) {
     try {
       const fd = new FormData();
       fd.append("file", file);
+      if (isMulti) fd.append("is_multi_statement", "true");
       // Precedence: per-file modal override > top-of-page dropdown.
       const effectiveAccountId = kindHintOverride ?? accountId;
       if (effectiveAccountId && !String(effectiveAccountId).startsWith("auto")) {
@@ -96,6 +104,26 @@ export default function StatementsTab({ companyId, bare = false }) {
         `/companies/${companyId}/statements/upload`, fd,
         { headers: { "Content-Type": "multipart/form-data" }, timeout: 180_000 },
       );
+      // Multi-statement path returns immediately with `status: 'splitting'`
+      // and no txn count yet. Individual child statements land later via
+      // Veryfi webhook — the imports table polls to surface them.
+      if (r.data?.status === "splitting") {
+        setUploading(u => u.map(x => x.tempId === id
+          ? { ...x, file: null, status: "splitting",
+              importId: r.data.import_id }
+          : x));
+        toast.success(
+          `${file.name} → sent to Veryfi splitter. Individual statements will ` +
+          `appear below as each finishes (typically 1–3 min).`,
+          { duration: 8000 },
+        );
+        // Poll for children while the splitter runs. Refreshes the
+        // imports table every 8s for ~5 min, stops early if the parent
+        // row flips off "splitting".
+        _startSplitPoll(r.data.import_id);
+        loadImports();
+        return;
+      }
       setUploading(u => u.map(x => x.tempId === id
         ? { ...x, file: null, status: "completed",
             importId: r.data.import_id,
@@ -156,15 +184,15 @@ export default function StatementsTab({ companyId, bare = false }) {
   const onFiles = async (files) => {
     const arr = Array.from(files || []);
     if (!arr.length) return;
-    const oversized = arr.filter(f => f.size > 25 * 1024 * 1024);
+    const oversized = arr.filter(f => f.size > 50 * 1024 * 1024);
     if (oversized.length) {
-      toast.error(`Too large (>25 MB): ${oversized.map(f => f.name).join(", ")}`);
+      toast.error(`Too large (>50 MB): ${oversized.map(f => f.name).join(", ")}`);
       return;
     }
     // If the user pinned a real account via the top-of-page dropdown OR
     // ticked "don't ask again for this batch", skip the modal.
     if ((accountId && !String(accountId).startsWith("auto")) || skipModal) {
-      startUploads(arr, accountId);
+      startUploads(arr, accountId, false);
       return;
     }
     // Otherwise raise the confirmation modal — preseed to the current
@@ -175,24 +203,47 @@ export default function StatementsTab({ companyId, bare = false }) {
     // choice here to prevent misfires).
     const preseed = accountId === "auto-liability" ? "auto-liability" : "auto-asset";
     setModalChoice(preseed);
+    // Multi-statement toggle: default OFF, auto-force ON for .zip files
+    // (Veryfi splitter accepts .pdf and .zip; .zip is always multi).
+    setModalIsMulti(arr.some(f => (f.name || "").toLowerCase().endsWith(".zip")));
     setPending({ files: arr });
   };
 
   // Actually kicks off the throttled upload workers. Extracted so both
   // the direct-path (pinned account / skipModal) and the modal-confirmed
   // path can share the exact same throttling logic.
-  const startUploads = (arr, hint) => {
+  const startUploads = (arr, hint, isMulti) => {
     (async () => {
       const queue = [...arr];
       const CONCURRENCY = 2;
       const workers = Array.from({ length: CONCURRENCY }, async () => {
         while (queue.length) {
           const f = queue.shift();
-          if (f) await uploadOne(f, null, hint);
+          if (f) await uploadOne(f, null, hint, isMulti);
         }
       });
       await Promise.all(workers);
     })();
+  };
+
+  // Polls the imports endpoint every 8s while a splitter parent row is
+  // still in ``splitting`` status. Stops once the parent flips to
+  // completed / partial / failed OR after ~5 min (safety cap so a
+  // stuck webhook doesn't leave a poll running forever).
+  const _startSplitPoll = (parentImportId) => {
+    const startedAt = Date.now();
+    const iv = setInterval(async () => {
+      // 5-minute cap.
+      if (Date.now() - startedAt > 5 * 60 * 1000) { clearInterval(iv); return; }
+      try {
+        const r = await api.get(`/companies/${companyId}/statements/imports`);
+        setImports(r.data.imports || []);
+        const parent = (r.data.imports || []).find(x => x.id === parentImportId);
+        if (parent && parent.status !== "splitting") {
+          clearInterval(iv);
+        }
+      } catch { /* keep polling — transient errors */ }
+    }, 8000);
   };
 
   const clearCompleted = () => {
@@ -435,6 +486,19 @@ export default function StatementsTab({ companyId, bare = false }) {
             <label className="flex items-center gap-2 mt-4 text-xs text-slate-600 cursor-pointer">
               <input
                 type="checkbox"
+                checked={modalIsMulti}
+                onChange={(e) => setModalIsMulti(e.target.checked)}
+                data-testid="stmt-precheck-multi-toggle"
+              />
+              <span>
+                <b>This PDF contains multiple statements</b> — use Veryfi&apos;s
+                auto-splitter (recommended for year-end catch-up or shoebox
+                PDFs). Off by default; auto-on for <code>.zip</code>.
+              </span>
+            </label>
+            <label className="flex items-center gap-2 mt-2 text-xs text-slate-600 cursor-pointer">
+              <input
+                type="checkbox"
                 checked={skipModal}
                 onChange={(e) => setSkipModal(e.target.checked)}
                 data-testid="stmt-precheck-skip-toggle"
@@ -444,7 +508,7 @@ export default function StatementsTab({ companyId, bare = false }) {
             <div className="flex justify-end gap-2 mt-5">
               <button
                 type="button"
-                onClick={() => { setPending(null); setSkipModal(false); }}
+                onClick={() => { setPending(null); setSkipModal(false); setModalIsMulti(false); }}
                 className="px-3 py-1.5 text-sm rounded-md border border-slate-300 hover:bg-slate-50"
                 data-testid="stmt-precheck-cancel"
               >
@@ -455,8 +519,10 @@ export default function StatementsTab({ companyId, bare = false }) {
                 onClick={() => {
                   const files = pending.files;
                   const choice = modalChoice;
+                  const isMulti = modalIsMulti;
                   setPending(null);
-                  startUploads(files, choice);
+                  setModalIsMulti(false);
+                  startUploads(files, choice, isMulti);
                 }}
                 className="px-4 py-1.5 text-sm rounded-md bg-slate-900 text-white hover:bg-slate-800"
                 data-testid="stmt-precheck-confirm"
@@ -482,6 +548,11 @@ function UploadRow({ entry, onOpen, onRetry, onDismiss }) {
         {entry.status === "processing" && (
           <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
             <Loader2 size={12} className="animate-spin" /> processing
+          </span>
+        )}
+        {entry.status === "splitting" && (
+          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
+            <Loader2 size={12} className="animate-spin" /> splitting (multi-statement)
           </span>
         )}
         {entry.status === "completed" && (
@@ -569,14 +640,28 @@ function ImportsTable({ loading, rows, onOpen, onDelete, onReprocess }) {
           )}
           {!loading && rows.map(r => (
             <tr key={r.id}
-                className="border-t border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer"
+                className={
+                  "border-t border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer " +
+                  (r.parent_import_id ? "bg-slate-50/40" : "")
+                }
                 onClick={() => onOpen(r.id)}
                 data-testid={`stmt-import-row-${r.id}`}>
               <td className="px-4 py-2 tabular-nums text-slate-700">
                 {r.created_at ? new Date(r.created_at).toLocaleDateString() : "—"}
               </td>
               <td className="px-4 py-2 text-slate-700 max-w-[280px] truncate" title={r.filename}>
+                {r.parent_import_id && (
+                  <span className="text-slate-400 mr-1" title="Split from a multi-statement PDF">↳</span>
+                )}
                 {r.filename ?? "—"}
+                {r.is_multi && (
+                  <span
+                    className="ml-2 inline-flex items-center rounded-full bg-indigo-100 text-indigo-800 text-[10px] px-2 py-0.5 uppercase tracking-wide"
+                    title={`Multi-statement PDF (${(r.child_import_ids || []).length} split statements)`}
+                  >
+                    multi · {(r.child_import_ids || r.child_document_ids || []).length || "…"}
+                  </span>
+                )}
               </td>
               <td className="px-4 py-2 text-slate-700 max-w-[240px] truncate" title={r.account_name}>
                 {r.account_name ?? "—"}
@@ -626,7 +711,9 @@ function StatusPill({ status }) {
   const map = {
     completed: "bg-emerald-100 text-emerald-800",
     processing: "bg-amber-100 text-amber-800",
-    failed: "bg-red-100 text-red-800",
+    splitting:  "bg-indigo-100 text-indigo-800",
+    partial:    "bg-yellow-100 text-yellow-800",
+    failed:     "bg-red-100 text-red-800",
   };
   return (
     <span className={`rounded px-2 py-0.5 text-xs ${map[status] ?? "bg-slate-100 text-slate-700"}`}>

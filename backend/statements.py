@@ -251,6 +251,90 @@ def _statement_ocr_reconcile_impl(
     }
 
 
+async def upload_statement_multi(
+    cid: str,
+    file: UploadFile,
+    categorize_fn,
+    is_period_closed_fn,
+    account_kind_hint: str | None = None,
+) -> dict:
+    """Async multi-statement upload — dispatches the PDF/zip to Veryfi's
+    ``bank-statements-set`` (splitter) endpoint. Returns immediately with
+    a parent import row in ``status='splitting'``; when Veryfi finishes
+    it fires a webhook that our
+    :func:`~routes.veryfi_webhooks.bank_statement_set` handler picks up,
+    creates one child :class:`statement_imports` row per split, and runs
+    each child through :func:`_process_veryfi_result`.
+
+    Kept as a dedicated function (rather than a branch inside
+    :func:`upload_statement`) because the two paths have entirely
+    different return contracts: this one returns immediately with a
+    ``status='splitting'`` payload, while the sync path returns a full
+    completed import summary. Splitting the entry points keeps that
+    contract explicit at both call sites.
+    """
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(400, "Empty file")
+    # Veryfi splitter caps at 50 MB.
+    if len(file_bytes) > 50 * 1024 * 1024:
+        raise HTTPException(400, "File too large (max 50 MB for multi-statement)")
+
+    import_id = str(uuid.uuid4())
+    now = now_iso()
+    await db.statement_imports.insert_one({
+        "id": import_id,
+        "company_id": cid,
+        "filename": file.filename or "statement.pdf",
+        "size": len(file_bytes),
+        "method": "veryfi_split",
+        "status": "splitting",
+        "is_multi": True,
+        "account_kind_hint": account_kind_hint,
+        "child_import_ids": [],
+        "child_document_ids": [],
+        "transaction_count": None,
+        "period_start": None,
+        "period_end": None,
+        "account_id": None,
+        "account_name": None,
+        "veryfi_document_set_id": None,
+        "created_at": now,
+        "updated_at": now,
+    })
+
+    # -------- Veryfi splitter (async, returns doc_set_id immediately) --------
+    try:
+        set_response = await veryfi_service.process_bank_statement_set(
+            file_bytes, file.filename or "statement.pdf",
+            file.content_type or "application/pdf",
+        )
+    except Exception as e:  # noqa: BLE001
+        await db.statement_imports.update_one(
+            {"id": import_id},
+            {"$set": {"status": "failed", "error": f"Veryfi splitter: {e}",
+                      "updated_at": now_iso()}},
+        )
+        raise HTTPException(502, f"Veryfi splitter error: {e}")
+
+    doc_set_id = set_response.get("id")
+    await db.statement_imports.update_one(
+        {"id": import_id},
+        {"$set": {"veryfi_document_set_id": doc_set_id,
+                  "veryfi_set_raw": set_response,
+                  "updated_at": now_iso()}},
+    )
+    return {
+        "import_id": import_id,
+        "status": "splitting",
+        "veryfi_document_set_id": doc_set_id,
+        "message": (
+            "PDF sent to Veryfi splitter. Individual statements will "
+            "appear here as they finish processing (typically 1–3 min)."
+        ),
+    }
+
+
 async def upload_statement(
     cid: str,
     file: UploadFile,
@@ -309,6 +393,31 @@ async def upload_statement(
         )
         raise HTTPException(502, f"Veryfi error: {e}")
 
+    return await _process_veryfi_result(
+        cid, import_id, veryfi_data, account_id,
+        categorize_fn=categorize_fn,
+        is_period_closed_fn=is_period_closed_fn,
+        account_kind_hint=account_kind_hint,
+    )
+
+
+async def _process_veryfi_result(
+    cid: str,
+    import_id: str,
+    veryfi_data: dict,
+    account_id: str | None,
+    categorize_fn,
+    is_period_closed_fn,
+    account_kind_hint: str | None = None,
+) -> dict:
+    """Post-Veryfi pipeline: resolve account, apply OCR guards, extract
+    transactions, categorize + insert, finalize the import row, auto-post
+    opening-balance JE, auto-create reconciliation.
+
+    Extracted from :func:`upload_statement` so the async splitter webhook
+    (which fetches each child statement's parsed JSON via a GET) can
+    reuse the exact same pipeline as the sync single-file path.
+    """
     # -------- Resolve/create the target CoA account --------
     if account_id:
         acct = await db.accounts.find_one({"id": account_id, "company_id": cid})

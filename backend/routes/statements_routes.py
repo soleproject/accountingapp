@@ -67,10 +67,25 @@ async def statements_upload(
     # Used when the user knows the statement is a credit card / loan
     # / LOC and Veryfi's OCR may return an ambiguous `account_type`.
     account_kind_hint: str | None = Form(None),
+    # When true, route the file to Veryfi's async splitter endpoint so
+    # a single PDF/zip containing MULTIPLE distinct bank statements is
+    # broken into N separate imports. Individual statements arrive via
+    # webhook and become child `statement_imports` rows under a parent.
+    # Auto-forced True when the filename ends with `.zip`.
+    is_multi_statement: bool = Form(False),
     user: dict = Depends(get_current_user),
 ):
     await require_company(user, cid)
     import statements
+    _fname = (file.filename or "").lower()
+    _is_multi = bool(is_multi_statement) or _fname.endswith(".zip")
+    if _is_multi:
+        return await statements.upload_statement_multi(
+            cid, file,
+            categorize_fn=categorize_transaction,
+            is_period_closed_fn=is_period_closed,
+            account_kind_hint=account_kind_hint,
+        )
     return await statements.upload_statement(
         cid, file, account_id or None,
         categorize_fn=categorize_transaction,

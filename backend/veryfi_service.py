@@ -100,11 +100,13 @@ def _is_cardholder_subtotal(desc: str, *, card_number: str | None = None) -> boo
 
 VERYFI_BASE = "https://api.veryfi.com"
 BANK_STMT_PATH = "/api/v8/partner/bank-statements/"
+BANK_STMT_SET_PATH = "/api/v8/partner/bank-statements-set"
 DOCS_PATH = "/api/v8/partner/documents/"
 
 _CLIENT_ID = os.environ["VERYFI_CLIENT_ID"]
 _USERNAME = os.environ["VERYFI_USERNAME"]
 _API_KEY = os.environ["VERYFI_API_KEY"]
+_CLIENT_SECRET = os.environ.get("VERYFI_CLIENT_SECRET", "")
 
 
 def _headers() -> dict:
@@ -146,6 +148,84 @@ async def process_generic_document(file_bytes: bytes, filename: str, content_typ
     except Exception:
         pass
     return r.json()
+
+
+async def process_bank_statement_set(
+    file_bytes: bytes, filename: str, content_type: str,
+) -> dict:
+    """Upload a multi-statement PDF (or a .zip of statements) to Veryfi's
+    ``bank-statements-set`` splitter endpoint. Returns immediately with a
+    JSON body containing ``id`` (the document-set id) and ``status``
+    (typically ``'split_in_progress'``). The actual per-statement OCR
+    results arrive later via the Veryfi webhook, handled in
+    :func:`routes.veryfi_webhooks.bank_statement_set`.
+    """
+    url = f"{VERYFI_BASE}{BANK_STMT_SET_PATH}"
+    files = {"file": (filename, io.BytesIO(file_bytes), content_type)}
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        r = await client.post(url, headers=_headers(), files=files)
+    if r.status_code >= 400:
+        raise RuntimeError(
+            f"Veryfi splitter returned {r.status_code}: {r.text[:400]}"
+        )
+    try:
+        from ai_usage import record_service
+        # Splitter is charged per resulting statement, but we don't know
+        # the count yet — we log a placeholder of 1 here and the webhook
+        # handler will log the true per-child count. Kept conservative
+        # to avoid double-billing internal telemetry.
+        await record_service(
+            feature="veryfi-bank-statement-set", service="veryfi_ocr",
+            quantity=1, unit="document_set",
+        )
+    except Exception:
+        pass
+    return r.json()
+
+
+async def fetch_bank_statement(document_id: int | str) -> dict:
+    """GET the parsed JSON for a single Veryfi bank-statement document.
+
+    Used by the async splitter webhook: Veryfi's ``bank_statement_set``
+    payload only gives us the child ``document_id``s, so we must fetch
+    each one's full JSON before running it through the shared
+    :func:`statements._process_veryfi_result` pipeline.
+    """
+    url = f"{VERYFI_BASE}{BANK_STMT_PATH}{document_id}/"
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        r = await client.get(url, headers=_headers())
+    if r.status_code >= 400:
+        raise RuntimeError(
+            f"Veryfi GET {document_id} returned {r.status_code}: {r.text[:400]}"
+        )
+    return r.json()
+
+
+def verify_webhook_signature(data_payload: dict, signature_header: str) -> bool:
+    """Verify a Veryfi webhook signature.
+
+    Veryfi HMACs ``str(data_payload)`` (i.e. Python's ``str()`` of the
+    ``data`` sub-object of the webhook JSON) with the ``client_secret``
+    as the key, then base64-encodes the result and sends it in the
+    ``x-veryfi-signature`` header. Constant-time comparison. Returns
+    False (never raises) when the secret isn't configured — the caller
+    then decides whether to reject or accept in dev.
+    """
+    import hmac
+    import hashlib
+    import base64
+    if not _CLIENT_SECRET or not signature_header:
+        return False
+    try:
+        expected = hmac.new(
+            _CLIENT_SECRET.encode("utf-8"),
+            msg=str(data_payload).encode("utf-8"),
+            digestmod=hashlib.sha256,
+        ).digest()
+        expected_b64 = base64.b64encode(expected).decode("utf-8").strip()
+        return hmac.compare_digest(expected_b64, signature_header.strip())
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def extract_transactions(veryfi_data: dict) -> list[dict]:
