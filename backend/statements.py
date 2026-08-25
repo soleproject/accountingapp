@@ -152,24 +152,38 @@ def _statement_ocr_reconcile(
     totals extracted from the same PDF. Returns a flag dict when
     drift is detected (so the caller can persist it on the import
     row and surface a review banner); returns ``None`` when clean.
+
+    ``veryfi_data`` sometimes arrives as a list (multi-account PDF).
+    In that shape we can't extract stable summary totals — return
+    None instead of erroring so the upload can't 500 on Layer 3
+    alone. Aug 24 2026.
     """
+    if not isinstance(veryfi_data, dict):
+        return None
     _fields = statement_account_resolver._statement_fields(veryfi_data)
     # `_statement_fields` returns `starting_balance` (not
     # `beginning_balance`) after normalizing across Veryfi's two doc
     # shapes. `total_deposits` / `total_withdrawals` aren't normalized
     # there — pull them opportunistically from the raw doc / accounts.
+    # Veryfi sometimes returns the whole doc as a list-of-accounts
+    # (multi-account statement); tolerate both shapes so this guard
+    # can't 500 the upload. Aug 24 2026.
     bb = _fields.get("starting_balance")
     eb = _fields.get("ending_balance")
-    _acct = (veryfi_data.get("accounts") or [{}])
-    _acct0 = _acct[0] if _acct and isinstance(_acct[0], dict) else {}
+    _root = veryfi_data if isinstance(veryfi_data, dict) else {}
+    _acct_list = _root.get("accounts") if _root else None
+    if not _acct_list and isinstance(veryfi_data, list):
+        _acct_list = veryfi_data
+    _acct_list = _acct_list or [{}]
+    _acct0 = _acct_list[0] if _acct_list and isinstance(_acct_list[0], dict) else {}
     _summaries = _acct0.get("summaries") or {}
     v_dep = (
-        veryfi_data.get("total_deposits")
+        _root.get("total_deposits")
         or _acct0.get("total_deposits")
         or _summaries.get("total_deposits")
     )
     v_wd = (
-        veryfi_data.get("total_withdrawals")
+        _root.get("total_withdrawals")
         or _acct0.get("total_withdrawals")
         or _summaries.get("total_withdrawals")
     )
