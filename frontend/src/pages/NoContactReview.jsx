@@ -82,8 +82,7 @@ export default function NoContactReview() {
   if (viewMode === "list") {
     return (
       <ListModeView
-        groups={groups}
-        setGroups={setGroups}
+        initialGroups={groups}
         onExitToStepper={() => {
           const next = new URLSearchParams(params);
           next.delete("view");
@@ -97,17 +96,16 @@ export default function NoContactReview() {
 
 // -------------------------- LIST MODE VIEW --------------------------
 
-function ListModeView({ groups, setGroups, onExitToStepper }) {
+export function ListModeView({ groups: initialGroups, embedded = false, onExitToStepper }) {
   const { currentId } = useCompany();
   const [contacts, setContacts] = useState([]);
   const [accounts, setAccounts] = useState([]);
-  // Per-group draft state — `{ contact_id, category_account_id, saving }`.
+  const [groups, setGroups] = useState(initialGroups || null);
   const [drafts, setDrafts] = useState({});
-  // Row-level expansion state — clicking a group's "N" cell opens a
-  // nested table beneath it with per-txn Contact + Category pickers +
-  // multi-select checkboxes for further within-group bulk edits.
-  const [expanded, setExpanded] = useState(null);        // group_key currently open
-  const [expandedRows, setExpandedRows] = useState({});  // { [group_key]: { loading, rows, err } }
+  const [expanded, setExpanded] = useState(null);
+  const [expandedRows, setExpandedRows] = useState({});
+  // In embedded mode we fetch our own groups list because Transactions.jsx
+  // doesn't know about them — the parent just toggles the URL flag.
   useEffect(() => {
     if (!currentId) return;
     Promise.all([
@@ -115,8 +113,15 @@ function ListModeView({ groups, setGroups, onExitToStepper }) {
          .then(r => setContacts(r.data.contacts || r.data || [])),
       api.get(`/companies/${currentId}/accounts`)
          .then(r => setAccounts((r.data.accounts || []).filter(a => a.active !== false))),
-    ]).catch(() => { /* ignore — pickers just render empty */ });
+    ]).catch(() => {});
   }, [currentId]);
+  useEffect(() => {
+    if (initialGroups) { setGroups(initialGroups); return; }
+    if (!currentId) return;
+    api.get(`/companies/${currentId}/transactions/no-contact-groups`)
+       .then(r => setGroups(r.data?.groups || []))
+       .catch(() => setGroups([]));
+  }, [currentId, initialGroups]);
   const patch = (gk, k, v) => setDrafts(d => ({ ...d, [gk]: { ...(d[gk] || {}), [k]: v } }));
 
   const toggleExpand = async (g) => {
@@ -215,38 +220,46 @@ function ListModeView({ groups, setGroups, onExitToStepper }) {
     }
   };
 
+  if (!groups) {
+    return <div className={embedded ? "p-4 text-sm text-slate-500" : "p-6 text-sm text-slate-500"}>Loading no-contact groups…</div>;
+  }
+  if (groups.length === 0) {
+    return <div className={embedded ? "p-4 text-sm text-slate-500" : "p-6 text-sm text-slate-500"}>No no-contact groups remain — every bank-feed row now has a contact.</div>;
+  }
   const totalTxns = groups.reduce((s, g) => s + (g.count || 0), 0);
   const totalAmount = groups.reduce((s, g) => s + (g.total_amount || 0), 0);
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-start justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900 flex items-center gap-2">
-            <Sparkles className="text-indigo-600" size={22} /> No-Contact Review · All Groups
-          </h1>
-          <div className="text-sm text-slate-500 mt-1">
-            {groups.length} groups · {totalTxns} transactions · $
-            {totalAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+    <div className={embedded ? "" : "p-6 max-w-6xl mx-auto"}>
+      {!embedded && (
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h1 className="text-2xl font-semibold text-slate-900 flex items-center gap-2">
+              <Sparkles className="text-indigo-600" size={22} /> No-Contact Review · All Groups
+            </h1>
+            <div className="text-sm text-slate-500 mt-1">
+              {groups.length} groups · {totalTxns} transactions · $
+              {totalAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onExitToStepper}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border bg-white text-slate-700 text-xs hover:bg-slate-50"
+              data-testid="ncr-mode-stepper"
+            >
+              <ListOrdered size={13} /> Switch to stepper
+            </button>
+            <Link
+              to="/dashboard"
+              className="px-3 py-1.5 rounded-md border bg-white text-slate-700 text-xs hover:bg-slate-50"
+            >
+              Back to dashboard
+            </Link>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onExitToStepper}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border bg-white text-slate-700 text-xs hover:bg-slate-50"
-            data-testid="ncr-mode-stepper"
-          >
-            <ListOrdered size={13} /> Switch to stepper
-          </button>
-          <Link
-            to="/dashboard"
-            className="px-3 py-1.5 rounded-md border bg-white text-slate-700 text-xs hover:bg-slate-50"
-          >
-            Back to dashboard
-          </Link>
-        </div>
-      </div>
+      )}
 
       <div className="rounded-lg border bg-white overflow-hidden">
         <table className="w-full text-sm">
@@ -396,20 +409,32 @@ export function useNoContactReviewNav() {
 }
 
 // Toggle-to-list button — mounted in Transactions.jsx alongside the
-// stepper Prev/Next controls when `noContactReview=1`. Sends the CPA
-// to `/accounting/no-contact-review?view=list` which renders the
-// full-groups table above.
+// stepper Prev/Next controls when `noContactReview=1`. Toggles the
+// `view=list` URL param IN PLACE (no navigation) so the CPA stays on
+// the same page. Transactions.jsx renders <ListModeView embedded /> in
+// place of the transactions table when the flag is set.
 export function NoContactReviewListToggle() {
-  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const isList = params.get("view") === "list";
+  const toggle = () => {
+    const next = new URLSearchParams(params);
+    if (isList) next.delete("view");
+    else next.set("view", "list");
+    setParams(next, { replace: true });
+  };
   return (
     <button
       type="button"
-      onClick={() => navigate("/accounting/no-contact-review?view=list")}
+      onClick={toggle}
       className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border bg-white text-slate-700 text-xs hover:bg-slate-50"
-      data-testid="ncr-open-list"
-      title="Show every no-contact group in a single list you can edit at once"
+      data-testid={isList ? "ncr-back-to-stepper" : "ncr-open-list"}
+      title={isList
+        ? "Back to walking one group at a time"
+        : "Show every no-contact group in a single list you can edit at once"}
     >
-      <LayoutList size={13} /> List view
+      {isList
+        ? (<><ListOrdered size={13} /> Stepper view</>)
+        : (<><LayoutList  size={13} /> List view</>)}
     </button>
   );
 }

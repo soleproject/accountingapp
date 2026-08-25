@@ -21,7 +21,7 @@ import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
 import { ContactBadge } from "@/components/ContactBadge";
 import { emitAction, useActionListener } from "@/lib/createBus";
 import { useLetsReviewNav } from "@/pages/LetsReview";
-import { useNoContactReviewNav, NoContactReviewListToggle } from "@/pages/NoContactReview";
+import { useNoContactReviewNav, NoContactReviewListToggle, ListModeView } from "@/pages/NoContactReview";
 import Step2Tour, { hasSeenStep2Tour } from "@/components/Step2Tour";
 import Step3BTour, { hasSeenStep3BTour } from "@/components/Step3BTour";
 import { useAuth } from "@/lib/auth";
@@ -304,6 +304,12 @@ export default function Transactions() {
   const ncrGroupKey = params.get("group_key") || "";
   const ncrLabel = params.get("label") || "";
   const noContactReviewNav = useNoContactReviewNav();
+  // In-place list-mode toggle for No-Contact Review. When set, the
+  // transactions table is replaced by <ListModeView embedded /> and
+  // the "Group X of Y" pill drops its category picker + Prev/Next
+  // controls (but keeps its footprint so the surrounding layout
+  // doesn't reflow). Powered by ?view=list on the same URL.
+  const ncrIsListMode = isNoContactReview && params.get("view") === "list";
   const isReviewMode = isLetsReview || isNoContactReview;
 
   // Step 2 first-time tour. Fires when the URL carries `?tour=1` AND
@@ -1235,49 +1241,61 @@ export default function Transactions() {
             </div>
             <div className="mt-2 flex items-center justify-between gap-2">
               <label className="text-[9px] uppercase tracking-wider text-slate-500 font-semibold">
-                Bulk-categorize all {(txns || []).length} row{(txns || []).length === 1 ? "" : "s"}
+                {ncrIsListMode
+                  ? "Editing all groups in list view"
+                  : `Bulk-categorize all ${(txns || []).length} row${(txns || []).length === 1 ? "" : "s"}`}
               </label>
-              <button
-                data-testid="no-contact-review-bulk-approve"
-                onClick={applyBulkCategoryPreview}
-                disabled={!bulkPreviewAcctId || bulkCatBusy || (txns || []).length === 0}
-                title={bulkPreviewAcctId ? "Save this category to every visible row in this group." : "Pick a category below to enable Approve."}
-                className="text-[11px] font-semibold rounded-md border border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600 hover:border-emerald-600 px-2.5 py-1 disabled:opacity-40 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:border-slate-300"
-              >
-                {bulkCatBusy ? "Saving…" : "Approve"}
-              </button>
+              {!ncrIsListMode && (
+                <button
+                  data-testid="no-contact-review-bulk-approve"
+                  onClick={applyBulkCategoryPreview}
+                  disabled={!bulkPreviewAcctId || bulkCatBusy || (txns || []).length === 0}
+                  title={bulkPreviewAcctId ? "Save this category to every visible row in this group." : "Pick a category below to enable Approve."}
+                  className="text-[11px] font-semibold rounded-md border border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600 hover:border-emerald-600 px-2.5 py-1 disabled:opacity-40 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:border-slate-300"
+                >
+                  {bulkCatBusy ? "Saving…" : "Approve"}
+                </button>
+              )}
             </div>
             <div className="mt-2 flex items-center gap-2">
-              <div className="flex-1 min-w-0" data-testid="no-contact-review-bulk-category">
-                <AccountPicker
-                  value={bulkPreviewAcctId}
-                  accounts={(accts || []).filter((a) =>
-                    // Full chart-of-accounts access (see comment on the
-                    // Lets-Review picker above). Only system Uncat sinks
-                    // are excluded.
-                    !["9999", "6999", "4999"].includes(a.code)
-                  )}
-                  onChange={(id) => previewBulkCategory(id)}
-                  companyId={currentId}
-                  testId="no-contact-review-bulk-category-picker"
-                />
-              </div>
-              <button
-                onClick={() => noContactReviewNav.prev && noContactReviewNav.prev()}
-                disabled={!noContactReviewNav.prev}
-                data-testid="no-contact-review-prev"
-                className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
-              >
-                ← Prev
-              </button>
-              <button
-                onClick={() => noContactReviewNav.next && noContactReviewNav.next()}
-                disabled={!noContactReviewNav.next}
-                data-testid="no-contact-review-next"
-                className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
-              >
-                Next →
-              </button>
+              {ncrIsListMode ? (
+                // In list mode the picker + Prev/Next are hidden but we
+                // keep a flex spacer of the same height so the box's
+                // total footprint (2 lines under the label) stays
+                // identical to stepper mode — the surrounding layout
+                // doesn't reflow when toggling.
+                <div className="flex-1 min-w-0 h-[26px]" aria-hidden="true" />
+              ) : (
+                <>
+                  <div className="flex-1 min-w-0" data-testid="no-contact-review-bulk-category">
+                    <AccountPicker
+                      value={bulkPreviewAcctId}
+                      accounts={(accts || []).filter((a) =>
+                        !["9999", "6999", "4999"].includes(a.code)
+                      )}
+                      onChange={(id) => previewBulkCategory(id)}
+                      companyId={currentId}
+                      testId="no-contact-review-bulk-category-picker"
+                    />
+                  </div>
+                  <button
+                    onClick={() => noContactReviewNav.prev && noContactReviewNav.prev()}
+                    disabled={!noContactReviewNav.prev}
+                    data-testid="no-contact-review-prev"
+                    className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                  >
+                    ← Prev
+                  </button>
+                  <button
+                    onClick={() => noContactReviewNav.next && noContactReviewNav.next()}
+                    disabled={!noContactReviewNav.next}
+                    data-testid="no-contact-review-next"
+                    className="text-[11px] rounded-md border border-slate-300 bg-white hover:bg-slate-50 px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                  >
+                    Next →
+                  </button>
+                </>
+              )}
               <NoContactReviewListToggle />
             </div>
           </div>
@@ -1674,7 +1692,13 @@ export default function Transactions() {
         </div>
       ) : (
       <div className="rounded-xl border bg-white overflow-hidden">
-        {view === "rollup" ? (
+        {ncrIsListMode ? (
+          // In-place list view — renders the same all-groups table the
+          // dedicated /accounting/no-contact-review?view=list page uses,
+          // but without the outer page chrome (title/breadcrumb/back-
+          // to-dashboard) so it slots cleanly into this container.
+          <ListModeView embedded />
+        ) : view === "rollup" ? (
           <ContactRollup
             data={rollup}
             busy={rollupBusy}
