@@ -2698,6 +2698,28 @@ async def compute_account_detail(company_id: str, account_id: str,
     else:
         account = account_docs[0]
 
+    # -------- Expand parent → descendant sub-accounts --------
+    # The Balance Sheet rolls a parent row up to include every child's
+    # movements, so a click on that row must drill into the SAME set of
+    # transactions to match. If we only queried the parent's own id we'd
+    # miss any txn that posted to a sub-account (e.g. "Business Checking"
+    # parent with a "Business Checking - ATM Card" child) and the drill
+    # would show 0 txns / $0 while the BS clearly shows a non-zero
+    # balance. Walk the tree here so parent clicks pull descendants,
+    # while sub-account clicks stay scoped to their own id.
+    acct_id_list = [a["id"] for a in account_docs]
+    _seen = set(acct_id_list)
+    _frontier = list(acct_id_list)
+    while _frontier:
+        kids = await db.accounts.find(
+            {"company_id": company_id, "parent_account_id": {"$in": _frontier}},
+            {"id": 1},
+        ).to_list(500)
+        _frontier = [k["id"] for k in kids if k["id"] not in _seen]
+        for kid_id in _frontier:
+            _seen.add(kid_id)
+            acct_id_list.append(kid_id)
+
     # The Account Detail page has two personalities depending on what you
     # click on the Balance Sheet or Income Statement:
     #
@@ -2717,7 +2739,8 @@ async def compute_account_detail(company_id: str, account_id: str,
     # every account type drills correctly. Duplicate hits (a transaction that
     # references the same account on both sides — e.g. an internal transfer)
     # collapse naturally because Mongo returns each doc once.
-    acct_id_list = [a["id"] for a in account_docs]
+    # `acct_id_list` above already includes descendant sub-account ids
+    # (walked up top so parent clicks pull child postings too).
     # Match `_signed_balances`: only count `posted=True` transactions so the
     # drill-down running balance ties to the Balance Sheet / Income Statement
     # figure the user clicked on. Unposted (needs-review) rows are excluded
