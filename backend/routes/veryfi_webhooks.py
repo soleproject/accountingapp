@@ -44,6 +44,24 @@ router = APIRouter(prefix="/api")
 log = logging.getLogger(__name__)
 
 
+# --- Webhook URL validation probes ---------------------------------------
+# Veryfi (and most webhook platforms) validate a webhook URL by hitting it
+# with an unauthenticated GET or HEAD before letting the user save it. If
+# we only accept POST, the probe gets 405 → the dashboard shows "URL is
+# invalid or unreachable" and the user can't register their webhook.
+# Returning a plain 200 satisfies the reachability check without exposing
+# anything sensitive.
+
+@router.get("/webhooks/veryfi/bank-statement-set")
+@router.head("/webhooks/veryfi/bank-statement-set")
+async def bank_statement_set_probe() -> dict:
+    """Reachability probe used by the Veryfi dashboard when the user saves
+    a new webhook URL. Not called at runtime by Veryfi's async pipeline —
+    that hits the POST handler below with a signed body.
+    """
+    return {"ok": True, "service": "axiom-veryfi-webhook"}
+
+
 @router.post("/webhooks/veryfi/bank-statement-set")
 async def bank_statement_set(
     request: Request,
@@ -57,11 +75,21 @@ async def bank_statement_set(
     to unblock local testing without ever accepting unsigned prod
     traffic silently.
     """
-    body = await request.json()
-    if not isinstance(body, dict):
+    body = await request.body()
+    # Empty body → treat as a validation probe (some webhook platforms
+    # POST an empty body during URL registration). Return 200 so the
+    # dashboard save succeeds without exposing anything.
+    if not body:
+        return {"ok": True, "probe": "empty_post"}
+    try:
+        import json
+        payload = json.loads(body)
+    except Exception:
+        raise HTTPException(400, "webhook body must be JSON")
+    if not isinstance(payload, dict):
         raise HTTPException(400, "webhook body must be JSON object")
-    event = body.get("event") or ""
-    data = body.get("data") or {}
+    event = payload.get("event") or ""
+    data = payload.get("data") or {}
     if not isinstance(data, dict):
         raise HTTPException(400, "webhook body.data must be object")
 
