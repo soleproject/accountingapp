@@ -21,7 +21,8 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { Calendar, History, CalendarClock } from "lucide-react";
+import { Calendar, History, CalendarClock, AlertTriangle, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 
 const _pad = (n) => String(n).padStart(2, "0");
 const _isoOf = (d) => `${d.getFullYear()}-${_pad(d.getMonth() + 1)}-${_pad(d.getDate())}`;
@@ -33,12 +34,47 @@ const _maxLookbackIso = () => {
   return _isoOf(d);
 };
 
+// Nuke Plaid Link's session cookies on the plaid.com origin. Loads
+// their public logout endpoint in an off-screen iframe → Plaid clears
+// its own returning-user state → next Link open forces the full
+// "search + login" flow instead of "Continue with previously linked
+// institution". Belt-and-suspenders on top of the backend nonce; safe
+// to call unconditionally.
+const _resetPlaidSession = () => new Promise((resolve) => {
+  try {
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.left = "-9999px";
+    iframe.style.width = "1px";
+    iframe.style.height = "1px";
+    iframe.style.border = "0";
+    iframe.src = "https://cdn.plaid.com/link/logout";
+    iframe.onload = () => {
+      setTimeout(() => {
+        try { document.body.removeChild(iframe); } catch { /* noop */ }
+        resolve();
+      }, 300);
+    };
+    // Fallback in case the iframe never loads (network/blocker).
+    setTimeout(() => {
+      try { document.body.removeChild(iframe); } catch { /* noop */ }
+      resolve();
+    }, 2500);
+    document.body.appendChild(iframe);
+  } catch {
+    resolve();
+  }
+});
+
 export default function PlaidStartDateModal({
   open, onOpenChange, onConfirm,
+  companyName,   // optional — shown in the "who am I linking?" banner
+  companyOwner,  // optional — owner/client email for extra disambiguation
 }) {
   // Three options, "This year" pre-selected per product decision.
   const [choice, setChoice] = useState("this_year");
   const [customDate, setCustomDate] = useState("");
+  const [resetting, setResetting] = useState(false);
 
   const bounds = useMemo(() => ({
     min: _maxLookbackIso(),
@@ -57,6 +93,16 @@ export default function PlaidStartDateModal({
     if (!iso) return; // custom picked but no date typed — button disabled
     onConfirm?.(iso);
     onOpenChange?.(false);
+  };
+
+  const handleResetSession = async () => {
+    setResetting(true);
+    try {
+      await _resetPlaidSession();
+      toast.success("Plaid session cleared — next open will start fresh.");
+    } finally {
+      setResetting(false);
+    }
   };
 
   const options = [
@@ -97,6 +143,42 @@ export default function PlaidStartDateModal({
             fewer transactions to review.
           </DialogDescription>
         </DialogHeader>
+
+        {companyName && (
+          <div
+            data-testid="plaid-link-target-banner"
+            className="rounded-lg border-2 border-amber-300 bg-amber-50 px-3 py-2.5 flex items-start gap-2.5"
+          >
+            <AlertTriangle size={16} className="text-amber-700 mt-0.5 shrink-0" />
+            <div className="text-xs text-amber-900 leading-snug flex-1">
+              <div>
+                You&apos;re about to link bank credentials for{" "}
+                <b className="text-amber-950">{companyName}</b>
+                {companyOwner && (
+                  <span className="text-amber-800"> · owned by {companyOwner}</span>
+                )}
+                .
+              </div>
+              <div className="mt-1 text-amber-800">
+                Confirm the bank credentials you&apos;re about to enter belong to
+                <b> this client</b>, not a previous one. If Plaid opens with a
+                &ldquo;continue with previously linked bank&rdquo; screen for a
+                different client, cancel and use{" "}
+                <button
+                  type="button"
+                  disabled={resetting}
+                  onClick={handleResetSession}
+                  className="inline-flex items-center gap-1 underline decoration-amber-500 decoration-2 hover:text-amber-950 disabled:opacity-60"
+                  data-testid="plaid-reset-session"
+                >
+                  <RefreshCw size={11} className={resetting ? "animate-spin" : ""} />
+                  Reset Plaid session
+                </button>
+                {" "}before retrying.
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="space-y-2 py-2">
           {options.map((opt) => {

@@ -1213,7 +1213,7 @@ export default function Onboarding() {
             </p>
             {!plaidAccts.length ? (
               <div className="flex gap-2 flex-wrap">
-                <PlaidLinkButton companyId={currentId} onSuccess={onPlaidLinked} disabled={busy} />
+                <PlaidLinkButton companyId={currentId} companyName={current?.name} companyOwner={current?.owner_email} onSuccess={onPlaidLinked} disabled={busy} />
               </div>
             ) : (
               <div className="space-y-4">
@@ -1301,6 +1301,8 @@ export default function Onboarding() {
                       {/* Link another institution — Chase + Wells Fargo + Amex, one page. */}
                       <PlaidLinkButton
                         companyId={currentId}
+                        companyName={current?.name}
+                        companyOwner={current?.owner_email}
                         onSuccess={onPlaidLinked}
                         disabled={busy}
                         label="Link another bank"

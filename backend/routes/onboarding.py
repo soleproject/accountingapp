@@ -660,8 +660,20 @@ async def plaid_link_token(cid: str, payload: dict | None = None,
     webhook_url = f"{public_base}/api/plaid/webhook" if public_base else None
     days_requested = _days_from_start_date((payload or {}).get("import_start_date"))
     try:
+        # Nonce on `client_user_id` — Plaid keeps a first-party session
+        # cookie on plaid.com that remembers which institutions a given
+        # `client_user_id` linked in the past. If we reuse the same
+        # `{user}::{cid}` value across opens, Plaid short-circuits the
+        # "Search / login" screen with a "Continue as previously
+        # linked" prompt, which is the exact bug that let an accountant
+        # accidentally re-open Client A's session while trying to link
+        # Client B. Adding a per-open uuid gives Plaid a brand-new
+        # identity every time, forcing a fresh flow. Zero side-effects:
+        # once linked, the returned access_token/item_id is what we
+        # use for the connection — client_user_id is never referenced
+        # again for that item.
         token = plaid_service.create_link_token(
-            user_id=f"{user['id']}::{cid}",
+            user_id=f"{user['id']}::{cid}::{uuid.uuid4()}",
             client_name="Axiom Ledger",
             webhook_url=webhook_url,
             days_requested=days_requested,
@@ -702,8 +714,13 @@ async def plaid_backfill_history_token(cid: str, user: dict = Depends(get_curren
     public_base = os.environ.get("PUBLIC_BACKEND_URL", "").rstrip("/")
     webhook_url = f"{public_base}/api/plaid/webhook" if public_base else None
     try:
+        # Same per-open nonce as the create-link path so update-mode
+        # reconnects don't accidentally inherit cross-tenant Plaid
+        # session state. Plaid identifies which item to update via the
+        # `access_token` param, so client_user_id can rotate freely
+        # without breaking the update flow.
         token = plaid_service.create_link_token(
-            user_id=f"{user['id']}::{cid}",
+            user_id=f"{user['id']}::{cid}::{uuid.uuid4()}",
             client_name="Axiom Ledger",
             webhook_url=webhook_url,
             access_token_for_update=plaid_service.token_from_item(item),
