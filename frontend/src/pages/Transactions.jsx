@@ -2060,6 +2060,11 @@ function ContactRollup({ data, busy, currentId }) {
   // Cache expanded rows: key = `${contactKey}||${categoryKey}` → txn list.
   const [expanded, setExpanded] = useState({});   // key → true/false
   const [cache, setCache] = useState({});          // key → txn[] (or "loading")
+  // Track which (contact, category) cells and which contacts as a whole
+  // have been approved this session. Purely visual state — the actual
+  // approval lives on the txn's human_reviewed field via bulk-approve.
+  const [approved, setApproved] = useState({});    // key → true
+  const [approvingBusy, setApprovingBusy] = useState({});  // key → true
 
   if (busy && contacts.length === 0) {
     return <div className="p-8 text-center text-slate-500 text-sm">Grouping transactions…</div>;
@@ -2095,10 +2100,96 @@ function ContactRollup({ data, busy, currentId }) {
     }
   };
 
+  // Fetch the txn ids underlying a (contact, category) cell. Reuses the
+  // expand cache when available; otherwise fires the same query the
+  // expand handler does. Returns array of ids (may be empty).
+  const idsForCell = async (contact, category, cellKey) => {
+    const cached = cache[cellKey];
+    if (Array.isArray(cached)) return cached.map(t => t.id);
+    const p = new URLSearchParams({ limit: "500" });
+    if (contact.contact_id) p.set("contact_id", contact.contact_id);
+    if (category.category_account_id) p.set("category_account_id", category.category_account_id);
+    const r = await api.get(`/companies/${currentId}/transactions?${p.toString()}`);
+    let rows = r.data.transactions || [];
+    if (!contact.contact_id) rows = rows.filter(t => !t.contact_id);
+    if (!category.category_account_id) rows = rows.filter(t => !t.category_account_id);
+    if (!contact.contact_id) rows = rows.filter(t => (t.contact_name || "") === contact.contact_name || !t.contact_name);
+    // Warm the cache so a later expand doesn't re-fetch.
+    setCache(c => ({ ...c, [cellKey]: rows }));
+    return rows.map(t => t.id);
+  };
+
+  const approveCategory = async (contact, category, e) => {
+    e?.stopPropagation();  // don't toggle the row's expand/collapse
+    const ck = contact.contact_id || `_nocontact_${contact.contact_name}`;
+    const ak = category.category_account_id || "_uncat_";
+    const key = `${ck}||${ak}`;
+    if (approved[key] || approvingBusy[key]) return;
+    setApprovingBusy(b => ({ ...b, [key]: true }));
+    try {
+      const ids = await idsForCell(contact, category, key);
+      if (ids.length) {
+        await api.post(`/companies/${currentId}/transactions/bulk-approve`, ids);
+      }
+      setApproved(a => ({ ...a, [key]: true }));
+      toast.success(`Approved ${ids.length} txns in "${category.category_name}"`);
+    } catch (err) {
+      toast.error(`Approve failed: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setApprovingBusy(b => ({ ...b, [key]: false }));
+    }
+  };
+
+  const approveContact = async (contact, e) => {
+    e?.stopPropagation();
+    const ck = contact.contact_id || `_nocontact_${contact.contact_name}`;
+    if (approved[ck] || approvingBusy[ck]) return;
+    setApprovingBusy(b => ({ ...b, [ck]: true }));
+    try {
+      // Gather ids across every category on this contact in parallel.
+      const perCat = await Promise.all(
+        contact.categories.map(cat => {
+          const ak = cat.category_account_id || "_uncat_";
+          const key = `${ck}||${ak}`;
+          return idsForCell(contact, cat, key).then(ids => ({ key, ids }));
+        }),
+      );
+      const allIds = perCat.flatMap(x => x.ids);
+      if (allIds.length) {
+        await api.post(`/companies/${currentId}/transactions/bulk-approve`, allIds);
+      }
+      // Mark contact + every category under it as approved.
+      setApproved(a => {
+        const next = { ...a, [ck]: true };
+        for (const { key } of perCat) next[key] = true;
+        return next;
+      });
+      toast.success(`Approved ${allIds.length} txns for ${contact.contact_name}`);
+    } catch (err) {
+      toast.error(`Approve failed: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setApprovingBusy(b => ({ ...b, [ck]: false }));
+    }
+  };
+
+  // Shared styling — filled green when actionable, outlined green once done.
+  const approveBtnClasses = (isApproved, size = "sm") => {
+    const base = size === "sm"
+      ? "text-[11px] px-2 py-0.5"
+      : "text-xs px-2.5 py-1";
+    if (isApproved) {
+      return `${base} rounded-md border border-emerald-600 bg-white text-emerald-700 font-medium cursor-default`;
+    }
+    return `${base} rounded-md bg-emerald-600 text-white font-medium hover:bg-emerald-700`;
+  };
+
   return (
     <div data-testid="txn-rollup-grid" className="p-4 flex flex-col gap-4">
       {contacts.map((c) => {
         const multi = c.categories.length > 1;
+        const ck = c.contact_id || `_nocontact_${c.contact_name}`;
+        const contactApproved = !!approved[ck];
+        const contactBusy = !!approvingBusy[ck];
         return (
           <div
             key={c.contact_id || c.contact_name}
@@ -2114,36 +2205,60 @@ function ContactRollup({ data, busy, currentId }) {
                   </span>
                 )}
                 <span className="text-xs text-slate-500 font-mono-num">{c.total_count} txns</span>
+                <button
+                  type="button"
+                  onClick={(e) => approveContact(c, e)}
+                  disabled={contactApproved || contactBusy}
+                  data-testid={`rollup-approve-contact-${ck}`}
+                  className={approveBtnClasses(contactApproved, "md")}
+                >
+                  {contactBusy ? "Approving…" : contactApproved ? "Approved" : "Approve"}
+                </button>
               </div>
             </div>
             <div className="divide-y divide-slate-100">
               {c.categories.map((cat) => {
-                const ck = c.contact_id || `_nocontact_${c.contact_name}`;
                 const ak = cat.category_account_id || "_uncat_";
                 const key = `${ck}||${ak}`;
                 const isOpen = !!expanded[key];
                 const cached = cache[key];
+                const cellApproved = !!approved[key];
+                const cellBusy = !!approvingBusy[key];
                 const rangeStr = cat.min_amount === cat.max_amount
                   ? fmtMoney(cat.min_amount)
                   : `${fmtMoney(cat.min_amount)} – ${fmtMoney(cat.max_amount)}`;
                 return (
                   <div key={cat.category_account_id || cat.category_name}>
-                    <button
-                      onClick={() => toggle(c, cat)}
-                      className={`w-full grid grid-cols-12 gap-2 px-3 py-2 items-center text-xs text-left ${isOpen ? "bg-slate-50" : "hover:bg-slate-50"}`}
-                      aria-expanded={isOpen}
-                    >
-                      <span className="col-span-1 flex items-center gap-1 font-mono-num text-slate-400">
-                        <ChevronRight
-                          size={12}
-                          className={`text-slate-400 transition-transform ${isOpen ? "rotate-90" : ""}`}
-                        />
-                        {cat.category_code || "—"}
-                      </span>
-                      <span className="col-span-6 text-slate-800 truncate">{cat.category_name}</span>
-                      <span className="col-span-1 text-right text-slate-500 font-mono-num">{cat.count}×</span>
-                      <span className="col-span-4 text-right font-mono-num text-slate-600">{rangeStr}</span>
-                    </button>
+                    <div className={`w-full grid grid-cols-12 gap-2 px-3 py-2 items-center text-xs ${isOpen ? "bg-slate-50" : "hover:bg-slate-50"}`}>
+                      <button
+                        type="button"
+                        onClick={() => toggle(c, cat)}
+                        aria-expanded={isOpen}
+                        className="col-span-11 grid grid-cols-11 gap-2 items-center text-left"
+                      >
+                        <span className="col-span-1 flex items-center gap-1 font-mono-num text-slate-400">
+                          <ChevronRight
+                            size={12}
+                            className={`text-slate-400 transition-transform ${isOpen ? "rotate-90" : ""}`}
+                          />
+                          {cat.category_code || "—"}
+                        </span>
+                        <span className="col-span-6 text-slate-800 truncate">{cat.category_name}</span>
+                        <span className="col-span-1 text-right text-slate-500 font-mono-num">{cat.count}×</span>
+                        <span className="col-span-3 text-right font-mono-num text-slate-600">{rangeStr}</span>
+                      </button>
+                      <div className="col-span-1 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={(e) => approveCategory(c, cat, e)}
+                          disabled={cellApproved || cellBusy}
+                          data-testid={`rollup-approve-cat-${key}`}
+                          className={approveBtnClasses(cellApproved, "sm")}
+                        >
+                          {cellBusy ? "…" : cellApproved ? "Approved" : "Approve"}
+                        </button>
+                      </div>
+                    </div>
                     {isOpen && (
                       <div data-testid={`rollup-expand-${key}`} className="bg-slate-50/40 border-t border-slate-100">
                         {cached === "loading" && (
