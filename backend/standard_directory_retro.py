@@ -97,6 +97,11 @@ async def apply_directory_to_existing(
         "skipped_tenant_priority": 0, "skipped_no_hint": 0,
         "skipped_no_account": 0, "skipped_same_answer": 0,
     }
+    # Rows we revert via identity_only get queued for AI contact
+    # re-resolution at the end of the sweep — one LLM pass extracts the
+    # real payee (Andrew Chesnutt) out of "Zelle Andrew Chesnutt ZELLE
+    # DEBIT" and swaps in the real-person contact.
+    identity_only_reverts: list[dict] = []
 
     for t in rows:
         # ---- Tenant-priority guard --------------------------------------
@@ -183,9 +188,21 @@ async def apply_directory_to_existing(
                     stats["overridden"] += 1
                     stats.setdefault("reverted_identity_only", 0)
                     stats["reverted_identity_only"] += 1
+                    # Queue for AI contact re-resolution below.
+                    identity_only_reverts.append(t)
                 continue
 
         if not hint:
+            # Even if no category hint fires, check whether this row is
+            # stuck on a payment-channel umbrella contact (Zelle/Venmo/
+            # PayPal/etc.) — those need the AI heal to extract the real
+            # payee. This catches rows reverted on a PREVIOUS sweep run
+            # whose category was flipped but whose contact was never
+            # re-resolved.
+            _cname = (t.get("contact_name") or "").strip()
+            if _cname in {"Zelle", "Venmo", "PayPal", "Cash App", "Wise",
+                          "Apple Cash", "Google Pay", "Apple Pay"}:
+                identity_only_reverts.append(t)
             stats["skipped_no_hint"] += 1
             continue
         stats["matched"] += 1
@@ -256,6 +273,89 @@ async def apply_directory_to_existing(
             {"id": t["id"]}, {"$set": update_fields},
         )
         stats["overridden"] += 1
+
+    # ---- AI Contact Heal for identity-only reverts -----------------
+    # After the category revert loop above, any row we flagged came
+    # from a payment channel where the real payee is buried in the
+    # memo. Run contact_resolver's AI path over them to swap in the
+    # real-person contact. Batched with concurrency=8 so we don't
+    # serialize 90 Haiku calls.
+    if identity_only_reverts:
+        import contact_resolver, ai_service, asyncio as _asyncio
+        stats["contacts_reresolved"] = 0
+        stats["contacts_created"] = 0
+        # Fresh snapshot — we may have created a bunch of new contacts
+        # earlier in this sweep too.
+        existing_contacts = await db.contacts.find(
+            {"company_id": company_id},
+        ).to_list(5000)
+        by_norm = {c.get("normalized_name"): c for c in existing_contacts}
+        # In-batch dedupe so 90 Andrew Chesnutt rows all share one
+        # newly-minted contact.
+        new_this_batch: dict[str, dict] = {}
+        sem = _asyncio.Semaphore(8)
+
+        async def _heal_one(t):
+            async with sem:
+                desc = t.get("description") or t.get("memo") or t.get("merchant") or ""
+                # Learning cache check (same helper contact_resolver
+                # uses) before hitting the LLM.
+                sig = contact_resolver._cache_signature(desc)
+                cached_hit = await contact_resolver._lookup_learning_cache(company_id, sig)
+                ai_result = None
+                if cached_hit and cached_hit.get("contact_id"):
+                    ai_result = {"contact_id": cached_hit["contact_id"],
+                                  "contact_name": cached_hit.get("contact_name")}
+                if not ai_result:
+                    r = await ai_service.resolve_contact_ai(
+                        desc, existing_contacts, pfc_primary=None,
+                    )
+                    if not r.get("has_counterparty") or not r.get("extracted_name"):
+                        return
+                    if r.get("match_existing_id"):
+                        m = next((c for c in existing_contacts
+                                  if c["id"] == r["match_existing_id"]), None)
+                        if m:
+                            ai_result = {"contact_id": m["id"],
+                                          "contact_name": m["name"]}
+                        else:
+                            return
+                    else:
+                        name = r["extracted_name"].strip()
+                        norm = contact_resolver.normalize_contact_name(name)
+                        if norm in by_norm:
+                            m = by_norm[norm]
+                            ai_result = {"contact_id": m["id"], "contact_name": m["name"]}
+                        elif norm in new_this_batch:
+                            m = new_this_batch[norm]
+                            ai_result = {"contact_id": m["id"], "contact_name": m["name"]}
+                        else:
+                            created = await contact_resolver._insert_contact(
+                                company_id, name, source="ai_new",
+                            )
+                            new_this_batch[norm] = created
+                            stats["contacts_created"] += 1
+                            ai_result = {"contact_id": created["id"],
+                                          "contact_name": created["name"]}
+                    await contact_resolver._save_to_learning_cache(
+                        company_id, sig,
+                        ai_result["contact_id"], ai_result["contact_name"],
+                    )
+
+                if ai_result.get("contact_id"):
+                    await db.transactions.update_one(
+                        {"id": t["id"]},
+                        {"$set": {
+                            "contact_id":     ai_result["contact_id"],
+                            "contact_name":   ai_result["contact_name"],
+                            "contact_source": "ai_new_heal",
+                            "updated_at": now_iso(),
+                        }},
+                    )
+                    stats["contacts_reresolved"] += 1
+
+        await _asyncio.gather(*(_heal_one(t) for t in identity_only_reverts),
+                               return_exceptions=True)
 
     log.info("Retroactive directory sweep cid=%s: %s", company_id, stats)
     return stats
