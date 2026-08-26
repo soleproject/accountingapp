@@ -41,8 +41,12 @@ log = logging.getLogger("axiom.standard_directory")
 
 # Sources whose categorization we're allowed to overwrite.  Everything
 # else is either tenant-owned or already carrying a stronger signal.
+# NOTE: pfc_primary / pfc_business ARE overridable because the directory
+# (canonical merchant identity) beats Plaid PFC (fuzzy category mapping).
 _OVERRIDABLE_SOURCES = {
-    "ai", "llm", "uncategorized", "directory", None, "",
+    "ai", "llm", "uncategorized", "directory",
+    "pfc_primary", "pfc_business", "pfc_default", "pfc_personal",
+    None, "",
 }
 
 

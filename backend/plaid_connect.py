@@ -356,27 +356,26 @@ async def categorize_and_insert_plaid_txns(
         cand["category_hint_source"] = "global_directory" if cr.get("linked_semantic") else None
 
     # ------ Stage 3: Global Contact Directory hint (deterministic) ------
-    # Candidates that PFC deferred BUT carry a `category_hint_semantic`
-    # (stamped by contact_resolver via the 5,221-entry directory) can
-    # skip the LLM entirely. The hint arrives from canonical merchant
-    # identity, so it's a stronger signal than an LLM guess. Directory
-    # accounts are resolved by CoA NAME (not code) so a company with a
-    # custom CoA still gets the right bucket.
+    # Runs on EVERY candidate carrying a `category_hint_semantic` (not
+    # just deferred). The directory is a stronger signal than Plaid PFC
+    # because it's built on canonical merchant identity (Google Workspace
+    # = software_saas) vs. PFC's fuzzy category mapping (Google Workspace
+    # = GENERAL_SERVICES_OTHER_GENERAL_SERVICES → Office Supplies).
+    # If the directory identified the vendor AND the semantic resolves
+    # to a real CoA account, the directory wins — PFC's answer is
+    # discarded and the LLM is skipped for that row.
     _company_doc = await db.companies.find_one({"id": cid})
     _template = (_company_doc or {}).get("industry_template") or "generic"
     _accts_now = await db.accounts.find({"company_id": cid}).to_list(2000)
     directory_results: dict[int, dict] = {}
-    still_deferred: list[dict] = []
-    for cand in deferred:
+    for cand in candidates:
         hint = cand.get("category_hint_semantic")
         if not hint or cand.get("category_hint_source") != "global_directory":
-            still_deferred.append(cand)
             continue
         acct = global_vendor_rules.resolve_semantic_to_account(
             hint, _accts_now, _template,
         )
         if not acct:
-            still_deferred.append(cand)
             continue
         directory_results[id(cand)] = {
             "account_id":   acct.get("id"),
@@ -384,7 +383,11 @@ async def categorize_and_insert_plaid_txns(
             "account_name": acct.get("name"),
             "semantic":     hint,
         }
-    deferred = still_deferred
+
+    # Rows that got a directory hit no longer need the LLM — drop them
+    # from the deferred set. PFC results for these rows are also
+    # ignored below (directory beats PFC).
+    deferred = [c for c in deferred if id(c) not in directory_results]
 
     per_item_result = await categorizer.categorize_batch_grouped(
         cid, deferred, coa, categorize_fn, concurrency=10,
@@ -399,9 +402,27 @@ async def categorize_and_insert_plaid_txns(
     inserted: list[dict] = []
     for cand in candidates:
         t = cand["plaid_txn"]
-        pfc_res = pfc_results.get(id(cand))
+        # Directory-first: canonical merchant identity beats Plaid PFC's
+        # fuzzy category mapping. If both fired on the same row, directory wins.
         dir_res = directory_results.get(id(cand))
-        if pfc_res:
+        pfc_res = None if dir_res else pfc_results.get(id(cand))
+        if dir_res:
+            post = {
+                "category_account_id":   dir_res["account_id"],
+                "category_account_code": dir_res["account_code"],
+                "category_account_name": dir_res["account_name"],
+                "ai_confidence": 0.90,
+                "ai_reasoning": (
+                    f"Global Contact Directory → {cand.get('contact_name')} "
+                    f"→ semantic '{dir_res['semantic']}' → account "
+                    f"'{dir_res['account_name']}'"
+                ),
+                "needs_review": False,
+                "posted": True,
+                "ai_source": "directory",
+            }
+            r = {"cache_hit": False}
+        elif pfc_res:
             post = {
                 "category_account_id":   pfc_res["category_account_id"],
                 "category_account_code": pfc_res["category_account_code"],
@@ -413,22 +434,6 @@ async def categorize_and_insert_plaid_txns(
                 "needs_review": not pfc_res["reviewed_by_default"],
                 "posted": True,
                 "ai_source": f"pfc_{pfc_res['source']}",
-            }
-            r = {"cache_hit": False}
-        elif dir_res:
-            post = {
-                "category_account_id":   dir_res["account_id"],
-                "category_account_code": dir_res["account_code"],
-                "category_account_name": dir_res["account_name"],
-                "ai_confidence": 0.85,
-                "ai_reasoning": (
-                    f"Global Contact Directory → {cand.get('contact_name')} "
-                    f"→ semantic '{dir_res['semantic']}' → account "
-                    f"'{dir_res['account_name']}'"
-                ),
-                "needs_review": False,   # directory is high-confidence
-                "posted": True,
-                "ai_source": "directory",
             }
             r = {"cache_hit": False}
         else:
