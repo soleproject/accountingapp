@@ -59,12 +59,15 @@ async def set_industry_template(
 async def set_categorization_mode(
     cid: str, payload: dict, user: dict = Depends(get_current_user),
 ) -> dict:
-    """Flip between 'standard' and 'ai_first'. Applies to incoming txns
-    from this moment forward — never rewrites already-categorized rows."""
+    """Flip between 'standard' | 'ai_first' | 'standard_plus'. Applies
+    to incoming txns from this moment forward — never rewrites already-
+    categorized rows."""
     await require_company(user, cid)
     mode = (payload.get("mode") or "").strip()
-    if mode not in ("standard", "ai_first"):
-        raise HTTPException(400, "mode must be 'standard' or 'ai_first'")
+    if mode not in ("standard", "ai_first", "standard_plus"):
+        raise HTTPException(
+            400, "mode must be 'standard', 'ai_first', or 'standard_plus'",
+        )
     await db.companies.update_one(
         {"id": cid},
         {"$set": {"categorization_mode": mode, "updated_at": now_iso()}},
@@ -112,3 +115,33 @@ async def ai_first_categorize(
         await db.transactions.update_one({"id": r["txn_id"]}, {"$set": set_fields})
         updated += 1
     return {"ok": True, "updated": updated, "results": results}
+
+
+@router.post("/companies/{cid}/standard-plus/apply-rules")
+async def standard_plus_apply_rules(
+    cid: str, payload: dict, user: dict = Depends(get_current_user),
+) -> dict:
+    """Apply the Global Vendor Rules library to a set of existing
+    transactions on the given company. Used for retroactive
+    re-categorization when the CPA flips a company to Standard+ or
+    when we ship a rule library update.
+
+    Body: {"transaction_ids": [str, ...]}
+    Returns: {"ok": true, "stats": {matched, overridden, review_flagged, skipped}}
+    """
+    await require_company(user, cid)
+    import standard_plus_categorizer
+    ids = payload.get("transaction_ids") or []
+    if not ids:
+        raise HTTPException(400, "transaction_ids required")
+    stats = await standard_plus_categorizer.apply_global_rules_override(cid, ids)
+    return {"ok": True, "stats": stats}
+
+
+@router.get("/global-vendor-rules/stats")
+async def global_vendor_rules_stats(user: dict = Depends(get_current_user)) -> dict:
+    """Return summary metadata about the loaded Global Vendor Rules
+    library. Used by the Settings UI to show rule coverage."""
+    import global_vendor_rules
+    return {"rule_count": global_vendor_rules.rule_count()}
+

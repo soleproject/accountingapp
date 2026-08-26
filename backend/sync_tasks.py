@@ -270,7 +270,8 @@ async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool,
     # branch inside `categorize_and_insert_plaid_txns` so the Standard
     # pipeline stays 100% untouched (per product decision).
     company_doc = await db.companies.find_one({"id": company_id})
-    if imported > 0 and (company_doc or {}).get("categorization_mode") == "ai_first":
+    mode = (company_doc or {}).get("categorization_mode") or "standard"
+    if imported > 0 and mode == "ai_first":
         try:
             import ai_first_categorizer
             ins_ids = [t["id"] for t in inserted_all if t.get("id")]
@@ -296,6 +297,24 @@ async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool,
             import logging
             logging.getLogger("axiom.app").warning(
                 "AI-First post-hook failed cid=%s: %s", company_id, e,
+            )
+
+    # Standard+ Beta override — Global Vendor Rules run over the rows
+    # Standard just inserted, overriding category selection where a
+    # curated merchant rule matches with confidence >= 0.50. Contact
+    # matching + AI confidence/reasoning from Standard are preserved —
+    # only the category is potentially overridden.
+    if imported > 0 and mode == "standard_plus":
+        try:
+            import standard_plus_categorizer
+            ins_ids = [t["id"] for t in inserted_all if t.get("id")]
+            await standard_plus_categorizer.apply_global_rules_override(
+                company_id, ins_ids,
+            )
+        except Exception as e:  # noqa: BLE001 — never fail the sync
+            import logging
+            logging.getLogger("axiom.app").warning(
+                "Standard+ post-hook failed cid=%s: %s", company_id, e,
             )
 
     # Post-sync: auto-detect internal transfers between company-owned bank

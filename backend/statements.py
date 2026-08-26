@@ -862,7 +862,8 @@ async def _process_veryfi_result(
     # standard-cascade categories.
     try:
         _co = await db.companies.find_one({"id": cid})
-        if imported > 0 and (_co or {}).get("categorization_mode") == "ai_first":
+        _mode = (_co or {}).get("categorization_mode") or "standard"
+        if imported > 0 and _mode == "ai_first":
             import ai_first_categorizer as _aifc
             _rows = await db.transactions.find(
                 {"statement_import_id": import_id, "company_id": cid},
@@ -884,10 +885,23 @@ async def _process_veryfi_result(
                 await db.transactions.update_one(
                     {"id": _r["txn_id"]}, {"$set": _set},
                 )
+        elif imported > 0 and _mode == "standard_plus":
+            # Standard+ Beta — apply Global Vendor Rules override on
+            # rows Standard just inserted (statement path). Mirror of
+            # the sync_tasks branch so both ingest paths behave the
+            # same.
+            import standard_plus_categorizer as _spc
+            _rows = await db.transactions.find(
+                {"statement_import_id": import_id, "company_id": cid},
+                projection={"id": 1},
+            ).to_list(imported)
+            await _spc.apply_global_rules_override(
+                cid, [_r["id"] for _r in _rows if _r.get("id")],
+            )
     except Exception as _e:  # noqa: BLE001
         import logging as _lg
         _lg.getLogger(__name__).warning(
-            "statements AI-First post-hook failed cid=%s import=%s: %s",
+            "statements categorization-mode post-hook failed cid=%s import=%s: %s",
             cid, import_id, _e,
         )
 
