@@ -36,9 +36,9 @@ const SOURCE_META = {
   // LLM cascade
   ai:                      { color: "bg-amber-500", label: "AI (Standard LLM)" },
   llm:                     { color: "bg-amber-500", label: "AI (LLM)" },
-  ai_first:                { color: "bg-amber-500", label: "AI-First (Beta)" },
-  ai_first_propagated:     { color: "bg-amber-500", label: "AI-First cluster propagation" },
-  ai_first_fallback:       { color: "bg-amber-500", label: "AI-First fallback → Uncategorized" },
+  ai_first:                { color: "bg-slate-400", label: "AI-First (legacy — retired)" },
+  ai_first_propagated:     { color: "bg-slate-400", label: "AI-First cluster (legacy — retired)" },
+  ai_first_fallback:       { color: "bg-slate-400", label: "AI-First fallback (legacy — retired)" },
   liability_paydown_guard: { color: "bg-amber-500", label: "Liability paydown guard" },
 };
 

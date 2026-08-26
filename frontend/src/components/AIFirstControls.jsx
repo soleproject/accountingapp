@@ -50,7 +50,7 @@ export function IndustryTemplatePicker({ companyId, value, onChange, autoSaveOnP
   );
 }
 
-// Settings toggle — Standard vs AI-First Beta.
+// Settings toggle — Standard vs Standard+.
 export function CategorizationModeToggle({ companyId, initialMode }) {
   const [mode, setMode] = useState(initialMode || "standard");
   const [saving, setSaving] = useState(false);
@@ -61,7 +61,6 @@ export function CategorizationModeToggle({ companyId, initialMode }) {
       await api.post(`/companies/${companyId}/categorization-mode`, { mode: newMode });
       setMode(newMode);
       const msg = {
-        ai_first: "AI-First Beta enabled — next batch will use the AI pipeline",
         standard_plus: "Standard+ Beta enabled — next batch will use Standard + Global Vendor Rules",
         standard: "Reverted to Standard categorization",
       }[newMode] || "Categorization mode updated";
@@ -95,23 +94,6 @@ export function CategorizationModeToggle({ companyId, initialMode }) {
         <input
           type="radio"
           name="cat-mode"
-          checked={mode === "ai_first"}
-          disabled={saving}
-          onChange={() => flip("ai_first")}
-          className="mt-1"
-          data-testid="cat-mode-ai-first"
-        />
-        <span className="text-sm">
-          <span className="font-semibold text-indigo-700">⭐ AI-First (Beta)</span>
-          <span className="text-slate-500 ml-2 text-xs">
-            single intelligent AI pass with your CoA + prior corrections as context
-          </span>
-        </span>
-      </label>
-      <label className="flex items-start gap-2 cursor-pointer">
-        <input
-          type="radio"
-          name="cat-mode"
           checked={mode === "standard_plus"}
           disabled={saving}
           onChange={() => flip("standard_plus")}
@@ -119,7 +101,7 @@ export function CategorizationModeToggle({ companyId, initialMode }) {
           data-testid="cat-mode-standard-plus"
         />
         <span className="text-sm">
-          <span className="font-semibold text-emerald-700">🚀 Standard+ (Beta)</span>
+          <span className="font-semibold text-emerald-700">Standard+ (Beta)</span>
           <span className="text-slate-500 ml-2 text-xs">
             Standard cascade + curated global vendor rules for ~500 top merchants
           </span>

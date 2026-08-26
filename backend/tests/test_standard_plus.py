@@ -695,8 +695,9 @@ class TestAmountBucketRules:
         assert big["semantic"] == "fuel"
 
     def test_amount_bucket_helper_matches_ai_first_cutoffs(self):
-        """The bucket cutoffs mirror ai_first_categorizer._AMOUNT_BUCKETS
-        so both pipelines split at the same thresholds."""
+        """The bucket cutoffs use the standard $50 / $500 / $5000
+        thresholds so amount-bucket rules split by consistent
+        magnitudes across the codebase."""
         import global_vendor_rules as r
         assert r.amount_bucket(0) == "s"
         assert r.amount_bucket(49.99) == "s"

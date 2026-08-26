@@ -1,4 +1,5 @@
-"""AI-First Beta routes: industry templates + categorization mode toggle."""
+"""Categorization mode routes: industry templates, mode toggle
+(Standard | Standard+), and Standard+ retroactive apply."""
 from __future__ import annotations
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,7 +8,6 @@ from db import db, now_iso
 from auth import get_current_user
 from deps import require_company
 import industry_templates
-import ai_first_categorizer
 
 router = APIRouter(prefix="/api")
 
@@ -59,62 +59,20 @@ async def set_industry_template(
 async def set_categorization_mode(
     cid: str, payload: dict, user: dict = Depends(get_current_user),
 ) -> dict:
-    """Flip between 'standard' | 'ai_first' | 'standard_plus'. Applies
-    to incoming txns from this moment forward — never rewrites already-
-    categorized rows."""
+    """Flip between 'standard' | 'standard_plus'. Applies to incoming
+    txns from this moment forward — never rewrites already-categorized
+    rows (use the Standard+ retroactive apply endpoint for that)."""
     await require_company(user, cid)
     mode = (payload.get("mode") or "").strip()
-    if mode not in ("standard", "ai_first", "standard_plus"):
+    if mode not in ("standard", "standard_plus"):
         raise HTTPException(
-            400, "mode must be 'standard', 'ai_first', or 'standard_plus'",
+            400, "mode must be 'standard' or 'standard_plus'",
         )
     await db.companies.update_one(
         {"id": cid},
         {"$set": {"categorization_mode": mode, "updated_at": now_iso()}},
     )
     return {"ok": True, "mode": mode}
-
-
-@router.post("/companies/{cid}/ai-first/categorize-batch")
-async def ai_first_categorize(
-    cid: str, payload: dict, user: dict = Depends(get_current_user),
-) -> dict:
-    """Categorize a batch of already-existing transactions using AI-First.
-
-    Body: {"transaction_ids": [str, ...]}
-    Applies results directly to the transactions (contact + category).
-    Used for on-demand re-categorization on companies opted into
-    ai_first mode. Live Plaid/statement imports should hook into this
-    same function via the standard ingest path (branching on
-    categorization_mode).
-    """
-    await require_company(user, cid)
-    ids = payload.get("transaction_ids") or []
-    if not ids:
-        raise HTTPException(400, "transaction_ids required")
-    rows = await db.transactions.find(
-        {"id": {"$in": ids}, "company_id": cid}
-    ).to_list(len(ids))
-    results = await ai_first_categorizer.categorize_batch(cid, rows)
-    updated = 0
-    for r in results:
-        set_fields = {
-            "category_account_id": r.get("category_account_id"),
-            "category_account_code": r.get("category_account_code"),
-            "category_account_name": r.get("category_account_name"),
-            "contact_id": r.get("contact_id"),
-            "contact_name": r.get("contact_name"),
-            "needs_review": r.get("needs_review", True),
-            "ai_confidence": r.get("confidence", 0.0),
-            "ai_reasoning": r.get("reasoning", ""),
-            "categorization_source": r.get("source", "ai_first"),
-            "updated_at": now_iso(),
-        }
-        # Drop empty values so we don't clobber existing data with nulls.
-        set_fields = {k: v for k, v in set_fields.items() if v is not None}
-        await db.transactions.update_one({"id": r["txn_id"]}, {"$set": set_fields})
-        updated += 1
-    return {"ok": True, "updated": updated, "results": results}
 
 
 @router.post("/companies/{cid}/standard-plus/apply-rules")

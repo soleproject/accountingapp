@@ -855,41 +855,15 @@ async def _process_veryfi_result(
     except Exception:  # noqa: BLE001
         pass
 
-    # AI-First post-hook — if the company opted in, overwrite the
-    # standard-cascade categorizations we just wrote with AI-First
-    # picks. Kept as a post-step so the Standard ingest path stays
-    # untouched. Silent on failure — the txns remain with their
+    # Standard+ post-hook — if the company opted in, apply Global
+    # Vendor Rules override on rows Standard just inserted (statement
+    # path). Mirror of the sync_tasks branch so both ingest paths
+    # behave the same. Silent on failure — txns remain with their
     # standard-cascade categories.
     try:
         _co = await db.companies.find_one({"id": cid})
         _mode = (_co or {}).get("categorization_mode") or "standard"
-        if imported > 0 and _mode == "ai_first":
-            import ai_first_categorizer as _aifc
-            _rows = await db.transactions.find(
-                {"statement_import_id": import_id, "company_id": cid},
-            ).to_list(imported)
-            _results = await _aifc.categorize_batch(cid, _rows)
-            for _r in _results:
-                _set = {
-                    "category_account_id": _r.get("category_account_id"),
-                    "category_account_code": _r.get("category_account_code"),
-                    "category_account_name": _r.get("category_account_name"),
-                    "contact_id": _r.get("contact_id"),
-                    "contact_name": _r.get("contact_name"),
-                    "needs_review": _r.get("needs_review", True),
-                    "ai_confidence": _r.get("confidence", 0.0),
-                    "ai_reasoning": _r.get("reasoning", ""),
-                    "categorization_source": _r.get("source", "ai_first"),
-                }
-                _set = {k: v for k, v in _set.items() if v is not None}
-                await db.transactions.update_one(
-                    {"id": _r["txn_id"]}, {"$set": _set},
-                )
-        elif imported > 0 and _mode == "standard_plus":
-            # Standard+ Beta — apply Global Vendor Rules override on
-            # rows Standard just inserted (statement path). Mirror of
-            # the sync_tasks branch so both ingest paths behave the
-            # same.
+        if imported > 0 and _mode == "standard_plus":
             import standard_plus_categorizer as _spc
             _rows = await db.transactions.find(
                 {"statement_import_id": import_id, "company_id": cid},
