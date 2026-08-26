@@ -7,6 +7,8 @@ Every task manages its own status transitions via `job_queue.update_job`;
 the enqueue wrapper only catches un-caught exceptions as a safety net.
 """
 from __future__ import annotations
+import asyncio
+import logging
 import traceback
 
 from db import db, now_iso
@@ -251,6 +253,7 @@ async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool,
     await _emit("categorizing", 0, total_target)
 
     imported = 0
+    inserted_all: list[dict] = []
     for bank_id, txns in by_bank.items():
         ledger_bank = next(a for a in accts if a["id"] == bank_id)
         inserted, _skipped = await plaid_connect.categorize_and_insert_plaid_txns(
@@ -258,7 +261,61 @@ async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool,
             categorize_fn=_categorize_fn, is_period_closed_fn=_is_period_closed,
         )
         imported += len(inserted)
+        inserted_all.extend(inserted)
         await _emit("categorizing", imported, total_target)
+
+    # AI-First override — if this company opted in, run the just-inserted
+    # rows through the AI-First categorizer, overwriting the standard-
+    # cascade result on each txn. Kept as a post-hook rather than a
+    # branch inside `categorize_and_insert_plaid_txns` so the Standard
+    # pipeline stays 100% untouched (per product decision).
+    company_doc = await db.companies.find_one({"id": company_id})
+    mode = (company_doc or {}).get("categorization_mode") or "standard"
+    if imported > 0 and mode == "ai_first":
+        try:
+            import ai_first_categorizer
+            ins_ids = [t["id"] for t in inserted_all if t.get("id")]
+            rows = await db.transactions.find(
+                {"id": {"$in": ins_ids}, "company_id": company_id},
+            ).to_list(len(ins_ids))
+            results = await ai_first_categorizer.categorize_batch(company_id, rows)
+            for r in results:
+                set_fields = {
+                    "category_account_id": r.get("category_account_id"),
+                    "category_account_code": r.get("category_account_code"),
+                    "category_account_name": r.get("category_account_name"),
+                    "contact_id": r.get("contact_id"),
+                    "contact_name": r.get("contact_name"),
+                    "needs_review": r.get("needs_review", True),
+                    "ai_confidence": r.get("confidence", 0.0),
+                    "ai_reasoning": r.get("reasoning", ""),
+                    "categorization_source": r.get("source", "ai_first"),
+                }
+                set_fields = {k: v for k, v in set_fields.items() if v is not None}
+                await db.transactions.update_one({"id": r["txn_id"]}, {"$set": set_fields})
+        except Exception as e:  # noqa: BLE001 — never fail the sync
+            import logging
+            logging.getLogger("axiom.app").warning(
+                "AI-First post-hook failed cid=%s: %s", company_id, e,
+            )
+
+    # Standard+ Beta override — Global Vendor Rules run over the rows
+    # Standard just inserted, overriding category selection where a
+    # curated merchant rule matches with confidence >= 0.50. Contact
+    # matching + AI confidence/reasoning from Standard are preserved —
+    # only the category is potentially overridden.
+    if imported > 0 and mode == "standard_plus":
+        try:
+            import standard_plus_categorizer
+            ins_ids = [t["id"] for t in inserted_all if t.get("id")]
+            await standard_plus_categorizer.apply_global_rules_override(
+                company_id, ins_ids,
+            )
+        except Exception as e:  # noqa: BLE001 — never fail the sync
+            import logging
+            logging.getLogger("axiom.app").warning(
+                "Standard+ post-hook failed cid=%s: %s", company_id, e,
+            )
 
     # Post-sync: auto-detect internal transfers between company-owned bank
     # accounts. If the user linked BOTH sides of a transfer via Plaid, this
@@ -380,6 +437,212 @@ async def _post_deferred_plaid_opening_balances(
 
 
 # ---------------------------------------------------------------------------
+# Plaid backfill polling — durable + semaphore-safe
+# ---------------------------------------------------------------------------
+#
+# Why this is not a `job_queue` task (Feb 2026 lesson):
+# The natural design would be to enqueue a delayed sync task that
+# calls `asyncio.sleep(delay)` before doing work. But `job_queue.enqueue_job`
+# runs its tasks inside `_run_wrapped`, which holds a shared semaphore
+# (`MAX_CONCURRENT_SYNCS=20` per pod). Sleeping 30s–30m inside that
+# semaphore causes a *priority inversion*: at 1,000+ concurrent
+# onboardings, all 20 semaphore slots per pod could be occupied by
+# sleeping polls while real webhook + manual syncs queue up behind
+# them. So instead of running the delay inside a queued task, we:
+#
+#   1. Persist `next_backfill_poll_at` + `next_backfill_poll_attempt`
+#      directly on the `plaid_items` document. This is what makes it
+#      DURABLE — a pod restart doesn't lose scheduled polls.
+#
+#   2. Spawn a lightweight fire-and-forget `asyncio.create_task` timer
+#      that sleeps outside the semaphore, then enqueues the ACTUAL
+#      sync work via `plaid_manual_sync` (which does hold the
+#      semaphore, but only while doing real work).
+#
+#   3. On backend startup, `reconcile_pending_backfill_polls` scans
+#      `plaid_items` for any item with a future `next_backfill_poll_at`
+#      and re-arms an in-process timer for it.
+#
+# Stops early when: (a) the requested `import_start_date` floor is
+# reached, or (b) a real Plaid `HISTORICAL_UPDATE` webhook stamps
+# `historical_update_received: True`. Final attempt sends
+# `webhook_code="HISTORICAL_UPDATE"` so opening-balance JEs still land
+# even when Plaid never fires its own webhook.
+
+_BACKFILL_POLL_DELAYS = [30, 120, 300, 900, 1800]  # seconds
+
+# Set holds a reference to every live in-process timer so the GC
+# doesn't reap them mid-sleep. Auto-cleaned via done_callback.
+_active_backfill_timers: set[asyncio.Task] = set()
+
+
+async def schedule_plaid_backfill_poll(
+    company_id: str, item_id: str, attempt: int = 0,
+) -> None:
+    """Schedule the next Plaid backfill poll for the given item.
+
+    Persists `next_backfill_poll_at` on the plaid_items row (so a pod
+    restart can re-arm) and starts an in-process timer that will fire
+    the actual sync after the delay expires.
+
+    Idempotent: if a timer is already armed for a future poll on this
+    item, this call replaces it with a newer schedule.
+    """
+    from datetime import datetime, timezone, timedelta
+
+    if attempt >= len(_BACKFILL_POLL_DELAYS):
+        return  # No more attempts.
+
+    delay = _BACKFILL_POLL_DELAYS[attempt]
+    next_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+    await db.plaid_items.update_one(
+        {"id": item_id},
+        {"$set": {
+            "next_backfill_poll_at": next_at.isoformat(),
+            "next_backfill_poll_attempt": attempt,
+            "updated_at": now_iso(),
+        }},
+    )
+
+    task = asyncio.create_task(
+        _backfill_timer(company_id, item_id, attempt, delay),
+        name=f"plaid_backfill_timer:{item_id[:8]}:a{attempt}",
+    )
+    _active_backfill_timers.add(task)
+    task.add_done_callback(_active_backfill_timers.discard)
+
+
+async def _backfill_timer(
+    company_id: str, item_id: str, attempt: int, delay: float,
+) -> None:
+    """The actual timer body — sleeps outside any semaphore, then
+    enqueues a real sync job.
+
+    Runs as a fire-and-forget asyncio task. Errors are swallowed (and
+    logged) so a single bad item can't crash the pod.
+    """
+    log = logging.getLogger("axiom.app")
+    try:
+        await asyncio.sleep(delay)
+
+        # Re-check the item: maybe HISTORICAL_UPDATE already landed while
+        # we were sleeping, or the item was deleted. Either way, stop.
+        item = await db.plaid_items.find_one({"id": item_id})
+        if not item:
+            return
+        if item.get("historical_update_received"):
+            await _clear_poll_schedule(item_id)
+            return
+
+        # Enqueue the real sync as a normal queued job. This is what
+        # actually acquires the sync semaphore — sleep already done.
+        # Last attempt uses `HISTORICAL_UPDATE` trigger so opening
+        # balance JEs land even if Plaid never fires its own webhook.
+        last = attempt >= len(_BACKFILL_POLL_DELAYS) - 1
+        trigger = "HISTORICAL_UPDATE" if last else "BACKFILL_POLL"
+        job_id = await job_queue.enqueue_job(
+            "plaid_manual_sync", company_id, user_id=None,
+            webhook_code=trigger,
+        )
+
+        # Wait briefly (up to 5 min) for the sync to finish so we can
+        # decide whether to schedule the next attempt based on its
+        # result. If it doesn't finish in time, we optimistically
+        # schedule the next attempt anyway — the follow-up sync will
+        # dedup against any in-flight or completed one.
+        result = await _await_job(job_id, timeout=300)
+        imported = int((result or {}).get("imported") or 0)
+
+        # Post-sync: did we reach the requested import_start_date floor?
+        item = await db.plaid_items.find_one({"id": item_id}) or item
+        floor = item.get("import_start_date")
+        reached_floor = False
+        if floor:
+            oldest = await db.transactions.find_one(
+                {"company_id": company_id,
+                 "plaid_transaction_id": {"$ne": None}},
+                sort=[("date", 1)], projection={"date": 1},
+            )
+            if oldest and (oldest.get("date") or "") <= floor:
+                reached_floor = True
+
+        # Decide whether to schedule the next attempt.
+        # STOP if: last attempt just ran, or we reached the floor, or
+        # this attempt imported 0 rows AND we've already had 2+ zero-
+        # imports (Plaid is done shipping data).
+        if last:
+            await _clear_poll_schedule(item_id)
+            return
+        if reached_floor:
+            await _clear_poll_schedule(item_id)
+            return
+
+        # Otherwise arm the next attempt.
+        await schedule_plaid_backfill_poll(company_id, item_id, attempt + 1)
+
+    except Exception:  # noqa: BLE001 — never crash a pod on a poll
+        log.warning(
+            "Plaid backfill timer failed cid=%s item=%s attempt=%s: %s",
+            company_id, item_id, attempt, traceback.format_exc(),
+        )
+
+
+async def _await_job(job_id: str, timeout: int = 300) -> dict | None:
+    """Poll the sync_jobs row until it's terminal or the timeout elapses."""
+    end = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < end:
+        j = await db.sync_jobs.find_one({"id": job_id})
+        if j and j.get("status") in ("completed", "failed"):
+            return j.get("result") or {}
+        await asyncio.sleep(5)
+    return None
+
+
+async def _clear_poll_schedule(item_id: str) -> None:
+    await db.plaid_items.update_one(
+        {"id": item_id},
+        {"$unset": {"next_backfill_poll_at": "",
+                    "next_backfill_poll_attempt": ""},
+         "$set": {"updated_at": now_iso()}},
+    )
+
+
+async def reconcile_pending_backfill_polls() -> int:
+    """Called at backend startup. Scans plaid_items for pending polls
+    persisted before the last shutdown/redeploy and re-arms an
+    in-process timer for each.
+
+    Returns the number of timers armed.
+    """
+    from datetime import datetime, timezone
+    log = logging.getLogger("axiom.app")
+    now = datetime.now(timezone.utc)
+    armed = 0
+    async for item in db.plaid_items.find({
+        "next_backfill_poll_at": {"$ne": None},
+        "historical_update_received": {"$ne": True},
+    }):
+        try:
+            due_at = datetime.fromisoformat(item["next_backfill_poll_at"])
+        except (TypeError, ValueError):
+            continue
+        remaining = max(0, (due_at - now).total_seconds())
+        attempt = int(item.get("next_backfill_poll_attempt") or 0)
+        task = asyncio.create_task(
+            _backfill_timer(
+                item["company_id"], item["id"], attempt, remaining,
+            ),
+            name=f"plaid_backfill_timer:{item['id'][:8]}:a{attempt}:resumed",
+        )
+        _active_backfill_timers.add(task)
+        task.add_done_callback(_active_backfill_timers.discard)
+        armed += 1
+    if armed:
+        log.info("Reconciled %d pending Plaid backfill polls", armed)
+    return armed
+
+
+# ---------------------------------------------------------------------------
 # Registration — called from FastAPI startup
 # ---------------------------------------------------------------------------
 
@@ -394,5 +657,7 @@ __all__ = [
     "plaid_manual_sync",
     "plaid_reset_resync",
     "plaid_contact_backfill",
+    "schedule_plaid_backfill_poll",
+    "reconcile_pending_backfill_polls",
     "register_all",
 ]

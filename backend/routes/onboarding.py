@@ -1040,6 +1040,29 @@ async def plaid_import(cid: str, payload: dict, user: dict = Depends(get_current
             })
     if imported_total:
         await log_ai(cid, "categorize", imported_total)
+
+    # Chase Plaid's async historical backfill. Plaid's `/transactions/sync`
+    # on a fresh Item returns only what's been backfilled at the moment of
+    # the call (~30 days for most institutions). In classic-webhook mode
+    # Plaid fires a follow-up `HISTORICAL_UPDATE` a minute later; in the
+    # newer sync-mode (some Sandbox institutions, all newer Prod items)
+    # that webhook may never fire. Schedule a poll-chain at +30s, +2m,
+    # +5m, +15m, +30m that stops early once we've reached the requested
+    # `import_start_date` floor or the real HISTORICAL_UPDATE beats us
+    # to it. The scheduler is semaphore-safe (sleep happens outside the
+    # job queue's concurrency semaphore) and durable across pod restarts
+    # (see `sync_tasks.reconcile_pending_backfill_polls`).
+    try:
+        from sync_tasks import schedule_plaid_backfill_poll
+        for item in items:
+            if not item.get("historical_update_received"):
+                await schedule_plaid_backfill_poll(cid, item["id"], attempt=0)
+    except Exception:  # noqa: BLE001 — never fail import on scheduling
+        import logging
+        logging.getLogger("axiom.app").warning(
+            "Failed to schedule Plaid backfill poll for cid=%s", cid,
+        )
+
     return {
         "imported": imported_total,
         "connected": connected,

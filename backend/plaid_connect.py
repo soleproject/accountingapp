@@ -300,6 +300,7 @@ async def categorize_and_insert_plaid_txns(
             "merchant_name": merchant,
             "pfc": pfc, "pfc_primary": (pfc or {}).get("primary"),
             "pfc_detailed": pfc_detailed,
+            "pfc_confidence_level": (pfc or {}).get("confidence_level"),
             "date": t["date"],
         })
 
@@ -408,6 +409,7 @@ async def categorize_and_insert_plaid_txns(
             "contact_source": cand.get("contact_source"),
             "pfc_detailed": cand.get("pfc_detailed"),
             "pfc_primary": cand.get("pfc_primary"),
+            "pfc_confidence_level": cand.get("pfc_confidence_level"),
             "pfc_classification": (pfc_res or {}).get("classification") if pfc_res
                                   else (cand.get("pfc_resolved") or {}).get("classification"),
             **post,

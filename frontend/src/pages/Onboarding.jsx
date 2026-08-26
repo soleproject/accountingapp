@@ -9,6 +9,7 @@ import { BUSINESS_TYPES } from "@/constants/businessTypes";
 import { CheckCircle2, ChevronRight, Loader2, Sparkles, ArrowLeft, Upload } from "lucide-react";
 import { toast } from "sonner";
 import PlaidLinkButton from "@/components/PlaidLinkButton";
+import { IndustryTemplatePicker } from "@/components/AIFirstControls";
 import StatementsTab from "@/components/StatementsTab";
 import InlineQboConnect from "@/components/InlineQboConnect";
 import { institutionLogoUrl } from "@/lib/institutionLogo";
@@ -903,6 +904,21 @@ export default function Onboarding() {
         {step === 0 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Tell us about {current.name}</h2>
+
+            <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
+              <label className="text-xs uppercase text-indigo-700 font-semibold">
+                Industry template
+              </label>
+              <p className="text-[11px] text-slate-600 mt-0.5 mb-2">
+                Pick the closest match — we&apos;ll seed the Chart of Accounts with the
+                right template for this industry. You can edit anything later.
+              </p>
+              <IndustryTemplatePicker
+                companyId={currentId}
+                value={current?.industry_template}
+              />
+            </div>
+
             <div>
               <label className="text-xs uppercase text-slate-500">Business type</label>
               <select
