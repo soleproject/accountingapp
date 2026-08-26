@@ -141,6 +141,21 @@ async def apply_directory_to_existing(
             hint, accounts, template,
         )
         if not acct:
+            # Fall back to canonical-account auto-creation. Every semantic
+            # in our allowlist has a GAAP-clean canonical account defined
+            # in `canonical_semantic_accounts`. Creating on first hit is
+            # the user's chosen policy — see chat spec.
+            import canonical_semantic_accounts
+            acct = await canonical_semantic_accounts.ensure_semantic_account(
+                db, company_id, hint, template,
+            )
+            if acct:
+                # Update our local snapshot so subsequent rows in this
+                # sweep reuse the newly-created account.
+                accounts.append(acct)
+                stats.setdefault("auto_created_accounts", 0)
+                stats["auto_created_accounts"] += 1
+        if not acct:
             stats["skipped_no_account"] += 1
             continue
 

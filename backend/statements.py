@@ -1154,6 +1154,7 @@ async def _categorize_and_insert_veryfi_lines(
     _template = (_company_doc or {}).get("industry_template") or "generic"
     _accts_now = await db.accounts.find({"company_id": cid}).to_list(2000)
     directory_results: dict[int, dict] = {}
+    import canonical_semantic_accounts
     for cand in candidates:
         hint = cand.get("category_hint_semantic")
         if not hint or cand.get("category_hint_source") != "global_directory":
@@ -1161,6 +1162,12 @@ async def _categorize_and_insert_veryfi_lines(
         acct = global_vendor_rules.resolve_semantic_to_account(
             hint, _accts_now, _template,
         )
+        if not acct:
+            acct = await canonical_semantic_accounts.ensure_semantic_account(
+                db, cid, hint, _template,
+            )
+            if acct:
+                _accts_now.append(acct)
         if not acct:
             continue
         directory_results[id(cand)] = {

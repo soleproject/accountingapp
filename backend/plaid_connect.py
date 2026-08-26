@@ -368,6 +368,7 @@ async def categorize_and_insert_plaid_txns(
     _template = (_company_doc or {}).get("industry_template") or "generic"
     _accts_now = await db.accounts.find({"company_id": cid}).to_list(2000)
     directory_results: dict[int, dict] = {}
+    import canonical_semantic_accounts
     for cand in candidates:
         hint = cand.get("category_hint_semantic")
         if not hint or cand.get("category_hint_source") != "global_directory":
@@ -375,6 +376,14 @@ async def categorize_and_insert_plaid_txns(
         acct = global_vendor_rules.resolve_semantic_to_account(
             hint, _accts_now, _template,
         )
+        if not acct:
+            # Auto-create the canonical account so we don't force-fit
+            # the row into the wrong bucket or dump it to Uncategorized.
+            acct = await canonical_semantic_accounts.ensure_semantic_account(
+                db, cid, hint, _template,
+            )
+            if acct:
+                _accts_now.append(acct)  # subsequent rows reuse it
         if not acct:
             continue
         directory_results[id(cand)] = {
