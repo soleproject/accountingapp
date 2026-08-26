@@ -75,6 +75,13 @@ def looks_noisy(merchant: str | None) -> bool:
     m_key = " ".join(merchant.lower().split())
     if m_key in _PAYMENT_CHANNEL_MERCHANTS:
         return True
+    # Payment-channel PREFIX check — Plaid often gives us the whole
+    # memo as merchant_name (e.g. "Zelle Andrew Chesnutt ZELLE DEBIT",
+    # "Venmo *Kevin Petersen"). The real counterparty is buried in the
+    # tail. Force these to the AI path so the LLM can extract the payee.
+    for chan in _PAYMENT_CHANNEL_MERCHANTS:
+        if m_key.startswith(chan + " ") or m_key.startswith(chan + "*"):
+            return True
     return bool(_NOISY_MERCHANT.search(merchant))
 
 
@@ -297,23 +304,30 @@ async def resolve_contact(
             # rows when the same tenant sees two variants).
             canonical = gd_hit["canonical_name"]
             existing_canonical = await _find_by_normalized(company_id, canonical)
+            # `identity_only` entries (Zelle/Venmo/PayPal/etc.) — the
+            # directory tells us WHO the vendor is but never WHAT the
+            # category should be. Category cascade decides normally.
+            identity_only = bool(gd_hit.get("identity_only"))
+            linked_sem = None if identity_only else gd_hit["semantic"]
             if existing_canonical:
                 return {"contact_id": existing_canonical["id"],
                         "contact_name": existing_canonical["name"],
                         "source": "merchant_name",
-                        "linked_semantic": existing_canonical.get("linked_semantic")
-                                           or gd_hit["semantic"]}
+                        "linked_semantic": None if identity_only else (
+                            existing_canonical.get("linked_semantic")
+                            or gd_hit["semantic"])}
             created = await _insert_contact(
                 company_id,
                 canonical,
                 source="global_directory",
                 logo_url=gcd.logo_url_for(gd_hit),
-                linked_semantic=gd_hit["semantic"],
+                linked_semantic=linked_sem,
             )
             return {"contact_id": created["id"], "contact_name": created["name"],
                     "source": "global_directory",
-                    "linked_semantic": gd_hit["semantic"],
-                    "linked_semantic_confidence": gd_hit["confidence"]}
+                    "linked_semantic": linked_sem,
+                    "linked_semantic_confidence": gd_hit["confidence"]
+                                                   if not identity_only else None}
         # No global hit — mint a bare tenant contact under the raw name.
         created = await _insert_contact(company_id, merch, source="merchant_name")
         return {"contact_id": created["id"], "contact_name": created["name"],
@@ -475,6 +489,8 @@ async def resolve_contacts_batch(
         if gd_hit:
             canonical = gd_hit["canonical_name"]
             canonical_key = normalize_contact_name(canonical)
+            identity_only = bool(gd_hit.get("identity_only"))
+            linked_sem = None if identity_only else gd_hit["semantic"]
             # Re-check the tenant snapshot under the canonical key —
             # avoids duplicating "Starbucks Coffee" vs "Starbucks".
             existing_canonical = by_key.get(canonical_key)
@@ -482,8 +498,9 @@ async def resolve_contacts_batch(
                 out[idx] = {"contact_id": existing_canonical["id"],
                             "contact_name": existing_canonical["name"],
                             "source": "merchant_name",
-                            "linked_semantic": existing_canonical.get("linked_semantic")
-                                               or gd_hit["semantic"]}
+                            "linked_semantic": None if identity_only else (
+                                existing_canonical.get("linked_semantic")
+                                or gd_hit["semantic"])}
                 continue
             # Batch-scope dedupe against the canonical key too.
             stub = new_by_key.get(canonical_key)
@@ -491,7 +508,7 @@ async def resolve_contacts_batch(
                 stub = _new_contact_doc(
                     company_id, canonical, source="global_directory",
                     logo_url=gcd.logo_url_for(gd_hit),
-                    linked_semantic=gd_hit["semantic"],
+                    linked_semantic=linked_sem,
                 )
                 new_by_key[canonical_key] = stub
                 # Also alias the merchant's raw key so a second row in
@@ -499,8 +516,9 @@ async def resolve_contacts_batch(
                 new_by_key.setdefault(key, stub)
             out[idx] = {"contact_id": stub["id"], "contact_name": stub["name"],
                         "source": "global_directory",
-                        "linked_semantic": gd_hit["semantic"],
-                        "linked_semantic_confidence": gd_hit["confidence"]}
+                        "linked_semantic": linked_sem,
+                        "linked_semantic_confidence": gd_hit["confidence"]
+                                                       if not identity_only else None}
             continue
         # No global hit — mint a bare tenant contact under the raw name.
         stub = new_by_key.get(key)

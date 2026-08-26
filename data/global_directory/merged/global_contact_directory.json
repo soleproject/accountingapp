@@ -3821,7 +3821,8 @@
     "semantic": "inter_account_transfer",
     "logo_domain": "apple.com",
     "confidence": "medium",
-    "notes": "Real counterparty may live in memo \u2014 resolver should extract."
+    "notes": "Real counterparty may live in memo \u2014 resolver should extract.",
+    "identity_only": true
   },
   {
     "canonical_name": "Apple Search Ads",
@@ -10959,7 +10960,8 @@
     "semantic": "inter_account_transfer",
     "logo_domain": "cash.app",
     "confidence": "medium",
-    "notes": "Real counterparty lives in memo \u2014 resolver should extract."
+    "notes": "Real counterparty lives in memo \u2014 resolver should extract.",
+    "identity_only": true
   },
   {
     "canonical_name": "Cash Saver",
@@ -24177,7 +24179,8 @@
     "semantic": "inter_account_transfer",
     "logo_domain": "pay.google.com",
     "confidence": "medium",
-    "notes": "May represent a wallet transfer or an underlying merchant purchase; resolver should inspect memo context."
+    "notes": "May represent a wallet transfer or an underlying merchant purchase; resolver should inspect memo context.",
+    "identity_only": true
   },
   {
     "canonical_name": "Google Shopping",
@@ -43381,7 +43384,8 @@
     "semantic": "inter_account_transfer",
     "logo_domain": "paypal.com",
     "confidence": "medium",
-    "notes": "PayPal can be a transfer channel, wallet, or merchant processor; resolver should extract the real counterparty when present."
+    "notes": "PayPal can be a transfer channel, wallet, or merchant processor; resolver should extract the real counterparty when present.",
+    "identity_only": true
   },
   {
     "canonical_name": "PaySimple",
@@ -62504,7 +62508,8 @@
     "semantic": "inter_account_transfer",
     "logo_domain": "venmo.com",
     "confidence": "medium",
-    "notes": "Real counterparty lives in memo \u2014 resolver should extract."
+    "notes": "Real counterparty lives in memo \u2014 resolver should extract.",
+    "identity_only": true
   },
   {
     "canonical_name": "Venngage",
@@ -65266,7 +65271,8 @@
     "semantic": "inter_account_transfer",
     "logo_domain": "wise.com",
     "confidence": "medium",
-    "notes": "May represent an international transfer or currency-conversion transaction."
+    "notes": "May represent an international transfer or currency-conversion transaction.",
+    "identity_only": true
   },
   {
     "canonical_name": "Wisepops",
@@ -66526,7 +66532,8 @@
     "semantic": "inter_account_transfer",
     "logo_domain": "zellepay.com",
     "confidence": "medium",
-    "notes": "Real counterparty lives in memo \u2014 resolver should extract."
+    "notes": "Real counterparty lives in memo \u2014 resolver should extract.",
+    "identity_only": true
   },
   {
     "canonical_name": "Zendesk",
