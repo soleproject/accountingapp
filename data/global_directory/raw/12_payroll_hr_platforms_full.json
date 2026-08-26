@@ -1,0 +1,2805 @@
+[
+  {
+    "canonical_name": "ADP",
+    "aliases": [
+      "adp",
+      "automatic data processing",
+      "adp payroll",
+      "adp workforce now",
+      "adp run"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "adp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Paychex",
+    "aliases": [
+      "paychex",
+      "paychex inc",
+      "paychex payroll",
+      "paychex flex",
+      "paychex payroll service"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "paychex.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Gusto",
+    "aliases": [
+      "gusto",
+      "gusto inc",
+      "gusto payroll",
+      "gusto payroll services",
+      "gusto *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "gusto.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Rippling",
+    "aliases": [
+      "rippling",
+      "rippling inc",
+      "rippling payroll",
+      "rippling payroll services",
+      "rippling subscription"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "rippling.com",
+    "confidence": "medium",
+    "notes": "May include HR, IT, benefits, or payroll platform fees."
+  },
+  {
+    "canonical_name": "QuickBooks Payroll",
+    "aliases": [
+      "quickbooks payroll",
+      "intuit payroll",
+      "qb payroll",
+      "quickbooks online payroll",
+      "intuit *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "quickbooks.intuit.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "OnPay",
+    "aliases": [
+      "onpay",
+      "onpay inc",
+      "onpay payroll",
+      "onpay payroll services",
+      "onpay *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "onpay.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Patriot Payroll",
+    "aliases": [
+      "patriot payroll",
+      "patriot software payroll",
+      "patriotsoftware",
+      "patriot payroll services",
+      "patriot *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "patriotsoftware.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SurePayroll",
+    "aliases": [
+      "surepayroll",
+      "sure payroll",
+      "surepayroll inc",
+      "surepayroll payroll",
+      "surepayroll service"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "surepayroll.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Square Payroll",
+    "aliases": [
+      "square payroll",
+      "squareup payroll",
+      "square payroll services",
+      "sq *payroll",
+      "square *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "squareup.com",
+    "confidence": "medium",
+    "notes": "Square also processes merchant payments; require payroll context."
+  },
+  {
+    "canonical_name": "Wave Payroll",
+    "aliases": [
+      "wave payroll",
+      "waveapps payroll",
+      "wave payroll services",
+      "wave *payroll",
+      "waveapps *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "waveapps.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Justworks",
+    "aliases": [
+      "justworks",
+      "justworks inc",
+      "justworks payroll",
+      "justworks peo",
+      "justworks *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "justworks.com",
+    "confidence": "medium",
+    "notes": "May bundle payroll, benefits, HR, and PEO charges."
+  },
+  {
+    "canonical_name": "TriNet",
+    "aliases": [
+      "trinet",
+      "trinet group",
+      "trinet payroll",
+      "trinet peo",
+      "trinet *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "trinet.com",
+    "confidence": "medium",
+    "notes": "May bundle payroll, benefits, HR, and PEO charges."
+  },
+  {
+    "canonical_name": "Insperity",
+    "aliases": [
+      "insperity",
+      "insperity inc",
+      "insperity payroll",
+      "insperity peo",
+      "insperity *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "insperity.com",
+    "confidence": "medium",
+    "notes": "May bundle payroll, benefits, HR, and PEO charges."
+  },
+  {
+    "canonical_name": "Paylocity",
+    "aliases": [
+      "paylocity",
+      "paylocity corporation",
+      "paylocity payroll",
+      "paylocity web pay",
+      "paylocity *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "paylocity.com",
+    "confidence": "medium",
+    "notes": "May include broader HCM software fees."
+  },
+  {
+    "canonical_name": "Paycom",
+    "aliases": [
+      "paycom",
+      "paycom software",
+      "paycom payroll",
+      "paycomonline",
+      "paycom *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "paycom.com",
+    "confidence": "medium",
+    "notes": "May include broader HCM software fees."
+  },
+  {
+    "canonical_name": "UKG",
+    "aliases": [
+      "ukg",
+      "ultimate kronos group",
+      "ukg payroll",
+      "ukg pro",
+      "ukg ready"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "ukg.com",
+    "confidence": "medium",
+    "notes": "May include workforce-management or HCM software without payroll processing."
+  },
+  {
+    "canonical_name": "Dayforce",
+    "aliases": [
+      "dayforce",
+      "dayforce inc",
+      "ceridian dayforce",
+      "dayforce payroll",
+      "dayforce *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "dayforce.com",
+    "confidence": "medium",
+    "notes": "May include broader HCM software fees."
+  },
+  {
+    "canonical_name": "Workday",
+    "aliases": [
+      "workday",
+      "workday inc",
+      "workday hcm",
+      "workday human capital management",
+      "workday subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "workday.com",
+    "confidence": "medium",
+    "notes": "Enterprise HCM software; payroll processing may be a separate service."
+  },
+  {
+    "canonical_name": "BambooHR",
+    "aliases": [
+      "bamboohr",
+      "bamboo hr",
+      "bamboohr llc",
+      "bamboohr subscription",
+      "bamboohr payroll"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "bamboohr.com",
+    "confidence": "high",
+    "notes": "Primary charge is HR software; payroll may be an add-on."
+  },
+  {
+    "canonical_name": "Zenefits",
+    "aliases": [
+      "zenefits",
+      "trinet zenefits",
+      "zenefits hr",
+      "zenefits payroll",
+      "zenefits subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "zenefits.com",
+    "confidence": "medium",
+    "notes": "May appear under TriNet branding."
+  },
+  {
+    "canonical_name": "Namely",
+    "aliases": [
+      "namely",
+      "namely inc",
+      "namely hr",
+      "namely payroll",
+      "namely subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "namely.com",
+    "confidence": "medium",
+    "notes": "May include payroll services in addition to HR software."
+  },
+  {
+    "canonical_name": "Deel",
+    "aliases": [
+      "deel",
+      "deel inc",
+      "deel payroll",
+      "deel global payroll",
+      "deel *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "deel.com",
+    "confidence": "medium",
+    "notes": "May include contractor payments, EOR, HR, or payroll fees."
+  },
+  {
+    "canonical_name": "Remote",
+    "aliases": [
+      "remote",
+      "remote com",
+      "remote payroll",
+      "remote global payroll",
+      "remote *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "remote.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; require payroll/EOR context."
+  },
+  {
+    "canonical_name": "Papaya Global",
+    "aliases": [
+      "papaya global",
+      "papayaglobal",
+      "papaya payroll",
+      "papaya global payroll",
+      "papaya *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "papayaglobal.com",
+    "confidence": "medium",
+    "notes": "Global payroll/EOR provider."
+  },
+  {
+    "canonical_name": "Oyster",
+    "aliases": [
+      "oyster",
+      "oyster hr",
+      "oysterhr",
+      "oyster payroll",
+      "oyster global employment",
+      "oyster *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "oysterhr.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; require HR/EOR context."
+  },
+  {
+    "canonical_name": "Multiplier",
+    "aliases": [
+      "multiplier",
+      "usemultiplier",
+      "multiplier payroll",
+      "multiplier eor",
+      "multiplier global payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "usemultiplier.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; require payroll/EOR context."
+  },
+  {
+    "canonical_name": "Velocity Global",
+    "aliases": [
+      "velocity global",
+      "velocityglobal",
+      "velocity global payroll",
+      "velocity global eor",
+      "velocity *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "velocityglobal.com",
+    "confidence": "medium",
+    "notes": "Global employment/EOR provider."
+  },
+  {
+    "canonical_name": "Globalization Partners",
+    "aliases": [
+      "globalization partners",
+      "g p",
+      "gp global employment",
+      "g p payroll",
+      "globalization partners payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "g-p.com",
+    "confidence": "medium",
+    "notes": "Global employment/EOR provider."
+  },
+  {
+    "canonical_name": "Safeguard Global",
+    "aliases": [
+      "safeguard global",
+      "safeguardglobal",
+      "safeguard payroll",
+      "safeguard global payroll",
+      "safeguard *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "safeguardglobal.com",
+    "confidence": "medium",
+    "notes": "Global payroll/EOR provider."
+  },
+  {
+    "canonical_name": "CloudPay",
+    "aliases": [
+      "cloudpay",
+      "cloud pay",
+      "cloudpay payroll",
+      "cloudpay global payroll",
+      "cloudpay *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "cloudpay.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "iiPay",
+    "aliases": [
+      "iipay",
+      "ii pay",
+      "iipay payroll",
+      "iipay global payroll",
+      "iipay *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "iipay.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Neeyamo",
+    "aliases": [
+      "neeyamo",
+      "neeyamo payroll",
+      "neeyamo global payroll",
+      "neeyamo hr",
+      "neeyamo *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "neeyamo.com",
+    "confidence": "medium",
+    "notes": "Global payroll and HR services."
+  },
+  {
+    "canonical_name": "Alight",
+    "aliases": [
+      "alight",
+      "alight solutions",
+      "alight payroll",
+      "alight human resources",
+      "alight *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "alight.com",
+    "confidence": "medium",
+    "notes": "May include benefits administration or HR services."
+  },
+  {
+    "canonical_name": "OneSource Virtual",
+    "aliases": [
+      "onesource virtual",
+      "one source virtual",
+      "osv payroll",
+      "onesource virtual payroll",
+      "osv *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "onesourcevirtual.com",
+    "confidence": "medium",
+    "notes": "Workday services and payroll provider."
+  },
+  {
+    "canonical_name": "Proliant",
+    "aliases": [
+      "proliant",
+      "proliant inc",
+      "proliant payroll",
+      "proliant ready pay",
+      "proliant *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "proliant.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "isolved",
+    "aliases": [
+      "isolved",
+      "isolved hcm",
+      "isolved payroll",
+      "isolved people cloud",
+      "isolved *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "isolvedhcm.com",
+    "confidence": "medium",
+    "notes": "May include broader HCM software/services."
+  },
+  {
+    "canonical_name": "Heartland Payroll",
+    "aliases": [
+      "heartland payroll",
+      "heartland payment systems payroll",
+      "heartland payroll solutions",
+      "heartland *payroll",
+      "heartland payroll service"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "heartland.us",
+    "confidence": "high",
+    "notes": "Heartland without payroll context may be payment processing."
+  },
+  {
+    "canonical_name": "Toast Payroll",
+    "aliases": [
+      "toast payroll",
+      "toasttab payroll",
+      "toast payroll and team management",
+      "toast *payroll",
+      "toast team management"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "toasttab.com",
+    "confidence": "medium",
+    "notes": "Toast charges without payroll context may be POS/software or processing."
+  },
+  {
+    "canonical_name": "Homebase",
+    "aliases": [
+      "homebase",
+      "joinhomebase",
+      "homebase payroll",
+      "homebase hr",
+      "homebase subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "joinhomebase.com",
+    "confidence": "medium",
+    "notes": "May include scheduling/timekeeping software or payroll."
+  },
+  {
+    "canonical_name": "RUN Powered by ADP",
+    "aliases": [
+      "run powered by adp",
+      "adp run",
+      "run payroll adp",
+      "run powered payroll",
+      "adp run payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "adp.com",
+    "confidence": "high",
+    "notes": "Often billed under ADP descriptors."
+  },
+  {
+    "canonical_name": "Roll by ADP",
+    "aliases": [
+      "roll by adp",
+      "roll payroll",
+      "rollbyadp",
+      "adp roll",
+      "roll *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "rollbyadp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wagepoint",
+    "aliases": [
+      "wagepoint",
+      "wage point",
+      "wagepoint payroll",
+      "wagepoint inc",
+      "wagepoint *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "wagepoint.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fingercheck",
+    "aliases": [
+      "fingercheck",
+      "finger check",
+      "fingercheck payroll",
+      "fingercheck hr",
+      "fingercheck *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "fingercheck.com",
+    "confidence": "medium",
+    "notes": "May include HR/timekeeping software."
+  },
+  {
+    "canonical_name": "APS Payroll",
+    "aliases": [
+      "aps payroll",
+      "aps payroll services",
+      "automatic payroll systems",
+      "aps *payroll",
+      "aps payroll solution"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "apspayroll.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Paycor",
+    "aliases": [
+      "paycor",
+      "paycor inc",
+      "paycor payroll",
+      "paycor hcm",
+      "paycor *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "paycor.com",
+    "confidence": "medium",
+    "notes": "May include broader HCM software fees."
+  },
+  {
+    "canonical_name": "PayNW",
+    "aliases": [
+      "paynw",
+      "pay nw",
+      "paynw payroll",
+      "pay northwest",
+      "paynw *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "paynw.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Checkwriters",
+    "aliases": [
+      "checkwriters",
+      "check writers",
+      "checkwriters payroll",
+      "checkwriters inc",
+      "checkwriters *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "checkwriters.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Complete Payroll Solutions",
+    "aliases": [
+      "complete payroll solutions",
+      "complete payroll",
+      "cps payroll",
+      "completepayrollsolutions",
+      "complete payroll *service"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "completepayrollsolutions.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dominion Payroll",
+    "aliases": [
+      "dominion payroll",
+      "dominion payroll services",
+      "dominionpayroll",
+      "dps payroll",
+      "dominion *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "dominionpayroll.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Payroll Network",
+    "aliases": [
+      "payroll network",
+      "payrollnetwork",
+      "payroll network inc",
+      "payroll network service",
+      "payroll network *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "payrollnetwork.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Payroll Partners",
+    "aliases": [
+      "payroll partners",
+      "payrollpartners",
+      "payroll partners inc",
+      "payroll partners service",
+      "payroll partners *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "payrollpartners.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Payroll4Free",
+    "aliases": [
+      "payroll4free",
+      "payroll 4 free",
+      "payroll4free com",
+      "payroll4free payroll",
+      "payroll4free service"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "payroll4free.com",
+    "confidence": "medium",
+    "notes": "Paid add-ons can appear despite the brand name."
+  },
+  {
+    "canonical_name": "Payroll Mate",
+    "aliases": [
+      "payroll mate",
+      "payrollmate",
+      "real business solutions payroll mate",
+      "payroll mate software",
+      "payroll mate license"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "realtaxtools.com",
+    "confidence": "high",
+    "notes": "Desktop payroll software rather than managed payroll service."
+  },
+  {
+    "canonical_name": "Surety Systems Payroll",
+    "aliases": [
+      "surety systems payroll",
+      "surety systems",
+      "suretysystems",
+      "surety hr consulting",
+      "surety workforce"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "suretysystems.com",
+    "confidence": "medium",
+    "notes": "Consulting/services can vary by engagement."
+  },
+  {
+    "canonical_name": "PrimePay",
+    "aliases": [
+      "primepay",
+      "prime pay",
+      "primepay payroll",
+      "primepay inc",
+      "primepay *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "primepay.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MPAY",
+    "aliases": [
+      "mpay",
+      "m pay",
+      "mpay payroll",
+      "mpay inc",
+      "mpay *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "mpay.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PayUSA",
+    "aliases": [
+      "payusa",
+      "pay usa",
+      "payusa payroll",
+      "payusa inc",
+      "payusa *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "payusa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Payroll Vault",
+    "aliases": [
+      "payroll vault",
+      "payrollvault",
+      "payroll vault payroll",
+      "payroll vault franchise",
+      "payroll vault *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "payrollvault.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Netchex",
+    "aliases": [
+      "netchex",
+      "net chex",
+      "netchex payroll",
+      "netchex hcm",
+      "netchex *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "netchex.com",
+    "confidence": "medium",
+    "notes": "May include broader HCM services."
+  },
+  {
+    "canonical_name": "Payentry",
+    "aliases": [
+      "payentry",
+      "pay entry",
+      "payentry payroll",
+      "payentry inc",
+      "payentry *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "payentry.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Evolution Payroll",
+    "aliases": [
+      "evolution payroll",
+      "evolutionpayroll",
+      "evolution payroll services",
+      "evolution *payroll",
+      "evolution payroll inc"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "evolutionpayroll.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Inova Payroll",
+    "aliases": [
+      "inova payroll",
+      "inovapayroll",
+      "inova payroll inc",
+      "inova *payroll",
+      "inova payroll services"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "inovapayroll.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Coastal Payroll",
+    "aliases": [
+      "coastal payroll",
+      "coastal payroll services",
+      "coastalpayroll",
+      "coastal *payroll",
+      "coastal payroll inc"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "coastalpayroll.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Alliance Payroll",
+    "aliases": [
+      "alliance payroll",
+      "alliancepayroll",
+      "alliance payroll services",
+      "alliance *payroll",
+      "alliance payroll inc"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "alliancepayroll.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "HCM Unlocked",
+    "aliases": [
+      "hcm unlocked",
+      "hcmunlocked",
+      "hcm unlocked payroll",
+      "hcm unlocked hr",
+      "hcm unlocked consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "hcmunlocked.com",
+    "confidence": "medium",
+    "notes": "May provide outsourced HR, payroll, and consulting services."
+  },
+  {
+    "canonical_name": "ExtensisHR",
+    "aliases": [
+      "extensishr",
+      "extensis hr",
+      "extensis payroll",
+      "extensis peo",
+      "extensis *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "extensishr.com",
+    "confidence": "medium",
+    "notes": "PEO charges may bundle payroll, benefits, and HR."
+  },
+  {
+    "canonical_name": "VensureHR",
+    "aliases": [
+      "vensurehr",
+      "vensure hr",
+      "vensure",
+      "vensure payroll",
+      "vensure peo"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "vensure.com",
+    "confidence": "medium",
+    "notes": "PEO charges may bundle payroll, benefits, and HR."
+  },
+  {
+    "canonical_name": "CoAdvantage",
+    "aliases": [
+      "coadvantage",
+      "co advantage",
+      "coadvantage payroll",
+      "coadvantage peo",
+      "coadvantage *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "coadvantage.com",
+    "confidence": "medium",
+    "notes": "PEO charges may bundle payroll, benefits, and HR."
+  },
+  {
+    "canonical_name": "Engage PEO",
+    "aliases": [
+      "engage peo",
+      "engagepeo",
+      "engage payroll",
+      "engage peo payroll",
+      "engage *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "engagepeo.com",
+    "confidence": "medium",
+    "notes": "PEO charges may bundle payroll, benefits, and HR."
+  },
+  {
+    "canonical_name": "Questco",
+    "aliases": [
+      "questco",
+      "questco peo",
+      "questco payroll",
+      "questco hr",
+      "questco *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "questco.net",
+    "confidence": "medium",
+    "notes": "PEO charges may bundle payroll, benefits, and HR."
+  },
+  {
+    "canonical_name": "Resourcing Edge",
+    "aliases": [
+      "resourcing edge",
+      "resourcingedge",
+      "resourcing edge payroll",
+      "resourcing edge peo",
+      "resourcing edge hr"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "resourcingedge.com",
+    "confidence": "medium",
+    "notes": "PEO charges may bundle payroll, benefits, and HR."
+  },
+  {
+    "canonical_name": "PrestigePEO",
+    "aliases": [
+      "prestigepeo",
+      "prestige peo",
+      "prestige payroll",
+      "prestige employee administrators",
+      "prestige *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "prestigepeo.com",
+    "confidence": "medium",
+    "notes": "PEO charges may bundle payroll, benefits, and HR."
+  },
+  {
+    "canonical_name": "Abel HR",
+    "aliases": [
+      "abel hr",
+      "abelhr",
+      "abel payroll",
+      "abel hr peo",
+      "abel *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "abelhr.com",
+    "confidence": "medium",
+    "notes": "PEO charges may bundle payroll, benefits, and HR."
+  },
+  {
+    "canonical_name": "FrankCrum",
+    "aliases": [
+      "frankcrum",
+      "frank crum",
+      "frankcrum payroll",
+      "frankcrum peo",
+      "frankcrum *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "frankcrum.com",
+    "confidence": "medium",
+    "notes": "PEO charges may bundle payroll, benefits, and HR."
+  },
+  {
+    "canonical_name": "Oasis",
+    "aliases": [
+      "oasis",
+      "oasis outsourcing",
+      "oasis peo",
+      "oasis payroll",
+      "paychex oasis",
+      "oasis *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "paychex.com",
+    "confidence": "medium",
+    "notes": "Legacy Oasis descriptors may appear under Paychex."
+  },
+  {
+    "canonical_name": "Amplify PEO",
+    "aliases": [
+      "amplify peo",
+      "amplifypeo",
+      "amplify payroll",
+      "amplify hr",
+      "amplify *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "amplifypeo.com",
+    "confidence": "medium",
+    "notes": "PEO charges may bundle payroll, benefits, and HR."
+  },
+  {
+    "canonical_name": "Nextep",
+    "aliases": [
+      "nextep",
+      "nextep payroll",
+      "nextep peo",
+      "nextep hr",
+      "nextep *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "nextep.com",
+    "confidence": "medium",
+    "notes": "PEO charges may bundle payroll, benefits, and HR."
+  },
+  {
+    "canonical_name": "AlphaStaff",
+    "aliases": [
+      "alphastaff",
+      "alpha staff",
+      "alphastaff payroll",
+      "alphastaff peo",
+      "alphastaff *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "alphastaff.com",
+    "confidence": "medium",
+    "notes": "PEO charges may bundle payroll, benefits, and HR."
+  },
+  {
+    "canonical_name": "Emplicity",
+    "aliases": [
+      "emplicity",
+      "emplicity payroll",
+      "emplicity peo",
+      "emplicity hr",
+      "emplicity *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "emplicity.com",
+    "confidence": "medium",
+    "notes": "PEO charges may bundle payroll, benefits, and HR."
+  },
+  {
+    "canonical_name": "BBSI",
+    "aliases": [
+      "bbsi",
+      "barrett business services",
+      "bbsi payroll",
+      "bbsi peo",
+      "bbsi *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "bbsi.com",
+    "confidence": "medium",
+    "notes": "PEO charges may bundle payroll, HR, workers' comp, and consulting."
+  },
+  {
+    "canonical_name": "Genesis HR Solutions",
+    "aliases": [
+      "genesis hr solutions",
+      "genesis hr",
+      "genesis payroll",
+      "genesis peo",
+      "genesis hr *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "genesishrsolutions.com",
+    "confidence": "medium",
+    "notes": "PEO charges may bundle payroll, benefits, and HR."
+  },
+  {
+    "canonical_name": "G&A Partners",
+    "aliases": [
+      "g&a partners",
+      "g and a partners",
+      "gna partners",
+      "ga partners payroll",
+      "g and a payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "gnapartners.com",
+    "confidence": "medium",
+    "notes": "PEO charges may bundle payroll, benefits, and HR."
+  },
+  {
+    "canonical_name": "Sequoia One",
+    "aliases": [
+      "sequoia one",
+      "sequoiaone",
+      "sequoia one peo",
+      "sequoia payroll",
+      "sequoia *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "sequoia.com",
+    "confidence": "medium",
+    "notes": "May bundle payroll, benefits, and HR."
+  },
+  {
+    "canonical_name": "ADP TotalSource",
+    "aliases": [
+      "adp totalsource",
+      "adp total source",
+      "totalsource",
+      "adp peo",
+      "adp totalsource payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "adp.com",
+    "confidence": "medium",
+    "notes": "PEO charges may bundle payroll, benefits, and HR."
+  },
+  {
+    "canonical_name": "Insperity PEO",
+    "aliases": [
+      "insperity peo",
+      "insperity workforce optimization",
+      "insperity payroll services",
+      "insperity hr services",
+      "insperity *peo"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "insperity.com",
+    "confidence": "medium",
+    "notes": "May overlap with broader Insperity descriptors."
+  },
+  {
+    "canonical_name": "TriNet PEO",
+    "aliases": [
+      "trinet peo",
+      "trinet professional employer organization",
+      "trinet payroll services",
+      "trinet hr services",
+      "trinet *peo"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "trinet.com",
+    "confidence": "medium",
+    "notes": "May overlap with broader TriNet descriptors."
+  },
+  {
+    "canonical_name": "Paychex PEO",
+    "aliases": [
+      "paychex peo",
+      "paychex professional employer organization",
+      "paychex hr peo",
+      "paychex peo payroll",
+      "paychex *peo"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "paychex.com",
+    "confidence": "medium",
+    "notes": "May overlap with broader Paychex descriptors."
+  },
+  {
+    "canonical_name": "Justworks PEO",
+    "aliases": [
+      "justworks peo",
+      "justworks professional employer organization",
+      "justworks payroll benefits",
+      "justworks hr",
+      "justworks *peo"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "justworks.com",
+    "confidence": "medium",
+    "notes": "May overlap with broader Justworks descriptors."
+  },
+  {
+    "canonical_name": "Worklio",
+    "aliases": [
+      "worklio",
+      "worklio payroll",
+      "worklio hr",
+      "worklio hcm",
+      "worklio subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "worklio.com",
+    "confidence": "medium",
+    "notes": "Platform used by payroll/PEO providers; charges may be software or payroll-related."
+  },
+  {
+    "canonical_name": "PrismHR",
+    "aliases": [
+      "prismhr",
+      "prism hr",
+      "prismhr software",
+      "prismhr platform",
+      "prismhr subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "prismhr.com",
+    "confidence": "high",
+    "notes": "Primarily HCM software for PEOs and payroll providers."
+  },
+  {
+    "canonical_name": "UKG Ready",
+    "aliases": [
+      "ukg ready",
+      "kronos workforce ready",
+      "ukg ready payroll",
+      "ukg ready subscription",
+      "ukg *ready"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "ukg.com",
+    "confidence": "medium",
+    "notes": "May include payroll functionality."
+  },
+  {
+    "canonical_name": "UKG Pro",
+    "aliases": [
+      "ukg pro",
+      "ultimate software",
+      "ultipro",
+      "ukg pro payroll",
+      "ukg *pro"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "ukg.com",
+    "confidence": "medium",
+    "notes": "Legacy UltiPro descriptors may appear."
+  },
+  {
+    "canonical_name": "Kronos",
+    "aliases": [
+      "kronos",
+      "kronos incorporated",
+      "kronos workforce central",
+      "kronos workforce dimensions",
+      "kronos subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "ukg.com",
+    "confidence": "medium",
+    "notes": "Legacy UKG workforce-management branding."
+  },
+  {
+    "canonical_name": "ADP Workforce Now",
+    "aliases": [
+      "adp workforce now",
+      "workforce now",
+      "adp wfn",
+      "adp workforce",
+      "adp *wfn"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "adp.com",
+    "confidence": "medium",
+    "notes": "May be bundled with payroll processing."
+  },
+  {
+    "canonical_name": "ADP SmartCompliance",
+    "aliases": [
+      "adp smartcompliance",
+      "adp smart compliance",
+      "smartcompliance",
+      "adp tax compliance",
+      "adp *smartcompliance"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "adp.com",
+    "confidence": "medium",
+    "notes": "Payroll tax/compliance service."
+  },
+  {
+    "canonical_name": "ADP Wisely",
+    "aliases": [
+      "adp wisely",
+      "wisely by adp",
+      "mywisely",
+      "wisely pay",
+      "adp *wisely"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "mywisely.com",
+    "confidence": "medium",
+    "notes": "Payroll card/pay solution; transaction type may vary."
+  },
+  {
+    "canonical_name": "Payactiv",
+    "aliases": [
+      "payactiv",
+      "pay activ",
+      "payactiv earned wage access",
+      "payactiv payroll",
+      "payactiv service"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "payactiv.com",
+    "confidence": "medium",
+    "notes": "Earned-wage-access charges may not be standard payroll processing."
+  },
+  {
+    "canonical_name": "DailyPay",
+    "aliases": [
+      "dailypay",
+      "daily pay",
+      "dailypay payroll",
+      "dailypay earned wage access",
+      "dailypay service"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "dailypay.com",
+    "confidence": "medium",
+    "notes": "Earned-wage-access charges may not be standard payroll processing."
+  },
+  {
+    "canonical_name": "Branch",
+    "aliases": [
+      "branch",
+      "branch app",
+      "branch payroll",
+      "branch workforce payments",
+      "branch *pay"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "branchapp.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; require workforce-payment context."
+  },
+  {
+    "canonical_name": "Rain",
+    "aliases": [
+      "rain",
+      "rain app",
+      "rain earned wage access",
+      "rain payroll",
+      "rain *pay"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "rainapp.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; require earned-wage/payroll context."
+  },
+  {
+    "canonical_name": "Clair",
+    "aliases": [
+      "clair",
+      "getclair",
+      "clair payroll",
+      "clair earned wage access",
+      "clair *pay"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "getclair.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; require payroll/EWA context."
+  },
+  {
+    "canonical_name": "Even",
+    "aliases": [
+      "even",
+      "even responsible finance",
+      "even earned wage access",
+      "one even",
+      "even payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "one.app",
+    "confidence": "medium",
+    "notes": "Legacy earned-wage-access descriptors may appear."
+  },
+  {
+    "canonical_name": "One@Work",
+    "aliases": [
+      "one@work",
+      "one at work",
+      "one work earned wage access",
+      "one work payroll",
+      "one app work"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "one.app",
+    "confidence": "medium",
+    "notes": "Earned-wage-access/workforce financial service."
+  },
+  {
+    "canonical_name": "Instant Financial",
+    "aliases": [
+      "instant financial",
+      "instant pay",
+      "instant payroll",
+      "instant earned wage access",
+      "instant *pay"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "instant.co",
+    "confidence": "medium",
+    "notes": "Generic wording requires workforce-payment context."
+  },
+  {
+    "canonical_name": "Tapcheck",
+    "aliases": [
+      "tapcheck",
+      "tap check",
+      "tapcheck earned wage access",
+      "tapcheck payroll",
+      "tapcheck *pay"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "tapcheck.com",
+    "confidence": "medium",
+    "notes": "Earned-wage-access provider."
+  },
+  {
+    "canonical_name": "ZayZoon",
+    "aliases": [
+      "zayzoon",
+      "zay zoon",
+      "zayzoon earned wage access",
+      "zayzoon payroll",
+      "zayzoon *pay"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "zayzoon.com",
+    "confidence": "medium",
+    "notes": "Earned-wage-access provider."
+  },
+  {
+    "canonical_name": "Payoneer Workforce Management",
+    "aliases": [
+      "payoneer workforce management",
+      "payoneer workforce",
+      "payoneer payroll",
+      "payoneer global payroll",
+      "payoneer *workforce"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "payoneer.com",
+    "confidence": "medium",
+    "notes": "Payoneer descriptors without workforce context may be payment transfers."
+  },
+  {
+    "canonical_name": "WorkMarket",
+    "aliases": [
+      "workmarket",
+      "work market",
+      "adp workmarket",
+      "workmarket payments",
+      "workmarket workforce"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "workmarket.com",
+    "confidence": "medium",
+    "notes": "Independent-contractor management/payments; may appear under ADP."
+  },
+  {
+    "canonical_name": "Worksuite",
+    "aliases": [
+      "worksuite",
+      "work suite",
+      "worksuite contractor management",
+      "worksuite workforce",
+      "worksuite subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "worksuite.com",
+    "confidence": "medium",
+    "notes": "Contractor-management software; payments may be separately processed."
+  },
+  {
+    "canonical_name": "Plane",
+    "aliases": [
+      "plane",
+      "plane payroll",
+      "plane global payroll",
+      "plane contractor payments",
+      "plane *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "plane.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; require payroll context."
+  },
+  {
+    "canonical_name": "Mercans",
+    "aliases": [
+      "mercans",
+      "mercans payroll",
+      "mercans global payroll",
+      "mercans hr",
+      "mercans *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "mercans.com",
+    "confidence": "medium",
+    "notes": "Global payroll provider."
+  },
+  {
+    "canonical_name": "TMF Group",
+    "aliases": [
+      "tmf group",
+      "tmf payroll",
+      "tmf global payroll",
+      "tmf hr services",
+      "tmf *payroll"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "tmf-group.com",
+    "confidence": "medium",
+    "notes": "Global professional services provider; charges may extend beyond payroll."
+  },
+  {
+    "canonical_name": "SD Worx",
+    "aliases": [
+      "sd worx",
+      "sdworx",
+      "sd worx payroll",
+      "sd worx global payroll",
+      "sd worx *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "sdworx.com",
+    "confidence": "medium",
+    "notes": "Global payroll/HCM provider."
+  },
+  {
+    "canonical_name": "IRIS Payroll",
+    "aliases": [
+      "iris payroll",
+      "iris global payroll",
+      "iris payroll services",
+      "iris *payroll",
+      "iris global"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "irisglobal.com",
+    "confidence": "medium",
+    "notes": "IRIS offers multiple accounting/HR software products."
+  },
+  {
+    "canonical_name": "Immedis",
+    "aliases": [
+      "immedis",
+      "immedis payroll",
+      "immedis global payroll",
+      "ukg immedis",
+      "immedis *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "ukg.com",
+    "confidence": "medium",
+    "notes": "Acquired by UKG; legacy descriptors may appear."
+  },
+  {
+    "canonical_name": "Payslip",
+    "aliases": [
+      "payslip",
+      "payslip payroll",
+      "payslip global payroll",
+      "payslip platform",
+      "payslip *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "payslip.com",
+    "confidence": "medium",
+    "notes": "Global payroll platform."
+  },
+  {
+    "canonical_name": "PayFit",
+    "aliases": [
+      "payfit",
+      "pay fit",
+      "payfit payroll",
+      "payfit hr",
+      "payfit *payroll"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "payfit.com",
+    "confidence": "medium",
+    "notes": "More common internationally but may appear for US firms with overseas operations."
+  },
+  {
+    "canonical_name": "Personio",
+    "aliases": [
+      "personio",
+      "personio se",
+      "personio hr",
+      "personio payroll",
+      "personio subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "personio.com",
+    "confidence": "medium",
+    "notes": "More common for European workforces."
+  },
+  {
+    "canonical_name": "HiBob",
+    "aliases": [
+      "hibob",
+      "hi bob",
+      "bob hr",
+      "hibob hr",
+      "hibob subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "hibob.com",
+    "confidence": "high",
+    "notes": "HRIS software."
+  },
+  {
+    "canonical_name": "Factorial",
+    "aliases": [
+      "factorial",
+      "factorial hr",
+      "factorialhr",
+      "factorial payroll",
+      "factorial subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "factorialhr.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; require HR descriptor context."
+  },
+  {
+    "canonical_name": "Employment Hero",
+    "aliases": [
+      "employment hero",
+      "employmenthero",
+      "employment hero hr",
+      "employment hero payroll",
+      "employment hero subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "employmenthero.com",
+    "confidence": "medium",
+    "notes": "HR/payroll platform with stronger presence outside the US."
+  },
+  {
+    "canonical_name": "Rippling Global Payroll",
+    "aliases": [
+      "rippling global payroll",
+      "rippling international payroll",
+      "rippling global",
+      "rippling *global payroll",
+      "rippling payroll global"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "rippling.com",
+    "confidence": "medium",
+    "notes": "May overlap with general Rippling billing."
+  },
+  {
+    "canonical_name": "Deel Global Payroll",
+    "aliases": [
+      "deel global payroll",
+      "deel payroll",
+      "deel international payroll",
+      "deel *global payroll",
+      "deel payroll service"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "deel.com",
+    "confidence": "medium",
+    "notes": "May overlap with general Deel billing."
+  },
+  {
+    "canonical_name": "Remote Payroll",
+    "aliases": [
+      "remote payroll",
+      "remote global payroll",
+      "remote com payroll",
+      "remote *global payroll",
+      "remote payroll service"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "remote.com",
+    "confidence": "medium",
+    "notes": "May overlap with general Remote billing."
+  },
+  {
+    "canonical_name": "BambooHR Payroll",
+    "aliases": [
+      "bamboohr payroll",
+      "bamboo hr payroll",
+      "bamboo payroll",
+      "bamboohr *payroll",
+      "bamboohr payroll service"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "bamboohr.com",
+    "confidence": "medium",
+    "notes": "May overlap with general BambooHR software billing."
+  },
+  {
+    "canonical_name": "Homebase Payroll",
+    "aliases": [
+      "homebase payroll",
+      "joinhomebase payroll",
+      "homebase *payroll",
+      "homebase payroll service",
+      "homebase pay"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "joinhomebase.com",
+    "confidence": "medium",
+    "notes": "May overlap with scheduling/timekeeping billing."
+  },
+  {
+    "canonical_name": "Zenefits Payroll",
+    "aliases": [
+      "zenefits payroll",
+      "trinet zenefits payroll",
+      "zenefits *payroll",
+      "zenefits payroll service",
+      "zenefits pay"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "zenefits.com",
+    "confidence": "medium",
+    "notes": "May overlap with HR software billing."
+  },
+  {
+    "canonical_name": "Deputy",
+    "aliases": [
+      "deputy",
+      "deputy com",
+      "deputy workforce management",
+      "deputy scheduling",
+      "deputy subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "deputy.com",
+    "confidence": "high",
+    "notes": "Scheduling/timekeeping software, not primarily payroll processing."
+  },
+  {
+    "canonical_name": "When I Work",
+    "aliases": [
+      "when i work",
+      "wheniwork",
+      "when i work scheduling",
+      "when i work subscription",
+      "wheniwork *subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "wheniwork.com",
+    "confidence": "high",
+    "notes": "Employee scheduling/timekeeping software."
+  },
+  {
+    "canonical_name": "7shifts",
+    "aliases": [
+      "7shifts",
+      "7 shifts",
+      "7shifts scheduling",
+      "7shifts restaurant scheduling",
+      "7shifts subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "7shifts.com",
+    "confidence": "high",
+    "notes": "Restaurant workforce-management software."
+  },
+  {
+    "canonical_name": "Sling",
+    "aliases": [
+      "sling",
+      "getsling",
+      "sling scheduling",
+      "sling employee scheduling",
+      "sling subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "getsling.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; require workforce/scheduling context."
+  },
+  {
+    "canonical_name": "Connecteam",
+    "aliases": [
+      "connecteam",
+      "connect team",
+      "connecteam workforce",
+      "connecteam hr",
+      "connecteam subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "connecteam.com",
+    "confidence": "high",
+    "notes": "Workforce-management software."
+  },
+  {
+    "canonical_name": "Buddy Punch",
+    "aliases": [
+      "buddy punch",
+      "buddypunch",
+      "buddy punch time clock",
+      "buddy punch payroll",
+      "buddy punch subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "buddypunch.com",
+    "confidence": "high",
+    "notes": "Time-clock software; payroll integrations may be separate."
+  },
+  {
+    "canonical_name": "ClockShark",
+    "aliases": [
+      "clockshark",
+      "clock shark",
+      "clockshark time tracking",
+      "clockshark payroll",
+      "clockshark subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "clockshark.com",
+    "confidence": "high",
+    "notes": "Time tracking/workforce software."
+  },
+  {
+    "canonical_name": "QuickBooks Time",
+    "aliases": [
+      "quickbooks time",
+      "intuit quickbooks time",
+      "tsheets",
+      "quickbooks time subscription",
+      "intuit *tsheets"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "quickbooks.intuit.com",
+    "confidence": "medium",
+    "notes": "Legacy TSheets descriptors may appear."
+  },
+  {
+    "canonical_name": "Hubstaff",
+    "aliases": [
+      "hubstaff",
+      "hub staff",
+      "hubstaff time tracking",
+      "hubstaff workforce",
+      "hubstaff subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "hubstaff.com",
+    "confidence": "high",
+    "notes": "Time-tracking/workforce software."
+  },
+  {
+    "canonical_name": "TimeClock Plus",
+    "aliases": [
+      "timeclock plus",
+      "time clock plus",
+      "tcp software",
+      "tcp timeclock",
+      "timeclock plus subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "tcpsoftware.com",
+    "confidence": "high",
+    "notes": "Workforce/timekeeping software."
+  },
+  {
+    "canonical_name": "TCP Software",
+    "aliases": [
+      "tcp software",
+      "tcpsoftware",
+      "tcp workforce",
+      "tcp time and attendance",
+      "tcp subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "tcpsoftware.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "UKG Dimensions",
+    "aliases": [
+      "ukg dimensions",
+      "kronos dimensions",
+      "workforce dimensions",
+      "ukg workforce management",
+      "ukg *dimensions"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "ukg.com",
+    "confidence": "medium",
+    "notes": "Workforce-management software."
+  },
+  {
+    "canonical_name": "UKG Workforce Central",
+    "aliases": [
+      "ukg workforce central",
+      "kronos workforce central",
+      "workforce central",
+      "kronos wfc",
+      "ukg *workforce central"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "ukg.com",
+    "confidence": "medium",
+    "notes": "Legacy Kronos workforce-management product."
+  },
+  {
+    "canonical_name": "Ceridian Powerpay",
+    "aliases": [
+      "ceridian powerpay",
+      "powerpay",
+      "dayforce powerpay",
+      "powerpay payroll",
+      "ceridian *powerpay"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "dayforce.com",
+    "confidence": "medium",
+    "notes": "Legacy Ceridian/Dayforce payroll branding."
+  },
+  {
+    "canonical_name": "Paycom Beti",
+    "aliases": [
+      "paycom beti",
+      "beti payroll",
+      "paycom payroll beti",
+      "paycom *beti",
+      "beti paycom"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "paycom.com",
+    "confidence": "medium",
+    "notes": "Paycom payroll product; may appear under general Paycom billing."
+  },
+  {
+    "canonical_name": "Paylocity Web Pay",
+    "aliases": [
+      "paylocity web pay",
+      "web pay paylocity",
+      "paylocity payroll",
+      "paylocity *webpay",
+      "paylocity webpay"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "paylocity.com",
+    "confidence": "medium",
+    "notes": "Legacy/product-specific Paylocity descriptor."
+  },
+  {
+    "canonical_name": "Paycor Perform",
+    "aliases": [
+      "paycor perform",
+      "paycor hcm",
+      "paycor perform payroll",
+      "paycor *perform",
+      "paycor platform"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "paycor.com",
+    "confidence": "medium",
+    "notes": "May be bundled with payroll services."
+  },
+  {
+    "canonical_name": "Paycor Recruiting",
+    "aliases": [
+      "paycor recruiting",
+      "paycor applicant tracking",
+      "paycor ats",
+      "paycor *recruiting",
+      "paycor talent"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "paycor.com",
+    "confidence": "medium",
+    "notes": "Recruiting software rather than payroll."
+  },
+  {
+    "canonical_name": "JazzHR",
+    "aliases": [
+      "jazzhr",
+      "jazz hr",
+      "jazzhr recruiting",
+      "jazzhr ats",
+      "jazzhr subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "jazzhr.com",
+    "confidence": "high",
+    "notes": "Applicant-tracking/recruiting software."
+  },
+  {
+    "canonical_name": "Greenhouse",
+    "aliases": [
+      "greenhouse",
+      "greenhouse software",
+      "greenhouse recruiting",
+      "greenhouse ats",
+      "greenhouse subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "greenhouse.com",
+    "confidence": "high",
+    "notes": "Recruiting software; generic name requires software context."
+  },
+  {
+    "canonical_name": "Lever",
+    "aliases": [
+      "lever",
+      "lever co",
+      "lever recruiting",
+      "lever ats",
+      "lever subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "lever.co",
+    "confidence": "medium",
+    "notes": "Generic brand name; require recruiting/software context."
+  },
+  {
+    "canonical_name": "Workable",
+    "aliases": [
+      "workable",
+      "workable software",
+      "workable recruiting",
+      "workable ats",
+      "workable subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "workable.com",
+    "confidence": "high",
+    "notes": "Recruiting software."
+  },
+  {
+    "canonical_name": "Breezy HR",
+    "aliases": [
+      "breezy hr",
+      "breezyhr",
+      "breezy recruiting",
+      "breezy ats",
+      "breezy hr subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "breezy.hr",
+    "confidence": "high",
+    "notes": "Recruiting software."
+  },
+  {
+    "canonical_name": "Recruitee",
+    "aliases": [
+      "recruitee",
+      "recruitee recruiting",
+      "recruitee ats",
+      "recruitee subscription",
+      "recruitee software"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "recruitee.com",
+    "confidence": "high",
+    "notes": "Recruiting software."
+  },
+  {
+    "canonical_name": "Ashby",
+    "aliases": [
+      "ashby",
+      "ashby hq",
+      "ashby recruiting",
+      "ashby ats",
+      "ashby subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "ashbyhq.com",
+    "confidence": "medium",
+    "notes": "Generic name; require recruiting/software context."
+  },
+  {
+    "canonical_name": "SmartRecruiters",
+    "aliases": [
+      "smartrecruiters",
+      "smart recruiters",
+      "smartrecruiters ats",
+      "smartrecruiters recruiting",
+      "smartrecruiters subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "smartrecruiters.com",
+    "confidence": "high",
+    "notes": "Recruiting software."
+  },
+  {
+    "canonical_name": "iCIMS",
+    "aliases": [
+      "icims",
+      "i cims",
+      "icims recruiting",
+      "icims ats",
+      "icims subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "icims.com",
+    "confidence": "high",
+    "notes": "Recruiting/talent software."
+  },
+  {
+    "canonical_name": "Jobvite",
+    "aliases": [
+      "jobvite",
+      "job vite",
+      "jobvite recruiting",
+      "jobvite ats",
+      "jobvite subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "jobvite.com",
+    "confidence": "high",
+    "notes": "Recruiting software."
+  },
+  {
+    "canonical_name": "ClearCompany",
+    "aliases": [
+      "clearcompany",
+      "clear company",
+      "clearcompany hr",
+      "clearcompany ats",
+      "clearcompany subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "clearcompany.com",
+    "confidence": "high",
+    "notes": "Talent-management software."
+  },
+  {
+    "canonical_name": "ApplicantPro",
+    "aliases": [
+      "applicantpro",
+      "applicant pro",
+      "applicantpro ats",
+      "applicantpro recruiting",
+      "applicantpro subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "applicantpro.com",
+    "confidence": "high",
+    "notes": "Recruiting software."
+  },
+  {
+    "canonical_name": "BambooHR Hiring",
+    "aliases": [
+      "bamboohr hiring",
+      "bamboo hr hiring",
+      "bamboohr ats",
+      "bamboohr recruiting",
+      "bamboohr *hiring"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "bamboohr.com",
+    "confidence": "medium",
+    "notes": "May overlap with general BambooHR billing."
+  },
+  {
+    "canonical_name": "Rippling Recruiting",
+    "aliases": [
+      "rippling recruiting",
+      "rippling ats",
+      "rippling applicant tracking",
+      "rippling *recruiting",
+      "rippling talent"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "rippling.com",
+    "confidence": "medium",
+    "notes": "May overlap with general Rippling billing."
+  },
+  {
+    "canonical_name": "Workday Recruiting",
+    "aliases": [
+      "workday recruiting",
+      "workday ats",
+      "workday talent acquisition",
+      "workday *recruiting",
+      "workday hiring"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "workday.com",
+    "confidence": "medium",
+    "notes": "May overlap with broader Workday billing."
+  },
+  {
+    "canonical_name": "Indeed",
+    "aliases": [
+      "indeed",
+      "indeed inc",
+      "indeed jobs",
+      "indeed sponsored jobs",
+      "indeed *job"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "indeed.com",
+    "confidence": "medium",
+    "notes": "Recruiting spend is commonly treated as advertising or recruiting expense."
+  },
+  {
+    "canonical_name": "LinkedIn Talent Solutions",
+    "aliases": [
+      "linkedin talent solutions",
+      "linkedin recruiter",
+      "linkedin recruiting",
+      "linkedin talent",
+      "linkedin *recruiter"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "linkedin.com",
+    "confidence": "medium",
+    "notes": "LinkedIn charges without talent context may be advertising or subscriptions."
+  },
+  {
+    "canonical_name": "ZipRecruiter",
+    "aliases": [
+      "ziprecruiter",
+      "zip recruiter",
+      "ziprecruiter inc",
+      "ziprecruiter jobs",
+      "ziprecruiter *job"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "ziprecruiter.com",
+    "confidence": "medium",
+    "notes": "Recruiting spend may be booked as advertising or recruiting expense."
+  },
+  {
+    "canonical_name": "Monster",
+    "aliases": [
+      "monster",
+      "monster com",
+      "monster jobs",
+      "monster hiring",
+      "monster *jobs"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "monster.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; require jobs/recruiting context."
+  },
+  {
+    "canonical_name": "CareerBuilder",
+    "aliases": [
+      "careerbuilder",
+      "career builder",
+      "careerbuilder jobs",
+      "careerbuilder hiring",
+      "careerbuilder *job"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "careerbuilder.com",
+    "confidence": "medium",
+    "notes": "Recruiting/job advertising."
+  },
+  {
+    "canonical_name": "Dice",
+    "aliases": [
+      "dice",
+      "dice com jobs",
+      "dice jobs",
+      "dice hiring",
+      "dice *jobs"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "dice.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; require jobs/recruiting context."
+  },
+  {
+    "canonical_name": "Handshake",
+    "aliases": [
+      "handshake",
+      "joinhandshake",
+      "handshake recruiting",
+      "handshake employer",
+      "handshake subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "joinhandshake.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; require recruiting context."
+  },
+  {
+    "canonical_name": "Lattice",
+    "aliases": [
+      "lattice",
+      "lattice hq",
+      "lattice performance",
+      "lattice hr",
+      "lattice subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "lattice.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; require HR/software context."
+  },
+  {
+    "canonical_name": "15Five",
+    "aliases": [
+      "15five",
+      "15 five",
+      "15five performance",
+      "15five hr",
+      "15five subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "15five.com",
+    "confidence": "high",
+    "notes": "Performance-management software."
+  },
+  {
+    "canonical_name": "Culture Amp",
+    "aliases": [
+      "culture amp",
+      "cultureamp",
+      "culture amp hr",
+      "culture amp engagement",
+      "culture amp subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "cultureamp.com",
+    "confidence": "high",
+    "notes": "Employee-experience/performance software."
+  },
+  {
+    "canonical_name": "Leapsome",
+    "aliases": [
+      "leapsome",
+      "leap some",
+      "leapsome hr",
+      "leapsome performance",
+      "leapsome subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "leapsome.com",
+    "confidence": "high",
+    "notes": "People enablement/performance software."
+  },
+  {
+    "canonical_name": "Betterworks",
+    "aliases": [
+      "betterworks",
+      "better works",
+      "betterworks performance",
+      "betterworks hr",
+      "betterworks subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "betterworks.com",
+    "confidence": "medium",
+    "notes": "Performance-management software."
+  },
+  {
+    "canonical_name": "PerformYard",
+    "aliases": [
+      "performyard",
+      "perform yard",
+      "performyard performance",
+      "performyard hr",
+      "performyard subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "performyard.com",
+    "confidence": "high",
+    "notes": "Performance-management software."
+  },
+  {
+    "canonical_name": "Trakstar",
+    "aliases": [
+      "trakstar",
+      "trak star",
+      "trakstar performance",
+      "trakstar hr",
+      "trakstar subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "trakstar.com",
+    "confidence": "high",
+    "notes": "Performance-management software."
+  },
+  {
+    "canonical_name": "WorkTango",
+    "aliases": [
+      "worktango",
+      "work tango",
+      "worktango engagement",
+      "worktango hr",
+      "worktango subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "worktango.com",
+    "confidence": "high",
+    "notes": "Employee-experience software."
+  },
+  {
+    "canonical_name": "Bonusly",
+    "aliases": [
+      "bonusly",
+      "bonusly inc",
+      "bonusly recognition",
+      "bonusly rewards",
+      "bonusly subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "bonusly.com",
+    "confidence": "medium",
+    "notes": "May include employee reward funding in addition to software fees."
+  },
+  {
+    "canonical_name": "Nectar",
+    "aliases": [
+      "nectar",
+      "nectar hr",
+      "nectarhr",
+      "nectar recognition",
+      "nectar rewards",
+      "nectar subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "nectarhr.com",
+    "confidence": "medium",
+    "notes": "May include employee reward funding in addition to software fees."
+  },
+  {
+    "canonical_name": "Awardco",
+    "aliases": [
+      "awardco",
+      "award co",
+      "awardco recognition",
+      "awardco rewards",
+      "awardco subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "award.co",
+    "confidence": "medium",
+    "notes": "May include employee reward funding in addition to software fees."
+  },
+  {
+    "canonical_name": "Motivosity",
+    "aliases": [
+      "motivosity",
+      "motivosity recognition",
+      "motivosity rewards",
+      "motivosity hr",
+      "motivosity subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "motivosity.com",
+    "confidence": "medium",
+    "notes": "May include employee reward funding in addition to software fees."
+  },
+  {
+    "canonical_name": "Workhuman",
+    "aliases": [
+      "workhuman",
+      "work human",
+      "workhuman recognition",
+      "workhuman rewards",
+      "workhuman subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "workhuman.com",
+    "confidence": "medium",
+    "notes": "May include employee reward funding in addition to software fees."
+  },
+  {
+    "canonical_name": "Kudos",
+    "aliases": [
+      "kudos",
+      "kudos inc",
+      "kudos recognition",
+      "kudos employee engagement",
+      "kudos subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "kudos.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; require HR/recognition context."
+  },
+  {
+    "canonical_name": "GoCo",
+    "aliases": [
+      "goco",
+      "go co",
+      "goco hr",
+      "goco benefits",
+      "goco subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "goco.io",
+    "confidence": "medium",
+    "notes": "HR/benefits software; payroll integrations may be separate."
+  },
+  {
+    "canonical_name": "Namely HR",
+    "aliases": [
+      "namely hr",
+      "namely hris",
+      "namely human resources",
+      "namely *hr",
+      "namely platform"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "namely.com",
+    "confidence": "medium",
+    "notes": "May overlap with payroll services."
+  },
+  {
+    "canonical_name": "Zoho People",
+    "aliases": [
+      "zoho people",
+      "zohopeople",
+      "zoho hr",
+      "zoho people subscription",
+      "zoho *people"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "zoho.com",
+    "confidence": "high",
+    "notes": "HR software."
+  },
+  {
+    "canonical_name": "Zoho Payroll",
+    "aliases": [
+      "zoho payroll",
+      "zoho pay",
+      "zoho payroll subscription",
+      "zoho *payroll",
+      "zoho payroll service"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "zoho.com",
+    "confidence": "medium",
+    "notes": "Availability and service scope vary by market."
+  },
+  {
+    "canonical_name": "Freshteam",
+    "aliases": [
+      "freshteam",
+      "fresh team",
+      "freshworks freshteam",
+      "freshteam hr",
+      "freshteam subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "freshworks.com",
+    "confidence": "high",
+    "notes": "HR/recruiting software."
+  },
+  {
+    "canonical_name": "OrangeHRM",
+    "aliases": [
+      "orangehrm",
+      "orange hrm",
+      "orangehrm software",
+      "orangehrm hr",
+      "orangehrm subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "orangehrm.com",
+    "confidence": "high",
+    "notes": "HR software."
+  },
+  {
+    "canonical_name": "Sage HR",
+    "aliases": [
+      "sage hr",
+      "sagehr",
+      "sage human resources",
+      "sage hr subscription",
+      "sage *hr"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "sage.com",
+    "confidence": "high",
+    "notes": "HR software."
+  },
+  {
+    "canonical_name": "Sage Payroll",
+    "aliases": [
+      "sage payroll",
+      "sage payroll services",
+      "sage *payroll",
+      "sage pay payroll",
+      "sage payroll subscription"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "sage.com",
+    "confidence": "medium",
+    "notes": "Product availability varies; Sage also bills for accounting software."
+  },
+  {
+    "canonical_name": "Xero Payroll",
+    "aliases": [
+      "xero payroll",
+      "xero *payroll",
+      "xero payroll service",
+      "xero pay run",
+      "xero payroll subscription"
+    ],
+    "semantic": "payroll_service_fee",
+    "logo_domain": "xero.com",
+    "confidence": "medium",
+    "notes": "US payroll functionality is commonly delivered through integrations; require explicit payroll descriptor."
+  },
+  {
+    "canonical_name": "Oracle HCM",
+    "aliases": [
+      "oracle hcm",
+      "oracle fusion hcm",
+      "oracle human capital management",
+      "oracle hcm cloud",
+      "oracle *hcm"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "oracle.com",
+    "confidence": "high",
+    "notes": "Enterprise HCM software."
+  },
+  {
+    "canonical_name": "SAP SuccessFactors",
+    "aliases": [
+      "sap successfactors",
+      "successfactors",
+      "sap success factors",
+      "successfactors hcm",
+      "sap *successfactors"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "sap.com",
+    "confidence": "high",
+    "notes": "Enterprise HCM software."
+  },
+  {
+    "canonical_name": "Microsoft Viva",
+    "aliases": [
+      "microsoft viva",
+      "ms viva",
+      "viva employee experience",
+      "microsoft *viva",
+      "viva subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "microsoft.com",
+    "confidence": "medium",
+    "notes": "Employee-experience software; Microsoft charges can represent many other products."
+  },
+  {
+    "canonical_name": "Cornerstone OnDemand",
+    "aliases": [
+      "cornerstone ondemand",
+      "cornerstone on demand",
+      "cornerstone learning",
+      "cornerstone talent",
+      "cornerstone subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "cornerstoneondemand.com",
+    "confidence": "high",
+    "notes": "Talent/learning software."
+  },
+  {
+    "canonical_name": "Docebo",
+    "aliases": [
+      "docebo",
+      "docebo inc",
+      "docebo learning",
+      "docebo lms",
+      "docebo subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "docebo.com",
+    "confidence": "high",
+    "notes": "Learning-management software."
+  },
+  {
+    "canonical_name": "Absorb LMS",
+    "aliases": [
+      "absorb lms",
+      "absorb",
+      "absorb learning",
+      "absorblms",
+      "absorb subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "absorblms.com",
+    "confidence": "high",
+    "notes": "Learning-management software."
+  },
+  {
+    "canonical_name": "TalentLMS",
+    "aliases": [
+      "talentlms",
+      "talent lms",
+      "talentlms training",
+      "talentlms subscription",
+      "talent *lms"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "talentlms.com",
+    "confidence": "high",
+    "notes": "Learning-management software."
+  },
+  {
+    "canonical_name": "Trainual",
+    "aliases": [
+      "trainual",
+      "trainual inc",
+      "trainual training",
+      "trainual onboarding",
+      "trainual subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "trainual.com",
+    "confidence": "high",
+    "notes": "Training/onboarding software."
+  },
+  {
+    "canonical_name": "Lessonly",
+    "aliases": [
+      "lessonly",
+      "lessonly by seismic",
+      "lessonly training",
+      "seismic learning",
+      "lessonly subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "seismic.com",
+    "confidence": "medium",
+    "notes": "Legacy brand now part of Seismic."
+  },
+  {
+    "canonical_name": "360Learning",
+    "aliases": [
+      "360learning",
+      "360 learning",
+      "360learning lms",
+      "360learning training",
+      "360learning subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "360learning.com",
+    "confidence": "high",
+    "notes": "Learning-management software."
+  }
+]

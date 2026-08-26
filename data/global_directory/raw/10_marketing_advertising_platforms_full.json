@@ -1,0 +1,7184 @@
+[
+  {
+    "canonical_name": "Google Ads",
+    "aliases": [
+      "google ads",
+      "google adwords",
+      "google *ads",
+      "google ads cc",
+      "google advertising"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "google.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Meta Ads",
+    "aliases": [
+      "meta ads",
+      "facebook ads",
+      "facebook advertising",
+      "meta *ads",
+      "fb ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "meta.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Instagram Ads",
+    "aliases": [
+      "instagram ads",
+      "instagram advertising",
+      "ig ads",
+      "meta instagram ads",
+      "instagram *ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "instagram.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "LinkedIn Ads",
+    "aliases": [
+      "linkedin ads",
+      "linkedin advertising",
+      "linkedin campaign manager",
+      "linkedin *ads",
+      "linkedin marketing solutions"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "linkedin.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "TikTok Ads",
+    "aliases": [
+      "tiktok ads",
+      "tik tok ads",
+      "tiktok advertising",
+      "tiktok *ads",
+      "tiktok for business"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "tiktok.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Microsoft Advertising",
+    "aliases": [
+      "microsoft advertising",
+      "microsoft ads",
+      "bing ads",
+      "bing advertising",
+      "msft advertising"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "microsoft.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "X Ads",
+    "aliases": [
+      "x ads",
+      "x advertising",
+      "twitter ads",
+      "twitter advertising",
+      "x *ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "x.com",
+    "confidence": "medium",
+    "notes": "Short brand name requires descriptor context to avoid false matches."
+  },
+  {
+    "canonical_name": "Pinterest Ads",
+    "aliases": [
+      "pinterest ads",
+      "pinterest advertising",
+      "pinterest *ads",
+      "pinterest business ads",
+      "pinterest promoted pins"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "pinterest.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Snapchat Ads",
+    "aliases": [
+      "snapchat ads",
+      "snap ads",
+      "snapchat advertising",
+      "snap *ads",
+      "snap inc ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "snapchat.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Reddit Ads",
+    "aliases": [
+      "reddit ads",
+      "reddit advertising",
+      "reddit *ads",
+      "reddit inc ads",
+      "reddit business ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "reddit.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Amazon Ads",
+    "aliases": [
+      "amazon ads",
+      "amazon advertising",
+      "amazon sponsored ads",
+      "amazon *advertising",
+      "amzn ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "advertising.amazon.com",
+    "confidence": "medium",
+    "notes": "Amazon transactions can also represent retail purchases or AWS."
+  },
+  {
+    "canonical_name": "Apple Search Ads",
+    "aliases": [
+      "apple search ads",
+      "apple ads",
+      "apple *search ads",
+      "apple advertising",
+      "search ads apple"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "ads.apple.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Yelp Ads",
+    "aliases": [
+      "yelp ads",
+      "yelp advertising",
+      "yelp *ads",
+      "yelp business advertising",
+      "yelp sponsored"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "yelp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nextdoor Ads",
+    "aliases": [
+      "nextdoor ads",
+      "nextdoor advertising",
+      "nextdoor *ads",
+      "nextdoor business ads",
+      "nextdoor local ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "nextdoor.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Waze Ads",
+    "aliases": [
+      "waze ads",
+      "waze advertising",
+      "waze local ads",
+      "waze *ads",
+      "google waze ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "waze.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Quora Ads",
+    "aliases": [
+      "quora ads",
+      "quora advertising",
+      "quora *ads",
+      "quora for business",
+      "quora promoted"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "quora.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Spotify Advertising",
+    "aliases": [
+      "spotify advertising",
+      "spotify ads",
+      "spotify ad studio",
+      "spotify *ads",
+      "spotify business ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "spotify.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pandora Advertising",
+    "aliases": [
+      "pandora advertising",
+      "pandora ads",
+      "pandora for brands",
+      "pandora *ads",
+      "siriusxm pandora ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "pandoraforbrands.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SiriusXM Media",
+    "aliases": [
+      "siriusxm media",
+      "sirius xm media",
+      "siriusxm advertising",
+      "siriusxm ads",
+      "sxm media"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "siriusxmmedia.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "YouTube Ads",
+    "aliases": [
+      "youtube ads",
+      "youtube advertising",
+      "youtube *ads",
+      "google youtube ads",
+      "youtube promotions"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "youtube.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hulu Ad Manager",
+    "aliases": [
+      "hulu ad manager",
+      "hulu ads",
+      "hulu advertising",
+      "hulu *ads",
+      "hulu business ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "hulu.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Roku Advertising",
+    "aliases": [
+      "roku advertising",
+      "roku ads",
+      "roku *ads",
+      "roku media",
+      "roku ad platform"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "roku.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Disney Advertising",
+    "aliases": [
+      "disney advertising",
+      "disney ads",
+      "disney *ads",
+      "disney advertising sales",
+      "disney ad sales"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "disneyadvertising.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Peacock Advertising",
+    "aliases": [
+      "peacock advertising",
+      "peacock ads",
+      "peacock *ads",
+      "nbcuniversal peacock ads",
+      "peacock ad sales"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "peacocktv.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Paramount Advertising",
+    "aliases": [
+      "paramount advertising",
+      "paramount ads",
+      "paramount *ads",
+      "paramount ad sales",
+      "paramount global advertising"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "paramount.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Twitch Ads",
+    "aliases": [
+      "twitch ads",
+      "twitch advertising",
+      "twitch *ads",
+      "amazon twitch ads",
+      "twitch business ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "twitch.tv",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Taboola",
+    "aliases": [
+      "taboola",
+      "taboola ads",
+      "taboola advertising",
+      "taboola inc",
+      "taboola *ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "taboola.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Outbrain",
+    "aliases": [
+      "outbrain",
+      "outbrain ads",
+      "outbrain advertising",
+      "outbrain inc",
+      "outbrain *ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "outbrain.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "StackAdapt",
+    "aliases": [
+      "stackadapt",
+      "stack adapt",
+      "stackadapt ads",
+      "stackadapt advertising",
+      "stackadapt platform"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "stackadapt.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Trade Desk",
+    "aliases": [
+      "the trade desk",
+      "trade desk",
+      "thetradedesk",
+      "ttd advertising",
+      "trade desk ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "thetradedesk.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "AdRoll",
+    "aliases": [
+      "adroll",
+      "ad roll",
+      "adroll ads",
+      "adroll advertising",
+      "nextroll adroll"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "adroll.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Criteo",
+    "aliases": [
+      "criteo",
+      "criteo ads",
+      "criteo advertising",
+      "criteo sa",
+      "criteo *ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "criteo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Basis Technologies",
+    "aliases": [
+      "basis technologies",
+      "basis ads",
+      "basis advertising",
+      "basis platform",
+      "centro basis"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "basis.com",
+    "confidence": "medium",
+    "notes": "Generic brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Simpli.fi",
+    "aliases": [
+      "simpli fi",
+      "simplifi",
+      "simpli.fi",
+      "simplifi advertising",
+      "simpli fi ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "simpli.fi",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Quantcast",
+    "aliases": [
+      "quantcast",
+      "quantcast ads",
+      "quantcast advertising",
+      "quantcast platform",
+      "quantcast corp"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "quantcast.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "AdTheorent",
+    "aliases": [
+      "adtheorent",
+      "ad theorent",
+      "adtheorent ads",
+      "adtheorent advertising",
+      "adtheorent inc"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "adtheorent.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MNTN",
+    "aliases": [
+      "mntn",
+      "mountain advertising",
+      "mntn performance tv",
+      "mntn ads",
+      "mntn connected tv"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "mountain.com",
+    "confidence": "medium",
+    "notes": "Short acronym requires descriptor context."
+  },
+  {
+    "canonical_name": "GroundTruth",
+    "aliases": [
+      "groundtruth",
+      "ground truth",
+      "groundtruth ads",
+      "groundtruth advertising",
+      "groundtruth location"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "groundtruth.com",
+    "confidence": "medium",
+    "notes": "Generic wording can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Adtaxi",
+    "aliases": [
+      "adtaxi",
+      "ad taxi",
+      "adtaxi advertising",
+      "adtaxi ads",
+      "adtaxi networks"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "adtaxi.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Choozle",
+    "aliases": [
+      "choozle",
+      "choozle ads",
+      "choozle advertising",
+      "choozle platform",
+      "choozle inc"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "choozle.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Centro",
+    "aliases": [
+      "centro",
+      "centro advertising",
+      "centro media",
+      "centro basis",
+      "centro ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "basis.com",
+    "confidence": "medium",
+    "notes": "Legacy brand associated with Basis Technologies."
+  },
+  {
+    "canonical_name": "RollWorks",
+    "aliases": [
+      "rollworks",
+      "roll works",
+      "rollworks ads",
+      "rollworks advertising",
+      "nextroll rollworks"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "rollworks.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Demandbase",
+    "aliases": [
+      "demandbase",
+      "demand base",
+      "demandbase advertising",
+      "demandbase ads",
+      "demandbase inc"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "demandbase.com",
+    "confidence": "medium",
+    "notes": "Can also bill SaaS subscriptions for account-based marketing."
+  },
+  {
+    "canonical_name": "6sense",
+    "aliases": [
+      "6sense",
+      "6 sense",
+      "6sense advertising",
+      "6sense ads",
+      "6sense revenue ai"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "6sense.com",
+    "confidence": "medium",
+    "notes": "Can also bill SaaS subscriptions."
+  },
+  {
+    "canonical_name": "Terminus",
+    "aliases": [
+      "terminus",
+      "terminus abm",
+      "terminus advertising",
+      "terminus ads",
+      "terminus software"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "terminus.com",
+    "confidence": "medium",
+    "notes": "Can also bill SaaS subscriptions."
+  },
+  {
+    "canonical_name": "Metadata.io",
+    "aliases": [
+      "metadata io",
+      "metadata.io",
+      "metadata advertising",
+      "metadata ads",
+      "metadata demand"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "metadata.io",
+    "confidence": "medium",
+    "notes": "Can also bill SaaS subscriptions."
+  },
+  {
+    "canonical_name": "Madison Logic",
+    "aliases": [
+      "madison logic",
+      "madisonlogic",
+      "madison logic advertising",
+      "madison logic ads",
+      "madison logic media"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "madisonlogic.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "TechTarget",
+    "aliases": [
+      "techtarget",
+      "tech target",
+      "techtarget advertising",
+      "techtarget media",
+      "techtarget ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "techtarget.com",
+    "confidence": "medium",
+    "notes": "May also bill lead-generation or research services."
+  },
+  {
+    "canonical_name": "Foundry",
+    "aliases": [
+      "foundry",
+      "foundry media",
+      "foundry advertising",
+      "idg advertising",
+      "foundryco"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "foundryco.com",
+    "confidence": "medium",
+    "notes": "Generic brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "G2 Marketing Solutions",
+    "aliases": [
+      "g2 marketing solutions",
+      "g2 advertising",
+      "g2 ads",
+      "g2 buyer intent",
+      "g2 paid"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "g2.com",
+    "confidence": "medium",
+    "notes": "G2 may also bill software subscriptions."
+  },
+  {
+    "canonical_name": "Capterra Advertising",
+    "aliases": [
+      "capterra advertising",
+      "capterra ads",
+      "capterra ppc",
+      "capterra paid listing",
+      "gartner capterra"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "capterra.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Software Advice Advertising",
+    "aliases": [
+      "software advice advertising",
+      "software advice ads",
+      "software advice leads",
+      "softwareadvice advertising",
+      "gartner software advice"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "softwareadvice.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "GetApp Advertising",
+    "aliases": [
+      "getapp advertising",
+      "getapp ads",
+      "getapp paid listing",
+      "getapp leads",
+      "gartner getapp"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "getapp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Clutch",
+    "aliases": [
+      "clutch",
+      "clutch advertising",
+      "clutch sponsorship",
+      "clutch paid listing",
+      "clutch co"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "clutch.co",
+    "confidence": "medium",
+    "notes": "Brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Thumbtack",
+    "aliases": [
+      "thumbtack",
+      "thumbtack leads",
+      "thumbtack pro",
+      "thumbtack advertising",
+      "thumbtack *pro"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "thumbtack.com",
+    "confidence": "medium",
+    "notes": "Charges are commonly lead-generation fees rather than traditional advertising."
+  },
+  {
+    "canonical_name": "Angi",
+    "aliases": [
+      "angi",
+      "angi ads",
+      "angi advertising",
+      "angies list advertising",
+      "angi leads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "angi.com",
+    "confidence": "medium",
+    "notes": "Charges may represent leads, advertising, or membership services."
+  },
+  {
+    "canonical_name": "HomeAdvisor",
+    "aliases": [
+      "homeadvisor",
+      "home advisor",
+      "homeadvisor leads",
+      "homeadvisor advertising",
+      "angi homeadvisor"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "homeadvisor.com",
+    "confidence": "medium",
+    "notes": "Charges commonly represent lead-generation services."
+  },
+  {
+    "canonical_name": "Houzz Pro Advertising",
+    "aliases": [
+      "houzz advertising",
+      "houzz ads",
+      "houzz pro advertising",
+      "houzz promoted",
+      "houzz business"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "houzz.com",
+    "confidence": "medium",
+    "notes": "Houzz may also bill software subscriptions."
+  },
+  {
+    "canonical_name": "Porch",
+    "aliases": [
+      "porch",
+      "porch leads",
+      "porch advertising",
+      "porch pro",
+      "porch services"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "porch.com",
+    "confidence": "medium",
+    "notes": "Charges may represent leads or other contractor services."
+  },
+  {
+    "canonical_name": "Bark",
+    "aliases": [
+      "bark",
+      "bark leads",
+      "bark advertising",
+      "bark professional leads",
+      "bark credits"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "bark.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; charges commonly represent purchased leads."
+  },
+  {
+    "canonical_name": "Google Local Services Ads",
+    "aliases": [
+      "google local services ads",
+      "google local services",
+      "google lsa",
+      "google *local services",
+      "google guaranteed ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "google.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Yext",
+    "aliases": [
+      "yext",
+      "yext inc",
+      "yext listings",
+      "yext marketing",
+      "yext subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "yext.com",
+    "confidence": "medium",
+    "notes": "Often a SaaS/listings-management subscription rather than ad spend."
+  },
+  {
+    "canonical_name": "Birdeye",
+    "aliases": [
+      "birdeye",
+      "bird eye",
+      "birdeye inc",
+      "birdeye marketing",
+      "birdeye reviews"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "birdeye.com",
+    "confidence": "medium",
+    "notes": "Often a reputation-management SaaS subscription."
+  },
+  {
+    "canonical_name": "Podium",
+    "aliases": [
+      "podium",
+      "podium corp",
+      "podium marketing",
+      "podium reviews",
+      "podium messaging"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "podium.com",
+    "confidence": "medium",
+    "notes": "Often a messaging/reputation SaaS subscription."
+  },
+  {
+    "canonical_name": "Reputation",
+    "aliases": [
+      "reputation",
+      "reputation com",
+      "reputation.com",
+      "reputation marketing",
+      "reputation management"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "reputation.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; often reputation-management software/services."
+  },
+  {
+    "canonical_name": "SOCi",
+    "aliases": [
+      "soci",
+      "soci inc",
+      "meet soci",
+      "soci marketing",
+      "soci local marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "meetsoci.com",
+    "confidence": "medium",
+    "notes": "Can be SaaS or managed marketing services."
+  },
+  {
+    "canonical_name": "Uberall",
+    "aliases": [
+      "uberall",
+      "uber all",
+      "uberall marketing",
+      "uberall listings",
+      "uberall inc"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "uberall.com",
+    "confidence": "medium",
+    "notes": "Often a local-marketing SaaS subscription."
+  },
+  {
+    "canonical_name": "BrightLocal",
+    "aliases": [
+      "brightlocal",
+      "bright local",
+      "brightlocal marketing",
+      "brightlocal seo",
+      "brightlocal subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "brightlocal.com",
+    "confidence": "medium",
+    "notes": "Often a local SEO software/service subscription."
+  },
+  {
+    "canonical_name": "Moz",
+    "aliases": [
+      "moz",
+      "moz pro",
+      "moz local",
+      "moz marketing",
+      "moz subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "moz.com",
+    "confidence": "medium",
+    "notes": "Often a marketing software subscription."
+  },
+  {
+    "canonical_name": "Semrush",
+    "aliases": [
+      "semrush",
+      "sem rush",
+      "semrush inc",
+      "semrush subscription",
+      "semrush marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "semrush.com",
+    "confidence": "medium",
+    "notes": "Primarily marketing software; could also fit software_saas."
+  },
+  {
+    "canonical_name": "Ahrefs",
+    "aliases": [
+      "ahrefs",
+      "ahrefs pte",
+      "ahrefs subscription",
+      "ahrefs marketing",
+      "ahrefs seo"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "ahrefs.com",
+    "confidence": "medium",
+    "notes": "Primarily marketing software; could also fit software_saas."
+  },
+  {
+    "canonical_name": "SpyFu",
+    "aliases": [
+      "spyfu",
+      "spy fu",
+      "spyfu subscription",
+      "spyfu marketing",
+      "spyfu seo"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "spyfu.com",
+    "confidence": "medium",
+    "notes": "Primarily marketing software; could also fit software_saas."
+  },
+  {
+    "canonical_name": "Similarweb",
+    "aliases": [
+      "similarweb",
+      "similar web",
+      "similarweb ltd",
+      "similarweb marketing",
+      "similarweb subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "similarweb.com",
+    "confidence": "medium",
+    "notes": "Primarily analytics/research software."
+  },
+  {
+    "canonical_name": "Constant Contact",
+    "aliases": [
+      "constant contact",
+      "constantcontact",
+      "constant contact inc",
+      "constant contact email",
+      "constant contact marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "constantcontact.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mailchimp",
+    "aliases": [
+      "mailchimp",
+      "mail chimp",
+      "intuit mailchimp",
+      "mailchimp email",
+      "mailchimp marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "mailchimp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Klaviyo",
+    "aliases": [
+      "klaviyo",
+      "klaviyo inc",
+      "klaviyo email",
+      "klaviyo marketing",
+      "klaviyo sms"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "klaviyo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Brevo",
+    "aliases": [
+      "brevo",
+      "sendinblue",
+      "brevo email",
+      "brevo marketing",
+      "brevo sms"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "brevo.com",
+    "confidence": "high",
+    "notes": "Legacy Sendinblue descriptors may still appear."
+  },
+  {
+    "canonical_name": "ActiveCampaign",
+    "aliases": [
+      "activecampaign",
+      "active campaign",
+      "activecampaign email",
+      "activecampaign marketing",
+      "activecampaign inc"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "activecampaign.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Campaign Monitor",
+    "aliases": [
+      "campaign monitor",
+      "campaignmonitor",
+      "campaign monitor email",
+      "campaign monitor marketing",
+      "cm group campaign monitor"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "campaignmonitor.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "GetResponse",
+    "aliases": [
+      "getresponse",
+      "get response",
+      "getresponse email",
+      "getresponse marketing",
+      "getresponse inc"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "getresponse.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "AWeber",
+    "aliases": [
+      "aweber",
+      "aweber communications",
+      "aweber email",
+      "aweber marketing",
+      "aweber subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "aweber.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ConvertKit",
+    "aliases": [
+      "convertkit",
+      "convert kit",
+      "kit email",
+      "kit creator",
+      "convertkit subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "kit.com",
+    "confidence": "high",
+    "notes": "Brand transitioned from ConvertKit to Kit; both descriptors may appear."
+  },
+  {
+    "canonical_name": "MailerLite",
+    "aliases": [
+      "mailerlite",
+      "mailer lite",
+      "mailerlite email",
+      "mailerlite marketing",
+      "mailerlite subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "mailerlite.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Drip",
+    "aliases": [
+      "drip",
+      "drip email",
+      "drip marketing",
+      "drip ecommerce",
+      "drip subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "drip.com",
+    "confidence": "medium",
+    "notes": "Generic brand name requires descriptor context."
+  },
+  {
+    "canonical_name": "Omnisend",
+    "aliases": [
+      "omnisend",
+      "omni send",
+      "omnisend email",
+      "omnisend marketing",
+      "omnisend sms"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "omnisend.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Iterable",
+    "aliases": [
+      "iterable",
+      "iterable inc",
+      "iterable marketing",
+      "iterable messaging",
+      "iterable subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "iterable.com",
+    "confidence": "medium",
+    "notes": "Primarily marketing SaaS."
+  },
+  {
+    "canonical_name": "Braze",
+    "aliases": [
+      "braze",
+      "braze inc",
+      "braze marketing",
+      "braze messaging",
+      "braze subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "braze.com",
+    "confidence": "medium",
+    "notes": "Primarily customer-engagement SaaS."
+  },
+  {
+    "canonical_name": "Customer.io",
+    "aliases": [
+      "customer io",
+      "customer.io",
+      "customerio",
+      "customer io marketing",
+      "customer io subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "customer.io",
+    "confidence": "medium",
+    "notes": "Primarily customer-engagement SaaS."
+  },
+  {
+    "canonical_name": "Attentive",
+    "aliases": [
+      "attentive",
+      "attentive mobile",
+      "attentive sms",
+      "attentive marketing",
+      "attentive subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "attentive.com",
+    "confidence": "medium",
+    "notes": "SMS marketing platform; can include usage-based messaging charges."
+  },
+  {
+    "canonical_name": "Postscript",
+    "aliases": [
+      "postscript",
+      "postscript io",
+      "postscript sms",
+      "postscript marketing",
+      "postscript subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "postscript.io",
+    "confidence": "medium",
+    "notes": "SMS marketing platform; can include usage-based messaging charges."
+  },
+  {
+    "canonical_name": "EZ Texting",
+    "aliases": [
+      "ez texting",
+      "eztexting",
+      "ez texting sms",
+      "ez texting marketing",
+      "eztexting subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "eztexting.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SimpleTexting",
+    "aliases": [
+      "simpletexting",
+      "simple texting",
+      "simpletexting sms",
+      "simpletexting marketing",
+      "simpletexting subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "simpletexting.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Textedly",
+    "aliases": [
+      "textedly",
+      "textedly sms",
+      "textedly marketing",
+      "textedly subscription",
+      "textedly inc"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "textedly.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SlickText",
+    "aliases": [
+      "slicktext",
+      "slick text",
+      "slicktext sms",
+      "slicktext marketing",
+      "slicktext subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "slicktext.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Twilio SendGrid",
+    "aliases": [
+      "sendgrid",
+      "twilio sendgrid",
+      "sendgrid email",
+      "sendgrid marketing",
+      "sendgrid *email"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "sendgrid.com",
+    "confidence": "medium",
+    "notes": "Can also be infrastructure/software expense rather than marketing."
+  },
+  {
+    "canonical_name": "HubSpot Marketing Hub",
+    "aliases": [
+      "hubspot marketing hub",
+      "hubspot marketing",
+      "hubspot *marketing",
+      "hubspot ads",
+      "hubspot email marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "hubspot.com",
+    "confidence": "medium",
+    "notes": "HubSpot charges may instead be CRM or general software subscriptions."
+  },
+  {
+    "canonical_name": "Salesforce Marketing Cloud",
+    "aliases": [
+      "salesforce marketing cloud",
+      "salesforce marketing",
+      "sfmc",
+      "exacttarget",
+      "salesforce *marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "salesforce.com",
+    "confidence": "medium",
+    "notes": "Salesforce charges may instead be general CRM/software."
+  },
+  {
+    "canonical_name": "Adobe Marketo Engage",
+    "aliases": [
+      "adobe marketo",
+      "marketo",
+      "marketo engage",
+      "adobe marketo engage",
+      "marketo subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "adobe.com",
+    "confidence": "medium",
+    "notes": "Adobe charges may instead be other software products."
+  },
+  {
+    "canonical_name": "Oracle Eloqua",
+    "aliases": [
+      "oracle eloqua",
+      "eloqua",
+      "eloqua marketing",
+      "oracle marketing cloud",
+      "eloqua subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "oracle.com",
+    "confidence": "medium",
+    "notes": "Oracle charges may instead be other software products."
+  },
+  {
+    "canonical_name": "Acoustic Marketing",
+    "aliases": [
+      "acoustic marketing",
+      "acoustic",
+      "acoustic campaign",
+      "acoustic marketing cloud",
+      "acoustic subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "acoustic.com",
+    "confidence": "medium",
+    "notes": "Generic brand name requires descriptor context."
+  },
+  {
+    "canonical_name": "Keap",
+    "aliases": [
+      "keap",
+      "infusionsoft",
+      "keap marketing",
+      "keap crm",
+      "keap subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "keap.com",
+    "confidence": "medium",
+    "notes": "Can also be classified as CRM/software."
+  },
+  {
+    "canonical_name": "GoHighLevel",
+    "aliases": [
+      "gohighlevel",
+      "go high level",
+      "highlevel",
+      "highlevel marketing",
+      "gohighlevel subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "gohighlevel.com",
+    "confidence": "medium",
+    "notes": "Primarily marketing/CRM SaaS."
+  },
+  {
+    "canonical_name": "HighLevel",
+    "aliases": [
+      "highlevel",
+      "high level",
+      "highlevel crm",
+      "highlevel marketing",
+      "highlevel subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "gohighlevel.com",
+    "confidence": "medium",
+    "notes": "Brand descriptors may overlap with GoHighLevel."
+  },
+  {
+    "canonical_name": "ClickFunnels",
+    "aliases": [
+      "clickfunnels",
+      "click funnels",
+      "clickfunnels marketing",
+      "clickfunnels subscription",
+      "clickfunnels funnel"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "clickfunnels.com",
+    "confidence": "medium",
+    "notes": "Primarily marketing SaaS."
+  },
+  {
+    "canonical_name": "Unbounce",
+    "aliases": [
+      "unbounce",
+      "unbounce marketing",
+      "unbounce landing pages",
+      "unbounce subscription",
+      "unbounce inc"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "unbounce.com",
+    "confidence": "medium",
+    "notes": "Primarily marketing SaaS."
+  },
+  {
+    "canonical_name": "Leadpages",
+    "aliases": [
+      "leadpages",
+      "lead pages",
+      "leadpages marketing",
+      "leadpages subscription",
+      "leadpages landing pages"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "leadpages.com",
+    "confidence": "medium",
+    "notes": "Primarily marketing SaaS."
+  },
+  {
+    "canonical_name": "Instapage",
+    "aliases": [
+      "instapage",
+      "insta page",
+      "instapage marketing",
+      "instapage subscription",
+      "instapage landing pages"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "instapage.com",
+    "confidence": "medium",
+    "notes": "Primarily marketing SaaS."
+  },
+  {
+    "canonical_name": "Optimizely",
+    "aliases": [
+      "optimizely",
+      "optimizely inc",
+      "optimizely marketing",
+      "optimizely experimentation",
+      "optimizely subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "optimizely.com",
+    "confidence": "medium",
+    "notes": "Primarily software; usage spans marketing and product teams."
+  },
+  {
+    "canonical_name": "VWO",
+    "aliases": [
+      "vwo",
+      "visual website optimizer",
+      "vwo marketing",
+      "vwo testing",
+      "vwo subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "vwo.com",
+    "confidence": "medium",
+    "notes": "Primarily experimentation software."
+  },
+  {
+    "canonical_name": "Crazy Egg",
+    "aliases": [
+      "crazy egg",
+      "crazyegg",
+      "crazy egg marketing",
+      "crazy egg analytics",
+      "crazy egg subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "crazyegg.com",
+    "confidence": "medium",
+    "notes": "Primarily analytics/optimization software."
+  },
+  {
+    "canonical_name": "Hotjar",
+    "aliases": [
+      "hotjar",
+      "hot jar",
+      "hotjar analytics",
+      "hotjar marketing",
+      "hotjar subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "hotjar.com",
+    "confidence": "medium",
+    "notes": "Primarily analytics software."
+  },
+  {
+    "canonical_name": "CallRail",
+    "aliases": [
+      "callrail",
+      "call rail",
+      "callrail tracking",
+      "callrail marketing",
+      "callrail subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "callrail.com",
+    "confidence": "medium",
+    "notes": "Marketing attribution/call-tracking platform."
+  },
+  {
+    "canonical_name": "CallTrackingMetrics",
+    "aliases": [
+      "calltrackingmetrics",
+      "call tracking metrics",
+      "ctm call tracking",
+      "calltrackingmetrics subscription",
+      "call tracking marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "calltrackingmetrics.com",
+    "confidence": "medium",
+    "notes": "Marketing attribution/call-tracking platform."
+  },
+  {
+    "canonical_name": "WhatConverts",
+    "aliases": [
+      "whatconverts",
+      "what converts",
+      "whatconverts tracking",
+      "whatconverts marketing",
+      "whatconverts subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "whatconverts.com",
+    "confidence": "medium",
+    "notes": "Marketing attribution software."
+  },
+  {
+    "canonical_name": "Invoca",
+    "aliases": [
+      "invoca",
+      "invoca inc",
+      "invoca call tracking",
+      "invoca marketing",
+      "invoca subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "invoca.com",
+    "confidence": "medium",
+    "notes": "Marketing attribution/conversation intelligence software."
+  },
+  {
+    "canonical_name": "Marchex",
+    "aliases": [
+      "marchex",
+      "marchex inc",
+      "marchex call analytics",
+      "marchex marketing",
+      "marchex advertising"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "marchex.com",
+    "confidence": "medium",
+    "notes": "Can include call analytics or advertising services."
+  },
+  {
+    "canonical_name": "CallSource",
+    "aliases": [
+      "callsource",
+      "call source",
+      "callsource tracking",
+      "callsource marketing",
+      "callsource subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "callsource.com",
+    "confidence": "medium",
+    "notes": "Call-tracking and marketing analytics service."
+  },
+  {
+    "canonical_name": "Sprout Social",
+    "aliases": [
+      "sprout social",
+      "sproutsocial",
+      "sprout social inc",
+      "sprout social marketing",
+      "sprout social subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "sproutsocial.com",
+    "confidence": "medium",
+    "notes": "Primarily social-media management SaaS."
+  },
+  {
+    "canonical_name": "Hootsuite",
+    "aliases": [
+      "hootsuite",
+      "hoot suite",
+      "hootsuite inc",
+      "hootsuite marketing",
+      "hootsuite subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "hootsuite.com",
+    "confidence": "medium",
+    "notes": "Primarily social-media management SaaS."
+  },
+  {
+    "canonical_name": "Buffer",
+    "aliases": [
+      "buffer",
+      "buffer social",
+      "buffer marketing",
+      "buffer subscription",
+      "buffer publish"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "buffer.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; primarily social-media management SaaS."
+  },
+  {
+    "canonical_name": "Later",
+    "aliases": [
+      "later",
+      "later media",
+      "later social",
+      "later marketing",
+      "later subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "later.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; primarily social-media management SaaS."
+  },
+  {
+    "canonical_name": "SocialPilot",
+    "aliases": [
+      "socialpilot",
+      "social pilot",
+      "socialpilot marketing",
+      "socialpilot subscription",
+      "socialpilot social media"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "socialpilot.co",
+    "confidence": "medium",
+    "notes": "Primarily social-media management SaaS."
+  },
+  {
+    "canonical_name": "Agorapulse",
+    "aliases": [
+      "agorapulse",
+      "agora pulse",
+      "agorapulse social",
+      "agorapulse marketing",
+      "agorapulse subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "agorapulse.com",
+    "confidence": "medium",
+    "notes": "Primarily social-media management SaaS."
+  },
+  {
+    "canonical_name": "Sendible",
+    "aliases": [
+      "sendible",
+      "sendible social",
+      "sendible marketing",
+      "sendible subscription",
+      "sendible inc"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "sendible.com",
+    "confidence": "medium",
+    "notes": "Primarily social-media management SaaS."
+  },
+  {
+    "canonical_name": "Brandwatch",
+    "aliases": [
+      "brandwatch",
+      "brand watch",
+      "brandwatch consumer research",
+      "brandwatch marketing",
+      "brandwatch subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "brandwatch.com",
+    "confidence": "medium",
+    "notes": "Primarily social intelligence software."
+  },
+  {
+    "canonical_name": "Meltwater",
+    "aliases": [
+      "meltwater",
+      "meltwater news",
+      "meltwater media",
+      "meltwater marketing",
+      "meltwater subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "meltwater.com",
+    "confidence": "medium",
+    "notes": "May represent media monitoring, PR, or social intelligence software."
+  },
+  {
+    "canonical_name": "Cision",
+    "aliases": [
+      "cision",
+      "cision us",
+      "cision pr",
+      "cision media",
+      "cision subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "cision.com",
+    "confidence": "medium",
+    "notes": "May represent PR software, media database access, or distribution services."
+  },
+  {
+    "canonical_name": "PR Newswire",
+    "aliases": [
+      "pr newswire",
+      "prnewswire",
+      "cision pr newswire",
+      "pr newswire distribution",
+      "pr newswire release"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "prnewswire.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Business Wire",
+    "aliases": [
+      "business wire",
+      "businesswire",
+      "business wire release",
+      "business wire distribution",
+      "business wire inc"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "businesswire.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "GlobeNewswire",
+    "aliases": [
+      "globenewswire",
+      "globe newswire",
+      "globe newswire release",
+      "globenewswire distribution",
+      "notified globenewswire"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "globenewswire.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Newswire",
+    "aliases": [
+      "newswire",
+      "newswire com",
+      "newswire.com",
+      "newswire press release",
+      "newswire distribution"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "newswire.com",
+    "confidence": "medium",
+    "notes": "Generic descriptor can collide with other newswire services."
+  },
+  {
+    "canonical_name": "eReleases",
+    "aliases": [
+      "ereleases",
+      "e releases",
+      "ereleases press release",
+      "ereleases distribution",
+      "ereleases pr"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "ereleases.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Prowly",
+    "aliases": [
+      "prowly",
+      "prowly pr",
+      "prowly media",
+      "prowly subscription",
+      "semrush prowly"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "prowly.com",
+    "confidence": "medium",
+    "notes": "PR software/service; may appear under Semrush ownership."
+  },
+  {
+    "canonical_name": "Muck Rack",
+    "aliases": [
+      "muck rack",
+      "muckrack",
+      "muck rack pr",
+      "muck rack media",
+      "muck rack subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "muckrack.com",
+    "confidence": "medium",
+    "notes": "Primarily PR/media-relations SaaS."
+  },
+  {
+    "canonical_name": "Prezly",
+    "aliases": [
+      "prezly",
+      "prezly pr",
+      "prezly newsroom",
+      "prezly subscription",
+      "prezly communications"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "prezly.com",
+    "confidence": "medium",
+    "notes": "Primarily PR SaaS."
+  },
+  {
+    "canonical_name": "Mention",
+    "aliases": [
+      "mention",
+      "mention com",
+      "mention monitoring",
+      "mention marketing",
+      "mention subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "mention.com",
+    "confidence": "medium",
+    "notes": "Generic brand name requires descriptor context."
+  },
+  {
+    "canonical_name": "Brand24",
+    "aliases": [
+      "brand24",
+      "brand 24",
+      "brand24 monitoring",
+      "brand24 marketing",
+      "brand24 subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "brand24.com",
+    "confidence": "medium",
+    "notes": "Primarily media-monitoring SaaS."
+  },
+  {
+    "canonical_name": "Trustpilot",
+    "aliases": [
+      "trustpilot",
+      "trust pilot",
+      "trustpilot business",
+      "trustpilot reviews",
+      "trustpilot subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "trustpilot.com",
+    "confidence": "medium",
+    "notes": "Reputation/review platform; charges may be subscription-based."
+  },
+  {
+    "canonical_name": "Bazaarvoice",
+    "aliases": [
+      "bazaarvoice",
+      "bazaar voice",
+      "bazaarvoice reviews",
+      "bazaarvoice marketing",
+      "bazaarvoice subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "bazaarvoice.com",
+    "confidence": "medium",
+    "notes": "Primarily ratings/reviews and commerce-marketing software."
+  },
+  {
+    "canonical_name": "Yotpo",
+    "aliases": [
+      "yotpo",
+      "yotpo reviews",
+      "yotpo marketing",
+      "yotpo sms",
+      "yotpo subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "yotpo.com",
+    "confidence": "medium",
+    "notes": "Primarily ecommerce marketing SaaS."
+  },
+  {
+    "canonical_name": "Okendo",
+    "aliases": [
+      "okendo",
+      "okendo reviews",
+      "okendo marketing",
+      "okendo subscription",
+      "okendo io"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "okendo.io",
+    "confidence": "medium",
+    "notes": "Primarily ecommerce marketing SaaS."
+  },
+  {
+    "canonical_name": "Stamped",
+    "aliases": [
+      "stamped",
+      "stamped io",
+      "stamped reviews",
+      "stamped marketing",
+      "stamped subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "stamped.io",
+    "confidence": "medium",
+    "notes": "Generic brand name requires descriptor context."
+  },
+  {
+    "canonical_name": "Judge.me",
+    "aliases": [
+      "judge me",
+      "judge.me",
+      "judgeme",
+      "judge me reviews",
+      "judge me subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "judge.me",
+    "confidence": "medium",
+    "notes": "Primarily ecommerce review software."
+  },
+  {
+    "canonical_name": "ReferralCandy",
+    "aliases": [
+      "referralcandy",
+      "referral candy",
+      "referral candy marketing",
+      "referralcandy subscription",
+      "referral candy app"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "referralcandy.com",
+    "confidence": "medium",
+    "notes": "Primarily referral-marketing SaaS."
+  },
+  {
+    "canonical_name": "Friendbuy",
+    "aliases": [
+      "friendbuy",
+      "friend buy",
+      "friendbuy referrals",
+      "friendbuy marketing",
+      "friendbuy subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "friendbuy.com",
+    "confidence": "medium",
+    "notes": "Primarily referral-marketing SaaS."
+  },
+  {
+    "canonical_name": "Impact.com",
+    "aliases": [
+      "impact com",
+      "impact.com",
+      "impact partnership",
+      "impact affiliate",
+      "impact marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "impact.com",
+    "confidence": "medium",
+    "notes": "May represent affiliate/partnership platform fees rather than ad spend."
+  },
+  {
+    "canonical_name": "PartnerStack",
+    "aliases": [
+      "partnerstack",
+      "partner stack",
+      "partnerstack affiliate",
+      "partnerstack partnerships",
+      "partnerstack subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "partnerstack.com",
+    "confidence": "medium",
+    "notes": "Primarily partner-management SaaS."
+  },
+  {
+    "canonical_name": "CJ Affiliate",
+    "aliases": [
+      "cj affiliate",
+      "commission junction",
+      "cj.com",
+      "cj advertising",
+      "cj affiliate fees"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "cj.com",
+    "confidence": "medium",
+    "notes": "Affiliate-network charges may include platform and publisher costs."
+  },
+  {
+    "canonical_name": "Awin",
+    "aliases": [
+      "awin",
+      "awin affiliate",
+      "awin advertising",
+      "awin network",
+      "awin fees"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "awin.com",
+    "confidence": "medium",
+    "notes": "Affiliate-network charges may include platform and publisher costs."
+  },
+  {
+    "canonical_name": "Rakuten Advertising",
+    "aliases": [
+      "rakuten advertising",
+      "rakuten ads",
+      "rakuten marketing",
+      "rakuten affiliate",
+      "rakuten advertising fees"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "rakutenadvertising.com",
+    "confidence": "medium",
+    "notes": "May include affiliate-network or media-buying charges."
+  },
+  {
+    "canonical_name": "ShareASale",
+    "aliases": [
+      "shareasale",
+      "share a sale",
+      "shareasale affiliate",
+      "shareasale fees",
+      "awin shareasale"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "shareasale.com",
+    "confidence": "medium",
+    "notes": "Affiliate-network charges may include platform and publisher costs."
+  },
+  {
+    "canonical_name": "Partnerize",
+    "aliases": [
+      "partnerize",
+      "partnerize affiliate",
+      "partnerize marketing",
+      "partnerize platform",
+      "partnerize fees"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "partnerize.com",
+    "confidence": "medium",
+    "notes": "Primarily partnership-management software/services."
+  },
+  {
+    "canonical_name": "Everflow",
+    "aliases": [
+      "everflow",
+      "everflow io",
+      "everflow affiliate",
+      "everflow marketing",
+      "everflow subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "everflow.io",
+    "confidence": "medium",
+    "notes": "Primarily partner-marketing SaaS."
+  },
+  {
+    "canonical_name": "Tapfiliate",
+    "aliases": [
+      "tapfiliate",
+      "tap affiliate",
+      "tapfiliate affiliate",
+      "tapfiliate marketing",
+      "tapfiliate subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "tapfiliate.com",
+    "confidence": "medium",
+    "notes": "Primarily affiliate-marketing SaaS."
+  },
+  {
+    "canonical_name": "Rewardful",
+    "aliases": [
+      "rewardful",
+      "rewardful affiliate",
+      "rewardful referrals",
+      "rewardful marketing",
+      "rewardful subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "rewardful.com",
+    "confidence": "medium",
+    "notes": "Primarily affiliate/referral SaaS."
+  },
+  {
+    "canonical_name": "FirstPromoter",
+    "aliases": [
+      "firstpromoter",
+      "first promoter",
+      "firstpromoter affiliate",
+      "firstpromoter marketing",
+      "firstpromoter subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "firstpromoter.com",
+    "confidence": "medium",
+    "notes": "Primarily affiliate-marketing SaaS."
+  },
+  {
+    "canonical_name": "BuySellAds",
+    "aliases": [
+      "buysellads",
+      "buy sell ads",
+      "buysellads advertising",
+      "buysellads media",
+      "buysellads *ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "buysellads.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Carbon Ads",
+    "aliases": [
+      "carbon ads",
+      "carbonads",
+      "carbon advertising",
+      "carbonads network",
+      "buysellads carbon"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "carbonads.net",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Adsterra",
+    "aliases": [
+      "adsterra",
+      "adsterra ads",
+      "adsterra advertising",
+      "adsterra network",
+      "adsterra *ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "adsterra.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PropellerAds",
+    "aliases": [
+      "propellerads",
+      "propeller ads",
+      "propeller advertising",
+      "propellerads network",
+      "propeller *ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "propellerads.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Revcontent",
+    "aliases": [
+      "revcontent",
+      "rev content",
+      "revcontent ads",
+      "revcontent advertising",
+      "revcontent network"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "revcontent.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MGID",
+    "aliases": [
+      "mgid",
+      "mgid ads",
+      "mgid advertising",
+      "mgid inc",
+      "mgid native ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "mgid.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Adblade",
+    "aliases": [
+      "adblade",
+      "ad blade",
+      "adblade ads",
+      "adblade advertising",
+      "adblade network"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "adblade.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Media.net",
+    "aliases": [
+      "media net",
+      "media.net",
+      "medianet advertising",
+      "media net ads",
+      "media net network"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "media.net",
+    "confidence": "medium",
+    "notes": "Generic domain-style brand requires descriptor context."
+  },
+  {
+    "canonical_name": "Adcash",
+    "aliases": [
+      "adcash",
+      "ad cash",
+      "adcash ads",
+      "adcash advertising",
+      "adcash network"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "adcash.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Adform",
+    "aliases": [
+      "adform",
+      "ad form",
+      "adform ads",
+      "adform advertising",
+      "adform platform"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "adform.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Magnite",
+    "aliases": [
+      "magnite",
+      "magnite advertising",
+      "magnite ads",
+      "rubicon project",
+      "magnite platform"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "magnite.com",
+    "confidence": "medium",
+    "notes": "Primarily ad-tech infrastructure; merchant charges are less common for small advertisers."
+  },
+  {
+    "canonical_name": "PubMatic",
+    "aliases": [
+      "pubmatic",
+      "pub matic",
+      "pubmatic advertising",
+      "pubmatic ads",
+      "pubmatic platform"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "pubmatic.com",
+    "confidence": "medium",
+    "notes": "Primarily ad-tech infrastructure; direct SMB advertiser charges are less common."
+  },
+  {
+    "canonical_name": "OpenX",
+    "aliases": [
+      "openx",
+      "open x",
+      "openx advertising",
+      "openx ads",
+      "openx technologies"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "openx.com",
+    "confidence": "medium",
+    "notes": "Primarily ad-tech infrastructure."
+  },
+  {
+    "canonical_name": "Index Exchange",
+    "aliases": [
+      "index exchange",
+      "indexexchange",
+      "index exchange advertising",
+      "index exchange ads",
+      "index exchange inc"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "indexexchange.com",
+    "confidence": "medium",
+    "notes": "Primarily ad-tech infrastructure."
+  },
+  {
+    "canonical_name": "Teads",
+    "aliases": [
+      "teads",
+      "teads advertising",
+      "teads ads",
+      "teads media",
+      "teads platform"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "teads.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Seedtag",
+    "aliases": [
+      "seedtag",
+      "seed tag",
+      "seedtag advertising",
+      "seedtag ads",
+      "seedtag media"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "seedtag.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "GumGum",
+    "aliases": [
+      "gumgum",
+      "gum gum",
+      "gumgum advertising",
+      "gumgum ads",
+      "gumgum inc"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "gumgum.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nativo",
+    "aliases": [
+      "nativo",
+      "nativo advertising",
+      "nativo ads",
+      "nativo inc",
+      "nativo native ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "nativo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "TripleLift",
+    "aliases": [
+      "triplelift",
+      "triple lift",
+      "triplelift advertising",
+      "triplelift ads",
+      "triplelift inc"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "triplelift.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sharethrough",
+    "aliases": [
+      "sharethrough",
+      "share through",
+      "sharethrough advertising",
+      "sharethrough ads",
+      "sharethrough inc"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "sharethrough.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Yahoo Advertising",
+    "aliases": [
+      "yahoo advertising",
+      "yahoo ads",
+      "yahoo *ads",
+      "yahoo native ads",
+      "yahoo dsp"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "yahoo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Yandex Advertising",
+    "aliases": [
+      "yandex advertising",
+      "yandex ads",
+      "yandex direct",
+      "yandex *ads",
+      "yandex business"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "yandex.com",
+    "confidence": "medium",
+    "notes": "Global platform with lower relevance for typical US SMBs."
+  },
+  {
+    "canonical_name": "Baidu Ads",
+    "aliases": [
+      "baidu ads",
+      "baidu advertising",
+      "baidu promotion",
+      "baidu *ads",
+      "baidu marketing"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "baidu.com",
+    "confidence": "medium",
+    "notes": "Global platform with lower relevance for typical US SMBs."
+  },
+  {
+    "canonical_name": "Stacker",
+    "aliases": [
+      "stacker",
+      "stacker studio",
+      "stacker content",
+      "stacker marketing",
+      "stacker distribution"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "stacker.com",
+    "confidence": "medium",
+    "notes": "Content distribution/service; generic brand name can collide."
+  },
+  {
+    "canonical_name": "Patch Advertising",
+    "aliases": [
+      "patch advertising",
+      "patch ads",
+      "patch local ads",
+      "patch *advertising",
+      "patch business ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "patch.com",
+    "confidence": "medium",
+    "notes": "Patch transactions without an ad descriptor may be ambiguous."
+  },
+  {
+    "canonical_name": "Alignable",
+    "aliases": [
+      "alignable",
+      "alignable premium",
+      "alignable advertising",
+      "alignable business",
+      "alignable subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "alignable.com",
+    "confidence": "medium",
+    "notes": "May be networking subscription rather than advertising."
+  },
+  {
+    "canonical_name": "Yellow Pages",
+    "aliases": [
+      "yellow pages",
+      "yellowpages",
+      "yp advertising",
+      "yellow pages advertising",
+      "yellowpages ads"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "yellowpages.com",
+    "confidence": "medium",
+    "notes": "Directory/listing charges can vary by provider and region."
+  },
+  {
+    "canonical_name": "Thryv",
+    "aliases": [
+      "thryv",
+      "thryv inc",
+      "thryv marketing",
+      "thryv advertising",
+      "thryv business"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "thryv.com",
+    "confidence": "medium",
+    "notes": "Can include SaaS, directory advertising, and managed marketing services."
+  },
+  {
+    "canonical_name": "Hibu",
+    "aliases": [
+      "hibu",
+      "hibu inc",
+      "hibu marketing",
+      "hibu advertising",
+      "hibu digital"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "hibu.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "LocaliQ",
+    "aliases": [
+      "localiq",
+      "local iq",
+      "localiq marketing",
+      "localiq advertising",
+      "localiq digital"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "localiq.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ReachLocal",
+    "aliases": [
+      "reachlocal",
+      "reach local",
+      "reachlocal marketing",
+      "reachlocal advertising",
+      "reachlocal inc"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "reachlocal.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Scorpion",
+    "aliases": [
+      "scorpion",
+      "scorpion marketing",
+      "scorpion internet marketing",
+      "scorpion advertising",
+      "scorpion co"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "scorpion.co",
+    "confidence": "medium",
+    "notes": "Generic brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "RevLocal",
+    "aliases": [
+      "revlocal",
+      "rev local",
+      "revlocal marketing",
+      "revlocal advertising",
+      "revlocal digital"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "revlocal.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Townsquare Interactive",
+    "aliases": [
+      "townsquare interactive",
+      "town square interactive",
+      "townsquare marketing",
+      "townsquare digital",
+      "townsquare interactive payment"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "townsquareinteractive.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hearst DMS",
+    "aliases": [
+      "hearst dms",
+      "hearst digital marketing services",
+      "hearst marketing",
+      "hearst dms advertising",
+      "hearst digital"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "hearstdms.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Advance Local",
+    "aliases": [
+      "advance local",
+      "advance local media",
+      "advance local advertising",
+      "advance local marketing",
+      "advance digital"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "advancelocal.com",
+    "confidence": "medium",
+    "notes": "May represent local-media advertising or marketing services."
+  },
+  {
+    "canonical_name": "Nexstar Digital",
+    "aliases": [
+      "nexstar digital",
+      "nexstar advertising",
+      "nexstar media ads",
+      "nexstar marketing",
+      "nexstar digital ads"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "nexstardigital.com",
+    "confidence": "medium",
+    "notes": "May represent local broadcast/digital advertising."
+  },
+  {
+    "canonical_name": "Sinclair Digital",
+    "aliases": [
+      "sinclair digital",
+      "sinclair advertising",
+      "sinclair broadcast ads",
+      "sinclair media advertising",
+      "sbgi advertising"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "sbgi.net",
+    "confidence": "medium",
+    "notes": "May represent local broadcast/digital advertising."
+  },
+  {
+    "canonical_name": "Spectrum Reach",
+    "aliases": [
+      "spectrum reach",
+      "spectrum advertising",
+      "charter advertising",
+      "spectrum reach ads",
+      "spectrum media ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "spectrumreach.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Comcast Advertising",
+    "aliases": [
+      "comcast advertising",
+      "comcast ads",
+      "comcast spotlight",
+      "effectv",
+      "comcast *advertising"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "comcastadvertising.com",
+    "confidence": "high",
+    "notes": "Legacy Comcast Spotlight/Effectv descriptors may appear."
+  },
+  {
+    "canonical_name": "Effectv",
+    "aliases": [
+      "effectv",
+      "effectv advertising",
+      "effectv ads",
+      "comcast effectv",
+      "effectv media"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "effectv.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cox Media",
+    "aliases": [
+      "cox media",
+      "cox advertising",
+      "cox media ads",
+      "cox media advertising",
+      "cox *media"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "coxmedia.com",
+    "confidence": "medium",
+    "notes": "Cox charges without media/ad descriptors may instead be telecom."
+  },
+  {
+    "canonical_name": "Lamar Advertising",
+    "aliases": [
+      "lamar advertising",
+      "lamar ads",
+      "lamar outdoor advertising",
+      "lamar billboards",
+      "lamar media"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "lamar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "OUTFRONT Media",
+    "aliases": [
+      "outfront media",
+      "outfront",
+      "outfront advertising",
+      "outfront billboards",
+      "outfront media inc"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "outfront.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Clear Channel Outdoor",
+    "aliases": [
+      "clear channel outdoor",
+      "clear channel advertising",
+      "cco advertising",
+      "clear channel billboards",
+      "clearchannel outdoor"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "clearchanneloutdoor.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Intersection",
+    "aliases": [
+      "intersection",
+      "intersection media",
+      "intersection advertising",
+      "intersection outdoor",
+      "intersection ads"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "intersection.com",
+    "confidence": "medium",
+    "notes": "Generic brand name requires descriptor context."
+  },
+  {
+    "canonical_name": "AdQuick",
+    "aliases": [
+      "adquick",
+      "ad quick",
+      "adquick advertising",
+      "adquick outdoor",
+      "adquick billboards"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "adquick.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Billups",
+    "aliases": [
+      "billups",
+      "billups advertising",
+      "billups outdoor",
+      "billups media",
+      "billups ooh"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "billups.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Blip Billboards",
+    "aliases": [
+      "blip billboards",
+      "blip",
+      "blip billboard",
+      "blip advertising",
+      "blip outdoor"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "blipbillboards.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Vistar Media",
+    "aliases": [
+      "vistar media",
+      "vistar",
+      "vistar advertising",
+      "vistar ads",
+      "vistar digital out of home"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "vistarmedia.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Place Exchange",
+    "aliases": [
+      "place exchange",
+      "placeexchange",
+      "place exchange ads",
+      "place exchange advertising",
+      "place exchange ooh"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "placeexchange.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "GroundTruth Ads",
+    "aliases": [
+      "groundtruth ads",
+      "ground truth ads",
+      "groundtruth advertising",
+      "groundtruth media",
+      "groundtruth *ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "groundtruth.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Foursquare Ads",
+    "aliases": [
+      "foursquare ads",
+      "foursquare advertising",
+      "foursquare *ads",
+      "foursquare media",
+      "foursquare business ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "foursquare.com",
+    "confidence": "medium",
+    "notes": "Foursquare also sells location-data products."
+  },
+  {
+    "canonical_name": "MapQuest Advertising",
+    "aliases": [
+      "mapquest advertising",
+      "mapquest ads",
+      "map quest ads",
+      "mapquest *ads",
+      "mapquest business"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "mapquest.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "YP Marketing Solutions",
+    "aliases": [
+      "yp marketing solutions",
+      "yp advertising",
+      "yellowpages marketing",
+      "yellow pages ads",
+      "yp digital"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "yellowpages.com",
+    "confidence": "medium",
+    "notes": "Legacy/descriptor variants may overlap with Yellow Pages."
+  },
+  {
+    "canonical_name": "Valpak",
+    "aliases": [
+      "valpak",
+      "val pak",
+      "valpak advertising",
+      "valpak coupons",
+      "valpak marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "valpak.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Money Mailer",
+    "aliases": [
+      "money mailer",
+      "moneymailer",
+      "money mailer advertising",
+      "money mailer coupons",
+      "money mailer marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "moneymailer.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Welcome Wagon",
+    "aliases": [
+      "welcome wagon",
+      "welcomewagon",
+      "welcome wagon advertising",
+      "welcome wagon marketing",
+      "welcome wagon business"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "welcomewagon.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mspark",
+    "aliases": [
+      "mspark",
+      "m spark",
+      "mspark advertising",
+      "mspark direct mail",
+      "mspark marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "mspark.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Modern Postcard",
+    "aliases": [
+      "modern postcard",
+      "modernpostcard",
+      "modern postcard direct mail",
+      "modern postcard marketing",
+      "modern postcard advertising"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "modernpostcard.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PostcardMania",
+    "aliases": [
+      "postcardmania",
+      "postcard mania",
+      "postcardmania marketing",
+      "postcardmania direct mail",
+      "postcardmania advertising"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "postcardmania.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Taradel",
+    "aliases": [
+      "taradel",
+      "taradel direct mail",
+      "taradel marketing",
+      "taradel advertising",
+      "taradel postcards"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "taradel.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Every Door Direct Mail",
+    "aliases": [
+      "every door direct mail",
+      "eddm",
+      "usps eddm",
+      "usps every door direct mail",
+      "eddm retail"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "usps.com",
+    "confidence": "medium",
+    "notes": "USPS charges without EDDM descriptors should classify as shipping rather than marketing."
+  },
+  {
+    "canonical_name": "Vistaprint Marketing",
+    "aliases": [
+      "vistaprint marketing",
+      "vistaprint postcards",
+      "vistaprint flyers",
+      "vistaprint advertising",
+      "vistaprint promo"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "vistaprint.com",
+    "confidence": "medium",
+    "notes": "Vistaprint purchases can also be office or print supplies."
+  },
+  {
+    "canonical_name": "Canva Print",
+    "aliases": [
+      "canva print",
+      "canva printing",
+      "canva business cards",
+      "canva flyers",
+      "canva marketing print"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "canva.com",
+    "confidence": "medium",
+    "notes": "Canva charges are often software_saas unless a print-product descriptor is present."
+  },
+  {
+    "canonical_name": "FedEx Office Marketing Print",
+    "aliases": [
+      "fedex office printing",
+      "fedex office marketing",
+      "fedex print flyers",
+      "fedex office postcards",
+      "fedex kinkos printing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "fedex.com",
+    "confidence": "medium",
+    "notes": "FedEx charges without print descriptors should generally classify as shipping."
+  },
+  {
+    "canonical_name": "AlphaGraphics",
+    "aliases": [
+      "alphagraphics",
+      "alpha graphics",
+      "alphagraphics printing",
+      "alphagraphics marketing",
+      "alphagraphics signs"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "alphagraphics.com",
+    "confidence": "medium",
+    "notes": "May also represent general printing or signage."
+  },
+  {
+    "canonical_name": "Minuteman Press",
+    "aliases": [
+      "minuteman press",
+      "minutemanpress",
+      "minuteman printing",
+      "minuteman marketing",
+      "minuteman press printing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "minutemanpress.com",
+    "confidence": "medium",
+    "notes": "May also represent general printing."
+  },
+  {
+    "canonical_name": "FASTSIGNS",
+    "aliases": [
+      "fastsigns",
+      "fast signs",
+      "fastsigns signs",
+      "fastsigns graphics",
+      "fastsigns marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "fastsigns.com",
+    "confidence": "medium",
+    "notes": "Signage may be marketing or general business fixtures depending on use."
+  },
+  {
+    "canonical_name": "Signs By Tomorrow",
+    "aliases": [
+      "signs by tomorrow",
+      "signsbytomorrow",
+      "signs by tomorrow graphics",
+      "signs by tomorrow marketing",
+      "sbt signs"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "signsbytomorrow.com",
+    "confidence": "medium",
+    "notes": "Signage may be marketing or general business fixtures depending on use."
+  },
+  {
+    "canonical_name": "Signarama",
+    "aliases": [
+      "signarama",
+      "sign a rama",
+      "signarama signs",
+      "signarama graphics",
+      "signarama marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "signarama.com",
+    "confidence": "medium",
+    "notes": "Signage may be marketing or general business fixtures depending on use."
+  },
+  {
+    "canonical_name": "4imprint",
+    "aliases": [
+      "4imprint",
+      "4 imprint",
+      "4imprint promotional",
+      "4imprint promo products",
+      "4imprint marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "4imprint.com",
+    "confidence": "medium",
+    "notes": "Promotional products may alternatively be treated as supplies."
+  },
+  {
+    "canonical_name": "Custom Ink",
+    "aliases": [
+      "custom ink",
+      "customink",
+      "custom ink promotional",
+      "custom ink shirts",
+      "custom ink printing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "customink.com",
+    "confidence": "medium",
+    "notes": "Branded apparel may be marketing, uniforms, or supplies depending on use."
+  },
+  {
+    "canonical_name": "Printful",
+    "aliases": [
+      "printful",
+      "printful inc",
+      "printful printing",
+      "printful merchandise",
+      "printful branding"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "printful.com",
+    "confidence": "medium",
+    "notes": "Could be COGS for businesses reselling printed merchandise."
+  },
+  {
+    "canonical_name": "Printify",
+    "aliases": [
+      "printify",
+      "printify inc",
+      "printify printing",
+      "printify merchandise",
+      "printify branding"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "printify.com",
+    "confidence": "medium",
+    "notes": "Could be COGS for businesses reselling printed merchandise."
+  },
+  {
+    "canonical_name": "Sticker Mule",
+    "aliases": [
+      "sticker mule",
+      "stickermule",
+      "sticker mule stickers",
+      "sticker mule printing",
+      "sticker mule promo"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "stickermule.com",
+    "confidence": "medium",
+    "notes": "Could be supplies or COGS depending on use."
+  },
+  {
+    "canonical_name": "StickerApp",
+    "aliases": [
+      "stickerapp",
+      "sticker app",
+      "stickerapp stickers",
+      "stickerapp printing",
+      "stickerapp marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "stickerapp.com",
+    "confidence": "medium",
+    "notes": "Could be supplies or COGS depending on use."
+  },
+  {
+    "canonical_name": "Moo",
+    "aliases": [
+      "moo",
+      "moo com",
+      "moo business cards",
+      "moo printing",
+      "moo marketing materials"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "moo.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; print purchases may be marketing or office supplies."
+  },
+  {
+    "canonical_name": "GotPrint",
+    "aliases": [
+      "gotprint",
+      "got print",
+      "gotprint business cards",
+      "gotprint printing",
+      "gotprint marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "gotprint.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "UPrinting",
+    "aliases": [
+      "uprinting",
+      "u printing",
+      "uprinting flyers",
+      "uprinting business cards",
+      "uprinting marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "uprinting.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PsPrint",
+    "aliases": [
+      "psprint",
+      "ps print",
+      "psprint printing",
+      "psprint postcards",
+      "psprint marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "psprint.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "NextDayFlyers",
+    "aliases": [
+      "nextdayflyers",
+      "next day flyers",
+      "nextday flyers printing",
+      "nextdayflyers marketing",
+      "next day flyers postcards"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "nextdayflyers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "48HourPrint",
+    "aliases": [
+      "48hourprint",
+      "48 hour print",
+      "48hourprint printing",
+      "48 hour print marketing",
+      "48hourprint flyers"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "48hourprint.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Smartpress",
+    "aliases": [
+      "smartpress",
+      "smart press",
+      "smartpress printing",
+      "smartpress marketing",
+      "smartpress print"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "smartpress.com",
+    "confidence": "medium",
+    "notes": "Generic brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "PrintPlace",
+    "aliases": [
+      "printplace",
+      "print place",
+      "printplace printing",
+      "printplace marketing",
+      "printplace flyers"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "printplace.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "QuantumDigital",
+    "aliases": [
+      "quantumdigital",
+      "quantum digital",
+      "quantumdigital marketing",
+      "quantum digital direct mail",
+      "quantumdigital postcards"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "quantumdigital.com",
+    "confidence": "medium",
+    "notes": "Generic wording can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Click2Mail",
+    "aliases": [
+      "click2mail",
+      "click 2 mail",
+      "click2mail direct mail",
+      "click2mail marketing",
+      "click2mail postcards"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "click2mail.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Postalytics",
+    "aliases": [
+      "postalytics",
+      "postalytics direct mail",
+      "postalytics marketing",
+      "postalytics postcards",
+      "postalytics subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "postalytics.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lob",
+    "aliases": [
+      "lob",
+      "lob direct mail",
+      "lob postcards",
+      "lob marketing",
+      "lob com"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "lob.com",
+    "confidence": "medium",
+    "notes": "Short brand name requires descriptor context; also provides mailing infrastructure."
+  },
+  {
+    "canonical_name": "PostGrid",
+    "aliases": [
+      "postgrid",
+      "post grid",
+      "postgrid direct mail",
+      "postgrid marketing",
+      "postgrid postcards"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "postgrid.com",
+    "confidence": "medium",
+    "notes": "Also provides mailing/address APIs."
+  },
+  {
+    "canonical_name": "Sendoso",
+    "aliases": [
+      "sendoso",
+      "sendoso gifting",
+      "sendoso marketing",
+      "sendoso direct mail",
+      "sendoso platform"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "sendoso.com",
+    "confidence": "medium",
+    "notes": "Charges can include gifts, fulfillment, or SaaS fees."
+  },
+  {
+    "canonical_name": "Postal.io",
+    "aliases": [
+      "postal io",
+      "postal.io",
+      "postal gifting",
+      "postal marketing",
+      "postal platform"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "postal.com",
+    "confidence": "medium",
+    "notes": "Charges can include gifts, fulfillment, or SaaS fees."
+  },
+  {
+    "canonical_name": "Reachdesk",
+    "aliases": [
+      "reachdesk",
+      "reach desk",
+      "reachdesk gifting",
+      "reachdesk marketing",
+      "reachdesk platform"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "reachdesk.com",
+    "confidence": "medium",
+    "notes": "Charges can include gifts, fulfillment, or SaaS fees."
+  },
+  {
+    "canonical_name": "SwagUp",
+    "aliases": [
+      "swagup",
+      "swag up",
+      "swagup promotional",
+      "swagup swag",
+      "swagup marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "swagup.com",
+    "confidence": "medium",
+    "notes": "Promotional merchandise may alternatively be supplies."
+  },
+  {
+    "canonical_name": "Swag.com",
+    "aliases": [
+      "swag com",
+      "swag.com",
+      "swag promotional products",
+      "swag merchandise",
+      "swag marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "swag.com",
+    "confidence": "medium",
+    "notes": "Generic brand wording requires descriptor context."
+  },
+  {
+    "canonical_name": "HALO Branded Solutions",
+    "aliases": [
+      "halo branded solutions",
+      "halo branded",
+      "halo promotional products",
+      "halo marketing",
+      "halo swag"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "halo.com",
+    "confidence": "medium",
+    "notes": "Promotional merchandise may alternatively be supplies."
+  },
+  {
+    "canonical_name": "4AllPromos",
+    "aliases": [
+      "4allpromos",
+      "4 all promos",
+      "4allpromos promotional",
+      "4allpromos marketing",
+      "4allpromos swag"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "4allpromos.com",
+    "confidence": "medium",
+    "notes": "Promotional merchandise may alternatively be supplies."
+  },
+  {
+    "canonical_name": "AnyPromo",
+    "aliases": [
+      "anypromo",
+      "any promo",
+      "anypromo promotional",
+      "anypromo marketing",
+      "anypromo swag"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "anypromo.com",
+    "confidence": "medium",
+    "notes": "Promotional merchandise may alternatively be supplies."
+  },
+  {
+    "canonical_name": "Quality Logo Products",
+    "aliases": [
+      "quality logo products",
+      "qualitylogoproducts",
+      "qlp promotional",
+      "quality logo marketing",
+      "quality logo promo"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "qualitylogoproducts.com",
+    "confidence": "medium",
+    "notes": "Promotional merchandise may alternatively be supplies."
+  },
+  {
+    "canonical_name": "DiscountMugs",
+    "aliases": [
+      "discountmugs",
+      "discount mugs",
+      "discountmugs promotional",
+      "discountmugs marketing",
+      "discount mugs promo"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "discountmugs.com",
+    "confidence": "medium",
+    "notes": "Promotional merchandise may alternatively be supplies."
+  },
+  {
+    "canonical_name": "Cameo for Business",
+    "aliases": [
+      "cameo for business",
+      "cameo business",
+      "cameo marketing",
+      "cameo talent business",
+      "cameo *business"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "cameo.com",
+    "confidence": "medium",
+    "notes": "Cameo charges without business descriptors may be personal entertainment."
+  },
+  {
+    "canonical_name": "Fiverr Pro Marketing",
+    "aliases": [
+      "fiverr pro marketing",
+      "fiverr marketing",
+      "fiverr advertising services",
+      "fiverr digital marketing",
+      "fiverr *marketing"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "fiverr.com",
+    "confidence": "medium",
+    "notes": "Marketplace purchase; actual service provider and expense type can vary."
+  },
+  {
+    "canonical_name": "Upwork Marketing Services",
+    "aliases": [
+      "upwork marketing",
+      "upwork advertising services",
+      "upwork digital marketing",
+      "upwork *marketing",
+      "upwork freelancer marketing"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "upwork.com",
+    "confidence": "medium",
+    "notes": "Marketplace purchase; actual service provider and expense type can vary."
+  },
+  {
+    "canonical_name": "MarketerHire",
+    "aliases": [
+      "marketerhire",
+      "marketer hire",
+      "marketerhire marketing",
+      "marketerhire talent",
+      "marketerhire services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "marketerhire.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mayple",
+    "aliases": [
+      "mayple",
+      "mayple marketing",
+      "mayple agency",
+      "mayple experts",
+      "mayple services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "mayple.com",
+    "confidence": "medium",
+    "notes": "Managed marketing/talent platform."
+  },
+  {
+    "canonical_name": "Design Pickle",
+    "aliases": [
+      "design pickle",
+      "designpickle",
+      "design pickle creative",
+      "design pickle subscription",
+      "design pickle design"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "designpickle.com",
+    "confidence": "medium",
+    "notes": "Creative-service subscription rather than ad spend."
+  },
+  {
+    "canonical_name": "Superside",
+    "aliases": [
+      "superside",
+      "super side",
+      "superside creative",
+      "superside design",
+      "superside subscription"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "superside.com",
+    "confidence": "medium",
+    "notes": "Creative-service subscription rather than ad spend."
+  },
+  {
+    "canonical_name": "Penji",
+    "aliases": [
+      "penji",
+      "penji design",
+      "penji creative",
+      "penji subscription",
+      "penji unlimited design"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "penji.co",
+    "confidence": "medium",
+    "notes": "Creative-service subscription rather than ad spend."
+  },
+  {
+    "canonical_name": "99designs",
+    "aliases": [
+      "99designs",
+      "99 designs",
+      "99designs by vista",
+      "99designs design",
+      "99designs contest"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "99designs.com",
+    "confidence": "medium",
+    "notes": "Design marketplace; actual provider varies."
+  },
+  {
+    "canonical_name": "Crowdspring",
+    "aliases": [
+      "crowdspring",
+      "crowd spring",
+      "crowdspring design",
+      "crowdspring creative",
+      "crowdspring branding"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "crowdspring.com",
+    "confidence": "medium",
+    "notes": "Design marketplace; actual provider varies."
+  },
+  {
+    "canonical_name": "Looka",
+    "aliases": [
+      "looka",
+      "looka logo",
+      "looka branding",
+      "looka brand kit",
+      "looka subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "looka.com",
+    "confidence": "medium",
+    "notes": "Branding/design software rather than advertising."
+  },
+  {
+    "canonical_name": "Tailor Brands",
+    "aliases": [
+      "tailor brands",
+      "tailorbrands",
+      "tailor brands logo",
+      "tailor brands branding",
+      "tailor brands subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "tailorbrands.com",
+    "confidence": "medium",
+    "notes": "Can include business formation or website services in addition to branding."
+  },
+  {
+    "canonical_name": "BrandCrowd",
+    "aliases": [
+      "brandcrowd",
+      "brand crowd",
+      "brandcrowd logo",
+      "brandcrowd branding",
+      "brandcrowd subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "brandcrowd.com",
+    "confidence": "medium",
+    "notes": "Branding/design software."
+  },
+  {
+    "canonical_name": "Placeit",
+    "aliases": [
+      "placeit",
+      "placeit net",
+      "placeit mockups",
+      "placeit marketing",
+      "envato placeit"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "placeit.net",
+    "confidence": "medium",
+    "notes": "Design/marketing-content subscription."
+  },
+  {
+    "canonical_name": "Envato Elements",
+    "aliases": [
+      "envato elements",
+      "envato",
+      "envato market",
+      "envato subscription",
+      "envato creative"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "envato.com",
+    "confidence": "medium",
+    "notes": "Creative asset subscription; could also fit software_saas."
+  },
+  {
+    "canonical_name": "Shutterstock",
+    "aliases": [
+      "shutterstock",
+      "shutterstock inc",
+      "shutterstock images",
+      "shutterstock subscription",
+      "shutterstock media"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "shutterstock.com",
+    "confidence": "medium",
+    "notes": "Stock media can support marketing or other creative work."
+  },
+  {
+    "canonical_name": "Getty Images",
+    "aliases": [
+      "getty images",
+      "gettyimages",
+      "getty images inc",
+      "getty licensing",
+      "getty subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "gettyimages.com",
+    "confidence": "medium",
+    "notes": "Licensed media can support marketing or other creative work."
+  },
+  {
+    "canonical_name": "iStock",
+    "aliases": [
+      "istock",
+      "istockphoto",
+      "i stock",
+      "getty istock",
+      "istock subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "istockphoto.com",
+    "confidence": "medium",
+    "notes": "Licensed media can support marketing or other creative work."
+  },
+  {
+    "canonical_name": "Adobe Stock",
+    "aliases": [
+      "adobe stock",
+      "adobe *stock",
+      "adobe stock images",
+      "adobe stock subscription",
+      "adobe stock assets"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "adobe.com",
+    "confidence": "medium",
+    "notes": "Adobe charges without Stock descriptors should generally classify as software_saas."
+  },
+  {
+    "canonical_name": "Storyblocks",
+    "aliases": [
+      "storyblocks",
+      "story blocks",
+      "storyblocks video",
+      "storyblocks subscription",
+      "storyblocks media"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "storyblocks.com",
+    "confidence": "medium",
+    "notes": "Stock media subscription."
+  },
+  {
+    "canonical_name": "Pond5",
+    "aliases": [
+      "pond5",
+      "pond 5",
+      "pond5 media",
+      "pond5 footage",
+      "pond5 licensing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "pond5.com",
+    "confidence": "medium",
+    "notes": "Stock media licensing."
+  },
+  {
+    "canonical_name": "Artlist",
+    "aliases": [
+      "artlist",
+      "artlist io",
+      "artlist music",
+      "artlist subscription",
+      "artlist licensing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "artlist.io",
+    "confidence": "medium",
+    "notes": "Creative media subscription."
+  },
+  {
+    "canonical_name": "Epidemic Sound",
+    "aliases": [
+      "epidemic sound",
+      "epidemicsound",
+      "epidemic sound subscription",
+      "epidemic licensing",
+      "epidemic music"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "epidemicsound.com",
+    "confidence": "medium",
+    "notes": "Creative music licensing subscription."
+  },
+  {
+    "canonical_name": "Soundstripe",
+    "aliases": [
+      "soundstripe",
+      "sound stripe",
+      "soundstripe music",
+      "soundstripe subscription",
+      "soundstripe licensing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "soundstripe.com",
+    "confidence": "medium",
+    "notes": "Creative music licensing subscription."
+  },
+  {
+    "canonical_name": "Motion Array",
+    "aliases": [
+      "motion array",
+      "motionarray",
+      "motion array subscription",
+      "motion array templates",
+      "motion array assets"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "motionarray.com",
+    "confidence": "medium",
+    "notes": "Creative asset subscription."
+  },
+  {
+    "canonical_name": "Envato Market",
+    "aliases": [
+      "envato market",
+      "themeforest",
+      "codecanyon",
+      "graphicriver",
+      "envato *market"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "envato.com",
+    "confidence": "medium",
+    "notes": "Purchases can span marketing assets, web templates, or software components."
+  },
+  {
+    "canonical_name": "Creative Market",
+    "aliases": [
+      "creative market",
+      "creativemarket",
+      "creative market assets",
+      "creative market graphics",
+      "creative market purchase"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "creativemarket.com",
+    "confidence": "medium",
+    "notes": "Digital creative assets can support marketing or design work."
+  },
+  {
+    "canonical_name": "Creative Fabrica",
+    "aliases": [
+      "creative fabrica",
+      "creativefabrica",
+      "creative fabrica subscription",
+      "creative fabrica graphics",
+      "creative fabrica assets"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "creativefabrica.com",
+    "confidence": "medium",
+    "notes": "Digital creative assets can support marketing or production."
+  },
+  {
+    "canonical_name": "Freepik",
+    "aliases": [
+      "freepik",
+      "free pik",
+      "freepik premium",
+      "freepik subscription",
+      "freepik assets"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "freepik.com",
+    "confidence": "medium",
+    "notes": "Digital creative asset subscription."
+  },
+  {
+    "canonical_name": "Vecteezy",
+    "aliases": [
+      "vecteezy",
+      "vecteezy pro",
+      "vecteezy subscription",
+      "vecteezy graphics",
+      "vecteezy assets"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "vecteezy.com",
+    "confidence": "medium",
+    "notes": "Digital creative asset subscription."
+  },
+  {
+    "canonical_name": "Depositphotos",
+    "aliases": [
+      "depositphotos",
+      "deposit photos",
+      "depositphotos images",
+      "depositphotos subscription",
+      "depositphotos media"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "depositphotos.com",
+    "confidence": "medium",
+    "notes": "Stock media licensing."
+  },
+  {
+    "canonical_name": "Dreamstime",
+    "aliases": [
+      "dreamstime",
+      "dreams time",
+      "dreamstime images",
+      "dreamstime subscription",
+      "dreamstime stock"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "dreamstime.com",
+    "confidence": "medium",
+    "notes": "Stock media licensing."
+  },
+  {
+    "canonical_name": "123RF",
+    "aliases": [
+      "123rf",
+      "123 rf",
+      "123rf images",
+      "123rf subscription",
+      "123rf stock"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "123rf.com",
+    "confidence": "medium",
+    "notes": "Stock media licensing."
+  },
+  {
+    "canonical_name": "PicMonkey",
+    "aliases": [
+      "picmonkey",
+      "pic monkey",
+      "picmonkey subscription",
+      "picmonkey design",
+      "picmonkey marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "picmonkey.com",
+    "confidence": "medium",
+    "notes": "Design software; could also fit software_saas."
+  },
+  {
+    "canonical_name": "VistaCreate",
+    "aliases": [
+      "vistacreate",
+      "vista create",
+      "crello",
+      "vistacreate subscription",
+      "vista create design"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "create.vista.com",
+    "confidence": "medium",
+    "notes": "Design software; legacy Crello descriptors may appear."
+  },
+  {
+    "canonical_name": "Promo.com",
+    "aliases": [
+      "promo com",
+      "promo.com",
+      "promo video",
+      "promo marketing",
+      "promo subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "promo.com",
+    "confidence": "medium",
+    "notes": "Generic brand wording requires descriptor context."
+  },
+  {
+    "canonical_name": "Animoto",
+    "aliases": [
+      "animoto",
+      "animoto video",
+      "animoto marketing",
+      "animoto subscription",
+      "animoto inc"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "animoto.com",
+    "confidence": "medium",
+    "notes": "Video-creation SaaS commonly used for marketing."
+  },
+  {
+    "canonical_name": "Biteable",
+    "aliases": [
+      "biteable",
+      "biteable video",
+      "biteable marketing",
+      "biteable subscription",
+      "biteable inc"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "biteable.com",
+    "confidence": "medium",
+    "notes": "Video-creation SaaS commonly used for marketing."
+  },
+  {
+    "canonical_name": "Lumen5",
+    "aliases": [
+      "lumen5",
+      "lumen 5",
+      "lumen5 video",
+      "lumen5 marketing",
+      "lumen5 subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "lumen5.com",
+    "confidence": "medium",
+    "notes": "Video-creation SaaS commonly used for marketing."
+  },
+  {
+    "canonical_name": "Vidyard",
+    "aliases": [
+      "vidyard",
+      "vid yard",
+      "vidyard video",
+      "vidyard marketing",
+      "vidyard subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "vidyard.com",
+    "confidence": "medium",
+    "notes": "Video marketing/sales SaaS."
+  },
+  {
+    "canonical_name": "Wistia",
+    "aliases": [
+      "wistia",
+      "wistia inc",
+      "wistia video",
+      "wistia marketing",
+      "wistia subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "wistia.com",
+    "confidence": "medium",
+    "notes": "Video hosting/marketing SaaS."
+  },
+  {
+    "canonical_name": "Vimeo Business",
+    "aliases": [
+      "vimeo business",
+      "vimeo marketing",
+      "vimeo *business",
+      "vimeo video marketing",
+      "vimeo subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "vimeo.com",
+    "confidence": "medium",
+    "notes": "Vimeo charges can also be general video/software subscriptions."
+  },
+  {
+    "canonical_name": "Loom Marketing",
+    "aliases": [
+      "loom marketing",
+      "loom video",
+      "loom *business",
+      "loom subscription",
+      "atlassian loom"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "loom.com",
+    "confidence": "medium",
+    "notes": "Loom is primarily collaboration software; use marketing only with contextual evidence."
+  },
+  {
+    "canonical_name": "Typeform",
+    "aliases": [
+      "typeform",
+      "type form",
+      "typeform forms",
+      "typeform marketing",
+      "typeform subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "typeform.com",
+    "confidence": "medium",
+    "notes": "Primarily forms/survey SaaS."
+  },
+  {
+    "canonical_name": "Jotform",
+    "aliases": [
+      "jotform",
+      "jot form",
+      "jotform forms",
+      "jotform marketing",
+      "jotform subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "jotform.com",
+    "confidence": "medium",
+    "notes": "Primarily forms/workflow SaaS."
+  },
+  {
+    "canonical_name": "SurveyMonkey",
+    "aliases": [
+      "surveymonkey",
+      "survey monkey",
+      "surveymonkey audience",
+      "surveymonkey marketing",
+      "surveymonkey subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "surveymonkey.com",
+    "confidence": "medium",
+    "notes": "Primarily survey SaaS; may support research rather than marketing."
+  },
+  {
+    "canonical_name": "Qualtrics",
+    "aliases": [
+      "qualtrics",
+      "qualtrics llc",
+      "qualtrics research",
+      "qualtrics marketing",
+      "qualtrics subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "qualtrics.com",
+    "confidence": "medium",
+    "notes": "Primarily experience/research SaaS."
+  },
+  {
+    "canonical_name": "UserTesting",
+    "aliases": [
+      "usertesting",
+      "user testing",
+      "usertesting inc",
+      "usertesting research",
+      "usertesting subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "usertesting.com",
+    "confidence": "medium",
+    "notes": "Usually user research rather than advertising."
+  },
+  {
+    "canonical_name": "Respondent",
+    "aliases": [
+      "respondent",
+      "respondent io",
+      "respondent research",
+      "respondent participants",
+      "respondent payment"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "respondent.io",
+    "confidence": "medium",
+    "notes": "Research participant marketplace rather than advertising."
+  },
+  {
+    "canonical_name": "User Interviews",
+    "aliases": [
+      "user interviews",
+      "userinterviews",
+      "user interviews research",
+      "user interviews participants",
+      "user interviews payment"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "userinterviews.com",
+    "confidence": "medium",
+    "notes": "Research participant recruiting service."
+  },
+  {
+    "canonical_name": "Prolific",
+    "aliases": [
+      "prolific",
+      "prolific research",
+      "prolific participants",
+      "prolific academic",
+      "prolific payment"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "prolific.com",
+    "confidence": "medium",
+    "notes": "Research participant platform; generic brand name requires context."
+  },
+  {
+    "canonical_name": "Dynata",
+    "aliases": [
+      "dynata",
+      "dynata research",
+      "dynata surveys",
+      "dynata insights",
+      "dynata payment"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "dynata.com",
+    "confidence": "medium",
+    "notes": "Market-research services rather than advertising."
+  },
+  {
+    "canonical_name": "Toluna",
+    "aliases": [
+      "toluna",
+      "toluna corporate",
+      "toluna research",
+      "toluna surveys",
+      "toluna insights"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "tolunacorporate.com",
+    "confidence": "medium",
+    "notes": "Market-research services rather than advertising."
+  },
+  {
+    "canonical_name": "Ipsos",
+    "aliases": [
+      "ipsos",
+      "ipsos research",
+      "ipsos usa",
+      "ipsos market research",
+      "ipsos insights"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "ipsos.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nielsen",
+    "aliases": [
+      "nielsen",
+      "nielsen research",
+      "nielsen media",
+      "nielsen measurement",
+      "nielsen insights"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "nielsen.com",
+    "confidence": "medium",
+    "notes": "May represent measurement/data subscriptions or research services."
+  },
+  {
+    "canonical_name": "Circana",
+    "aliases": [
+      "circana",
+      "iri",
+      "npd group",
+      "circana research",
+      "circana insights"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "circana.com",
+    "confidence": "medium",
+    "notes": "Market intelligence/data services; legacy IRI/NPD descriptors may appear."
+  },
+  {
+    "canonical_name": "YouGov",
+    "aliases": [
+      "yougov",
+      "you gov",
+      "yougov research",
+      "yougov surveys",
+      "yougov america"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "yougov.com",
+    "confidence": "medium",
+    "notes": "Market-research services."
+  },
+  {
+    "canonical_name": "Morning Consult",
+    "aliases": [
+      "morning consult",
+      "morningconsult",
+      "morning consult research",
+      "morning consult intelligence",
+      "morning consult subscription"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "morningconsult.com",
+    "confidence": "medium",
+    "notes": "Research/intelligence services."
+  },
+  {
+    "canonical_name": "Qualaroo",
+    "aliases": [
+      "qualaroo",
+      "qualaroo survey",
+      "qualaroo feedback",
+      "qualaroo marketing",
+      "qualaroo subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "qualaroo.com",
+    "confidence": "medium",
+    "notes": "Customer-feedback SaaS."
+  },
+  {
+    "canonical_name": "Delighted",
+    "aliases": [
+      "delighted",
+      "delighted survey",
+      "delighted feedback",
+      "delighted nps",
+      "delighted subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "delighted.com",
+    "confidence": "medium",
+    "notes": "Customer-feedback SaaS; generic brand name requires context."
+  },
+  {
+    "canonical_name": "AskNicely",
+    "aliases": [
+      "asknicely",
+      "ask nicely",
+      "asknicely nps",
+      "asknicely feedback",
+      "asknicely subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "asknicely.com",
+    "confidence": "medium",
+    "notes": "Customer-feedback SaaS."
+  },
+  {
+    "canonical_name": "NiceJob",
+    "aliases": [
+      "nicejob",
+      "nice job",
+      "nicejob reviews",
+      "nicejob marketing",
+      "nicejob subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "nicejob.com",
+    "confidence": "medium",
+    "notes": "Reputation/referral marketing SaaS."
+  },
+  {
+    "canonical_name": "Broadly",
+    "aliases": [
+      "broadly",
+      "broadly reviews",
+      "broadly marketing",
+      "broadly customer experience",
+      "broadly subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "broadly.com",
+    "confidence": "medium",
+    "notes": "Generic brand name requires context."
+  },
+  {
+    "canonical_name": "Grade.us",
+    "aliases": [
+      "grade us",
+      "grade.us",
+      "gradeus",
+      "grade us reviews",
+      "grade us subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "grade.us",
+    "confidence": "medium",
+    "notes": "Reputation-management SaaS."
+  },
+  {
+    "canonical_name": "GatherUp",
+    "aliases": [
+      "gatherup",
+      "gather up",
+      "gatherup reviews",
+      "gatherup marketing",
+      "gatherup subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "gatherup.com",
+    "confidence": "medium",
+    "notes": "Reputation-management SaaS."
+  },
+  {
+    "canonical_name": "ReviewTrackers",
+    "aliases": [
+      "reviewtrackers",
+      "review trackers",
+      "reviewtrackers reviews",
+      "reviewtrackers marketing",
+      "reviewtrackers subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "reviewtrackers.com",
+    "confidence": "medium",
+    "notes": "Reputation-management SaaS."
+  },
+  {
+    "canonical_name": "SOCi Reviews",
+    "aliases": [
+      "soci reviews",
+      "soci reputation",
+      "meet soci reviews",
+      "soci local reviews",
+      "soci *reviews"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "meetsoci.com",
+    "confidence": "medium",
+    "notes": "May overlap with broader SOCi platform charges."
+  },
+  {
+    "canonical_name": "LocalClarity",
+    "aliases": [
+      "localclarity",
+      "local clarity",
+      "localclarity reviews",
+      "localclarity marketing",
+      "localclarity subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "localclarity.com",
+    "confidence": "medium",
+    "notes": "Local reputation/listings SaaS."
+  },
+  {
+    "canonical_name": "Whitespark",
+    "aliases": [
+      "whitespark",
+      "white spark",
+      "whitespark local seo",
+      "whitespark citations",
+      "whitespark subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "whitespark.ca",
+    "confidence": "medium",
+    "notes": "Canadian company but commonly used by US SMB marketers."
+  },
+  {
+    "canonical_name": "Semrush Local",
+    "aliases": [
+      "semrush local",
+      "semrush listings",
+      "semrush local seo",
+      "semrush *local",
+      "semrush listing management"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "semrush.com",
+    "confidence": "medium",
+    "notes": "May appear as a broader Semrush subscription."
+  },
+  {
+    "canonical_name": "BrightLocal Citation Builder",
+    "aliases": [
+      "brightlocal citation builder",
+      "brightlocal citations",
+      "bright local citations",
+      "brightlocal local seo",
+      "brightlocal *citation"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "brightlocal.com",
+    "confidence": "medium",
+    "notes": "May appear as a broader BrightLocal charge."
+  },
+  {
+    "canonical_name": "Data Axle",
+    "aliases": [
+      "data axle",
+      "data-axle",
+      "data axle usa",
+      "data axle marketing",
+      "infogroup"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "data-axle.com",
+    "confidence": "medium",
+    "notes": "May represent business data, mailing lists, or marketing services."
+  },
+  {
+    "canonical_name": "Dun & Bradstreet Marketing",
+    "aliases": [
+      "dun and bradstreet marketing",
+      "dnb marketing",
+      "d&b marketing",
+      "dnb hoovers",
+      "dun bradstreet data"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "dnb.com",
+    "confidence": "medium",
+    "notes": "D&B charges can also be credit/business-data services."
+  },
+  {
+    "canonical_name": "ZoomInfo",
+    "aliases": [
+      "zoominfo",
+      "zoom info",
+      "zoominfo sales",
+      "zoominfo marketing",
+      "zoominfo subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "zoominfo.com",
+    "confidence": "medium",
+    "notes": "Primarily sales intelligence SaaS."
+  },
+  {
+    "canonical_name": "Apollo.io",
+    "aliases": [
+      "apollo io",
+      "apollo.io",
+      "apollo sales",
+      "apollo marketing",
+      "apollo subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "apollo.io",
+    "confidence": "medium",
+    "notes": "Primarily sales intelligence/outreach SaaS."
+  },
+  {
+    "canonical_name": "Seamless.AI",
+    "aliases": [
+      "seamless ai",
+      "seamless.ai",
+      "seamless sales",
+      "seamless marketing",
+      "seamless subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "seamless.ai",
+    "confidence": "medium",
+    "notes": "Primarily sales intelligence SaaS."
+  },
+  {
+    "canonical_name": "Lusha",
+    "aliases": [
+      "lusha",
+      "lusha systems",
+      "lusha sales",
+      "lusha marketing",
+      "lusha subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "lusha.com",
+    "confidence": "medium",
+    "notes": "Primarily sales intelligence SaaS."
+  },
+  {
+    "canonical_name": "Cognism",
+    "aliases": [
+      "cognism",
+      "cognism sales",
+      "cognism marketing",
+      "cognism data",
+      "cognism subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "cognism.com",
+    "confidence": "medium",
+    "notes": "Primarily sales intelligence SaaS."
+  },
+  {
+    "canonical_name": "Lead411",
+    "aliases": [
+      "lead411",
+      "lead 411",
+      "lead411 sales",
+      "lead411 marketing",
+      "lead411 subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "lead411.com",
+    "confidence": "medium",
+    "notes": "Primarily sales intelligence SaaS."
+  },
+  {
+    "canonical_name": "UpLead",
+    "aliases": [
+      "uplead",
+      "up lead",
+      "uplead sales",
+      "uplead marketing",
+      "uplead subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "uplead.com",
+    "confidence": "medium",
+    "notes": "Primarily sales intelligence SaaS."
+  },
+  {
+    "canonical_name": "LeadFuze",
+    "aliases": [
+      "leadfuze",
+      "lead fuze",
+      "leadfuze sales",
+      "leadfuze marketing",
+      "leadfuze subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "leadfuze.com",
+    "confidence": "medium",
+    "notes": "Primarily lead-generation SaaS."
+  },
+  {
+    "canonical_name": "Hunter",
+    "aliases": [
+      "hunter io",
+      "hunter.io",
+      "hunter email",
+      "hunter leads",
+      "hunter subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "hunter.io",
+    "confidence": "medium",
+    "notes": "Generic brand name; primarily email-finding SaaS."
+  },
+  {
+    "canonical_name": "Snov.io",
+    "aliases": [
+      "snov io",
+      "snov.io",
+      "snov email",
+      "snov leads",
+      "snov subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "snov.io",
+    "confidence": "medium",
+    "notes": "Primarily sales outreach SaaS."
+  },
+  {
+    "canonical_name": "Mailshake",
+    "aliases": [
+      "mailshake",
+      "mail shake",
+      "mailshake outreach",
+      "mailshake email",
+      "mailshake subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "mailshake.com",
+    "confidence": "medium",
+    "notes": "Primarily sales outreach SaaS."
+  },
+  {
+    "canonical_name": "Lemlist",
+    "aliases": [
+      "lemlist",
+      "lem list",
+      "lemlist outreach",
+      "lemlist email",
+      "lemlist subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "lemlist.com",
+    "confidence": "medium",
+    "notes": "Primarily sales outreach SaaS."
+  },
+  {
+    "canonical_name": "Reply.io",
+    "aliases": [
+      "reply io",
+      "reply.io",
+      "reply outreach",
+      "reply sales",
+      "reply subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "reply.io",
+    "confidence": "medium",
+    "notes": "Generic brand name requires descriptor context."
+  },
+  {
+    "canonical_name": "Woodpecker",
+    "aliases": [
+      "woodpecker",
+      "woodpecker co",
+      "woodpecker email",
+      "woodpecker outreach",
+      "woodpecker subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "woodpecker.co",
+    "confidence": "medium",
+    "notes": "Generic brand name requires descriptor context."
+  },
+  {
+    "canonical_name": "Smartlead",
+    "aliases": [
+      "smartlead",
+      "smart lead",
+      "smartlead ai",
+      "smartlead email",
+      "smartlead subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "smartlead.ai",
+    "confidence": "medium",
+    "notes": "Primarily outbound-email SaaS."
+  },
+  {
+    "canonical_name": "Instantly",
+    "aliases": [
+      "instantly",
+      "instantly ai",
+      "instantly email",
+      "instantly outreach",
+      "instantly subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "instantly.ai",
+    "confidence": "medium",
+    "notes": "Generic brand name requires descriptor context."
+  },
+  {
+    "canonical_name": "Close Marketing",
+    "aliases": [
+      "close marketing",
+      "close crm",
+      "close sales",
+      "close com subscription",
+      "close *crm"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "close.com",
+    "confidence": "medium",
+    "notes": "Close is primarily CRM/sales software."
+  },
+  {
+    "canonical_name": "Outreach",
+    "aliases": [
+      "outreach",
+      "outreach io",
+      "outreach sales",
+      "outreach subscription",
+      "outreach software"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "outreach.io",
+    "confidence": "medium",
+    "notes": "Generic brand name; primarily sales-engagement SaaS."
+  },
+  {
+    "canonical_name": "Salesloft",
+    "aliases": [
+      "salesloft",
+      "sales loft",
+      "salesloft sales",
+      "salesloft subscription",
+      "salesloft platform"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "salesloft.com",
+    "confidence": "medium",
+    "notes": "Primarily sales-engagement SaaS."
+  },
+  {
+    "canonical_name": "Gong",
+    "aliases": [
+      "gong",
+      "gong io",
+      "gong sales",
+      "gong revenue intelligence",
+      "gong subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "gong.io",
+    "confidence": "medium",
+    "notes": "Generic brand name; primarily sales/revenue SaaS."
+  },
+  {
+    "canonical_name": "Chili Piper",
+    "aliases": [
+      "chili piper",
+      "chilipiper",
+      "chili piper scheduling",
+      "chili piper marketing",
+      "chili piper subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "chilipiper.com",
+    "confidence": "medium",
+    "notes": "Primarily scheduling/conversion SaaS."
+  },
+  {
+    "canonical_name": "Calendly Routing",
+    "aliases": [
+      "calendly routing",
+      "calendly marketing",
+      "calendly *routing",
+      "calendly teams",
+      "calendly subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "calendly.com",
+    "confidence": "medium",
+    "notes": "Calendly is primarily scheduling software."
+  },
+  {
+    "canonical_name": "Qualified",
+    "aliases": [
+      "qualified",
+      "qualified com",
+      "qualified pipeline",
+      "qualified marketing",
+      "qualified subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "qualified.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; primarily conversational marketing SaaS."
+  },
+  {
+    "canonical_name": "Drift",
+    "aliases": [
+      "drift",
+      "drift com",
+      "drift marketing",
+      "drift chatbot",
+      "drift subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "drift.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; primarily conversational marketing SaaS."
+  },
+  {
+    "canonical_name": "Intercom Marketing",
+    "aliases": [
+      "intercom marketing",
+      "intercom messages",
+      "intercom campaigns",
+      "intercom *marketing",
+      "intercom subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "intercom.com",
+    "confidence": "medium",
+    "notes": "Intercom is primarily customer-support/messaging software."
+  },
+  {
+    "canonical_name": "Manychat",
+    "aliases": [
+      "manychat",
+      "many chat",
+      "manychat marketing",
+      "manychat messenger",
+      "manychat subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "manychat.com",
+    "confidence": "medium",
+    "notes": "Messaging automation SaaS."
+  },
+  {
+    "canonical_name": "MobileMonkey",
+    "aliases": [
+      "mobilemonkey",
+      "mobile monkey",
+      "customers ai",
+      "customers.ai",
+      "mobilemonkey marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "customers.ai",
+    "confidence": "medium",
+    "notes": "Brand transitioned toward Customers.ai; both descriptors may appear."
+  },
+  {
+    "canonical_name": "Customers.ai",
+    "aliases": [
+      "customers ai",
+      "customers.ai",
+      "customersai",
+      "customers ai marketing",
+      "customers ai subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "customers.ai",
+    "confidence": "medium",
+    "notes": "Marketing intelligence/automation SaaS."
+  },
+  {
+    "canonical_name": "Tidio",
+    "aliases": [
+      "tidio",
+      "tidio chat",
+      "tidio marketing",
+      "tidio chatbot",
+      "tidio subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "tidio.com",
+    "confidence": "medium",
+    "notes": "Primarily chat/customer-service SaaS."
+  },
+  {
+    "canonical_name": "Privy",
+    "aliases": [
+      "privy",
+      "privy com",
+      "privy marketing",
+      "privy email",
+      "privy subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "privy.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; ecommerce marketing SaaS."
+  },
+  {
+    "canonical_name": "Justuno",
+    "aliases": [
+      "justuno",
+      "just uno",
+      "justuno marketing",
+      "justuno conversion",
+      "justuno subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "justuno.com",
+    "confidence": "medium",
+    "notes": "Conversion-marketing SaaS."
+  },
+  {
+    "canonical_name": "OptiMonk",
+    "aliases": [
+      "optimonk",
+      "opti monk",
+      "optimonk marketing",
+      "optimonk popup",
+      "optimonk subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "optimonk.com",
+    "confidence": "medium",
+    "notes": "Conversion-marketing SaaS."
+  },
+  {
+    "canonical_name": "Wisepops",
+    "aliases": [
+      "wisepops",
+      "wise pops",
+      "wisepops marketing",
+      "wisepops popup",
+      "wisepops subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "wisepops.com",
+    "confidence": "medium",
+    "notes": "Conversion-marketing SaaS."
+  },
+  {
+    "canonical_name": "Hello Bar",
+    "aliases": [
+      "hello bar",
+      "hellobar",
+      "hello bar marketing",
+      "hello bar popup",
+      "hello bar subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "hellobar.com",
+    "confidence": "medium",
+    "notes": "Conversion-marketing SaaS."
+  },
+  {
+    "canonical_name": "Sumo",
+    "aliases": [
+      "sumo",
+      "sumo com",
+      "sumo marketing",
+      "sumo email capture",
+      "sumo subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "sumo.com",
+    "confidence": "medium",
+    "notes": "Generic brand name requires descriptor context."
+  },
+  {
+    "canonical_name": "OptinMonster",
+    "aliases": [
+      "optinmonster",
+      "optin monster",
+      "optinmonster marketing",
+      "optinmonster leads",
+      "optinmonster subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "optinmonster.com",
+    "confidence": "medium",
+    "notes": "Lead-generation SaaS."
+  },
+  {
+    "canonical_name": "WPForms",
+    "aliases": [
+      "wpforms",
+      "wp forms",
+      "wpforms leads",
+      "wpforms marketing",
+      "wpforms subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "wpforms.com",
+    "confidence": "medium",
+    "notes": "Primarily form-builder software."
+  },
+  {
+    "canonical_name": "Gravity Forms",
+    "aliases": [
+      "gravity forms",
+      "gravityforms",
+      "gravity forms leads",
+      "gravity forms marketing",
+      "gravity forms license"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "gravityforms.com",
+    "confidence": "medium",
+    "notes": "Primarily form-builder software."
+  },
+  {
+    "canonical_name": "HubSpot Ads",
+    "aliases": [
+      "hubspot ads",
+      "hubspot advertising",
+      "hubspot *ads",
+      "hubspot ad management",
+      "hubspot paid media"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "hubspot.com",
+    "confidence": "medium",
+    "notes": "HubSpot typically manages ads rather than being the underlying ad network."
+  },
+  {
+    "canonical_name": "Mailchimp Ads",
+    "aliases": [
+      "mailchimp ads",
+      "mailchimp advertising",
+      "mailchimp *ads",
+      "mailchimp social ads",
+      "intuit mailchimp ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "mailchimp.com",
+    "confidence": "medium",
+    "notes": "May be bundled with broader Mailchimp marketing services."
+  },
+  {
+    "canonical_name": "AdEspresso",
+    "aliases": [
+      "adespresso",
+      "ad espresso",
+      "adespresso ads",
+      "adespresso advertising",
+      "hootsuite adespresso"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "adespresso.com",
+    "confidence": "medium",
+    "notes": "Ad-management SaaS rather than the underlying media spend."
+  },
+  {
+    "canonical_name": "Revealbot",
+    "aliases": [
+      "revealbot",
+      "reveal bot",
+      "revealbot ads",
+      "revealbot advertising",
+      "revealbot subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "revealbot.com",
+    "confidence": "medium",
+    "notes": "Ad-management SaaS rather than underlying media spend."
+  },
+  {
+    "canonical_name": "Madgicx",
+    "aliases": [
+      "madgicx",
+      "madgic x",
+      "madgicx ads",
+      "madgicx marketing",
+      "madgicx subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "madgicx.com",
+    "confidence": "medium",
+    "notes": "Ad-management SaaS rather than underlying media spend."
+  },
+  {
+    "canonical_name": "WordStream",
+    "aliases": [
+      "wordstream",
+      "word stream",
+      "wordstream advertising",
+      "wordstream marketing",
+      "wordstream advisor"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "wordstream.com",
+    "confidence": "medium",
+    "notes": "Marketing/ad-management software and services."
+  },
+  {
+    "canonical_name": "Marin Software",
+    "aliases": [
+      "marin software",
+      "marinsoftware",
+      "marin ads",
+      "marin advertising",
+      "marin search marketer"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "marinsoftware.com",
+    "confidence": "medium",
+    "notes": "Ad-management SaaS rather than underlying media spend."
+  },
+  {
+    "canonical_name": "Skai",
+    "aliases": [
+      "skai",
+      "skai io",
+      "kenshoo",
+      "skai advertising",
+      "skai marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "skai.io",
+    "confidence": "medium",
+    "notes": "Ad-management software; legacy Kenshoo descriptors may appear."
+  },
+  {
+    "canonical_name": "Smartly.io",
+    "aliases": [
+      "smartly io",
+      "smartly.io",
+      "smartly ads",
+      "smartly advertising",
+      "smartly marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "smartly.io",
+    "confidence": "medium",
+    "notes": "Ad-management SaaS rather than underlying media spend."
+  },
+  {
+    "canonical_name": "Sprinklr",
+    "aliases": [
+      "sprinklr",
+      "sprinklr inc",
+      "sprinklr marketing",
+      "sprinklr social",
+      "sprinklr subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "sprinklr.com",
+    "confidence": "medium",
+    "notes": "Enterprise customer-experience/social SaaS."
+  },
+  {
+    "canonical_name": "Emplifi",
+    "aliases": [
+      "emplifi",
+      "emplifi io",
+      "socialbakers",
+      "emplifi social",
+      "emplifi marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "emplifi.io",
+    "confidence": "medium",
+    "notes": "Social marketing SaaS; legacy Socialbakers descriptors may appear."
+  },
+  {
+    "canonical_name": "Khoros",
+    "aliases": [
+      "khoros",
+      "khoros llc",
+      "khoros social",
+      "khoros marketing",
+      "khoros subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "khoros.com",
+    "confidence": "medium",
+    "notes": "Social/community SaaS."
+  },
+  {
+    "canonical_name": "Oktopost",
+    "aliases": [
+      "oktopost",
+      "okto post",
+      "oktopost social",
+      "oktopost marketing",
+      "oktopost subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "oktopost.com",
+    "confidence": "medium",
+    "notes": "B2B social-media SaaS."
+  },
+  {
+    "canonical_name": "Loomly",
+    "aliases": [
+      "loomly",
+      "loom ly",
+      "loomly social",
+      "loomly marketing",
+      "loomly subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "loomly.com",
+    "confidence": "medium",
+    "notes": "Social-media management SaaS."
+  },
+  {
+    "canonical_name": "Planable",
+    "aliases": [
+      "planable",
+      "planable io",
+      "planable social",
+      "planable marketing",
+      "planable subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "planable.io",
+    "confidence": "medium",
+    "notes": "Social-media management SaaS."
+  },
+  {
+    "canonical_name": "Metricool",
+    "aliases": [
+      "metricool",
+      "metri cool",
+      "metricool social",
+      "metricool marketing",
+      "metricool subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "metricool.com",
+    "confidence": "medium",
+    "notes": "Social-media management/analytics SaaS."
+  },
+  {
+    "canonical_name": "Tailwind",
+    "aliases": [
+      "tailwind",
+      "tailwind app",
+      "tailwind social",
+      "tailwind pinterest",
+      "tailwind subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "tailwindapp.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; social marketing SaaS."
+  },
+  {
+    "canonical_name": "Iconosquare",
+    "aliases": [
+      "iconosquare",
+      "icono square",
+      "iconosquare social",
+      "iconosquare marketing",
+      "iconosquare subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "iconosquare.com",
+    "confidence": "medium",
+    "notes": "Social analytics/management SaaS."
+  },
+  {
+    "canonical_name": "Keyhole",
+    "aliases": [
+      "keyhole",
+      "keyhole co",
+      "keyhole social",
+      "keyhole marketing",
+      "keyhole subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "keyhole.co",
+    "confidence": "medium",
+    "notes": "Generic brand name; social analytics SaaS."
+  },
+  {
+    "canonical_name": "Rival IQ",
+    "aliases": [
+      "rival iq",
+      "rivaliq",
+      "rival iq social",
+      "rival iq marketing",
+      "rival iq subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "rivaliq.com",
+    "confidence": "medium",
+    "notes": "Social analytics SaaS."
+  },
+  {
+    "canonical_name": "Socialinsider",
+    "aliases": [
+      "socialinsider",
+      "social insider",
+      "socialinsider analytics",
+      "socialinsider marketing",
+      "socialinsider subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "socialinsider.io",
+    "confidence": "medium",
+    "notes": "Social analytics SaaS."
+  },
+  {
+    "canonical_name": "BuzzSumo",
+    "aliases": [
+      "buzzsumo",
+      "buzz sumo",
+      "buzzsumo content",
+      "buzzsumo marketing",
+      "buzzsumo subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "buzzsumo.com",
+    "confidence": "medium",
+    "notes": "Content research/marketing SaaS."
+  },
+  {
+    "canonical_name": "SparkToro",
+    "aliases": [
+      "sparktoro",
+      "spark toro",
+      "sparktoro audience",
+      "sparktoro marketing",
+      "sparktoro subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "sparktoro.com",
+    "confidence": "medium",
+    "notes": "Audience research SaaS."
+  },
+  {
+    "canonical_name": "AnswerThePublic",
+    "aliases": [
+      "answer the public",
+      "answerthepublic",
+      "answer the public seo",
+      "answer the public marketing",
+      "answerthepublic subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "answerthepublic.com",
+    "confidence": "medium",
+    "notes": "Search/content research SaaS."
+  },
+  {
+    "canonical_name": "Ubersuggest",
+    "aliases": [
+      "ubersuggest",
+      "uber suggest",
+      "ubersuggest seo",
+      "ubersuggest marketing",
+      "neil patel ubersuggest"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "neilpatel.com",
+    "confidence": "medium",
+    "notes": "SEO/content research SaaS."
+  },
+  {
+    "canonical_name": "Surfer",
+    "aliases": [
+      "surfer",
+      "surfer seo",
+      "surferseo",
+      "surfer content",
+      "surfer subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "surferseo.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; SEO/content SaaS."
+  },
+  {
+    "canonical_name": "Clearscope",
+    "aliases": [
+      "clearscope",
+      "clear scope",
+      "clearscope seo",
+      "clearscope content",
+      "clearscope subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "clearscope.io",
+    "confidence": "medium",
+    "notes": "SEO/content SaaS."
+  },
+  {
+    "canonical_name": "MarketMuse",
+    "aliases": [
+      "marketmuse",
+      "market muse",
+      "marketmuse content",
+      "marketmuse seo",
+      "marketmuse subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "marketmuse.com",
+    "confidence": "medium",
+    "notes": "Content/SEO SaaS."
+  },
+  {
+    "canonical_name": "Frase",
+    "aliases": [
+      "frase",
+      "frase io",
+      "frase seo",
+      "frase content",
+      "frase subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "frase.io",
+    "confidence": "medium",
+    "notes": "Content/SEO SaaS."
+  },
+  {
+    "canonical_name": "Screaming Frog",
+    "aliases": [
+      "screaming frog",
+      "screamingfrog",
+      "seo spider",
+      "screaming frog seo",
+      "screaming frog license"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "screamingfrog.co.uk",
+    "confidence": "medium",
+    "notes": "UK company but widely used by US SEO professionals."
+  },
+  {
+    "canonical_name": "Majestic",
+    "aliases": [
+      "majestic",
+      "majestic seo",
+      "majestic com",
+      "majestic subscription",
+      "majestic backlinks"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "majestic.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; SEO SaaS."
+  },
+  {
+    "canonical_name": "SE Ranking",
+    "aliases": [
+      "se ranking",
+      "seranking",
+      "se ranking seo",
+      "se ranking subscription",
+      "seranking marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "seranking.com",
+    "confidence": "medium",
+    "notes": "SEO SaaS."
+  },
+  {
+    "canonical_name": "Mangools",
+    "aliases": [
+      "mangools",
+      "kwfinder",
+      "mangools seo",
+      "mangools subscription",
+      "mangools marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "mangools.com",
+    "confidence": "medium",
+    "notes": "SEO SaaS."
+  },
+  {
+    "canonical_name": "Serpstat",
+    "aliases": [
+      "serpstat",
+      "serp stat",
+      "serpstat seo",
+      "serpstat marketing",
+      "serpstat subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "serpstat.com",
+    "confidence": "medium",
+    "notes": "SEO SaaS."
+  },
+  {
+    "canonical_name": "AccuRanker",
+    "aliases": [
+      "accuranker",
+      "accu ranker",
+      "accuranker seo",
+      "accuranker rankings",
+      "accuranker subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "accuranker.com",
+    "confidence": "medium",
+    "notes": "SEO rank-tracking SaaS."
+  },
+  {
+    "canonical_name": "STAT Search Analytics",
+    "aliases": [
+      "stat search analytics",
+      "getstat",
+      "stat seo",
+      "stat rankings",
+      "moz stat"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "getstat.com",
+    "confidence": "medium",
+    "notes": "SEO rank-tracking software; may appear under Moz."
+  },
+  {
+    "canonical_name": "Conductor",
+    "aliases": [
+      "conductor",
+      "conductor seo",
+      "conductor marketing",
+      "conductor searchlight",
+      "conductor subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "conductor.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; enterprise SEO SaaS."
+  },
+  {
+    "canonical_name": "BrightEdge",
+    "aliases": [
+      "brightedge",
+      "bright edge",
+      "brightedge seo",
+      "brightedge marketing",
+      "brightedge subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "brightedge.com",
+    "confidence": "medium",
+    "notes": "Enterprise SEO SaaS."
+  },
+  {
+    "canonical_name": "Botify",
+    "aliases": [
+      "botify",
+      "botify seo",
+      "botify marketing",
+      "botify analytics",
+      "botify subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "botify.com",
+    "confidence": "medium",
+    "notes": "Enterprise SEO SaaS."
+  },
+  {
+    "canonical_name": "seoClarity",
+    "aliases": [
+      "seoclarity",
+      "seo clarity",
+      "seoclarity seo",
+      "seoclarity marketing",
+      "seoclarity subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "seoclarity.net",
+    "confidence": "medium",
+    "notes": "Enterprise SEO SaaS."
+  },
+  {
+    "canonical_name": "Local Falcon",
+    "aliases": [
+      "local falcon",
+      "localfalcon",
+      "local falcon seo",
+      "local falcon maps",
+      "local falcon subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "localfalcon.com",
+    "confidence": "medium",
+    "notes": "Local SEO SaaS."
+  },
+  {
+    "canonical_name": "GeoRanker",
+    "aliases": [
+      "georanker",
+      "geo ranker",
+      "georanker seo",
+      "georanker local",
+      "georanker subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "georanker.com",
+    "confidence": "medium",
+    "notes": "Local SEO SaaS."
+  },
+  {
+    "canonical_name": "Whitespark Local Rank Tracker",
+    "aliases": [
+      "whitespark local rank tracker",
+      "whitespark rank tracker",
+      "whitespark local",
+      "whitespark seo",
+      "whitespark subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "whitespark.ca",
+    "confidence": "medium",
+    "notes": "May overlap with broader Whitespark charges."
+  },
+  {
+    "canonical_name": "CallFire",
+    "aliases": [
+      "callfire",
+      "call fire",
+      "callfire sms",
+      "callfire voice broadcast",
+      "callfire marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "callfire.com",
+    "confidence": "medium",
+    "notes": "Usage-based messaging/voice marketing platform."
+  },
+  {
+    "canonical_name": "Sakari",
+    "aliases": [
+      "sakari",
+      "sakari io",
+      "sakari sms",
+      "sakari marketing",
+      "sakari subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "sakari.io",
+    "confidence": "medium",
+    "notes": "Business SMS SaaS."
+  },
+  {
+    "canonical_name": "Salesmsg",
+    "aliases": [
+      "salesmsg",
+      "sales msg",
+      "salesmessage",
+      "salesmsg sms",
+      "salesmsg subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "salesmessage.com",
+    "confidence": "medium",
+    "notes": "Business SMS SaaS."
+  },
+  {
+    "canonical_name": "TextMagic",
+    "aliases": [
+      "textmagic",
+      "text magic",
+      "textmagic sms",
+      "textmagic marketing",
+      "textmagic subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "textmagic.com",
+    "confidence": "medium",
+    "notes": "Business SMS SaaS."
+  },
+  {
+    "canonical_name": "ClickSend",
+    "aliases": [
+      "clicksend",
+      "click send",
+      "clicksend sms",
+      "clicksend marketing",
+      "clicksend messaging"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "clicksend.com",
+    "confidence": "medium",
+    "notes": "Messaging platform; may be operational rather than marketing."
+  },
+  {
+    "canonical_name": "MessageMedia",
+    "aliases": [
+      "messagemedia",
+      "message media",
+      "messagemedia sms",
+      "message media marketing",
+      "messagemedia subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "messagemedia.com",
+    "confidence": "medium",
+    "notes": "Messaging platform; may be operational rather than marketing."
+  },
+  {
+    "canonical_name": "Sinch",
+    "aliases": [
+      "sinch",
+      "sinch messaging",
+      "sinch sms",
+      "sinch marketing",
+      "sinch subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "sinch.com",
+    "confidence": "medium",
+    "notes": "Communications platform; may be operational rather than marketing."
+  },
+  {
+    "canonical_name": "Bird",
+    "aliases": [
+      "bird",
+      "bird com",
+      "messagebird",
+      "bird messaging",
+      "bird marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "bird.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; communications platform formerly MessageBird."
+  },
+  {
+    "canonical_name": "Mailgun",
+    "aliases": [
+      "mailgun",
+      "mail gun",
+      "mailgun email",
+      "mailgun sending",
+      "mailgun subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "mailgun.com",
+    "confidence": "medium",
+    "notes": "Transactional email infrastructure may be software rather than marketing."
+  },
+  {
+    "canonical_name": "Postmark",
+    "aliases": [
+      "postmark",
+      "postmark app",
+      "postmark email",
+      "postmark transactional email",
+      "postmark subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "postmarkapp.com",
+    "confidence": "medium",
+    "notes": "Transactional email infrastructure may be software rather than marketing."
+  },
+  {
+    "canonical_name": "MailerSend",
+    "aliases": [
+      "mailersend",
+      "mailer send",
+      "mailersend email",
+      "mailersend transactional",
+      "mailersend subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "mailersend.com",
+    "confidence": "medium",
+    "notes": "Transactional email infrastructure may be software rather than marketing."
+  },
+  {
+    "canonical_name": "Amazon SES",
+    "aliases": [
+      "amazon ses",
+      "aws ses",
+      "amazon simple email service",
+      "aws *ses",
+      "amazon email service"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "aws.amazon.com",
+    "confidence": "medium",
+    "notes": "Could be infrastructure/software rather than marketing depending on usage."
+  },
+  {
+    "canonical_name": "Twilio Messaging",
+    "aliases": [
+      "twilio messaging",
+      "twilio sms",
+      "twilio *sms",
+      "twilio messages",
+      "twilio messaging service"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "twilio.com",
+    "confidence": "medium",
+    "notes": "Could be operational telecom/software rather than marketing."
+  },
+  {
+    "canonical_name": "Sinch Mailjet",
+    "aliases": [
+      "mailjet",
+      "sinch mailjet",
+      "mailjet email",
+      "mailjet marketing",
+      "mailjet subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "mailjet.com",
+    "confidence": "medium",
+    "notes": "Email marketing/transactional email platform."
+  },
+  {
+    "canonical_name": "Campaigner",
+    "aliases": [
+      "campaigner",
+      "campaigner email",
+      "campaigner marketing",
+      "campaigner subscription",
+      "campaigner com"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "campaigner.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Benchmark Email",
+    "aliases": [
+      "benchmark email",
+      "benchmarkemail",
+      "benchmark email marketing",
+      "benchmark subscription",
+      "benchmark internet group"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "benchmarkemail.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "VerticalResponse",
+    "aliases": [
+      "verticalresponse",
+      "vertical response",
+      "verticalresponse email",
+      "verticalresponse marketing",
+      "verticalresponse subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "verticalresponse.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "iContact",
+    "aliases": [
+      "icontact",
+      "i contact",
+      "icontact email",
+      "icontact marketing",
+      "icontact subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "icontact.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Emma",
+    "aliases": [
+      "emma",
+      "myemma",
+      "emma email",
+      "emma marketing",
+      "emma subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "myemma.com",
+    "confidence": "medium",
+    "notes": "Generic brand name requires descriptor context."
+  },
+  {
+    "canonical_name": "Maropost",
+    "aliases": [
+      "maropost",
+      "maro post",
+      "maropost marketing",
+      "maropost email",
+      "maropost subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "maropost.com",
+    "confidence": "medium",
+    "notes": "Marketing/ecommerce SaaS."
+  },
+  {
+    "canonical_name": "Dotdigital",
+    "aliases": [
+      "dotdigital",
+      "dot digital",
+      "dotdigital marketing",
+      "dotdigital email",
+      "dotdigital subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "dotdigital.com",
+    "confidence": "medium",
+    "notes": "Marketing automation SaaS."
+  },
+  {
+    "canonical_name": "Sendlane",
+    "aliases": [
+      "sendlane",
+      "send lane",
+      "sendlane email",
+      "sendlane marketing",
+      "sendlane subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "sendlane.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Flodesk",
+    "aliases": [
+      "flodesk",
+      "flo desk",
+      "flodesk email",
+      "flodesk marketing",
+      "flodesk subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "flodesk.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "beehiiv",
+    "aliases": [
+      "beehiiv",
+      "bee hiiv",
+      "beehiiv newsletter",
+      "beehiiv email",
+      "beehiiv subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "beehiiv.com",
+    "confidence": "medium",
+    "notes": "Newsletter SaaS; could also be software_saas."
+  },
+  {
+    "canonical_name": "Substack",
+    "aliases": [
+      "substack",
+      "sub stack",
+      "substack publication",
+      "substack newsletter",
+      "substack subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "substack.com",
+    "confidence": "medium",
+    "notes": "Charges can be creator subscriptions rather than business marketing."
+  },
+  {
+    "canonical_name": "Kit",
+    "aliases": [
+      "kit",
+      "kit email",
+      "kit creator",
+      "kit marketing",
+      "kit subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "kit.com",
+    "confidence": "medium",
+    "notes": "Very short brand name requires descriptor context; formerly ConvertKit."
+  },
+  {
+    "canonical_name": "BeeFree",
+    "aliases": [
+      "beefree",
+      "bee free",
+      "beefree email",
+      "beefree design",
+      "beefree subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "beefree.io",
+    "confidence": "medium",
+    "notes": "Email design SaaS."
+  },
+  {
+    "canonical_name": "Stripo",
+    "aliases": [
+      "stripo",
+      "stripo email",
+      "stripo editor",
+      "stripo marketing",
+      "stripo subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "stripo.email",
+    "confidence": "medium",
+    "notes": "Email design SaaS."
+  },
+  {
+    "canonical_name": "Litmus",
+    "aliases": [
+      "litmus",
+      "litmus email",
+      "litmus testing",
+      "litmus marketing",
+      "litmus subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "litmus.com",
+    "confidence": "medium",
+    "notes": "Email testing/marketing SaaS."
+  },
+  {
+    "canonical_name": "Email on Acid",
+    "aliases": [
+      "email on acid",
+      "emailonacid",
+      "email testing",
+      "email on acid subscription",
+      "email on acid marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "emailonacid.com",
+    "confidence": "medium",
+    "notes": "Email testing SaaS."
+  },
+  {
+    "canonical_name": "ZeroBounce",
+    "aliases": [
+      "zerobounce",
+      "zero bounce",
+      "zerobounce email",
+      "zerobounce validation",
+      "zerobounce subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "zerobounce.net",
+    "confidence": "medium",
+    "notes": "Email validation SaaS."
+  },
+  {
+    "canonical_name": "NeverBounce",
+    "aliases": [
+      "neverbounce",
+      "never bounce",
+      "neverbounce email",
+      "neverbounce validation",
+      "neverbounce subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "neverbounce.com",
+    "confidence": "medium",
+    "notes": "Email validation SaaS."
+  },
+  {
+    "canonical_name": "BriteVerify",
+    "aliases": [
+      "briteverify",
+      "brite verify",
+      "validity briteverify",
+      "briteverify email",
+      "briteverify validation"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "validity.com",
+    "confidence": "medium",
+    "notes": "May appear under parent Validity."
+  },
+  {
+    "canonical_name": "Validity",
+    "aliases": [
+      "validity",
+      "validity inc",
+      "validity email",
+      "validity marketing",
+      "validity subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "validity.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; marketing/data-quality SaaS."
+  },
+  {
+    "canonical_name": "Kickbox",
+    "aliases": [
+      "kickbox",
+      "kick box",
+      "kickbox email",
+      "kickbox verification",
+      "kickbox subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "kickbox.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; email verification SaaS."
+  },
+  {
+    "canonical_name": "Warmbox",
+    "aliases": [
+      "warmbox",
+      "warm box",
+      "warmbox ai",
+      "warmbox email",
+      "warmbox subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "warmbox.ai",
+    "confidence": "medium",
+    "notes": "Email deliverability SaaS."
+  },
+  {
+    "canonical_name": "Mailwarm",
+    "aliases": [
+      "mailwarm",
+      "mail warm",
+      "mailwarm email",
+      "mailwarm deliverability",
+      "mailwarm subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "mailwarm.com",
+    "confidence": "medium",
+    "notes": "Email deliverability SaaS."
+  },
+  {
+    "canonical_name": "Folderly",
+    "aliases": [
+      "folderly",
+      "folderly email",
+      "folderly deliverability",
+      "folderly marketing",
+      "folderly subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "folderly.com",
+    "confidence": "medium",
+    "notes": "Email deliverability SaaS."
+  },
+  {
+    "canonical_name": "InboxAlly",
+    "aliases": [
+      "inboxally",
+      "inbox ally",
+      "inboxally email",
+      "inboxally deliverability",
+      "inboxally subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "inboxally.com",
+    "confidence": "medium",
+    "notes": "Email deliverability SaaS."
+  },
+  {
+    "canonical_name": "Validity Everest",
+    "aliases": [
+      "validity everest",
+      "everest email",
+      "everest deliverability",
+      "validity email",
+      "everest subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "validity.com",
+    "confidence": "medium",
+    "notes": "May appear as broader Validity billing."
+  },
+  {
+    "canonical_name": "Kicksta",
+    "aliases": [
+      "kicksta",
+      "kick sta",
+      "kicksta instagram",
+      "kicksta marketing",
+      "kicksta subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "kicksta.co",
+    "confidence": "medium",
+    "notes": "Social-growth service; classification depends on usage."
+  },
+  {
+    "canonical_name": "Flick",
+    "aliases": [
+      "flick",
+      "flick social",
+      "flick instagram",
+      "flick marketing",
+      "flick subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "flick.social",
+    "confidence": "medium",
+    "notes": "Generic brand name; social marketing SaaS."
+  },
+  {
+    "canonical_name": "Later Influence",
+    "aliases": [
+      "later influence",
+      "later influencer",
+      "mavrck",
+      "later *influence",
+      "later creator marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "later.com",
+    "confidence": "medium",
+    "notes": "Influencer-marketing platform; legacy Mavrck descriptors may appear."
+  },
+  {
+    "canonical_name": "GRIN",
+    "aliases": [
+      "grin",
+      "grin co",
+      "grin influencer",
+      "grin marketing",
+      "grin subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "grin.co",
+    "confidence": "medium",
+    "notes": "Generic brand name; influencer-marketing SaaS."
+  },
+  {
+    "canonical_name": "CreatorIQ",
+    "aliases": [
+      "creatoriq",
+      "creator iq",
+      "creatoriq influencer",
+      "creatoriq marketing",
+      "creatoriq subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "creatoriq.com",
+    "confidence": "medium",
+    "notes": "Influencer-marketing SaaS."
+  },
+  {
+    "canonical_name": "Aspire",
+    "aliases": [
+      "aspire",
+      "aspire io",
+      "aspire influencer",
+      "aspire marketing",
+      "aspire subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "aspire.io",
+    "confidence": "medium",
+    "notes": "Generic brand name; influencer-marketing SaaS."
+  },
+  {
+    "canonical_name": "Upfluence",
+    "aliases": [
+      "upfluence",
+      "upfluence influencer",
+      "upfluence marketing",
+      "upfluence software",
+      "upfluence subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "upfluence.com",
+    "confidence": "medium",
+    "notes": "Influencer-marketing SaaS."
+  },
+  {
+    "canonical_name": "Traackr",
+    "aliases": [
+      "traackr",
+      "tracker influencer",
+      "traackr influencer",
+      "traackr marketing",
+      "traackr subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "traackr.com",
+    "confidence": "medium",
+    "notes": "Influencer-marketing SaaS."
+  },
+  {
+    "canonical_name": "Impact Creator",
+    "aliases": [
+      "impact creator",
+      "impact creator marketing",
+      "impact influencers",
+      "impact com creator",
+      "impact *creator"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "impact.com",
+    "confidence": "medium",
+    "notes": "May overlap with broader Impact.com platform billing."
+  },
+  {
+    "canonical_name": "LTK",
+    "aliases": [
+      "ltk",
+      "ltk creator",
+      "ltk advertising",
+      "ltk influencer",
+      "rewardstyle"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "ltk.com",
+    "confidence": "medium",
+    "notes": "Influencer/creator commerce platform; legacy rewardStyle descriptors may appear."
+  },
+  {
+    "canonical_name": "ShopMy",
+    "aliases": [
+      "shopmy",
+      "shop my",
+      "shopmy creators",
+      "shopmy influencer",
+      "shopmy marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "shopmy.us",
+    "confidence": "medium",
+    "notes": "Creator marketing/affiliate platform."
+  },
+  {
+    "canonical_name": "Insense",
+    "aliases": [
+      "insense",
+      "insense pro",
+      "insense influencer",
+      "insense ugc",
+      "insense marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "insense.pro",
+    "confidence": "medium",
+    "notes": "Creator/UGC marketing platform."
+  },
+  {
+    "canonical_name": "Billo",
+    "aliases": [
+      "billo",
+      "billo app",
+      "billo ugc",
+      "billo creators",
+      "billo marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "billo.app",
+    "confidence": "medium",
+    "notes": "Creator/UGC marketplace."
+  },
+  {
+    "canonical_name": "Trend.io",
+    "aliases": [
+      "trend io",
+      "trend.io",
+      "trend creators",
+      "trend ugc",
+      "trend marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "trend.io",
+    "confidence": "medium",
+    "notes": "Generic brand name; creator/UGC marketplace."
+  },
+  {
+    "canonical_name": "Collabstr",
+    "aliases": [
+      "collabstr",
+      "collab str",
+      "collabstr influencer",
+      "collabstr creators",
+      "collabstr marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "collabstr.com",
+    "confidence": "medium",
+    "notes": "Influencer marketplace."
+  },
+  {
+    "canonical_name": "FameBit",
+    "aliases": [
+      "famebit",
+      "fame bit",
+      "youtube famebit",
+      "famebit creators",
+      "famebit influencer"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "youtube.com",
+    "confidence": "medium",
+    "notes": "Legacy creator marketplace descriptors may appear; verify active billing context."
+  },
+  {
+    "canonical_name": "IZEA",
+    "aliases": [
+      "izea",
+      "izea worldwide",
+      "izea influencer",
+      "izea marketing",
+      "izea flex"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "izea.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Captiv8",
+    "aliases": [
+      "captiv8",
+      "captivate influencer",
+      "captiv8 influencer",
+      "captiv8 marketing",
+      "captiv8 subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "captiv8.io",
+    "confidence": "medium",
+    "notes": "Influencer-marketing SaaS."
+  },
+  {
+    "canonical_name": "Tagger",
+    "aliases": [
+      "tagger",
+      "tagger media",
+      "tagger influencer",
+      "sprout social tagger",
+      "tagger marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "sproutsocial.com",
+    "confidence": "medium",
+    "notes": "May appear under Sprout Social ownership."
+  },
+  {
+    "canonical_name": "Modash",
+    "aliases": [
+      "modash",
+      "modash io",
+      "modash influencer",
+      "modash marketing",
+      "modash subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "modash.io",
+    "confidence": "medium",
+    "notes": "Influencer-marketing SaaS."
+  },
+  {
+    "canonical_name": "HypeAuditor",
+    "aliases": [
+      "hypeauditor",
+      "hype auditor",
+      "hypeauditor influencer",
+      "hypeauditor marketing",
+      "hypeauditor subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "hypeauditor.com",
+    "confidence": "medium",
+    "notes": "Influencer analytics SaaS."
+  },
+  {
+    "canonical_name": "Social Cat",
+    "aliases": [
+      "social cat",
+      "the social cat",
+      "social cat influencer",
+      "social cat marketing",
+      "social cat creators"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "thesocialcat.com",
+    "confidence": "medium",
+    "notes": "Influencer marketplace."
+  },
+  {
+    "canonical_name": "Passionfroot",
+    "aliases": [
+      "passionfroot",
+      "passion froot",
+      "passionfroot creators",
+      "passionfroot sponsorship",
+      "passionfroot marketing"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "passionfroot.me",
+    "confidence": "medium",
+    "notes": "Creator sponsorship marketplace."
+  },
+  {
+    "canonical_name": "Paved",
+    "aliases": [
+      "paved",
+      "paved newsletter ads",
+      "paved advertising",
+      "paved sponsorship",
+      "paved media"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "paved.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; newsletter advertising marketplace."
+  },
+  {
+    "canonical_name": "Swapstack",
+    "aliases": [
+      "swapstack",
+      "swap stack",
+      "swapstack newsletter ads",
+      "swapstack sponsorship",
+      "swapstack advertising"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "swapstack.co",
+    "confidence": "medium",
+    "notes": "Newsletter advertising marketplace."
+  },
+  {
+    "canonical_name": "Beehiiv Ad Network",
+    "aliases": [
+      "beehiiv ad network",
+      "beehiiv ads",
+      "beehiiv advertising",
+      "beehiiv *ads",
+      "beehiiv boosts"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "beehiiv.com",
+    "confidence": "medium",
+    "notes": "May overlap with broader beehiiv subscription billing."
+  },
+  {
+    "canonical_name": "ConvertKit Sponsor Network",
+    "aliases": [
+      "convertkit sponsor network",
+      "kit sponsor network",
+      "convertkit ads",
+      "kit sponsorships",
+      "convertkit creator network"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "kit.com",
+    "confidence": "medium",
+    "notes": "May overlap with broader Kit/ConvertKit subscription billing."
+  },
+  {
+    "canonical_name": "Podcorn",
+    "aliases": [
+      "podcorn",
+      "pod corn",
+      "podcorn sponsorship",
+      "podcorn advertising",
+      "podcorn podcast ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "podcorn.com",
+    "confidence": "medium",
+    "notes": "Podcast sponsorship marketplace."
+  },
+  {
+    "canonical_name": "AdvertiseCast",
+    "aliases": [
+      "advertisecast",
+      "advertise cast",
+      "advertisecast podcast",
+      "advertisecast ads",
+      "advertisecast advertising"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "advertisecast.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Gumball",
+    "aliases": [
+      "gumball",
+      "gumball fm",
+      "gumball podcast ads",
+      "gumball advertising",
+      "gumball sponsorship"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "gumball.fm",
+    "confidence": "medium",
+    "notes": "Generic brand name; podcast advertising marketplace."
+  },
+  {
+    "canonical_name": "Podscribe",
+    "aliases": [
+      "podscribe",
+      "pod scribe",
+      "podscribe attribution",
+      "podscribe marketing",
+      "podscribe subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "podscribe.com",
+    "confidence": "medium",
+    "notes": "Podcast attribution/measurement SaaS."
+  },
+  {
+    "canonical_name": "Chartable",
+    "aliases": [
+      "chartable",
+      "chartable podcast",
+      "chartable analytics",
+      "chartable marketing",
+      "chartable subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "chartable.com",
+    "confidence": "medium",
+    "notes": "Podcast analytics/attribution SaaS."
+  },
+  {
+    "canonical_name": "Podsights",
+    "aliases": [
+      "podsights",
+      "pod sights",
+      "spotify podsights",
+      "podsights attribution",
+      "podsights advertising"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "spotify.com",
+    "confidence": "medium",
+    "notes": "May appear under Spotify ownership."
+  },
+  {
+    "canonical_name": "Libsyn Ads",
+    "aliases": [
+      "libsyn ads",
+      "libsyn advertising",
+      "advertisecast libsyn",
+      "libsyn *ads",
+      "libsyn podcast ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "libsyn.com",
+    "confidence": "medium",
+    "notes": "Libsyn charges may also be podcast-hosting software."
+  },
+  {
+    "canonical_name": "Acast Ads",
+    "aliases": [
+      "acast ads",
+      "acast advertising",
+      "acast podcast ads",
+      "acast *ads",
+      "acast marketplace"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "acast.com",
+    "confidence": "medium",
+    "notes": "Acast charges may also be podcast-hosting services."
+  },
+  {
+    "canonical_name": "Spotify Podcast Ads",
+    "aliases": [
+      "spotify podcast ads",
+      "spotify podcast advertising",
+      "spotify ads manager",
+      "spotify *podcast ads",
+      "spotify audio ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "spotify.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "iHeartMedia Advertising",
+    "aliases": [
+      "iheartmedia advertising",
+      "iheart ads",
+      "iheartradio advertising",
+      "iheartmedia ads",
+      "iheart *ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "iheartmedia.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Audacy Advertising",
+    "aliases": [
+      "audacy advertising",
+      "audacy ads",
+      "audacy inc advertising",
+      "audacy media ads",
+      "audacy *ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "audacyinc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cumulus Media Advertising",
+    "aliases": [
+      "cumulus media advertising",
+      "cumulus ads",
+      "cumulus radio advertising",
+      "cumulus *ads",
+      "cumulus media ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "cumulusmedia.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Townsquare Media Advertising",
+    "aliases": [
+      "townsquare media advertising",
+      "townsquare ads",
+      "townsquare radio advertising",
+      "townsquare media ads",
+      "townsquare *ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "townsquaremedia.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nielsen Ad Intel",
+    "aliases": [
+      "nielsen ad intel",
+      "nielsen advertising intelligence",
+      "nielsen ads",
+      "nielsen ad data",
+      "nielsen media research"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "nielsen.com",
+    "confidence": "medium",
+    "notes": "Advertising intelligence/research rather than ad spend."
+  },
+  {
+    "canonical_name": "Comscore",
+    "aliases": [
+      "comscore",
+      "com score",
+      "comscore media",
+      "comscore advertising",
+      "comscore subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "comscore.com",
+    "confidence": "medium",
+    "notes": "Measurement/data service rather than ad spend."
+  },
+  {
+    "canonical_name": "Kantar",
+    "aliases": [
+      "kantar",
+      "kantar media",
+      "kantar research",
+      "kantar advertising research",
+      "kantar insights"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "kantar.com",
+    "confidence": "medium",
+    "notes": "Market-research and measurement services."
+  },
+  {
+    "canonical_name": "Numerator",
+    "aliases": [
+      "numerator",
+      "numerator insights",
+      "numerator research",
+      "numerator marketing",
+      "numerator subscription"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "numerator.com",
+    "confidence": "medium",
+    "notes": "Consumer intelligence/data service."
+  },
+  {
+    "canonical_name": "Attest",
+    "aliases": [
+      "attest",
+      "askattest",
+      "attest research",
+      "attest consumer research",
+      "attest subscription"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "askattest.com",
+    "confidence": "medium",
+    "notes": "Market-research platform; generic brand name requires context."
+  },
+  {
+    "canonical_name": "Pollfish",
+    "aliases": [
+      "pollfish",
+      "poll fish",
+      "pollfish research",
+      "pollfish surveys",
+      "pollfish payment"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "pollfish.com",
+    "confidence": "medium",
+    "notes": "Market-research platform."
+  },
+  {
+    "canonical_name": "SurveySparrow",
+    "aliases": [
+      "surveysparrow",
+      "survey sparrow",
+      "surveysparrow feedback",
+      "surveysparrow marketing",
+      "surveysparrow subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "surveysparrow.com",
+    "confidence": "medium",
+    "notes": "Survey/customer-experience SaaS."
+  },
+  {
+    "canonical_name": "Alchemer",
+    "aliases": [
+      "alchemer",
+      "surveygizmo",
+      "alchemer survey",
+      "alchemer marketing",
+      "alchemer subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "alchemer.com",
+    "confidence": "medium",
+    "notes": "Survey SaaS; legacy SurveyGizmo descriptors may appear."
+  },
+  {
+    "canonical_name": "QuestionPro",
+    "aliases": [
+      "questionpro",
+      "question pro",
+      "questionpro research",
+      "questionpro surveys",
+      "questionpro subscription"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "questionpro.com",
+    "confidence": "medium",
+    "notes": "Survey/research SaaS."
+  },
+  {
+    "canonical_name": "Zappi",
+    "aliases": [
+      "zappi",
+      "zappi io",
+      "zappi research",
+      "zappi insights",
+      "zappi subscription"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "zappi.io",
+    "confidence": "medium",
+    "notes": "Market-research SaaS."
+  },
+  {
+    "canonical_name": "Suzy",
+    "aliases": [
+      "suzy",
+      "suzy insights",
+      "suzy research",
+      "suzy market research",
+      "suzy subscription"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "suzy.com",
+    "confidence": "medium",
+    "notes": "Generic personal name; market-research platform."
+  },
+  {
+    "canonical_name": "Dscout",
+    "aliases": [
+      "dscout",
+      "d scout",
+      "dscout research",
+      "dscout participants",
+      "dscout subscription"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "dscout.com",
+    "confidence": "medium",
+    "notes": "User-research platform."
+  },
+  {
+    "canonical_name": "Maze",
+    "aliases": [
+      "maze",
+      "maze co",
+      "maze research",
+      "maze testing",
+      "maze subscription"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "maze.co",
+    "confidence": "medium",
+    "notes": "Generic brand name; product-research SaaS."
+  },
+  {
+    "canonical_name": "Lyssna",
+    "aliases": [
+      "lyssna",
+      "usabilityhub",
+      "lyssna research",
+      "lyssna testing",
+      "lyssna subscription"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "lyssna.com",
+    "confidence": "medium",
+    "notes": "User-research SaaS; legacy UsabilityHub descriptors may appear."
+  },
+  {
+    "canonical_name": "Optimal Workshop",
+    "aliases": [
+      "optimal workshop",
+      "optimalworkshop",
+      "optimal workshop research",
+      "optimal workshop testing",
+      "optimal workshop subscription"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "optimalworkshop.com",
+    "confidence": "medium",
+    "notes": "User-research SaaS."
+  },
+  {
+    "canonical_name": "Lookback",
+    "aliases": [
+      "lookback",
+      "lookback research",
+      "lookback testing",
+      "lookback user research",
+      "lookback subscription"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "lookback.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; user-research SaaS."
+  },
+  {
+    "canonical_name": "UserZoom",
+    "aliases": [
+      "userzoom",
+      "user zoom",
+      "userzoom research",
+      "userzoom testing",
+      "userzoom subscription"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "userzoom.com",
+    "confidence": "medium",
+    "notes": "User-research SaaS."
+  },
+  {
+    "canonical_name": "Userlytics",
+    "aliases": [
+      "userlytics",
+      "user lytics",
+      "userlytics research",
+      "userlytics testing",
+      "userlytics payment"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "userlytics.com",
+    "confidence": "medium",
+    "notes": "User-research platform."
+  },
+  {
+    "canonical_name": "PlaybookUX",
+    "aliases": [
+      "playbookux",
+      "playbook ux",
+      "playbookux research",
+      "playbookux testing",
+      "playbookux payment"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "playbookux.com",
+    "confidence": "medium",
+    "notes": "User-research platform."
+  },
+  {
+    "canonical_name": "Userfeel",
+    "aliases": [
+      "userfeel",
+      "user feel",
+      "userfeel testing",
+      "userfeel research",
+      "userfeel payment"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "userfeel.com",
+    "confidence": "medium",
+    "notes": "User-testing service."
+  },
+  {
+    "canonical_name": "Trymata",
+    "aliases": [
+      "trymata",
+      "try mata",
+      "trymata testing",
+      "trymata research",
+      "trymata subscription"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "trymata.com",
+    "confidence": "medium",
+    "notes": "User-testing platform."
+  },
+  {
+    "canonical_name": "Hotjar Engage",
+    "aliases": [
+      "hotjar engage",
+      "hotjar interviews",
+      "hotjar user research",
+      "hotjar *engage",
+      "hotjar research"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "hotjar.com",
+    "confidence": "medium",
+    "notes": "May overlap with broader Hotjar software billing."
+  },
+  {
+    "canonical_name": "Google Surveys",
+    "aliases": [
+      "google surveys",
+      "google consumer surveys",
+      "google *surveys",
+      "google market research",
+      "google survey"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "google.com",
+    "confidence": "medium",
+    "notes": "Only classify when survey/research descriptor is explicit."
+  }
+]
