@@ -200,8 +200,20 @@ async def _save_to_learning_cache(company_id: str, signature: str,
         pass
 
 
-async def _insert_contact(company_id: str, contact_name: str, source: str) -> dict:
-    """Insert or, on unique-conflict, return whichever won the race."""
+async def _insert_contact(
+    company_id: str,
+    contact_name: str,
+    source: str,
+    logo_url: str | None = None,
+    linked_semantic: str | None = None,
+) -> dict:
+    """Insert or, on unique-conflict, return whichever won the race.
+
+    Optional extras (`logo_url`, `linked_semantic`) let the caller
+    attach global-directory metadata at creation time — e.g., when
+    we identify a new contact via the well-known-companies list we
+    want the ledger row to remember which merchant this maps to.
+    """
     key = normalize_contact_name(contact_name)
     doc = {
         "id": str(uuid.uuid4()),
@@ -211,7 +223,9 @@ async def _insert_contact(company_id: str, contact_name: str, source: str) -> di
         "type": None,  # user tags manually — per user's preference
         "created_by_ai": True,
         "needs_review": True,
-        "source": source,       # 'merchant_name' | 'ai_new'
+        "source": source,       # 'merchant_name' | 'ai_new' | 'global_directory'
+        "logo_url": logo_url,
+        "linked_semantic": linked_semantic,
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }
@@ -264,7 +278,43 @@ async def resolve_contact(
         existing = await _find_by_normalized(company_id, merch)
         if existing:
             return {"contact_id": existing["id"], "contact_name": existing["name"],
-                    "source": "merchant_name"}
+                    "source": "merchant_name",
+                    "linked_semantic": existing.get("linked_semantic")}
+        # Tenant hasn't seen this merchant. Before minting a bare
+        # tenant contact, check the global well-known-companies
+        # directory. On hit we use the canonical name (so future
+        # variants of the same brand normalize to the same tenant
+        # contact) and stamp the linked semantic so Standard+ can
+        # pre-categorize the row.
+        try:
+            import global_contact_directory as gcd
+            gd_hit = gcd.lookup(merch)
+        except Exception:  # noqa: BLE001 — directory is best-effort
+            gd_hit = None
+        if gd_hit:
+            # Re-check tenant contacts under the canonical name too
+            # (avoids duplicate "Starbucks Coffee" vs "Starbucks"
+            # rows when the same tenant sees two variants).
+            canonical = gd_hit["canonical_name"]
+            existing_canonical = await _find_by_normalized(company_id, canonical)
+            if existing_canonical:
+                return {"contact_id": existing_canonical["id"],
+                        "contact_name": existing_canonical["name"],
+                        "source": "merchant_name",
+                        "linked_semantic": existing_canonical.get("linked_semantic")
+                                           or gd_hit["semantic"]}
+            created = await _insert_contact(
+                company_id,
+                canonical,
+                source="global_directory",
+                logo_url=gcd.logo_url_for(gd_hit),
+                linked_semantic=gd_hit["semantic"],
+            )
+            return {"contact_id": created["id"], "contact_name": created["name"],
+                    "source": "global_directory",
+                    "linked_semantic": gd_hit["semantic"],
+                    "linked_semantic_confidence": gd_hit["confidence"]}
+        # No global hit — mint a bare tenant contact under the raw name.
         created = await _insert_contact(company_id, merch, source="merchant_name")
         return {"contact_id": created["id"], "contact_name": created["name"],
                 "source": "merchant_name"}
@@ -400,6 +450,12 @@ async def resolve_contacts_batch(
     # Group same-key fast-path rows so we insert one contact per unique key.
     new_by_key: dict[str, dict] = {}
 
+    # Lazy import — module loads its JSON on first call.
+    try:
+        import global_contact_directory as gcd
+    except Exception:  # noqa: BLE001 — never fail contact resolution
+        gcd = None
+
     for idx, merch, _it in fast_rows:
         key = normalize_contact_name(merch)
         if not key:
@@ -408,10 +464,45 @@ async def resolve_contacts_batch(
             continue
         existing = by_key.get(key)
         if existing:
-            out[idx] = {"contact_id": existing["id"], "contact_name": existing["name"],
-                        "source": "merchant_name"}
+            out[idx] = {"contact_id": existing["id"],
+                        "contact_name": existing["name"],
+                        "source": "merchant_name",
+                        "linked_semantic": existing.get("linked_semantic")}
             continue
-        # Not yet in DB — dedupe within batch
+        # Not yet in tenant DB — check the global well-known-companies
+        # directory before minting a bare tenant contact.
+        gd_hit = gcd.lookup(merch) if gcd else None
+        if gd_hit:
+            canonical = gd_hit["canonical_name"]
+            canonical_key = normalize_contact_name(canonical)
+            # Re-check the tenant snapshot under the canonical key —
+            # avoids duplicating "Starbucks Coffee" vs "Starbucks".
+            existing_canonical = by_key.get(canonical_key)
+            if existing_canonical:
+                out[idx] = {"contact_id": existing_canonical["id"],
+                            "contact_name": existing_canonical["name"],
+                            "source": "merchant_name",
+                            "linked_semantic": existing_canonical.get("linked_semantic")
+                                               or gd_hit["semantic"]}
+                continue
+            # Batch-scope dedupe against the canonical key too.
+            stub = new_by_key.get(canonical_key)
+            if stub is None:
+                stub = _new_contact_doc(
+                    company_id, canonical, source="global_directory",
+                    logo_url=gcd.logo_url_for(gd_hit),
+                    linked_semantic=gd_hit["semantic"],
+                )
+                new_by_key[canonical_key] = stub
+                # Also alias the merchant's raw key so a second row in
+                # THIS batch under the raw string still dedupes.
+                new_by_key.setdefault(key, stub)
+            out[idx] = {"contact_id": stub["id"], "contact_name": stub["name"],
+                        "source": "global_directory",
+                        "linked_semantic": gd_hit["semantic"],
+                        "linked_semantic_confidence": gd_hit["confidence"]}
+            continue
+        # No global hit — mint a bare tenant contact under the raw name.
         stub = new_by_key.get(key)
         if stub is None:
             stub = _new_contact_doc(company_id, merch, source="merchant_name")
@@ -561,9 +652,19 @@ async def resolve_contacts_batch(
             for r in out]
 
 
-def _new_contact_doc(company_id: str, name: str, source: str) -> dict:
+def _new_contact_doc(
+    company_id: str,
+    name: str,
+    source: str,
+    logo_url: str | None = None,
+    linked_semantic: str | None = None,
+) -> dict:
     """Build (but do not insert) a contact doc. Used by the batch resolver
     to defer inserts to a single `insert_many` call at the end.
+
+    Optional `logo_url` + `linked_semantic` are attached when the
+    contact was minted via a global-directory hit — see
+    `global_contact_directory` for how they're populated.
     """
     return {
         "id": str(uuid.uuid4()),
@@ -574,6 +675,8 @@ def _new_contact_doc(company_id: str, name: str, source: str) -> dict:
         "created_by_ai": True,
         "needs_review": True,
         "source": source,
+        "logo_url": logo_url,
+        "linked_semantic": linked_semantic,
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }

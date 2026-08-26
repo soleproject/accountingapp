@@ -1,0 +1,2809 @@
+[
+  {
+    "canonical_name": "USPS",
+    "aliases": [
+      "usps",
+      "united states postal service",
+      "us postal service",
+      "usps click n ship",
+      "usps postage"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "usps.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "FedEx",
+    "aliases": [
+      "fedex",
+      "federal express",
+      "fedex shipping",
+      "fedex ship manager",
+      "fedex ground"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "fedex.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "UPS",
+    "aliases": [
+      "ups",
+      "united parcel service",
+      "ups shipping",
+      "ups ground",
+      "ups billing"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "ups.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "DHL Express",
+    "aliases": [
+      "dhl express",
+      "dhl",
+      "dhl shipping",
+      "dhl express usa",
+      "dhl international"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "dhl.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "OnTrac",
+    "aliases": [
+      "ontrac",
+      "on trac",
+      "ontrac shipping",
+      "ontrac logistics",
+      "ontrac delivery"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "ontrac.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "LaserShip",
+    "aliases": [
+      "lasership",
+      "laser ship",
+      "lasership delivery",
+      "lasership shipping",
+      "lasership inc"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "ontrac.com",
+    "confidence": "high",
+    "notes": "Legacy descriptors may still appear after combination with OnTrac."
+  },
+  {
+    "canonical_name": "GLS US",
+    "aliases": [
+      "gls us",
+      "gls",
+      "gls shipping",
+      "gls delivery",
+      "general logistics systems"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "gls-us.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Spee-Dee Delivery",
+    "aliases": [
+      "spee-dee delivery",
+      "spee dee delivery",
+      "speedee delivery",
+      "spee dee shipping",
+      "spee dee"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "speedeedelivery.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lone Star Overnight",
+    "aliases": [
+      "lone star overnight",
+      "lso",
+      "lso shipping",
+      "lso delivery",
+      "lso overnight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "lso.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Better Trucks",
+    "aliases": [
+      "better trucks",
+      "bettertrucks",
+      "better trucks delivery",
+      "better trucks shipping",
+      "better trucks logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "bettertrucks.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Veho",
+    "aliases": [
+      "veho",
+      "ship veho",
+      "veho delivery",
+      "veho shipping",
+      "veho logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "shipveho.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Roadie",
+    "aliases": [
+      "roadie",
+      "roadie delivery",
+      "roadie shipping",
+      "ups roadie",
+      "roadie logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "roadie.com",
+    "confidence": "medium",
+    "notes": "May represent same-day delivery rather than parcel shipping."
+  },
+  {
+    "canonical_name": "GoShare",
+    "aliases": [
+      "goshare",
+      "go share",
+      "goshare delivery",
+      "goshare moving",
+      "goshare logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "goshare.co",
+    "confidence": "medium",
+    "notes": "May represent local delivery or moving services."
+  },
+  {
+    "canonical_name": "Curri",
+    "aliases": [
+      "curri",
+      "curri delivery",
+      "curri logistics",
+      "curri courier",
+      "curri freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "curri.com",
+    "confidence": "medium",
+    "notes": "Common in construction and industrial local delivery."
+  },
+  {
+    "canonical_name": "Dropoff",
+    "aliases": [
+      "dropoff",
+      "dropoff delivery",
+      "dropoff courier",
+      "dropoff logistics",
+      "dropoff inc"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "dropoff.com",
+    "confidence": "medium",
+    "notes": "Generic brand name requires descriptor context."
+  },
+  {
+    "canonical_name": "Senpex",
+    "aliases": [
+      "senpex",
+      "senpex delivery",
+      "senpex courier",
+      "senpex logistics",
+      "senpex shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "senpex.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dispatch",
+    "aliases": [
+      "dispatch",
+      "dispatchit",
+      "dispatch delivery",
+      "dispatch courier",
+      "dispatch logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "dispatchit.com",
+    "confidence": "medium",
+    "notes": "Generic brand name requires descriptor context."
+  },
+  {
+    "canonical_name": "Frayt",
+    "aliases": [
+      "frayt",
+      "frayt delivery",
+      "frayt freight",
+      "frayt logistics",
+      "frayt app"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "frayt.app",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "AxleHire",
+    "aliases": [
+      "axlehire",
+      "axle hire",
+      "axlehire delivery",
+      "axlehire logistics",
+      "axlehire shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "axlehire.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "UniUni",
+    "aliases": [
+      "uniuni",
+      "uni uni",
+      "uniuni delivery",
+      "uniuni shipping",
+      "uniuni logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "uniuni.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PiggyShip",
+    "aliases": [
+      "piggyship",
+      "piggy ship",
+      "piggyship delivery",
+      "piggyship shipping",
+      "piggyship logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "piggyship.com",
+    "confidence": "medium",
+    "notes": "Regional last-mile carrier."
+  },
+  {
+    "canonical_name": "ShipStation",
+    "aliases": [
+      "shipstation",
+      "ship station",
+      "shipstation shipping",
+      "shipstation labels",
+      "shipstation subscription"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "shipstation.com",
+    "confidence": "medium",
+    "notes": "Charges may include software fees or purchased postage."
+  },
+  {
+    "canonical_name": "Stamps.com",
+    "aliases": [
+      "stamps.com",
+      "stamps com",
+      "stampscom",
+      "stamps postage",
+      "stamps subscription"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "stamps.com",
+    "confidence": "medium",
+    "notes": "Charges may include postage and software/service fees."
+  },
+  {
+    "canonical_name": "Endicia",
+    "aliases": [
+      "endicia",
+      "endicia postage",
+      "endicia shipping",
+      "endicia labels",
+      "endicia internet postage"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "endicia.com",
+    "confidence": "medium",
+    "notes": "Charges may include postage and service fees."
+  },
+  {
+    "canonical_name": "Shippo",
+    "aliases": [
+      "shippo",
+      "go shippo",
+      "goshippo",
+      "shippo shipping",
+      "shippo labels"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "goshippo.com",
+    "confidence": "medium",
+    "notes": "Charges may include postage and software/service fees."
+  },
+  {
+    "canonical_name": "EasyPost",
+    "aliases": [
+      "easypost",
+      "easy post",
+      "easypost shipping",
+      "easypost labels",
+      "easypost postage"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "easypost.com",
+    "confidence": "medium",
+    "notes": "Charges may include shipping labels or API/software fees."
+  },
+  {
+    "canonical_name": "Easyship",
+    "aliases": [
+      "easyship",
+      "easy ship",
+      "easyship shipping",
+      "easyship labels",
+      "easyship logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "easyship.com",
+    "confidence": "medium",
+    "notes": "Charges may include labels, duties, or software fees."
+  },
+  {
+    "canonical_name": "Pirate Ship",
+    "aliases": [
+      "pirate ship",
+      "pirateship",
+      "pirate ship postage",
+      "pirate ship shipping",
+      "pirate ship labels"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "pirateship.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ShipSaving",
+    "aliases": [
+      "shipsaving",
+      "ship saving",
+      "shipsaving postage",
+      "shipsaving shipping",
+      "shipsaving labels"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "shipsaving.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ShipRush",
+    "aliases": [
+      "shiprush",
+      "ship rush",
+      "shiprush shipping",
+      "shiprush labels",
+      "shiprush subscription"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "shiprush.com",
+    "confidence": "medium",
+    "notes": "May include software subscription charges."
+  },
+  {
+    "canonical_name": "ShippingEasy",
+    "aliases": [
+      "shippingeasy",
+      "shipping easy",
+      "shippingeasy shipping",
+      "shippingeasy postage",
+      "shippingeasy subscription"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "shippingeasy.com",
+    "confidence": "medium",
+    "notes": "May include software subscription or postage charges."
+  },
+  {
+    "canonical_name": "Ordoro",
+    "aliases": [
+      "ordoro",
+      "ordoro shipping",
+      "ordoro postage",
+      "ordoro labels",
+      "ordoro subscription"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "ordoro.com",
+    "confidence": "medium",
+    "notes": "Also provides inventory/order-management software."
+  },
+  {
+    "canonical_name": "ShipWorks",
+    "aliases": [
+      "shipworks",
+      "ship works",
+      "shipworks shipping",
+      "shipworks labels",
+      "shipworks subscription"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "shipworks.com",
+    "confidence": "medium",
+    "notes": "Primarily shipping software; postage may be separately billed."
+  },
+  {
+    "canonical_name": "ShipHero",
+    "aliases": [
+      "shiphero",
+      "ship hero",
+      "shiphero fulfillment",
+      "shiphero shipping",
+      "shiphero warehouse"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "shiphero.com",
+    "confidence": "medium",
+    "notes": "May represent fulfillment services or warehouse software."
+  },
+  {
+    "canonical_name": "ShipBob",
+    "aliases": [
+      "shipbob",
+      "ship bob",
+      "shipbob fulfillment",
+      "shipbob shipping",
+      "shipbob inc"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "shipbob.com",
+    "confidence": "medium",
+    "notes": "Charges can include fulfillment, storage, and shipping."
+  },
+  {
+    "canonical_name": "ShipMonk",
+    "aliases": [
+      "shipmonk",
+      "ship monk",
+      "shipmonk fulfillment",
+      "shipmonk shipping",
+      "shipmonk logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "shipmonk.com",
+    "confidence": "medium",
+    "notes": "Charges can include fulfillment, storage, and shipping."
+  },
+  {
+    "canonical_name": "Red Stag Fulfillment",
+    "aliases": [
+      "red stag fulfillment",
+      "redstag fulfillment",
+      "red stag shipping",
+      "red stag logistics",
+      "redstag"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "redstagfulfillment.com",
+    "confidence": "medium",
+    "notes": "Charges can include fulfillment, storage, and shipping."
+  },
+  {
+    "canonical_name": "Fulfillment by Amazon",
+    "aliases": [
+      "fulfillment by amazon",
+      "amazon fba",
+      "fba fulfillment",
+      "amazon fulfillment",
+      "amazon fba fees"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "amazon.com",
+    "confidence": "medium",
+    "notes": "Amazon charges can represent marketplace fees, inventory, ads, or fulfillment."
+  },
+  {
+    "canonical_name": "Amazon Shipping",
+    "aliases": [
+      "amazon shipping",
+      "amazon shipping services",
+      "amazon delivery shipping",
+      "amazon ship",
+      "amazon logistics shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "shipping.amazon.com",
+    "confidence": "medium",
+    "notes": "Amazon descriptors without shipping context are highly ambiguous."
+  },
+  {
+    "canonical_name": "Amazon Multi-Channel Fulfillment",
+    "aliases": [
+      "amazon multi-channel fulfillment",
+      "amazon multi channel fulfillment",
+      "amazon mcf",
+      "amazon multichannel fulfillment",
+      "amazon fulfillment mcf",
+      "amazon supply chain"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "supplychain.amazon.com",
+    "confidence": "medium",
+    "notes": "Amazon charges can include multiple supply-chain services."
+  },
+  {
+    "canonical_name": "Walmart Fulfillment Services",
+    "aliases": [
+      "walmart fulfillment services",
+      "walmart wfs",
+      "wfs fulfillment",
+      "walmart fulfillment",
+      "walmart seller fulfillment"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "walmart.com",
+    "confidence": "medium",
+    "notes": "Walmart descriptors without fulfillment context may be retail purchases."
+  },
+  {
+    "canonical_name": "Flexport",
+    "aliases": [
+      "flexport",
+      "flexport inc",
+      "flexport freight",
+      "flexport logistics",
+      "flexport shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "flexport.com",
+    "confidence": "medium",
+    "notes": "May include freight, customs brokerage, or logistics software/services."
+  },
+  {
+    "canonical_name": "Flexe",
+    "aliases": [
+      "flexe",
+      "flexe logistics",
+      "flexe fulfillment",
+      "flexe warehousing",
+      "flexe shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "flexe.com",
+    "confidence": "medium",
+    "notes": "Charges may include warehousing and fulfillment."
+  },
+  {
+    "canonical_name": "Stord",
+    "aliases": [
+      "stord",
+      "stord logistics",
+      "stord fulfillment",
+      "stord warehousing",
+      "stord shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "stord.com",
+    "confidence": "medium",
+    "notes": "Charges may include warehousing, fulfillment, and transportation."
+  },
+  {
+    "canonical_name": "Quiet Platforms",
+    "aliases": [
+      "quiet platforms",
+      "quietplatforms",
+      "quiet logistics",
+      "quiet fulfillment",
+      "quiet platforms shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "quietplatforms.com",
+    "confidence": "medium",
+    "notes": "Fulfillment/logistics provider."
+  },
+  {
+    "canonical_name": "Radial",
+    "aliases": [
+      "radial",
+      "radial fulfillment",
+      "radial logistics",
+      "radial shipping",
+      "radial commerce"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "radial.com",
+    "confidence": "medium",
+    "notes": "Generic brand name; may include ecommerce technology/services."
+  },
+  {
+    "canonical_name": "Whiplash",
+    "aliases": [
+      "whiplash",
+      "whiplash fulfillment",
+      "whiplash shipping",
+      "whiplash logistics",
+      "whiplash ecommerce"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "whiplash.com",
+    "confidence": "medium",
+    "notes": "Generic brand name requires logistics descriptor context."
+  },
+  {
+    "canonical_name": "Ryder E-commerce",
+    "aliases": [
+      "ryder e-commerce",
+      "ryder ecommerce",
+      "ryder e commerce",
+      "ryder fulfillment",
+      "ryder logistics",
+      "ryder supply chain"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "ryder.com",
+    "confidence": "medium",
+    "notes": "Ryder charges may also represent fleet or transportation services."
+  },
+  {
+    "canonical_name": "DHL Supply Chain",
+    "aliases": [
+      "dhl supply chain",
+      "dhl fulfillment",
+      "dhl logistics",
+      "dhl warehousing",
+      "dhl supply chain usa"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "dhl.com",
+    "confidence": "medium",
+    "notes": "May include warehousing, fulfillment, and contract logistics."
+  },
+  {
+    "canonical_name": "UPS Supply Chain Solutions",
+    "aliases": [
+      "ups supply chain solutions",
+      "ups scs",
+      "ups logistics",
+      "ups freight forwarding",
+      "ups supply chain"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "ups.com",
+    "confidence": "medium",
+    "notes": "May include freight forwarding, customs, or warehousing."
+  },
+  {
+    "canonical_name": "FedEx Logistics",
+    "aliases": [
+      "fedex logistics",
+      "fedex forwarding",
+      "fedex customs brokerage",
+      "fedex trade networks",
+      "fedex logistics inc"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "fedex.com",
+    "confidence": "medium",
+    "notes": "May include freight forwarding and customs services."
+  },
+  {
+    "canonical_name": "GEODIS",
+    "aliases": [
+      "geodis",
+      "geodis logistics",
+      "geodis usa",
+      "geodis freight",
+      "geodis fulfillment"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "geodis.com",
+    "confidence": "medium",
+    "notes": "May include freight, warehousing, and fulfillment."
+  },
+  {
+    "canonical_name": "Kuehne+Nagel",
+    "aliases": [
+      "kuehne nagel",
+      "kuehne and nagel",
+      "kn logistics",
+      "kuehne nagel usa"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "kuehne-nagel.com",
+    "confidence": "medium",
+    "notes": "Global freight forwarding and contract logistics."
+  },
+  {
+    "canonical_name": "DSV",
+    "aliases": [
+      "dsv",
+      "dsv air sea",
+      "dsv logistics",
+      "dsv road",
+      "dsv usa"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "dsv.com",
+    "confidence": "medium",
+    "notes": "Short acronym requires logistics context."
+  },
+  {
+    "canonical_name": "DB Schenker",
+    "aliases": [
+      "db schenker",
+      "schenker",
+      "db schenker usa",
+      "schenker logistics",
+      "db schenker freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "dbschenker.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CEVA Logistics",
+    "aliases": [
+      "ceva logistics",
+      "ceva",
+      "ceva freight",
+      "ceva logistics usa",
+      "ceva shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "cevalogistics.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Expeditors",
+    "aliases": [
+      "expeditors",
+      "expeditors international",
+      "expeditors international of washington",
+      "expeditors freight",
+      "expeditors logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "expeditors.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "C.H. Robinson",
+    "aliases": [
+      "c.h. robinson",
+      "ch robinson",
+      "c h robinson",
+      "chrobinson",
+      "ch robinson worldwide",
+      "ch robinson freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "chrobinson.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "J.B. Hunt",
+    "aliases": [
+      "j.b. hunt",
+      "jb hunt",
+      "j b hunt",
+      "jbhunt",
+      "jb hunt transport",
+      "jb hunt logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "jbhunt.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Schneider",
+    "aliases": [
+      "schneider",
+      "schneider national",
+      "schneider transportation",
+      "schneider logistics",
+      "schneider freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "schneider.com",
+    "confidence": "medium",
+    "notes": "Generic brand name requires transportation context."
+  },
+  {
+    "canonical_name": "Werner Enterprises",
+    "aliases": [
+      "werner enterprises",
+      "werner",
+      "werner trucking",
+      "werner transportation",
+      "werner logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "werner.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Old Dominion Freight Line",
+    "aliases": [
+      "old dominion freight line",
+      "old dominion freight",
+      "odfl",
+      "old dominion shipping",
+      "odfl freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "odfl.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Estes Express Lines",
+    "aliases": [
+      "estes express lines",
+      "estes express",
+      "estes freight",
+      "estes shipping",
+      "estes"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "estes-express.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Saia",
+    "aliases": [
+      "saia",
+      "saia ltl freight",
+      "saia freight",
+      "saia motor freight",
+      "saia shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "saia.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "XPO",
+    "aliases": [
+      "xpo",
+      "xpo logistics",
+      "xpo freight",
+      "xpo ltl",
+      "xpo shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "xpo.com",
+    "confidence": "medium",
+    "notes": "Short brand name requires freight/logistics context."
+  },
+  {
+    "canonical_name": "RXO",
+    "aliases": [
+      "rxo",
+      "rxo logistics",
+      "rxo freight",
+      "rxo transportation",
+      "rxo shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "rxo.com",
+    "confidence": "medium",
+    "notes": "Short brand name requires freight/logistics context."
+  },
+  {
+    "canonical_name": "ArcBest",
+    "aliases": [
+      "arcbest",
+      "arc best",
+      "arcbest freight",
+      "arcbest logistics",
+      "abf freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "arcb.com",
+    "confidence": "medium",
+    "notes": "May appear through ABF Freight descriptors."
+  },
+  {
+    "canonical_name": "ABF Freight",
+    "aliases": [
+      "abf freight",
+      "abf",
+      "abf freight system",
+      "abf shipping",
+      "arcbest abf"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "arcb.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Southeastern Freight Lines",
+    "aliases": [
+      "southeastern freight lines",
+      "southeastern freight",
+      "sefl",
+      "sefl freight",
+      "southeastern shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "sefl.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "R+L Carriers",
+    "aliases": [
+      "r l carriers",
+      "rl carriers",
+      "rl freight",
+      "rl shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "rlcarriers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "AAA Cooper Transportation",
+    "aliases": [
+      "aaa cooper transportation",
+      "aaa cooper",
+      "act freight",
+      "aaa cooper freight",
+      "aaa cooper shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "aaacooper.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Averitt",
+    "aliases": [
+      "averitt",
+      "averitt express",
+      "averitt freight",
+      "averitt transportation",
+      "averitt shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "averitt.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dayton Freight",
+    "aliases": [
+      "dayton freight",
+      "dayton freight lines",
+      "daytonfreight",
+      "dayton shipping",
+      "dayton freight lines inc"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "daytonfreight.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pitt Ohio",
+    "aliases": [
+      "pitt ohio",
+      "pitt ohio express",
+      "pitt ohio freight",
+      "pittohio",
+      "pitt ohio shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "pittohio.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ward Transport & Logistics",
+    "aliases": [
+      "ward transport and logistics",
+      "ward transport",
+      "ward trucking",
+      "ward transport logistics",
+      "wardtlc",
+      "ward freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "wardtlc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Central Transport",
+    "aliases": [
+      "central transport",
+      "central transport freight",
+      "centraltransport",
+      "central transport shipping",
+      "central transport llc"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "centraltransport.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "TForce Freight",
+    "aliases": [
+      "tforce freight",
+      "t force freight",
+      "tforce",
+      "tforce shipping",
+      "tforce freight inc"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "tforcefreight.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Forward Air",
+    "aliases": [
+      "forward air",
+      "forwardair",
+      "forward air freight",
+      "forward air shipping",
+      "forward air corp"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "forwardair.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Roadrunner Freight",
+    "aliases": [
+      "roadrunner freight",
+      "road runner freight",
+      "roadrunner transportation",
+      "roadrunner shipping",
+      "roadrunner freight systems"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "shiproadrunnerfreight.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "FedEx Freight",
+    "aliases": [
+      "fedex freight",
+      "federal express freight",
+      "fedex ltl",
+      "fedex freight shipping",
+      "fedex freight inc"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "fedexfreight.com",
+    "confidence": "high",
+    "notes": "FedEx Freight became an independent LTL company in 2026."
+  },
+  {
+    "canonical_name": "Uber Freight",
+    "aliases": [
+      "uber freight",
+      "uberfreight",
+      "uber freight shipping",
+      "uber freight logistics",
+      "uber freight llc"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "uberfreight.com",
+    "confidence": "medium",
+    "notes": "Uber descriptors without Freight context may represent rides or delivery."
+  },
+  {
+    "canonical_name": "Convoy Platform",
+    "aliases": [
+      "convoy platform",
+      "convoy",
+      "convoy freight",
+      "convoy logistics",
+      "convoy shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "convoy.com",
+    "confidence": "medium",
+    "notes": "Verify current operating counterparty when matching legacy descriptors."
+  },
+  {
+    "canonical_name": "DAT Freight & Analytics",
+    "aliases": [
+      "dat freight and analytics",
+      "dat freight",
+      "dat load board",
+      "dat freight analytics",
+      "dat.com",
+      "dat solutions"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "dat.com",
+    "confidence": "medium",
+    "notes": "Often a freight marketplace/software subscription rather than carrier charge."
+  },
+  {
+    "canonical_name": "Truckstop",
+    "aliases": [
+      "truckstop",
+      "truck stop load board",
+      "truckstop com",
+      "truckstop freight",
+      "truckstop load board"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "truckstop.com",
+    "confidence": "medium",
+    "notes": "Often a freight marketplace/software subscription."
+  },
+  {
+    "canonical_name": "uShip",
+    "aliases": [
+      "uship",
+      "u ship",
+      "uship shipping",
+      "uship marketplace",
+      "uship freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "uship.com",
+    "confidence": "medium",
+    "notes": "Marketplace payment; actual carrier may be a third party."
+  },
+  {
+    "canonical_name": "Freightquote",
+    "aliases": [
+      "freightquote",
+      "freight quote",
+      "freightquote by ch robinson",
+      "freightquote shipping",
+      "freightquote freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "freightquote.com",
+    "confidence": "medium",
+    "notes": "Freight brokerage; underlying carrier varies."
+  },
+  {
+    "canonical_name": "FreightCenter",
+    "aliases": [
+      "freightcenter",
+      "freight center",
+      "freightcenter shipping",
+      "freightcenter freight",
+      "freightcenter inc"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "freightcenter.com",
+    "confidence": "medium",
+    "notes": "Freight brokerage; underlying carrier varies."
+  },
+  {
+    "canonical_name": "Freightos",
+    "aliases": [
+      "freightos",
+      "freight os",
+      "freightos shipping",
+      "freightos freight",
+      "freightos marketplace"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "freightos.com",
+    "confidence": "medium",
+    "notes": "Freight marketplace; underlying carrier/forwarder varies."
+  },
+  {
+    "canonical_name": "FreightClub",
+    "aliases": [
+      "freightclub",
+      "freight club",
+      "freightclub shipping",
+      "freightclub freight",
+      "freightclub logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "freightclub.com",
+    "confidence": "medium",
+    "notes": "Freight rate platform/broker."
+  },
+  {
+    "canonical_name": "Worldwide Express",
+    "aliases": [
+      "worldwide express",
+      "wwex",
+      "world wide express",
+      "worldwide express shipping",
+      "wwex freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "wwex.com",
+    "confidence": "medium",
+    "notes": "Shipping reseller/broker; underlying carrier varies."
+  },
+  {
+    "canonical_name": "Unishippers",
+    "aliases": [
+      "unishippers",
+      "uni shippers",
+      "unishippers shipping",
+      "unishippers freight",
+      "unishippers global logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "unishippers.com",
+    "confidence": "medium",
+    "notes": "Shipping reseller; underlying carrier varies."
+  },
+  {
+    "canonical_name": "GlobalTranz",
+    "aliases": [
+      "globaltranz",
+      "global tranz",
+      "globaltranz freight",
+      "globaltranz logistics",
+      "globaltranz shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "globaltranz.com",
+    "confidence": "medium",
+    "notes": "Freight brokerage/logistics provider."
+  },
+  {
+    "canonical_name": "Echo Global Logistics",
+    "aliases": [
+      "echo global logistics",
+      "echo logistics",
+      "echo global",
+      "echo freight",
+      "echo shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "echo.com",
+    "confidence": "medium",
+    "notes": "Generic Echo descriptor requires logistics context."
+  },
+  {
+    "canonical_name": "Total Quality Logistics",
+    "aliases": [
+      "total quality logistics",
+      "tql",
+      "tql freight",
+      "tql logistics",
+      "tql shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "tql.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Arrive Logistics",
+    "aliases": [
+      "arrive logistics",
+      "arrive",
+      "arrive freight",
+      "arrive shipping",
+      "arrive logistics inc"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "arrivelogistics.com",
+    "confidence": "medium",
+    "notes": "Generic brand name requires logistics context."
+  },
+  {
+    "canonical_name": "Nolan Transportation Group",
+    "aliases": [
+      "nolan transportation group",
+      "ntg freight",
+      "ntg",
+      "nolan transportation",
+      "ntg logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "ntgfreight.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Allen Lund Company",
+    "aliases": [
+      "allen lund company",
+      "allen lund",
+      "alc logistics",
+      "allen lund freight",
+      "allen lund transportation"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "allenlund.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MODE Global",
+    "aliases": [
+      "mode global",
+      "mode transportation",
+      "mode global logistics",
+      "mode freight",
+      "modeglobal"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "modeglobal.com",
+    "confidence": "medium",
+    "notes": "Generic brand name requires logistics context."
+  },
+  {
+    "canonical_name": "BlueGrace Logistics",
+    "aliases": [
+      "bluegrace logistics",
+      "blue grace logistics",
+      "bluegrace",
+      "blue grace freight",
+      "mybluegrace"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "mybluegrace.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Redwood Logistics",
+    "aliases": [
+      "redwood logistics",
+      "redwoodlogistics",
+      "redwood freight",
+      "redwood transportation",
+      "redwood shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "redwoodlogistics.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "NTG",
+    "aliases": [
+      "ntg",
+      "ntg freight",
+      "ntg logistics",
+      "nolan transportation group",
+      "ntg shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "ntgfreight.com",
+    "confidence": "medium",
+    "notes": "Acronym can be ambiguous without freight context."
+  },
+  {
+    "canonical_name": "Landstar",
+    "aliases": [
+      "landstar",
+      "landstar system",
+      "landstar freight",
+      "landstar logistics",
+      "landstar transportation"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "landstar.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hub Group",
+    "aliases": [
+      "hub group",
+      "hubgroup",
+      "hub group logistics",
+      "hub group freight",
+      "hub group transportation"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "hubgroup.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Knight-Swift",
+    "aliases": [
+      "knight-swift",
+      "knight swift",
+      "knight swift transportation",
+      "knight transportation",
+      "swift transportation"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "knight-swift.com",
+    "confidence": "medium",
+    "notes": "May appear under operating subsidiaries."
+  },
+  {
+    "canonical_name": "Swift Transportation",
+    "aliases": [
+      "swift transportation",
+      "swift trans",
+      "swift trucking",
+      "swift freight",
+      "swift transportation co"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "swifttrans.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Knight Transportation",
+    "aliases": [
+      "knight transportation",
+      "knight trans",
+      "knight trucking",
+      "knight freight",
+      "knight transportation inc"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "knighttrans.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CRST",
+    "aliases": [
+      "crst",
+      "crst transportation",
+      "crst freight",
+      "crst trucking",
+      "crst logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "crst.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Covenant Logistics",
+    "aliases": [
+      "covenant logistics",
+      "covenant transport",
+      "covenant freight",
+      "covenant transportation",
+      "covenant logistics group"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "covenantlogistics.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Marten Transport",
+    "aliases": [
+      "marten transport",
+      "marten transportation",
+      "marten freight",
+      "marten trucking",
+      "marten transport ltd"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "marten.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Heartland Express",
+    "aliases": [
+      "heartland express",
+      "heartland trucking",
+      "heartland freight",
+      "heartland transportation",
+      "heartland express inc"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "heartlandexpress.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Crete Carrier",
+    "aliases": [
+      "crete carrier",
+      "crete carrier corp",
+      "crete freight",
+      "crete trucking",
+      "crete transportation"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "cretecarrier.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Prime Inc.",
+    "aliases": [
+      "prime inc.",
+      "prime inc",
+      "primeinc",
+      "prime trucking",
+      "prime freight",
+      "prime transportation"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "primeinc.com",
+    "confidence": "medium",
+    "notes": "Do not match generic 'prime' alone due to Amazon and other collisions."
+  },
+  {
+    "canonical_name": "Roehl Transport",
+    "aliases": [
+      "roehl transport",
+      "roehl transportation",
+      "roehl freight",
+      "roehl trucking",
+      "roehl"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "roehl.jobs",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "System Transport",
+    "aliases": [
+      "system transport",
+      "systemtrans",
+      "system transportation",
+      "system freight",
+      "system trucking"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "systemtrans.com",
+    "confidence": "medium",
+    "notes": "Generic wording requires transportation context."
+  },
+  {
+    "canonical_name": "Mercer Transportation",
+    "aliases": [
+      "mercer transportation",
+      "mercer trans",
+      "mercer freight",
+      "mercer trucking",
+      "mercer transportation co"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "mercer-trans.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bennett Family of Companies",
+    "aliases": [
+      "bennett family of companies",
+      "bennett international",
+      "bennett transportation",
+      "bennett motor express",
+      "bennett freight",
+      "bennett family companies"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "bennettig.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pilot Freight Services",
+    "aliases": [
+      "pilot freight services",
+      "pilot freight",
+      "pilot delivers",
+      "pilot logistics",
+      "pilot shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "pilotdelivers.com",
+    "confidence": "medium",
+    "notes": "Do not match generic 'pilot' alone due to fuel/travel collisions."
+  },
+  {
+    "canonical_name": "AIT Worldwide Logistics",
+    "aliases": [
+      "ait worldwide logistics",
+      "ait worldwide",
+      "ait logistics",
+      "ait freight",
+      "ait shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "aitworldwide.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SEKO Logistics",
+    "aliases": [
+      "seko logistics",
+      "seko",
+      "seko freight",
+      "seko shipping",
+      "seko logistics usa"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "sekologistics.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Crane Worldwide Logistics",
+    "aliases": [
+      "crane worldwide logistics",
+      "crane worldwide",
+      "crane logistics",
+      "crane freight",
+      "craneww"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "craneww.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hellmann Worldwide Logistics",
+    "aliases": [
+      "hellmann worldwide logistics",
+      "hellmann logistics",
+      "hellmann freight",
+      "hellmann usa",
+      "hellmann shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "hellmann.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nippon Express",
+    "aliases": [
+      "nippon express",
+      "nippon express usa",
+      "nx logistics",
+      "nippon freight",
+      "nippon shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "nipponexpress.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kintetsu World Express",
+    "aliases": [
+      "kintetsu world express",
+      "kwe",
+      "kwe usa",
+      "kintetsu logistics",
+      "kintetsu freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "kwe.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Yusen Logistics",
+    "aliases": [
+      "yusen logistics",
+      "yusen",
+      "yusen logistics usa",
+      "yusen freight",
+      "yusen shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "yusen-logistics.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kerry Logistics",
+    "aliases": [
+      "kerry logistics",
+      "kerrylogistics",
+      "kerry freight",
+      "kerry shipping",
+      "kerry logistics usa"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "kerrylogistics.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Maersk",
+    "aliases": [
+      "maersk",
+      "maersk line",
+      "maersk shipping",
+      "maersk logistics",
+      "ap moller maersk"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "maersk.com",
+    "confidence": "medium",
+    "notes": "May include ocean freight, inland transport, or logistics services."
+  },
+  {
+    "canonical_name": "MSC",
+    "aliases": [
+      "msc",
+      "mediterranean shipping company",
+      "msc shipping",
+      "msc cargo",
+      "msc freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "msc.com",
+    "confidence": "medium",
+    "notes": "Acronym is ambiguous without shipping context."
+  },
+  {
+    "canonical_name": "CMA CGM",
+    "aliases": [
+      "cma cgm",
+      "cmacgm",
+      "cma cgm shipping",
+      "cma cgm america",
+      "cma cgm freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "cma-cgm.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hapag-Lloyd",
+    "aliases": [
+      "hapag-lloyd",
+      "hapag lloyd",
+      "hapag lloyd shipping",
+      "hapag lloyd america",
+      "hapag freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "hapag-lloyd.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "COSCO Shipping",
+    "aliases": [
+      "cosco shipping",
+      "cosco",
+      "cosco shipping lines",
+      "cosco freight",
+      "cosco shipping north america"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "coscoshipping.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ONE",
+    "aliases": [
+      "one",
+      "ocean network express",
+      "one line",
+      "one shipping",
+      "one ocean network express",
+      "one container shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "one-line.com",
+    "confidence": "medium",
+    "notes": "Do not match 'one' alone; require shipping-specific descriptor."
+  },
+  {
+    "canonical_name": "Evergreen Marine",
+    "aliases": [
+      "evergreen marine",
+      "evergreen shipping",
+      "evergreen line",
+      "evergreen marine corp",
+      "evergreen container"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "evergreen-marine.com",
+    "confidence": "medium",
+    "notes": "Generic Evergreen descriptor requires marine/shipping context."
+  },
+  {
+    "canonical_name": "Yang Ming",
+    "aliases": [
+      "yang ming",
+      "yangming",
+      "yang ming marine",
+      "yang ming shipping",
+      "yang ming america"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "yangming.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ZIM",
+    "aliases": [
+      "zim",
+      "zim integrated shipping",
+      "zim shipping",
+      "zim lines",
+      "zim america"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "zim.com",
+    "confidence": "medium",
+    "notes": "Short brand requires shipping context."
+  },
+  {
+    "canonical_name": "Matson",
+    "aliases": [
+      "matson",
+      "matson navigation",
+      "matson shipping",
+      "matson logistics",
+      "matson freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "matson.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Crowley",
+    "aliases": [
+      "crowley",
+      "crowley maritime",
+      "crowley logistics",
+      "crowley shipping",
+      "crowley freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "crowley.com",
+    "confidence": "medium",
+    "notes": "Generic surname requires logistics/maritime context."
+  },
+  {
+    "canonical_name": "TOTE Maritime",
+    "aliases": [
+      "tote maritime",
+      "tote shipping",
+      "tote maritime puerto rico",
+      "tote maritime alaska",
+      "tote freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "totemaritime.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pasha Hawaii",
+    "aliases": [
+      "pasha hawaii",
+      "pasha shipping",
+      "pasha freight",
+      "pasha group hawaii",
+      "pasha maritime"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "pashahawaii.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lynden",
+    "aliases": [
+      "lynden",
+      "lynden transport",
+      "lynden freight",
+      "lynden logistics",
+      "lynden shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "lynden.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Alaska Marine Lines",
+    "aliases": [
+      "alaska marine lines",
+      "aml shipping",
+      "alaska marine freight",
+      "lynden alaska marine",
+      "alaska marine lines freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "lynden.com",
+    "confidence": "medium",
+    "notes": "May appear under Lynden-related billing."
+  },
+  {
+    "canonical_name": "Horizon Air Freight",
+    "aliases": [
+      "horizon air freight",
+      "haf freight",
+      "horizon freight",
+      "horizon air cargo",
+      "horizon air freight inc"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "haf.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Air General",
+    "aliases": [
+      "air general",
+      "airgeneral",
+      "air general cargo",
+      "air general freight",
+      "air general inc"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "airgeneral.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Alliance Ground International",
+    "aliases": [
+      "alliance ground international",
+      "agi cargo",
+      "agi logistics",
+      "alliance ground cargo",
+      "allianceground"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "allianceground.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Amerijet",
+    "aliases": [
+      "amerijet",
+      "amerijet international",
+      "amerijet cargo",
+      "amerijet freight",
+      "amerijet shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "amerijet.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Atlas Air",
+    "aliases": [
+      "atlas air",
+      "atlasair",
+      "atlas air cargo",
+      "atlas air freight",
+      "atlas air worldwide"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "atlasair.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kalitta Air",
+    "aliases": [
+      "kalitta air",
+      "kalittaair",
+      "kalitta cargo",
+      "kalitta freight",
+      "kalitta air llc"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "kalittaair.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Polar Air Cargo",
+    "aliases": [
+      "polar air cargo",
+      "polar air",
+      "polar cargo",
+      "polar freight",
+      "polaraircargo"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "polaraircargo.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Air Cargo Carriers",
+    "aliases": [
+      "air cargo carriers",
+      "acc cargo",
+      "air cargo carriers inc",
+      "air cargo freight",
+      "aircargocarriers"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "aircargocarriers.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Southwest Cargo",
+    "aliases": [
+      "southwest cargo",
+      "swa cargo",
+      "southwest airlines cargo",
+      "swacargo",
+      "southwest freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "swacargo.com",
+    "confidence": "medium",
+    "notes": "Southwest charges without Cargo context may represent travel."
+  },
+  {
+    "canonical_name": "Delta Cargo",
+    "aliases": [
+      "delta cargo",
+      "delta air cargo",
+      "delta airlines cargo",
+      "delta freight",
+      "delta cargo shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "deltacargo.com",
+    "confidence": "medium",
+    "notes": "Delta charges without Cargo context may represent travel."
+  },
+  {
+    "canonical_name": "American Airlines Cargo",
+    "aliases": [
+      "american airlines cargo",
+      "aa cargo",
+      "aacargo",
+      "american air cargo",
+      "american airlines freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "aacargo.com",
+    "confidence": "medium",
+    "notes": "American Airlines charges without Cargo context may represent travel."
+  },
+  {
+    "canonical_name": "United Cargo",
+    "aliases": [
+      "united cargo",
+      "united airlines cargo",
+      "united air cargo",
+      "united freight",
+      "unitedcargo"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "unitedcargo.com",
+    "confidence": "medium",
+    "notes": "United charges without Cargo context may represent travel."
+  },
+  {
+    "canonical_name": "Alaska Air Cargo",
+    "aliases": [
+      "alaska air cargo",
+      "alaska airlines cargo",
+      "alaska cargo",
+      "alaska air freight",
+      "alaskacargo"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "alaskacargo.com",
+    "confidence": "medium",
+    "notes": "Alaska Airlines charges without Cargo context may represent travel."
+  },
+  {
+    "canonical_name": "Lufthansa Cargo",
+    "aliases": [
+      "lufthansa cargo",
+      "lufthansa freight",
+      "lufthansa air cargo",
+      "lufthansa cargo usa",
+      "lh cargo"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "lufthansa-cargo.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "IAG Cargo",
+    "aliases": [
+      "iag cargo",
+      "british airways cargo",
+      "iag freight",
+      "iagcargo",
+      "iag air cargo"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "iagcargo.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Emirates SkyCargo",
+    "aliases": [
+      "emirates skycargo",
+      "emirates sky cargo",
+      "emirates cargo",
+      "sky cargo emirates",
+      "emirates freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "skycargo.com",
+    "confidence": "medium",
+    "notes": "Emirates charges without cargo context may represent travel."
+  },
+  {
+    "canonical_name": "Qatar Airways Cargo",
+    "aliases": [
+      "qatar airways cargo",
+      "qatar cargo",
+      "qr cargo",
+      "qatar freight",
+      "qrcargo"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "qrcargo.com",
+    "confidence": "medium",
+    "notes": "Qatar Airways charges without Cargo context may represent travel."
+  },
+  {
+    "canonical_name": "Turkish Cargo",
+    "aliases": [
+      "turkish cargo",
+      "turkish airlines cargo",
+      "thy cargo",
+      "turkish freight",
+      "turkishcargo"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "turkishcargo.com.tr",
+    "confidence": "medium",
+    "notes": "Turkish Airlines charges without Cargo context may represent travel."
+  },
+  {
+    "canonical_name": "Cargolux",
+    "aliases": [
+      "cargolux",
+      "cargo lux",
+      "cargolux airlines",
+      "cargolux freight",
+      "cargolux usa"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "cargolux.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "DHL Global Forwarding",
+    "aliases": [
+      "dhl global forwarding",
+      "dhl forwarding",
+      "dhl freight forwarding",
+      "dhl global freight",
+      "dhl gf"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "dhl.com",
+    "confidence": "medium",
+    "notes": "May include air/ocean freight and customs brokerage."
+  },
+  {
+    "canonical_name": "UPS Mail Innovations",
+    "aliases": [
+      "ups mail innovations",
+      "ups mi",
+      "ups mail innovations shipping",
+      "ups mail innovations returns",
+      "ups mailing"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "ups.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "FedEx Ground Economy",
+    "aliases": [
+      "fedex ground economy",
+      "fedex smartpost",
+      "smartpost",
+      "fedex economy shipping",
+      "fedex ground econ"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "fedex.com",
+    "confidence": "high",
+    "notes": "Legacy SmartPost descriptors may still appear."
+  },
+  {
+    "canonical_name": "DHL eCommerce",
+    "aliases": [
+      "dhl ecommerce",
+      "dhl e commerce",
+      "dhl ecommerce solutions",
+      "dhl parcel",
+      "dhl ecommerce shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "dhl.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pitney Bowes",
+    "aliases": [
+      "pitney bowes",
+      "pitneybowes",
+      "pitney bowes postage",
+      "pb postage",
+      "pitney bowes shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "pitneybowes.com",
+    "confidence": "medium",
+    "notes": "May include postage, equipment leases, or software fees."
+  },
+  {
+    "canonical_name": "Quadient",
+    "aliases": [
+      "quadient",
+      "neopost",
+      "quadient postage",
+      "quadient mailing",
+      "quadient shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "quadient.com",
+    "confidence": "medium",
+    "notes": "May include postage, mailing equipment, or software fees."
+  },
+  {
+    "canonical_name": "FP Mailing Solutions",
+    "aliases": [
+      "fp mailing solutions",
+      "fp usa",
+      "fp postage",
+      "fp mailing",
+      "francotyp postalia"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "fp-usa.com",
+    "confidence": "medium",
+    "notes": "May include postage meter or mailing equipment charges."
+  },
+  {
+    "canonical_name": "SendPro",
+    "aliases": [
+      "sendpro",
+      "send pro",
+      "pitney bowes sendpro",
+      "sendpro postage",
+      "sendpro shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "pitneybowes.com",
+    "confidence": "medium",
+    "notes": "May overlap with broader Pitney Bowes billing."
+  },
+  {
+    "canonical_name": "Click-N-Ship",
+    "aliases": [
+      "click-n-ship",
+      "click n ship",
+      "usps click n ship",
+      "usps click and ship",
+      "click n ship postage"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "usps.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ShipTime",
+    "aliases": [
+      "shiptime",
+      "ship time",
+      "shiptime shipping",
+      "shiptime courier",
+      "shiptime freight"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "shiptime.com",
+    "confidence": "medium",
+    "notes": "Shipping reseller/platform; underlying carrier varies."
+  },
+  {
+    "canonical_name": "ParcelPath",
+    "aliases": [
+      "parcelpath",
+      "parcel path",
+      "parcelpath shipping",
+      "parcelpath labels",
+      "parcelpath postage"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "parcelpath.com",
+    "confidence": "medium",
+    "notes": "Shipping-label platform."
+  },
+  {
+    "canonical_name": "Sendle",
+    "aliases": [
+      "sendle",
+      "sendle shipping",
+      "sendle delivery",
+      "sendle usa",
+      "sendle parcel"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "sendle.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Parcel Monkey",
+    "aliases": [
+      "parcel monkey",
+      "parcelmonkey",
+      "parcel monkey shipping",
+      "parcel monkey usa",
+      "parcelmonkey courier"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "parcelmonkey.com",
+    "confidence": "medium",
+    "notes": "Shipping comparison/reseller platform."
+  },
+  {
+    "canonical_name": "Parcel2Go",
+    "aliases": [
+      "parcel2go",
+      "parcel 2 go",
+      "parcel2go shipping",
+      "parcel2go courier",
+      "parcel2go delivery"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "parcel2go.com",
+    "confidence": "medium",
+    "notes": "Global shipping comparison platform with some US usage."
+  },
+  {
+    "canonical_name": "MyUS",
+    "aliases": [
+      "myus",
+      "my us",
+      "myus shipping",
+      "myus forwarding",
+      "myus package forwarding"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "myus.com",
+    "confidence": "medium",
+    "notes": "Package-forwarding service."
+  },
+  {
+    "canonical_name": "Stackry",
+    "aliases": [
+      "stackry",
+      "stackry shipping",
+      "stackry forwarding",
+      "stackry package forwarding",
+      "stackry usa"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "stackry.com",
+    "confidence": "medium",
+    "notes": "Package-forwarding service."
+  },
+  {
+    "canonical_name": "Shipito",
+    "aliases": [
+      "shipito",
+      "ship ito",
+      "shipito shipping",
+      "shipito forwarding",
+      "shipito package forwarding"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "shipito.com",
+    "confidence": "medium",
+    "notes": "Package-forwarding service."
+  },
+  {
+    "canonical_name": "Planet Express",
+    "aliases": [
+      "planet express",
+      "planetexpress",
+      "planet express shipping",
+      "planet express forwarding",
+      "planet express package"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "planetexpress.com",
+    "confidence": "medium",
+    "notes": "Generic brand name requires shipping context."
+  },
+  {
+    "canonical_name": "MyMallBox",
+    "aliases": [
+      "mymallbox",
+      "my mall box",
+      "mymallbox shipping",
+      "mymallbox forwarding",
+      "my mall box package"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "mymallbox.com",
+    "confidence": "medium",
+    "notes": "Package-forwarding service."
+  },
+  {
+    "canonical_name": "Ship7",
+    "aliases": [
+      "ship7",
+      "ship 7",
+      "ship7 shipping",
+      "ship7 forwarding",
+      "ship7 package"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "ship7.com",
+    "confidence": "medium",
+    "notes": "Package-forwarding service."
+  },
+  {
+    "canonical_name": "Reship",
+    "aliases": [
+      "reship",
+      "re ship",
+      "reship shipping",
+      "reship forwarding",
+      "reship package"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "reship.com",
+    "confidence": "medium",
+    "notes": "Generic term requires brand/context match."
+  },
+  {
+    "canonical_name": "Global Shopaholics",
+    "aliases": [
+      "global shopaholics",
+      "globalshopaholics",
+      "global shopaholics shipping",
+      "global shopaholics forwarding",
+      "global shopaholics package"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "globalshopaholics.com",
+    "confidence": "medium",
+    "notes": "Package-forwarding service."
+  },
+  {
+    "canonical_name": "ShipNetwork",
+    "aliases": [
+      "shipnetwork",
+      "ship network",
+      "shipnetwork fulfillment",
+      "shipnetwork shipping",
+      "rakuten super logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "shipnetwork.com",
+    "confidence": "medium",
+    "notes": "Legacy Rakuten Super Logistics descriptors may appear."
+  },
+  {
+    "canonical_name": "eFulfillment Service",
+    "aliases": [
+      "efulfillment service",
+      "e fulfillment service",
+      "efulfillmentservice",
+      "efs fulfillment",
+      "efulfillment shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "efulfillmentservice.com",
+    "confidence": "medium",
+    "notes": "Fulfillment and warehousing provider."
+  },
+  {
+    "canonical_name": "Fulfillrite",
+    "aliases": [
+      "fulfillrite",
+      "fulfill rite",
+      "fulfillrite fulfillment",
+      "fulfillrite shipping",
+      "fulfillrite logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "fulfillrite.com",
+    "confidence": "medium",
+    "notes": "Fulfillment and warehousing provider."
+  },
+  {
+    "canonical_name": "ShipBots",
+    "aliases": [
+      "shipbots",
+      "ship bots",
+      "shipbots fulfillment",
+      "shipbots shipping",
+      "shipbots logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "shipbots.com",
+    "confidence": "medium",
+    "notes": "Fulfillment and warehousing provider."
+  },
+  {
+    "canonical_name": "Flowspace",
+    "aliases": [
+      "flowspace",
+      "flow space",
+      "flowspace fulfillment",
+      "flowspace logistics",
+      "flowspace warehousing"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "flowspace.com",
+    "confidence": "medium",
+    "notes": "Fulfillment/warehouse network and software."
+  },
+  {
+    "canonical_name": "Ware2Go",
+    "aliases": [
+      "ware2go",
+      "ware 2 go",
+      "ware2go fulfillment",
+      "ups ware2go",
+      "ware2go logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "ware2go.co",
+    "confidence": "medium",
+    "notes": "UPS-affiliated fulfillment provider."
+  },
+  {
+    "canonical_name": "Saltbox",
+    "aliases": [
+      "saltbox",
+      "salt box",
+      "saltbox logistics",
+      "saltbox fulfillment",
+      "saltbox shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "saltbox.com",
+    "confidence": "medium",
+    "notes": "May include workspace/warehouse rent as well as logistics."
+  },
+  {
+    "canonical_name": "ShipCalm",
+    "aliases": [
+      "shipcalm",
+      "ship calm",
+      "shipcalm fulfillment",
+      "shipcalm shipping",
+      "shipcalm logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "shipcalm.com",
+    "confidence": "medium",
+    "notes": "Fulfillment provider."
+  },
+  {
+    "canonical_name": "ShipHype",
+    "aliases": [
+      "shiphype",
+      "ship hype",
+      "shiphype fulfillment",
+      "shiphype shipping",
+      "shiphype logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "shiphype.com",
+    "confidence": "medium",
+    "notes": "Fulfillment provider."
+  },
+  {
+    "canonical_name": "Fulfillment.com",
+    "aliases": [
+      "fulfillment.com",
+      "fulfillment com",
+      "fulfillmentcom",
+      "fulfillment shipping",
+      "fulfillment logistics"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "fulfillment.com",
+    "confidence": "medium",
+    "notes": "Generic domain-style brand requires exact descriptor match."
+  },
+  {
+    "canonical_name": "Rakuten Super Logistics",
+    "aliases": [
+      "rakuten super logistics",
+      "rakuten logistics",
+      "rsl fulfillment",
+      "rakuten fulfillment",
+      "rakuten shipping"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "shipnetwork.com",
+    "confidence": "medium",
+    "notes": "Legacy brand now associated with ShipNetwork."
+  },
+  {
+    "canonical_name": "DCL Logistics",
+    "aliases": [
+      "dcl logistics",
+      "dcl corp",
+      "dcl fulfillment",
+      "dcl shipping",
+      "dcl logistics inc"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "dclcorp.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "NFI Industries",
+    "aliases": [
+      "nfi industries",
+      "nfi logistics",
+      "nfi freight",
+      "nfi transportation",
+      "nfi fulfillment"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "nfiindustries.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "GXO Logistics",
+    "aliases": [
+      "gxo logistics",
+      "gxo",
+      "gxo fulfillment",
+      "gxo warehousing",
+      "gxo supply chain"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "gxo.com",
+    "confidence": "medium",
+    "notes": "Short acronym requires logistics context."
+  },
+  {
+    "canonical_name": "Kenco",
+    "aliases": [
+      "kenco",
+      "kenco group",
+      "kenco logistics",
+      "kenco warehousing",
+      "kenco supply chain"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "kencogroup.com",
+    "confidence": "medium",
+    "notes": "Generic brand name requires logistics context."
+  },
+  {
+    "canonical_name": "Performance Team",
+    "aliases": [
+      "performance team",
+      "performance team logistics",
+      "performance team freight",
+      "maersk performance team",
+      "performance team warehousing"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "performanceteam.net",
+    "confidence": "medium",
+    "notes": "Generic wording requires logistics context."
+  },
+  {
+    "canonical_name": "CJ Logistics America",
+    "aliases": [
+      "cj logistics america",
+      "cj logistics",
+      "cj logistics usa",
+      "cj logistics freight",
+      "cj logistics warehousing"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "cjlogisticsamerica.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Penske Logistics",
+    "aliases": [
+      "penske logistics",
+      "penske transportation",
+      "penske freight",
+      "penske logistics llc",
+      "penske supply chain"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "penskelogistics.com",
+    "confidence": "medium",
+    "notes": "Penske charges without Logistics context may represent truck rental."
+  },
+  {
+    "canonical_name": "Ryder Supply Chain Solutions",
+    "aliases": [
+      "ryder supply chain solutions",
+      "ryder supply chain",
+      "ryder logistics",
+      "ryder fulfillment",
+      "ryder warehousing"
+    ],
+    "semantic": "shipping_cogs",
+    "logo_domain": "ryder.com",
+    "confidence": "medium",
+    "notes": "Ryder charges without supply-chain context may represent vehicle services."
+  }
+]

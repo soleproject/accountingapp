@@ -1,0 +1,3740 @@
+[
+  {
+    "canonical_name": "Deloitte",
+    "aliases": [
+      "deloitte",
+      "deloitte llp",
+      "deloitte touche",
+      "deloitte tax",
+      "deloitte consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "deloitte.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PwC",
+    "aliases": [
+      "pwc",
+      "pricewaterhousecoopers",
+      "pricewaterhousecoopers llp",
+      "pwc advisory",
+      "pwc tax"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "pwc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "EY",
+    "aliases": [
+      "ey",
+      "ernst and young",
+      "ernst young llp",
+      "ey tax",
+      "ey consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "ey.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "KPMG",
+    "aliases": [
+      "kpmg",
+      "kpmg llp",
+      "kpmg tax",
+      "kpmg advisory",
+      "kpmg us"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "kpmg.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "BDO USA",
+    "aliases": [
+      "bdo usa",
+      "bdo",
+      "bdo usa pc",
+      "bdo tax",
+      "bdo advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "bdo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "RSM US",
+    "aliases": [
+      "rsm us",
+      "rsm",
+      "rsm us llp",
+      "rsm tax",
+      "rsm consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "rsmus.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Grant Thornton",
+    "aliases": [
+      "grant thornton",
+      "grant thornton llp",
+      "grant thornton advisors",
+      "grant thornton tax",
+      "grant thornton advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "grantthornton.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Forvis Mazars",
+    "aliases": [
+      "forvis mazars",
+      "forvis",
+      "mazars usa",
+      "forvis mazars llp",
+      "forvis mazars tax"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "forvismazars.us",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CLA",
+    "aliases": [
+      "cla",
+      "cliftonlarsonallen",
+      "clifton larson allen",
+      "cla tax",
+      "cla advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "claconnect.com",
+    "confidence": "medium",
+    "notes": "Short acronym can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "CBIZ",
+    "aliases": [
+      "cbiz",
+      "cbiz inc",
+      "cbiz advisory",
+      "cbiz accounting",
+      "cbiz tax"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "cbiz.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Baker Tilly",
+    "aliases": [
+      "baker tilly",
+      "baker tilly us",
+      "baker tilly advisory",
+      "baker tilly tax",
+      "bakertilly"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "bakertilly.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Crowe",
+    "aliases": [
+      "crowe",
+      "crowe llp",
+      "crowe horwath",
+      "crowe tax",
+      "crowe advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "crowe.com",
+    "confidence": "medium",
+    "notes": "Short brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "CohnReznick",
+    "aliases": [
+      "cohnreznick",
+      "cohn reznick",
+      "cohnreznick llp",
+      "cohnreznick tax",
+      "cohnreznick advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "cohnreznick.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "EisnerAmper",
+    "aliases": [
+      "eisneramper",
+      "eisner amper",
+      "eisneramper llp",
+      "eisneramper tax",
+      "eisneramper advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "eisneramper.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Marcum",
+    "aliases": [
+      "marcum",
+      "marcum llp",
+      "marcum accounting",
+      "marcum tax",
+      "marcum advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "marcumllp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Plante Moran",
+    "aliases": [
+      "plante moran",
+      "plantemoran",
+      "plante moran pllc",
+      "plante moran tax",
+      "plante moran advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "plantemoran.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Moss Adams",
+    "aliases": [
+      "moss adams",
+      "moss adams llp",
+      "mossadams",
+      "moss adams tax",
+      "moss adams advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "mossadams.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Armanino",
+    "aliases": [
+      "armanino",
+      "armanino llp",
+      "armanino accounting",
+      "armanino tax",
+      "armanino advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "armanino.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Aprio",
+    "aliases": [
+      "aprio",
+      "aprio llp",
+      "aprio advisory",
+      "aprio tax",
+      "aprio accounting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "aprio.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cherry Bekaert",
+    "aliases": [
+      "cherry bekaert",
+      "cherry bekaert llp",
+      "cherry bekaert advisory",
+      "cherry bekaert tax",
+      "cbh accounting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "cbh.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Withum",
+    "aliases": [
+      "withum",
+      "withumsmith brown",
+      "withumsmith brown pc",
+      "withum tax",
+      "withum advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "withum.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PKF O'Connor Davies",
+    "aliases": [
+      "pkf oconnor davies",
+      "pkf o connor davies",
+      "pkfod",
+      "pkf od",
+      "pkf tax"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "pkfod.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sikich",
+    "aliases": [
+      "sikich",
+      "sikich llp",
+      "sikich accounting",
+      "sikich tax",
+      "sikich advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "sikich.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wipfli",
+    "aliases": [
+      "wipfli",
+      "wipfli llp",
+      "wipfli accounting",
+      "wipfli tax",
+      "wipfli advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "wipfli.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Eide Bailly",
+    "aliases": [
+      "eide bailly",
+      "eide bailly llp",
+      "eidebailly",
+      "eide bailly tax",
+      "eide bailly advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "eidebailly.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "HCVT",
+    "aliases": [
+      "hcvt",
+      "holthouse carlin van trigt",
+      "hcvt llp",
+      "hcvt tax",
+      "hcvt advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "hcvt.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SingerLewak",
+    "aliases": [
+      "singerlewak",
+      "singer lewak",
+      "singerlewak llp",
+      "singerlewak tax",
+      "singerlewak advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "singerlewak.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MGO",
+    "aliases": [
+      "mgo",
+      "macias gini and oconnell",
+      "mgo cpa",
+      "mgo tax",
+      "mgo advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "mgocpa.com",
+    "confidence": "medium",
+    "notes": "Short acronym can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "BPM",
+    "aliases": [
+      "bpm",
+      "bpm llp",
+      "bpm accounting",
+      "bpm tax",
+      "bpm advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "bpm.com",
+    "confidence": "medium",
+    "notes": "Short acronym can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Carr Riggs & Ingram",
+    "aliases": [
+      "carr riggs and ingram",
+      "carr riggs & ingram",
+      "cri cpa",
+      "cri accounting",
+      "cri tax"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "cricpa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Warren Averett",
+    "aliases": [
+      "warren averett",
+      "warren averett llc",
+      "warren averett accounting",
+      "warren averett tax",
+      "warren averett advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "warrenaverett.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mauldin & Jenkins",
+    "aliases": [
+      "mauldin and jenkins",
+      "mauldin & jenkins",
+      "mj cpa",
+      "mauldin jenkins tax",
+      "mauldin jenkins accounting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "mjcpa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Rehmann",
+    "aliases": [
+      "rehmann",
+      "rehmann llc",
+      "rehmann accounting",
+      "rehmann tax",
+      "rehmann advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "rehmann.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Doeren Mayhew",
+    "aliases": [
+      "doeren mayhew",
+      "doeren",
+      "doeren mayhew cpa",
+      "doeren mayhew tax",
+      "doeren mayhew advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "doeren.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "UHY",
+    "aliases": [
+      "uhy",
+      "uhy llp",
+      "uhy advisors",
+      "uhy accounting",
+      "uhy tax"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "uhy-us.com",
+    "confidence": "medium",
+    "notes": "Short acronym can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Kaufman Rossin",
+    "aliases": [
+      "kaufman rossin",
+      "kaufman rossin cpa",
+      "kaufman rossin accounting",
+      "kaufman rossin tax",
+      "kaufman rossin advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "kaufmanrossin.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Frazier & Deeter",
+    "aliases": [
+      "frazier and deeter",
+      "frazier & deeter",
+      "frazier deeter",
+      "frazier deeter tax",
+      "frazier deeter advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "frazierdeeter.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kreischer Miller",
+    "aliases": [
+      "kreischer miller",
+      "kreischer miller cpa",
+      "kmco",
+      "kreischer miller tax",
+      "kreischer miller advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "kmco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Schellman",
+    "aliases": [
+      "schellman",
+      "schellman compliance",
+      "schellman assurance",
+      "schellman audit",
+      "schellman payment"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "schellman.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "A-LIGN",
+    "aliases": [
+      "a-lign",
+      "a lign",
+      "align compliance",
+      "a lign compliance",
+      "a lign audit"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "a-lign.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sensiba",
+    "aliases": [
+      "sensiba",
+      "sensiba llp",
+      "sensiba accounting",
+      "sensiba tax",
+      "sensiba advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "sensiba.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Frank Rimerman",
+    "aliases": [
+      "frank rimerman",
+      "frank rimerman co",
+      "frank rimerman cpa",
+      "frank rimerman tax",
+      "frank rimerman advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "frankrimerman.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "McKinsey & Company",
+    "aliases": [
+      "mckinsey and company",
+      "mckinsey & company",
+      "mckinsey",
+      "mckinsey consulting",
+      "mckinsey co"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "mckinsey.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Boston Consulting Group",
+    "aliases": [
+      "boston consulting group",
+      "bcg",
+      "bcg consulting",
+      "the boston consulting group",
+      "bcg inc"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "bcg.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bain & Company",
+    "aliases": [
+      "bain and company",
+      "bain & company",
+      "bain",
+      "bain consulting",
+      "bain co"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "bain.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Accenture",
+    "aliases": [
+      "accenture",
+      "accenture llp",
+      "accenture consulting",
+      "accenture services",
+      "accenture inc"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "accenture.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Capgemini",
+    "aliases": [
+      "capgemini",
+      "capgemini america",
+      "capgemini consulting",
+      "capgemini services",
+      "cap gemini"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "capgemini.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cognizant",
+    "aliases": [
+      "cognizant",
+      "cognizant technology solutions",
+      "cognizant consulting",
+      "cognizant services",
+      "cts consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "cognizant.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Infosys",
+    "aliases": [
+      "infosys",
+      "infosys limited",
+      "infosys consulting",
+      "infosys services",
+      "infosys ltd"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "infosys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wipro",
+    "aliases": [
+      "wipro",
+      "wipro limited",
+      "wipro consulting",
+      "wipro services",
+      "wipro ltd"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "wipro.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tata Consultancy Services",
+    "aliases": [
+      "tata consultancy services",
+      "tcs",
+      "tcs consulting",
+      "tata consulting",
+      "tcs services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "tcs.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Slalom",
+    "aliases": [
+      "slalom",
+      "slalom consulting",
+      "slalom llc",
+      "slalom services",
+      "slalom inc"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "slalom.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Booz Allen Hamilton",
+    "aliases": [
+      "booz allen hamilton",
+      "booz allen",
+      "boozallen",
+      "booz allen consulting",
+      "bah consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "boozallen.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Guidehouse",
+    "aliases": [
+      "guidehouse",
+      "guidehouse inc",
+      "guidehouse consulting",
+      "guidehouse services",
+      "guidehouse advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "guidehouse.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Alvarez & Marsal",
+    "aliases": [
+      "alvarez and marsal",
+      "alvarez & marsal",
+      "a&m consulting",
+      "alvarez marsal",
+      "am consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "alvarezandmarsal.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "FTI Consulting",
+    "aliases": [
+      "fti consulting",
+      "fti",
+      "fti consulting inc",
+      "fti advisory",
+      "fti services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "fticonsulting.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "AlixPartners",
+    "aliases": [
+      "alixpartners",
+      "alix partners",
+      "alixpartners llp",
+      "alixpartners consulting",
+      "alixpartners advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "alixpartners.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kearney",
+    "aliases": [
+      "kearney",
+      "a t kearney",
+      "at kearney",
+      "kearney consulting",
+      "kearney inc"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "kearney.com",
+    "confidence": "medium",
+    "notes": "Generic surname can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Oliver Wyman",
+    "aliases": [
+      "oliver wyman",
+      "oliverwyman",
+      "oliver wyman consulting",
+      "oliver wyman inc",
+      "marsh oliver wyman"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "oliverwyman.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "LEK Consulting",
+    "aliases": [
+      "lek consulting",
+      "l e k consulting",
+      "lek",
+      "lek consulting llc",
+      "lek advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "lek.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Roland Berger",
+    "aliases": [
+      "roland berger",
+      "roland berger consulting",
+      "rolandberger",
+      "roland berger lp",
+      "roland berger advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "rolandberger.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Gartner",
+    "aliases": [
+      "gartner",
+      "gartner inc",
+      "gartner consulting",
+      "gartner advisory",
+      "gartner research"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "gartner.com",
+    "confidence": "medium",
+    "notes": "Charges may be research subscriptions rather than consulting services."
+  },
+  {
+    "canonical_name": "Forrester",
+    "aliases": [
+      "forrester",
+      "forrester research",
+      "forrester consulting",
+      "forrester inc",
+      "forrester advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "forrester.com",
+    "confidence": "medium",
+    "notes": "Charges may be research subscriptions rather than consulting services."
+  },
+  {
+    "canonical_name": "West Monroe",
+    "aliases": [
+      "west monroe",
+      "west monroe partners",
+      "westmonroe",
+      "west monroe consulting",
+      "west monroe llc"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "westmonroe.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Publicis Sapient",
+    "aliases": [
+      "publicis sapient",
+      "sapient",
+      "sapient consulting",
+      "publicis sapient services",
+      "sapient corporation"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "publicissapient.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Thoughtworks",
+    "aliases": [
+      "thoughtworks",
+      "thought works",
+      "thoughtworks inc",
+      "thoughtworks consulting",
+      "thoughtworks services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "thoughtworks.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "EPAM Systems",
+    "aliases": [
+      "epam systems",
+      "epam",
+      "epam systems inc",
+      "epam consulting",
+      "epam services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "epam.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Globant",
+    "aliases": [
+      "globant",
+      "globant llc",
+      "globant consulting",
+      "globant services",
+      "globant usa"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "globant.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Perficient",
+    "aliases": [
+      "perficient",
+      "perficient inc",
+      "perficient consulting",
+      "perficient services",
+      "perficient digital"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "perficient.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CGI",
+    "aliases": [
+      "cgi",
+      "cgi inc",
+      "cgi consulting",
+      "cgi technologies",
+      "cgi services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "cgi.com",
+    "confidence": "medium",
+    "notes": "Short acronym can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "NTT DATA",
+    "aliases": [
+      "ntt data",
+      "nttdata",
+      "ntt data services",
+      "ntt data consulting",
+      "ntt data inc"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "nttdata.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "DXC Technology",
+    "aliases": [
+      "dxc technology",
+      "dxc",
+      "dxc technology services",
+      "dxc consulting",
+      "dxc services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "dxc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Genpact",
+    "aliases": [
+      "genpact",
+      "genpact llc",
+      "genpact consulting",
+      "genpact services",
+      "genpact usa"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "genpact.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Protiviti",
+    "aliases": [
+      "protiviti",
+      "protiviti inc",
+      "protiviti consulting",
+      "protiviti advisory",
+      "protiviti services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "protiviti.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Huron Consulting Group",
+    "aliases": [
+      "huron consulting group",
+      "huron consulting",
+      "huron",
+      "huron consulting services",
+      "huron group"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "huronconsultinggroup.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CRA International",
+    "aliases": [
+      "cra international",
+      "charles river associates",
+      "crai",
+      "cra consulting",
+      "cra international inc"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "crai.com",
+    "confidence": "medium",
+    "notes": "Acronym can collide with unrelated organizations."
+  },
+  {
+    "canonical_name": "NERA Economic Consulting",
+    "aliases": [
+      "nera economic consulting",
+      "nera",
+      "nera consulting",
+      "national economic research associates",
+      "nera economic"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "nera.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Analysis Group",
+    "aliases": [
+      "analysis group",
+      "analysis group inc",
+      "analysis group consulting",
+      "analysisgroup",
+      "analysis group economics"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "analysisgroup.com",
+    "confidence": "medium",
+    "notes": "Generic name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Cornerstone Research",
+    "aliases": [
+      "cornerstone research",
+      "cornerstone research inc",
+      "cornerstone economic consulting",
+      "cornerstone litigation consulting",
+      "cornerstone research payment"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "cornerstone.com",
+    "confidence": "medium",
+    "notes": "Generic brand wording can collide with unrelated businesses."
+  },
+  {
+    "canonical_name": "Berkeley Research Group",
+    "aliases": [
+      "berkeley research group",
+      "brg",
+      "thinkbrg",
+      "brg consulting",
+      "berkeley research consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "thinkbrg.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ankura",
+    "aliases": [
+      "ankura",
+      "ankura consulting",
+      "ankura consulting group",
+      "ankura advisory",
+      "ankura services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "ankura.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kroll",
+    "aliases": [
+      "kroll",
+      "kroll llc",
+      "kroll consulting",
+      "kroll advisory",
+      "kroll risk"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "kroll.com",
+    "confidence": "medium",
+    "notes": "May include valuation, cyber, investigations, compliance, or other professional services."
+  },
+  {
+    "canonical_name": "Stout",
+    "aliases": [
+      "stout",
+      "stout risius ross",
+      "stout advisory",
+      "stout valuation",
+      "stout consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "stout.com",
+    "confidence": "medium",
+    "notes": "Short brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Houlihan Lokey",
+    "aliases": [
+      "houlihan lokey",
+      "houlihan lokey inc",
+      "hl advisory",
+      "houlihan lokey financial advisory",
+      "houlihan lokey consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "hl.com",
+    "confidence": "medium",
+    "notes": "May represent investment-banking or financial-advisory services."
+  },
+  {
+    "canonical_name": "Aon",
+    "aliases": [
+      "aon",
+      "aon plc",
+      "aon consulting",
+      "aon advisory",
+      "aon risk services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "aon.com",
+    "confidence": "medium",
+    "notes": "Aon may also bill insurance brokerage or benefits services."
+  },
+  {
+    "canonical_name": "Mercer",
+    "aliases": [
+      "mercer",
+      "mercer consulting",
+      "mercer llc",
+      "mercer human resources consulting",
+      "mercer benefits"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "mercer.com",
+    "confidence": "medium",
+    "notes": "May represent benefits brokerage or HR consulting."
+  },
+  {
+    "canonical_name": "WTW",
+    "aliases": [
+      "wtw",
+      "willis towers watson",
+      "towers watson",
+      "wtw consulting",
+      "willis towers watson consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "wtwco.com",
+    "confidence": "medium",
+    "notes": "May represent insurance brokerage, benefits, or consulting."
+  },
+  {
+    "canonical_name": "Gallup",
+    "aliases": [
+      "gallup",
+      "gallup inc",
+      "gallup consulting",
+      "gallup workplace",
+      "gallup services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "gallup.com",
+    "confidence": "medium",
+    "notes": "May represent consulting, assessments, or subscription products."
+  },
+  {
+    "canonical_name": "Kirkland & Ellis",
+    "aliases": [
+      "kirkland and ellis",
+      "kirkland & ellis",
+      "kirkland ellis llp",
+      "kirkland legal",
+      "kirkland law"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "kirkland.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Latham & Watkins",
+    "aliases": [
+      "latham and watkins",
+      "latham & watkins",
+      "latham watkins llp",
+      "latham legal",
+      "latham law"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "lw.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "DLA Piper",
+    "aliases": [
+      "dla piper",
+      "dla piper llp",
+      "dla piper us",
+      "dla legal",
+      "dla piper law"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "dlapiper.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Baker McKenzie",
+    "aliases": [
+      "baker mckenzie",
+      "baker & mckenzie",
+      "baker mckenzie llp",
+      "baker mckenzie legal",
+      "baker mckenzie law"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "bakermckenzie.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Skadden",
+    "aliases": [
+      "skadden",
+      "skadden arps",
+      "skadden arps slate meagher flom",
+      "skadden legal",
+      "skadden law"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "skadden.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sidley Austin",
+    "aliases": [
+      "sidley austin",
+      "sidley",
+      "sidley austin llp",
+      "sidley legal",
+      "sidley law"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "sidley.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Morgan Lewis",
+    "aliases": [
+      "morgan lewis",
+      "morgan lewis bockius",
+      "morgan lewis llp",
+      "morgan lewis legal",
+      "morgan lewis law"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "morganlewis.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Jones Day",
+    "aliases": [
+      "jones day",
+      "jonesday",
+      "jones day law",
+      "jones day legal",
+      "jones day firm"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "jonesday.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "White & Case",
+    "aliases": [
+      "white and case",
+      "white & case",
+      "white case llp",
+      "white case legal",
+      "white case law"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "whitecase.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hogan Lovells",
+    "aliases": [
+      "hogan lovells",
+      "hogan lovells us",
+      "hogan lovells llp",
+      "hogan legal",
+      "hogan lovells law"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "hoganlovells.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Greenberg Traurig",
+    "aliases": [
+      "greenberg traurig",
+      "greenberg traurig llp",
+      "gt law",
+      "gtlaw",
+      "greenberg legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "gtlaw.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cooley",
+    "aliases": [
+      "cooley",
+      "cooley llp",
+      "cooley law",
+      "cooley legal",
+      "cooley attorneys"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "cooley.com",
+    "confidence": "medium",
+    "notes": "Surname can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Goodwin",
+    "aliases": [
+      "goodwin",
+      "goodwin procter",
+      "goodwin procter llp",
+      "goodwin law",
+      "goodwin legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "goodwinlaw.com",
+    "confidence": "medium",
+    "notes": "Surname can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Wilson Sonsini",
+    "aliases": [
+      "wilson sonsini",
+      "wilson sonsini goodrich rosati",
+      "wsgr",
+      "wilson sonsini law",
+      "wilson sonsini legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "wsgr.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fenwick & West",
+    "aliases": [
+      "fenwick and west",
+      "fenwick & west",
+      "fenwick west llp",
+      "fenwick law",
+      "fenwick legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "fenwick.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Orrick",
+    "aliases": [
+      "orrick",
+      "orrick herrington sutcliffe",
+      "orrick llp",
+      "orrick law",
+      "orrick legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "orrick.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Perkins Coie",
+    "aliases": [
+      "perkins coie",
+      "perkinscoie",
+      "perkins coie llp",
+      "perkins coie law",
+      "perkins coie legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "perkinscoie.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Morrison Foerster",
+    "aliases": [
+      "morrison foerster",
+      "morrison & foerster",
+      "mofo law",
+      "morrison foerster llp",
+      "mofo legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "mofo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Gibson Dunn",
+    "aliases": [
+      "gibson dunn",
+      "gibson dunn crutcher",
+      "gibson dunn llp",
+      "gibson dunn law",
+      "gibson dunn legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "gibsondunn.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Paul Weiss",
+    "aliases": [
+      "paul weiss",
+      "paul weiss rifkind wharton garrison",
+      "paul weiss llp",
+      "paul weiss law",
+      "paul weiss legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "paulweiss.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sullivan & Cromwell",
+    "aliases": [
+      "sullivan and cromwell",
+      "sullivan & cromwell",
+      "sullivan cromwell llp",
+      "sullcrom",
+      "sullivan cromwell law"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "sullcrom.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Simpson Thacher",
+    "aliases": [
+      "simpson thacher",
+      "simpson thacher bartlett",
+      "stb law",
+      "simpson thacher llp",
+      "simpson thacher legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "stblaw.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Weil Gotshal & Manges",
+    "aliases": [
+      "weil gotshal and manges",
+      "weil gotshal & manges",
+      "weil llp",
+      "weil law",
+      "weil legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "weil.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Debevoise & Plimpton",
+    "aliases": [
+      "debevoise and plimpton",
+      "debevoise & plimpton",
+      "debevoise llp",
+      "debevoise law",
+      "debevoise legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "debevoise.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cleary Gottlieb",
+    "aliases": [
+      "cleary gottlieb",
+      "cleary gottlieb steen hamilton",
+      "cgsh",
+      "cleary law",
+      "cleary legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "cgsh.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Milbank",
+    "aliases": [
+      "milbank",
+      "milbank llp",
+      "milbank law",
+      "milbank legal",
+      "milbank attorneys"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "milbank.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ropes & Gray",
+    "aliases": [
+      "ropes and gray",
+      "ropes & gray",
+      "ropes gray llp",
+      "ropes gray law",
+      "ropes gray legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "ropesgray.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "WilmerHale",
+    "aliases": [
+      "wilmerhale",
+      "wilmer hale",
+      "wilmer cutler pickering hale dorr",
+      "wilmerhale law",
+      "wilmerhale legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "wilmerhale.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Covington & Burling",
+    "aliases": [
+      "covington and burling",
+      "covington & burling",
+      "covington burling llp",
+      "covington law",
+      "covington legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "cov.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Arnold & Porter",
+    "aliases": [
+      "arnold and porter",
+      "arnold & porter",
+      "arnold porter kaye scholer",
+      "arnold porter law",
+      "arnold porter legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "arnoldporter.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Akin",
+    "aliases": [
+      "akin",
+      "akin gump",
+      "akin gump strauss hauer feld",
+      "akin law",
+      "akin legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "akingump.com",
+    "confidence": "medium",
+    "notes": "Short brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "King & Spalding",
+    "aliases": [
+      "king and spalding",
+      "king & spalding",
+      "king spalding llp",
+      "kslaw",
+      "king spalding legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "kslaw.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mayer Brown",
+    "aliases": [
+      "mayer brown",
+      "mayer brown llp",
+      "mayerbrown",
+      "mayer brown law",
+      "mayer brown legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "mayerbrown.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Reed Smith",
+    "aliases": [
+      "reed smith",
+      "reed smith llp",
+      "reedsmith",
+      "reed smith law",
+      "reed smith legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "reedsmith.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Norton Rose Fulbright",
+    "aliases": [
+      "norton rose fulbright",
+      "norton rose",
+      "fulbright jaworski",
+      "nrf law",
+      "norton rose legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "nortonrosefulbright.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dentons",
+    "aliases": [
+      "dentons",
+      "dentons us",
+      "dentons law",
+      "dentons legal",
+      "dentons llp"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "dentons.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "K&L Gates",
+    "aliases": [
+      "k&l gates",
+      "k and l gates",
+      "kl gates",
+      "klgates",
+      "k l gates law"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "klgates.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Foley & Lardner",
+    "aliases": [
+      "foley and lardner",
+      "foley & lardner",
+      "foley lardner llp",
+      "foley law",
+      "foley legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "foley.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Faegre Drinker",
+    "aliases": [
+      "faegre drinker",
+      "faegre drinker biddle reath",
+      "faegre drinker llp",
+      "faegre law",
+      "faegre legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "faegredrinker.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Taft",
+    "aliases": [
+      "taft",
+      "taft stetinius hollister",
+      "taft law",
+      "taft legal",
+      "taft attorneys"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "taftlaw.com",
+    "confidence": "medium",
+    "notes": "Short surname can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Fisher Phillips",
+    "aliases": [
+      "fisher phillips",
+      "fisher & phillips",
+      "fisher phillips llp",
+      "fisher phillips law",
+      "fisher phillips legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "fisherphillips.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Littler",
+    "aliases": [
+      "littler",
+      "littler mendelson",
+      "littler mendelson pc",
+      "littler law",
+      "littler legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "littler.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ogletree Deakins",
+    "aliases": [
+      "ogletree deakins",
+      "ogletree deakins nash smoak stewart",
+      "ogletree law",
+      "ogletree legal",
+      "ogletree deakins pc"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "ogletree.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Jackson Lewis",
+    "aliases": [
+      "jackson lewis",
+      "jackson lewis pc",
+      "jacksonlewis",
+      "jackson lewis law",
+      "jackson lewis legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "jacksonlewis.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Seyfarth Shaw",
+    "aliases": [
+      "seyfarth shaw",
+      "seyfarth",
+      "seyfarth shaw llp",
+      "seyfarth law",
+      "seyfarth legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "seyfarth.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lewis Brisbois",
+    "aliases": [
+      "lewis brisbois",
+      "lewis brisbois bisgaard smith",
+      "lewis brisbois llp",
+      "lewis brisbois law",
+      "lewis brisbois legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "lewisbrisbois.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Gordon Rees Scully Mansukhani",
+    "aliases": [
+      "gordon rees scully mansukhani",
+      "gordon rees",
+      "grsm",
+      "gordon rees law",
+      "gordon rees legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "grsm.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Quinn Emanuel",
+    "aliases": [
+      "quinn emanuel",
+      "quinn emanuel urquhart sullivan",
+      "quinn emanuel llp",
+      "quinn emanuel law",
+      "quinn emanuel legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "quinnemanuel.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Boies Schiller Flexner",
+    "aliases": [
+      "boies schiller flexner",
+      "boies schiller",
+      "bsf llp",
+      "boies schiller law",
+      "boies schiller legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "bsfllp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fish & Richardson",
+    "aliases": [
+      "fish and richardson",
+      "fish & richardson",
+      "fish richardson pc",
+      "fish richardson law",
+      "fish richardson legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "fr.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Finnegan",
+    "aliases": [
+      "finnegan",
+      "finnegan henderson farabow garrett dunner",
+      "finnegan law",
+      "finnegan legal",
+      "finnegan llp"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "finnegan.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kilpatrick Townsend",
+    "aliases": [
+      "kilpatrick townsend",
+      "kilpatrick townsend stockton",
+      "kilpatrick law",
+      "kilpatrick legal",
+      "kilpatrick townsend llp"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "kilpatricktownsend.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Polsinelli",
+    "aliases": [
+      "polsinelli",
+      "polsinelli pc",
+      "polsinelli law",
+      "polsinelli legal",
+      "polsinelli attorneys"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "polsinelli.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Holland & Knight",
+    "aliases": [
+      "holland and knight",
+      "holland & knight",
+      "holland knight llp",
+      "hklaw",
+      "holland knight legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "hklaw.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Akerman",
+    "aliases": [
+      "akerman",
+      "akerman llp",
+      "akerman law",
+      "akerman legal",
+      "akerman attorneys"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "akerman.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Troutman Pepper Locke",
+    "aliases": [
+      "troutman pepper locke",
+      "troutman pepper",
+      "locke lord",
+      "troutman law",
+      "troutman legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "troutman.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "McDermott Will & Emery",
+    "aliases": [
+      "mcdermott will and emery",
+      "mcdermott will & emery",
+      "mwe law",
+      "mcdermott legal",
+      "mcdermott will emery llp"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "mwe.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sheppard Mullin",
+    "aliases": [
+      "sheppard mullin",
+      "sheppard mullin richter hampton",
+      "sheppard mullin llp",
+      "sheppard law",
+      "sheppard legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "sheppardmullin.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Venable",
+    "aliases": [
+      "venable",
+      "venable llp",
+      "venable law",
+      "venable legal",
+      "venable attorneys"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "venable.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "BakerHostetler",
+    "aliases": [
+      "bakerhostetler",
+      "baker hostetler",
+      "baker & hostetler",
+      "baker law",
+      "bakerhostetler legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "bakerlaw.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ballard Spahr",
+    "aliases": [
+      "ballard spahr",
+      "ballard spahr llp",
+      "ballardspahr",
+      "ballard spahr law",
+      "ballard spahr legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "ballardspahr.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Duane Morris",
+    "aliases": [
+      "duane morris",
+      "duane morris llp",
+      "duanemorris",
+      "duane morris law",
+      "duane morris legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "duanemorris.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cozen O'Connor",
+    "aliases": [
+      "cozen oconnor",
+      "cozen o connor",
+      "cozen",
+      "cozen law",
+      "cozen legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "cozen.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fox Rothschild",
+    "aliases": [
+      "fox rothschild",
+      "fox rothschild llp",
+      "foxrothschild",
+      "fox rothschild law",
+      "fox rothschild legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "foxrothschild.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Blank Rome",
+    "aliases": [
+      "blank rome",
+      "blank rome llp",
+      "blankrome",
+      "blank rome law",
+      "blank rome legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "blankrome.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nelson Mullins",
+    "aliases": [
+      "nelson mullins",
+      "nelson mullins riley scarborough",
+      "nelson mullins law",
+      "nelson mullins legal",
+      "nelson mullins llp"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "nelsonmullins.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Buchanan Ingersoll & Rooney",
+    "aliases": [
+      "buchanan ingersoll and rooney",
+      "buchanan ingersoll & rooney",
+      "bipc",
+      "buchanan law",
+      "buchanan ingersoll legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "bipc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ice Miller",
+    "aliases": [
+      "ice miller",
+      "ice miller llp",
+      "icemiller",
+      "ice miller law",
+      "ice miller legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "icemiller.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Snell & Wilmer",
+    "aliases": [
+      "snell and wilmer",
+      "snell & wilmer",
+      "snell wilmer llp",
+      "swlaw",
+      "snell wilmer legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "swlaw.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dorsey & Whitney",
+    "aliases": [
+      "dorsey and whitney",
+      "dorsey & whitney",
+      "dorsey whitney llp",
+      "dorsey law",
+      "dorsey legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "dorsey.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Stoel Rives",
+    "aliases": [
+      "stoel rives",
+      "stoel rives llp",
+      "stoel law",
+      "stoel legal",
+      "stoelrives"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "stoel.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lane Powell",
+    "aliases": [
+      "lane powell",
+      "lane powell pc",
+      "lanepowell",
+      "lane powell law",
+      "lane powell legal"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "lanepowell.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Robert Half",
+    "aliases": [
+      "robert half",
+      "robert half international",
+      "robert half staffing",
+      "robert half consulting",
+      "robert half payment"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "roberthalf.com",
+    "confidence": "medium",
+    "notes": "Charges may represent temporary staffing rather than advisory services."
+  },
+  {
+    "canonical_name": "Kelly Services",
+    "aliases": [
+      "kelly services",
+      "kelly staffing",
+      "kellyservices",
+      "kelly temporary services",
+      "kelly professional"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "kellyservices.com",
+    "confidence": "medium",
+    "notes": "Charges may represent temporary staffing."
+  },
+  {
+    "canonical_name": "Randstad",
+    "aliases": [
+      "randstad",
+      "randstad usa",
+      "randstad staffing",
+      "randstad north america",
+      "randstad professionals"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "randstadusa.com",
+    "confidence": "medium",
+    "notes": "Charges may represent temporary staffing."
+  },
+  {
+    "canonical_name": "Adecco",
+    "aliases": [
+      "adecco",
+      "adecco usa",
+      "adecco staffing",
+      "adecco group",
+      "adecco professional"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "adecco.com",
+    "confidence": "medium",
+    "notes": "Charges may represent temporary staffing."
+  },
+  {
+    "canonical_name": "ManpowerGroup",
+    "aliases": [
+      "manpowergroup",
+      "manpower group",
+      "manpower",
+      "manpower staffing",
+      "manpower professional"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "manpowergroup.com",
+    "confidence": "medium",
+    "notes": "Charges may represent temporary staffing."
+  },
+  {
+    "canonical_name": "Insight Global",
+    "aliases": [
+      "insight global",
+      "insightglobal",
+      "insight global staffing",
+      "insight global llc",
+      "insight global services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "insightglobal.com",
+    "confidence": "medium",
+    "notes": "Charges may represent staffing or consulting."
+  },
+  {
+    "canonical_name": "TEKsystems",
+    "aliases": [
+      "teksystems",
+      "tek systems",
+      "teksystems inc",
+      "teksystems staffing",
+      "teksystems services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "teksystems.com",
+    "confidence": "medium",
+    "notes": "Charges may represent staffing or technology services."
+  },
+  {
+    "canonical_name": "Kforce",
+    "aliases": [
+      "kforce",
+      "kforce inc",
+      "kforce staffing",
+      "kforce professional staffing",
+      "kforce services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "kforce.com",
+    "confidence": "medium",
+    "notes": "Charges may represent staffing or consulting."
+  },
+  {
+    "canonical_name": "Aerotek",
+    "aliases": [
+      "aerotek",
+      "aerotek inc",
+      "aerotek staffing",
+      "aerotek services",
+      "aerotek professional"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "aerotek.com",
+    "confidence": "medium",
+    "notes": "Charges may represent temporary staffing."
+  },
+  {
+    "canonical_name": "Aston Carter",
+    "aliases": [
+      "aston carter",
+      "astoncarter",
+      "aston carter staffing",
+      "aston carter services",
+      "aston carter inc"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "astoncarter.com",
+    "confidence": "medium",
+    "notes": "Charges may represent staffing or consulting."
+  },
+  {
+    "canonical_name": "Motion Recruitment",
+    "aliases": [
+      "motion recruitment",
+      "motion recruitment partners",
+      "motionrecruitment",
+      "motion staffing",
+      "motion recruiting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "motionrecruitment.com",
+    "confidence": "medium",
+    "notes": "Charges may represent recruiting or staffing."
+  },
+  {
+    "canonical_name": "CyberCoders",
+    "aliases": [
+      "cybercoders",
+      "cyber coders",
+      "cybercoders inc",
+      "cybercoders recruiting",
+      "cybercoders placement"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "cybercoders.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Michael Page",
+    "aliases": [
+      "michael page",
+      "michael page international",
+      "michaelpage",
+      "michael page recruitment",
+      "pagegroup"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "michaelpage.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Korn Ferry",
+    "aliases": [
+      "korn ferry",
+      "kornferry",
+      "korn ferry international",
+      "korn ferry consulting",
+      "korn ferry search"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "kornferry.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Spencer Stuart",
+    "aliases": [
+      "spencer stuart",
+      "spencerstuart",
+      "spencer stuart executive search",
+      "spencer stuart inc",
+      "spencer stuart consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "spencerstuart.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Russell Reynolds Associates",
+    "aliases": [
+      "russell reynolds associates",
+      "russell reynolds",
+      "rra executive search",
+      "russell reynolds consulting",
+      "russellreynolds"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "russellreynolds.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Heidrick & Struggles",
+    "aliases": [
+      "heidrick and struggles",
+      "heidrick & struggles",
+      "heidrick struggles",
+      "heidrick executive search",
+      "heidrick consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "heidrick.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lucas Group",
+    "aliases": [
+      "lucas group",
+      "lucas group recruiting",
+      "lucas group search",
+      "korn ferry lucas group",
+      "lucasgroup"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "kornferry.com",
+    "confidence": "medium",
+    "notes": "Legacy recruiting brand now associated with Korn Ferry."
+  },
+  {
+    "canonical_name": "Vaco",
+    "aliases": [
+      "vaco",
+      "vaco llc",
+      "vaco staffing",
+      "vaco consulting",
+      "vaco services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "vaco.com",
+    "confidence": "medium",
+    "notes": "Charges may represent staffing or consulting."
+  },
+  {
+    "canonical_name": "Beacon Hill",
+    "aliases": [
+      "beacon hill",
+      "beacon hill staffing",
+      "beacon hill staffing group",
+      "beaconhillstaffing",
+      "beacon hill services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "beaconhillstaffing.com",
+    "confidence": "medium",
+    "notes": "Generic brand wording can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Creative Circle",
+    "aliases": [
+      "creative circle",
+      "creativecircle",
+      "creative circle staffing",
+      "creative circle recruiting",
+      "creative circle services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "creativecircle.com",
+    "confidence": "medium",
+    "notes": "Charges may represent creative staffing or recruiting."
+  },
+  {
+    "canonical_name": "Aquent",
+    "aliases": [
+      "aquent",
+      "aquent llc",
+      "aquent talent",
+      "aquent staffing",
+      "aquent services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "aquent.com",
+    "confidence": "medium",
+    "notes": "Charges may represent staffing or creative services."
+  },
+  {
+    "canonical_name": "24 Seven Talent",
+    "aliases": [
+      "24 seven talent",
+      "24seven talent",
+      "24 seven staffing",
+      "24 seven recruiting",
+      "24seventalent"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "24seventalent.com",
+    "confidence": "medium",
+    "notes": "Charges may represent staffing or recruiting."
+  },
+  {
+    "canonical_name": "AECOM",
+    "aliases": [
+      "aecom",
+      "aecom technical services",
+      "aecom consulting",
+      "aecom engineering",
+      "aecom inc"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "aecom.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Jacobs",
+    "aliases": [
+      "jacobs",
+      "jacobs engineering",
+      "jacobs solutions",
+      "jacobs engineering group",
+      "jacobs consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "jacobs.com",
+    "confidence": "medium",
+    "notes": "Surname can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "WSP",
+    "aliases": [
+      "wsp",
+      "wsp usa",
+      "wsp global",
+      "wsp engineering",
+      "wsp consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "wsp.com",
+    "confidence": "medium",
+    "notes": "Short acronym can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Stantec",
+    "aliases": [
+      "stantec",
+      "stantec consulting",
+      "stantec inc",
+      "stantec engineering",
+      "stantec architecture"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "stantec.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "HDR",
+    "aliases": [
+      "hdr",
+      "hdr inc",
+      "hdr engineering",
+      "hdr architecture",
+      "hdr consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "hdrinc.com",
+    "confidence": "medium",
+    "notes": "Short acronym can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Arcadis",
+    "aliases": [
+      "arcadis",
+      "arcadis us",
+      "arcadis consulting",
+      "arcadis engineering",
+      "arcadis inc"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "arcadis.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tetra Tech",
+    "aliases": [
+      "tetra tech",
+      "tetratech",
+      "tetra tech inc",
+      "tetra tech consulting",
+      "tetra tech engineering"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "tetratech.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Burns & McDonnell",
+    "aliases": [
+      "burns and mcdonnell",
+      "burns & mcdonnell",
+      "burns mcdonnell",
+      "burns mcd engineering",
+      "burns mcd consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "burnsmcd.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Black & Veatch",
+    "aliases": [
+      "black and veatch",
+      "black & veatch",
+      "black veatch",
+      "bv engineering",
+      "black veatch consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "bv.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kimley-Horn",
+    "aliases": [
+      "kimley horn",
+      "kimley-horn",
+      "kimley horn associates",
+      "kimley horn engineering",
+      "kimley horn consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "kimley-horn.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Terracon",
+    "aliases": [
+      "terracon",
+      "terracon consultants",
+      "terracon consulting",
+      "terracon engineering",
+      "terracon environmental"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "terracon.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Gannett Fleming",
+    "aliases": [
+      "gannett fleming",
+      "gannettfleming",
+      "gannett fleming inc",
+      "gannett fleming engineering",
+      "gannett fleming consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "gannettfleming.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Michael Baker International",
+    "aliases": [
+      "michael baker international",
+      "michael baker",
+      "mbakerintl",
+      "michael baker engineering",
+      "michael baker consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "mbakerintl.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Parsons",
+    "aliases": [
+      "parsons",
+      "parsons corporation",
+      "parsons engineering",
+      "parsons consulting",
+      "parsons services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "parsons.com",
+    "confidence": "medium",
+    "notes": "Surname can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "CDM Smith",
+    "aliases": [
+      "cdm smith",
+      "cdmsmith",
+      "cdm smith inc",
+      "cdm smith engineering",
+      "cdm smith consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "cdmsmith.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dewberry",
+    "aliases": [
+      "dewberry",
+      "dewberry engineers",
+      "dewberry consulting",
+      "dewberry engineering",
+      "dewberry inc"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "dewberry.com",
+    "confidence": "medium",
+    "notes": "Brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "NV5",
+    "aliases": [
+      "nv5",
+      "nv5 global",
+      "nv5 inc",
+      "nv5 engineering",
+      "nv5 consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "nv5.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "TRC Companies",
+    "aliases": [
+      "trc companies",
+      "trc",
+      "trc environmental",
+      "trc engineering",
+      "trc consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "trccompanies.com",
+    "confidence": "medium",
+    "notes": "Short acronym can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "SCS Engineers",
+    "aliases": [
+      "scs engineers",
+      "scs engineering",
+      "scsengineers",
+      "scs environmental",
+      "scs consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "scsengineers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ramboll",
+    "aliases": [
+      "ramboll",
+      "ramboll americas",
+      "ramboll consulting",
+      "ramboll engineering",
+      "ramboll environment"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "ramboll.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ogilvy",
+    "aliases": [
+      "ogilvy",
+      "ogilvy advertising",
+      "ogilvy group",
+      "ogilvy agency",
+      "ogilvy consulting"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "ogilvy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "VML",
+    "aliases": [
+      "vml",
+      "vml agency",
+      "vml advertising",
+      "vml marketing",
+      "vml commerce"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "vml.com",
+    "confidence": "medium",
+    "notes": "Short acronym can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "BBDO",
+    "aliases": [
+      "bbdo",
+      "bbdo worldwide",
+      "bbdo advertising",
+      "bbdo agency",
+      "bbdo usa"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "bbdo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "DDB",
+    "aliases": [
+      "ddb",
+      "ddb worldwide",
+      "ddb advertising",
+      "ddb agency",
+      "ddb usa"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "ddb.com",
+    "confidence": "medium",
+    "notes": "Short acronym can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "McCann",
+    "aliases": [
+      "mccann",
+      "mccann worldgroup",
+      "mccann advertising",
+      "mccann agency",
+      "mccann erickson"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "mccann.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "TBWA",
+    "aliases": [
+      "tbwa",
+      "tbwa worldwide",
+      "tbwa advertising",
+      "tbwa agency",
+      "tbwa chiat day"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "tbwa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Leo Burnett",
+    "aliases": [
+      "leo burnett",
+      "leo burnett company",
+      "leo burnett advertising",
+      "leo burnett agency",
+      "leoburnett"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "leoburnett.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Publicis Worldwide",
+    "aliases": [
+      "publicis worldwide",
+      "publicis",
+      "publicis advertising",
+      "publicis agency",
+      "publicis groupe"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "publicis.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Saatchi & Saatchi",
+    "aliases": [
+      "saatchi and saatchi",
+      "saatchi & saatchi",
+      "saatchi advertising",
+      "saatchi agency",
+      "saatchi worldwide"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "saatchi.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Grey",
+    "aliases": [
+      "grey",
+      "grey advertising",
+      "grey group",
+      "grey agency",
+      "grey global"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "grey.com",
+    "confidence": "medium",
+    "notes": "Generic brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Havas",
+    "aliases": [
+      "havas",
+      "havas creative",
+      "havas media",
+      "havas advertising",
+      "havas agency"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "havas.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dentsu",
+    "aliases": [
+      "dentsu",
+      "dentsu america",
+      "dentsu creative",
+      "dentsu agency",
+      "dentsu advertising"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "dentsu.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "R/GA",
+    "aliases": [
+      "rga",
+      "r ga",
+      "rga agency",
+      "rga advertising",
+      "rga digital"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "rga.com",
+    "confidence": "medium",
+    "notes": "Short acronym can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Huge",
+    "aliases": [
+      "huge",
+      "huge inc",
+      "huge agency",
+      "huge digital",
+      "huge advertising"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "hugeinc.com",
+    "confidence": "medium",
+    "notes": "Generic brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Razorfish",
+    "aliases": [
+      "razorfish",
+      "razor fish",
+      "razorfish agency",
+      "razorfish digital",
+      "razorfish advertising"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "razorfish.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "AKQA",
+    "aliases": [
+      "akqa",
+      "akqa inc",
+      "akqa agency",
+      "akqa digital",
+      "akqa advertising"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "akqa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Droga5",
+    "aliases": [
+      "droga5",
+      "droga 5",
+      "droga5 agency",
+      "droga5 advertising",
+      "accenture song droga5"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "droga5.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "72andSunny",
+    "aliases": [
+      "72andsunny",
+      "72 and sunny",
+      "72andsunny agency",
+      "72 and sunny advertising",
+      "72andsunny marketing"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "72andsunny.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wieden+Kennedy",
+    "aliases": [
+      "wieden kennedy",
+      "wieden+kennedy",
+      "wieden and kennedy",
+      "wk agency",
+      "wieden kennedy advertising"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "wk.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "GSD&M",
+    "aliases": [
+      "gsd&m",
+      "gsdm",
+      "gsd and m",
+      "gsdm advertising",
+      "gsdm agency"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "gsdm.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Martin Agency",
+    "aliases": [
+      "the martin agency",
+      "martin agency",
+      "martinagency",
+      "martin advertising",
+      "martin agency payment"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "martinagency.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Deutsch",
+    "aliases": [
+      "deutsch",
+      "deutsch advertising",
+      "deutsch agency",
+      "deutsch la",
+      "deutsch new york"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "deutsch.com",
+    "confidence": "medium",
+    "notes": "Surname/word can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Goodby Silverstein & Partners",
+    "aliases": [
+      "goodby silverstein and partners",
+      "goodby silverstein & partners",
+      "gsp agency",
+      "goodby silverstein",
+      "goodby advertising"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "goodbysilverstein.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MullenLowe",
+    "aliases": [
+      "mullenlowe",
+      "mullen lowe",
+      "mullenlowe us",
+      "mullenlowe agency",
+      "mullenlowe advertising"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "mullenlowe.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Edelman",
+    "aliases": [
+      "edelman",
+      "edelman pr",
+      "edelman public relations",
+      "edelman communications",
+      "edelman agency"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "edelman.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Weber Shandwick",
+    "aliases": [
+      "weber shandwick",
+      "webershandwick",
+      "weber shandwick pr",
+      "weber shandwick communications",
+      "weber shandwick agency"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "webershandwick.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "FleishmanHillard",
+    "aliases": [
+      "fleishmanhillard",
+      "fleishman hillard",
+      "fleishman hillard pr",
+      "fleishmanhillard communications",
+      "fleishman agency"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "fleishmanhillard.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ketchum",
+    "aliases": [
+      "ketchum",
+      "ketchum inc",
+      "ketchum pr",
+      "ketchum communications",
+      "ketchum agency"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "ketchum.com",
+    "confidence": "medium",
+    "notes": "Surname can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Burson",
+    "aliases": [
+      "burson",
+      "burson global",
+      "burson cohn wolfe",
+      "bcw",
+      "burson pr"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "burson.global",
+    "confidence": "medium",
+    "notes": "Brand and legacy BCW descriptors may both appear."
+  },
+  {
+    "canonical_name": "Finn Partners",
+    "aliases": [
+      "finn partners",
+      "finnpartners",
+      "finn partners pr",
+      "finn partners communications",
+      "finn agency"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "finnpartners.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Zeno Group",
+    "aliases": [
+      "zeno group",
+      "zeno",
+      "zeno group pr",
+      "zeno communications",
+      "zeno agency"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "zenogroup.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Real Chemistry",
+    "aliases": [
+      "real chemistry",
+      "realchemistry",
+      "real chemistry communications",
+      "real chemistry agency",
+      "w2o group"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "realchemistry.com",
+    "confidence": "medium",
+    "notes": "Legacy W2O descriptors may appear."
+  },
+  {
+    "canonical_name": "Highwire",
+    "aliases": [
+      "highwire",
+      "highwire pr",
+      "highwire public relations",
+      "highwire communications",
+      "highwire agency"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "highwirepr.com",
+    "confidence": "medium",
+    "notes": "Brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Walker Sands",
+    "aliases": [
+      "walker sands",
+      "walker sands communications",
+      "walker sands agency",
+      "walker sands pr",
+      "walker sands marketing"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "walkersands.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tinuiti",
+    "aliases": [
+      "tinuiti",
+      "tinuiti agency",
+      "tinuiti marketing",
+      "tinuiti digital",
+      "tinuiti media"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "tinuiti.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wpromote",
+    "aliases": [
+      "wpromote",
+      "w promote",
+      "wpromote agency",
+      "wpromote marketing",
+      "wpromote digital"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "wpromote.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "WebFX",
+    "aliases": [
+      "webfx",
+      "web fx",
+      "webfx marketing",
+      "webfx agency",
+      "webfx digital"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "webfx.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ignite Visibility",
+    "aliases": [
+      "ignite visibility",
+      "ignitevisibility",
+      "ignite visibility marketing",
+      "ignite visibility agency",
+      "ignite visibility digital"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "ignitevisibility.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Disruptive Advertising",
+    "aliases": [
+      "disruptive advertising",
+      "disruptiveadvertising",
+      "disruptive agency",
+      "disruptive marketing",
+      "disruptive advertising inc"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "disruptiveadvertising.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Power Digital",
+    "aliases": [
+      "power digital",
+      "power digital marketing",
+      "powerdigital",
+      "power digital agency",
+      "power digital media"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "powerdigitalmarketing.com",
+    "confidence": "medium",
+    "notes": "Generic wording can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "KlientBoost",
+    "aliases": [
+      "klientboost",
+      "klient boost",
+      "klientboost agency",
+      "klientboost marketing",
+      "klientboost ppc"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "klientboost.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Single Grain",
+    "aliases": [
+      "single grain",
+      "singlegrain",
+      "single grain marketing",
+      "single grain agency",
+      "single grain digital"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "singlegrain.com",
+    "confidence": "medium",
+    "notes": "Brand wording can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Victorious",
+    "aliases": [
+      "victorious",
+      "victorious seo",
+      "victorious marketing",
+      "victorious agency",
+      "victorious digital"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "victorious.com",
+    "confidence": "medium",
+    "notes": "Generic brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Moss Adams Capital",
+    "aliases": [
+      "moss adams capital",
+      "moss adams advisory",
+      "moss adams transaction services",
+      "moss adams consulting",
+      "moss adams"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "mossadams.com",
+    "confidence": "medium",
+    "notes": "May overlap with accounting and tax services from Moss Adams."
+  },
+  {
+    "canonical_name": "Riveron",
+    "aliases": [
+      "riveron",
+      "riveron consulting",
+      "riveron advisory",
+      "riveron transaction services",
+      "riveron llc"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "riveron.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CrossCountry Consulting",
+    "aliases": [
+      "crosscountry consulting",
+      "cross country consulting",
+      "crosscountry-consulting",
+      "crosscountry advisory",
+      "crosscountry services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "crosscountry-consulting.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Embark",
+    "aliases": [
+      "embark",
+      "embark consulting",
+      "embark llc",
+      "embark accounting advisory",
+      "embarkwithus"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "embarkwithus.com",
+    "confidence": "medium",
+    "notes": "Generic brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Centri Business Consulting",
+    "aliases": [
+      "centri business consulting",
+      "centri consulting",
+      "centri",
+      "centri accounting advisory",
+      "centri services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "centriconsulting.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Connor Group",
+    "aliases": [
+      "connor group",
+      "the connor group",
+      "connor group accounting",
+      "connor group advisory",
+      "connorgp"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "connorgp.com",
+    "confidence": "medium",
+    "notes": "Generic name can collide with unrelated firms."
+  },
+  {
+    "canonical_name": "CFGI",
+    "aliases": [
+      "cfgi",
+      "cfgi consulting",
+      "cfgi llc",
+      "cfgi accounting advisory",
+      "cfgi services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "cfgi.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MorganFranklin Consulting",
+    "aliases": [
+      "morganfranklin consulting",
+      "morgan franklin",
+      "morganfranklin",
+      "morgan franklin consulting",
+      "morganfranklin advisory"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "morganfranklin.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Accordion",
+    "aliases": [
+      "accordion",
+      "accordion partners",
+      "accordion consulting",
+      "accordion advisory",
+      "accordion finance"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "accordion.com",
+    "confidence": "medium",
+    "notes": "Brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "A&M Tax",
+    "aliases": [
+      "a&m tax",
+      "a and m tax",
+      "alvarez marsal tax",
+      "alvarez and marsal tax",
+      "am tax"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "alvarezandmarsal.com",
+    "confidence": "medium",
+    "notes": "May overlap with broader Alvarez & Marsal consulting charges."
+  },
+  {
+    "canonical_name": "Ryan",
+    "aliases": [
+      "ryan",
+      "ryan llc",
+      "ryan tax",
+      "ryan tax services",
+      "ryan tax firm"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "ryan.com",
+    "confidence": "medium",
+    "notes": "Common personal name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Avalara Professional Services",
+    "aliases": [
+      "avalara professional services",
+      "avalara tax services",
+      "avalara consulting",
+      "avalara implementation",
+      "avalara services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "avalara.com",
+    "confidence": "medium",
+    "notes": "Avalara charges are often software_saas; use professional_fees only for clearly identified services."
+  },
+  {
+    "canonical_name": "Vertex Consulting",
+    "aliases": [
+      "vertex consulting",
+      "vertex professional services",
+      "vertex tax services",
+      "vertex implementation",
+      "vertex inc services"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "vertexinc.com",
+    "confidence": "medium",
+    "notes": "Vertex charges are often software_saas; use professional_fees only for clearly identified services."
+  },
+  {
+    "canonical_name": "CSC",
+    "aliases": [
+      "csc",
+      "corporation service company",
+      "csc global",
+      "csc registered agent",
+      "csc entity management"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "cscglobal.com",
+    "confidence": "medium",
+    "notes": "Charges may include registered-agent, filing, or entity-management services."
+  },
+  {
+    "canonical_name": "CT Corporation",
+    "aliases": [
+      "ct corporation",
+      "ct corporation system",
+      "ct corp",
+      "ct registered agent",
+      "wolters kluwer ct"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "wolterskluwer.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Northwest Registered Agent",
+    "aliases": [
+      "northwest registered agent",
+      "northwest registered agent llc",
+      "northwest agent",
+      "northwest registered",
+      "northwest ra"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "northwestregisteredagent.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Harbor Compliance",
+    "aliases": [
+      "harbor compliance",
+      "harborcompliance",
+      "harbor compliance services",
+      "harbor registered agent",
+      "harbor compliance filing"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "harborcompliance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "LegalZoom",
+    "aliases": [
+      "legalzoom",
+      "legal zoom",
+      "legalzoom com",
+      "legalzoom legal services",
+      "legalzoom subscription"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "legalzoom.com",
+    "confidence": "medium",
+    "notes": "Can include legal-service subscriptions, filings, or registered-agent services."
+  },
+  {
+    "canonical_name": "Rocket Lawyer",
+    "aliases": [
+      "rocket lawyer",
+      "rocketlawyer",
+      "rocket lawyer inc",
+      "rocket lawyer legal services",
+      "rocket lawyer subscription"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "rocketlawyer.com",
+    "confidence": "medium",
+    "notes": "Can include subscriptions or document/legal services."
+  },
+  {
+    "canonical_name": "UpCounsel",
+    "aliases": [
+      "upcounsel",
+      "up counsel",
+      "upcounsel legal",
+      "upcounsel attorney",
+      "upcounsel payment"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "upcounsel.com",
+    "confidence": "medium",
+    "notes": "Legal marketplace; underlying attorney may be the actual service provider."
+  },
+  {
+    "canonical_name": "Priori Legal",
+    "aliases": [
+      "priori legal",
+      "priori",
+      "priori legal services",
+      "priori attorney",
+      "priori payment"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "priorilegal.com",
+    "confidence": "medium",
+    "notes": "Legal marketplace; underlying attorney may be the actual service provider."
+  }
+]

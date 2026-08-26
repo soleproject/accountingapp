@@ -1,0 +1,2804 @@
+[
+  {
+    "canonical_name": "Internal Revenue Service",
+    "aliases": [
+      "internal revenue service",
+      "irs",
+      "irs usataxpymt",
+      "irs tax payment",
+      "us treasury tax payment",
+      "eftps"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "irs.gov",
+    "confidence": "medium",
+    "notes": "Federal tax payments can represent payroll, income, excise, or other taxes; use memo detail when available."
+  },
+  {
+    "canonical_name": "Electronic Federal Tax Payment System",
+    "aliases": [
+      "electronic federal tax payment system",
+      "eftps",
+      "eftps tax payment",
+      "usataxpymt",
+      "us treasury eftps",
+      "irs eftps"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "eftps.gov",
+    "confidence": "medium",
+    "notes": "Federal payment channel; underlying tax type should be resolved from memo or filing context."
+  },
+  {
+    "canonical_name": "IRS Direct Pay",
+    "aliases": [
+      "irs direct pay",
+      "irs directpay",
+      "irs direct pay business",
+      "irs tax direct pay",
+      "us treasury direct pay"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "irs.gov",
+    "confidence": "medium",
+    "notes": "Federal payment channel; underlying tax type can vary."
+  },
+  {
+    "canonical_name": "U.S. Department of the Treasury",
+    "aliases": [
+      "us department of the treasury",
+      "us treasury",
+      "united states treasury",
+      "treasury tax payment",
+      "treas tax pymt"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "treasury.gov",
+    "confidence": "medium",
+    "notes": "Treasury descriptors are broad; only auto-categorize when tax context is present."
+  },
+  {
+    "canonical_name": "U.S. Small Business Administration",
+    "aliases": [
+      "us small business administration",
+      "small business administration",
+      "sba",
+      "sba loan payment",
+      "sba disaster loan"
+    ],
+    "semantic": "loan_payment",
+    "logo_domain": "sba.gov",
+    "confidence": "medium",
+    "notes": "SBA debits may be loan repayments or program fees; use memo detail."
+  },
+  {
+    "canonical_name": "U.S. Patent and Trademark Office",
+    "aliases": [
+      "us patent and trademark office",
+      "uspto",
+      "uspto fee",
+      "uspto patent fee",
+      "uspto trademark fee"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "uspto.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "U.S. Copyright Office",
+    "aliases": [
+      "us copyright office",
+      "copyright office",
+      "copyright gov",
+      "copyright registration fee",
+      "usco registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "copyright.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Federal Communications Commission",
+    "aliases": [
+      "federal communications commission",
+      "fcc",
+      "fcc fee",
+      "fcc licensing",
+      "fcc regulatory fee"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "fcc.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Federal Motor Carrier Safety Administration",
+    "aliases": [
+      "federal motor carrier safety administration",
+      "fmcsa",
+      "fmcsa registration",
+      "fmcsa licensing",
+      "dot fmcsa"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "fmcsa.dot.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "U.S. Department of Transportation",
+    "aliases": [
+      "us department of transportation",
+      "us dot",
+      "usd ot",
+      "dot registration fee",
+      "dot licensing"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "transportation.gov",
+    "confidence": "medium",
+    "notes": "DOT-related charges can include registrations, permits, or penalties."
+  },
+  {
+    "canonical_name": "U.S. Customs and Border Protection",
+    "aliases": [
+      "us customs and border protection",
+      "cbp",
+      "us customs",
+      "customs duty payment",
+      "cbp payment"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "cbp.gov",
+    "confidence": "medium",
+    "notes": "Customs debits may be duties or user fees; category set has no dedicated customs-duty semantic."
+  },
+  {
+    "canonical_name": "Alcohol and Tobacco Tax and Trade Bureau",
+    "aliases": [
+      "alcohol and tobacco tax and trade bureau",
+      "ttb",
+      "ttb tax payment",
+      "ttb permit fee",
+      "treasury ttb"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "ttb.gov",
+    "confidence": "medium",
+    "notes": "TTB payments can be excise taxes or permit-related charges."
+  },
+  {
+    "canonical_name": "Federal Aviation Administration",
+    "aliases": [
+      "federal aviation administration",
+      "faa",
+      "faa registration",
+      "faa fee",
+      "faa certification"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "faa.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "U.S. Food and Drug Administration",
+    "aliases": [
+      "us food and drug administration",
+      "fda",
+      "fda user fee",
+      "fda registration fee",
+      "fda payment"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "fda.gov",
+    "confidence": "medium",
+    "notes": "FDA payments may be registration or regulatory user fees."
+  },
+  {
+    "canonical_name": "Drug Enforcement Administration",
+    "aliases": [
+      "drug enforcement administration",
+      "dea",
+      "dea registration",
+      "dea registration fee",
+      "dea renewal"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dea.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "U.S. Citizenship and Immigration Services",
+    "aliases": [
+      "us citizenship and immigration services",
+      "uscis",
+      "uscis filing fee",
+      "uscis payment",
+      "dhs uscis"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "uscis.gov",
+    "confidence": "medium",
+    "notes": "Business-paid filing fees may be immigration/legal compliance costs."
+  },
+  {
+    "canonical_name": "U.S. Department of Agriculture",
+    "aliases": [
+      "us department of agriculture",
+      "usda",
+      "usda licensing fee",
+      "usda permit",
+      "usda inspection fee"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "usda.gov",
+    "confidence": "medium",
+    "notes": "USDA charges can include permits, inspections, and program fees."
+  },
+  {
+    "canonical_name": "Animal and Plant Health Inspection Service",
+    "aliases": [
+      "animal and plant health inspection service",
+      "aphis",
+      "usda aphis",
+      "aphis permit",
+      "aphis fee"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "aphis.usda.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "U.S. Fish and Wildlife Service",
+    "aliases": [
+      "us fish and wildlife service",
+      "usfws",
+      "fish wildlife permit",
+      "usfws permit",
+      "fws fee"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "fws.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pay.gov",
+    "aliases": [
+      "paygov",
+      "pay gov",
+      "pay.gov",
+      "paygov payment",
+      "us treasury paygov"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "pay.gov",
+    "confidence": "medium",
+    "notes": "Federal payment portal used by many agencies; resolver should inspect the agency/memo before final categorization."
+  },
+  {
+    "canonical_name": "Alabama Department of Revenue",
+    "aliases": [
+      "alabama department of revenue",
+      "alabama revenue",
+      "al department of revenue",
+      "al dor",
+      "alabama tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "revenue.alabama.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Alaska Department of Revenue",
+    "aliases": [
+      "alaska department of revenue",
+      "alaska revenue",
+      "ak department of revenue",
+      "ak dor",
+      "alaska tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "tax.alaska.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Arizona Department of Revenue",
+    "aliases": [
+      "arizona department of revenue",
+      "arizona revenue",
+      "az department of revenue",
+      "az dor",
+      "arizona tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "azdor.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Arkansas Department of Revenue",
+    "aliases": [
+      "arkansas department of revenue",
+      "arkansas revenue",
+      "ar department of revenue",
+      "ar dor",
+      "arkansas tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "dfa.arkansas.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "California Department of Tax and Fee Administration",
+    "aliases": [
+      "california department of tax and fee administration",
+      "cdtfa",
+      "ca cdtfa",
+      "cdtfa payment",
+      "california sales tax"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "cdtfa.ca.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Colorado Department of Revenue",
+    "aliases": [
+      "colorado department of revenue",
+      "colorado revenue",
+      "co department of revenue",
+      "co dor",
+      "colorado tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "tax.colorado.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Connecticut Department of Revenue",
+    "aliases": [
+      "connecticut department of revenue",
+      "connecticut revenue",
+      "ct department of revenue",
+      "ct dor",
+      "connecticut tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "portal.ct.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Delaware Department of Revenue",
+    "aliases": [
+      "delaware department of revenue",
+      "delaware revenue",
+      "de department of revenue",
+      "de dor",
+      "delaware tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "revenue.delaware.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Florida Department of Revenue",
+    "aliases": [
+      "florida department of revenue",
+      "florida revenue",
+      "fl department of revenue",
+      "fl dor",
+      "florida tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "floridarevenue.com",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Georgia Department of Revenue",
+    "aliases": [
+      "georgia department of revenue",
+      "georgia revenue",
+      "ga department of revenue",
+      "ga dor",
+      "georgia tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "dor.georgia.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Hawaii Department of Revenue",
+    "aliases": [
+      "hawaii department of revenue",
+      "hawaii revenue",
+      "hi department of revenue",
+      "hi dor",
+      "hawaii tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "tax.hawaii.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Idaho Department of Revenue",
+    "aliases": [
+      "idaho department of revenue",
+      "idaho revenue",
+      "id department of revenue",
+      "id dor",
+      "idaho tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "tax.idaho.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Illinois Department of Revenue",
+    "aliases": [
+      "illinois department of revenue",
+      "illinois revenue",
+      "il department of revenue",
+      "il dor",
+      "illinois tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "tax.illinois.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Indiana Department of Revenue",
+    "aliases": [
+      "indiana department of revenue",
+      "indiana revenue",
+      "in department of revenue",
+      "in dor",
+      "indiana tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "in.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Iowa Department of Revenue",
+    "aliases": [
+      "iowa department of revenue",
+      "iowa revenue",
+      "ia department of revenue",
+      "ia dor",
+      "iowa tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "revenue.iowa.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Kansas Department of Revenue",
+    "aliases": [
+      "kansas department of revenue",
+      "kansas revenue",
+      "ks department of revenue",
+      "ks dor",
+      "kansas tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "ksrevenue.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Kentucky Department of Revenue",
+    "aliases": [
+      "kentucky department of revenue",
+      "kentucky revenue",
+      "ky department of revenue",
+      "ky dor",
+      "kentucky tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "revenue.ky.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Louisiana Department of Revenue",
+    "aliases": [
+      "louisiana department of revenue",
+      "louisiana revenue",
+      "la department of revenue",
+      "la dor",
+      "louisiana tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "revenue.louisiana.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Maine Department of Revenue",
+    "aliases": [
+      "maine department of revenue",
+      "maine revenue",
+      "me department of revenue",
+      "me dor",
+      "maine tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "maine.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Comptroller of Maryland",
+    "aliases": [
+      "comptroller of maryland",
+      "maryland comptroller",
+      "md comptroller",
+      "maryland tax payment",
+      "md tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "marylandcomptroller.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Massachusetts Department of Revenue",
+    "aliases": [
+      "massachusetts department of revenue",
+      "massachusetts revenue",
+      "ma department of revenue",
+      "ma dor",
+      "massachusetts tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "mass.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Michigan Department of Revenue",
+    "aliases": [
+      "michigan department of revenue",
+      "michigan revenue",
+      "mi department of revenue",
+      "mi dor",
+      "michigan tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "michigan.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Minnesota Department of Revenue",
+    "aliases": [
+      "minnesota department of revenue",
+      "minnesota revenue",
+      "mn department of revenue",
+      "mn dor",
+      "minnesota tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "revenue.state.mn.us",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Mississippi Department of Revenue",
+    "aliases": [
+      "mississippi department of revenue",
+      "mississippi revenue",
+      "ms department of revenue",
+      "ms dor",
+      "mississippi tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "dor.ms.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Missouri Department of Revenue",
+    "aliases": [
+      "missouri department of revenue",
+      "missouri revenue",
+      "mo department of revenue",
+      "mo dor",
+      "missouri tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "dor.mo.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Montana Department of Revenue",
+    "aliases": [
+      "montana department of revenue",
+      "montana revenue",
+      "mt department of revenue",
+      "mt dor",
+      "montana tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "mtrevenue.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Nebraska Department of Revenue",
+    "aliases": [
+      "nebraska department of revenue",
+      "nebraska revenue",
+      "ne department of revenue",
+      "ne dor",
+      "nebraska tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "revenue.nebraska.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Nevada Department of Revenue",
+    "aliases": [
+      "nevada department of revenue",
+      "nevada revenue",
+      "nv department of revenue",
+      "nv dor",
+      "nevada tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "tax.nv.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "New Hampshire Department of Revenue",
+    "aliases": [
+      "new hampshire department of revenue",
+      "new hampshire revenue",
+      "nh department of revenue",
+      "nh dor",
+      "new hampshire tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "revenue.nh.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "New Jersey Department of Revenue",
+    "aliases": [
+      "new jersey department of revenue",
+      "new jersey revenue",
+      "nj department of revenue",
+      "nj dor",
+      "new jersey tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "nj.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "New Mexico Department of Revenue",
+    "aliases": [
+      "new mexico department of revenue",
+      "new mexico revenue",
+      "nm department of revenue",
+      "nm dor",
+      "new mexico tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "tax.newmexico.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "New York Department of Revenue",
+    "aliases": [
+      "new york department of revenue",
+      "new york revenue",
+      "ny department of revenue",
+      "ny dor",
+      "new york tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "tax.ny.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "North Carolina Department of Revenue",
+    "aliases": [
+      "north carolina department of revenue",
+      "north carolina revenue",
+      "nc department of revenue",
+      "nc dor",
+      "north carolina tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "ncdor.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "North Dakota Department of Revenue",
+    "aliases": [
+      "north dakota department of revenue",
+      "north dakota revenue",
+      "nd department of revenue",
+      "nd dor",
+      "north dakota tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "tax.nd.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Ohio Department of Revenue",
+    "aliases": [
+      "ohio department of revenue",
+      "ohio revenue",
+      "oh department of revenue",
+      "oh dor",
+      "ohio tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "tax.ohio.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Oklahoma Department of Revenue",
+    "aliases": [
+      "oklahoma department of revenue",
+      "oklahoma revenue",
+      "ok department of revenue",
+      "ok dor",
+      "oklahoma tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "oklahoma.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Oregon Department of Revenue",
+    "aliases": [
+      "oregon department of revenue",
+      "oregon revenue",
+      "or department of revenue",
+      "or dor",
+      "oregon tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "oregon.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Pennsylvania Department of Revenue",
+    "aliases": [
+      "pennsylvania department of revenue",
+      "pennsylvania revenue",
+      "pa department of revenue",
+      "pa dor",
+      "pennsylvania tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "pa.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Rhode Island Department of Revenue",
+    "aliases": [
+      "rhode island department of revenue",
+      "rhode island revenue",
+      "ri department of revenue",
+      "ri dor",
+      "rhode island tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "tax.ri.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "South Carolina Department of Revenue",
+    "aliases": [
+      "south carolina department of revenue",
+      "south carolina revenue",
+      "sc department of revenue",
+      "sc dor",
+      "south carolina tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "dor.sc.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "South Dakota Department of Revenue",
+    "aliases": [
+      "south dakota department of revenue",
+      "south dakota revenue",
+      "sd department of revenue",
+      "sd dor",
+      "south dakota tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "dor.sd.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Tennessee Department of Revenue",
+    "aliases": [
+      "tennessee department of revenue",
+      "tennessee revenue",
+      "tn department of revenue",
+      "tn dor",
+      "tennessee tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "tn.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Texas Comptroller of Public Accounts",
+    "aliases": [
+      "texas comptroller of public accounts",
+      "texas comptroller",
+      "tx comptroller",
+      "texas sales tax",
+      "comptroller tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "comptroller.texas.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Utah Department of Revenue",
+    "aliases": [
+      "utah department of revenue",
+      "utah revenue",
+      "ut department of revenue",
+      "ut dor",
+      "utah tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "tax.utah.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Vermont Department of Revenue",
+    "aliases": [
+      "vermont department of revenue",
+      "vermont revenue",
+      "vt department of revenue",
+      "vt dor",
+      "vermont tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "tax.vermont.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Virginia Department of Revenue",
+    "aliases": [
+      "virginia department of revenue",
+      "virginia revenue",
+      "va department of revenue",
+      "va dor",
+      "virginia tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "tax.virginia.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Washington Department of Revenue",
+    "aliases": [
+      "washington department of revenue",
+      "washington revenue",
+      "wa department of revenue",
+      "wa dor",
+      "washington tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "dor.wa.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "West Virginia Department of Revenue",
+    "aliases": [
+      "west virginia department of revenue",
+      "west virginia revenue",
+      "wv department of revenue",
+      "wv dor",
+      "west virginia tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "tax.wv.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Wisconsin Department of Revenue",
+    "aliases": [
+      "wisconsin department of revenue",
+      "wisconsin revenue",
+      "wi department of revenue",
+      "wi dor",
+      "wisconsin tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "revenue.wi.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Wyoming Department of Revenue",
+    "aliases": [
+      "wyoming department of revenue",
+      "wyoming revenue",
+      "wy department of revenue",
+      "wy dor",
+      "wyoming tax payment"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "revenue.wyo.gov",
+    "confidence": "medium",
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
+  },
+  {
+    "canonical_name": "Alabama Secretary of State",
+    "aliases": [
+      "alabama secretary of state",
+      "alabama sos",
+      "al secretary of state",
+      "alabama business filing",
+      "al business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.alabama.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Alaska Division of Corporations, Business and Professional Licensing",
+    "aliases": [
+      "alaska division of corporations",
+      "alaska corporations",
+      "ak business licensing",
+      "alaska business license",
+      "ak corporations"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "commerce.alaska.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Arizona Secretary of State",
+    "aliases": [
+      "arizona secretary of state",
+      "arizona sos",
+      "az secretary of state",
+      "arizona business filing",
+      "az business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "azsos.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Arkansas Secretary of State",
+    "aliases": [
+      "arkansas secretary of state",
+      "arkansas sos",
+      "ar secretary of state",
+      "arkansas business filing",
+      "ar business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.arkansas.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "California Secretary of State",
+    "aliases": [
+      "california secretary of state",
+      "california sos",
+      "ca secretary of state",
+      "california business filing",
+      "ca business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.ca.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Colorado Secretary of State",
+    "aliases": [
+      "colorado secretary of state",
+      "colorado sos",
+      "co secretary of state",
+      "colorado business filing",
+      "co business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.state.co.us",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Connecticut Secretary of State",
+    "aliases": [
+      "connecticut secretary of state",
+      "connecticut sos",
+      "ct secretary of state",
+      "connecticut business filing",
+      "ct business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "portal.ct.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Delaware Secretary of State",
+    "aliases": [
+      "delaware secretary of state",
+      "delaware sos",
+      "de secretary of state",
+      "delaware business filing",
+      "de business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "corp.delaware.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Florida Secretary of State",
+    "aliases": [
+      "florida secretary of state",
+      "florida sos",
+      "fl secretary of state",
+      "florida business filing",
+      "fl business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dos.fl.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Georgia Secretary of State",
+    "aliases": [
+      "georgia secretary of state",
+      "georgia sos",
+      "ga secretary of state",
+      "georgia business filing",
+      "ga business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.ga.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hawaii Business Registration Division",
+    "aliases": [
+      "hawaii business registration division",
+      "hawaii brd",
+      "hi business registration",
+      "hawaii business filing",
+      "hi business filing"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "cca.hawaii.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Idaho Secretary of State",
+    "aliases": [
+      "idaho secretary of state",
+      "idaho sos",
+      "id secretary of state",
+      "idaho business filing",
+      "id business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.idaho.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Illinois Secretary of State",
+    "aliases": [
+      "illinois secretary of state",
+      "illinois sos",
+      "il secretary of state",
+      "illinois business filing",
+      "il business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "ilsos.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Indiana Secretary of State",
+    "aliases": [
+      "indiana secretary of state",
+      "indiana sos",
+      "in secretary of state",
+      "indiana business filing",
+      "in business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "in.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Iowa Secretary of State",
+    "aliases": [
+      "iowa secretary of state",
+      "iowa sos",
+      "ia secretary of state",
+      "iowa business filing",
+      "ia business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.iowa.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kansas Secretary of State",
+    "aliases": [
+      "kansas secretary of state",
+      "kansas sos",
+      "ks secretary of state",
+      "kansas business filing",
+      "ks business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.ks.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kentucky Secretary of State",
+    "aliases": [
+      "kentucky secretary of state",
+      "kentucky sos",
+      "ky secretary of state",
+      "kentucky business filing",
+      "ky business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.ky.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Louisiana Secretary of State",
+    "aliases": [
+      "louisiana secretary of state",
+      "louisiana sos",
+      "la secretary of state",
+      "louisiana business filing",
+      "la business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.la.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Maine Secretary of State",
+    "aliases": [
+      "maine secretary of state",
+      "maine sos",
+      "me secretary of state",
+      "maine business filing",
+      "me business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "maine.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Maryland Secretary of State",
+    "aliases": [
+      "maryland secretary of state",
+      "maryland sos",
+      "md secretary of state",
+      "maryland business filing",
+      "md business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "egov.maryland.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Massachusetts Secretary of State",
+    "aliases": [
+      "massachusetts secretary of state",
+      "massachusetts sos",
+      "ma secretary of state",
+      "massachusetts business filing",
+      "ma business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sec.state.ma.us",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Michigan Secretary of State",
+    "aliases": [
+      "michigan secretary of state",
+      "michigan sos",
+      "mi secretary of state",
+      "michigan business filing",
+      "mi business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "michigan.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Minnesota Secretary of State",
+    "aliases": [
+      "minnesota secretary of state",
+      "minnesota sos",
+      "mn secretary of state",
+      "minnesota business filing",
+      "mn business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.mn.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mississippi Secretary of State",
+    "aliases": [
+      "mississippi secretary of state",
+      "mississippi sos",
+      "ms secretary of state",
+      "mississippi business filing",
+      "ms business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.ms.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Missouri Secretary of State",
+    "aliases": [
+      "missouri secretary of state",
+      "missouri sos",
+      "mo secretary of state",
+      "missouri business filing",
+      "mo business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.mo.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Montana Secretary of State",
+    "aliases": [
+      "montana secretary of state",
+      "montana sos",
+      "mt secretary of state",
+      "montana business filing",
+      "mt business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sosmt.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nebraska Secretary of State",
+    "aliases": [
+      "nebraska secretary of state",
+      "nebraska sos",
+      "ne secretary of state",
+      "nebraska business filing",
+      "ne business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.nebraska.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nevada Secretary of State",
+    "aliases": [
+      "nevada secretary of state",
+      "nevada sos",
+      "nv secretary of state",
+      "nevada business filing",
+      "nv business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "nvsos.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "New Hampshire Secretary of State",
+    "aliases": [
+      "new hampshire secretary of state",
+      "new hampshire sos",
+      "nh secretary of state",
+      "new hampshire business filing",
+      "nh business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.nh.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "New Jersey Secretary of State",
+    "aliases": [
+      "new jersey secretary of state",
+      "new jersey sos",
+      "nj secretary of state",
+      "new jersey business filing",
+      "nj business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "nj.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "New Mexico Secretary of State",
+    "aliases": [
+      "new mexico secretary of state",
+      "new mexico sos",
+      "nm secretary of state",
+      "new mexico business filing",
+      "nm business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.nm.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "New York Secretary of State",
+    "aliases": [
+      "new york secretary of state",
+      "new york sos",
+      "ny secretary of state",
+      "new york business filing",
+      "ny business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dos.ny.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "North Carolina Secretary of State",
+    "aliases": [
+      "north carolina secretary of state",
+      "north carolina sos",
+      "nc secretary of state",
+      "north carolina business filing",
+      "nc business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sosnc.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "North Dakota Secretary of State",
+    "aliases": [
+      "north dakota secretary of state",
+      "north dakota sos",
+      "nd secretary of state",
+      "north dakota business filing",
+      "nd business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.nd.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ohio Secretary of State",
+    "aliases": [
+      "ohio secretary of state",
+      "ohio sos",
+      "oh secretary of state",
+      "ohio business filing",
+      "oh business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "ohiosos.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Oklahoma Secretary of State",
+    "aliases": [
+      "oklahoma secretary of state",
+      "oklahoma sos",
+      "ok secretary of state",
+      "oklahoma business filing",
+      "ok business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.ok.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Oregon Secretary of State",
+    "aliases": [
+      "oregon secretary of state",
+      "oregon sos",
+      "or secretary of state",
+      "oregon business filing",
+      "or business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.oregon.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pennsylvania Secretary of State",
+    "aliases": [
+      "pennsylvania secretary of state",
+      "pennsylvania sos",
+      "pa secretary of state",
+      "pennsylvania business filing",
+      "pa business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "pa.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Rhode Island Secretary of State",
+    "aliases": [
+      "rhode island secretary of state",
+      "rhode island sos",
+      "ri secretary of state",
+      "rhode island business filing",
+      "ri business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.ri.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "South Carolina Secretary of State",
+    "aliases": [
+      "south carolina secretary of state",
+      "south carolina sos",
+      "sc secretary of state",
+      "south carolina business filing",
+      "sc business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.sc.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "South Dakota Secretary of State",
+    "aliases": [
+      "south dakota secretary of state",
+      "south dakota sos",
+      "sd secretary of state",
+      "south dakota business filing",
+      "sd business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sdsos.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tennessee Secretary of State",
+    "aliases": [
+      "tennessee secretary of state",
+      "tennessee sos",
+      "tn secretary of state",
+      "tennessee business filing",
+      "tn business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.tn.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Texas Secretary of State",
+    "aliases": [
+      "texas secretary of state",
+      "texas sos",
+      "tx secretary of state",
+      "texas business filing",
+      "tx business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.state.tx.us",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Utah Secretary of State",
+    "aliases": [
+      "utah secretary of state",
+      "utah sos",
+      "ut secretary of state",
+      "utah business filing",
+      "ut business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "corporations.utah.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Vermont Secretary of State",
+    "aliases": [
+      "vermont secretary of state",
+      "vermont sos",
+      "vt secretary of state",
+      "vermont business filing",
+      "vt business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.vermont.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Virginia State Corporation Commission",
+    "aliases": [
+      "virginia state corporation commission",
+      "virginia scc",
+      "va scc",
+      "virginia business filing",
+      "va business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "scc.virginia.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Washington Secretary of State",
+    "aliases": [
+      "washington secretary of state",
+      "washington sos",
+      "wa secretary of state",
+      "washington business filing",
+      "wa business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.wa.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "West Virginia Secretary of State",
+    "aliases": [
+      "west virginia secretary of state",
+      "west virginia sos",
+      "wv secretary of state",
+      "west virginia business filing",
+      "wv business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.wv.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wisconsin Secretary of State",
+    "aliases": [
+      "wisconsin secretary of state",
+      "wisconsin sos",
+      "wi secretary of state",
+      "wisconsin business filing",
+      "wi business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "wdfi.org",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wyoming Secretary of State",
+    "aliases": [
+      "wyoming secretary of state",
+      "wyoming sos",
+      "wy secretary of state",
+      "wyoming business filing",
+      "wy business registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.wyo.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Alabama Unemployment Insurance",
+    "aliases": [
+      "alabama unemployment insurance",
+      "alabama unemployment tax",
+      "al unemployment insurance",
+      "al ui tax",
+      "alabama workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "labor.alabama.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Alaska Unemployment Insurance",
+    "aliases": [
+      "alaska unemployment insurance",
+      "alaska unemployment tax",
+      "ak unemployment insurance",
+      "ak ui tax",
+      "alaska workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "labor.alaska.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Arizona Unemployment Insurance",
+    "aliases": [
+      "arizona unemployment insurance",
+      "arizona unemployment tax",
+      "az unemployment insurance",
+      "az ui tax",
+      "arizona workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "des.az.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Arkansas Unemployment Insurance",
+    "aliases": [
+      "arkansas unemployment insurance",
+      "arkansas unemployment tax",
+      "ar unemployment insurance",
+      "ar ui tax",
+      "arkansas workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "dws.arkansas.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "California Employment Development Department",
+    "aliases": [
+      "california employment development department",
+      "ca edd",
+      "edd tax payment",
+      "california payroll tax",
+      "edd payment"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "edd.ca.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Colorado Unemployment Insurance",
+    "aliases": [
+      "colorado unemployment insurance",
+      "colorado unemployment tax",
+      "co unemployment insurance",
+      "co ui tax",
+      "colorado workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "cdle.colorado.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Connecticut Unemployment Insurance",
+    "aliases": [
+      "connecticut unemployment insurance",
+      "connecticut unemployment tax",
+      "ct unemployment insurance",
+      "ct ui tax",
+      "connecticut workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "ctdol.state.ct.us",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Delaware Unemployment Insurance",
+    "aliases": [
+      "delaware unemployment insurance",
+      "delaware unemployment tax",
+      "de unemployment insurance",
+      "de ui tax",
+      "delaware workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "labor.delaware.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Florida Department of Commerce",
+    "aliases": [
+      "florida department of commerce",
+      "florida reemployment tax",
+      "fl reemployment tax",
+      "florida jobs tax",
+      "fl unemployment tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "floridajobs.org",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Georgia Unemployment Insurance",
+    "aliases": [
+      "georgia unemployment insurance",
+      "georgia unemployment tax",
+      "ga unemployment insurance",
+      "ga ui tax",
+      "georgia workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "dol.georgia.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Hawaii Unemployment Insurance",
+    "aliases": [
+      "hawaii unemployment insurance",
+      "hawaii unemployment tax",
+      "hi unemployment insurance",
+      "hi ui tax",
+      "hawaii workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "labor.hawaii.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Idaho Unemployment Insurance",
+    "aliases": [
+      "idaho unemployment insurance",
+      "idaho unemployment tax",
+      "id unemployment insurance",
+      "id ui tax",
+      "idaho workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "labor.idaho.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Illinois Unemployment Insurance",
+    "aliases": [
+      "illinois unemployment insurance",
+      "illinois unemployment tax",
+      "il unemployment insurance",
+      "il ui tax",
+      "illinois workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "ides.illinois.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Indiana Unemployment Insurance",
+    "aliases": [
+      "indiana unemployment insurance",
+      "indiana unemployment tax",
+      "in unemployment insurance",
+      "in ui tax",
+      "indiana workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "in.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Iowa Unemployment Insurance",
+    "aliases": [
+      "iowa unemployment insurance",
+      "iowa unemployment tax",
+      "ia unemployment insurance",
+      "ia ui tax",
+      "iowa workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "workforce.iowa.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Kansas Unemployment Insurance",
+    "aliases": [
+      "kansas unemployment insurance",
+      "kansas unemployment tax",
+      "ks unemployment insurance",
+      "ks ui tax",
+      "kansas workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "dol.ks.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Kentucky Unemployment Insurance",
+    "aliases": [
+      "kentucky unemployment insurance",
+      "kentucky unemployment tax",
+      "ky unemployment insurance",
+      "ky ui tax",
+      "kentucky workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "kcc.ky.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Louisiana Unemployment Insurance",
+    "aliases": [
+      "louisiana unemployment insurance",
+      "louisiana unemployment tax",
+      "la unemployment insurance",
+      "la ui tax",
+      "louisiana workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "laworks.net",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Maine Unemployment Insurance",
+    "aliases": [
+      "maine unemployment insurance",
+      "maine unemployment tax",
+      "me unemployment insurance",
+      "me ui tax",
+      "maine workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "maine.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Maryland Unemployment Insurance",
+    "aliases": [
+      "maryland unemployment insurance",
+      "maryland unemployment tax",
+      "md unemployment insurance",
+      "md ui tax",
+      "maryland workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "labor.maryland.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Massachusetts Unemployment Insurance",
+    "aliases": [
+      "massachusetts unemployment insurance",
+      "massachusetts unemployment tax",
+      "ma unemployment insurance",
+      "ma ui tax",
+      "massachusetts workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "mass.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Michigan Unemployment Insurance",
+    "aliases": [
+      "michigan unemployment insurance",
+      "michigan unemployment tax",
+      "mi unemployment insurance",
+      "mi ui tax",
+      "michigan workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "michigan.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Minnesota Unemployment Insurance",
+    "aliases": [
+      "minnesota unemployment insurance",
+      "minnesota unemployment tax",
+      "mn unemployment insurance",
+      "mn ui tax",
+      "minnesota workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "uimn.org",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Mississippi Unemployment Insurance",
+    "aliases": [
+      "mississippi unemployment insurance",
+      "mississippi unemployment tax",
+      "ms unemployment insurance",
+      "ms ui tax",
+      "mississippi workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "mdes.ms.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Missouri Unemployment Insurance",
+    "aliases": [
+      "missouri unemployment insurance",
+      "missouri unemployment tax",
+      "mo unemployment insurance",
+      "mo ui tax",
+      "missouri workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "labor.mo.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Montana Unemployment Insurance",
+    "aliases": [
+      "montana unemployment insurance",
+      "montana unemployment tax",
+      "mt unemployment insurance",
+      "mt ui tax",
+      "montana workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "uid.dli.mt.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Nebraska Unemployment Insurance",
+    "aliases": [
+      "nebraska unemployment insurance",
+      "nebraska unemployment tax",
+      "ne unemployment insurance",
+      "ne ui tax",
+      "nebraska workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "dol.nebraska.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Nevada Unemployment Insurance",
+    "aliases": [
+      "nevada unemployment insurance",
+      "nevada unemployment tax",
+      "nv unemployment insurance",
+      "nv ui tax",
+      "nevada workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "detr.nv.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "New Hampshire Unemployment Insurance",
+    "aliases": [
+      "new hampshire unemployment insurance",
+      "new hampshire unemployment tax",
+      "nh unemployment insurance",
+      "nh ui tax",
+      "new hampshire workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "nhes.nh.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "New Jersey Unemployment Insurance",
+    "aliases": [
+      "new jersey unemployment insurance",
+      "new jersey unemployment tax",
+      "nj unemployment insurance",
+      "nj ui tax",
+      "new jersey workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "nj.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "New Mexico Unemployment Insurance",
+    "aliases": [
+      "new mexico unemployment insurance",
+      "new mexico unemployment tax",
+      "nm unemployment insurance",
+      "nm ui tax",
+      "new mexico workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "dws.state.nm.us",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "New York State Department of Labor",
+    "aliases": [
+      "new york state department of labor",
+      "ny department of labor",
+      "ny dol",
+      "new york unemployment insurance",
+      "ny unemployment tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "dol.ny.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "North Carolina Unemployment Insurance",
+    "aliases": [
+      "north carolina unemployment insurance",
+      "north carolina unemployment tax",
+      "nc unemployment insurance",
+      "nc ui tax",
+      "north carolina workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "des.nc.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "North Dakota Unemployment Insurance",
+    "aliases": [
+      "north dakota unemployment insurance",
+      "north dakota unemployment tax",
+      "nd unemployment insurance",
+      "nd ui tax",
+      "north dakota workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "jobsnd.com",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Ohio Unemployment Insurance",
+    "aliases": [
+      "ohio unemployment insurance",
+      "ohio unemployment tax",
+      "oh unemployment insurance",
+      "oh ui tax",
+      "ohio workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "jfs.ohio.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Oklahoma Unemployment Insurance",
+    "aliases": [
+      "oklahoma unemployment insurance",
+      "oklahoma unemployment tax",
+      "ok unemployment insurance",
+      "ok ui tax",
+      "oklahoma workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "oklahoma.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Oregon Unemployment Insurance",
+    "aliases": [
+      "oregon unemployment insurance",
+      "oregon unemployment tax",
+      "or unemployment insurance",
+      "or ui tax",
+      "oregon workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "oregon.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Pennsylvania Unemployment Insurance",
+    "aliases": [
+      "pennsylvania unemployment insurance",
+      "pennsylvania unemployment tax",
+      "pa unemployment insurance",
+      "pa ui tax",
+      "pennsylvania workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "pa.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Rhode Island Unemployment Insurance",
+    "aliases": [
+      "rhode island unemployment insurance",
+      "rhode island unemployment tax",
+      "ri unemployment insurance",
+      "ri ui tax",
+      "rhode island workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "dlt.ri.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "South Carolina Unemployment Insurance",
+    "aliases": [
+      "south carolina unemployment insurance",
+      "south carolina unemployment tax",
+      "sc unemployment insurance",
+      "sc ui tax",
+      "south carolina workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "dew.sc.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "South Dakota Unemployment Insurance",
+    "aliases": [
+      "south dakota unemployment insurance",
+      "south dakota unemployment tax",
+      "sd unemployment insurance",
+      "sd ui tax",
+      "south dakota workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "dlr.sd.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Tennessee Unemployment Insurance",
+    "aliases": [
+      "tennessee unemployment insurance",
+      "tennessee unemployment tax",
+      "tn unemployment insurance",
+      "tn ui tax",
+      "tennessee workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "tn.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Texas Workforce Commission",
+    "aliases": [
+      "texas workforce commission",
+      "tx workforce commission",
+      "twc tax payment",
+      "texas unemployment tax",
+      "twc payment"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "twc.texas.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Utah Unemployment Insurance",
+    "aliases": [
+      "utah unemployment insurance",
+      "utah unemployment tax",
+      "ut unemployment insurance",
+      "ut ui tax",
+      "utah workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "jobs.utah.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Vermont Unemployment Insurance",
+    "aliases": [
+      "vermont unemployment insurance",
+      "vermont unemployment tax",
+      "vt unemployment insurance",
+      "vt ui tax",
+      "vermont workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "labor.vermont.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Virginia Unemployment Insurance",
+    "aliases": [
+      "virginia unemployment insurance",
+      "virginia unemployment tax",
+      "va unemployment insurance",
+      "va ui tax",
+      "virginia workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "vec.virginia.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Washington Unemployment Insurance",
+    "aliases": [
+      "washington unemployment insurance",
+      "washington unemployment tax",
+      "wa unemployment insurance",
+      "wa ui tax",
+      "washington workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "esd.wa.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "West Virginia Unemployment Insurance",
+    "aliases": [
+      "west virginia unemployment insurance",
+      "west virginia unemployment tax",
+      "wv unemployment insurance",
+      "wv ui tax",
+      "west virginia workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "workforcewv.org",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Wisconsin Unemployment Insurance",
+    "aliases": [
+      "wisconsin unemployment insurance",
+      "wisconsin unemployment tax",
+      "wi unemployment insurance",
+      "wi ui tax",
+      "wisconsin workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "dwd.wisconsin.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "Wyoming Unemployment Insurance",
+    "aliases": [
+      "wyoming unemployment insurance",
+      "wyoming unemployment tax",
+      "wy unemployment insurance",
+      "wy ui tax",
+      "wyoming workforce tax"
+    ],
+    "semantic": "payroll_expense",
+    "logo_domain": "dws.wyo.gov",
+    "confidence": "medium",
+    "notes": "Employer unemployment/workforce payments are payroll-related taxes; exact program varies by state."
+  },
+  {
+    "canonical_name": "California Franchise Tax Board",
+    "aliases": [
+      "california franchise tax board",
+      "ca franchise tax board",
+      "ca ftb",
+      "ftb tax payment",
+      "franchise tax board"
+    ],
+    "semantic": "sales_tax_payment",
+    "logo_domain": "ftb.ca.gov",
+    "confidence": "medium",
+    "notes": "California FTB handles income/franchise taxes, not sales tax; semantic list has no general income-tax category."
+  },
+  {
+    "canonical_name": "California Department of Motor Vehicles",
+    "aliases": [
+      "california department of motor vehicles",
+      "ca dmv",
+      "california dmv",
+      "dmv registration",
+      "ca vehicle registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dmv.ca.gov",
+    "confidence": "medium",
+    "notes": "Vehicle registration/licensing; some DMV charges may be personal."
+  },
+  {
+    "canonical_name": "Nevada Department of Motor Vehicles",
+    "aliases": [
+      "nevada department of motor vehicles",
+      "nv dmv",
+      "nevada dmv",
+      "dmv registration nevada",
+      "nv vehicle registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dmv.nv.gov",
+    "confidence": "medium",
+    "notes": "Vehicle registration/licensing; some DMV charges may be personal."
+  },
+  {
+    "canonical_name": "Texas Department of Motor Vehicles",
+    "aliases": [
+      "texas department of motor vehicles",
+      "tx dmv",
+      "texas dmv",
+      "txdmv",
+      "texas vehicle registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "txdmv.gov",
+    "confidence": "medium",
+    "notes": "Vehicle registration/licensing."
+  },
+  {
+    "canonical_name": "New York State Department of Motor Vehicles",
+    "aliases": [
+      "new york state department of motor vehicles",
+      "ny dmv",
+      "new york dmv",
+      "nys dmv",
+      "ny vehicle registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dmv.ny.gov",
+    "confidence": "medium",
+    "notes": "Vehicle registration/licensing."
+  },
+  {
+    "canonical_name": "Florida Department of Highway Safety and Motor Vehicles",
+    "aliases": [
+      "florida department of highway safety and motor vehicles",
+      "flhsmv",
+      "florida dmv",
+      "fl vehicle registration",
+      "flhsmv payment"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "flhsmv.gov",
+    "confidence": "medium",
+    "notes": "Vehicle registration/licensing."
+  },
+  {
+    "canonical_name": "Washington Department of Licensing",
+    "aliases": [
+      "washington department of licensing",
+      "wa dol",
+      "washington dol",
+      "wa business license",
+      "washington licensing"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dol.wa.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Oregon Driver and Motor Vehicle Services",
+    "aliases": [
+      "oregon driver and motor vehicle services",
+      "oregon dmv",
+      "or dmv",
+      "oregon vehicle registration",
+      "dmv oregon"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "oregon.gov",
+    "confidence": "medium",
+    "notes": "Vehicle registration/licensing."
+  },
+  {
+    "canonical_name": "Arizona Department of Transportation Motor Vehicle Division",
+    "aliases": [
+      "arizona motor vehicle division",
+      "az mvd",
+      "arizona mvd",
+      "az vehicle registration",
+      "adot mvd"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "azdot.gov",
+    "confidence": "medium",
+    "notes": "Vehicle registration/licensing."
+  },
+  {
+    "canonical_name": "Colorado Division of Motor Vehicles",
+    "aliases": [
+      "colorado division of motor vehicles",
+      "colorado dmv",
+      "co dmv",
+      "colorado vehicle registration",
+      "dmv colorado"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dmv.colorado.gov",
+    "confidence": "medium",
+    "notes": "Vehicle registration/licensing."
+  },
+  {
+    "canonical_name": "California Department of Consumer Affairs",
+    "aliases": [
+      "california department of consumer affairs",
+      "ca dca",
+      "california dca",
+      "dca license renewal",
+      "ca professional license"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dca.ca.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "California Contractors State License Board",
+    "aliases": [
+      "california contractors state license board",
+      "cslb",
+      "ca contractors license",
+      "cslb renewal",
+      "contractors state license board"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "cslb.ca.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "California Department of Alcoholic Beverage Control",
+    "aliases": [
+      "california department of alcoholic beverage control",
+      "ca abc",
+      "california abc",
+      "abc license renewal",
+      "california liquor license"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "abc.ca.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Texas Alcoholic Beverage Commission",
+    "aliases": [
+      "texas alcoholic beverage commission",
+      "tabc",
+      "texas abc",
+      "tabc license",
+      "texas liquor license"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "tabc.texas.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "New York State Liquor Authority",
+    "aliases": [
+      "new york state liquor authority",
+      "nys liquor authority",
+      "ny sla",
+      "new york liquor license",
+      "sla license fee"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sla.ny.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Florida Division of Alcoholic Beverages and Tobacco",
+    "aliases": [
+      "florida division of alcoholic beverages and tobacco",
+      "florida abt",
+      "fl abt",
+      "florida liquor license",
+      "abt license fee"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "myfloridalicense.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nevada State Contractors Board",
+    "aliases": [
+      "nevada state contractors board",
+      "nv contractors board",
+      "nscb",
+      "nevada contractor license",
+      "nscb renewal"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "nvcontractorsboard.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Arizona Registrar of Contractors",
+    "aliases": [
+      "arizona registrar of contractors",
+      "az roc",
+      "arizona roc",
+      "arizona contractor license",
+      "roc renewal"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "roc.az.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Texas Department of Licensing and Regulation",
+    "aliases": [
+      "texas department of licensing and regulation",
+      "tdlr",
+      "texas licensing regulation",
+      "tdlr license",
+      "tdlr renewal"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "tdlr.texas.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Florida Department of Business and Professional Regulation",
+    "aliases": [
+      "florida department of business and professional regulation",
+      "florida dbpr",
+      "dbpr",
+      "my florida license",
+      "dbpr license renewal"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "myfloridalicense.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "New York Department of State Division of Licensing Services",
+    "aliases": [
+      "new york division of licensing services",
+      "ny licensing services",
+      "nys dos licensing",
+      "ny professional license",
+      "ny license renewal"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dos.ny.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Illinois Department of Financial and Professional Regulation",
+    "aliases": [
+      "illinois department of financial and professional regulation",
+      "idfpr",
+      "illinois professional regulation",
+      "idfpr license",
+      "illinois license renewal"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "idfpr.illinois.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Georgia State Licensing Board",
+    "aliases": [
+      "georgia state licensing board",
+      "ga licensing board",
+      "georgia professional license",
+      "ga license renewal",
+      "georgia licensing fee"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "sos.ga.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "North Carolina Licensing Board for General Contractors",
+    "aliases": [
+      "north carolina licensing board for general contractors",
+      "nclbgc",
+      "nc general contractors board",
+      "nc contractor license",
+      "nclbgc renewal"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "nclbgc.org",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "South Carolina Department of Labor, Licensing and Regulation",
+    "aliases": [
+      "south carolina department of labor licensing and regulation",
+      "sc llr",
+      "south carolina llr",
+      "sc professional license",
+      "sc license renewal"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "llr.sc.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tennessee Department of Commerce and Insurance",
+    "aliases": [
+      "tennessee department of commerce and insurance",
+      "tn commerce insurance",
+      "tennessee professional licensing",
+      "tn license renewal",
+      "tn regulatory boards"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "tn.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Washington State Liquor and Cannabis Board",
+    "aliases": [
+      "washington state liquor and cannabis board",
+      "wa lcb",
+      "washington liquor board",
+      "wa liquor license",
+      "lcb license fee"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "lcb.wa.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Oregon Liquor and Cannabis Commission",
+    "aliases": [
+      "oregon liquor and cannabis commission",
+      "olcc",
+      "oregon liquor commission",
+      "oregon liquor license",
+      "olcc license fee"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "oregon.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pennsylvania Liquor Control Board",
+    "aliases": [
+      "pennsylvania liquor control board",
+      "plcb",
+      "pa liquor control board",
+      "pa liquor license",
+      "plcb license fee"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "lcb.pa.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Massachusetts Alcoholic Beverages Control Commission",
+    "aliases": [
+      "massachusetts alcoholic beverages control commission",
+      "massachusetts abcc",
+      "ma abcc",
+      "massachusetts liquor license",
+      "abcc license fee"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "mass.gov",
+    "confidence": "high",
+    "notes": ""
+  }
+]

@@ -1,0 +1,3183 @@
+[
+  {
+    "canonical_name": "State Farm",
+    "aliases": [
+      "state farm",
+      "state farm insurance",
+      "state farm mutual",
+      "state farm payment",
+      "statefarm"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "statefarm.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "GEICO",
+    "aliases": [
+      "geico",
+      "government employees insurance company",
+      "geico insurance",
+      "geico payment",
+      "geico auto"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "geico.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Progressive",
+    "aliases": [
+      "progressive",
+      "progressive insurance",
+      "progressive casualty",
+      "progressive payment",
+      "progressive commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "progressive.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Allstate",
+    "aliases": [
+      "allstate",
+      "allstate insurance",
+      "allstate insurance company",
+      "allstate payment",
+      "allstate business insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "allstate.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Liberty Mutual",
+    "aliases": [
+      "liberty mutual",
+      "liberty mutual insurance",
+      "liberty mutual payment",
+      "liberty insurance",
+      "liberty mutual group"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "libertymutual.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nationwide",
+    "aliases": [
+      "nationwide",
+      "nationwide insurance",
+      "nationwide mutual",
+      "nationwide payment",
+      "nationwide business insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "nationwide.com",
+    "confidence": "medium",
+    "notes": "Generic brand wording can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Farmers Insurance",
+    "aliases": [
+      "farmers insurance",
+      "farmers insurance group",
+      "farmers insurance exchange",
+      "farmers payment",
+      "farmers commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "farmers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Travelers",
+    "aliases": [
+      "travelers",
+      "travelers insurance",
+      "travelers indemnity",
+      "travelers payment",
+      "travelers commercial insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "travelers.com",
+    "confidence": "medium",
+    "notes": "Brand name can collide with travel-related descriptors."
+  },
+  {
+    "canonical_name": "The Hartford",
+    "aliases": [
+      "the hartford",
+      "hartford insurance",
+      "hartford fire insurance",
+      "hartford payment",
+      "hartford business insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "thehartford.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Chubb",
+    "aliases": [
+      "chubb",
+      "chubb insurance",
+      "chubb limited",
+      "chubb payment",
+      "chubb commercial insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "chubb.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CNA Insurance",
+    "aliases": [
+      "cna insurance",
+      "cna",
+      "continental casualty company",
+      "cna payment",
+      "cna commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "cna.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Zurich North America",
+    "aliases": [
+      "zurich north america",
+      "zurich insurance",
+      "zurich american insurance",
+      "zurich payment",
+      "zurich commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "zurichna.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "AIG",
+    "aliases": [
+      "aig",
+      "american international group",
+      "aig insurance",
+      "aig payment",
+      "aig commercial insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "aig.com",
+    "confidence": "medium",
+    "notes": "AIG provides multiple insurance and financial products."
+  },
+  {
+    "canonical_name": "Berkshire Hathaway GUARD",
+    "aliases": [
+      "berkshire hathaway guard",
+      "guard insurance",
+      "guard insurance companies",
+      "bh guard",
+      "guard workers comp"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "guard.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Berkshire Hathaway Specialty Insurance",
+    "aliases": [
+      "berkshire hathaway specialty insurance",
+      "bhsi",
+      "bhspecialty",
+      "berkshire specialty insurance",
+      "bhsi payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "bhspecialty.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "biBERK",
+    "aliases": [
+      "biberk",
+      "bi berk",
+      "biberk business insurance",
+      "berkshire hathaway biberk",
+      "biberk payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "biberk.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hiscox",
+    "aliases": [
+      "hiscox",
+      "hiscox insurance",
+      "hiscox inc",
+      "hiscox business insurance",
+      "hiscox payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "hiscox.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "NEXT Insurance",
+    "aliases": [
+      "next insurance",
+      "nextinsurance",
+      "next insurance inc",
+      "next business insurance",
+      "next insurance payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "nextinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Thimble",
+    "aliases": [
+      "thimble",
+      "thimble insurance",
+      "thimble business insurance",
+      "thimble payment",
+      "verifly thimble"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "thimble.com",
+    "confidence": "medium",
+    "notes": "Short brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Simply Business",
+    "aliases": [
+      "simply business",
+      "simply business insurance",
+      "simplybusiness",
+      "simply business inc",
+      "simply business payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "simplybusiness.com",
+    "confidence": "medium",
+    "notes": "Insurance marketplace; policy may ultimately be underwritten by another carrier."
+  },
+  {
+    "canonical_name": "CoverWallet",
+    "aliases": [
+      "coverwallet",
+      "cover wallet",
+      "coverwallet insurance",
+      "aon coverwallet",
+      "coverwallet payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "coverwallet.com",
+    "confidence": "medium",
+    "notes": "Insurance marketplace; policy may ultimately be underwritten by another carrier."
+  },
+  {
+    "canonical_name": "Insureon",
+    "aliases": [
+      "insureon",
+      "insureon insurance",
+      "insureon business insurance",
+      "insureon payment",
+      "insureon marketplace"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "insureon.com",
+    "confidence": "medium",
+    "notes": "Insurance marketplace; policy may ultimately be underwritten by another carrier."
+  },
+  {
+    "canonical_name": "Pie Insurance",
+    "aliases": [
+      "pie insurance",
+      "pieinsurance",
+      "pie insurance holdings",
+      "pie workers comp",
+      "pie insurance payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "pieinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Employers Insurance",
+    "aliases": [
+      "employers insurance",
+      "employers holdings",
+      "employers compensation insurance",
+      "employers workers comp",
+      "employers payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "employers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "AmTrust Financial",
+    "aliases": [
+      "amtrust financial",
+      "amtrust",
+      "amtrust insurance",
+      "amtrust workers comp",
+      "amtrust payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "amtrustfinancial.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Markel",
+    "aliases": [
+      "markel",
+      "markel insurance",
+      "markel specialty",
+      "markel payment",
+      "markel commercial insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "markel.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tokio Marine HCC",
+    "aliases": [
+      "tokio marine hcc",
+      "tmhcc",
+      "hcc insurance",
+      "tokio marine insurance",
+      "tmhcc payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "tmhcc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tokio Marine America",
+    "aliases": [
+      "tokio marine america",
+      "tokio marine",
+      "tmamerica",
+      "tokio marine insurance",
+      "tokio marine payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "tmamerica.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Great American Insurance Group",
+    "aliases": [
+      "great american insurance",
+      "great american insurance group",
+      "great american insurance company",
+      "great american payment",
+      "gaig"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "greatamericaninsurancegroup.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Philadelphia Insurance Companies",
+    "aliases": [
+      "philadelphia insurance companies",
+      "philadelphia insurance",
+      "phly",
+      "phly insurance",
+      "phly payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "phly.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hanover Insurance",
+    "aliases": [
+      "hanover insurance",
+      "the hanover",
+      "hanover insurance group",
+      "hanover payment",
+      "hanover commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "hanover.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Erie Insurance",
+    "aliases": [
+      "erie insurance",
+      "erie insurance group",
+      "erie indemnity",
+      "erie payment",
+      "erie commercial insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "erieinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Auto-Owners Insurance",
+    "aliases": [
+      "auto owners insurance",
+      "auto-owners insurance",
+      "auto owners",
+      "auto owners payment",
+      "auto owners commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "auto-owners.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Westfield Insurance",
+    "aliases": [
+      "westfield insurance",
+      "westfield",
+      "westfield insurance company",
+      "westfield payment",
+      "westfield commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "westfieldinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Selective Insurance",
+    "aliases": [
+      "selective insurance",
+      "selective",
+      "selective insurance group",
+      "selective payment",
+      "selective commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "selective.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cincinnati Insurance",
+    "aliases": [
+      "cincinnati insurance",
+      "cincinnati insurance company",
+      "cincinnati financial",
+      "cinfin",
+      "cincinnati insurance payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "cinfin.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Grange Insurance",
+    "aliases": [
+      "grange insurance",
+      "grange mutual",
+      "grange insurance company",
+      "grange payment",
+      "grange commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "grangeinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mercury Insurance",
+    "aliases": [
+      "mercury insurance",
+      "mercury general",
+      "mercury casualty",
+      "mercury payment",
+      "mercury commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "mercuryinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kemper",
+    "aliases": [
+      "kemper",
+      "kemper insurance",
+      "kemper corporation",
+      "kemper payment",
+      "kemper auto"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "kemper.com",
+    "confidence": "medium",
+    "notes": "Kemper offers multiple insurance products and brands."
+  },
+  {
+    "canonical_name": "Shelter Insurance",
+    "aliases": [
+      "shelter insurance",
+      "shelter mutual",
+      "shelter insurance companies",
+      "shelter payment",
+      "shelter commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "shelterinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "American Family Insurance",
+    "aliases": [
+      "american family insurance",
+      "american family",
+      "amfam",
+      "american family mutual",
+      "amfam payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "amfam.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "COUNTRY Financial",
+    "aliases": [
+      "country financial",
+      "country insurance",
+      "country mutual insurance",
+      "country financial payment",
+      "country companies"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "countryfinancial.com",
+    "confidence": "medium",
+    "notes": "Generic brand wording can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Sentry Insurance",
+    "aliases": [
+      "sentry insurance",
+      "sentry",
+      "sentry insurance company",
+      "sentry payment",
+      "sentry business insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "sentry.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "West Bend Insurance",
+    "aliases": [
+      "west bend insurance",
+      "west bend mutual",
+      "west bend insurance company",
+      "west bend payment",
+      "west bend commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "thesilverlining.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Society Insurance",
+    "aliases": [
+      "society insurance",
+      "society insurance company",
+      "society insurance payment",
+      "society commercial insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "societyinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Acuity Insurance",
+    "aliases": [
+      "acuity insurance",
+      "acuity",
+      "acuity mutual insurance",
+      "acuity payment",
+      "acuity commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "acuity.com",
+    "confidence": "medium",
+    "notes": "Short brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Secura Insurance",
+    "aliases": [
+      "secura insurance",
+      "secura",
+      "secura insurance companies",
+      "secura payment",
+      "secura commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "secura.net",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Church Mutual",
+    "aliases": [
+      "church mutual",
+      "church mutual insurance",
+      "church mutual insurance company",
+      "church mutual payment",
+      "church mutual insurance si"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "churchmutual.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Federated Insurance",
+    "aliases": [
+      "federated insurance",
+      "federated mutual",
+      "federated insurance company",
+      "federated payment",
+      "federated commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "federatedinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Central Insurance",
+    "aliases": [
+      "central insurance",
+      "central mutual insurance",
+      "central insurance companies",
+      "central insurance payment",
+      "central-insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "central-insurance.com",
+    "confidence": "medium",
+    "notes": "Generic name can collide with unrelated insurers."
+  },
+  {
+    "canonical_name": "Donegal Insurance Group",
+    "aliases": [
+      "donegal insurance",
+      "donegal insurance group",
+      "donegal mutual",
+      "donegal payment",
+      "donegal commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "donegalgroup.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Penn National Insurance",
+    "aliases": [
+      "penn national insurance",
+      "penn national",
+      "penn national insurance company",
+      "penn national payment",
+      "penn national commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "pennnationalinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Harford Mutual Insurance Group",
+    "aliases": [
+      "harford mutual",
+      "harford mutual insurance",
+      "harford mutual insurance group",
+      "harford payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "harfordmutual.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Utica National Insurance Group",
+    "aliases": [
+      "utica national",
+      "utica national insurance",
+      "utica national insurance group",
+      "utica payment",
+      "utica national commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "uticanational.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Merchants Insurance Group",
+    "aliases": [
+      "merchants insurance group",
+      "merchants insurance",
+      "merchants mutual insurance",
+      "merchants payment",
+      "merchants group"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "merchantsgroup.com",
+    "confidence": "medium",
+    "notes": "Generic brand wording can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Pekin Insurance",
+    "aliases": [
+      "pekin insurance",
+      "pekin",
+      "pekin insurance company",
+      "pekin payment",
+      "pekin commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "pekininsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Indiana Farmers Insurance",
+    "aliases": [
+      "indiana farmers insurance",
+      "indiana farmers",
+      "indiana farmers mutual",
+      "indiana farmers payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "indianafarmers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kentucky Farm Bureau Insurance",
+    "aliases": [
+      "kentucky farm bureau insurance",
+      "kentucky farm bureau",
+      "ky farm bureau insurance",
+      "kyfb insurance",
+      "kyfb payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "kyfb.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Texas Mutual Insurance",
+    "aliases": [
+      "texas mutual insurance",
+      "texas mutual",
+      "texas mutual workers comp",
+      "texas mutual insurance company",
+      "texas mutual payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "texasmutual.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SAIF",
+    "aliases": [
+      "saif",
+      "saif corporation",
+      "saif workers comp",
+      "oregon saif",
+      "saif payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "saif.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "State Compensation Insurance Fund",
+    "aliases": [
+      "state compensation insurance fund",
+      "state fund",
+      "state fund ca",
+      "california state fund",
+      "statefund workers comp"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "statefundca.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pinnacol Assurance",
+    "aliases": [
+      "pinnacol assurance",
+      "pinnacol",
+      "pinnacol workers comp",
+      "pinnacol insurance",
+      "pinnacol payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "pinnacol.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MEMIC",
+    "aliases": [
+      "memic",
+      "maine employers mutual insurance",
+      "memic workers comp",
+      "memic insurance",
+      "memic payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "memic.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CopperPoint Insurance Companies",
+    "aliases": [
+      "copperpoint",
+      "copperpoint insurance",
+      "copperpoint insurance companies",
+      "copperpoint workers comp",
+      "copperpoint payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "copperpoint.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ICW Group",
+    "aliases": [
+      "icw group",
+      "icw",
+      "insurance company of the west",
+      "icw workers comp",
+      "icw payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "icwgroup.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Berkley",
+    "aliases": [
+      "berkley",
+      "w r berkley",
+      "wr berkley",
+      "berkley insurance",
+      "berkley payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "berkley.com",
+    "confidence": "medium",
+    "notes": "Multiple W. R. Berkley operating companies may appear under distinct names."
+  },
+  {
+    "canonical_name": "BerkleyNet",
+    "aliases": [
+      "berkleynet",
+      "berkley net",
+      "berkleynet insurance",
+      "berkleynet workers comp",
+      "berkleynet payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "berkleynet.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Travelers Workers Compensation",
+    "aliases": [
+      "travelers workers compensation",
+      "travelers workers comp",
+      "travelers wc",
+      "travelers indemnity workers comp"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "travelers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Liberty Mutual Workers Compensation",
+    "aliases": [
+      "liberty mutual workers compensation",
+      "liberty mutual workers comp",
+      "liberty workers comp",
+      "liberty mutual wc"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "libertymutual.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Chubb Workers Compensation",
+    "aliases": [
+      "chubb workers compensation",
+      "chubb workers comp",
+      "chubb wc",
+      "chubb commercial workers comp"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "chubb.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "UnitedHealthcare",
+    "aliases": [
+      "unitedhealthcare",
+      "united healthcare",
+      "uhc",
+      "united healthcare insurance",
+      "uhc premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "uhc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "UnitedHealthcare Oxford",
+    "aliases": [
+      "oxford health plans",
+      "unitedhealthcare oxford",
+      "oxford health insurance",
+      "uhc oxford",
+      "oxford premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "uhc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Aetna",
+    "aliases": [
+      "aetna",
+      "aetna insurance",
+      "aetna health",
+      "aetna premium",
+      "cvs aetna"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "aetna.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cigna Healthcare",
+    "aliases": [
+      "cigna",
+      "cigna healthcare",
+      "cigna health",
+      "cigna insurance",
+      "cigna premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "cigna.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Humana",
+    "aliases": [
+      "humana",
+      "humana insurance",
+      "humana health",
+      "humana premium",
+      "humana inc"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "humana.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kaiser Permanente",
+    "aliases": [
+      "kaiser permanente",
+      "kaiser",
+      "kaiser foundation health plan",
+      "kp health",
+      "kaiser premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "kp.org",
+    "confidence": "medium",
+    "notes": "Charges may represent insurance premiums or direct healthcare services."
+  },
+  {
+    "canonical_name": "Blue Cross Blue Shield",
+    "aliases": [
+      "blue cross blue shield",
+      "bcbs",
+      "bluecross blueshield",
+      "blue cross insurance",
+      "blue shield insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "bcbs.com",
+    "confidence": "medium",
+    "notes": "Independent regional BCBS companies often appear under their own names."
+  },
+  {
+    "canonical_name": "Anthem Blue Cross Blue Shield",
+    "aliases": [
+      "anthem blue cross blue shield",
+      "anthem bcbs",
+      "anthem insurance",
+      "anthem health",
+      "anthem premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "anthem.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Elevance Health",
+    "aliases": [
+      "elevance health",
+      "elevance",
+      "anthem inc",
+      "elevance insurance",
+      "elevance health inc"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "elevancehealth.com",
+    "confidence": "medium",
+    "notes": "Parent-company name may not be the billing descriptor for a specific health plan."
+  },
+  {
+    "canonical_name": "Blue Shield of California",
+    "aliases": [
+      "blue shield of california",
+      "blue shield ca",
+      "blueshieldca",
+      "blue shield california premium",
+      "bsc insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "blueshieldca.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Blue Cross Blue Shield of Michigan",
+    "aliases": [
+      "blue cross blue shield of michigan",
+      "bcbs michigan",
+      "bcbsm",
+      "blue cross michigan",
+      "bcbsm premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "bcbsm.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Blue Cross Blue Shield of Massachusetts",
+    "aliases": [
+      "blue cross blue shield of massachusetts",
+      "bcbs massachusetts",
+      "blue cross ma",
+      "bcbsma",
+      "blue cross ma premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "bluecrossma.org",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Blue Cross Blue Shield of Texas",
+    "aliases": [
+      "blue cross blue shield of texas",
+      "bcbs texas",
+      "bcbstx",
+      "blue cross texas",
+      "bcbstx premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "bcbstx.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Blue Cross Blue Shield of Illinois",
+    "aliases": [
+      "blue cross blue shield of illinois",
+      "bcbs illinois",
+      "bcbsil",
+      "blue cross illinois",
+      "bcbsil premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "bcbsil.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Blue Cross Blue Shield of North Carolina",
+    "aliases": [
+      "blue cross blue shield of north carolina",
+      "blue cross nc",
+      "bcbs nc",
+      "bluecrossnc",
+      "bcbsnc premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "bluecrossnc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Florida Blue",
+    "aliases": [
+      "florida blue",
+      "blue cross blue shield florida",
+      "bcbs florida",
+      "florida blue insurance",
+      "florida blue premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "floridablue.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Highmark",
+    "aliases": [
+      "highmark",
+      "highmark blue cross blue shield",
+      "highmark bcbs",
+      "highmark health insurance",
+      "highmark premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "highmark.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Independence Blue Cross",
+    "aliases": [
+      "independence blue cross",
+      "ibx",
+      "independence bc",
+      "independence blue cross premium",
+      "ibx insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "ibx.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CareFirst BlueCross BlueShield",
+    "aliases": [
+      "carefirst",
+      "carefirst bluecross blueshield",
+      "carefirst bcbs",
+      "carefirst insurance",
+      "carefirst premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "carefirst.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Horizon Blue Cross Blue Shield of New Jersey",
+    "aliases": [
+      "horizon blue cross blue shield",
+      "horizon bcbsnj",
+      "horizon blue",
+      "horizon blue cross",
+      "horizon premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "horizonblue.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Premera Blue Cross",
+    "aliases": [
+      "premera blue cross",
+      "premera",
+      "premera insurance",
+      "premera health",
+      "premera premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "premera.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Regence",
+    "aliases": [
+      "regence",
+      "regence bluecross blueshield",
+      "regence bcbs",
+      "regence insurance",
+      "regence premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "regence.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Health Care Service Corporation",
+    "aliases": [
+      "health care service corporation",
+      "hcsc",
+      "healthcare service corporation",
+      "hcsc insurance",
+      "hcsc health"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "hcsc.com",
+    "confidence": "medium",
+    "notes": "Parent organization for several regional Blue Cross Blue Shield plans."
+  },
+  {
+    "canonical_name": "Molina Healthcare",
+    "aliases": [
+      "molina healthcare",
+      "molina",
+      "molina health",
+      "molina insurance",
+      "molina premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "molinahealthcare.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Centene",
+    "aliases": [
+      "centene",
+      "centene corporation",
+      "centene health",
+      "centene insurance",
+      "centene payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "centene.com",
+    "confidence": "medium",
+    "notes": "Parent company for multiple health-plan brands; local plan may appear instead."
+  },
+  {
+    "canonical_name": "Ambetter",
+    "aliases": [
+      "ambetter",
+      "ambetter health",
+      "ambetter insurance",
+      "ambetter premium",
+      "centene ambetter"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "ambetterhealth.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Oscar Health",
+    "aliases": [
+      "oscar health",
+      "oscar insurance",
+      "oscar",
+      "hioscar",
+      "oscar premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "hioscar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "K Health",
+    "aliases": [
+      "k health",
+      "khealth",
+      "k health membership",
+      "k health medical",
+      "k health payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "khealth.com",
+    "confidence": "medium",
+    "notes": "May represent healthcare services rather than insurance premiums."
+  },
+  {
+    "canonical_name": "HealthPartners",
+    "aliases": [
+      "healthpartners",
+      "health partners",
+      "healthpartners insurance",
+      "healthpartners health plan",
+      "healthpartners premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "healthpartners.com",
+    "confidence": "medium",
+    "notes": "May also represent direct healthcare services."
+  },
+  {
+    "canonical_name": "Medica",
+    "aliases": [
+      "medica",
+      "medica health plans",
+      "medica insurance",
+      "medica health",
+      "medica premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "medica.com",
+    "confidence": "medium",
+    "notes": "Short brand name can collide with unrelated healthcare entities."
+  },
+  {
+    "canonical_name": "Priority Health",
+    "aliases": [
+      "priority health",
+      "priorityhealth",
+      "priority health insurance",
+      "priority health premium",
+      "priority health plan"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "priorityhealth.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Medical Mutual of Ohio",
+    "aliases": [
+      "medical mutual of ohio",
+      "medical mutual",
+      "medmutual",
+      "medical mutual insurance",
+      "medical mutual premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "medmutual.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "UPMC Health Plan",
+    "aliases": [
+      "upmc health plan",
+      "upmc insurance",
+      "upmc health",
+      "upmc health plan premium",
+      "upmc premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "upmchealthplan.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Geisinger Health Plan",
+    "aliases": [
+      "geisinger health plan",
+      "geisinger insurance",
+      "geisinger health",
+      "geisinger premium",
+      "ghp insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "geisinger.org",
+    "confidence": "medium",
+    "notes": "Geisinger descriptors may also represent direct healthcare services."
+  },
+  {
+    "canonical_name": "EmblemHealth",
+    "aliases": [
+      "emblemhealth",
+      "emblem health",
+      "emblem health insurance",
+      "emblem premium",
+      "ghi emblemhealth"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "emblemhealth.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Healthfirst",
+    "aliases": [
+      "healthfirst",
+      "health first",
+      "healthfirst insurance",
+      "healthfirst health plan",
+      "healthfirst premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "healthfirst.org",
+    "confidence": "medium",
+    "notes": "Generic name can collide with unrelated healthcare organizations."
+  },
+  {
+    "canonical_name": "Tufts Health Plan",
+    "aliases": [
+      "tufts health plan",
+      "tufts health",
+      "tufts insurance",
+      "tufts health plan premium",
+      "tufts premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "tuftshealthplan.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Harvard Pilgrim Health Care",
+    "aliases": [
+      "harvard pilgrim",
+      "harvard pilgrim health care",
+      "harvard pilgrim insurance",
+      "harvard pilgrim premium",
+      "hphc"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "harvardpilgrim.org",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Point32Health",
+    "aliases": [
+      "point32health",
+      "point 32 health",
+      "point32 health",
+      "point32health inc",
+      "point32 insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "point32health.org",
+    "confidence": "medium",
+    "notes": "Parent organization; member billing may use Harvard Pilgrim or Tufts Health Plan."
+  },
+  {
+    "canonical_name": "Moda Health",
+    "aliases": [
+      "moda health",
+      "moda",
+      "moda insurance",
+      "moda health premium",
+      "moda health plan"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "modahealth.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PacificSource",
+    "aliases": [
+      "pacificsource",
+      "pacific source",
+      "pacificsource health plans",
+      "pacificsource insurance",
+      "pacificsource premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "pacificsource.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Select Health",
+    "aliases": [
+      "select health",
+      "selecthealth",
+      "select health insurance",
+      "selecthealth premium",
+      "select health plan"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "selecthealth.org",
+    "confidence": "medium",
+    "notes": "Generic name can collide with unrelated healthcare organizations."
+  },
+  {
+    "canonical_name": "Delta Dental",
+    "aliases": [
+      "delta dental",
+      "delta dental insurance",
+      "delta dental plans",
+      "delta dental premium",
+      "delta dental payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "deltadental.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MetLife",
+    "aliases": [
+      "metlife",
+      "metropolitan life insurance",
+      "metlife insurance",
+      "metlife premium",
+      "metlife payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "metlife.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Guardian Life",
+    "aliases": [
+      "guardian life",
+      "guardian insurance",
+      "guardian life insurance",
+      "guardian dental",
+      "guardian premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "guardianlife.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Principal Financial Group",
+    "aliases": [
+      "principal financial group",
+      "principal insurance",
+      "principal life insurance",
+      "principal dental",
+      "principal premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "principal.com",
+    "confidence": "medium",
+    "notes": "Principal also provides retirement and investment services."
+  },
+  {
+    "canonical_name": "Lincoln Financial",
+    "aliases": [
+      "lincoln financial",
+      "lincoln financial group",
+      "lincoln national life",
+      "lincoln insurance",
+      "lincoln premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "lincolnfinancial.com",
+    "confidence": "medium",
+    "notes": "Lincoln also provides retirement and investment products."
+  },
+  {
+    "canonical_name": "Mutual of Omaha",
+    "aliases": [
+      "mutual of omaha",
+      "mutual omaha",
+      "mutual of omaha insurance",
+      "mutual of omaha premium",
+      "united of omaha"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "mutualofomaha.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sun Life",
+    "aliases": [
+      "sun life",
+      "sun life financial",
+      "sun life insurance",
+      "sun life premium",
+      "sunlife"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "sunlife.com",
+    "confidence": "medium",
+    "notes": "Provides insurance and employee-benefit products."
+  },
+  {
+    "canonical_name": "Unum",
+    "aliases": [
+      "unum",
+      "unum insurance",
+      "unum group",
+      "unum disability",
+      "unum premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "unum.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Aflac",
+    "aliases": [
+      "aflac",
+      "aflac insurance",
+      "american family life assurance",
+      "aflac premium",
+      "aflac payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "aflac.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Voya Financial",
+    "aliases": [
+      "voya financial",
+      "voya",
+      "voya insurance",
+      "voya benefits",
+      "voya premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "voya.com",
+    "confidence": "medium",
+    "notes": "Voya also provides retirement and investment services."
+  },
+  {
+    "canonical_name": "New York Life",
+    "aliases": [
+      "new york life",
+      "new york life insurance",
+      "ny life",
+      "new york life premium",
+      "nyl insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "newyorklife.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Northwestern Mutual",
+    "aliases": [
+      "northwestern mutual",
+      "northwestern mutual life",
+      "northwestern mutual insurance",
+      "northwestern mutual premium",
+      "nml insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "northwesternmutual.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MassMutual",
+    "aliases": [
+      "massmutual",
+      "mass mutual",
+      "massachusetts mutual life",
+      "massmutual insurance",
+      "massmutual premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "massmutual.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Prudential",
+    "aliases": [
+      "prudential",
+      "prudential insurance",
+      "prudential financial",
+      "pru insurance",
+      "prudential premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "prudential.com",
+    "confidence": "medium",
+    "notes": "Prudential also provides investment and retirement products."
+  },
+  {
+    "canonical_name": "Transamerica",
+    "aliases": [
+      "transamerica",
+      "transamerica life insurance",
+      "transamerica insurance",
+      "transamerica premium",
+      "transamerica financial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "transamerica.com",
+    "confidence": "medium",
+    "notes": "Also provides retirement and investment products."
+  },
+  {
+    "canonical_name": "Securian Financial",
+    "aliases": [
+      "securian financial",
+      "securian",
+      "minnesota life insurance",
+      "securian insurance",
+      "securian premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "securian.com",
+    "confidence": "medium",
+    "notes": "Also provides retirement and financial products."
+  },
+  {
+    "canonical_name": "Ameritas",
+    "aliases": [
+      "ameritas",
+      "ameritas life insurance",
+      "ameritas dental",
+      "ameritas insurance",
+      "ameritas premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "ameritas.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Reliance Standard",
+    "aliases": [
+      "reliance standard",
+      "reliance standard life insurance",
+      "rsli",
+      "reliance standard insurance",
+      "reliance premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "rsli.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Standard",
+    "aliases": [
+      "the standard",
+      "standard insurance company",
+      "standard insurance",
+      "standard disability",
+      "standard premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "standard.com",
+    "confidence": "medium",
+    "notes": "Generic brand wording can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Symetra",
+    "aliases": [
+      "symetra",
+      "symetra life insurance",
+      "symetra insurance",
+      "symetra benefits",
+      "symetra premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "symetra.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dearborn Group",
+    "aliases": [
+      "dearborn group",
+      "dearborn group benefits",
+      "dearborn life insurance",
+      "dearborn insurance",
+      "dearborn premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "dearborngroupbenefits.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "VSP Vision Care",
+    "aliases": [
+      "vsp",
+      "vsp vision care",
+      "vision service plan",
+      "vsp insurance",
+      "vsp premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "vsp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "EyeMed",
+    "aliases": [
+      "eyemed",
+      "eye med",
+      "eyemed vision care",
+      "eyemed insurance",
+      "eyemed premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "eyemed.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Davis Vision",
+    "aliases": [
+      "davis vision",
+      "davisvision",
+      "davis vision insurance",
+      "davis vision premium",
+      "davis vision plan"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "davisvision.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "USAA",
+    "aliases": [
+      "usaa",
+      "usaa insurance",
+      "united services automobile association",
+      "usaa payment",
+      "usaa auto insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "usaa.com",
+    "confidence": "medium",
+    "notes": "USAA also provides banking and other financial services."
+  },
+  {
+    "canonical_name": "AAA Insurance",
+    "aliases": [
+      "aaa insurance",
+      "aaa auto insurance",
+      "aaa property insurance",
+      "aaa insurance payment",
+      "aaa *insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "aaa.com",
+    "confidence": "medium",
+    "notes": "AAA charges may instead be membership, roadside assistance, or travel."
+  },
+  {
+    "canonical_name": "Auto Club Enterprises Insurance",
+    "aliases": [
+      "auto club enterprises insurance",
+      "aaa auto club insurance",
+      "auto club insurance",
+      "ace insurance aaa",
+      "aaa southern california insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "ace.aaa.com",
+    "confidence": "medium",
+    "notes": "AAA-related descriptors may also represent membership or roadside services."
+  },
+  {
+    "canonical_name": "CSAA Insurance Group",
+    "aliases": [
+      "csaa insurance",
+      "csaa insurance group",
+      "aaa csaa insurance",
+      "csaa payment",
+      "csaa auto insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "csaa-insurance.aaa.com",
+    "confidence": "medium",
+    "notes": "AAA-related descriptors may also represent membership or roadside services."
+  },
+  {
+    "canonical_name": "Amica",
+    "aliases": [
+      "amica",
+      "amica mutual insurance",
+      "amica insurance",
+      "amica payment",
+      "amica auto insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "amica.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "NJM Insurance Group",
+    "aliases": [
+      "njm",
+      "njm insurance",
+      "new jersey manufacturers insurance",
+      "njm payment",
+      "njm commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "njm.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Plymouth Rock Assurance",
+    "aliases": [
+      "plymouth rock assurance",
+      "plymouth rock insurance",
+      "plymouth rock",
+      "plymouth rock payment",
+      "plymouth auto insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "plymouthrock.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Safety Insurance",
+    "aliases": [
+      "safety insurance",
+      "safety insurance company",
+      "safety insurance group",
+      "safety payment",
+      "safety auto insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "safetyinsurance.com",
+    "confidence": "medium",
+    "notes": "Generic name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "MAPFRE Insurance",
+    "aliases": [
+      "mapfre insurance",
+      "mapfre",
+      "mapfre usa",
+      "mapfre payment",
+      "mapfre auto insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "mapfreinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Arbella Insurance",
+    "aliases": [
+      "arbella insurance",
+      "arbella",
+      "arbella mutual insurance",
+      "arbella payment",
+      "arbella commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "arbella.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mercury General",
+    "aliases": [
+      "mercury general",
+      "mercury general corporation",
+      "mercury insurance",
+      "mercury general payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "mercuryinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wawanesa Insurance",
+    "aliases": [
+      "wawanesa insurance",
+      "wawanesa",
+      "wawanesa general insurance",
+      "wawanesa payment",
+      "wawanesa auto"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "wawanesa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Root Insurance",
+    "aliases": [
+      "root insurance",
+      "root",
+      "root insurance company",
+      "joinroot",
+      "root insurance payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "joinroot.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lemonade",
+    "aliases": [
+      "lemonade",
+      "lemonade insurance",
+      "lemonade inc",
+      "lemonade premium",
+      "lemonade *insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "lemonade.com",
+    "confidence": "medium",
+    "notes": "Brand name can collide with food and beverage merchants."
+  },
+  {
+    "canonical_name": "Hippo Insurance",
+    "aliases": [
+      "hippo insurance",
+      "hippo",
+      "hippo insurance services",
+      "hippo premium",
+      "hippo *insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "hippo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kin Insurance",
+    "aliases": [
+      "kin insurance",
+      "kin",
+      "kin insurance network",
+      "kin premium",
+      "kin *insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "kin.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Openly",
+    "aliases": [
+      "openly",
+      "openly insurance",
+      "openly inc",
+      "openly premium",
+      "openly *insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "openly.com",
+    "confidence": "medium",
+    "notes": "Short brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Branch Insurance",
+    "aliases": [
+      "branch insurance",
+      "branch",
+      "branch financial",
+      "branch insurance payment",
+      "ourbranch"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "ourbranch.com",
+    "confidence": "medium",
+    "notes": "Generic brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Toggle Insurance",
+    "aliases": [
+      "toggle insurance",
+      "toggle",
+      "toggleinsurance",
+      "farmers toggle",
+      "toggle premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "toggleinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Homesite Insurance",
+    "aliases": [
+      "homesite insurance",
+      "homesite",
+      "homesite insurance company",
+      "homesite payment",
+      "homesite premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "homesite.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Stillwater Insurance",
+    "aliases": [
+      "stillwater insurance",
+      "stillwater",
+      "stillwater insurance group",
+      "stillwater payment",
+      "stillwater premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "stillwaterinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Foremost Insurance",
+    "aliases": [
+      "foremost insurance",
+      "foremost",
+      "foremost insurance company",
+      "foremost payment",
+      "farmers foremost"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "foremost.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "American Modern Insurance Group",
+    "aliases": [
+      "american modern insurance",
+      "american modern insurance group",
+      "amig",
+      "american modern payment",
+      "american modern insurance company"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "amig.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Assurant",
+    "aliases": [
+      "assurant",
+      "assurant insurance",
+      "assurant inc",
+      "assurant premium",
+      "assurant payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "assurant.com",
+    "confidence": "medium",
+    "notes": "Assurant provides multiple specialty insurance and protection products."
+  },
+  {
+    "canonical_name": "Assurity",
+    "aliases": [
+      "assurity",
+      "assurity life insurance",
+      "assurity insurance",
+      "assurity premium",
+      "assurity payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "assurity.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "RLI Insurance",
+    "aliases": [
+      "rli insurance",
+      "rli",
+      "rli insurance company",
+      "rli payment",
+      "rli commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "rlicorp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kinsale Insurance",
+    "aliases": [
+      "kinsale insurance",
+      "kinsale",
+      "kinsale insurance company",
+      "kinsale payment",
+      "kinsale specialty"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "kinsaleins.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Skyward Specialty Insurance",
+    "aliases": [
+      "skyward specialty insurance",
+      "skyward insurance",
+      "skyward specialty",
+      "skyward payment",
+      "houston international insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "skywardinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Arch Insurance",
+    "aliases": [
+      "arch insurance",
+      "arch insurance group",
+      "arch insurance company",
+      "arch payment",
+      "arch specialty"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "insurance.archgroup.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "AXA XL",
+    "aliases": [
+      "axa xl",
+      "axaxl",
+      "xl insurance",
+      "xl specialty insurance",
+      "axa xl payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "axaxl.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Allianz Commercial",
+    "aliases": [
+      "allianz commercial",
+      "allianz insurance",
+      "allianz global corporate specialty",
+      "agcs",
+      "allianz payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "commercial.allianz.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Munich Re Specialty",
+    "aliases": [
+      "munich re specialty",
+      "munich re",
+      "munichre",
+      "munich re insurance",
+      "munich re payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "munichre.com",
+    "confidence": "medium",
+    "notes": "Often appears in specialty or reinsurance contexts rather than ordinary SMB policies."
+  },
+  {
+    "canonical_name": "Swiss Re Corporate Solutions",
+    "aliases": [
+      "swiss re corporate solutions",
+      "swiss re",
+      "swissre",
+      "swiss re insurance",
+      "swiss re payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "corporatesolutions.swissre.com",
+    "confidence": "medium",
+    "notes": "Often appears in specialty insurance contexts."
+  },
+  {
+    "canonical_name": "QBE North America",
+    "aliases": [
+      "qbe north america",
+      "qbe insurance",
+      "qbe",
+      "qbe insurance corporation",
+      "qbe payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "qbe.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sompo",
+    "aliases": [
+      "sompo",
+      "sompo international",
+      "sompo insurance",
+      "sompo payment",
+      "sompo commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "sompo-intl.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Starr Insurance",
+    "aliases": [
+      "starr insurance",
+      "starr companies",
+      "starr indemnity",
+      "starr payment",
+      "starr commercial"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "starrcompanies.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Crum & Forster",
+    "aliases": [
+      "crum and forster",
+      "crum & forster",
+      "crum forster",
+      "cf insurance",
+      "crum forster payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "cfins.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Old Republic Insurance",
+    "aliases": [
+      "old republic insurance",
+      "old republic",
+      "old republic insurance company",
+      "old republic payment",
+      "ori insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "oldrepublic.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Great West Casualty",
+    "aliases": [
+      "great west casualty",
+      "great west casualty company",
+      "gwcc",
+      "great west insurance",
+      "great west payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "gwccnet.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Canal Insurance",
+    "aliases": [
+      "canal insurance",
+      "canal insurance company",
+      "canal insurance payment",
+      "canal commercial auto",
+      "canal *insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "canalinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "National Interstate Insurance",
+    "aliases": [
+      "national interstate insurance",
+      "national interstate",
+      "national interstate insurance company",
+      "national interstate payment",
+      "natl insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "natl.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Protective Insurance",
+    "aliases": [
+      "protective insurance",
+      "protective insurance company",
+      "protective specialty",
+      "protective payment",
+      "protective commercial auto"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "protectiveinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lancer Insurance",
+    "aliases": [
+      "lancer insurance",
+      "lancer insurance company",
+      "lancer",
+      "lancer payment",
+      "lancer commercial auto"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "lancerinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Philadelphia Indemnity Insurance",
+    "aliases": [
+      "philadelphia indemnity insurance",
+      "philadelphia indemnity",
+      "phly indemnity",
+      "phly insurance",
+      "philadelphia indemnity payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "phly.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ProAssurance",
+    "aliases": [
+      "proassurance",
+      "pro assurance",
+      "proassurance insurance",
+      "proassurance payment",
+      "proassurance professional liability"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "proassurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MedPro Group",
+    "aliases": [
+      "medpro group",
+      "medpro",
+      "medical protective company",
+      "medpro insurance",
+      "medpro payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "medpro.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Coverys",
+    "aliases": [
+      "coverys",
+      "coverys insurance",
+      "coverys group",
+      "coverys payment",
+      "coverys professional liability"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "coverys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Doctors Company",
+    "aliases": [
+      "the doctors company",
+      "doctors company insurance",
+      "the doctors insurance",
+      "tdc insurance",
+      "doctors company payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "thedoctors.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "NORCAL Group",
+    "aliases": [
+      "norcal group",
+      "norcal insurance",
+      "norcal mutual",
+      "norcal medical liability",
+      "norcal payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "norcal-group.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ISMIE",
+    "aliases": [
+      "ismie",
+      "ismie mutual",
+      "ismie insurance",
+      "ismie medical liability",
+      "ismie payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "ismie.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Proliability",
+    "aliases": [
+      "proliability",
+      "pro liability",
+      "proliability insurance",
+      "mercer proliability",
+      "proliability payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "proliability.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CM&F Group",
+    "aliases": [
+      "cm&f group",
+      "cmf group",
+      "cmf insurance",
+      "cmf professional liability",
+      "cmf payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "cmfgroup.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Embroker",
+    "aliases": [
+      "embroker",
+      "embroker insurance",
+      "embroker insurance services",
+      "embroker payment",
+      "embroker business insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "embroker.com",
+    "confidence": "medium",
+    "notes": "Digital brokerage; policy may be underwritten by another carrier."
+  },
+  {
+    "canonical_name": "Vouch Insurance",
+    "aliases": [
+      "vouch insurance",
+      "vouch",
+      "vouch insurance services",
+      "vouch premium",
+      "vouch *insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "vouch.us",
+    "confidence": "medium",
+    "notes": "Digital brokerage/carrier platform; underlying insurer may vary."
+  },
+  {
+    "canonical_name": "Coalition",
+    "aliases": [
+      "coalition",
+      "coalition insurance",
+      "coalition inc",
+      "coalition cyber insurance",
+      "coalition premium"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "coalitioninc.com",
+    "confidence": "medium",
+    "notes": "Cyber-insurance platform; policies may involve partner carriers."
+  },
+  {
+    "canonical_name": "At-Bay",
+    "aliases": [
+      "at bay",
+      "at-bay",
+      "at bay insurance",
+      "at bay cyber insurance",
+      "at bay payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "at-bay.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cowbell",
+    "aliases": [
+      "cowbell",
+      "cowbell cyber",
+      "cowbell insurance",
+      "cowbell cyber insurance",
+      "cowbell payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "cowbell.insure",
+    "confidence": "medium",
+    "notes": "Brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Corvus Insurance",
+    "aliases": [
+      "corvus insurance",
+      "corvus",
+      "corvus cyber insurance",
+      "corvus payment",
+      "travelers corvus"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "corvusinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Coterie Insurance",
+    "aliases": [
+      "coterie insurance",
+      "coterie",
+      "coterie insurance agency",
+      "coterie payment",
+      "coterie business insurance"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "coterieinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cerity",
+    "aliases": [
+      "cerity",
+      "cerity insurance",
+      "cerity workers comp",
+      "cerity insurance company",
+      "cerity payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "cerity.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Guard Insurance Group",
+    "aliases": [
+      "guard insurance group",
+      "guard insurance",
+      "berkshire hathaway guard",
+      "guard workers compensation",
+      "guard payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "guard.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Applied Underwriters",
+    "aliases": [
+      "applied underwriters",
+      "applied underwriting",
+      "applied underwriters inc",
+      "applied insurance",
+      "applied underwriters payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "auw.com",
+    "confidence": "medium",
+    "notes": "Provides workers' compensation and other insurance-related programs."
+  },
+  {
+    "canonical_name": "AF Group",
+    "aliases": [
+      "af group",
+      "afgroup",
+      "accident fund",
+      "accident fund insurance",
+      "af group payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "afgroup.com",
+    "confidence": "medium",
+    "notes": "Parent organization for multiple workers' compensation carriers."
+  },
+  {
+    "canonical_name": "Accident Fund Insurance Company of America",
+    "aliases": [
+      "accident fund",
+      "accident fund insurance",
+      "accident fund insurance company",
+      "accident fund workers comp",
+      "accident fund payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "accidentfund.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CompWest",
+    "aliases": [
+      "compwest",
+      "compwest insurance",
+      "compwest workers comp",
+      "compwest insurance company",
+      "compwest payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "compwestinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Third Coast Underwriters",
+    "aliases": [
+      "third coast underwriters",
+      "third coast",
+      "third coast insurance",
+      "third coast workers comp",
+      "third coast payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "thirdcoastuw.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "LWCC",
+    "aliases": [
+      "lwcc",
+      "louisiana workers compensation corporation",
+      "lwcc workers comp",
+      "lwcc insurance",
+      "lwcc payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "lwcc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Chesapeake Employers Insurance",
+    "aliases": [
+      "chesapeake employers insurance",
+      "chesapeake employers",
+      "ceiwc",
+      "chesapeake workers comp",
+      "chesapeake employers payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "ceiwc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Missouri Employers Mutual",
+    "aliases": [
+      "missouri employers mutual",
+      "mem",
+      "mem insurance",
+      "missouri employers workers comp",
+      "mem payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "mem-ins.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SFM Mutual Insurance",
+    "aliases": [
+      "sfm mutual insurance",
+      "sfm",
+      "sfm insurance",
+      "sfm workers comp",
+      "sfm payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "sfmic.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Montana State Fund",
+    "aliases": [
+      "montana state fund",
+      "msf",
+      "montana workers comp",
+      "montana state fund insurance",
+      "msf payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "montanastatefund.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "New Mexico Mutual",
+    "aliases": [
+      "new mexico mutual",
+      "new mexico mutual insurance",
+      "nm mutual",
+      "new mexico workers comp",
+      "new mexico mutual payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "newmexicomutual.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pinnacle Risk Management Services",
+    "aliases": [
+      "pinnacle risk management",
+      "pinnacle risk",
+      "pinnacle insurance services",
+      "pinnacle risk payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "pinnaclerisk.com",
+    "confidence": "medium",
+    "notes": "May represent third-party administration or risk services rather than an insurance premium."
+  },
+  {
+    "canonical_name": "Zenith Insurance Company",
+    "aliases": [
+      "zenith insurance company",
+      "the zenith",
+      "zenith insurance",
+      "zenith workers comp",
+      "zenith payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "thezenith.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "BHHC",
+    "aliases": [
+      "bhhc",
+      "berkshire hathaway homestate companies",
+      "berkshire hathaway homestate",
+      "bhhc insurance",
+      "bhhc workers comp"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "bhhc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Amwins",
+    "aliases": [
+      "amwins",
+      "amwins group",
+      "amwins insurance",
+      "amwins brokerage",
+      "amwins payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "amwins.com",
+    "confidence": "medium",
+    "notes": "Wholesale insurance distributor; underlying carrier may differ."
+  },
+  {
+    "canonical_name": "CRC Group",
+    "aliases": [
+      "crc group",
+      "crc insurance",
+      "crc group insurance",
+      "crc brokerage",
+      "crc payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "crcgroupins.com",
+    "confidence": "medium",
+    "notes": "Wholesale insurance distributor; underlying carrier may differ."
+  },
+  {
+    "canonical_name": "Burns & Wilcox",
+    "aliases": [
+      "burns and wilcox",
+      "burns & wilcox",
+      "burns wilcox",
+      "burns wilcox insurance",
+      "burns wilcox payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "burnsandwilcox.com",
+    "confidence": "medium",
+    "notes": "Wholesale broker/MGA; underlying carrier may differ."
+  },
+  {
+    "canonical_name": "RT Specialty",
+    "aliases": [
+      "rt specialty",
+      "r t specialty",
+      "rtspecialty",
+      "rt specialty insurance",
+      "rt specialty payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "rtspecialty.com",
+    "confidence": "medium",
+    "notes": "Wholesale broker; underlying carrier may differ."
+  },
+  {
+    "canonical_name": "Aon",
+    "aliases": [
+      "aon",
+      "aon insurance",
+      "aon risk services",
+      "aon insurance services",
+      "aon payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "aon.com",
+    "confidence": "medium",
+    "notes": "Aon is primarily a broker/adviser; charges may be brokerage or consulting rather than premiums."
+  },
+  {
+    "canonical_name": "Marsh",
+    "aliases": [
+      "marsh",
+      "marsh insurance",
+      "marsh usa",
+      "marsh risk",
+      "marsh payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "marsh.com",
+    "confidence": "medium",
+    "notes": "Marsh is primarily a broker/adviser; charges may be brokerage or consulting rather than premiums."
+  },
+  {
+    "canonical_name": "Gallagher",
+    "aliases": [
+      "gallagher",
+      "arthur j gallagher",
+      "ajg",
+      "gallagher insurance",
+      "gallagher payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "ajg.com",
+    "confidence": "medium",
+    "notes": "Gallagher is primarily a broker/adviser; charges may be brokerage or consulting rather than premiums."
+  },
+  {
+    "canonical_name": "Brown & Brown",
+    "aliases": [
+      "brown and brown",
+      "brown & brown",
+      "brown brown insurance",
+      "brown and brown insurance",
+      "brown brown payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "bbrown.com",
+    "confidence": "medium",
+    "notes": "Insurance brokerage; underlying carrier may differ."
+  },
+  {
+    "canonical_name": "Hub International",
+    "aliases": [
+      "hub international",
+      "hub insurance",
+      "hub international insurance",
+      "hub risk services",
+      "hub payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "hubinternational.com",
+    "confidence": "medium",
+    "notes": "Insurance brokerage; underlying carrier may differ."
+  },
+  {
+    "canonical_name": "USI Insurance Services",
+    "aliases": [
+      "usi insurance services",
+      "usi insurance",
+      "usi",
+      "usi risk",
+      "usi payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "usi.com",
+    "confidence": "medium",
+    "notes": "Insurance brokerage; underlying carrier may differ."
+  },
+  {
+    "canonical_name": "Lockton",
+    "aliases": [
+      "lockton",
+      "lockton companies",
+      "lockton insurance",
+      "lockton risk",
+      "lockton payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "lockton.com",
+    "confidence": "medium",
+    "notes": "Insurance brokerage; underlying carrier may differ."
+  },
+  {
+    "canonical_name": "AssuredPartners",
+    "aliases": [
+      "assuredpartners",
+      "assured partners",
+      "assuredpartners insurance",
+      "assured partners insurance",
+      "assuredpartners payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "assuredpartners.com",
+    "confidence": "medium",
+    "notes": "Insurance brokerage; underlying carrier may differ."
+  },
+  {
+    "canonical_name": "Acrisure",
+    "aliases": [
+      "acrisure",
+      "acrisure insurance",
+      "acrisure llc",
+      "acrisure payment",
+      "acrisure partners"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "acrisure.com",
+    "confidence": "medium",
+    "notes": "Insurance brokerage and fintech group; underlying carrier may differ."
+  },
+  {
+    "canonical_name": "Risk Strategies",
+    "aliases": [
+      "risk strategies",
+      "risk strategies company",
+      "risk strategies insurance",
+      "risk strategies payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "risk-strategies.com",
+    "confidence": "medium",
+    "notes": "Insurance brokerage; underlying carrier may differ."
+  },
+  {
+    "canonical_name": "EPIC Insurance Brokers",
+    "aliases": [
+      "epic insurance brokers",
+      "epic brokers",
+      "epic insurance",
+      "epic brokers payment",
+      "edgewood partners insurance center"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "epicbrokers.com",
+    "confidence": "medium",
+    "notes": "Insurance brokerage; underlying carrier may differ."
+  },
+  {
+    "canonical_name": "Woodruff Sawyer",
+    "aliases": [
+      "woodruff sawyer",
+      "woodruff-sawyer",
+      "woodruff sawyer insurance",
+      "woodruff sawyer payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "woodruffsawyer.com",
+    "confidence": "medium",
+    "notes": "Insurance brokerage and risk-advisory firm."
+  },
+  {
+    "canonical_name": "Heffernan Insurance Brokers",
+    "aliases": [
+      "heffernan insurance brokers",
+      "heffernan insurance",
+      "heffernan",
+      "heffernan payment"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "heffins.com",
+    "confidence": "medium",
+    "notes": "Insurance brokerage; underlying carrier may differ."
+  }
+]

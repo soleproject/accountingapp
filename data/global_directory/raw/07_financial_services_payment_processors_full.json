@@ -1,0 +1,1884 @@
+[
+  {
+    "canonical_name": "Stripe",
+    "aliases": [
+      "stripe",
+      "stripe inc",
+      "stripe payments",
+      "stripe *payment",
+      "stripe billing",
+      "stripe connect"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "stripe.com",
+    "confidence": "medium",
+    "notes": "Stripe can appear as a processor for another merchant; resolver should inspect the remaining memo."
+  },
+  {
+    "canonical_name": "Square",
+    "aliases": [
+      "square",
+      "square inc",
+      "squareup",
+      "sq *",
+      "square payments",
+      "block inc"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "squareup.com",
+    "confidence": "medium",
+    "notes": "Square may be the processor rather than the real merchant; resolver should extract merchant text after the Square descriptor."
+  },
+  {
+    "canonical_name": "PayPal",
+    "aliases": [
+      "paypal",
+      "paypal inc",
+      "paypal *",
+      "paypal transfer",
+      "paypal payment",
+      "pp *"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "paypal.com",
+    "confidence": "medium",
+    "notes": "PayPal can be a transfer channel, wallet, or merchant processor; resolver should extract the real counterparty when present."
+  },
+  {
+    "canonical_name": "Venmo",
+    "aliases": [
+      "venmo",
+      "venmo payment",
+      "venmo transfer",
+      "venmo *",
+      "paypal venmo"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "venmo.com",
+    "confidence": "medium",
+    "notes": "Real counterparty lives in memo — resolver should extract."
+  },
+  {
+    "canonical_name": "Zelle",
+    "aliases": [
+      "zelle",
+      "zelle payment",
+      "zelle transfer",
+      "zellepay",
+      "zelle *"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "zellepay.com",
+    "confidence": "medium",
+    "notes": "Real counterparty lives in memo — resolver should extract."
+  },
+  {
+    "canonical_name": "Cash App",
+    "aliases": [
+      "cash app",
+      "cashapp",
+      "cash app payment",
+      "cash app transfer",
+      "square cash"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "cash.app",
+    "confidence": "medium",
+    "notes": "Real counterparty lives in memo — resolver should extract."
+  },
+  {
+    "canonical_name": "Apple Cash",
+    "aliases": [
+      "apple cash",
+      "applecash",
+      "apple cash transfer",
+      "apple cash payment"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "apple.com",
+    "confidence": "medium",
+    "notes": "Real counterparty may live in memo — resolver should extract."
+  },
+  {
+    "canonical_name": "Google Pay",
+    "aliases": [
+      "google pay",
+      "googlepay",
+      "google payment",
+      "google *pay",
+      "gpay"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "pay.google.com",
+    "confidence": "medium",
+    "notes": "May represent a wallet transfer or an underlying merchant purchase; resolver should inspect memo context."
+  },
+  {
+    "canonical_name": "Wise",
+    "aliases": [
+      "wise",
+      "wise inc",
+      "transferwise",
+      "wise transfer",
+      "wise *transfer"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "wise.com",
+    "confidence": "medium",
+    "notes": "May represent an international transfer or currency-conversion transaction."
+  },
+  {
+    "canonical_name": "Revolut",
+    "aliases": [
+      "revolut",
+      "revolut ltd",
+      "revolut transfer",
+      "revolut payment"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "revolut.com",
+    "confidence": "medium",
+    "notes": "May represent a transfer, card funding, or foreign-exchange transaction."
+  },
+  {
+    "canonical_name": "Western Union",
+    "aliases": [
+      "western union",
+      "westernunion",
+      "western union transfer",
+      "wu transfer",
+      "western union money transfer"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "westernunion.com",
+    "confidence": "medium",
+    "notes": "Real counterparty may be represented separately from the transfer service."
+  },
+  {
+    "canonical_name": "MoneyGram",
+    "aliases": [
+      "moneygram",
+      "money gram",
+      "moneygram transfer",
+      "moneygram payment",
+      "moneygram international"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "moneygram.com",
+    "confidence": "medium",
+    "notes": "Real counterparty may be represented separately from the transfer service."
+  },
+  {
+    "canonical_name": "Remitly",
+    "aliases": [
+      "remitly",
+      "remitly inc",
+      "remitly transfer",
+      "remitly payment"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "remitly.com",
+    "confidence": "medium",
+    "notes": "International money-transfer channel; recipient may appear elsewhere in memo."
+  },
+  {
+    "canonical_name": "Xoom",
+    "aliases": [
+      "xoom",
+      "xoom paypal",
+      "xoom transfer",
+      "xoom payment",
+      "paypal xoom"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "xoom.com",
+    "confidence": "medium",
+    "notes": "International money-transfer service owned by PayPal."
+  },
+  {
+    "canonical_name": "WorldRemit",
+    "aliases": [
+      "worldremit",
+      "world remit",
+      "worldremit transfer",
+      "worldremit payment"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "worldremit.com",
+    "confidence": "medium",
+    "notes": "International transfer channel; recipient may appear elsewhere in memo."
+  },
+  {
+    "canonical_name": "Clover",
+    "aliases": [
+      "clover",
+      "clover network",
+      "clover payments",
+      "clover *payment",
+      "fiserv clover"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "clover.com",
+    "confidence": "medium",
+    "notes": "Can represent merchant processing, POS software, hardware, or related services."
+  },
+  {
+    "canonical_name": "Toast Payments",
+    "aliases": [
+      "toast payments",
+      "toasttab payments",
+      "toast *payment",
+      "toast payment processing",
+      "toast inc"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "toasttab.com",
+    "confidence": "medium",
+    "notes": "Toast charges may also represent restaurant POS software or hardware."
+  },
+  {
+    "canonical_name": "Shopify Payments",
+    "aliases": [
+      "shopify payments",
+      "shopify payment",
+      "shopify *payments",
+      "shopify payouts",
+      "shopify pay"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "shopify.com",
+    "confidence": "medium",
+    "notes": "Shopify charges may also be subscription or marketplace-related fees."
+  },
+  {
+    "canonical_name": "Amazon Pay",
+    "aliases": [
+      "amazon pay",
+      "amazon payments",
+      "amazon payments inc",
+      "amazon *pay",
+      "amzn payments"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "pay.amazon.com",
+    "confidence": "medium",
+    "notes": "Amazon descriptors can also represent retail or marketplace activity."
+  },
+  {
+    "canonical_name": "Authorize.net",
+    "aliases": [
+      "authorize net",
+      "authorize.net",
+      "authorizenet",
+      "authorize net payment",
+      "cybersource authorize net"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "authorize.net",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Braintree",
+    "aliases": [
+      "braintree",
+      "braintree payments",
+      "braintreepayments",
+      "paypal braintree",
+      "braintree *payment"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "braintreepayments.com",
+    "confidence": "medium",
+    "notes": "Owned by PayPal; descriptors may reference either Braintree or PayPal."
+  },
+  {
+    "canonical_name": "Adyen",
+    "aliases": [
+      "adyen",
+      "adyen nv",
+      "adyen payments",
+      "adyen *payment",
+      "adyen inc"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "adyen.com",
+    "confidence": "medium",
+    "notes": "Can appear as the processor for an underlying merchant."
+  },
+  {
+    "canonical_name": "Checkout.com",
+    "aliases": [
+      "checkout com",
+      "checkout.com",
+      "checkout ltd",
+      "checkout payments",
+      "checkout *payment"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "checkout.com",
+    "confidence": "medium",
+    "notes": "Generic descriptor may require memo context to distinguish the processor from a merchant."
+  },
+  {
+    "canonical_name": "Worldpay",
+    "aliases": [
+      "worldpay",
+      "world pay",
+      "worldpay payments",
+      "worldpay merchant",
+      "worldpay *payment"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "worldpay.com",
+    "confidence": "medium",
+    "notes": "Can appear as a processor or merchant-services provider."
+  },
+  {
+    "canonical_name": "Fiserv",
+    "aliases": [
+      "fiserv",
+      "fiserv inc",
+      "fiserv merchant services",
+      "fiserv payments",
+      "fiserv *merchant"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "fiserv.com",
+    "confidence": "medium",
+    "notes": "Fiserv provides many banking and merchant services beyond payment processing."
+  },
+  {
+    "canonical_name": "Fiserv Merchant Services",
+    "aliases": [
+      "fiserv merchant services",
+      "fiserv merchant",
+      "fiserv payment processing",
+      "fiserv merchant svc"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "fiserv.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Global Payments",
+    "aliases": [
+      "global payments",
+      "global payments inc",
+      "globalpayments",
+      "global payments merchant",
+      "global *payments"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "globalpayments.com",
+    "confidence": "medium",
+    "notes": "Generic wording can collide with processor descriptors for underlying merchants."
+  },
+  {
+    "canonical_name": "TSYS",
+    "aliases": [
+      "tsys",
+      "total system services",
+      "tsys merchant solutions",
+      "tsys payments",
+      "global payments tsys"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "tsys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Heartland Payment Systems",
+    "aliases": [
+      "heartland payment systems",
+      "heartland payments",
+      "heartland payment",
+      "heartland merchant services",
+      "global payments heartland"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "heartland.us",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Elavon",
+    "aliases": [
+      "elavon",
+      "elavon inc",
+      "elavon merchant services",
+      "elavon payments",
+      "us bank elavon"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "elavon.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Chase Payment Solutions",
+    "aliases": [
+      "chase payment solutions",
+      "chase merchant services",
+      "chase paymentech",
+      "paymentech",
+      "jpmorgan merchant services"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "chase.com",
+    "confidence": "medium",
+    "notes": "Chase descriptors can also represent banking or credit-card activity."
+  },
+  {
+    "canonical_name": "Bank of America Merchant Services",
+    "aliases": [
+      "bank of america merchant services",
+      "bofa merchant services",
+      "boa merchant services",
+      "bankamerica merchant services"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "bankofamerica.com",
+    "confidence": "medium",
+    "notes": "Bank of America descriptors can also represent ordinary banking activity."
+  },
+  {
+    "canonical_name": "Wells Fargo Merchant Services",
+    "aliases": [
+      "wells fargo merchant services",
+      "wells fargo merchant",
+      "wells fargo payments",
+      "wf merchant services"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "wellsfargo.com",
+    "confidence": "medium",
+    "notes": "Wells Fargo descriptors can also represent ordinary banking activity."
+  },
+  {
+    "canonical_name": "U.S. Bank Merchant Services",
+    "aliases": [
+      "us bank merchant services",
+      "u s bank merchant services",
+      "usbank merchant",
+      "us bank payments"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "usbank.com",
+    "confidence": "medium",
+    "notes": "U.S. Bank descriptors can also represent ordinary banking activity."
+  },
+  {
+    "canonical_name": "PNC Merchant Services",
+    "aliases": [
+      "pnc merchant services",
+      "pnc merchant",
+      "pnc payments",
+      "pnc merchant svc"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "pnc.com",
+    "confidence": "medium",
+    "notes": "PNC descriptors can also represent ordinary banking activity."
+  },
+  {
+    "canonical_name": "TD Merchant Solutions",
+    "aliases": [
+      "td merchant solutions",
+      "td merchant services",
+      "td payments",
+      "td merchant"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "td.com",
+    "confidence": "medium",
+    "notes": "TD descriptors can also represent ordinary banking activity."
+  },
+  {
+    "canonical_name": "Citizens Merchant Services",
+    "aliases": [
+      "citizens merchant services",
+      "citizens merchant",
+      "citizens payments",
+      "citizens bank merchant"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "citizensbank.com",
+    "confidence": "medium",
+    "notes": "Citizens descriptors can also represent ordinary banking activity."
+  },
+  {
+    "canonical_name": "PaymentCloud",
+    "aliases": [
+      "paymentcloud",
+      "payment cloud",
+      "paymentcloud inc",
+      "payment cloud merchant services"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "paymentcloudinc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Stax",
+    "aliases": [
+      "stax",
+      "stax payments",
+      "staxpayments",
+      "fattmerchant",
+      "stax *payment"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "staxpayments.com",
+    "confidence": "medium",
+    "notes": "Short brand name may collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Payment Depot",
+    "aliases": [
+      "payment depot",
+      "paymentdepot",
+      "payment depot merchant services",
+      "payment depot processing"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "paymentdepot.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Helcim",
+    "aliases": [
+      "helcim",
+      "helcim inc",
+      "helcim payments",
+      "helcim merchant services"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "helcim.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "National Processing",
+    "aliases": [
+      "national processing",
+      "nationalprocessing",
+      "national processing merchant services",
+      "national processing payments"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "nationalprocessing.com",
+    "confidence": "medium",
+    "notes": "Generic name may require memo context."
+  },
+  {
+    "canonical_name": "Payment Depot by Stax",
+    "aliases": [
+      "payment depot by stax",
+      "stax payment depot",
+      "payment depot",
+      "paymentdepot"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "paymentdepot.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PayJunction",
+    "aliases": [
+      "payjunction",
+      "pay junction",
+      "payjunction inc",
+      "payjunction payments"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "payjunction.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PaySimple",
+    "aliases": [
+      "paysimple",
+      "pay simple",
+      "paysimple inc",
+      "paysimple payments"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "paysimple.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "WePay",
+    "aliases": [
+      "wepay",
+      "we pay",
+      "wepay inc",
+      "wepay payments",
+      "chase wepay"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "wepay.com",
+    "confidence": "medium",
+    "notes": "Owned by JPMorgan Chase; may appear as a processor for platforms."
+  },
+  {
+    "canonical_name": "BlueSnap",
+    "aliases": [
+      "bluesnap",
+      "blue snap",
+      "bluesnap inc",
+      "bluesnap payments"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "bluesnap.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "2Checkout",
+    "aliases": [
+      "2checkout",
+      "2 checkout",
+      "2checkout com",
+      "verifone 2checkout",
+      "2co"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "2checkout.com",
+    "confidence": "medium",
+    "notes": "May appear under Verifone branding."
+  },
+  {
+    "canonical_name": "Verifone",
+    "aliases": [
+      "verifone",
+      "verifone inc",
+      "verifone payments",
+      "verifone merchant",
+      "verifone *payment"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "verifone.com",
+    "confidence": "medium",
+    "notes": "Can represent payment processing, terminals, or hardware/services."
+  },
+  {
+    "canonical_name": "Cybersource",
+    "aliases": [
+      "cybersource",
+      "cyber source",
+      "cybersource corp",
+      "cybersource payments",
+      "visa cybersource"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "cybersource.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "NMI",
+    "aliases": [
+      "nmi",
+      "network merchants inc",
+      "nmi payments",
+      "nmi gateway",
+      "network merchants"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "nmi.com",
+    "confidence": "medium",
+    "notes": "Short acronym can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "FreedomPay",
+    "aliases": [
+      "freedompay",
+      "freedom pay",
+      "freedompay inc",
+      "freedompay payments"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "freedompay.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Paysafe",
+    "aliases": [
+      "paysafe",
+      "pay safe",
+      "paysafe payments",
+      "paysafe merchant",
+      "paysafe group"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "paysafe.com",
+    "confidence": "medium",
+    "notes": "Provides multiple payment products and wallet services."
+  },
+  {
+    "canonical_name": "Skrill",
+    "aliases": [
+      "skrill",
+      "skrill ltd",
+      "skrill payment",
+      "skrill transfer"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "skrill.com",
+    "confidence": "medium",
+    "notes": "May function as a wallet or transfer channel."
+  },
+  {
+    "canonical_name": "Neteller",
+    "aliases": [
+      "neteller",
+      "net teller",
+      "neteller payment",
+      "neteller transfer"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "neteller.com",
+    "confidence": "medium",
+    "notes": "May function as a wallet or transfer channel."
+  },
+  {
+    "canonical_name": "Payoneer",
+    "aliases": [
+      "payoneer",
+      "payoneer inc",
+      "payoneer payment",
+      "payoneer transfer",
+      "payoneer global"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "payoneer.com",
+    "confidence": "medium",
+    "notes": "Often used for marketplace payouts and international business transfers."
+  },
+  {
+    "canonical_name": "Airwallex",
+    "aliases": [
+      "airwallex",
+      "air wallex",
+      "airwallex us",
+      "airwallex transfer",
+      "airwallex payment"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "airwallex.com",
+    "confidence": "medium",
+    "notes": "Can represent transfers, FX, cards, or payment processing."
+  },
+  {
+    "canonical_name": "Brex",
+    "aliases": [
+      "brex",
+      "brex inc",
+      "brex card",
+      "brex payment",
+      "brex *card"
+    ],
+    "semantic": "credit_card_payment",
+    "logo_domain": "brex.com",
+    "confidence": "medium",
+    "notes": "Brex also provides banking and spend-management services."
+  },
+  {
+    "canonical_name": "Ramp",
+    "aliases": [
+      "ramp",
+      "ramp business corporation",
+      "ramp card",
+      "ramp payment",
+      "ramp *card"
+    ],
+    "semantic": "credit_card_payment",
+    "logo_domain": "ramp.com",
+    "confidence": "medium",
+    "notes": "Ramp also provides spend-management and financial software."
+  },
+  {
+    "canonical_name": "Mercury",
+    "aliases": [
+      "mercury",
+      "mercury bank",
+      "mercury checking",
+      "mercury transfer",
+      "mercury banking"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "mercury.com",
+    "confidence": "medium",
+    "notes": "Banking platform transactions should usually be resolved to the underlying counterparty."
+  },
+  {
+    "canonical_name": "Relay",
+    "aliases": [
+      "relay",
+      "relay financial",
+      "relayfi",
+      "relay transfer",
+      "relay banking"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "relayfi.com",
+    "confidence": "medium",
+    "notes": "Banking platform transactions should usually be resolved to the underlying counterparty."
+  },
+  {
+    "canonical_name": "Novo",
+    "aliases": [
+      "novo",
+      "novo bank",
+      "novo banking",
+      "novo transfer",
+      "bank novo"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "novo.co",
+    "confidence": "medium",
+    "notes": "Banking platform transactions should usually be resolved to the underlying counterparty."
+  },
+  {
+    "canonical_name": "Bluevine",
+    "aliases": [
+      "bluevine",
+      "blue vine",
+      "bluevine banking",
+      "bluevine transfer",
+      "bluevine business checking"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "bluevine.com",
+    "confidence": "medium",
+    "notes": "Bluevine also offers lending; memo context should distinguish loan activity."
+  },
+  {
+    "canonical_name": "Found",
+    "aliases": [
+      "found",
+      "found banking",
+      "found business banking",
+      "found transfer",
+      "found card"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "found.com",
+    "confidence": "medium",
+    "notes": "Generic brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Lili",
+    "aliases": [
+      "lili",
+      "lili banking",
+      "lili business banking",
+      "lili transfer",
+      "lili app"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "lili.co",
+    "confidence": "medium",
+    "notes": "Short brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "American Express",
+    "aliases": [
+      "american express",
+      "amex",
+      "american express payment",
+      "amex payment",
+      "american express card",
+      "amex epayment"
+    ],
+    "semantic": "credit_card_payment",
+    "logo_domain": "americanexpress.com",
+    "confidence": "medium",
+    "notes": "American Express descriptors may represent card payments, merchant fees, or other services; context is required."
+  },
+  {
+    "canonical_name": "Chase Credit Card",
+    "aliases": [
+      "chase credit card",
+      "chase card payment",
+      "jpmcb card payment",
+      "chase epay",
+      "chase credit crd"
+    ],
+    "semantic": "credit_card_payment",
+    "logo_domain": "chase.com",
+    "confidence": "medium",
+    "notes": "Chase also provides deposit accounts, loans, and merchant services."
+  },
+  {
+    "canonical_name": "Bank of America Credit Card",
+    "aliases": [
+      "bank of america credit card",
+      "bofa card payment",
+      "boa credit card",
+      "bankamerica card payment",
+      "bofa credit crd"
+    ],
+    "semantic": "credit_card_payment",
+    "logo_domain": "bankofamerica.com",
+    "confidence": "medium",
+    "notes": "Bank of America also provides deposit accounts and merchant services."
+  },
+  {
+    "canonical_name": "Capital One",
+    "aliases": [
+      "capital one",
+      "capitalone",
+      "capital one card",
+      "capital one payment",
+      "capitalone credit card"
+    ],
+    "semantic": "credit_card_payment",
+    "logo_domain": "capitalone.com",
+    "confidence": "medium",
+    "notes": "Capital One also provides banking and lending products."
+  },
+  {
+    "canonical_name": "Citi Credit Card",
+    "aliases": [
+      "citi credit card",
+      "citibank card payment",
+      "citi card payment",
+      "citicards",
+      "citi autopay"
+    ],
+    "semantic": "credit_card_payment",
+    "logo_domain": "citi.com",
+    "confidence": "medium",
+    "notes": "Citi also provides deposit accounts and other financial services."
+  },
+  {
+    "canonical_name": "Discover",
+    "aliases": [
+      "discover",
+      "discover card",
+      "discover card payment",
+      "discover financial",
+      "discover autopay"
+    ],
+    "semantic": "credit_card_payment",
+    "logo_domain": "discover.com",
+    "confidence": "medium",
+    "notes": "Discover descriptors may also relate to banking products."
+  },
+  {
+    "canonical_name": "U.S. Bank Credit Card",
+    "aliases": [
+      "us bank credit card",
+      "usbank card payment",
+      "u s bank card payment",
+      "us bank credit card payment"
+    ],
+    "semantic": "credit_card_payment",
+    "logo_domain": "usbank.com",
+    "confidence": "medium",
+    "notes": "U.S. Bank also provides deposit accounts and merchant services."
+  },
+  {
+    "canonical_name": "Wells Fargo Credit Card",
+    "aliases": [
+      "wells fargo credit card",
+      "wells fargo card payment",
+      "wf card payment",
+      "wellsfargo credit card"
+    ],
+    "semantic": "credit_card_payment",
+    "logo_domain": "wellsfargo.com",
+    "confidence": "medium",
+    "notes": "Wells Fargo also provides deposit accounts and merchant services."
+  },
+  {
+    "canonical_name": "Barclays US",
+    "aliases": [
+      "barclays us",
+      "barclays card",
+      "barclays card payment",
+      "barclaycard us",
+      "barclays payment"
+    ],
+    "semantic": "credit_card_payment",
+    "logo_domain": "barclaysus.com",
+    "confidence": "medium",
+    "notes": "Barclays issues multiple co-branded cards; descriptor may identify the partner brand."
+  },
+  {
+    "canonical_name": "Synchrony",
+    "aliases": [
+      "synchrony",
+      "synchrony bank",
+      "synchrony card payment",
+      "synchrony payment",
+      "syncb payment"
+    ],
+    "semantic": "credit_card_payment",
+    "logo_domain": "synchrony.com",
+    "confidence": "medium",
+    "notes": "Synchrony issues many store and business credit products."
+  },
+  {
+    "canonical_name": "Comenity",
+    "aliases": [
+      "comenity",
+      "comenity bank",
+      "comenity capital bank",
+      "comenity card payment",
+      "bread financial payment"
+    ],
+    "semantic": "credit_card_payment",
+    "logo_domain": "breadfinancial.com",
+    "confidence": "medium",
+    "notes": "Comenity/Bread Financial issues many private-label credit cards."
+  },
+  {
+    "canonical_name": "FNBO",
+    "aliases": [
+      "fnbo",
+      "first national bank of omaha",
+      "fnbo card payment",
+      "first national card payment",
+      "fnbo credit card"
+    ],
+    "semantic": "credit_card_payment",
+    "logo_domain": "fnbo.com",
+    "confidence": "medium",
+    "notes": "FNBO also provides ordinary banking services."
+  },
+  {
+    "canonical_name": "JPMorgan Chase",
+    "aliases": [
+      "jpmorgan chase",
+      "jp morgan chase",
+      "chase bank",
+      "jpmcb",
+      "chase banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "chase.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee; ordinary transfers should resolve to the actual transaction type."
+  },
+  {
+    "canonical_name": "Bank of America",
+    "aliases": [
+      "bank of america",
+      "bofa",
+      "boa bank",
+      "bankamerica",
+      "bank of america fee"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "bankofamerica.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Wells Fargo",
+    "aliases": [
+      "wells fargo",
+      "wellsfargo",
+      "wells fargo bank",
+      "wf bank",
+      "wells fargo fee"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "wellsfargo.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Citibank",
+    "aliases": [
+      "citibank",
+      "citi bank",
+      "citi",
+      "citibank fee",
+      "citi banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "citi.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "U.S. Bank",
+    "aliases": [
+      "us bank",
+      "u s bank",
+      "usbank",
+      "us bank fee",
+      "us bancorp"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "usbank.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "PNC Bank",
+    "aliases": [
+      "pnc bank",
+      "pnc",
+      "pnc financial",
+      "pnc bank fee",
+      "pnc banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "pnc.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Truist",
+    "aliases": [
+      "truist",
+      "truist bank",
+      "truist financial",
+      "truist bank fee",
+      "bbt suntrust"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "truist.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee; legacy BB&T or SunTrust descriptors may appear."
+  },
+  {
+    "canonical_name": "TD Bank",
+    "aliases": [
+      "td bank",
+      "td bank na",
+      "td banking",
+      "td bank fee",
+      "td *bank"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "td.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Citizens Bank",
+    "aliases": [
+      "citizens bank",
+      "citizens financial",
+      "citizens banking",
+      "citizens bank fee",
+      "citizens *bank"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "citizensbank.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Fifth Third Bank",
+    "aliases": [
+      "fifth third bank",
+      "53 bank",
+      "fifth third",
+      "fifth third fee",
+      "53 banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "53.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "KeyBank",
+    "aliases": [
+      "keybank",
+      "key bank",
+      "keycorp",
+      "keybank fee",
+      "key banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "key.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Regions Bank",
+    "aliases": [
+      "regions bank",
+      "regions",
+      "regions financial",
+      "regions bank fee",
+      "regions banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "regions.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Huntington Bank",
+    "aliases": [
+      "huntington bank",
+      "huntington national bank",
+      "huntington bancshares",
+      "huntington fee",
+      "huntington banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "huntington.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "M&T Bank",
+    "aliases": [
+      "m&t bank",
+      "m and t bank",
+      "mt bank",
+      "manufacturers and traders trust",
+      "mtb bank fee"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "mtb.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "BMO Bank",
+    "aliases": [
+      "bmo bank",
+      "bmo",
+      "bmo harris",
+      "bmo bank fee",
+      "bmo banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "bmo.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee; BMO Harris legacy descriptors may appear."
+  },
+  {
+    "canonical_name": "Santander Bank",
+    "aliases": [
+      "santander bank",
+      "santander",
+      "santander bank fee",
+      "santander banking",
+      "sovereign bank"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "santanderbank.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "First Citizens Bank",
+    "aliases": [
+      "first citizens bank",
+      "first citizens",
+      "firstcitizens",
+      "first citizens fee",
+      "fcb banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "firstcitizens.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Comerica Bank",
+    "aliases": [
+      "comerica bank",
+      "comerica",
+      "comerica bank fee",
+      "comerica banking",
+      "comerica inc"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "comerica.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Zions Bank",
+    "aliases": [
+      "zions bank",
+      "zionsbank",
+      "zions bancorporation",
+      "zions bank fee",
+      "zions banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "zionsbank.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "First Horizon Bank",
+    "aliases": [
+      "first horizon bank",
+      "first horizon",
+      "firsthorizon",
+      "first horizon fee",
+      "first tennessee bank"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "firsthorizon.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee; legacy First Tennessee descriptors may appear."
+  },
+  {
+    "canonical_name": "Synovus",
+    "aliases": [
+      "synovus",
+      "synovus bank",
+      "synovus financial",
+      "synovus bank fee",
+      "synovus banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "synovus.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Webster Bank",
+    "aliases": [
+      "webster bank",
+      "websterbank",
+      "webster financial",
+      "webster bank fee",
+      "webster banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "websterbank.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "East West Bank",
+    "aliases": [
+      "east west bank",
+      "eastwest bank",
+      "east west bancorp",
+      "east west bank fee",
+      "ewb banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "eastwestbank.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Valley Bank",
+    "aliases": [
+      "valley bank",
+      "valley national bank",
+      "valley national bancorp",
+      "valley bank fee",
+      "valley banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "valley.com",
+    "confidence": "medium",
+    "notes": "Generic bank name can collide with unrelated institutions; use bank_fees only for explicit fee descriptors."
+  },
+  {
+    "canonical_name": "Old National Bank",
+    "aliases": [
+      "old national bank",
+      "old national",
+      "oldnational",
+      "old national fee",
+      "onb banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "oldnational.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Frost Bank",
+    "aliases": [
+      "frost bank",
+      "frostbank",
+      "cullen frost",
+      "frost bank fee",
+      "frost banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "frostbank.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "BOK Financial",
+    "aliases": [
+      "bok financial",
+      "bank of oklahoma",
+      "bokf",
+      "bok bank fee",
+      "bank of oklahoma fee"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "bokfinancial.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Arvest Bank",
+    "aliases": [
+      "arvest bank",
+      "arvest",
+      "arvest bank fee",
+      "arvest banking",
+      "arvest *bank"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "arvest.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Associated Bank",
+    "aliases": [
+      "associated bank",
+      "associatedbank",
+      "associated banc corp",
+      "associated bank fee",
+      "associated banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "associatedbank.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "UMB Bank",
+    "aliases": [
+      "umb bank",
+      "umb",
+      "umb financial",
+      "umb bank fee",
+      "umb banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "umb.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Commerce Bank",
+    "aliases": [
+      "commerce bank",
+      "commercebank",
+      "commerce bancshares",
+      "commerce bank fee",
+      "commerce banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "commercebank.com",
+    "confidence": "medium",
+    "notes": "Generic name can collide with unrelated banks; use bank_fees only for explicit fee descriptors."
+  },
+  {
+    "canonical_name": "Cadence Bank",
+    "aliases": [
+      "cadence bank",
+      "cadencebank",
+      "cadence banking",
+      "cadence bank fee",
+      "bancorpsouth"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "cadencebank.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee; legacy BancorpSouth descriptors may appear."
+  },
+  {
+    "canonical_name": "SouthState Bank",
+    "aliases": [
+      "southstate bank",
+      "south state bank",
+      "southstate",
+      "southstate bank fee",
+      "centerstate bank"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "southstatebank.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "United Community Bank",
+    "aliases": [
+      "united community bank",
+      "ucb bank",
+      "ucbi",
+      "united community bank fee",
+      "united community banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "ucbi.com",
+    "confidence": "medium",
+    "notes": "Generic name can collide with unrelated institutions."
+  },
+  {
+    "canonical_name": "FirstBank",
+    "aliases": [
+      "firstbank",
+      "first bank colorado",
+      "efirstbank",
+      "firstbank fee",
+      "firstbank banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "efirstbank.com",
+    "confidence": "medium",
+    "notes": "Generic brand name can collide with unrelated banks."
+  },
+  {
+    "canonical_name": "City National Bank",
+    "aliases": [
+      "city national bank",
+      "cnb",
+      "city national",
+      "city national bank fee",
+      "cnb banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "cnb.com",
+    "confidence": "medium",
+    "notes": "Generic name can collide with unrelated institutions."
+  },
+  {
+    "canonical_name": "First Interstate Bank",
+    "aliases": [
+      "first interstate bank",
+      "first interstate",
+      "firstinterstatebank",
+      "first interstate fee",
+      "fibk"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "firstinterstatebank.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Glacier Bank",
+    "aliases": [
+      "glacier bank",
+      "glacierbank",
+      "glacier bancorp",
+      "glacier bank fee",
+      "glacier banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "glacierbank.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "WaFd Bank",
+    "aliases": [
+      "wafd bank",
+      "wafd",
+      "washington federal",
+      "wafd bank fee",
+      "washington federal bank"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "wafdbank.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Banner Bank",
+    "aliases": [
+      "banner bank",
+      "bannerbank",
+      "banner corporation",
+      "banner bank fee",
+      "banner banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "bannerbank.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Umpqua Bank",
+    "aliases": [
+      "umpqua bank",
+      "umpqua",
+      "umpqua holdings",
+      "umpqua bank fee",
+      "columbia bank umpqua"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "umpquabank.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Cathay Bank",
+    "aliases": [
+      "cathay bank",
+      "cathaybank",
+      "cathay general bancorp",
+      "cathay bank fee",
+      "cathay banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "cathaybank.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Mechanics Bank",
+    "aliases": [
+      "mechanics bank",
+      "mechanicsbank",
+      "mechanics bank fee",
+      "mechanics banking",
+      "mechanics *bank"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "mechanicsbank.com",
+    "confidence": "medium",
+    "notes": "Generic name can collide with unrelated institutions."
+  },
+  {
+    "canonical_name": "First Foundation Bank",
+    "aliases": [
+      "first foundation bank",
+      "first foundation",
+      "firstfoundation",
+      "first foundation fee",
+      "ffb banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "firstfoundationinc.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
+  },
+  {
+    "canonical_name": "Axos Bank",
+    "aliases": [
+      "axos bank",
+      "axos",
+      "axosbank",
+      "axos bank fee",
+      "bank of internet usa"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "axosbank.com",
+    "confidence": "medium",
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee; legacy Bank of Internet USA descriptors may appear."
+  },
+  {
+    "canonical_name": "Ally Bank",
+    "aliases": [
+      "ally bank",
+      "ally",
+      "ally financial",
+      "ally bank fee",
+      "ally banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "ally.com",
+    "confidence": "medium",
+    "notes": "Ally also provides auto financing and lending."
+  },
+  {
+    "canonical_name": "SoFi",
+    "aliases": [
+      "sofi",
+      "sofi bank",
+      "social finance",
+      "sofi banking",
+      "sofi bank fee"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "sofi.com",
+    "confidence": "medium",
+    "notes": "SoFi also offers loans, investments, and credit cards."
+  },
+  {
+    "canonical_name": "Charles Schwab Bank",
+    "aliases": [
+      "charles schwab bank",
+      "schwab bank",
+      "schwab",
+      "schwab bank fee",
+      "charles schwab banking"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "schwab.com",
+    "confidence": "medium",
+    "notes": "Schwab descriptors may also represent brokerage activity."
+  },
+  {
+    "canonical_name": "Fidelity Cash Management",
+    "aliases": [
+      "fidelity cash management",
+      "fidelity investments",
+      "fidelity cma",
+      "fidelity transfer",
+      "fidelity cash mgmt"
+    ],
+    "semantic": "inter_account_transfer",
+    "logo_domain": "fidelity.com",
+    "confidence": "medium",
+    "notes": "Fidelity descriptors may represent brokerage or retirement activity rather than ordinary bank transfers."
+  },
+  {
+    "canonical_name": "Bill.com",
+    "aliases": [
+      "bill com",
+      "bill.com",
+      "billcom",
+      "bill payments",
+      "bill *payment"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "bill.com",
+    "confidence": "medium",
+    "notes": "Often a payment channel for a vendor; resolver should extract the actual vendor when present."
+  },
+  {
+    "canonical_name": "Melio",
+    "aliases": [
+      "melio",
+      "melio payments",
+      "melio payment",
+      "melio *payment",
+      "melio llc"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "melio.com",
+    "confidence": "medium",
+    "notes": "Often a bill-payment channel; resolver should extract the actual vendor when present."
+  },
+  {
+    "canonical_name": "QuickBooks Payments",
+    "aliases": [
+      "quickbooks payments",
+      "intuit payments",
+      "intuit payment solutions",
+      "qb payments",
+      "quickbooks *payment"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "quickbooks.intuit.com",
+    "confidence": "medium",
+    "notes": "Intuit descriptors may also represent QuickBooks software or payroll services."
+  },
+  {
+    "canonical_name": "GoCardless",
+    "aliases": [
+      "gocardless",
+      "go cardless",
+      "gocardless inc",
+      "gocardless payment",
+      "gocardless *payment"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "gocardless.com",
+    "confidence": "medium",
+    "notes": "May appear as an ACH/direct-debit processor for an underlying merchant."
+  },
+  {
+    "canonical_name": "Dwolla",
+    "aliases": [
+      "dwolla",
+      "dwolla inc",
+      "dwolla payment",
+      "dwolla transfer",
+      "dwolla *payment"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "dwolla.com",
+    "confidence": "medium",
+    "notes": "May be a payment rail for an underlying platform or counterparty."
+  },
+  {
+    "canonical_name": "Modern Treasury",
+    "aliases": [
+      "modern treasury",
+      "modern treasury corp",
+      "modern treasury payments",
+      "modern treasury *payment"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "moderntreasury.com",
+    "confidence": "medium",
+    "notes": "Payment infrastructure platform; underlying counterparty may be more relevant."
+  },
+  {
+    "canonical_name": "Highnote",
+    "aliases": [
+      "highnote",
+      "highnote platform",
+      "highnote payments",
+      "highnote *payment"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "highnote.com",
+    "confidence": "medium",
+    "notes": "Embedded-finance platform; descriptor may relate to an underlying program."
+  },
+  {
+    "canonical_name": "Marqeta",
+    "aliases": [
+      "marqeta",
+      "marqeta inc",
+      "marqeta payments",
+      "marqeta card",
+      "marqeta *payment"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "marqeta.com",
+    "confidence": "medium",
+    "notes": "Card-issuing infrastructure provider; underlying program may be more relevant."
+  },
+  {
+    "canonical_name": "Galileo Financial Technologies",
+    "aliases": [
+      "galileo financial technologies",
+      "galileo",
+      "galileo ft",
+      "galileo payments",
+      "galileo processing"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "galileo-ft.com",
+    "confidence": "medium",
+    "notes": "Financial infrastructure provider; underlying program may be more relevant."
+  },
+  {
+    "canonical_name": "Moov",
+    "aliases": [
+      "moov",
+      "moov financial",
+      "moov payments",
+      "moov transfer",
+      "moov *payment"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "moov.io",
+    "confidence": "medium",
+    "notes": "Payment infrastructure provider; underlying counterparty may be more relevant."
+  }
+]

@@ -1,0 +1,3404 @@
+[
+  {
+    "canonical_name": "AT&T",
+    "aliases": [
+      "at&t",
+      "att",
+      "at and t",
+      "at&t mobility",
+      "att mobility",
+      "at&t wireless"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "att.com",
+    "confidence": "medium",
+    "notes": "AT&T charges can include wireless, internet, or other communications services."
+  },
+  {
+    "canonical_name": "Verizon",
+    "aliases": [
+      "verizon",
+      "verizon wireless",
+      "verizon communications",
+      "vzw",
+      "verizon fios",
+      "verizon business"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "verizon.com",
+    "confidence": "medium",
+    "notes": "Verizon charges can include wireless, internet, or business communications services."
+  },
+  {
+    "canonical_name": "T-Mobile",
+    "aliases": [
+      "t-mobile",
+      "t mobile",
+      "tmobile",
+      "t-mobile usa",
+      "t mobile usa",
+      "tmobile wireless"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "t-mobile.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "UScellular",
+    "aliases": [
+      "uscellular",
+      "us cellular",
+      "united states cellular",
+      "us cellular corp",
+      "uscellular wireless"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "uscellular.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Boost Mobile",
+    "aliases": [
+      "boost mobile",
+      "boostmobile",
+      "boost mobile wireless",
+      "boost mobile payment"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "boostmobile.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cricket Wireless",
+    "aliases": [
+      "cricket wireless",
+      "cricket",
+      "cricket communications",
+      "cricket wireless payment"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "cricketwireless.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Metro by T-Mobile",
+    "aliases": [
+      "metro by t-mobile",
+      "metro by t mobile",
+      "metropcs",
+      "metro pcs",
+      "metro wireless"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "metrobyt-mobile.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Visible",
+    "aliases": [
+      "visible",
+      "visible wireless",
+      "visible by verizon",
+      "visible service"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "visible.com",
+    "confidence": "medium",
+    "notes": "Short brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Mint Mobile",
+    "aliases": [
+      "mint mobile",
+      "mintmobile",
+      "mint mobile wireless",
+      "mint mobile plan"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "mintmobile.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Consumer Cellular",
+    "aliases": [
+      "consumer cellular",
+      "consumer cellular inc",
+      "consumer cellular wireless",
+      "consumer cellular payment"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "consumercellular.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Google Fi Wireless",
+    "aliases": [
+      "google fi",
+      "google fi wireless",
+      "google *fi",
+      "google fi service",
+      "project fi"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "fi.google.com",
+    "confidence": "medium",
+    "notes": "Google statement descriptors can overlap with other Google services."
+  },
+  {
+    "canonical_name": "Spectrum Mobile",
+    "aliases": [
+      "spectrum mobile",
+      "charter spectrum mobile",
+      "spectrum wireless",
+      "spectrum *mobile"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "spectrum.com",
+    "confidence": "medium",
+    "notes": "Spectrum charges can also represent cable or internet service."
+  },
+  {
+    "canonical_name": "Xfinity Mobile",
+    "aliases": [
+      "xfinity mobile",
+      "comcast xfinity mobile",
+      "xfinity wireless",
+      "xfinity *mobile"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "xfinity.com",
+    "confidence": "medium",
+    "notes": "Xfinity charges can also represent internet or cable service."
+  },
+  {
+    "canonical_name": "Straight Talk",
+    "aliases": [
+      "straight talk",
+      "straight talk wireless",
+      "straighttalk",
+      "tracfone straight talk"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "straighttalk.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tracfone",
+    "aliases": [
+      "tracfone",
+      "tracfone wireless",
+      "tracfone wireless inc",
+      "tracfone service"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "tracfone.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Total Wireless",
+    "aliases": [
+      "total wireless",
+      "total by verizon",
+      "totalwireless",
+      "total wireless service"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "totalwireless.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Simple Mobile",
+    "aliases": [
+      "simple mobile",
+      "simplemobile",
+      "simple mobile wireless",
+      "tracfone simple mobile"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "simplemobile.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ultra Mobile",
+    "aliases": [
+      "ultra mobile",
+      "ultramobile",
+      "ultra mobile wireless",
+      "ultra mobile plan"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "ultramobile.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tello",
+    "aliases": [
+      "tello",
+      "tello mobile",
+      "tello wireless",
+      "tello service"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "tello.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ting Mobile",
+    "aliases": [
+      "ting mobile",
+      "ting",
+      "ting wireless",
+      "ting mobile service"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "tingmobile.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PureTalk",
+    "aliases": [
+      "puretalk",
+      "pure talk",
+      "puretalk wireless",
+      "puretalk usa"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "puretalk.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Red Pocket Mobile",
+    "aliases": [
+      "red pocket mobile",
+      "red pocket",
+      "redpocket",
+      "red pocket wireless"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "redpocket.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Republic Wireless",
+    "aliases": [
+      "republic wireless",
+      "republicwireless",
+      "republic wireless service",
+      "dish republic wireless"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "republicwireless.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lively",
+    "aliases": [
+      "lively",
+      "lively wireless",
+      "jitterbug",
+      "lively phone service"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "lively.com",
+    "confidence": "medium",
+    "notes": "Brand can include devices and health/safety services as well as cellular service."
+  },
+  {
+    "canonical_name": "Xfinity",
+    "aliases": [
+      "xfinity",
+      "comcast",
+      "comcast cable",
+      "comcast xfinity",
+      "xfinity internet",
+      "comcast business"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "xfinity.com",
+    "confidence": "medium",
+    "notes": "Charges can include internet, phone, mobile, or television service."
+  },
+  {
+    "canonical_name": "Spectrum",
+    "aliases": [
+      "spectrum",
+      "charter communications",
+      "charter spectrum",
+      "spectrum internet",
+      "spectrum business",
+      "charter cable"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "spectrum.com",
+    "confidence": "medium",
+    "notes": "Charges can include internet, phone, mobile, or television service."
+  },
+  {
+    "canonical_name": "Cox Communications",
+    "aliases": [
+      "cox communications",
+      "cox",
+      "cox cable",
+      "cox internet",
+      "cox business",
+      "cox communications inc"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "cox.com",
+    "confidence": "medium",
+    "notes": "Charges can include internet, phone, or television service."
+  },
+  {
+    "canonical_name": "Optimum",
+    "aliases": [
+      "optimum",
+      "optimum online",
+      "optimum business",
+      "altice usa",
+      "cablevision optimum"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "optimum.com",
+    "confidence": "medium",
+    "notes": "Charges can include internet, phone, or television service."
+  },
+  {
+    "canonical_name": "Mediacom",
+    "aliases": [
+      "mediacom",
+      "mediacom communications",
+      "mediacom cable",
+      "mediacom internet",
+      "mediacom business"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "mediacomcable.com",
+    "confidence": "medium",
+    "notes": "Charges can include internet, phone, or television service."
+  },
+  {
+    "canonical_name": "WOW!",
+    "aliases": [
+      "wow",
+      "wow internet",
+      "wideopenwest",
+      "wowway",
+      "wow business"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "wowway.com",
+    "confidence": "medium",
+    "notes": "Short brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Astound Broadband",
+    "aliases": [
+      "astound broadband",
+      "astound",
+      "rcn",
+      "wave broadband",
+      "grande communications",
+      "astound business"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "astound.com",
+    "confidence": "medium",
+    "notes": "Legacy regional brands may still appear on statements."
+  },
+  {
+    "canonical_name": "Frontier Communications",
+    "aliases": [
+      "frontier communications",
+      "frontier",
+      "frontier internet",
+      "frontier fiber",
+      "frontier communications corp"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "frontier.com",
+    "confidence": "medium",
+    "notes": "Short brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "CenturyLink",
+    "aliases": [
+      "centurylink",
+      "century link",
+      "centurylink communications",
+      "centurylink internet",
+      "lumen centurylink"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "centurylink.com",
+    "confidence": "medium",
+    "notes": "Lumen and CenturyLink descriptors may overlap."
+  },
+  {
+    "canonical_name": "Lumen Technologies",
+    "aliases": [
+      "lumen technologies",
+      "lumen",
+      "lumen business",
+      "lumen communications",
+      "level 3 communications"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "lumen.com",
+    "confidence": "medium",
+    "notes": "Enterprise telecom charges may use legacy Level 3 or CenturyLink descriptors."
+  },
+  {
+    "canonical_name": "Brightspeed",
+    "aliases": [
+      "brightspeed",
+      "bright speed",
+      "brightspeed internet",
+      "brightspeed fiber"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "brightspeed.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Windstream",
+    "aliases": [
+      "windstream",
+      "windstream communications",
+      "windstream internet",
+      "windstream enterprise",
+      "kinetic by windstream"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "windstream.com",
+    "confidence": "medium",
+    "notes": "Charges may use Kinetic or Windstream descriptors."
+  },
+  {
+    "canonical_name": "Kinetic by Windstream",
+    "aliases": [
+      "kinetic by windstream",
+      "kinetic internet",
+      "windstream kinetic",
+      "kinetic broadband"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "windstream.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Consolidated Communications",
+    "aliases": [
+      "consolidated communications",
+      "consolidated comm",
+      "cci communications",
+      "consolidated internet"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "consolidated.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fidium Fiber",
+    "aliases": [
+      "fidium fiber",
+      "fidium",
+      "fidium internet",
+      "consolidated fidium"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "fidiumfiber.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ziply Fiber",
+    "aliases": [
+      "ziply fiber",
+      "ziply",
+      "ziply internet",
+      "ziply fiber business"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "ziplyfiber.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Google Fiber",
+    "aliases": [
+      "google fiber",
+      "google *fiber",
+      "google fiber internet",
+      "google fiber webpass",
+      "gfiber"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "fiber.google.com",
+    "confidence": "medium",
+    "notes": "Google statement descriptors can overlap with other Google services."
+  },
+  {
+    "canonical_name": "GFiber",
+    "aliases": [
+      "gfiber",
+      "g fiber",
+      "google fiber",
+      "gfiber internet"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "fiber.google.com",
+    "confidence": "medium",
+    "notes": "May appear under Google Fiber descriptors."
+  },
+  {
+    "canonical_name": "TDS Telecom",
+    "aliases": [
+      "tds telecom",
+      "tds telecommunications",
+      "tds internet",
+      "tds broadband"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "tdstelecom.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sparklight",
+    "aliases": [
+      "sparklight",
+      "cable one",
+      "sparklight internet",
+      "sparklight business",
+      "cableone"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "sparklight.com",
+    "confidence": "medium",
+    "notes": "Legacy Cable One descriptors may still appear."
+  },
+  {
+    "canonical_name": "Vyve Broadband",
+    "aliases": [
+      "vyve broadband",
+      "vyve",
+      "vyve internet",
+      "vyve business"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "vyvebroadband.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Breezeline",
+    "aliases": [
+      "breezeline",
+      "atlantic broadband",
+      "breezeline internet",
+      "breezeline business"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "breezeline.com",
+    "confidence": "medium",
+    "notes": "Legacy Atlantic Broadband descriptors may still appear."
+  },
+  {
+    "canonical_name": "Armstrong",
+    "aliases": [
+      "armstrong",
+      "armstrong cable",
+      "armstrong one wire",
+      "armstrong internet"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "armstrongonewire.com",
+    "confidence": "medium",
+    "notes": "Generic brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Midco",
+    "aliases": [
+      "midco",
+      "midcontinent communications",
+      "midco internet",
+      "midco business"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "midco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "GCI",
+    "aliases": [
+      "gci",
+      "gci communication corp",
+      "gci communications",
+      "gci internet",
+      "gci wireless"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "gci.com",
+    "confidence": "medium",
+    "notes": "Short acronym can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Altafiber",
+    "aliases": [
+      "altafiber",
+      "alta fiber",
+      "cincinnati bell",
+      "altafiber internet",
+      "altafiber business"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "altafiber.com",
+    "confidence": "medium",
+    "notes": "Legacy Cincinnati Bell descriptors may still appear."
+  },
+  {
+    "canonical_name": "Hawaiian Telcom",
+    "aliases": [
+      "hawaiian telcom",
+      "hawaiian telecom",
+      "hawaiian tel",
+      "hawaiian telcom internet"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "hawaiiantel.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sonic",
+    "aliases": [
+      "sonic",
+      "sonic net",
+      "sonic internet",
+      "sonic telecom"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "sonic.com",
+    "confidence": "medium",
+    "notes": "Short brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "EarthLink",
+    "aliases": [
+      "earthlink",
+      "earthlink internet",
+      "earthlink network",
+      "earthlink business"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "earthlink.net",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Starlink",
+    "aliases": [
+      "starlink",
+      "spacex starlink",
+      "starlink internet",
+      "starlink subscription",
+      "starlink service"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "starlink.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Viasat",
+    "aliases": [
+      "viasat",
+      "viasat internet",
+      "viasat satellite internet",
+      "viasat inc"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "viasat.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hughesnet",
+    "aliases": [
+      "hughesnet",
+      "hughes net",
+      "hughes network systems",
+      "hughesnet internet"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "hughesnet.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Rise Broadband",
+    "aliases": [
+      "rise broadband",
+      "risebroadband",
+      "rise internet",
+      "rise broadband service"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "risebroadband.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Metronet",
+    "aliases": [
+      "metronet",
+      "metro net",
+      "metronet fiber",
+      "metronet internet"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "metronet.com",
+    "confidence": "medium",
+    "notes": "Name can overlap with unrelated transit or network businesses."
+  },
+  {
+    "canonical_name": "Quantum Fiber",
+    "aliases": [
+      "quantum fiber",
+      "quantumfiber",
+      "lumen quantum fiber",
+      "quantum fiber internet"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "quantumfiber.com",
+    "confidence": "medium",
+    "notes": "May appear under Lumen-related descriptors."
+  },
+  {
+    "canonical_name": "Bluepeak",
+    "aliases": [
+      "bluepeak",
+      "blue peak",
+      "bluepeak internet",
+      "bluepeak fiber"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "mybluepeak.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ting Internet",
+    "aliases": [
+      "ting internet",
+      "ting fiber",
+      "ting broadband",
+      "ting internet service"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "ting.com",
+    "confidence": "medium",
+    "notes": "Ting also operates mobile services."
+  },
+  {
+    "canonical_name": "Greenlight Networks",
+    "aliases": [
+      "greenlight networks",
+      "greenlight internet",
+      "greenlight fiber",
+      "greenlight network"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "greenlightnetworks.com",
+    "confidence": "medium",
+    "notes": "Generic brand wording can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "EPB Fiber Optics",
+    "aliases": [
+      "epb",
+      "epb fiber optics",
+      "epb fiber",
+      "epb internet"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "epb.com",
+    "confidence": "medium",
+    "notes": "EPB also provides electric utility service."
+  },
+  {
+    "canonical_name": "US Signal",
+    "aliases": [
+      "us signal",
+      "u s signal",
+      "us signal company",
+      "us signal network"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "ussignal.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Zayo",
+    "aliases": [
+      "zayo",
+      "zayo group",
+      "zayo group holdings",
+      "zayo network"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "zayo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cogent Communications",
+    "aliases": [
+      "cogent communications",
+      "cogent",
+      "cogentco",
+      "cogent network"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "cogentco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "GTT Communications",
+    "aliases": [
+      "gtt communications",
+      "gtt",
+      "gtt communications inc",
+      "gtt network"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "gtt.net",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Crown Castle Fiber",
+    "aliases": [
+      "crown castle fiber",
+      "crown castle",
+      "crown castle network",
+      "crown castle communications"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "crowncastle.com",
+    "confidence": "medium",
+    "notes": "May include fiber/network infrastructure services."
+  },
+  {
+    "canonical_name": "Comcast Business",
+    "aliases": [
+      "comcast business",
+      "comcast business internet",
+      "comcast business services",
+      "comcast *business"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "business.comcast.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Spectrum Business",
+    "aliases": [
+      "spectrum business",
+      "charter spectrum business",
+      "spectrum business internet",
+      "spectrum *business"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "spectrum.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cox Business",
+    "aliases": [
+      "cox business",
+      "cox business internet",
+      "cox communications business",
+      "cox *business"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "cox.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Verizon Business",
+    "aliases": [
+      "verizon business",
+      "verizon enterprise",
+      "verizon business internet",
+      "verizon *business"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "verizon.com",
+    "confidence": "medium",
+    "notes": "May include wireless, internet, voice, or managed network services."
+  },
+  {
+    "canonical_name": "AT&T Business",
+    "aliases": [
+      "at&t business",
+      "att business",
+      "at and t business",
+      "at&t business internet",
+      "att *business"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "business.att.com",
+    "confidence": "medium",
+    "notes": "May include wireless, internet, voice, or managed network services."
+  },
+  {
+    "canonical_name": "RingCentral",
+    "aliases": [
+      "ringcentral",
+      "ring central",
+      "ringcentral inc",
+      "ringcentral phone",
+      "ringcentral mvp"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "ringcentral.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Vonage",
+    "aliases": [
+      "vonage",
+      "vonage business",
+      "vonage holdings",
+      "vonage communications",
+      "vonage phone"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "vonage.com",
+    "confidence": "medium",
+    "notes": "May include business communications APIs or phone service."
+  },
+  {
+    "canonical_name": "Ooma",
+    "aliases": [
+      "ooma",
+      "ooma inc",
+      "ooma office",
+      "ooma business",
+      "ooma phone"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "ooma.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nextiva",
+    "aliases": [
+      "nextiva",
+      "nextiva inc",
+      "nextiva phone",
+      "nextiva business",
+      "nextiva communications"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "nextiva.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "8x8",
+    "aliases": [
+      "8x8",
+      "8 x 8",
+      "8x8 inc",
+      "8x8 phone",
+      "8x8 communications"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "8x8.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dialpad",
+    "aliases": [
+      "dialpad",
+      "dialpad inc",
+      "dialpad phone",
+      "dialpad business communications",
+      "dialpad subscription"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "dialpad.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "GoTo Connect",
+    "aliases": [
+      "goto connect",
+      "jive communications",
+      "goto phone",
+      "goto *connect"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "goto.com",
+    "confidence": "medium",
+    "notes": "GoTo also sells meeting and remote-support software."
+  },
+  {
+    "canonical_name": "Intermedia",
+    "aliases": [
+      "intermedia",
+      "intermedia cloud communications",
+      "intermedia unite",
+      "intermedia phone"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "intermedia.com",
+    "confidence": "medium",
+    "notes": "May include cloud communications or other hosted IT services."
+  },
+  {
+    "canonical_name": "Grasshopper",
+    "aliases": [
+      "grasshopper",
+      "grasshopper phone",
+      "grasshopper virtual phone",
+      "grasshopper group"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "grasshopper.com",
+    "confidence": "medium",
+    "notes": "Brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Phone.com",
+    "aliases": [
+      "phone com",
+      "phone.com",
+      "phonecom",
+      "phone com voip",
+      "phone com service"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "phone.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "OpenPhone",
+    "aliases": [
+      "openphone",
+      "open phone",
+      "openphone technologies",
+      "openphone subscription"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "openphone.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Zoom Phone",
+    "aliases": [
+      "zoom phone",
+      "zoom video communications",
+      "zoom *phone",
+      "zoom phone subscription"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "zoom.com",
+    "confidence": "medium",
+    "notes": "Zoom charges may instead be videoconferencing software."
+  },
+  {
+    "canonical_name": "Microsoft Teams Phone",
+    "aliases": [
+      "microsoft teams phone",
+      "teams phone",
+      "microsoft *teams",
+      "microsoft calling plan"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "microsoft.com",
+    "confidence": "medium",
+    "notes": "Microsoft charges can represent many other software products."
+  },
+  {
+    "canonical_name": "Google Voice",
+    "aliases": [
+      "google voice",
+      "google *voice",
+      "google voice business",
+      "google voice subscription"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "voice.google.com",
+    "confidence": "medium",
+    "notes": "Google charges can represent many other products."
+  },
+  {
+    "canonical_name": "Twilio",
+    "aliases": [
+      "twilio",
+      "twilio inc",
+      "twilio communications",
+      "twilio messaging",
+      "twilio voice"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "twilio.com",
+    "confidence": "medium",
+    "notes": "Usage may be communications infrastructure rather than conventional telecom."
+  },
+  {
+    "canonical_name": "Bandwidth",
+    "aliases": [
+      "bandwidth",
+      "bandwidth inc",
+      "bandwidth com",
+      "bandwidth communications"
+    ],
+    "semantic": "telecom",
+    "logo_domain": "bandwidth.com",
+    "confidence": "medium",
+    "notes": "Generic brand name can collide with descriptors for other network vendors."
+  },
+  {
+    "canonical_name": "Pacific Gas and Electric",
+    "aliases": [
+      "pacific gas and electric",
+      "pg&e",
+      "pge",
+      "pacific gas electric",
+      "pge utility",
+      "pge energy"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "pge.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Southern California Edison",
+    "aliases": [
+      "southern california edison",
+      "sce",
+      "so cal edison",
+      "edison utility",
+      "sce payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "sce.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "San Diego Gas & Electric",
+    "aliases": [
+      "san diego gas and electric",
+      "sdg&e",
+      "sdge",
+      "sdg and e",
+      "sdge utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "sdge.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Southern California Gas Company",
+    "aliases": [
+      "southern california gas company",
+      "socalgas",
+      "so cal gas",
+      "southern california gas",
+      "socal gas"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "socalgas.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sacramento Municipal Utility District",
+    "aliases": [
+      "smud",
+      "sacramento municipal utility district",
+      "smud utility",
+      "smud electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "smud.org",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Los Angeles Department of Water and Power",
+    "aliases": [
+      "ladwp",
+      "los angeles department of water and power",
+      "la dwp",
+      "ladwp utility",
+      "ladwp payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "ladwp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Duke Energy",
+    "aliases": [
+      "duke energy",
+      "duke-energy",
+      "duke energy payment",
+      "duke energy utility",
+      "duke power"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "duke-energy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Florida Power & Light",
+    "aliases": [
+      "florida power and light",
+      "fpl",
+      "fpl utility",
+      "fpl electric",
+      "fpl payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "fpl.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "NextEra Energy",
+    "aliases": [
+      "nextera energy",
+      "nextera",
+      "next era energy",
+      "nextera energy resources"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "nexteraenergy.com",
+    "confidence": "medium",
+    "notes": "Parent company charges may not always represent a direct utility bill."
+  },
+  {
+    "canonical_name": "Georgia Power",
+    "aliases": [
+      "georgia power",
+      "ga power",
+      "georgia power company",
+      "georgia power payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "georgiapower.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Alabama Power",
+    "aliases": [
+      "alabama power",
+      "al power",
+      "alabama power company",
+      "alabama power payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "alabamapower.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mississippi Power",
+    "aliases": [
+      "mississippi power",
+      "ms power",
+      "mississippi power company",
+      "mississippi power payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "mississippipower.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dominion Energy",
+    "aliases": [
+      "dominion energy",
+      "dominion",
+      "dominion energy virginia",
+      "dominion gas",
+      "dominion power"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "dominionenergy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Appalachian Power",
+    "aliases": [
+      "appalachian power",
+      "appalachian power company",
+      "aep appalachian power",
+      "appalachian electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "appalachianpower.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "American Electric Power",
+    "aliases": [
+      "american electric power",
+      "aep",
+      "aep energy",
+      "aep utility",
+      "aep electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "aep.com",
+    "confidence": "medium",
+    "notes": "Regional operating companies may appear instead of the AEP parent name."
+  },
+  {
+    "canonical_name": "AEP Ohio",
+    "aliases": [
+      "aep ohio",
+      "ohio power company",
+      "aep ohio utility",
+      "aep ohio electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "aepohio.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "AEP Texas",
+    "aliases": [
+      "aep texas",
+      "aep texas central",
+      "aep texas north",
+      "aep texas utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "aeptexas.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Indiana Michigan Power",
+    "aliases": [
+      "indiana michigan power",
+      "i&m",
+      "indiana michigan power company",
+      "aep indiana michigan"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "indianamichiganpower.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kentucky Power",
+    "aliases": [
+      "kentucky power",
+      "kentucky power company",
+      "aep kentucky power",
+      "kentucky electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "kentuckypower.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Public Service Company of Oklahoma",
+    "aliases": [
+      "public service company of oklahoma",
+      "pso",
+      "psoklahoma",
+      "aep pso",
+      "pso electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "psoklahoma.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Southwestern Electric Power Company",
+    "aliases": [
+      "swepco",
+      "southwestern electric power company",
+      "aep swepco",
+      "swepco electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "swepco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Xcel Energy",
+    "aliases": [
+      "xcel energy",
+      "xcel",
+      "xcel energy payment",
+      "xcel utility",
+      "xcel electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "xcelenergy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Entergy",
+    "aliases": [
+      "entergy",
+      "entergy corp",
+      "entergy utility",
+      "entergy electric",
+      "entergy payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "entergy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Entergy Arkansas",
+    "aliases": [
+      "entergy arkansas",
+      "entergy ar",
+      "entergy arkansas llc",
+      "entergy arkansas payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "entergy-arkansas.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Entergy Louisiana",
+    "aliases": [
+      "entergy louisiana",
+      "entergy la",
+      "entergy louisiana llc",
+      "entergy louisiana payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "entergy-louisiana.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Entergy Mississippi",
+    "aliases": [
+      "entergy mississippi",
+      "entergy ms",
+      "entergy mississippi llc",
+      "entergy mississippi payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "entergy-mississippi.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Entergy Texas",
+    "aliases": [
+      "entergy texas",
+      "entergy tx",
+      "entergy texas inc",
+      "entergy texas payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "entergy-texas.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CenterPoint Energy",
+    "aliases": [
+      "centerpoint energy",
+      "centerpoint",
+      "center point energy",
+      "centerpoint gas",
+      "centerpoint utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "centerpointenergy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Atmos Energy",
+    "aliases": [
+      "atmos energy",
+      "atmos",
+      "atmos energy corp",
+      "atmos gas",
+      "atmos utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "atmosenergy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nicor Gas",
+    "aliases": [
+      "nicor gas",
+      "nicor",
+      "northern illinois gas",
+      "nicor gas payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "nicorgas.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Peoples Gas",
+    "aliases": [
+      "peoples gas",
+      "peoples gas delivery",
+      "peoplesgas",
+      "peoples gas utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "peoplesgasdelivery.com",
+    "confidence": "medium",
+    "notes": "Several unrelated U.S. utilities use the Peoples Gas name."
+  },
+  {
+    "canonical_name": "Consumers Energy",
+    "aliases": [
+      "consumers energy",
+      "consumersenergy",
+      "consumers power",
+      "consumers energy payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "consumersenergy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "DTE Energy",
+    "aliases": [
+      "dte energy",
+      "dte",
+      "detroit edison",
+      "dte electric",
+      "dte gas"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "dteenergy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ameren",
+    "aliases": [
+      "ameren",
+      "ameren corporation",
+      "ameren utility",
+      "ameren electric",
+      "ameren gas"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "ameren.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ameren Illinois",
+    "aliases": [
+      "ameren illinois",
+      "ameren il",
+      "ameren illinois company",
+      "ameren il utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "ameren.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ameren Missouri",
+    "aliases": [
+      "ameren missouri",
+      "ameren mo",
+      "union electric company",
+      "ameren missouri utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "ameren.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ComEd",
+    "aliases": [
+      "comed",
+      "commonwealth edison",
+      "com ed",
+      "comed electric",
+      "comed payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "comed.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PPL Electric Utilities",
+    "aliases": [
+      "ppl electric",
+      "ppl electric utilities",
+      "ppl utility",
+      "ppl electric payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "pplelectric.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PECO",
+    "aliases": [
+      "peco",
+      "peco energy",
+      "peco energy company",
+      "peco electric",
+      "peco gas"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "peco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PSEG",
+    "aliases": [
+      "pseg",
+      "public service enterprise group",
+      "pse&g",
+      "pse g",
+      "public service electric and gas"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "pseg.com",
+    "confidence": "medium",
+    "notes": "Parent and regulated utility descriptors can overlap."
+  },
+  {
+    "canonical_name": "JCP&L",
+    "aliases": [
+      "jcp&l",
+      "jcpl",
+      "jersey central power and light",
+      "firstenergy jcpl"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "firstenergycorp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "FirstEnergy",
+    "aliases": [
+      "firstenergy",
+      "first energy",
+      "firstenergy corp",
+      "firstenergy utilities"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "firstenergycorp.com",
+    "confidence": "medium",
+    "notes": "Regional operating utilities may appear instead of the parent name."
+  },
+  {
+    "canonical_name": "Ohio Edison",
+    "aliases": [
+      "ohio edison",
+      "ohio edison company",
+      "firstenergy ohio edison",
+      "ohio edison electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "firstenergycorp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Illuminating Company",
+    "aliases": [
+      "illuminating company",
+      "the illuminating company",
+      "cleveland electric illuminating",
+      "firstenergy illuminating"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "firstenergycorp.com",
+    "confidence": "medium",
+    "notes": "Generic wording can be ambiguous without location context."
+  },
+  {
+    "canonical_name": "Toledo Edison",
+    "aliases": [
+      "toledo edison",
+      "toledo edison company",
+      "firstenergy toledo edison",
+      "toledo edison electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "firstenergycorp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Met-Ed",
+    "aliases": [
+      "met ed",
+      "met-ed",
+      "metropolitan edison",
+      "firstenergy met ed"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "firstenergycorp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Penelec",
+    "aliases": [
+      "penelec",
+      "pennsylvania electric company",
+      "firstenergy penelec",
+      "penelec electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "firstenergycorp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "West Penn Power",
+    "aliases": [
+      "west penn power",
+      "west penn",
+      "firstenergy west penn",
+      "west penn electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "firstenergycorp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Potomac Edison",
+    "aliases": [
+      "potomac edison",
+      "potomac edison company",
+      "firstenergy potomac edison",
+      "potomac electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "firstenergycorp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mon Power",
+    "aliases": [
+      "mon power",
+      "monongahela power",
+      "firstenergy mon power",
+      "mon power electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "firstenergycorp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "APS",
+    "aliases": [
+      "aps",
+      "arizona public service",
+      "aps electric",
+      "aps utility",
+      "aps payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "aps.com",
+    "confidence": "medium",
+    "notes": "Short acronym can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Salt River Project",
+    "aliases": [
+      "salt river project",
+      "srp",
+      "srp electric",
+      "srp utility",
+      "srpnet"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "srpnet.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "NV Energy",
+    "aliases": [
+      "nv energy",
+      "nvenergy",
+      "nevada power",
+      "sierra pacific power",
+      "nv energy payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "nvenergy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Idaho Power",
+    "aliases": [
+      "idaho power",
+      "idaho power company",
+      "idaho power utility",
+      "idaho electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "idahopower.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PacifiCorp",
+    "aliases": [
+      "pacificorp",
+      "pacifi corp",
+      "pacificorp utility",
+      "pacificorp energy"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "pacificorp.com",
+    "confidence": "medium",
+    "notes": "Customer bills more often appear as Pacific Power or Rocky Mountain Power."
+  },
+  {
+    "canonical_name": "Pacific Power",
+    "aliases": [
+      "pacific power",
+      "pacificpower",
+      "pacificorp pacific power",
+      "pacific power utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "pacificpower.net",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Rocky Mountain Power",
+    "aliases": [
+      "rocky mountain power",
+      "rockymountainpower",
+      "pacificorp rocky mountain",
+      "rmp utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "rockymountainpower.net",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Portland General Electric",
+    "aliases": [
+      "portland general electric",
+      "pge oregon",
+      "portland general",
+      "pge electric oregon"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "portlandgeneral.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Puget Sound Energy",
+    "aliases": [
+      "puget sound energy",
+      "pse",
+      "pse utility",
+      "pse electric",
+      "pse gas"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "pse.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Seattle City Light",
+    "aliases": [
+      "seattle city light",
+      "city light seattle",
+      "seattle electric",
+      "seattle city light payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "seattle.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tacoma Public Utilities",
+    "aliases": [
+      "tacoma public utilities",
+      "tpu",
+      "tacoma power",
+      "tacoma utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "mytpu.org",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Avista",
+    "aliases": [
+      "avista",
+      "avista utilities",
+      "avista corp",
+      "avista electric",
+      "avista gas"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "myavista.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "NorthWestern Energy",
+    "aliases": [
+      "northwestern energy",
+      "north western energy",
+      "northwestern utility",
+      "northwestern electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "northwesternenergy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Black Hills Energy",
+    "aliases": [
+      "black hills energy",
+      "blackhills energy",
+      "black hills utility",
+      "black hills gas"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "blackhillsenergy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Evergy",
+    "aliases": [
+      "evergy",
+      "evergy kansas",
+      "evergy missouri",
+      "evergy electric",
+      "evergy utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "evergy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "OG&E",
+    "aliases": [
+      "og&e",
+      "oge",
+      "oklahoma gas and electric",
+      "oge energy",
+      "oge utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "oge.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Oncor",
+    "aliases": [
+      "oncor",
+      "oncor electric delivery",
+      "oncor electric",
+      "oncor utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "oncor.com",
+    "confidence": "medium",
+    "notes": "In competitive Texas markets, retail electricity charges usually come from the chosen provider rather than Oncor."
+  },
+  {
+    "canonical_name": "Reliant",
+    "aliases": [
+      "reliant",
+      "reliant energy",
+      "reliant electricity",
+      "reliant power",
+      "nrg reliant"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "reliant.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "TXU Energy",
+    "aliases": [
+      "txu energy",
+      "txu",
+      "txu electric",
+      "txu electricity",
+      "vistra txu"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "txu.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Direct Energy",
+    "aliases": [
+      "direct energy",
+      "directenergy",
+      "direct energy electricity",
+      "direct energy gas"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "directenergy.com",
+    "confidence": "medium",
+    "notes": "May provide electricity, natural gas, or related home services."
+  },
+  {
+    "canonical_name": "Constellation",
+    "aliases": [
+      "constellation",
+      "constellation energy",
+      "constellation newenergy",
+      "constellation electricity",
+      "constellation gas"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "constellation.com",
+    "confidence": "medium",
+    "notes": "Brand name can collide with unrelated merchants and services."
+  },
+  {
+    "canonical_name": "NRG Energy",
+    "aliases": [
+      "nrg energy",
+      "nrg",
+      "nrg electricity",
+      "nrg retail",
+      "nrg power"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "nrg.com",
+    "confidence": "medium",
+    "notes": "Parent-company descriptor may not identify the specific retail energy brand."
+  },
+  {
+    "canonical_name": "Green Mountain Energy",
+    "aliases": [
+      "green mountain energy",
+      "green mountain electricity",
+      "green mountain power texas",
+      "greenmountainenergy"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "greenmountainenergy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Champion Energy Services",
+    "aliases": [
+      "champion energy",
+      "champion energy services",
+      "champion electricity",
+      "champion power"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "championenergyservices.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cirro Energy",
+    "aliases": [
+      "cirro energy",
+      "cirro",
+      "cirro electricity",
+      "cirro power"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "cirroenergy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Gexa Energy",
+    "aliases": [
+      "gexa energy",
+      "gexa",
+      "gexa electricity",
+      "gexa power"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "gexaenergy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Just Energy",
+    "aliases": [
+      "just energy",
+      "justenergy",
+      "just energy electricity",
+      "just energy gas"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "justenergy.com",
+    "confidence": "medium",
+    "notes": "Generic brand wording can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Rhythm Energy",
+    "aliases": [
+      "rhythm energy",
+      "rhythm electricity",
+      "rhythm power",
+      "got rhythm energy"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "gotrhythm.com",
+    "confidence": "medium",
+    "notes": "Brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Octopus Energy",
+    "aliases": [
+      "octopus energy",
+      "octopus electricity",
+      "octopus power",
+      "octopus energy usa"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "octopusenergy.com",
+    "confidence": "medium",
+    "notes": "Global brand; U.S. availability is market-specific."
+  },
+  {
+    "canonical_name": "National Grid",
+    "aliases": [
+      "national grid",
+      "nationalgrid",
+      "national grid usa",
+      "national grid electric",
+      "national grid gas"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "nationalgridus.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Eversource",
+    "aliases": [
+      "eversource",
+      "eversource energy",
+      "eversource electric",
+      "eversource gas",
+      "eversource utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "eversource.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Unitil",
+    "aliases": [
+      "unitil",
+      "unitil corp",
+      "unitil electric",
+      "unitil gas",
+      "unitil utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "unitil.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Liberty Utilities",
+    "aliases": [
+      "liberty utilities",
+      "liberty utility",
+      "liberty energy and water",
+      "liberty utilities payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "libertyutilities.com",
+    "confidence": "medium",
+    "notes": "Can provide electric, gas, or water service depending on region."
+  },
+  {
+    "canonical_name": "National Fuel",
+    "aliases": [
+      "national fuel",
+      "national fuel gas",
+      "national fuel gas distribution",
+      "nationalfuel"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "nationalfuel.com",
+    "confidence": "medium",
+    "notes": "May refer to utility service or related corporate entities."
+  },
+  {
+    "canonical_name": "UGI Utilities",
+    "aliases": [
+      "ugi utilities",
+      "ugi",
+      "ugi gas",
+      "ugi electric",
+      "ugi utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "ugi.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Columbia Gas",
+    "aliases": [
+      "columbia gas",
+      "columbia gas of ohio",
+      "columbia gas of pennsylvania",
+      "columbia gas utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "columbiagas.com",
+    "confidence": "medium",
+    "notes": "Multiple regional operating companies use the Columbia Gas brand."
+  },
+  {
+    "canonical_name": "Washington Gas",
+    "aliases": [
+      "washington gas",
+      "washington gas light",
+      "washington gas utility",
+      "washington gas payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "washingtongas.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Baltimore Gas and Electric",
+    "aliases": [
+      "baltimore gas and electric",
+      "bge",
+      "bge utility",
+      "bge electric",
+      "bge gas"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "bge.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Delmarva Power",
+    "aliases": [
+      "delmarva power",
+      "delmarva",
+      "delmarva power and light",
+      "delmarva utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "delmarva.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Atlantic City Electric",
+    "aliases": [
+      "atlantic city electric",
+      "ace electric",
+      "atlantic city electric company",
+      "ace utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "atlanticcityelectric.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pepco",
+    "aliases": [
+      "pepco",
+      "potomac electric power company",
+      "pepco electric",
+      "pepco utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "pepco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Duke Energy Progress",
+    "aliases": [
+      "duke energy progress",
+      "duke progress",
+      "progress energy carolinas",
+      "duke progress energy"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "duke-energy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Duke Energy Carolinas",
+    "aliases": [
+      "duke energy carolinas",
+      "duke carolinas",
+      "duke power carolinas",
+      "duke energy nc"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "duke-energy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tampa Electric",
+    "aliases": [
+      "tampa electric",
+      "teco",
+      "tampa electric company",
+      "teco energy",
+      "tampa electric payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "tampaelectric.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "TECO Peoples Gas",
+    "aliases": [
+      "teco peoples gas",
+      "peoples gas florida",
+      "peoplesgas florida",
+      "teco gas"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "peoplesgas.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "JEA",
+    "aliases": [
+      "jea",
+      "jacksonville electric authority",
+      "jea electric",
+      "jea water",
+      "jea utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "jea.com",
+    "confidence": "medium",
+    "notes": "JEA bills may combine electric, water, sewer, and other municipal utility services."
+  },
+  {
+    "canonical_name": "Orlando Utilities Commission",
+    "aliases": [
+      "orlando utilities commission",
+      "ouc",
+      "ouc electric",
+      "ouc utility",
+      "ouc payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "ouc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Gulf Power",
+    "aliases": [
+      "gulf power",
+      "gulf power company",
+      "fpl gulf power",
+      "gulf power electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "fpl.com",
+    "confidence": "medium",
+    "notes": "Legacy brand acquired by FPL; older descriptors may still appear in historical data."
+  },
+  {
+    "canonical_name": "CPS Energy",
+    "aliases": [
+      "cps energy",
+      "cpsenergy",
+      "city public service san antonio",
+      "cps electric",
+      "cps gas"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "cpsenergy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Austin Energy",
+    "aliases": [
+      "austin energy",
+      "city of austin utilities",
+      "austin electric",
+      "austin energy payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "austinenergy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pedernales Electric Cooperative",
+    "aliases": [
+      "pedernales electric cooperative",
+      "pec",
+      "pec electric",
+      "pedernales electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "pec.coop",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CoServ",
+    "aliases": [
+      "coserv",
+      "coserv electric",
+      "coserv gas",
+      "coserv utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "coserv.com",
+    "confidence": "medium",
+    "notes": "Can provide electric or gas service."
+  },
+  {
+    "canonical_name": "LADWP",
+    "aliases": [
+      "ladwp",
+      "la dwp",
+      "los angeles dwp",
+      "los angeles water power",
+      "ladwp payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "ladwp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Anaheim Public Utilities",
+    "aliases": [
+      "anaheim public utilities",
+      "anaheim utilities",
+      "city of anaheim utilities",
+      "anaheim electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "anaheim.net",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Burbank Water and Power",
+    "aliases": [
+      "burbank water and power",
+      "bwp",
+      "burbank utilities",
+      "burbank water power"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "burbankwaterandpower.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Glendale Water & Power",
+    "aliases": [
+      "glendale water and power",
+      "gwp",
+      "glendale utilities",
+      "glendale water power"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "glendaleca.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pasadena Water and Power",
+    "aliases": [
+      "pasadena water and power",
+      "pwp",
+      "pasadena utilities",
+      "pasadena water power"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "pwpweb.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Riverside Public Utilities",
+    "aliases": [
+      "riverside public utilities",
+      "rpu",
+      "riverside utilities",
+      "riverside electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "riversideca.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Silicon Valley Power",
+    "aliases": [
+      "silicon valley power",
+      "svp",
+      "city of santa clara electric",
+      "silicon valley electric"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "siliconvalleypower.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Roseville Electric Utility",
+    "aliases": [
+      "roseville electric",
+      "roseville electric utility",
+      "city of roseville utilities",
+      "roseville utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "roseville.ca.us",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Modesto Irrigation District",
+    "aliases": [
+      "modesto irrigation district",
+      "mid",
+      "mid electric",
+      "modesto irrigation"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "mid.org",
+    "confidence": "medium",
+    "notes": "MID can provide electric and water-related services."
+  },
+  {
+    "canonical_name": "Turlock Irrigation District",
+    "aliases": [
+      "turlock irrigation district",
+      "tid",
+      "tid electric",
+      "turlock irrigation"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "tid.org",
+    "confidence": "medium",
+    "notes": "TID can provide electric and water-related services."
+  },
+  {
+    "canonical_name": "Imperial Irrigation District",
+    "aliases": [
+      "imperial irrigation district",
+      "iid",
+      "iid electric",
+      "imperial irrigation"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "iid.com",
+    "confidence": "medium",
+    "notes": "IID can provide electric and water-related services."
+  },
+  {
+    "canonical_name": "American Water",
+    "aliases": [
+      "american water",
+      "american water works",
+      "amwater",
+      "american water utility",
+      "american water payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "amwater.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "California American Water",
+    "aliases": [
+      "california american water",
+      "cal am water",
+      "california amwater",
+      "american water california"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "amwater.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "New Jersey American Water",
+    "aliases": [
+      "new jersey american water",
+      "nj american water",
+      "nj amwater",
+      "american water new jersey"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "amwater.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pennsylvania American Water",
+    "aliases": [
+      "pennsylvania american water",
+      "pa american water",
+      "pa amwater",
+      "american water pennsylvania"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "amwater.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Illinois American Water",
+    "aliases": [
+      "illinois american water",
+      "il american water",
+      "il amwater",
+      "american water illinois"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "amwater.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Missouri American Water",
+    "aliases": [
+      "missouri american water",
+      "mo american water",
+      "mo amwater",
+      "american water missouri"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "amwater.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Indiana American Water",
+    "aliases": [
+      "indiana american water",
+      "in american water",
+      "in amwater",
+      "american water indiana"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "amwater.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tennessee American Water",
+    "aliases": [
+      "tennessee american water",
+      "tn american water",
+      "tn amwater",
+      "american water tennessee"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "amwater.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Virginia American Water",
+    "aliases": [
+      "virginia american water",
+      "va american water",
+      "va amwater",
+      "american water virginia"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "amwater.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "West Virginia American Water",
+    "aliases": [
+      "west virginia american water",
+      "wv american water",
+      "wv amwater",
+      "american water west virginia"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "amwater.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kentucky American Water",
+    "aliases": [
+      "kentucky american water",
+      "ky american water",
+      "ky amwater",
+      "american water kentucky"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "amwater.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hawaii American Water",
+    "aliases": [
+      "hawaii american water",
+      "hi american water",
+      "hawaii amwater",
+      "american water hawaii"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "amwater.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Essential Utilities",
+    "aliases": [
+      "essential utilities",
+      "essential utilities inc",
+      "aqua america",
+      "essential water"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "essential.co",
+    "confidence": "medium",
+    "notes": "Parent company may appear instead of local Aqua utility brands."
+  },
+  {
+    "canonical_name": "Aqua",
+    "aliases": [
+      "aqua",
+      "aqua america",
+      "aqua water",
+      "aqua utility",
+      "aqua payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "aquawater.com",
+    "confidence": "medium",
+    "notes": "Short brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "California Water Service",
+    "aliases": [
+      "california water service",
+      "cal water",
+      "calwater",
+      "california water service company"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "calwater.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "San Jose Water",
+    "aliases": [
+      "san jose water",
+      "sj water",
+      "san jose water company",
+      "sjwater"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "sjwater.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Golden State Water Company",
+    "aliases": [
+      "golden state water",
+      "golden state water company",
+      "gswc",
+      "gswater"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "gswater.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Las Vegas Valley Water District",
+    "aliases": [
+      "las vegas valley water district",
+      "lvvwd",
+      "las vegas water",
+      "lv water district"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "lvvwd.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Southern Nevada Water Authority",
+    "aliases": [
+      "southern nevada water authority",
+      "snwa",
+      "southern nevada water",
+      "snwa water"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "snwa.com",
+    "confidence": "medium",
+    "notes": "Wholesale/regional authority; customer bills may come from a local water provider."
+  },
+  {
+    "canonical_name": "Denver Water",
+    "aliases": [
+      "denver water",
+      "denver water department",
+      "denverwater",
+      "denver water payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "denverwater.org",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Phoenix Water Services",
+    "aliases": [
+      "phoenix water services",
+      "city of phoenix water",
+      "phoenix water",
+      "phoenix utilities"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "phoenix.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tucson Water",
+    "aliases": [
+      "tucson water",
+      "city of tucson water",
+      "tucson water utility",
+      "tucson utilities"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "tucsonaz.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Austin Water",
+    "aliases": [
+      "austin water",
+      "city of austin water",
+      "austin water utility",
+      "austin utilities"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "austintexas.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "San Antonio Water System",
+    "aliases": [
+      "san antonio water system",
+      "saws",
+      "san antonio water",
+      "saws utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "saws.org",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Houston Public Works",
+    "aliases": [
+      "houston public works",
+      "city of houston water",
+      "houston water",
+      "houston utility bill"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "houstontx.gov",
+    "confidence": "medium",
+    "notes": "City charges may include water, sewer, or other municipal services."
+  },
+  {
+    "canonical_name": "Dallas Water Utilities",
+    "aliases": [
+      "dallas water utilities",
+      "dwu",
+      "city of dallas water",
+      "dallas water"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "dallascityhall.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fort Worth Water",
+    "aliases": [
+      "fort worth water",
+      "city of fort worth water",
+      "fort worth water utility",
+      "fort worth utilities"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "fortworthtexas.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Miami-Dade Water and Sewer",
+    "aliases": [
+      "miami dade water and sewer",
+      "miami dade water",
+      "wasd",
+      "miami dade utilities"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "miamidade.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "NYC Water Board",
+    "aliases": [
+      "nyc water board",
+      "new york city water board",
+      "nyc water",
+      "nyc dep water"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "nyc.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Philadelphia Water Department",
+    "aliases": [
+      "philadelphia water department",
+      "phila water",
+      "philadelphia water",
+      "pwd water"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "phila.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "DC Water",
+    "aliases": [
+      "dc water",
+      "district of columbia water",
+      "dcwater",
+      "dc water utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "dcwater.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Boston Water and Sewer Commission",
+    "aliases": [
+      "boston water and sewer commission",
+      "bwsc",
+      "boston water",
+      "boston sewer"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "bwsc.org",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Chicago Department of Water Management",
+    "aliases": [
+      "chicago water",
+      "city of chicago water",
+      "chicago department water management",
+      "chicago utility bill"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "chicago.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Seattle Public Utilities",
+    "aliases": [
+      "seattle public utilities",
+      "spu",
+      "seattle water",
+      "seattle utilities"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "seattle.gov",
+    "confidence": "medium",
+    "notes": "Bills may include water, sewer, drainage, and solid waste."
+  },
+  {
+    "canonical_name": "Portland Water Bureau",
+    "aliases": [
+      "portland water bureau",
+      "portland water",
+      "city of portland water",
+      "portland utility"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "portland.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "San Francisco Public Utilities Commission",
+    "aliases": [
+      "sfpuc",
+      "san francisco public utilities commission",
+      "sf water",
+      "san francisco utilities"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "sfpuc.gov",
+    "confidence": "medium",
+    "notes": "May include water, sewer, or municipal power services."
+  },
+  {
+    "canonical_name": "Waste Management",
+    "aliases": [
+      "waste management",
+      "wm",
+      "wm waste",
+      "waste management inc",
+      "wm service"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "wm.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Republic Services",
+    "aliases": [
+      "republic services",
+      "republic waste",
+      "republic services inc",
+      "republic trash",
+      "republic *service"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "republicservices.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Waste Connections",
+    "aliases": [
+      "waste connections",
+      "waste connections inc",
+      "wasteconnections",
+      "waste connections service"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "wasteconnections.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "GFL Environmental",
+    "aliases": [
+      "gfl environmental",
+      "gfl",
+      "gfl environmental usa",
+      "gfl waste",
+      "gfl service"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "gflenv.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Rumpke",
+    "aliases": [
+      "rumpke",
+      "rumpke waste",
+      "rumpke consolidated companies",
+      "rumpke service"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "rumpke.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Casella Waste Systems",
+    "aliases": [
+      "casella",
+      "casella waste systems",
+      "casella waste",
+      "casella service"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "casella.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Recology",
+    "aliases": [
+      "recology",
+      "recology inc",
+      "recology waste",
+      "recology service"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "recology.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Waste Pro",
+    "aliases": [
+      "waste pro",
+      "waste pro usa",
+      "wastepro",
+      "waste pro service"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "wasteprousa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Waste Industries",
+    "aliases": [
+      "waste industries",
+      "waste industries usa",
+      "gfl waste industries",
+      "waste industries service"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "gflenv.com",
+    "confidence": "medium",
+    "notes": "Legacy brand now associated with GFL; historical descriptors may still appear."
+  },
+  {
+    "canonical_name": "Clean Harbors",
+    "aliases": [
+      "clean harbors",
+      "cleanharbors",
+      "clean harbors environmental",
+      "clean harbors waste"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "cleanharbors.com",
+    "confidence": "medium",
+    "notes": "Often specialized environmental or hazardous-waste service rather than ordinary trash utility."
+  },
+  {
+    "canonical_name": "Stericycle",
+    "aliases": [
+      "stericycle",
+      "stericycle inc",
+      "stericycle waste",
+      "stericycle medical waste",
+      "stericycle service"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "stericycle.com",
+    "confidence": "medium",
+    "notes": "Typically medical/sharps or regulated waste rather than ordinary trash service."
+  },
+  {
+    "canonical_name": "WM Bagster",
+    "aliases": [
+      "bagster",
+      "wm bagster",
+      "waste management bagster",
+      "the bagster"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "thebagster.com",
+    "confidence": "medium",
+    "notes": "One-time waste-removal product/service rather than recurring utility."
+  },
+  {
+    "canonical_name": "AmeriGas",
+    "aliases": [
+      "amerigas",
+      "amerigas propane",
+      "amerigas propane lp",
+      "amerigas service",
+      "amerigas payment"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "amerigas.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Suburban Propane",
+    "aliases": [
+      "suburban propane",
+      "suburban propane lp",
+      "suburbanpropane",
+      "suburban propane service"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "suburbanpropane.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ferrellgas",
+    "aliases": [
+      "ferrellgas",
+      "ferrell gas",
+      "ferrellgas lp",
+      "ferrellgas propane",
+      "ferrellgas service"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "ferrellgas.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "U-Haul Propane",
+    "aliases": [
+      "u haul propane",
+      "uhaul propane",
+      "u haul propane refill",
+      "uhaul *propane"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "uhaul.com",
+    "confidence": "medium",
+    "notes": "U-Haul charges may instead be rentals or moving supplies."
+  },
+  {
+    "canonical_name": "Blue Rhino",
+    "aliases": [
+      "blue rhino",
+      "bluerhino",
+      "blue rhino propane",
+      "blue rhino exchange"
+    ],
+    "semantic": "utilities",
+    "logo_domain": "bluerhino.com",
+    "confidence": "medium",
+    "notes": "Often a cylinder exchange purchase rather than a recurring utility bill."
+  }
+]

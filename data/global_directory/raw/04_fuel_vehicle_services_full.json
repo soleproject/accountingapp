@@ -1,0 +1,3590 @@
+[
+  {
+    "canonical_name": "Shell",
+    "aliases": [
+      "shell",
+      "shell oil",
+      "shell oil company",
+      "shell service station",
+      "shell fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "shell.us",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Chevron",
+    "aliases": [
+      "chevron",
+      "chevron usa",
+      "chevron products company",
+      "chevron station",
+      "chevron fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "chevron.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Texaco",
+    "aliases": [
+      "texaco",
+      "texaco inc",
+      "texaco station",
+      "texaco fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "texaco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Exxon",
+    "aliases": [
+      "exxon",
+      "exxonmobil",
+      "exxon mobil",
+      "exxon station",
+      "exxon fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "exxon.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mobil",
+    "aliases": [
+      "mobil",
+      "exxonmobil",
+      "exxon mobil",
+      "mobil station",
+      "mobil fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "mobil.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "76",
+    "aliases": [
+      "76",
+      "76 gas",
+      "76 station",
+      "76 fuel",
+      "phillips 66 76"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "76.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Phillips 66",
+    "aliases": [
+      "phillips 66",
+      "phillips66",
+      "phillips 66 company",
+      "phillips 66 station",
+      "phillips 66 fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "phillips66.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Conoco",
+    "aliases": [
+      "conoco",
+      "conoco gas",
+      "conoco station",
+      "conoco fuel",
+      "phillips 66 conoco"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "conoco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "BP",
+    "aliases": [
+      "bp",
+      "bp america",
+      "bp products north america",
+      "bp gas",
+      "bp station"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "bp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Amoco",
+    "aliases": [
+      "amoco",
+      "bp amoco",
+      "amoco gas",
+      "amoco station",
+      "amoco fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "bp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ARCO",
+    "aliases": [
+      "arco",
+      "arco gas",
+      "arco station",
+      "arco fuel",
+      "arco ampm"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "arco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Valero",
+    "aliases": [
+      "valero",
+      "valero energy",
+      "valero gas",
+      "valero station",
+      "valero fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "valero.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Marathon",
+    "aliases": [
+      "marathon",
+      "marathon petroleum",
+      "marathon gas",
+      "marathon station",
+      "marathon fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "marathonfuel.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sunoco",
+    "aliases": [
+      "sunoco",
+      "sunoco lp",
+      "sunoco gas",
+      "sunoco station",
+      "sunoco fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "sunoco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Citgo",
+    "aliases": [
+      "citgo",
+      "citgo petroleum",
+      "citgo gas",
+      "citgo station",
+      "citgo fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "citgo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sinclair",
+    "aliases": [
+      "sinclair",
+      "sinclair oil",
+      "sinclair gas",
+      "sinclair station",
+      "sinclair fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "sinclairoil.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Gulf",
+    "aliases": [
+      "gulf",
+      "gulf oil",
+      "gulf gas",
+      "gulf station",
+      "gulf fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "gulfoil.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Murphy USA",
+    "aliases": [
+      "murphy usa",
+      "murphy usa inc",
+      "murphy gas",
+      "murphy usa fuel",
+      "murphy express"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "murphyusa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Murphy Express",
+    "aliases": [
+      "murphy express",
+      "murphy usa",
+      "murphy express gas",
+      "murphy express fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "murphyusa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Speedway",
+    "aliases": [
+      "speedway",
+      "speedway llc",
+      "speedway gas",
+      "speedway fuel",
+      "speedway store"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "speedway.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Circle K",
+    "aliases": [
+      "circle k",
+      "circle k stores",
+      "circle k gas",
+      "circle k fuel",
+      "circle k store"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "circlek.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "7-Eleven",
+    "aliases": [
+      "7 eleven",
+      "7-eleven",
+      "7 eleven inc",
+      "7 eleven gas",
+      "7 eleven fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "7-eleven.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "QuikTrip",
+    "aliases": [
+      "quiktrip",
+      "qt",
+      "quiktrip corporation",
+      "quiktrip gas",
+      "qt fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "quiktrip.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "RaceTrac",
+    "aliases": [
+      "racetrac",
+      "race trac",
+      "racetrac petroleum",
+      "racetrac gas",
+      "racetrac fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "racetrac.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Casey's",
+    "aliases": [
+      "caseys",
+      "caseys general stores",
+      "caseys general store",
+      "caseys gas",
+      "caseys fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "caseys.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Kwik Trip",
+    "aliases": [
+      "kwik trip",
+      "kwik trip inc",
+      "kwiktrip",
+      "kwik trip gas",
+      "kwik trip fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "kwiktrip.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Maverik",
+    "aliases": [
+      "maverik",
+      "maverik inc",
+      "maverik adventure club",
+      "maverik gas",
+      "maverik fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "maverik.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Love's Travel Stops",
+    "aliases": [
+      "loves",
+      "loves travel stops",
+      "loves travel stop",
+      "loves fuel",
+      "loves country stores"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "loves.com",
+    "confidence": "medium",
+    "notes": "Travel-stop purchases may include food or supplies."
+  },
+  {
+    "canonical_name": "Pilot Flying J",
+    "aliases": [
+      "pilot flying j",
+      "pilot travel centers",
+      "flying j",
+      "pilot fuel",
+      "flying j fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "pilotflyingj.com",
+    "confidence": "medium",
+    "notes": "Travel-stop purchases may include food or supplies."
+  },
+  {
+    "canonical_name": "TA Travel Centers",
+    "aliases": [
+      "travelcenters of america",
+      "ta travel center",
+      "ta petro",
+      "ta fuel",
+      "petro stopping centers"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "ta-petro.com",
+    "confidence": "medium",
+    "notes": "Travel-stop purchases may include food or supplies."
+  },
+  {
+    "canonical_name": "Wawa",
+    "aliases": [
+      "wawa",
+      "wawa inc",
+      "wawa gas",
+      "wawa fuel",
+      "wawa store"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "wawa.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Sheetz",
+    "aliases": [
+      "sheetz",
+      "sheetz inc",
+      "sheetz gas",
+      "sheetz fuel",
+      "sheetz store"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "sheetz.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Buc-ee's",
+    "aliases": [
+      "buc ees",
+      "bucees",
+      "buc ees ltd",
+      "buc ees gas",
+      "buc ees fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "buc-ees.com",
+    "confidence": "medium",
+    "notes": "Travel-center purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Royal Farms",
+    "aliases": [
+      "royal farms",
+      "royal farms stores",
+      "royal farms gas",
+      "royal farms fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "royalfarms.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Cumberland Farms",
+    "aliases": [
+      "cumberland farms",
+      "cumberland farms inc",
+      "cumberland gas",
+      "cumberland farms fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "cumberlandfarms.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Stewart's Shops",
+    "aliases": [
+      "stewarts shops",
+      "stewarts",
+      "stewarts shops corp",
+      "stewarts gas",
+      "stewarts fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "stewartsshops.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Rutter's",
+    "aliases": [
+      "rutters",
+      "rutters farm stores",
+      "rutters gas",
+      "rutters fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "rutters.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Parker's Kitchen",
+    "aliases": [
+      "parkers kitchen",
+      "parkers",
+      "parkers gas",
+      "parkers fuel",
+      "parkers convenience"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "parkerskitchen.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Thorntons",
+    "aliases": [
+      "thorntons",
+      "thorntons llc",
+      "thorntons gas",
+      "thorntons fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "mythorntons.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "CEFCO",
+    "aliases": [
+      "cefco",
+      "cefco convenience stores",
+      "cefco gas",
+      "cefco fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "cefcostores.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Weigel's",
+    "aliases": [
+      "weigels",
+      "weigels stores",
+      "weigels gas",
+      "weigels fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "weigels.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Spinx",
+    "aliases": [
+      "spinx",
+      "spinx company",
+      "spinx gas",
+      "spinx fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "spinx.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Enmarket",
+    "aliases": [
+      "enmarket",
+      "enmarket stations",
+      "enmarket gas",
+      "enmarket fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "enmarket.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Dash In",
+    "aliases": [
+      "dash in",
+      "dashin",
+      "dash in food stores",
+      "dash in gas",
+      "dash in fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "dashin.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "GetGo",
+    "aliases": [
+      "getgo",
+      "getgo cafe market",
+      "getgo gas",
+      "getgo fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "getgocafe.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Holiday Stationstores",
+    "aliases": [
+      "holiday stationstores",
+      "holiday station stores",
+      "holiday gas",
+      "holiday fuel",
+      "circle k holiday"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "holidaystationstores.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Hy-Vee Fast & Fresh",
+    "aliases": [
+      "hy vee fast and fresh",
+      "hy vee gas",
+      "hy vee fuel saver",
+      "hy vee fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "hy-vee.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Meijer Express",
+    "aliases": [
+      "meijer express",
+      "meijer gas station",
+      "meijer gas",
+      "meijer fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "meijer.com",
+    "confidence": "medium",
+    "notes": "Convenience-store purchases may not be fuel."
+  },
+  {
+    "canonical_name": "Kroger Fuel Center",
+    "aliases": [
+      "kroger fuel center",
+      "kroger fuel",
+      "kroger gas",
+      "kroger gas station"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "kroger.com",
+    "confidence": "medium",
+    "notes": "May appear under the parent grocery brand."
+  },
+  {
+    "canonical_name": "Costco Gasoline",
+    "aliases": [
+      "costco gas",
+      "costco gasoline",
+      "costco fuel",
+      "costco wholesale gas"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "costco.com",
+    "confidence": "medium",
+    "notes": "Costco statements may not clearly distinguish warehouse purchases from fuel."
+  },
+  {
+    "canonical_name": "Sam's Club Fuel Center",
+    "aliases": [
+      "sams club gas",
+      "sams club fuel",
+      "sams fuel center",
+      "sams club fuel center"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "samsclub.com",
+    "confidence": "medium",
+    "notes": "Sam's Club statements may not clearly distinguish club purchases from fuel."
+  },
+  {
+    "canonical_name": "BJ's Gas",
+    "aliases": [
+      "bjs gas",
+      "bjs gasoline",
+      "bjs fuel",
+      "bjs gas station"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "bjs.com",
+    "confidence": "medium",
+    "notes": "BJ's statements may not clearly distinguish club purchases from fuel."
+  },
+  {
+    "canonical_name": "Safeway Fuel Station",
+    "aliases": [
+      "safeway fuel",
+      "safeway gas",
+      "safeway fuel station",
+      "safeway gas station"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "safeway.com",
+    "confidence": "medium",
+    "notes": "May appear under the parent grocery brand."
+  },
+  {
+    "canonical_name": "Albertsons Fuel Station",
+    "aliases": [
+      "albertsons fuel",
+      "albertsons gas",
+      "albertsons fuel station",
+      "albertsons gas station"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "albertsons.com",
+    "confidence": "medium",
+    "notes": "May appear under the parent grocery brand."
+  },
+  {
+    "canonical_name": "H-E-B Fuel",
+    "aliases": [
+      "heb fuel",
+      "h e b fuel",
+      "heb gas",
+      "h e b gas station"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "heb.com",
+    "confidence": "medium",
+    "notes": "May appear under the parent grocery brand."
+  },
+  {
+    "canonical_name": "Fred Meyer Fuel Center",
+    "aliases": [
+      "fred meyer fuel",
+      "fred meyer gas",
+      "fred meyer fuel center",
+      "fredmeyer fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "fredmeyer.com",
+    "confidence": "medium",
+    "notes": "May appear under the parent grocery brand."
+  },
+  {
+    "canonical_name": "Fry's Fuel Center",
+    "aliases": [
+      "frys fuel",
+      "frys gas",
+      "frys fuel center",
+      "frys gas station"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "frysfood.com",
+    "confidence": "medium",
+    "notes": "May appear under the parent grocery brand."
+  },
+  {
+    "canonical_name": "Smith's Fuel Center",
+    "aliases": [
+      "smiths fuel",
+      "smiths gas",
+      "smiths fuel center",
+      "smiths gas station"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "smithsfoodanddrug.com",
+    "confidence": "medium",
+    "notes": "May appear under the parent grocery brand."
+  },
+  {
+    "canonical_name": "King Soopers Fuel Center",
+    "aliases": [
+      "king soopers fuel",
+      "king soopers gas",
+      "king soopers fuel center",
+      "kingsoopers fuel"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "kingsoopers.com",
+    "confidence": "medium",
+    "notes": "May appear under the parent grocery brand."
+  },
+  {
+    "canonical_name": "AutoZone",
+    "aliases": [
+      "autozone",
+      "auto zone",
+      "autozone inc",
+      "autozone parts",
+      "autozone store"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "autozone.com",
+    "confidence": "medium",
+    "notes": "Parts may be expensed, inventoried, or capitalized depending on use."
+  },
+  {
+    "canonical_name": "O'Reilly Auto Parts",
+    "aliases": [
+      "oreilly auto parts",
+      "o reilly auto parts",
+      "oreilly automotive",
+      "oreilly parts",
+      "oreillyauto"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "oreillyauto.com",
+    "confidence": "medium",
+    "notes": "Parts may be expensed, inventoried, or capitalized depending on use."
+  },
+  {
+    "canonical_name": "Advance Auto Parts",
+    "aliases": [
+      "advance auto parts",
+      "advance auto",
+      "advance stores company",
+      "advanceauto parts",
+      "advance auto parts store"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "advanceautoparts.com",
+    "confidence": "medium",
+    "notes": "Parts may be expensed, inventoried, or capitalized depending on use."
+  },
+  {
+    "canonical_name": "NAPA Auto Parts",
+    "aliases": [
+      "napa auto parts",
+      "napa",
+      "genuine parts company",
+      "napa parts",
+      "napaonline"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "napaonline.com",
+    "confidence": "medium",
+    "notes": "Parts may be expensed, inventoried, or capitalized depending on use."
+  },
+  {
+    "canonical_name": "Carquest Auto Parts",
+    "aliases": [
+      "carquest",
+      "carquest auto parts",
+      "carquest parts",
+      "advance auto carquest"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "carquest.com",
+    "confidence": "medium",
+    "notes": "Parts may be expensed, inventoried, or capitalized depending on use."
+  },
+  {
+    "canonical_name": "Pep Boys",
+    "aliases": [
+      "pep boys",
+      "pepboys",
+      "pep boys auto",
+      "pep boys auto service",
+      "pep boys tires"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "pepboys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Jiffy Lube",
+    "aliases": [
+      "jiffy lube",
+      "jiffylube",
+      "jiffy lube international",
+      "jiffy lube service center",
+      "jiffy lube oil change"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "jiffylube.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Valvoline Instant Oil Change",
+    "aliases": [
+      "valvoline instant oil change",
+      "valvoline instant oil",
+      "vioc",
+      "valvoline oil change",
+      "valvoline service center"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "vioc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Take 5 Oil Change",
+    "aliases": [
+      "take 5 oil change",
+      "take5 oil change",
+      "take 5",
+      "take 5 car wash oil change",
+      "take five oil change"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "take5.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Grease Monkey",
+    "aliases": [
+      "grease monkey",
+      "grease monkey international",
+      "grease monkey auto",
+      "grease monkey service",
+      "grease monkey oil change"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "greasemonkeyauto.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Meineke",
+    "aliases": [
+      "meineke",
+      "meineke car care",
+      "meineke car care center",
+      "meineke auto repair"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "meineke.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Midas",
+    "aliases": [
+      "midas",
+      "midas international",
+      "midas auto service",
+      "midas total car care",
+      "midas repair"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "midas.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Firestone Complete Auto Care",
+    "aliases": [
+      "firestone complete auto care",
+      "firestone auto care",
+      "firestone complete auto",
+      "firestone service",
+      "bridgestone firestone"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "firestonecompleteautocare.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Goodyear Auto Service",
+    "aliases": [
+      "goodyear auto service",
+      "goodyear",
+      "goodyear tire and rubber",
+      "goodyear service center",
+      "goodyear auto"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "goodyear.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Discount Tire",
+    "aliases": [
+      "discount tire",
+      "discount tire company",
+      "discount tire co",
+      "discount tire store",
+      "discounttire"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "discounttire.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "America's Tire",
+    "aliases": [
+      "americas tire",
+      "america s tire",
+      "americas tire company",
+      "discount tire americas tire"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "americastire.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Les Schwab Tire Centers",
+    "aliases": [
+      "les schwab",
+      "les schwab tire centers",
+      "les schwab tire center",
+      "les schwab tires"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "lesschwab.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Big O Tires",
+    "aliases": [
+      "big o tires",
+      "big o tire",
+      "bigotires",
+      "big o tire dealers"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "bigotires.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mavis Tires & Brakes",
+    "aliases": [
+      "mavis",
+      "mavis tire",
+      "mavis tires and brakes",
+      "mavis discount tire",
+      "mavis tire supply"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "mavis.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "NTB",
+    "aliases": [
+      "ntb",
+      "national tire and battery",
+      "ntb tire",
+      "ntb tires and service",
+      "ntb auto"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "ntb.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Belle Tire",
+    "aliases": [
+      "belle tire",
+      "belle tire distributors",
+      "belle tire service",
+      "belle tire auto"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "belletire.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tire Discounters",
+    "aliases": [
+      "tire discounters",
+      "tire discounters inc",
+      "tire discounters auto glass",
+      "tire discounters service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "tirediscounters.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tires Plus",
+    "aliases": [
+      "tires plus",
+      "tiresplus",
+      "tires plus total car care",
+      "bridgestone tires plus"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "tiresplus.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mr. Tire",
+    "aliases": [
+      "mr tire",
+      "mr tire auto service",
+      "mr tire auto service centers",
+      "mr tire service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "mrtire.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Monro Auto Service and Tire Centers",
+    "aliases": [
+      "monro auto service",
+      "monro auto service and tire centers",
+      "monro muffler brake",
+      "monro tire",
+      "monro inc"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "monro.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Brakes Plus",
+    "aliases": [
+      "brakes plus",
+      "brakesplus",
+      "brakes plus auto service",
+      "brakes plus repair"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "brakesplus.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Christian Brothers Automotive",
+    "aliases": [
+      "christian brothers automotive",
+      "christian brothers auto",
+      "cba automotive",
+      "christian brothers repair"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "cbac.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "AAMCO",
+    "aliases": [
+      "aamco",
+      "aamco transmissions",
+      "aamco total car care",
+      "aamco auto repair"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "aamco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Meineke Car Care Center",
+    "aliases": [
+      "meineke car care center",
+      "meineke car care",
+      "meineke auto repair",
+      "meineke service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "meineke.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Caliber Collision",
+    "aliases": [
+      "caliber collision",
+      "caliber collision centers",
+      "caliber auto body",
+      "caliber collision repair"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "calibercollision.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Gerber Collision & Glass",
+    "aliases": [
+      "gerber collision and glass",
+      "gerber collision",
+      "gerber auto body",
+      "gerber glass"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "gerbercollision.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Crash Champions",
+    "aliases": [
+      "crash champions",
+      "crash champions collision repair",
+      "crash champions llc",
+      "crash champions auto body"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "crashchampions.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Service King Collision",
+    "aliases": [
+      "service king",
+      "service king collision",
+      "service king collision repair",
+      "service king paint and body"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "serviceking.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Maaco",
+    "aliases": [
+      "maaco",
+      "maaco collision repair",
+      "maaco auto painting",
+      "maaco auto body"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "maaco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Safelite AutoGlass",
+    "aliases": [
+      "safelite",
+      "safelite autoglass",
+      "safelite auto glass",
+      "safelite group"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "safelite.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Glass Doctor",
+    "aliases": [
+      "glass doctor",
+      "glass doctor auto",
+      "glass doctor automotive",
+      "glass doctor windshield"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "glassdoctor.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CARSTAR",
+    "aliases": [
+      "carstar",
+      "carstar collision",
+      "carstar auto body",
+      "carstar collision repair"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "carstar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fix Auto USA",
+    "aliases": [
+      "fix auto usa",
+      "fix auto",
+      "fix auto collision",
+      "fix auto body"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "fixautousa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Meineke Econo Lube",
+    "aliases": [
+      "econo lube",
+      "econo lube n tune",
+      "meineke econo lube",
+      "econo lube auto service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "meineke.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Precision Tune Auto Care",
+    "aliases": [
+      "precision tune auto care",
+      "precision tune",
+      "precision auto care",
+      "precision tune service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "precisiontune.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tuffy Tire & Auto Service",
+    "aliases": [
+      "tuffy",
+      "tuffy tire and auto service",
+      "tuffy auto service",
+      "tuffy tire"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "tuffy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Honest-1 Auto Care",
+    "aliases": [
+      "honest 1 auto care",
+      "honest1 auto care",
+      "honest 1",
+      "honest one auto care"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "honest1.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Express Oil Change & Tire Engineers",
+    "aliases": [
+      "express oil change",
+      "express oil change and tire engineers",
+      "tire engineers",
+      "express oil"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "expressoil.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Strickland Brothers 10 Minute Oil Change",
+    "aliases": [
+      "strickland brothers",
+      "strickland brothers oil change",
+      "sb oil change",
+      "strickland oil change"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "sboilchange.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kwik Kar",
+    "aliases": [
+      "kwik kar",
+      "kwik kar lube and auto repair",
+      "kwik kar oil change",
+      "kwik kar auto"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "kwikkar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SpeeDee Oil Change & Auto Service",
+    "aliases": [
+      "speedee oil change",
+      "speedee",
+      "speedee oil change and auto service",
+      "speedee auto service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "speedeeoil.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Batteries Plus",
+    "aliases": [
+      "batteries plus",
+      "batteries plus bulbs",
+      "batteries plus llc",
+      "batteriesplus"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "batteriesplus.com",
+    "confidence": "medium",
+    "notes": "May include non-vehicle batteries or electronics accessories."
+  },
+  {
+    "canonical_name": "Interstate Batteries",
+    "aliases": [
+      "interstate batteries",
+      "interstate battery",
+      "interstate battery system",
+      "interstatebatteries"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "interstatebatteries.com",
+    "confidence": "medium",
+    "notes": "May include batteries for equipment other than vehicles."
+  },
+  {
+    "canonical_name": "AAA",
+    "aliases": [
+      "aaa",
+      "american automobile association",
+      "aaa roadside assistance",
+      "aaa auto club",
+      "aaa membership"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "aaa.com",
+    "confidence": "medium",
+    "notes": "Charges may be roadside service, membership, insurance, or travel."
+  },
+  {
+    "canonical_name": "Tesla Supercharger",
+    "aliases": [
+      "tesla supercharger",
+      "tesla charging",
+      "tesla supercharging",
+      "tesla supercharger network"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "tesla.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Electrify America",
+    "aliases": [
+      "electrify america",
+      "electrify america charging",
+      "electrifyamerica",
+      "ea charging"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "electrifyamerica.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "EVgo",
+    "aliases": [
+      "evgo",
+      "evgo services",
+      "evgo charging",
+      "evgo fast charging"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "evgo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ChargePoint",
+    "aliases": [
+      "chargepoint",
+      "chargepoint inc",
+      "chargepoint charging",
+      "chargepoint station",
+      "chargepoint services"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "chargepoint.com",
+    "confidence": "medium",
+    "notes": "Charges can include EV charging hardware or network services."
+  },
+  {
+    "canonical_name": "Blink Charging",
+    "aliases": [
+      "blink charging",
+      "blink",
+      "blink network",
+      "blink ev charging",
+      "blink charging co"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "blinkcharging.com",
+    "confidence": "medium",
+    "notes": "Charges can include EV charging hardware or network services."
+  },
+  {
+    "canonical_name": "Shell Recharge",
+    "aliases": [
+      "shell recharge",
+      "shell ev charging",
+      "shell recharge solutions",
+      "shell recharge station"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "shellrecharge.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Volta Charging",
+    "aliases": [
+      "volta charging",
+      "volta",
+      "volta charging network",
+      "volta ev charging"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "voltacharging.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Francis Energy",
+    "aliases": [
+      "francis energy",
+      "francis ev charging",
+      "francis charging",
+      "francis energy charging"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "francisenergy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Red E Charging",
+    "aliases": [
+      "red e charging",
+      "rede charging",
+      "red e charge",
+      "red e ev charging"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "redecharge.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mercedes-Benz Charging",
+    "aliases": [
+      "mercedes benz charging",
+      "mercedes me charge",
+      "mercedes benz high power charging",
+      "mb charging"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "mbusa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Rivian Adventure Network",
+    "aliases": [
+      "rivian adventure network",
+      "rivian charging",
+      "rivian charger",
+      "rivian network"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "rivian.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ford Charge",
+    "aliases": [
+      "ford charge",
+      "ford charging",
+      "blueoval charge network",
+      "ford blueoval charging"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "ford.com",
+    "confidence": "medium",
+    "notes": "May appear under Ford-related descriptors."
+  },
+  {
+    "canonical_name": "GM Energy",
+    "aliases": [
+      "gm energy",
+      "gm charging",
+      "gm energy charging",
+      "gm ev charging"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "gmenergy.gm.com",
+    "confidence": "medium",
+    "notes": "May include charging hardware or energy products."
+  },
+  {
+    "canonical_name": "IONNA",
+    "aliases": [
+      "ionna",
+      "ionna charging",
+      "ionna ev charging",
+      "ionna rechargery"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "ionna.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "FLO",
+    "aliases": [
+      "flo charging",
+      "flo ev charging",
+      "flo network",
+      "flo services"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "flo.com",
+    "confidence": "medium",
+    "notes": "Short brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "AmpUp",
+    "aliases": [
+      "ampup",
+      "ampup charging",
+      "ampup ev charging",
+      "ampup network"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "ampup.io",
+    "confidence": "medium",
+    "notes": "May include EV charging software or charging sessions."
+  },
+  {
+    "canonical_name": "SemaConnect",
+    "aliases": [
+      "semaconnect",
+      "sema connect",
+      "semaconnect charging",
+      "blink semaconnect"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "blinkcharging.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Greenlots",
+    "aliases": [
+      "greenlots",
+      "shell greenlots",
+      "greenlots charging",
+      "greenlots network"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "shell.com",
+    "confidence": "medium",
+    "notes": "May appear as a charging-network or software charge."
+  },
+  {
+    "canonical_name": "EV Connect",
+    "aliases": [
+      "ev connect",
+      "evconnect",
+      "ev connect charging",
+      "ev connect network"
+    ],
+    "semantic": "fuel",
+    "logo_domain": "evconnect.com",
+    "confidence": "medium",
+    "notes": "May include charging software or charging sessions."
+  },
+  {
+    "canonical_name": "Tesla Service",
+    "aliases": [
+      "tesla service",
+      "tesla motors",
+      "tesla service center",
+      "tesla repair"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "tesla.com",
+    "confidence": "medium",
+    "notes": "Tesla charges can also be vehicle purchases, charging, or subscriptions."
+  },
+  {
+    "canonical_name": "Ford Service",
+    "aliases": [
+      "ford service",
+      "ford motor company",
+      "ford dealer service",
+      "ford maintenance"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "ford.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "Chevrolet Service",
+    "aliases": [
+      "chevrolet service",
+      "chevy service",
+      "chevrolet dealer service",
+      "gm service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "chevrolet.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "Toyota Service",
+    "aliases": [
+      "toyota service",
+      "toyota motor sales",
+      "toyota dealer service",
+      "toyota maintenance"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "toyota.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "Honda Service",
+    "aliases": [
+      "honda service",
+      "american honda",
+      "honda dealer service",
+      "honda maintenance"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "honda.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "Nissan Service",
+    "aliases": [
+      "nissan service",
+      "nissan north america",
+      "nissan dealer service",
+      "nissan maintenance"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "nissanusa.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "Hyundai Service",
+    "aliases": [
+      "hyundai service",
+      "hyundai motor america",
+      "hyundai dealer service",
+      "hyundai maintenance"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "hyundaiusa.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "Kia Service",
+    "aliases": [
+      "kia service",
+      "kia america",
+      "kia dealer service",
+      "kia maintenance"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "kia.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "Subaru Service",
+    "aliases": [
+      "subaru service",
+      "subaru of america",
+      "subaru dealer service",
+      "subaru maintenance"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "subaru.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "Mazda Service",
+    "aliases": [
+      "mazda service",
+      "mazda north american operations",
+      "mazda dealer service",
+      "mazda maintenance"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "mazdausa.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "Volkswagen Service",
+    "aliases": [
+      "volkswagen service",
+      "vw service",
+      "volkswagen group of america",
+      "vw dealer service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "vw.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "BMW Service",
+    "aliases": [
+      "bmw service",
+      "bmw of north america",
+      "bmw dealer service",
+      "bmw maintenance"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "bmwusa.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "Mercedes-Benz Service",
+    "aliases": [
+      "mercedes benz service",
+      "mercedes service",
+      "mercedes benz usa",
+      "mb dealer service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "mbusa.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "Audi Service",
+    "aliases": [
+      "audi service",
+      "audi of america",
+      "audi dealer service",
+      "audi maintenance"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "audiusa.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "Lexus Service",
+    "aliases": [
+      "lexus service",
+      "lexus dealer service",
+      "lexus maintenance",
+      "lexus repair"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "lexus.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "Acura Service",
+    "aliases": [
+      "acura service",
+      "acura dealer service",
+      "acura maintenance",
+      "american honda acura"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "acura.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "Infiniti Service",
+    "aliases": [
+      "infiniti service",
+      "infiniti dealer service",
+      "infiniti maintenance",
+      "infiniti usa"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "infinitiusa.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "Volvo Cars Service",
+    "aliases": [
+      "volvo service",
+      "volvo cars usa",
+      "volvo dealer service",
+      "volvo maintenance"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "volvocars.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "Land Rover Service",
+    "aliases": [
+      "land rover service",
+      "land rover usa",
+      "land rover dealer service",
+      "jaguar land rover service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "landroverusa.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "Jeep Service",
+    "aliases": [
+      "jeep service",
+      "jeep dealer service",
+      "jeep maintenance",
+      "stellantis jeep service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "jeep.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "Ram Service",
+    "aliases": [
+      "ram service",
+      "ram dealer service",
+      "ram truck service",
+      "stellantis ram service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "ramtrucks.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "GMC Service",
+    "aliases": [
+      "gmc service",
+      "gmc dealer service",
+      "gmc maintenance",
+      "general motors gmc service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "gmc.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "Buick Service",
+    "aliases": [
+      "buick service",
+      "buick dealer service",
+      "buick maintenance",
+      "general motors buick service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "buick.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "Cadillac Service",
+    "aliases": [
+      "cadillac service",
+      "cadillac dealer service",
+      "cadillac maintenance",
+      "general motors cadillac service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "cadillac.com",
+    "confidence": "medium",
+    "notes": "Dealer statement descriptors vary by independently owned dealership."
+  },
+  {
+    "canonical_name": "CarMax Service",
+    "aliases": [
+      "carmax service",
+      "carmax auto service",
+      "carmax service center",
+      "carmax"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "carmax.com",
+    "confidence": "medium",
+    "notes": "CarMax charges can also represent vehicle purchases."
+  },
+  {
+    "canonical_name": "Carvana",
+    "aliases": [
+      "carvana",
+      "carvana llc",
+      "carvana auto",
+      "carvana vehicle"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "carvana.com",
+    "confidence": "medium",
+    "notes": "Usually a vehicle purchase rather than routine transportation expense; capitalization may be appropriate."
+  },
+  {
+    "canonical_name": "CarMax",
+    "aliases": [
+      "carmax",
+      "carmax auto superstores",
+      "carmax inc",
+      "carmax vehicle"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "carmax.com",
+    "confidence": "medium",
+    "notes": "Usually a vehicle purchase rather than routine transportation expense; capitalization may be appropriate."
+  },
+  {
+    "canonical_name": "AutoNation",
+    "aliases": [
+      "autonation",
+      "autonation inc",
+      "autonation service",
+      "autonation auto"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "autonation.com",
+    "confidence": "medium",
+    "notes": "Charges can represent repairs, parts, or vehicle purchases."
+  },
+  {
+    "canonical_name": "Lithia Motors",
+    "aliases": [
+      "lithia motors",
+      "lithia and driveway",
+      "lithia service",
+      "lithia auto"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "lithia.com",
+    "confidence": "medium",
+    "notes": "Charges can represent repairs, parts, or vehicle purchases."
+  },
+  {
+    "canonical_name": "Driveway",
+    "aliases": [
+      "driveway",
+      "driveway com",
+      "lithia driveway",
+      "driveway auto"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "driveway.com",
+    "confidence": "medium",
+    "notes": "Charges can represent repairs, parts, or vehicle purchases."
+  },
+  {
+    "canonical_name": "Camping World",
+    "aliases": [
+      "camping world",
+      "camping world holdings",
+      "camping world service",
+      "camping world rv"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "campingworld.com",
+    "confidence": "medium",
+    "notes": "Charges can include RV equipment, supplies, repairs, or vehicle purchases."
+  },
+  {
+    "canonical_name": "General RV Center",
+    "aliases": [
+      "general rv",
+      "general rv center",
+      "general rv service",
+      "general rv repair"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "generalrv.com",
+    "confidence": "medium",
+    "notes": "Charges can include RV equipment, repairs, or vehicle purchases."
+  },
+  {
+    "canonical_name": "U-Haul",
+    "aliases": [
+      "u haul",
+      "uhaul",
+      "u haul international",
+      "u haul moving and storage",
+      "u haul rental"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "uhaul.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Penske Truck Rental",
+    "aliases": [
+      "penske truck rental",
+      "penske rental",
+      "penske truck leasing",
+      "penske truck"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "pensketruckrental.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Budget Truck Rental",
+    "aliases": [
+      "budget truck rental",
+      "budget truck",
+      "budget rental truck",
+      "budgettruck"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "budgettruck.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Enterprise Truck Rental",
+    "aliases": [
+      "enterprise truck rental",
+      "enterprise trucks",
+      "enterprise truck",
+      "enterprise commercial truck"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "enterprisetrucks.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ryder",
+    "aliases": [
+      "ryder",
+      "ryder system",
+      "ryder truck rental",
+      "ryder transportation",
+      "ryder vehicle"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "ryder.com",
+    "confidence": "medium",
+    "notes": "Charges may be rentals, leasing, maintenance, or logistics services."
+  },
+  {
+    "canonical_name": "Enterprise Rent-A-Car",
+    "aliases": [
+      "enterprise rent a car",
+      "enterprise rental",
+      "enterprise car rental",
+      "enterprise holdings"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "enterprise.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hertz",
+    "aliases": [
+      "hertz",
+      "hertz rent a car",
+      "hertz car rental",
+      "hertz vehicle rental"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "hertz.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Avis",
+    "aliases": [
+      "avis",
+      "avis rent a car",
+      "avis car rental",
+      "avis budget group"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "avis.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Budget Rent a Car",
+    "aliases": [
+      "budget rent a car",
+      "budget car rental",
+      "budget rental",
+      "avis budget"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "budget.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "National Car Rental",
+    "aliases": [
+      "national car rental",
+      "national rental car",
+      "national car",
+      "enterprise national"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "nationalcar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Alamo Rent A Car",
+    "aliases": [
+      "alamo rent a car",
+      "alamo car rental",
+      "alamo rental",
+      "enterprise alamo"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "alamo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dollar Car Rental",
+    "aliases": [
+      "dollar car rental",
+      "dollar rent a car",
+      "dollar rental",
+      "hertz dollar"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "dollar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Thrifty Car Rental",
+    "aliases": [
+      "thrifty car rental",
+      "thrifty rent a car",
+      "thrifty rental",
+      "hertz thrifty"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "thrifty.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sixt",
+    "aliases": [
+      "sixt",
+      "sixt rent a car",
+      "sixt car rental",
+      "sixt rent"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "sixt.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Turo",
+    "aliases": [
+      "turo",
+      "turo inc",
+      "turo car rental",
+      "turo trip"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "turo.com",
+    "confidence": "medium",
+    "notes": "Peer-to-peer vehicle rental charges can include trip fees and protection plans."
+  },
+  {
+    "canonical_name": "Zipcar",
+    "aliases": [
+      "zipcar",
+      "zipcar inc",
+      "zipcar rental",
+      "zipcar membership"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "zipcar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Getaround",
+    "aliases": [
+      "getaround",
+      "getaround inc",
+      "getaround rental",
+      "getaround car"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "getaround.com",
+    "confidence": "medium",
+    "notes": "Peer-to-peer vehicle rental charges can include multiple fee types."
+  },
+  {
+    "canonical_name": "Flexcar",
+    "aliases": [
+      "flexcar",
+      "flexcar subscription",
+      "flexcar rental",
+      "flexcar vehicle"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "flexcar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mister Car Wash",
+    "aliases": [
+      "mister car wash",
+      "mister carwash",
+      "mister car wash subscription",
+      "mister car wash unlimited"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "mistercarwash.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Quick Quack Car Wash",
+    "aliases": [
+      "quick quack car wash",
+      "quick quack",
+      "quick quack membership",
+      "quick quack unlimited"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "dontdrivedirty.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tommy's Express Car Wash",
+    "aliases": [
+      "tommys express car wash",
+      "tommys express",
+      "tommys car wash",
+      "tommys express membership"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "tommys-express.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Zips Car Wash",
+    "aliases": [
+      "zips car wash",
+      "zips",
+      "zips carwash",
+      "zips unlimited"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "zipscarwash.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Club Car Wash",
+    "aliases": [
+      "club car wash",
+      "clubcarwash",
+      "club car wash membership",
+      "club car wash unlimited"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "clubcarwash.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tidal Wave Auto Spa",
+    "aliases": [
+      "tidal wave auto spa",
+      "tidal wave car wash",
+      "tidal wave",
+      "tidal wave wash club"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "tidalwaveautospa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "WhiteWater Express Car Wash",
+    "aliases": [
+      "whitewater express car wash",
+      "whitewater car wash",
+      "whitewater express",
+      "whitewater wash club"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "whitewatercw.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "GO Car Wash",
+    "aliases": [
+      "go car wash",
+      "go carwash",
+      "go car wash membership",
+      "go car wash unlimited"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "gocarwash.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Take 5 Car Wash",
+    "aliases": [
+      "take 5 car wash",
+      "take5 car wash",
+      "take 5 wash",
+      "take 5 car wash membership"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "take5.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cobblestone Auto Spa",
+    "aliases": [
+      "cobblestone auto spa",
+      "cobblestone car wash",
+      "cobblestone wash",
+      "cobblestone unlimited"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "cobblestone.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Brown Bear Car Wash",
+    "aliases": [
+      "brown bear car wash",
+      "brown bear",
+      "brown bear wash club",
+      "brown bear carwash"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "brownbear.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Delta Sonic",
+    "aliases": [
+      "delta sonic",
+      "delta sonic car wash",
+      "delta sonic detail",
+      "delta sonic unlimited"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "deltasoniccarwash.com",
+    "confidence": "medium",
+    "notes": "Locations can also sell fuel and convenience-store items."
+  },
+  {
+    "canonical_name": "Crew Carwash",
+    "aliases": [
+      "crew carwash",
+      "crew car wash",
+      "crew unlimited wash",
+      "crew carwash membership"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "crewcarwash.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Autobell Car Wash",
+    "aliases": [
+      "autobell car wash",
+      "autobell",
+      "auto bell car wash",
+      "autobell unlimited"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "autobell.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Waterway Carwash",
+    "aliases": [
+      "waterway carwash",
+      "waterway car wash",
+      "waterway wash club",
+      "waterway unlimited"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "waterway.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "El Car Wash",
+    "aliases": [
+      "el car wash",
+      "elcarwash",
+      "el car wash unlimited",
+      "el car wash membership"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "elcarwash.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Driven Brands Car Wash",
+    "aliases": [
+      "driven brands car wash",
+      "driven brands",
+      "driven car wash",
+      "driven brands automotive"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "drivenbrands.com",
+    "confidence": "medium",
+    "notes": "Parent company operates multiple automotive-service brands."
+  },
+  {
+    "canonical_name": "Super Star Car Wash",
+    "aliases": [
+      "super star car wash",
+      "superstar car wash",
+      "super star wash",
+      "superstar unlimited"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "superstarcarwashaz.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Caliber Car Wash",
+    "aliases": [
+      "caliber car wash",
+      "caliber carwash",
+      "caliber wash club",
+      "caliber unlimited"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "calibercarwash.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wash N' Roll",
+    "aliases": [
+      "wash n roll",
+      "wash and roll",
+      "wash n roll car wash",
+      "wash n roll unlimited"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "washnroll.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Raceway Car Wash",
+    "aliases": [
+      "raceway car wash",
+      "raceway carwash",
+      "raceway wash club",
+      "raceway unlimited"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "racewaycarwash.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "BlueWave Express Car Wash",
+    "aliases": [
+      "bluewave express car wash",
+      "bluewave express",
+      "blue wave car wash",
+      "bluewave unlimited"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "bluewaveexpress.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "LUV Car Wash",
+    "aliases": [
+      "luv car wash",
+      "luv carwash",
+      "luv wash club",
+      "luv unlimited"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "luvcarwash.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Circle K Car Wash",
+    "aliases": [
+      "circle k car wash",
+      "circle k wash",
+      "circle k carwash",
+      "circle k wash subscription"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "circlek.com",
+    "confidence": "medium",
+    "notes": "May be difficult to distinguish from Circle K fuel or store purchases."
+  },
+  {
+    "canonical_name": "Shell Car Wash",
+    "aliases": [
+      "shell car wash",
+      "shell wash",
+      "shell carwash",
+      "shell station car wash"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "shell.us",
+    "confidence": "medium",
+    "notes": "May be difficult to distinguish from Shell fuel purchases."
+  },
+  {
+    "canonical_name": "DMV California",
+    "aliases": [
+      "california dmv",
+      "ca dmv",
+      "department of motor vehicles california",
+      "dmv ca",
+      "dmv california"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dmv.ca.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nevada DMV",
+    "aliases": [
+      "nevada dmv",
+      "nv dmv",
+      "nevada department of motor vehicles",
+      "dmv nv"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dmv.nv.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Texas DMV",
+    "aliases": [
+      "texas dmv",
+      "txdmv",
+      "texas department of motor vehicles",
+      "tx dmv"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "txdmv.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Florida Highway Safety and Motor Vehicles",
+    "aliases": [
+      "flhsmv",
+      "florida dmv",
+      "florida highway safety motor vehicles",
+      "florida motor vehicles"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "flhsmv.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "New York DMV",
+    "aliases": [
+      "new york dmv",
+      "ny dmv",
+      "new york department of motor vehicles",
+      "dmv ny"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dmv.ny.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Illinois Secretary of State Vehicle Services",
+    "aliases": [
+      "illinois secretary of state",
+      "illinois vehicle services",
+      "il sos vehicle",
+      "illinois dmv"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "ilsos.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pennsylvania PennDOT Driver & Vehicle Services",
+    "aliases": [
+      "penndot",
+      "pennsylvania dmv",
+      "pa driver vehicle services",
+      "pa dmv"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "pa.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ohio BMV",
+    "aliases": [
+      "ohio bmv",
+      "oh bmv",
+      "ohio bureau of motor vehicles",
+      "ohio motor vehicles"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "bmv.ohio.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Georgia Department of Revenue Motor Vehicles",
+    "aliases": [
+      "georgia motor vehicle division",
+      "georgia mvd",
+      "ga motor vehicles",
+      "georgia tag office"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dor.georgia.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Arizona MVD",
+    "aliases": [
+      "arizona mvd",
+      "az mvd",
+      "arizona motor vehicle division",
+      "azdot mvd"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "azdot.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Washington Department of Licensing",
+    "aliases": [
+      "washington dol",
+      "wa dol",
+      "washington department of licensing",
+      "washington vehicle licensing"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dol.wa.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Oregon DMV",
+    "aliases": [
+      "oregon dmv",
+      "or dmv",
+      "oregon driver motor vehicle services",
+      "dmv oregon"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "oregon.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Colorado DMV",
+    "aliases": [
+      "colorado dmv",
+      "co dmv",
+      "colorado division of motor vehicles",
+      "dmv colorado"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dmv.colorado.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Michigan Secretary of State",
+    "aliases": [
+      "michigan secretary of state",
+      "michigan sos",
+      "mi sos vehicle",
+      "michigan vehicle registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "michigan.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "North Carolina DMV",
+    "aliases": [
+      "north carolina dmv",
+      "nc dmv",
+      "ncdmv",
+      "north carolina division motor vehicles"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "ncdot.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Virginia DMV",
+    "aliases": [
+      "virginia dmv",
+      "va dmv",
+      "virginia department motor vehicles",
+      "dmv virginia"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dmv.virginia.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Massachusetts RMV",
+    "aliases": [
+      "massachusetts rmv",
+      "mass rmv",
+      "ma rmv",
+      "registry of motor vehicles massachusetts"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "mass.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "New Jersey MVC",
+    "aliases": [
+      "new jersey mvc",
+      "nj mvc",
+      "new jersey motor vehicle commission",
+      "nj motor vehicles"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "nj.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Maryland MVA",
+    "aliases": [
+      "maryland mva",
+      "md mva",
+      "maryland motor vehicle administration",
+      "mva maryland"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "mva.maryland.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tennessee Driver Services",
+    "aliases": [
+      "tennessee driver services",
+      "tennessee dmv",
+      "tn dmv",
+      "tennessee vehicle services"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "tn.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Indiana BMV",
+    "aliases": [
+      "indiana bmv",
+      "in bmv",
+      "indiana bureau motor vehicles",
+      "bmv indiana"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "in.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Missouri Department of Revenue Motor Vehicle",
+    "aliases": [
+      "missouri motor vehicle",
+      "missouri dor motor vehicle",
+      "mo dmv",
+      "missouri vehicle registration"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dor.mo.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wisconsin DMV",
+    "aliases": [
+      "wisconsin dmv",
+      "wi dmv",
+      "wisconsin dot dmv",
+      "wisconsin motor vehicles"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "wisconsindot.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Minnesota DVS",
+    "aliases": [
+      "minnesota dvs",
+      "mn dvs",
+      "minnesota driver vehicle services",
+      "minnesota dmv"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dps.mn.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "South Carolina DMV",
+    "aliases": [
+      "south carolina dmv",
+      "sc dmv",
+      "scdmv",
+      "south carolina motor vehicles"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "scdmvonline.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Alabama ALEA Driver License",
+    "aliases": [
+      "alabama alea",
+      "alabama dmv",
+      "alea driver license",
+      "alabama motor vehicle"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "alea.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Louisiana OMV",
+    "aliases": [
+      "louisiana omv",
+      "la omv",
+      "louisiana office motor vehicles",
+      "louisiana dmv"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "expresslane.org",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kentucky Motor Vehicle Licensing",
+    "aliases": [
+      "kentucky motor vehicle licensing",
+      "kentucky dmv",
+      "ky dmv",
+      "drive ky"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "drive.ky.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Oklahoma Service Oklahoma",
+    "aliases": [
+      "service oklahoma",
+      "oklahoma dmv",
+      "ok dmv",
+      "oklahoma motor vehicle"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "service.ok.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Connecticut DMV",
+    "aliases": [
+      "connecticut dmv",
+      "ct dmv",
+      "connecticut department motor vehicles",
+      "dmv ct"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "portal.ct.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Utah DMV",
+    "aliases": [
+      "utah dmv",
+      "ut dmv",
+      "utah division motor vehicles",
+      "dmv utah"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dmv.utah.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Iowa DOT Motor Vehicle Division",
+    "aliases": [
+      "iowa dot",
+      "iowa dmv",
+      "iowa motor vehicle division",
+      "ia dmv"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "iowadot.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Arkansas DFA Motor Vehicle",
+    "aliases": [
+      "arkansas dfa motor vehicle",
+      "arkansas dmv",
+      "ar dmv",
+      "arkansas motor vehicle"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dfa.arkansas.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mississippi Department of Revenue Motor Vehicle",
+    "aliases": [
+      "mississippi motor vehicle",
+      "mississippi dmv",
+      "ms dmv",
+      "mississippi dor vehicle"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dor.ms.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kansas Division of Vehicles",
+    "aliases": [
+      "kansas division vehicles",
+      "kansas dmv",
+      "ks dmv",
+      "kansas motor vehicle"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "ksrevenue.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "New Mexico MVD",
+    "aliases": [
+      "new mexico mvd",
+      "nm mvd",
+      "new mexico motor vehicle division",
+      "new mexico dmv"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "mvd.newmexico.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nebraska DMV",
+    "aliases": [
+      "nebraska dmv",
+      "ne dmv",
+      "nebraska department motor vehicles",
+      "dmv nebraska"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dmv.nebraska.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Idaho DMV",
+    "aliases": [
+      "idaho dmv",
+      "id dmv",
+      "idaho transportation department dmv",
+      "dmv idaho"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "itd.idaho.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "West Virginia DMV",
+    "aliases": [
+      "west virginia dmv",
+      "wv dmv",
+      "west virginia division motor vehicles",
+      "dmv wv"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "transportation.wv.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hawaii DMV",
+    "aliases": [
+      "hawaii dmv",
+      "hawaii motor vehicle registration",
+      "honolulu motor vehicle",
+      "hawaii vehicle licensing"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "honolulu.gov",
+    "confidence": "medium",
+    "notes": "Vehicle registration is administered locally by county in Hawaii."
+  },
+  {
+    "canonical_name": "New Hampshire DMV",
+    "aliases": [
+      "new hampshire dmv",
+      "nh dmv",
+      "new hampshire division motor vehicles",
+      "dmv nh"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dmv.nh.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Maine BMV",
+    "aliases": [
+      "maine bmv",
+      "maine bureau motor vehicles",
+      "maine dmv",
+      "me bmv"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "maine.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Rhode Island DMV",
+    "aliases": [
+      "rhode island dmv",
+      "ri dmv",
+      "rhode island division motor vehicles",
+      "dmv ri"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dmv.ri.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Montana MVD",
+    "aliases": [
+      "montana mvd",
+      "mt mvd",
+      "montana motor vehicle division",
+      "montana dmv"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "mvdmt.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Delaware DMV",
+    "aliases": [
+      "delaware dmv",
+      "de dmv",
+      "delaware division motor vehicles",
+      "dmv delaware"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dmv.de.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "South Dakota Motor Vehicles",
+    "aliases": [
+      "south dakota motor vehicles",
+      "south dakota dmv",
+      "sd dmv",
+      "south dakota dor vehicle"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dor.sd.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "North Dakota Motor Vehicle",
+    "aliases": [
+      "north dakota motor vehicle",
+      "north dakota dmv",
+      "nd dmv",
+      "nddot motor vehicle"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dot.nd.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Alaska DMV",
+    "aliases": [
+      "alaska dmv",
+      "ak dmv",
+      "alaska division motor vehicles",
+      "dmv alaska"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dmv.alaska.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Vermont DMV",
+    "aliases": [
+      "vermont dmv",
+      "vt dmv",
+      "vermont department motor vehicles",
+      "dmv vermont"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dmv.vermont.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wyoming Driver Services",
+    "aliases": [
+      "wyoming driver services",
+      "wyoming dmv",
+      "wy dmv",
+      "wyoming motor vehicle services"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dot.state.wy.us",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "District of Columbia DMV",
+    "aliases": [
+      "dc dmv",
+      "district of columbia dmv",
+      "washington dc dmv",
+      "dmv dc"
+    ],
+    "semantic": "licenses_permits",
+    "logo_domain": "dmv.dc.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "FasTrak",
+    "aliases": [
+      "fastrak",
+      "bay area fastrak",
+      "fastrak toll",
+      "fastrak toll tag",
+      "bayareafastrak"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "bayareafastrak.org",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "E-ZPass",
+    "aliases": [
+      "e zpass",
+      "ezpass",
+      "e z pass",
+      "ez pass toll",
+      "e zpass toll"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "e-zpassiag.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SunPass",
+    "aliases": [
+      "sunpass",
+      "sun pass",
+      "sunpass toll",
+      "florida sunpass",
+      "sunpass prepaid"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "sunpass.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "TxTag",
+    "aliases": [
+      "txtag",
+      "tx tag",
+      "txtag toll",
+      "texas txtag",
+      "txtag account"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "txtag.org",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "TollTag",
+    "aliases": [
+      "tolltag",
+      "toll tag",
+      "ntta tolltag",
+      "ntta toll",
+      "north texas tollway"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "ntta.org",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "EZ TAG",
+    "aliases": [
+      "ez tag",
+      "eztag",
+      "hctra ez tag",
+      "hctra toll",
+      "houston toll"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "hctra.org",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Peach Pass",
+    "aliases": [
+      "peach pass",
+      "peachpass",
+      "georgia peach pass",
+      "peach pass toll"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "peachpass.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "NC Quick Pass",
+    "aliases": [
+      "nc quick pass",
+      "ncquickpass",
+      "north carolina quick pass",
+      "nc toll"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "ncquickpass.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Good To Go!",
+    "aliases": [
+      "good to go",
+      "goodtogo",
+      "washington good to go",
+      "good to go toll"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "mygoodtogo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ExpressToll",
+    "aliases": [
+      "expresstoll",
+      "express toll",
+      "colorado expresstoll",
+      "e 470 toll"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "expresstoll.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "RiverLink",
+    "aliases": [
+      "riverlink",
+      "river link toll",
+      "riverlink toll",
+      "louisville riverlink"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "riverlink.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "I-PASS",
+    "aliases": [
+      "i pass",
+      "ipass",
+      "illinois i pass",
+      "illinois tollway",
+      "ipass toll"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "getipass.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pikepass",
+    "aliases": [
+      "pikepass",
+      "pike pass",
+      "oklahoma pikepass",
+      "pikepass toll"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "pikepass.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "K-TAG",
+    "aliases": [
+      "k tag",
+      "ktag",
+      "kansas k tag",
+      "kansas turnpike",
+      "ktag toll"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "myktag.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "FasTrak 91 Express Lanes",
+    "aliases": [
+      "91 express lanes",
+      "91 express",
+      "fastrak 91",
+      "91expresslanes"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "91expresslanes.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Toll Roads",
+    "aliases": [
+      "the toll roads",
+      "toll roads",
+      "orange county toll roads",
+      "thetollroads"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "thetollroads.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Metro ExpressLanes",
+    "aliases": [
+      "metro expresslanes",
+      "metro express lanes",
+      "la express lanes",
+      "fastrak metro"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "metroexpresslanes.net",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "407 ETR",
+    "aliases": [
+      "407 etr",
+      "407etr",
+      "highway 407",
+      "407 toll"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "407etr.com",
+    "confidence": "high",
+    "notes": "Canadian toll road but commonly encountered by U.S. businesses traveling in Ontario."
+  }
+]
