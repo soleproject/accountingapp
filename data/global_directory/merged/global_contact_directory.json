@@ -67588,5 +67588,127 @@
     "logo_domain": "zzounds.com",
     "confidence": "medium",
     "notes": "Purchases can span multiple expense types; override based on the item purchased."
+  },
+  {
+    "canonical_name": "LinkedIn",
+    "aliases": [
+      "linkedin",
+      "linkedin corp",
+      "lnkd",
+      "lnkd recruiter",
+      "linkedin premium",
+      "linkedin sales navigator",
+      "linkedin learning",
+      "linkedin inmail",
+      "linkedin subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "linkedin.com",
+    "confidence": "high",
+    "notes": "LinkedIn Ads is a separate marketplace_ads entry."
+  },
+  {
+    "canonical_name": "Netflix",
+    "aliases": [
+      "netflix",
+      "netflix com",
+      "netflix subscription",
+      "netflix streaming"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "netflix.com",
+    "confidence": "medium",
+    "notes": "Personal use is common \u2014 CPA may re-classify to owner_draw."
+  },
+  {
+    "canonical_name": "Whole Foods",
+    "aliases": [
+      "whole foods",
+      "whole foods market",
+      "wholefoods",
+      "whfds",
+      "amazon whole foods"
+    ],
+    "semantic": "meals",
+    "logo_domain": "wholefoodsmarket.com",
+    "confidence": "medium",
+    "notes": "Restaurants may override to food_cogs; retailers may override to office_supplies."
+  },
+  {
+    "canonical_name": "Bitly",
+    "aliases": [
+      "bitly",
+      "bit ly",
+      "bitly com",
+      "bitly subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "bitly.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Naugle Insurance",
+    "aliases": [
+      "naugle insurance",
+      "naugle insurance ach",
+      "naugle ach pmt",
+      "naugle"
+    ],
+    "semantic": "insurance",
+    "logo_domain": "naugleinsurance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tax Quotes Inc",
+    "aliases": [
+      "tax quotes inc",
+      "tax quotes",
+      "taxquotes"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "taxquotes.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Catalyst Fitness",
+    "aliases": [
+      "catalyst fitness",
+      "catalyst fitness transit",
+      "catalystfitness"
+    ],
+    "semantic": "meals",
+    "logo_domain": "catalystfitnessgyms.com",
+    "confidence": "medium",
+    "notes": "May be owner_draw for owner-operators; consider a rule."
+  },
+  {
+    "canonical_name": "Jada Blitz Fitness",
+    "aliases": [
+      "jada blitz fitness",
+      "jada blitz",
+      "jadablitz"
+    ],
+    "semantic": "meals",
+    "logo_domain": "jadablitzfitness.com",
+    "confidence": "medium",
+    "notes": "May be owner_draw for owner-operators."
+  },
+  {
+    "canonical_name": "Bank Overdraft Fee",
+    "aliases": [
+      "overdraft fee",
+      "sustained overdraft fee",
+      "returned item",
+      "overdraft 1 at",
+      "overdraft 2 at",
+      "exchange fee"
+    ],
+    "semantic": "bank_fees",
+    "logo_domain": "",
+    "confidence": "high",
+    "notes": "Generic bank charges \u2014 no branded merchant."
   }
 ]
