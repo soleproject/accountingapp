@@ -1,0 +1,7486 @@
+[
+  {
+    "canonical_name": "Starbucks",
+    "aliases": [
+      "starbucks"
+    ],
+    "semantic": "meals",
+    "logo_domain": "starbucks.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "McDonald's",
+    "aliases": [
+      "mcdonald s",
+      "mcdonalds"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mcdonalds.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Chick-fil-A",
+    "aliases": [
+      "chick fil a",
+      "chickfila"
+    ],
+    "semantic": "meals",
+    "logo_domain": "chick-fil-a.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Taco Bell",
+    "aliases": [
+      "taco bell",
+      "tacobell"
+    ],
+    "semantic": "meals",
+    "logo_domain": "tacobell.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wendy's",
+    "aliases": [
+      "wendy s",
+      "wendys"
+    ],
+    "semantic": "meals",
+    "logo_domain": "wendys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Burger King",
+    "aliases": [
+      "burger king",
+      "burgerking",
+      "burger king store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bk.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Subway",
+    "aliases": [
+      "subway"
+    ],
+    "semantic": "meals",
+    "logo_domain": "subway.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Chipotle",
+    "aliases": [
+      "chipotle"
+    ],
+    "semantic": "meals",
+    "logo_domain": "chipotle.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Panera Bread",
+    "aliases": [
+      "panera bread",
+      "panerabread"
+    ],
+    "semantic": "meals",
+    "logo_domain": "panerabread.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dunkin'",
+    "aliases": [
+      "dunkin"
+    ],
+    "semantic": "meals",
+    "logo_domain": "dunkindonuts.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Domino's",
+    "aliases": [
+      "domino s",
+      "dominos"
+    ],
+    "semantic": "meals",
+    "logo_domain": "dominos.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pizza Hut",
+    "aliases": [
+      "pizza hut",
+      "pizzahut",
+      "pizza hut store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "pizzahut.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Papa Johns",
+    "aliases": [
+      "papa johns",
+      "papajohns"
+    ],
+    "semantic": "meals",
+    "logo_domain": "papajohns.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "KFC",
+    "aliases": [
+      "kfc"
+    ],
+    "semantic": "meals",
+    "logo_domain": "kfc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Popeyes",
+    "aliases": [
+      "popeyes"
+    ],
+    "semantic": "meals",
+    "logo_domain": "popeyes.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sonic Drive-In",
+    "aliases": [
+      "sonic drive in",
+      "sonicdrivein"
+    ],
+    "semantic": "meals",
+    "logo_domain": "sonicdrivein.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Arby's",
+    "aliases": [
+      "arby s",
+      "arbys"
+    ],
+    "semantic": "meals",
+    "logo_domain": "arbys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Jack in the Box",
+    "aliases": [
+      "jack in the box",
+      "jackinthebox"
+    ],
+    "semantic": "meals",
+    "logo_domain": "jackinthebox.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Five Guys",
+    "aliases": [
+      "five guys",
+      "fiveguys"
+    ],
+    "semantic": "meals",
+    "logo_domain": "fiveguys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "In-N-Out Burger",
+    "aliases": [
+      "in n out burger",
+      "innoutburger",
+      "in n out burger store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "in-n-out.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dairy Queen",
+    "aliases": [
+      "dairy queen",
+      "dairyqueen"
+    ],
+    "semantic": "meals",
+    "logo_domain": "dairyqueen.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Little Caesars",
+    "aliases": [
+      "little caesars",
+      "littlecaesars"
+    ],
+    "semantic": "meals",
+    "logo_domain": "littlecaesars.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Panda Express",
+    "aliases": [
+      "panda express",
+      "pandaexpress"
+    ],
+    "semantic": "meals",
+    "logo_domain": "pandaexpress.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Jersey Mike's",
+    "aliases": [
+      "jersey mike s",
+      "jerseymikes"
+    ],
+    "semantic": "meals",
+    "logo_domain": "jerseymikes.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Jimmy John's",
+    "aliases": [
+      "jimmy john s",
+      "jimmyjohns"
+    ],
+    "semantic": "meals",
+    "logo_domain": "jimmyjohns.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wingstop",
+    "aliases": [
+      "wingstop"
+    ],
+    "semantic": "meals",
+    "logo_domain": "wingstop.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Raising Cane's",
+    "aliases": [
+      "raising cane s",
+      "raisingcanes"
+    ],
+    "semantic": "meals",
+    "logo_domain": "raisingcanes.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Whataburger",
+    "aliases": [
+      "whataburger",
+      "whataburger store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "whataburger.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Culver's",
+    "aliases": [
+      "culver s",
+      "culvers"
+    ],
+    "semantic": "meals",
+    "logo_domain": "culvers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Shake Shack",
+    "aliases": [
+      "shake shack",
+      "shakeshack"
+    ],
+    "semantic": "meals",
+    "logo_domain": "shakeshack.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Krispy Kreme",
+    "aliases": [
+      "krispy kreme",
+      "krispykreme"
+    ],
+    "semantic": "meals",
+    "logo_domain": "krispykreme.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Einstein Bros. Bagels",
+    "aliases": [
+      "einstein bros bagels",
+      "einsteinbrosbagels"
+    ],
+    "semantic": "meals",
+    "logo_domain": "einsteinbros.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dutch Bros",
+    "aliases": [
+      "dutch bros",
+      "dutchbros"
+    ],
+    "semantic": "meals",
+    "logo_domain": "dutchbros.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Peet's Coffee",
+    "aliases": [
+      "peet s coffee",
+      "peetscoffee",
+      "peet s coffee store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "peets.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Coffee Bean & Tea Leaf",
+    "aliases": [
+      "the coffee bean and tea leaf",
+      "thecoffeebeanandtealeaf",
+      "the coffee bean and tea leaf store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "coffeebean.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sweetgreen",
+    "aliases": [
+      "sweetgreen"
+    ],
+    "semantic": "meals",
+    "logo_domain": "sweetgreen.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CAVA",
+    "aliases": [
+      "cava"
+    ],
+    "semantic": "meals",
+    "logo_domain": "cava.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "QDOBA",
+    "aliases": [
+      "qdoba"
+    ],
+    "semantic": "meals",
+    "logo_domain": "qdoba.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Moe's Southwest Grill",
+    "aliases": [
+      "moe s southwest grill",
+      "moessouthwestgrill",
+      "moe s southwest grill store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "moes.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Del Taco",
+    "aliases": [
+      "del taco",
+      "deltaco"
+    ],
+    "semantic": "meals",
+    "logo_domain": "deltaco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "El Pollo Loco",
+    "aliases": [
+      "el pollo loco",
+      "elpolloloco"
+    ],
+    "semantic": "meals",
+    "logo_domain": "elpolloloco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Baja Fresh",
+    "aliases": [
+      "baja fresh",
+      "bajafresh"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bajafresh.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Taco John's",
+    "aliases": [
+      "taco john s",
+      "tacojohns"
+    ],
+    "semantic": "meals",
+    "logo_domain": "tacojohns.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "TacoTime",
+    "aliases": [
+      "tacotime"
+    ],
+    "semantic": "meals",
+    "logo_domain": "tacotime.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Torchy's Tacos",
+    "aliases": [
+      "torchy s tacos",
+      "torchystacos"
+    ],
+    "semantic": "meals",
+    "logo_domain": "torchystacos.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fuzzy's Taco Shop",
+    "aliases": [
+      "fuzzy s taco shop",
+      "fuzzystacoshop"
+    ],
+    "semantic": "meals",
+    "logo_domain": "fuzzystacoshop.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tijuana Flats",
+    "aliases": [
+      "tijuana flats",
+      "tijuanaflats"
+    ],
+    "semantic": "meals",
+    "logo_domain": "tijuanaflats.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cafe Rio",
+    "aliases": [
+      "cafe rio",
+      "caferio",
+      "cafe rio store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "caferio.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Costa Vida",
+    "aliases": [
+      "costa vida",
+      "costavida"
+    ],
+    "semantic": "meals",
+    "logo_domain": "costavida.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Rubio's Coastal Grill",
+    "aliases": [
+      "rubio s coastal grill",
+      "rubioscoastalgrill",
+      "rubio s coastal grill store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "rubios.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Freebirds World Burrito",
+    "aliases": [
+      "freebirds world burrito",
+      "freebirdsworldburrito"
+    ],
+    "semantic": "meals",
+    "logo_domain": "freebirds.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Chuy's",
+    "aliases": [
+      "chuy s",
+      "chuys"
+    ],
+    "semantic": "meals",
+    "logo_domain": "chuys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "On The Border",
+    "aliases": [
+      "on the border",
+      "ontheborder"
+    ],
+    "semantic": "meals",
+    "logo_domain": "ontheborder.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Yard House",
+    "aliases": [
+      "yard house",
+      "yardhouse"
+    ],
+    "semantic": "meals",
+    "logo_domain": "yardhouse.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Buffalo Wild Wings",
+    "aliases": [
+      "buffalo wild wings",
+      "buffalowildwings"
+    ],
+    "semantic": "meals",
+    "logo_domain": "buffalowildwings.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Applebee's",
+    "aliases": [
+      "applebee s",
+      "applebees"
+    ],
+    "semantic": "meals",
+    "logo_domain": "applebees.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Chili's",
+    "aliases": [
+      "chili s",
+      "chilis"
+    ],
+    "semantic": "meals",
+    "logo_domain": "chilis.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "TGI Fridays",
+    "aliases": [
+      "tgi fridays",
+      "tgifridays"
+    ],
+    "semantic": "meals",
+    "logo_domain": "tgifridays.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ruby Tuesday",
+    "aliases": [
+      "ruby tuesday",
+      "rubytuesday"
+    ],
+    "semantic": "meals",
+    "logo_domain": "rubytuesday.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Red Robin",
+    "aliases": [
+      "red robin",
+      "redrobin"
+    ],
+    "semantic": "meals",
+    "logo_domain": "redrobin.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Cheesecake Factory",
+    "aliases": [
+      "the cheesecake factory",
+      "thecheesecakefactory"
+    ],
+    "semantic": "meals",
+    "logo_domain": "thecheesecakefactory.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "BJ's Restaurant & Brewhouse",
+    "aliases": [
+      "bj s restaurant and brewhouse",
+      "bjsrestaurantandbrewhouse",
+      "bj s restaurant and brewhouse store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bjsrestaurants.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "California Pizza Kitchen",
+    "aliases": [
+      "california pizza kitchen",
+      "californiapizzakitchen",
+      "california pizza kitchen store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "cpk.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Uno Pizzeria & Grill",
+    "aliases": [
+      "uno pizzeria and grill",
+      "unopizzeriaandgrill",
+      "uno pizzeria and grill store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "unos.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Old Chicago Pizza & Taproom",
+    "aliases": [
+      "old chicago pizza and taproom",
+      "oldchicagopizzaandtaproom",
+      "old chicago pizza and taproom store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "oldchicago.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mellow Mushroom",
+    "aliases": [
+      "mellow mushroom",
+      "mellowmushroom"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mellowmushroom.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MOD Pizza",
+    "aliases": [
+      "mod pizza",
+      "modpizza",
+      "mod pizza store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "modpizza.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Blaze Pizza",
+    "aliases": [
+      "blaze pizza",
+      "blazepizza",
+      "blaze pizza store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "blazepizza.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Marco's Pizza",
+    "aliases": [
+      "marco s pizza",
+      "marcospizza",
+      "marco s pizza store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "marcos.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hungry Howie's",
+    "aliases": [
+      "hungry howie s",
+      "hungryhowies"
+    ],
+    "semantic": "meals",
+    "logo_domain": "hungryhowies.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Jet's Pizza",
+    "aliases": [
+      "jet s pizza",
+      "jetspizza",
+      "jet s pizza store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "jetspizza.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mountain Mike's Pizza",
+    "aliases": [
+      "mountain mike s pizza",
+      "mountainmikespizza",
+      "mountain mike s pizza store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mountainmikespizza.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Round Table Pizza",
+    "aliases": [
+      "round table pizza",
+      "roundtablepizza",
+      "round table pizza store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "roundtablepizza.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Godfather's Pizza",
+    "aliases": [
+      "godfather s pizza",
+      "godfatherspizza",
+      "godfather s pizza store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "godfathers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Papa Murphy's",
+    "aliases": [
+      "papa murphy s",
+      "papamurphys"
+    ],
+    "semantic": "meals",
+    "logo_domain": "papamurphys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Donatos Pizza",
+    "aliases": [
+      "donatos pizza",
+      "donatospizza",
+      "donatos pizza store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "donatos.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Rosati's Pizza",
+    "aliases": [
+      "rosati s pizza",
+      "rosatispizza",
+      "rosati s pizza store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "rosatispizza.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Giordano's",
+    "aliases": [
+      "giordano s",
+      "giordanos"
+    ],
+    "semantic": "meals",
+    "logo_domain": "giordanos.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lou Malnati's",
+    "aliases": [
+      "lou malnati s",
+      "loumalnatis"
+    ],
+    "semantic": "meals",
+    "logo_domain": "loumalnatis.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Peter Piper Pizza",
+    "aliases": [
+      "peter piper pizza",
+      "peterpiperpizza",
+      "peter piper pizza store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "peterpiperpizza.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cicis Pizza",
+    "aliases": [
+      "cicis pizza",
+      "cicispizza",
+      "cicis pizza store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "cicis.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sbarro",
+    "aliases": [
+      "sbarro"
+    ],
+    "semantic": "meals",
+    "logo_domain": "sbarro.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Chuck E. Cheese",
+    "aliases": [
+      "chuck e cheese",
+      "chuckecheese"
+    ],
+    "semantic": "meals",
+    "logo_domain": "chuckecheese.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dave & Buster's",
+    "aliases": [
+      "dave and buster s",
+      "daveandbusters"
+    ],
+    "semantic": "meals",
+    "logo_domain": "daveandbusters.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Main Event",
+    "aliases": [
+      "main event",
+      "mainevent"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mainevent.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Topgolf",
+    "aliases": [
+      "topgolf"
+    ],
+    "semantic": "meals",
+    "logo_domain": "topgolf.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hooters",
+    "aliases": [
+      "hooters"
+    ],
+    "semantic": "meals",
+    "logo_domain": "hooters.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Twin Peaks",
+    "aliases": [
+      "twin peaks",
+      "twinpeaks"
+    ],
+    "semantic": "meals",
+    "logo_domain": "twinpeaksrestaurant.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Walk-On's Sports Bistreaux",
+    "aliases": [
+      "walk on s sports bistreaux",
+      "walkonssportsbistreaux"
+    ],
+    "semantic": "meals",
+    "logo_domain": "walk-ons.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Miller's Ale House",
+    "aliases": [
+      "miller s ale house",
+      "millersalehouse"
+    ],
+    "semantic": "meals",
+    "logo_domain": "millersalehouse.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bar Louie",
+    "aliases": [
+      "bar louie",
+      "barlouie"
+    ],
+    "semantic": "meals",
+    "logo_domain": "barlouie.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Buffalo Wings & Rings",
+    "aliases": [
+      "buffalo wings and rings",
+      "buffalowingsandrings"
+    ],
+    "semantic": "meals",
+    "logo_domain": "wingsandrings.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hurricane Grill & Wings",
+    "aliases": [
+      "hurricane grill and wings",
+      "hurricanegrillandwings",
+      "hurricane grill and wings store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "hurricanewings.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Zaxby's",
+    "aliases": [
+      "zaxby s",
+      "zaxbys"
+    ],
+    "semantic": "meals",
+    "logo_domain": "zaxbys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bojangles",
+    "aliases": [
+      "bojangles"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bojangles.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Church's Texas Chicken",
+    "aliases": [
+      "church s texas chicken",
+      "churchstexaschicken"
+    ],
+    "semantic": "meals",
+    "logo_domain": "churchs.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Golden Chick",
+    "aliases": [
+      "golden chick",
+      "goldenchick"
+    ],
+    "semantic": "meals",
+    "logo_domain": "goldenchick.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Slim Chickens",
+    "aliases": [
+      "slim chickens",
+      "slimchickens"
+    ],
+    "semantic": "meals",
+    "logo_domain": "slimchickens.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Chicken Salad Chick",
+    "aliases": [
+      "chicken salad chick",
+      "chickensaladchick"
+    ],
+    "semantic": "meals",
+    "logo_domain": "chickensaladchick.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Huey Magoo's",
+    "aliases": [
+      "huey magoo s",
+      "hueymagoos"
+    ],
+    "semantic": "meals",
+    "logo_domain": "hueymagoos.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PDQ",
+    "aliases": [
+      "pdq"
+    ],
+    "semantic": "meals",
+    "logo_domain": "eatpdq.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lee's Famous Recipe Chicken",
+    "aliases": [
+      "lee s famous recipe chicken",
+      "leesfamousrecipechicken"
+    ],
+    "semantic": "meals",
+    "logo_domain": "leesfamousrecipe.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pollo Campero",
+    "aliases": [
+      "pollo campero",
+      "pollocampero"
+    ],
+    "semantic": "meals",
+    "logo_domain": "campero.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bonchon",
+    "aliases": [
+      "bonchon"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bonchon.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "bb.q Chicken",
+    "aliases": [
+      "bb q chicken",
+      "bbqchicken"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bbqchicken.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Jollibee",
+    "aliases": [
+      "jollibee"
+    ],
+    "semantic": "meals",
+    "logo_domain": "jollibeefoods.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nando's PERi-PERi",
+    "aliases": [
+      "nando s peri peri",
+      "nandosperiperi"
+    ],
+    "semantic": "meals",
+    "logo_domain": "nandosperiperi.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dave's Hot Chicken",
+    "aliases": [
+      "dave s hot chicken",
+      "daveshotchicken"
+    ],
+    "semantic": "meals",
+    "logo_domain": "daveshotchicken.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Halal Guys",
+    "aliases": [
+      "the halal guys",
+      "thehalalguys"
+    ],
+    "semantic": "meals",
+    "logo_domain": "thehalalguys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Portillo's",
+    "aliases": [
+      "portillo s",
+      "portillos"
+    ],
+    "semantic": "meals",
+    "logo_domain": "portillos.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Freddy's Frozen Custard & Steakburgers",
+    "aliases": [
+      "freddy s frozen custard and steakburgers",
+      "freddysfrozencustardandsteakburgers",
+      "freddy s frozen custard and steakburgers store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "freddys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Steak 'n Shake",
+    "aliases": [
+      "steak n shake",
+      "steaknshake"
+    ],
+    "semantic": "meals",
+    "logo_domain": "steaknshake.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Smashburger",
+    "aliases": [
+      "smashburger",
+      "smashburger store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "smashburger.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Habit Burger & Grill",
+    "aliases": [
+      "habit burger and grill",
+      "habitburgerandgrill",
+      "habit burger and grill store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "habitburger.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "BurgerFi",
+    "aliases": [
+      "burgerfi",
+      "burgerfi store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "burgerfi.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wayback Burgers",
+    "aliases": [
+      "wayback burgers",
+      "waybackburgers",
+      "wayback burgers store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "waybackburgers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fatburger",
+    "aliases": [
+      "fatburger",
+      "fatburger store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "fatburger.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Johnny Rockets",
+    "aliases": [
+      "johnny rockets",
+      "johnnyrockets"
+    ],
+    "semantic": "meals",
+    "logo_domain": "johnnyrockets.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Farmer Boys",
+    "aliases": [
+      "farmer boys",
+      "farmerboys"
+    ],
+    "semantic": "meals",
+    "logo_domain": "farmerboys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Braum's",
+    "aliases": [
+      "braum s",
+      "braums"
+    ],
+    "semantic": "meals",
+    "logo_domain": "braums.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cook Out",
+    "aliases": [
+      "cook out",
+      "cookout"
+    ],
+    "semantic": "meals",
+    "logo_domain": "cookout.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Krystal",
+    "aliases": [
+      "krystal"
+    ],
+    "semantic": "meals",
+    "logo_domain": "krystal.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "White Castle",
+    "aliases": [
+      "white castle",
+      "whitecastle"
+    ],
+    "semantic": "meals",
+    "logo_domain": "whitecastle.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Checkers & Rally's",
+    "aliases": [
+      "checkers and rally s",
+      "checkersandrallys"
+    ],
+    "semantic": "meals",
+    "logo_domain": "checkers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Carl's Jr.",
+    "aliases": [
+      "carl s jr",
+      "carlsjr"
+    ],
+    "semantic": "meals",
+    "logo_domain": "carlsjr.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hardee's",
+    "aliases": [
+      "hardee s",
+      "hardees"
+    ],
+    "semantic": "meals",
+    "logo_domain": "hardees.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "A&W Restaurants",
+    "aliases": [
+      "a and w restaurants",
+      "aandwrestaurants",
+      "a and w restaurants store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "awrestaurants.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wienerschnitzel",
+    "aliases": [
+      "wienerschnitzel"
+    ],
+    "semantic": "meals",
+    "logo_domain": "wienerschnitzel.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nathan's Famous",
+    "aliases": [
+      "nathan s famous",
+      "nathansfamous"
+    ],
+    "semantic": "meals",
+    "logo_domain": "nathansfamous.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hot Dog on a Stick",
+    "aliases": [
+      "hot dog on a stick",
+      "hotdogonastick"
+    ],
+    "semantic": "meals",
+    "logo_domain": "hotdogonastick.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dog Haus",
+    "aliases": [
+      "dog haus",
+      "doghaus"
+    ],
+    "semantic": "meals",
+    "logo_domain": "doghaus.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Original Hot Dog Factory",
+    "aliases": [
+      "the original hot dog factory",
+      "theoriginalhotdogfactory"
+    ],
+    "semantic": "meals",
+    "logo_domain": "theoriginalhotdogfactory.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Potbelly",
+    "aliases": [
+      "potbelly"
+    ],
+    "semantic": "meals",
+    "logo_domain": "potbelly.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Firehouse Subs",
+    "aliases": [
+      "firehouse subs",
+      "firehousesubs"
+    ],
+    "semantic": "meals",
+    "logo_domain": "firehousesubs.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "McAlister's Deli",
+    "aliases": [
+      "mcalister s deli",
+      "mcalistersdeli"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mcalistersdeli.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Jason's Deli",
+    "aliases": [
+      "jason s deli",
+      "jasonsdeli"
+    ],
+    "semantic": "meals",
+    "logo_domain": "jasonsdeli.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Schlotzsky's",
+    "aliases": [
+      "schlotzsky s",
+      "schlotzskys"
+    ],
+    "semantic": "meals",
+    "logo_domain": "schlotzskys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Which Wich",
+    "aliases": [
+      "which wich",
+      "whichwich"
+    ],
+    "semantic": "meals",
+    "logo_domain": "whichwich.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Capriotti's",
+    "aliases": [
+      "capriotti s",
+      "capriottis"
+    ],
+    "semantic": "meals",
+    "logo_domain": "capriottis.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Penn Station East Coast Subs",
+    "aliases": [
+      "penn station east coast subs",
+      "pennstationeastcoastsubs"
+    ],
+    "semantic": "meals",
+    "logo_domain": "penn-station.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Charleys Cheesesteaks",
+    "aliases": [
+      "charleys cheesesteaks",
+      "charleyscheesesteaks"
+    ],
+    "semantic": "meals",
+    "logo_domain": "charleys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PrimoHoagies",
+    "aliases": [
+      "primohoagies"
+    ],
+    "semantic": "meals",
+    "logo_domain": "primohoagies.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cousins Subs",
+    "aliases": [
+      "cousins subs",
+      "cousinssubs"
+    ],
+    "semantic": "meals",
+    "logo_domain": "cousinssubs.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Erbert & Gerbert's",
+    "aliases": [
+      "erbert and gerbert s",
+      "erbertandgerberts"
+    ],
+    "semantic": "meals",
+    "logo_domain": "erbertandgerberts.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Togo's",
+    "aliases": [
+      "togo s",
+      "togos"
+    ],
+    "semantic": "meals",
+    "logo_domain": "togos.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Blimpie",
+    "aliases": [
+      "blimpie"
+    ],
+    "semantic": "meals",
+    "logo_domain": "blimpie.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Quiznos",
+    "aliases": [
+      "quiznos"
+    ],
+    "semantic": "meals",
+    "logo_domain": "quiznos.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lee's Sandwiches",
+    "aliases": [
+      "lee s sandwiches",
+      "leessandwiches"
+    ],
+    "semantic": "meals",
+    "logo_domain": "leesandwiches.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mendocino Farms",
+    "aliases": [
+      "mendocino farms",
+      "mendocinofarms"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mendocinofarms.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Newk's Eatery",
+    "aliases": [
+      "newk s eatery",
+      "newkseatery"
+    ],
+    "semantic": "meals",
+    "logo_domain": "newks.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Corner Bakery Cafe",
+    "aliases": [
+      "corner bakery cafe",
+      "cornerbakerycafe",
+      "corner bakery cafe store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "cornerbakerycafe.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Au Bon Pain",
+    "aliases": [
+      "au bon pain",
+      "aubonpain"
+    ],
+    "semantic": "meals",
+    "logo_domain": "aubonpain.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pret A Manger",
+    "aliases": [
+      "pret a manger",
+      "pretamanger"
+    ],
+    "semantic": "meals",
+    "logo_domain": "pret.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Paris Baguette",
+    "aliases": [
+      "paris baguette",
+      "parisbaguette"
+    ],
+    "semantic": "meals",
+    "logo_domain": "parisbaguette.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tous les Jours",
+    "aliases": [
+      "tous les jours",
+      "touslesjours"
+    ],
+    "semantic": "meals",
+    "logo_domain": "tljus.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "85°C Bakery Cafe",
+    "aliases": [
+      "85c bakery cafe",
+      "85cbakerycafe",
+      "85c bakery cafe store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "85cbakerycafe.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nothing Bundt Cakes",
+    "aliases": [
+      "nothing bundt cakes",
+      "nothingbundtcakes"
+    ],
+    "semantic": "meals",
+    "logo_domain": "nothingbundtcakes.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Crumbl",
+    "aliases": [
+      "crumbl"
+    ],
+    "semantic": "meals",
+    "logo_domain": "crumblcookies.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Insomnia Cookies",
+    "aliases": [
+      "insomnia cookies",
+      "insomniacookies"
+    ],
+    "semantic": "meals",
+    "logo_domain": "insomniacookies.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Great American Cookies",
+    "aliases": [
+      "great american cookies",
+      "greatamericancookies"
+    ],
+    "semantic": "meals",
+    "logo_domain": "greatamericancookies.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mrs. Fields",
+    "aliases": [
+      "mrs fields",
+      "mrsfields"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mrsfields.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tiff's Treats",
+    "aliases": [
+      "tiff s treats",
+      "tiffstreats"
+    ],
+    "semantic": "meals",
+    "logo_domain": "cookiedelivery.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Levain Bakery",
+    "aliases": [
+      "levain bakery",
+      "levainbakery",
+      "levain bakery store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "levainbakery.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Milk Bar",
+    "aliases": [
+      "milk bar",
+      "milkbar"
+    ],
+    "semantic": "meals",
+    "logo_domain": "milkbarstore.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sprinkles",
+    "aliases": [
+      "sprinkles"
+    ],
+    "semantic": "meals",
+    "logo_domain": "sprinkles.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Magnolia Bakery",
+    "aliases": [
+      "magnolia bakery",
+      "magnoliabakery",
+      "magnolia bakery store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "magnoliabakery.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cinnabon",
+    "aliases": [
+      "cinnabon"
+    ],
+    "semantic": "meals",
+    "logo_domain": "cinnabon.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Auntie Anne's",
+    "aliases": [
+      "auntie anne s",
+      "auntieannes"
+    ],
+    "semantic": "meals",
+    "logo_domain": "auntieannes.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wetzel's Pretzels",
+    "aliases": [
+      "wetzel s pretzels",
+      "wetzelspretzels"
+    ],
+    "semantic": "meals",
+    "logo_domain": "wetzels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Great Harvest Bread Co.",
+    "aliases": [
+      "great harvest bread co",
+      "greatharvestbreadco"
+    ],
+    "semantic": "meals",
+    "logo_domain": "greatharvest.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Duck Donuts",
+    "aliases": [
+      "duck donuts",
+      "duckdonuts"
+    ],
+    "semantic": "meals",
+    "logo_domain": "duckdonuts.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Shipley Do-Nuts",
+    "aliases": [
+      "shipley do nuts",
+      "shipleydonuts"
+    ],
+    "semantic": "meals",
+    "logo_domain": "shipleydonuts.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Daylight Donuts",
+    "aliases": [
+      "daylight donuts",
+      "daylightdonuts"
+    ],
+    "semantic": "meals",
+    "logo_domain": "daylightdonuts.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "LaMar's Donuts",
+    "aliases": [
+      "lamar s donuts",
+      "lamarsdonuts"
+    ],
+    "semantic": "meals",
+    "logo_domain": "lamars.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tim Hortons",
+    "aliases": [
+      "tim hortons",
+      "timhortons"
+    ],
+    "semantic": "meals",
+    "logo_domain": "timhortons.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Caribou Coffee",
+    "aliases": [
+      "caribou coffee",
+      "cariboucoffee",
+      "caribou coffee store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "cariboucoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Scooter's Coffee",
+    "aliases": [
+      "scooter s coffee",
+      "scooterscoffee",
+      "scooter s coffee store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "scooterscoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Biggby Coffee",
+    "aliases": [
+      "biggby coffee",
+      "biggbycoffee",
+      "biggby coffee store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "biggby.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Human Bean",
+    "aliases": [
+      "the human bean",
+      "thehumanbean"
+    ],
+    "semantic": "meals",
+    "logo_domain": "thehumanbean.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PJ's Coffee",
+    "aliases": [
+      "pj s coffee",
+      "pjscoffee",
+      "pj s coffee store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "pjscoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Coffee Republic",
+    "aliases": [
+      "coffee republic",
+      "coffeerepublic",
+      "coffee republic store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "coffeerepublic.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Philz Coffee",
+    "aliases": [
+      "philz coffee",
+      "philzcoffee",
+      "philz coffee store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "philzcoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Blue Bottle Coffee",
+    "aliases": [
+      "blue bottle coffee",
+      "bluebottlecoffee",
+      "blue bottle coffee store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bluebottlecoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "La Colombe",
+    "aliases": [
+      "la colombe",
+      "lacolombe"
+    ],
+    "semantic": "meals",
+    "logo_domain": "lacolombe.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Stumptown Coffee Roasters",
+    "aliases": [
+      "stumptown coffee roasters",
+      "stumptowncoffeeroasters",
+      "stumptown coffee roasters store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "stumptowncoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Intelligentsia Coffee",
+    "aliases": [
+      "intelligentsia coffee",
+      "intelligentsiacoffee",
+      "intelligentsia coffee store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "intelligentsia.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Joe & The Juice",
+    "aliases": [
+      "joe and the juice",
+      "joeandthejuice"
+    ],
+    "semantic": "meals",
+    "logo_domain": "joejuice.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Gregorys Coffee",
+    "aliases": [
+      "gregorys coffee",
+      "gregoryscoffee",
+      "gregorys coffee store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "gregoryscoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bluestone Lane",
+    "aliases": [
+      "bluestone lane",
+      "bluestonelane"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bluestonelane.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Foxtail Coffee",
+    "aliases": [
+      "foxtail coffee",
+      "foxtailcoffee",
+      "foxtail coffee store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "foxtailcoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "7 Brew Coffee",
+    "aliases": [
+      "7 brew coffee",
+      "7brewcoffee",
+      "7 brew coffee store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "7brew.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Black Rock Coffee Bar",
+    "aliases": [
+      "black rock coffee bar",
+      "blackrockcoffeebar",
+      "black rock coffee bar store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "br.coffee",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ziggi's Coffee",
+    "aliases": [
+      "ziggi s coffee",
+      "ziggiscoffee",
+      "ziggi s coffee store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "ziggiscoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ellianos Coffee",
+    "aliases": [
+      "ellianos coffee",
+      "ellianoscoffee",
+      "ellianos coffee store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "ellianos.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Gloria Jean's Coffees",
+    "aliases": [
+      "gloria jean s coffees",
+      "gloriajeanscoffees",
+      "gloria jean s coffees store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "gloriajeans.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Gong cha",
+    "aliases": [
+      "gong cha",
+      "gongcha"
+    ],
+    "semantic": "meals",
+    "logo_domain": "gong-cha.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kung Fu Tea",
+    "aliases": [
+      "kung fu tea",
+      "kungfutea"
+    ],
+    "semantic": "meals",
+    "logo_domain": "kungfutea.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sharetea",
+    "aliases": [
+      "sharetea"
+    ],
+    "semantic": "meals",
+    "logo_domain": "1992sharetea.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CoCo Fresh Tea & Juice",
+    "aliases": [
+      "coco fresh tea and juice",
+      "cocofreshteaandjuice"
+    ],
+    "semantic": "meals",
+    "logo_domain": "cocobubbletea.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tiger Sugar",
+    "aliases": [
+      "tiger sugar",
+      "tigersugar"
+    ],
+    "semantic": "meals",
+    "logo_domain": "tigersugar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Happy Lemon",
+    "aliases": [
+      "happy lemon",
+      "happylemon"
+    ],
+    "semantic": "meals",
+    "logo_domain": "happylemonusa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ding Tea",
+    "aliases": [
+      "ding tea",
+      "dingtea"
+    ],
+    "semantic": "meals",
+    "logo_domain": "dingtea.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Alley",
+    "aliases": [
+      "the alley",
+      "thealley"
+    ],
+    "semantic": "meals",
+    "logo_domain": "the-alley.us",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "It's Boba Time",
+    "aliases": [
+      "it s boba time",
+      "itsbobatime"
+    ],
+    "semantic": "meals",
+    "logo_domain": "itsbobatime.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Boba Guys",
+    "aliases": [
+      "boba guys",
+      "bobaguys"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bobaguys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Jamba",
+    "aliases": [
+      "jamba"
+    ],
+    "semantic": "meals",
+    "logo_domain": "jamba.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Smoothie King",
+    "aliases": [
+      "smoothie king",
+      "smoothieking"
+    ],
+    "semantic": "meals",
+    "logo_domain": "smoothieking.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tropical Smoothie Cafe",
+    "aliases": [
+      "tropical smoothie cafe",
+      "tropicalsmoothiecafe",
+      "tropical smoothie cafe store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "tropicalsmoothiecafe.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nékter Juice Bar",
+    "aliases": [
+      "nkter juice bar",
+      "nkterjuicebar"
+    ],
+    "semantic": "meals",
+    "logo_domain": "nekterjuicebar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Clean Juice",
+    "aliases": [
+      "clean juice",
+      "cleanjuice"
+    ],
+    "semantic": "meals",
+    "logo_domain": "cleanjuice.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Robeks",
+    "aliases": [
+      "robeks"
+    ],
+    "semantic": "meals",
+    "logo_domain": "robeks.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pressed Juicery",
+    "aliases": [
+      "pressed juicery",
+      "pressedjuicery"
+    ],
+    "semantic": "meals",
+    "logo_domain": "pressed.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Juice It Up!",
+    "aliases": [
+      "juice it up",
+      "juiceitup"
+    ],
+    "semantic": "meals",
+    "logo_domain": "juiceitup.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Playa Bowls",
+    "aliases": [
+      "playa bowls",
+      "playabowls"
+    ],
+    "semantic": "meals",
+    "logo_domain": "playabowls.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Rush Bowls",
+    "aliases": [
+      "rush bowls",
+      "rushbowls"
+    ],
+    "semantic": "meals",
+    "logo_domain": "rushbowls.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Vitality Bowls",
+    "aliases": [
+      "vitality bowls",
+      "vitalitybowls"
+    ],
+    "semantic": "meals",
+    "logo_domain": "vitalitybowls.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bahama Buck's",
+    "aliases": [
+      "bahama buck s",
+      "bahamabucks"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bahamabucks.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kona Ice",
+    "aliases": [
+      "kona ice",
+      "konaice"
+    ],
+    "semantic": "meals",
+    "logo_domain": "kona-ice.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pelican's SnoBalls",
+    "aliases": [
+      "pelican s snoballs",
+      "pelicanssnoballs"
+    ],
+    "semantic": "meals",
+    "logo_domain": "pelicanssnoballs.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Rita's Italian Ice",
+    "aliases": [
+      "rita s italian ice",
+      "ritasitalianice"
+    ],
+    "semantic": "meals",
+    "logo_domain": "ritasice.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Jeremiah's Italian Ice",
+    "aliases": [
+      "jeremiah s italian ice",
+      "jeremiahsitalianice"
+    ],
+    "semantic": "meals",
+    "logo_domain": "jeremiahsice.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Andy's Frozen Custard",
+    "aliases": [
+      "andy s frozen custard",
+      "andysfrozencustard"
+    ],
+    "semantic": "meals",
+    "logo_domain": "eatandys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Baskin-Robbins",
+    "aliases": [
+      "baskin robbins",
+      "baskinrobbins"
+    ],
+    "semantic": "meals",
+    "logo_domain": "baskinrobbins.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cold Stone Creamery",
+    "aliases": [
+      "cold stone creamery",
+      "coldstonecreamery"
+    ],
+    "semantic": "meals",
+    "logo_domain": "coldstonecreamery.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Marble Slab Creamery",
+    "aliases": [
+      "marble slab creamery",
+      "marbleslabcreamery"
+    ],
+    "semantic": "meals",
+    "logo_domain": "marbleslab.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ben & Jerry's",
+    "aliases": [
+      "ben and jerry s",
+      "benandjerrys"
+    ],
+    "semantic": "meals",
+    "logo_domain": "benjerry.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Häagen-Dazs Shops",
+    "aliases": [
+      "hagen dazs shops",
+      "hagendazsshops"
+    ],
+    "semantic": "meals",
+    "logo_domain": "haagendazs.us",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dippin' Dots",
+    "aliases": [
+      "dippin dots",
+      "dippindots"
+    ],
+    "semantic": "meals",
+    "logo_domain": "dippindots.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Menchie's",
+    "aliases": [
+      "menchie s",
+      "menchies"
+    ],
+    "semantic": "meals",
+    "logo_domain": "menchies.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Yogurtland",
+    "aliases": [
+      "yogurtland"
+    ],
+    "semantic": "meals",
+    "logo_domain": "yogurt-land.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pinkberry",
+    "aliases": [
+      "pinkberry"
+    ],
+    "semantic": "meals",
+    "logo_domain": "pinkberry.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "sweetFrog",
+    "aliases": [
+      "sweetfrog"
+    ],
+    "semantic": "meals",
+    "logo_domain": "sweetfrog.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "TCBY",
+    "aliases": [
+      "tcby"
+    ],
+    "semantic": "meals",
+    "logo_domain": "tcby.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "16 Handles",
+    "aliases": [
+      "16 handles",
+      "16handles"
+    ],
+    "semantic": "meals",
+    "logo_domain": "16handles.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Handel's Homemade Ice Cream",
+    "aliases": [
+      "handel s homemade ice cream",
+      "handelshomemadeicecream"
+    ],
+    "semantic": "meals",
+    "logo_domain": "handelsicecream.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bruster's Real Ice Cream",
+    "aliases": [
+      "bruster s real ice cream",
+      "brustersrealicecream"
+    ],
+    "semantic": "meals",
+    "logo_domain": "brusters.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kilwins",
+    "aliases": [
+      "kilwins"
+    ],
+    "semantic": "meals",
+    "logo_domain": "kilwins.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Salt & Straw",
+    "aliases": [
+      "salt and straw",
+      "saltandstraw"
+    ],
+    "semantic": "meals",
+    "logo_domain": "saltandstraw.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Jeni's Splendid Ice Creams",
+    "aliases": [
+      "jeni s splendid ice creams",
+      "jenissplendidicecreams"
+    ],
+    "semantic": "meals",
+    "logo_domain": "jenis.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Van Leeuwen Ice Cream",
+    "aliases": [
+      "van leeuwen ice cream",
+      "vanleeuwenicecream"
+    ],
+    "semantic": "meals",
+    "logo_domain": "vanleeuwenicecream.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Orange Julius",
+    "aliases": [
+      "orange julius",
+      "orangejulius"
+    ],
+    "semantic": "meals",
+    "logo_domain": "orangejulius.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "First Watch",
+    "aliases": [
+      "first watch",
+      "firstwatch"
+    ],
+    "semantic": "meals",
+    "logo_domain": "firstwatch.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "IHOP",
+    "aliases": [
+      "ihop"
+    ],
+    "semantic": "meals",
+    "logo_domain": "ihop.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Denny's",
+    "aliases": [
+      "denny s",
+      "dennys"
+    ],
+    "semantic": "meals",
+    "logo_domain": "dennys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Waffle House",
+    "aliases": [
+      "waffle house",
+      "wafflehouse"
+    ],
+    "semantic": "meals",
+    "logo_domain": "wafflehouse.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cracker Barrel",
+    "aliases": [
+      "cracker barrel",
+      "crackerbarrel"
+    ],
+    "semantic": "meals",
+    "logo_domain": "crackerbarrel.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bob Evans",
+    "aliases": [
+      "bob evans",
+      "bobevans"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bobevans.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Perkins Restaurant & Bakery",
+    "aliases": [
+      "perkins restaurant and bakery",
+      "perkinsrestaurantandbakery",
+      "perkins restaurant and bakery store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "perkinsrestaurants.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Huddle House",
+    "aliases": [
+      "huddle house",
+      "huddlehouse"
+    ],
+    "semantic": "meals",
+    "logo_domain": "huddlehouse.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Black Bear Diner",
+    "aliases": [
+      "black bear diner",
+      "blackbeardiner"
+    ],
+    "semantic": "meals",
+    "logo_domain": "blackbeardiner.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Snooze, an A.M. Eatery",
+    "aliases": [
+      "snooze an a m eatery",
+      "snoozeanameatery"
+    ],
+    "semantic": "meals",
+    "logo_domain": "snoozeeatery.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Another Broken Egg Cafe",
+    "aliases": [
+      "another broken egg cafe",
+      "anotherbrokeneggcafe",
+      "another broken egg cafe store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "anotherbrokenegg.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Original Pancake House",
+    "aliases": [
+      "the original pancake house",
+      "theoriginalpancakehouse"
+    ],
+    "semantic": "meals",
+    "logo_domain": "originalpancakehouse.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Eggs Up Grill",
+    "aliases": [
+      "eggs up grill",
+      "eggsupgrill",
+      "eggs up grill store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "eggsupgrill.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Broken Yolk Cafe",
+    "aliases": [
+      "broken yolk cafe",
+      "brokenyolkcafe",
+      "broken yolk cafe store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "thebrokenyolkcafe.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Metro Diner",
+    "aliases": [
+      "metro diner",
+      "metrodiner"
+    ],
+    "semantic": "meals",
+    "logo_domain": "metrodiner.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Flying Biscuit Cafe",
+    "aliases": [
+      "flying biscuit cafe",
+      "flyingbiscuitcafe",
+      "flying biscuit cafe store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "flyingbiscuit.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hash House A Go Go",
+    "aliases": [
+      "hash house a go go",
+      "hashhouseagogo"
+    ],
+    "semantic": "meals",
+    "logo_domain": "hashhouseagogo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Le Peep",
+    "aliases": [
+      "le peep",
+      "lepeep"
+    ],
+    "semantic": "meals",
+    "logo_domain": "lepeep.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Village Inn",
+    "aliases": [
+      "village inn",
+      "villageinn"
+    ],
+    "semantic": "meals",
+    "logo_domain": "villageinn.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Shoney's",
+    "aliases": [
+      "shoney s",
+      "shoneys"
+    ],
+    "semantic": "meals",
+    "logo_domain": "shoneys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Golden Corral",
+    "aliases": [
+      "golden corral",
+      "goldencorral"
+    ],
+    "semantic": "meals",
+    "logo_domain": "goldencorral.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sizzler",
+    "aliases": [
+      "sizzler"
+    ],
+    "semantic": "meals",
+    "logo_domain": "sizzler.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fogo de Chão",
+    "aliases": [
+      "fogo de cho",
+      "fogodecho"
+    ],
+    "semantic": "meals",
+    "logo_domain": "fogodechao.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Texas de Brazil",
+    "aliases": [
+      "texas de brazil",
+      "texasdebrazil"
+    ],
+    "semantic": "meals",
+    "logo_domain": "texasdebrazil.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Texas Roadhouse",
+    "aliases": [
+      "texas roadhouse",
+      "texasroadhouse"
+    ],
+    "semantic": "meals",
+    "logo_domain": "texasroadhouse.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "LongHorn Steakhouse",
+    "aliases": [
+      "longhorn steakhouse",
+      "longhornsteakhouse"
+    ],
+    "semantic": "meals",
+    "logo_domain": "longhornsteakhouse.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Outback Steakhouse",
+    "aliases": [
+      "outback steakhouse",
+      "outbacksteakhouse"
+    ],
+    "semantic": "meals",
+    "logo_domain": "outback.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ruth's Chris Steak House",
+    "aliases": [
+      "ruth s chris steak house",
+      "ruthschrissteakhouse"
+    ],
+    "semantic": "meals",
+    "logo_domain": "ruthschris.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fleming's Prime Steakhouse",
+    "aliases": [
+      "fleming s prime steakhouse",
+      "flemingsprimesteakhouse"
+    ],
+    "semantic": "meals",
+    "logo_domain": "flemingssteakhouse.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Morton's The Steakhouse",
+    "aliases": [
+      "morton s the steakhouse",
+      "mortonsthesteakhouse"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mortons.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Capital Grille",
+    "aliases": [
+      "the capital grille",
+      "thecapitalgrille",
+      "the capital grille store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "thecapitalgrille.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "STK Steakhouse",
+    "aliases": [
+      "stk steakhouse",
+      "stksteakhouse"
+    ],
+    "semantic": "meals",
+    "logo_domain": "stksteakhouse.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Del Frisco's Double Eagle Steakhouse",
+    "aliases": [
+      "del frisco s double eagle steakhouse",
+      "delfriscosdoubleeaglesteakhouse"
+    ],
+    "semantic": "meals",
+    "logo_domain": "delfriscos.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Eddie V's",
+    "aliases": [
+      "eddie v s",
+      "eddievs"
+    ],
+    "semantic": "meals",
+    "logo_domain": "eddiev.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ocean Prime",
+    "aliases": [
+      "ocean prime",
+      "oceanprime"
+    ],
+    "semantic": "meals",
+    "logo_domain": "ocean-prime.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mastro's",
+    "aliases": [
+      "mastro s",
+      "mastros"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mastrosrestaurants.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bubba Gump Shrimp Co.",
+    "aliases": [
+      "bubba gump shrimp co",
+      "bubbagumpshrimpco"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bubbagump.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Joe's Crab Shack",
+    "aliases": [
+      "joe s crab shack",
+      "joescrabshack"
+    ],
+    "semantic": "meals",
+    "logo_domain": "joescrabshack.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Red Lobster",
+    "aliases": [
+      "red lobster",
+      "redlobster"
+    ],
+    "semantic": "meals",
+    "logo_domain": "redlobster.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bonefish Grill",
+    "aliases": [
+      "bonefish grill",
+      "bonefishgrill",
+      "bonefish grill store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bonefishgrill.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Legal Sea Foods",
+    "aliases": [
+      "legal sea foods",
+      "legalseafoods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "legalseafoods.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "McCormick & Schmick's",
+    "aliases": [
+      "mccormick and schmick s",
+      "mccormickandschmicks"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mccormickandschmicks.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Chart House",
+    "aliases": [
+      "chart house",
+      "charthouse"
+    ],
+    "semantic": "meals",
+    "logo_domain": "chart-house.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Seasons 52",
+    "aliases": [
+      "seasons 52",
+      "seasons52"
+    ],
+    "semantic": "meals",
+    "logo_domain": "seasons52.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Olive Garden",
+    "aliases": [
+      "olive garden",
+      "olivegarden"
+    ],
+    "semantic": "meals",
+    "logo_domain": "olivegarden.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Carrabba's Italian Grill",
+    "aliases": [
+      "carrabba s italian grill",
+      "carrabbasitaliangrill",
+      "carrabba s italian grill store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "carrabbas.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Maggiano's Little Italy",
+    "aliases": [
+      "maggiano s little italy",
+      "maggianoslittleitaly"
+    ],
+    "semantic": "meals",
+    "logo_domain": "maggianos.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Buca di Beppo",
+    "aliases": [
+      "buca di beppo",
+      "bucadibeppo"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bucadibeppo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bravo! Italian Kitchen",
+    "aliases": [
+      "bravo italian kitchen",
+      "bravoitaliankitchen"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bravoitalian.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Brio Italian Grille",
+    "aliases": [
+      "brio italian grille",
+      "brioitaliangrille",
+      "brio italian grille store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "brioitalian.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "North Italia",
+    "aliases": [
+      "north italia",
+      "northitalia"
+    ],
+    "semantic": "meals",
+    "logo_domain": "northitalia.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fazoli's",
+    "aliases": [
+      "fazoli s",
+      "fazolis"
+    ],
+    "semantic": "meals",
+    "logo_domain": "fazolis.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Noodles & Company",
+    "aliases": [
+      "noodles and company",
+      "noodlesandcompany"
+    ],
+    "semantic": "meals",
+    "logo_domain": "noodles.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Piada Italian Street Food",
+    "aliases": [
+      "piada italian street food",
+      "piadaitalianstreetfood"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mypiada.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Old Spaghetti Factory",
+    "aliases": [
+      "the old spaghetti factory",
+      "theoldspaghettifactory"
+    ],
+    "semantic": "meals",
+    "logo_domain": "osf.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Romano's Macaroni Grill",
+    "aliases": [
+      "romano s macaroni grill",
+      "romanosmacaronigrill",
+      "romano s macaroni grill store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "macaronigrill.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "P.F. Chang's",
+    "aliases": [
+      "p f chang s",
+      "pfchangs"
+    ],
+    "semantic": "meals",
+    "logo_domain": "pfchangs.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pei Wei",
+    "aliases": [
+      "pei wei",
+      "peiwei"
+    ],
+    "semantic": "meals",
+    "logo_domain": "peiwei.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pick Up Stix",
+    "aliases": [
+      "pick up stix",
+      "pickupstix"
+    ],
+    "semantic": "meals",
+    "logo_domain": "pickupstix.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "WaBa Grill",
+    "aliases": [
+      "waba grill",
+      "wabagrill",
+      "waba grill store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "wabagrill.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Flame Broiler",
+    "aliases": [
+      "flame broiler",
+      "flamebroiler"
+    ],
+    "semantic": "meals",
+    "logo_domain": "flamebroilerusa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Teriyaki Madness",
+    "aliases": [
+      "teriyaki madness",
+      "teriyakimadness"
+    ],
+    "semantic": "meals",
+    "logo_domain": "teriyakimadness.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Yoshinoya",
+    "aliases": [
+      "yoshinoya"
+    ],
+    "semantic": "meals",
+    "logo_domain": "yoshinoyaamerica.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Poke Bros.",
+    "aliases": [
+      "poke bros",
+      "pokebros"
+    ],
+    "semantic": "meals",
+    "logo_domain": "eatpokebros.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pokeworks",
+    "aliases": [
+      "pokeworks"
+    ],
+    "semantic": "meals",
+    "logo_domain": "pokeworks.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Poké Bar",
+    "aliases": [
+      "pok bar",
+      "pokbar"
+    ],
+    "semantic": "meals",
+    "logo_domain": "ilovepokebar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "L&L Hawaiian Barbecue",
+    "aliases": [
+      "l and l hawaiian barbecue",
+      "landlhawaiianbarbecue"
+    ],
+    "semantic": "meals",
+    "logo_domain": "hawaiianbarbecue.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ono Hawaiian BBQ",
+    "aliases": [
+      "ono hawaiian bbq",
+      "onohawaiianbbq"
+    ],
+    "semantic": "meals",
+    "logo_domain": "onohawaiianbbq.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hawaiian Bros",
+    "aliases": [
+      "hawaiian bros",
+      "hawaiianbros"
+    ],
+    "semantic": "meals",
+    "logo_domain": "hawaiianbros.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Waikiki Hawaiian BBQ",
+    "aliases": [
+      "waikiki hawaiian bbq",
+      "waikikihawaiianbbq"
+    ],
+    "semantic": "meals",
+    "logo_domain": "waikikihawaiianbbq.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Poke House",
+    "aliases": [
+      "poke house",
+      "pokehouse"
+    ],
+    "semantic": "meals",
+    "logo_domain": "poke.house",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sarku Japan",
+    "aliases": [
+      "sarku japan",
+      "sarkujapan"
+    ],
+    "semantic": "meals",
+    "logo_domain": "sarkujapan.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Benihana",
+    "aliases": [
+      "benihana"
+    ],
+    "semantic": "meals",
+    "logo_domain": "benihana.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "RA Sushi",
+    "aliases": [
+      "ra sushi",
+      "rasushi"
+    ],
+    "semantic": "meals",
+    "logo_domain": "rasushi.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kura Revolving Sushi Bar",
+    "aliases": [
+      "kura revolving sushi bar",
+      "kurarevolvingsushibar"
+    ],
+    "semantic": "meals",
+    "logo_domain": "kurasushi.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Gen Korean BBQ House",
+    "aliases": [
+      "gen korean bbq house",
+      "genkoreanbbqhouse"
+    ],
+    "semantic": "meals",
+    "logo_domain": "genkoreanbbq.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Gyu-Kaku",
+    "aliases": [
+      "gyu kaku",
+      "gyukaku"
+    ],
+    "semantic": "meals",
+    "logo_domain": "gyu-kaku.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Din Tai Fung",
+    "aliases": [
+      "din tai fung",
+      "dintaifung"
+    ],
+    "semantic": "meals",
+    "logo_domain": "dintaifungusa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "JINYA Ramen Bar",
+    "aliases": [
+      "jinya ramen bar",
+      "jinyaramenbar"
+    ],
+    "semantic": "meals",
+    "logo_domain": "jinyaramenbar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Panda Inn",
+    "aliases": [
+      "panda inn",
+      "pandainn"
+    ],
+    "semantic": "meals",
+    "logo_domain": "pandainn.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Grand Lux Cafe",
+    "aliases": [
+      "grand lux cafe",
+      "grandluxcafe",
+      "grand lux cafe store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "grandluxcafe.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "True Food Kitchen",
+    "aliases": [
+      "true food kitchen",
+      "truefoodkitchen"
+    ],
+    "semantic": "meals",
+    "logo_domain": "truefoodkitchen.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Flower Child",
+    "aliases": [
+      "flower child",
+      "flowerchild"
+    ],
+    "semantic": "meals",
+    "logo_domain": "iamaflowerchild.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tender Greens",
+    "aliases": [
+      "tender greens",
+      "tendergreens"
+    ],
+    "semantic": "meals",
+    "logo_domain": "tendergreens.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Urban Plates",
+    "aliases": [
+      "urban plates",
+      "urbanplates"
+    ],
+    "semantic": "meals",
+    "logo_domain": "urbanplates.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Saladworks",
+    "aliases": [
+      "saladworks"
+    ],
+    "semantic": "meals",
+    "logo_domain": "saladworks.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Chopt Creative Salad Co.",
+    "aliases": [
+      "chopt creative salad co",
+      "choptcreativesaladco"
+    ],
+    "semantic": "meals",
+    "logo_domain": "choptsalad.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Just Salad",
+    "aliases": [
+      "just salad",
+      "justsalad"
+    ],
+    "semantic": "meals",
+    "logo_domain": "justsalad.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Salata",
+    "aliases": [
+      "salata"
+    ],
+    "semantic": "meals",
+    "logo_domain": "salata.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Freshii",
+    "aliases": [
+      "freshii"
+    ],
+    "semantic": "meals",
+    "logo_domain": "freshii.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CoreLife Eatery",
+    "aliases": [
+      "corelife eatery",
+      "corelifeeatery"
+    ],
+    "semantic": "meals",
+    "logo_domain": "corelifeeatery.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Café Zupas",
+    "aliases": [
+      "caf zupas",
+      "cafzupas"
+    ],
+    "semantic": "meals",
+    "logo_domain": "cafezupas.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Chicken Kitchen",
+    "aliases": [
+      "chicken kitchen",
+      "chickenkitchen"
+    ],
+    "semantic": "meals",
+    "logo_domain": "chickenkitchen.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Muscle Maker Grill",
+    "aliases": [
+      "muscle maker grill",
+      "musclemakergrill",
+      "muscle maker grill store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "musclemakergrill.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Protein Bar & Kitchen",
+    "aliases": [
+      "protein bar and kitchen",
+      "proteinbarandkitchen"
+    ],
+    "semantic": "meals",
+    "logo_domain": "theproteinbar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Honeygrow",
+    "aliases": [
+      "honeygrow"
+    ],
+    "semantic": "meals",
+    "logo_domain": "honeygrow.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dig",
+    "aliases": [
+      "dig"
+    ],
+    "semantic": "meals",
+    "logo_domain": "diginn.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Little Beet",
+    "aliases": [
+      "the little beet",
+      "thelittlebeet"
+    ],
+    "semantic": "meals",
+    "logo_domain": "thelittlebeet.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Roti Mediterranean Bowls",
+    "aliases": [
+      "roti mediterranean bowls",
+      "rotimediterraneanbowls"
+    ],
+    "semantic": "meals",
+    "logo_domain": "roti.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Garbanzo Mediterranean Fresh",
+    "aliases": [
+      "garbanzo mediterranean fresh",
+      "garbanzomediterraneanfresh"
+    ],
+    "semantic": "meals",
+    "logo_domain": "eatgarbanzo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Great Greek Mediterranean Grill",
+    "aliases": [
+      "the great greek mediterranean grill",
+      "thegreatgreekmediterraneangrill",
+      "the great greek mediterranean grill store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "thegreatgreekgrill.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Taziki's Mediterranean Cafe",
+    "aliases": [
+      "taziki s mediterranean cafe",
+      "tazikismediterraneancafe",
+      "taziki s mediterranean cafe store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "tazikis.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Luna Grill",
+    "aliases": [
+      "luna grill",
+      "lunagrill",
+      "luna grill store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "lunagrill.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pita Pit",
+    "aliases": [
+      "pita pit",
+      "pitapit"
+    ],
+    "semantic": "meals",
+    "logo_domain": "pitapitusa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Naf Naf Grill",
+    "aliases": [
+      "naf naf grill",
+      "nafnafgrill",
+      "naf naf grill store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "nafnafgrill.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Zoës Kitchen",
+    "aliases": [
+      "zos kitchen",
+      "zoskitchen"
+    ],
+    "semantic": "meals",
+    "logo_domain": "zoeskitchen.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mazzio's",
+    "aliases": [
+      "mazzio s",
+      "mazzios"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mazzios.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Black-eyed Pea",
+    "aliases": [
+      "black eyed pea",
+      "blackeyedpea"
+    ],
+    "semantic": "meals",
+    "logo_domain": "theblackeyedpea.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cotton Patch Cafe",
+    "aliases": [
+      "cotton patch cafe",
+      "cottonpatchcafe",
+      "cotton patch cafe store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "cottonpatch.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cheddar's Scratch Kitchen",
+    "aliases": [
+      "cheddar s scratch kitchen",
+      "cheddarsscratchkitchen"
+    ],
+    "semantic": "meals",
+    "logo_domain": "cheddars.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "O'Charley's",
+    "aliases": [
+      "o charley s",
+      "ocharleys"
+    ],
+    "semantic": "meals",
+    "logo_domain": "ocharleys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Logan's Roadhouse",
+    "aliases": [
+      "logan s roadhouse",
+      "logansroadhouse"
+    ],
+    "semantic": "meals",
+    "logo_domain": "logansroadhouse.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Saltgrass Steak House",
+    "aliases": [
+      "saltgrass steak house",
+      "saltgrasssteakhouse"
+    ],
+    "semantic": "meals",
+    "logo_domain": "saltgrass.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Claim Jumper",
+    "aliases": [
+      "claim jumper",
+      "claimjumper"
+    ],
+    "semantic": "meals",
+    "logo_domain": "claimjumper.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lazy Dog Restaurant & Bar",
+    "aliases": [
+      "lazy dog restaurant and bar",
+      "lazydogrestaurantandbar",
+      "lazy dog restaurant and bar store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "lazydogrestaurants.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Habit Burger Grill",
+    "aliases": [
+      "the habit burger grill",
+      "thehabitburgergrill",
+      "the habit burger grill store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "habitburger.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Islands Restaurants",
+    "aliases": [
+      "islands restaurants",
+      "islandsrestaurants",
+      "islands restaurants store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "islandsrestaurants.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hopdoddy Burger Bar",
+    "aliases": [
+      "hopdoddy burger bar",
+      "hopdoddyburgerbar",
+      "hopdoddy burger bar store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "hopdoddy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bareburger",
+    "aliases": [
+      "bareburger",
+      "bareburger store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bareburger.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Burger Lounge",
+    "aliases": [
+      "burger lounge",
+      "burgerlounge",
+      "burger lounge store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "burgerlounge.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Counter",
+    "aliases": [
+      "the counter",
+      "thecounter"
+    ],
+    "semantic": "meals",
+    "logo_domain": "thecounter.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Umami Burger",
+    "aliases": [
+      "umami burger",
+      "umamiburger",
+      "umami burger store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "umamiburger.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mooyah",
+    "aliases": [
+      "mooyah"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mooyah.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Burger 21",
+    "aliases": [
+      "burger 21",
+      "burger21",
+      "burger 21 store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "burger21.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Elevation Burger",
+    "aliases": [
+      "elevation burger",
+      "elevationburger",
+      "elevation burger store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "elevationburger.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "BGR The Burger Joint",
+    "aliases": [
+      "bgr the burger joint",
+      "bgrtheburgerjoint",
+      "bgr the burger joint store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bgrtheburgerjoint.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ted's Montana Grill",
+    "aliases": [
+      "ted s montana grill",
+      "tedsmontanagrill",
+      "ted s montana grill store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "tedsmontanagrill.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Johnny's Rockets",
+    "aliases": [
+      "johnny s rockets",
+      "johnnysrockets"
+    ],
+    "semantic": "meals",
+    "logo_domain": "johnnyrockets.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fuddruckers",
+    "aliases": [
+      "fuddruckers"
+    ],
+    "semantic": "meals",
+    "logo_domain": "fuddruckers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Melt",
+    "aliases": [
+      "the melt",
+      "themelt"
+    ],
+    "semantic": "meals",
+    "logo_domain": "themelt.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Grilled Cheese Society",
+    "aliases": [
+      "grilled cheese society",
+      "grilledcheesesociety",
+      "grilled cheese society store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "grilledcheesesociety.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Melt Shop",
+    "aliases": [
+      "melt shop",
+      "meltshop"
+    ],
+    "semantic": "meals",
+    "logo_domain": "meltshop.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tom & Chee",
+    "aliases": [
+      "tom and chee",
+      "tomandchee"
+    ],
+    "semantic": "meals",
+    "logo_domain": "tomandchee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Shah's Halal Food",
+    "aliases": [
+      "shah s halal food",
+      "shahshalalfood"
+    ],
+    "semantic": "meals",
+    "logo_domain": "shahshalalfood.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Gyroville",
+    "aliases": [
+      "gyroville"
+    ],
+    "semantic": "meals",
+    "logo_domain": "gyroville.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hummus Republic",
+    "aliases": [
+      "hummus republic",
+      "hummusrepublic"
+    ],
+    "semantic": "meals",
+    "logo_domain": "hummusrepublic.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nick the Greek",
+    "aliases": [
+      "nick the greek",
+      "nickthegreek"
+    ],
+    "semantic": "meals",
+    "logo_domain": "nickthegreek.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Curry Up Now",
+    "aliases": [
+      "curry up now",
+      "curryupnow"
+    ],
+    "semantic": "meals",
+    "logo_domain": "curryupnow.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tikka Shack",
+    "aliases": [
+      "tikka shack",
+      "tikkashack"
+    ],
+    "semantic": "meals",
+    "logo_domain": "tikkashack.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Masala Wok",
+    "aliases": [
+      "masala wok",
+      "masalawok"
+    ],
+    "semantic": "meals",
+    "logo_domain": "masalawok.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "NaanStop",
+    "aliases": [
+      "naanstop"
+    ],
+    "semantic": "meals",
+    "logo_domain": "naanstop.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wow Bao",
+    "aliases": [
+      "wow bao",
+      "wowbao"
+    ],
+    "semantic": "meals",
+    "logo_domain": "wowbao.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Leeann Chin",
+    "aliases": [
+      "leeann chin",
+      "leeannchin"
+    ],
+    "semantic": "meals",
+    "logo_domain": "leeannchin.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Manchu Wok",
+    "aliases": [
+      "manchu wok",
+      "manchuwok"
+    ],
+    "semantic": "meals",
+    "logo_domain": "manchuwok.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Genghis Grill",
+    "aliases": [
+      "genghis grill",
+      "genghisgrill",
+      "genghis grill store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "genghisgrill.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "HuHot Mongolian Grill",
+    "aliases": [
+      "huhot mongolian grill",
+      "huhotmongoliangrill",
+      "huhot mongolian grill store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "huhot.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "BD's Mongolian Grill",
+    "aliases": [
+      "bd s mongolian grill",
+      "bdsmongoliangrill",
+      "bd s mongolian grill store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "gomongo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mongolian BBQ",
+    "aliases": [
+      "mongolian bbq",
+      "mongolianbbq"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mongolianbbq.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bahama Breeze",
+    "aliases": [
+      "bahama breeze",
+      "bahamabreeze"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bahamabreeze.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Yardbird",
+    "aliases": [
+      "yardbird"
+    ],
+    "semantic": "meals",
+    "logo_domain": "runchickenrun.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Biscuitville",
+    "aliases": [
+      "biscuitville"
+    ],
+    "semantic": "meals",
+    "logo_domain": "biscuitville.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tudor's Biscuit World",
+    "aliases": [
+      "tudor s biscuit world",
+      "tudorsbiscuitworld"
+    ],
+    "semantic": "meals",
+    "logo_domain": "tudorsbiscuitworld.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Maple Street Biscuit Company",
+    "aliases": [
+      "maple street biscuit company",
+      "maplestreetbiscuitcompany"
+    ],
+    "semantic": "meals",
+    "logo_domain": "maplestreetbiscuits.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Honey Baked Ham",
+    "aliases": [
+      "honey baked ham",
+      "honeybakedham"
+    ],
+    "semantic": "meals",
+    "logo_domain": "honeybaked.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Boston Market",
+    "aliases": [
+      "boston market",
+      "bostonmarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "bostonmarket.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Cafe Express",
+    "aliases": [
+      "cafe express",
+      "cafeexpress",
+      "cafe express store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "cafe-express.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "La Madeleine",
+    "aliases": [
+      "la madeleine",
+      "lamadeleine"
+    ],
+    "semantic": "meals",
+    "logo_domain": "lamadeleine.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Le Pain Quotidien",
+    "aliases": [
+      "le pain quotidien",
+      "lepainquotidien"
+    ],
+    "semantic": "meals",
+    "logo_domain": "lepainquotidien.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Port of Subs",
+    "aliases": [
+      "port of subs",
+      "portofsubs"
+    ],
+    "semantic": "meals",
+    "logo_domain": "portofsubs.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Earl of Sandwich",
+    "aliases": [
+      "earl of sandwich",
+      "earlofsandwich"
+    ],
+    "semantic": "meals",
+    "logo_domain": "earlofsandwichusa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cheba Hut",
+    "aliases": [
+      "cheba hut",
+      "chebahut"
+    ],
+    "semantic": "meals",
+    "logo_domain": "chebahut.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ike's Love & Sandwiches",
+    "aliases": [
+      "ike s love and sandwiches",
+      "ikesloveandsandwiches"
+    ],
+    "semantic": "meals",
+    "logo_domain": "ikessandwich.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "D'Angelo Grilled Sandwiches",
+    "aliases": [
+      "d angelo grilled sandwiches",
+      "dangelogrilledsandwiches",
+      "d angelo grilled sandwiches store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "dangelos.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "DiBella's Subs",
+    "aliases": [
+      "dibella s subs",
+      "dibellassubs"
+    ],
+    "semantic": "meals",
+    "logo_domain": "dibellas.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lennys Grill & Subs",
+    "aliases": [
+      "lennys grill and subs",
+      "lennysgrillandsubs",
+      "lennys grill and subs store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "lennys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Goodcents",
+    "aliases": [
+      "goodcents"
+    ],
+    "semantic": "meals",
+    "logo_domain": "goodcentssubs.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Planet Sub",
+    "aliases": [
+      "planet sub",
+      "planetsub"
+    ],
+    "semantic": "meals",
+    "logo_domain": "planetsub.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mr. Pickle's Sandwich Shop",
+    "aliases": [
+      "mr pickle s sandwich shop",
+      "mrpicklessandwichshop"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mrpickles.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Roly Poly",
+    "aliases": [
+      "roly poly",
+      "rolypoly"
+    ],
+    "semantic": "meals",
+    "logo_domain": "rolypoly.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Potato Corner",
+    "aliases": [
+      "potato corner",
+      "potatocorner"
+    ],
+    "semantic": "meals",
+    "logo_domain": "potatocornerusa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Great Steak",
+    "aliases": [
+      "great steak",
+      "greatsteak"
+    ],
+    "semantic": "meals",
+    "logo_domain": "thegreatsteak.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Philly's Best",
+    "aliases": [
+      "philly s best",
+      "phillysbest"
+    ],
+    "semantic": "meals",
+    "logo_domain": "eatphillysbest.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Carvel",
+    "aliases": [
+      "carvel"
+    ],
+    "semantic": "meals",
+    "logo_domain": "carvel.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nestlé Toll House Café by Chip",
+    "aliases": [
+      "nestl toll house caf by chip",
+      "nestltollhousecafbychip"
+    ],
+    "semantic": "meals",
+    "logo_domain": "nestlecafe.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Rocky Mountain Chocolate Factory",
+    "aliases": [
+      "rocky mountain chocolate factory",
+      "rockymountainchocolatefactory"
+    ],
+    "semantic": "meals",
+    "logo_domain": "rmcf.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "See's Candies",
+    "aliases": [
+      "see s candies",
+      "seescandies"
+    ],
+    "semantic": "meals",
+    "logo_domain": "sees.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "IT'SUGAR",
+    "aliases": [
+      "it sugar",
+      "itsugar"
+    ],
+    "semantic": "meals",
+    "logo_domain": "itsugar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sugarfina",
+    "aliases": [
+      "sugarfina"
+    ],
+    "semantic": "meals",
+    "logo_domain": "sugarfina.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Edible Arrangements",
+    "aliases": [
+      "edible arrangements",
+      "ediblearrangements"
+    ],
+    "semantic": "meals",
+    "logo_domain": "ediblearrangements.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cinnaholic",
+    "aliases": [
+      "cinnaholic"
+    ],
+    "semantic": "meals",
+    "logo_domain": "cinnaholic.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hurts Donut",
+    "aliases": [
+      "hurts donut",
+      "hurtsdonut"
+    ],
+    "semantic": "meals",
+    "logo_domain": "wannahurts.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Voodoo Doughnut",
+    "aliases": [
+      "voodoo doughnut",
+      "voodoodoughnut"
+    ],
+    "semantic": "meals",
+    "logo_domain": "voodoodoughnut.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mochinut",
+    "aliases": [
+      "mochinut"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mochinut.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Porto's Bakery",
+    "aliases": [
+      "porto s bakery",
+      "portosbakery",
+      "porto s bakery store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "portosbakery.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SusieCakes",
+    "aliases": [
+      "susiecakes"
+    ],
+    "semantic": "meals",
+    "logo_domain": "susiecakes.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bruegger's Bagels",
+    "aliases": [
+      "bruegger s bagels",
+      "brueggersbagels"
+    ],
+    "semantic": "meals",
+    "logo_domain": "brueggers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Noah's New York Bagels",
+    "aliases": [
+      "noah s new york bagels",
+      "noahsnewyorkbagels"
+    ],
+    "semantic": "meals",
+    "logo_domain": "noahs.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Manhattan Bagel",
+    "aliases": [
+      "manhattan bagel",
+      "manhattanbagel"
+    ],
+    "semantic": "meals",
+    "logo_domain": "manhattanbagel.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Big Apple Bagels",
+    "aliases": [
+      "big apple bagels",
+      "bigapplebagels"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bigapplebagels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bagel Brands",
+    "aliases": [
+      "bagel brands",
+      "bagelbrands"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bagelbrands.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Black Rifle Coffee Company",
+    "aliases": [
+      "black rifle coffee company",
+      "blackriflecoffeecompany",
+      "black rifle coffee company store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "blackriflecoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dunn Brothers Coffee",
+    "aliases": [
+      "dunn brothers coffee",
+      "dunnbrotherscoffee",
+      "dunn brothers coffee store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "dunnbrothers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Coffee Beanery",
+    "aliases": [
+      "coffee beanery",
+      "coffeebeanery",
+      "coffee beanery store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "coffeebeanery.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bad Ass Coffee of Hawaii",
+    "aliases": [
+      "bad ass coffee of hawaii",
+      "badasscoffeeofhawaii",
+      "bad ass coffee of hawaii store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "badasscoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Just Love Coffee Cafe",
+    "aliases": [
+      "just love coffee cafe",
+      "justlovecoffeecafe",
+      "just love coffee cafe store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "justlovecoffeecafe.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Roasterie",
+    "aliases": [
+      "the roasterie",
+      "theroasterie"
+    ],
+    "semantic": "meals",
+    "logo_domain": "theroasterie.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Joe Coffee Company",
+    "aliases": [
+      "joe coffee company",
+      "joecoffeecompany",
+      "joe coffee company store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "joecoffeecompany.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Reborn Coffee",
+    "aliases": [
+      "reborn coffee",
+      "reborncoffee",
+      "reborn coffee store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "reborncoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Better Buzz Coffee",
+    "aliases": [
+      "better buzz coffee",
+      "betterbuzzcoffee",
+      "better buzz coffee store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "betterbuzzcoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Aroma Joe's",
+    "aliases": [
+      "aroma joe s",
+      "aromajoes"
+    ],
+    "semantic": "meals",
+    "logo_domain": "aromajoes.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Honey Dew Donuts",
+    "aliases": [
+      "honey dew donuts",
+      "honeydewdonuts"
+    ],
+    "semantic": "meals",
+    "logo_domain": "honeydewdonuts.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Marylou's Coffee",
+    "aliases": [
+      "marylou s coffee",
+      "marylouscoffee",
+      "marylou s coffee store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "marylous.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Saxbys",
+    "aliases": [
+      "saxbys"
+    ],
+    "semantic": "meals",
+    "logo_domain": "saxbyscoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Planet Smoothie",
+    "aliases": [
+      "planet smoothie",
+      "planetsmoothie"
+    ],
+    "semantic": "meals",
+    "logo_domain": "planetsmoothie.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Smoothie Factory + Kitchen",
+    "aliases": [
+      "smoothie factory kitchen",
+      "smoothiefactorykitchen"
+    ],
+    "semantic": "meals",
+    "logo_domain": "smoothiefactory.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "JuiceLand",
+    "aliases": [
+      "juiceland"
+    ],
+    "semantic": "meals",
+    "logo_domain": "juiceland.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Main Squeeze Juice Co.",
+    "aliases": [
+      "main squeeze juice co",
+      "mainsqueezejuiceco"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mainsqueezejuiceco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "I Love Juice Bar",
+    "aliases": [
+      "i love juice bar",
+      "ilovejuicebar"
+    ],
+    "semantic": "meals",
+    "logo_domain": "ilovejuicebar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Frutta Bowls",
+    "aliases": [
+      "frutta bowls",
+      "fruttabowls"
+    ],
+    "semantic": "meals",
+    "logo_domain": "fruttabowls.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SoBol",
+    "aliases": [
+      "sobol"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mysobol.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Everbowl",
+    "aliases": [
+      "everbowl"
+    ],
+    "semantic": "meals",
+    "logo_domain": "everbowl.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nautical Bowls",
+    "aliases": [
+      "nautical bowls",
+      "nauticalbowls"
+    ],
+    "semantic": "meals",
+    "logo_domain": "nauticalbowls.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Toastique",
+    "aliases": [
+      "toastique"
+    ],
+    "semantic": "meals",
+    "logo_domain": "toastique.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sweetberry Bowls",
+    "aliases": [
+      "sweetberry bowls",
+      "sweetberrybowls"
+    ],
+    "semantic": "meals",
+    "logo_domain": "sweetberrybowls.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "DoorDash",
+    "aliases": [
+      "doordash"
+    ],
+    "semantic": "meals",
+    "logo_domain": "doordash.com",
+    "confidence": "medium",
+    "notes": "Delivery-related charges may represent meals or merchant platform fees."
+  },
+  {
+    "canonical_name": "Uber Eats",
+    "aliases": [
+      "uber eats",
+      "ubereats"
+    ],
+    "semantic": "meals",
+    "logo_domain": "ubereats.com",
+    "confidence": "medium",
+    "notes": "Delivery-related charges may represent meals or merchant platform fees."
+  },
+  {
+    "canonical_name": "Grubhub",
+    "aliases": [
+      "grubhub"
+    ],
+    "semantic": "meals",
+    "logo_domain": "grubhub.com",
+    "confidence": "medium",
+    "notes": "Delivery-related charges may represent meals or merchant platform fees."
+  },
+  {
+    "canonical_name": "Postmates",
+    "aliases": [
+      "postmates"
+    ],
+    "semantic": "meals",
+    "logo_domain": "postmates.com",
+    "confidence": "medium",
+    "notes": "Delivery-related charges may represent meals or merchant platform fees."
+  },
+  {
+    "canonical_name": "Seamless",
+    "aliases": [
+      "seamless"
+    ],
+    "semantic": "meals",
+    "logo_domain": "seamless.com",
+    "confidence": "medium",
+    "notes": "Delivery-related charges may represent meals or merchant platform fees."
+  },
+  {
+    "canonical_name": "ChowNow",
+    "aliases": [
+      "chownow"
+    ],
+    "semantic": "meals",
+    "logo_domain": "chownow.com",
+    "confidence": "medium",
+    "notes": "Delivery-related charges may represent meals or merchant platform fees."
+  },
+  {
+    "canonical_name": "Slice",
+    "aliases": [
+      "slice"
+    ],
+    "semantic": "meals",
+    "logo_domain": "slice.com",
+    "confidence": "medium",
+    "notes": "Delivery-related charges may represent meals or merchant platform fees."
+  },
+  {
+    "canonical_name": "Goldbelly",
+    "aliases": [
+      "goldbelly"
+    ],
+    "semantic": "meals",
+    "logo_domain": "goldbelly.com",
+    "confidence": "medium",
+    "notes": "Delivery-related charges may represent meals or merchant platform fees."
+  },
+  {
+    "canonical_name": "Gopuff",
+    "aliases": [
+      "gopuff"
+    ],
+    "semantic": "meals",
+    "logo_domain": "gopuff.com",
+    "confidence": "medium",
+    "notes": "Delivery-related charges may represent meals or merchant platform fees."
+  },
+  {
+    "canonical_name": "Instacart",
+    "aliases": [
+      "instacart"
+    ],
+    "semantic": "meals",
+    "logo_domain": "instacart.com",
+    "confidence": "medium",
+    "notes": "Delivery-related charges may represent meals or merchant platform fees."
+  },
+  {
+    "canonical_name": "Shipt",
+    "aliases": [
+      "shipt"
+    ],
+    "semantic": "meals",
+    "logo_domain": "shipt.com",
+    "confidence": "medium",
+    "notes": "Delivery-related charges may represent meals or merchant platform fees."
+  },
+  {
+    "canonical_name": "Favor",
+    "aliases": [
+      "favor"
+    ],
+    "semantic": "meals",
+    "logo_domain": "favordelivery.com",
+    "confidence": "medium",
+    "notes": "Delivery-related charges may represent meals or merchant platform fees."
+  },
+  {
+    "canonical_name": "Delivery.com",
+    "aliases": [
+      "delivery com",
+      "deliverycom"
+    ],
+    "semantic": "meals",
+    "logo_domain": "delivery.com",
+    "confidence": "medium",
+    "notes": "Delivery-related charges may represent meals or merchant platform fees."
+  },
+  {
+    "canonical_name": "Toast TakeOut",
+    "aliases": [
+      "toast takeout",
+      "toasttakeout"
+    ],
+    "semantic": "meals",
+    "logo_domain": "toasttab.com",
+    "confidence": "medium",
+    "notes": "Delivery-related charges may represent meals or merchant platform fees."
+  },
+  {
+    "canonical_name": "Beyond Menu",
+    "aliases": [
+      "beyond menu",
+      "beyondmenu"
+    ],
+    "semantic": "meals",
+    "logo_domain": "beyondmenu.com",
+    "confidence": "medium",
+    "notes": "Delivery-related charges may represent meals or merchant platform fees."
+  },
+  {
+    "canonical_name": "EatStreet",
+    "aliases": [
+      "eatstreet"
+    ],
+    "semantic": "meals",
+    "logo_domain": "eatstreet.com",
+    "confidence": "medium",
+    "notes": "Delivery-related charges may represent meals or merchant platform fees."
+  },
+  {
+    "canonical_name": "Caviar",
+    "aliases": [
+      "caviar"
+    ],
+    "semantic": "meals",
+    "logo_domain": "doordash.com",
+    "confidence": "medium",
+    "notes": "Delivery-related charges may represent meals or merchant platform fees."
+  },
+  {
+    "canonical_name": "Waitr",
+    "aliases": [
+      "waitr"
+    ],
+    "semantic": "meals",
+    "logo_domain": "asap.com",
+    "confidence": "medium",
+    "notes": "Delivery-related charges may represent meals or merchant platform fees."
+  },
+  {
+    "canonical_name": "Bite Squad",
+    "aliases": [
+      "bite squad",
+      "bitesquad"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bitesquad.com",
+    "confidence": "medium",
+    "notes": "Delivery-related charges may represent meals or merchant platform fees."
+  },
+  {
+    "canonical_name": "ASAP",
+    "aliases": [
+      "asap"
+    ],
+    "semantic": "meals",
+    "logo_domain": "asap.com",
+    "confidence": "medium",
+    "notes": "Delivery-related charges may represent meals or merchant platform fees."
+  },
+  {
+    "canonical_name": "FreshDirect",
+    "aliases": [
+      "freshdirect"
+    ],
+    "semantic": "meals",
+    "logo_domain": "freshdirect.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Thrive Market",
+    "aliases": [
+      "thrive market",
+      "thrivemarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "thrivemarket.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Whole Foods Market",
+    "aliases": [
+      "whole foods market",
+      "wholefoodsmarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "wholefoodsmarket.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Trader Joe's",
+    "aliases": [
+      "trader joe s",
+      "traderjoes"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "traderjoes.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Sprouts Farmers Market",
+    "aliases": [
+      "sprouts farmers market",
+      "sproutsfarmersmarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "sprouts.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "The Fresh Market",
+    "aliases": [
+      "the fresh market",
+      "thefreshmarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "thefreshmarket.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Publix",
+    "aliases": [
+      "publix"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "publix.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Kroger",
+    "aliases": [
+      "kroger"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "kroger.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Safeway",
+    "aliases": [
+      "safeway"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "safeway.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Albertsons",
+    "aliases": [
+      "albertsons"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "albertsons.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Vons",
+    "aliases": [
+      "vons"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "vons.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Jewel-Osco",
+    "aliases": [
+      "jewel osco",
+      "jewelosco"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "jewelosco.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Shaw's",
+    "aliases": [
+      "shaw s",
+      "shaws"
+    ],
+    "semantic": "meals",
+    "logo_domain": "shaws.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Acme Markets",
+    "aliases": [
+      "acme markets",
+      "acmemarkets"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "acmemarkets.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Tom Thumb",
+    "aliases": [
+      "tom thumb",
+      "tomthumb"
+    ],
+    "semantic": "meals",
+    "logo_domain": "tomthumb.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Randalls",
+    "aliases": [
+      "randalls"
+    ],
+    "semantic": "meals",
+    "logo_domain": "randalls.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Harris Teeter",
+    "aliases": [
+      "harris teeter",
+      "harristeeter"
+    ],
+    "semantic": "meals",
+    "logo_domain": "harristeeter.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Food Lion",
+    "aliases": [
+      "food lion",
+      "foodlion"
+    ],
+    "semantic": "meals",
+    "logo_domain": "foodlion.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Giant Food",
+    "aliases": [
+      "giant food",
+      "giantfood"
+    ],
+    "semantic": "meals",
+    "logo_domain": "giantfood.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Giant Food Stores",
+    "aliases": [
+      "giant food stores",
+      "giantfoodstores"
+    ],
+    "semantic": "meals",
+    "logo_domain": "giantfoodstores.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Stop & Shop",
+    "aliases": [
+      "stop and shop",
+      "stopandshop"
+    ],
+    "semantic": "meals",
+    "logo_domain": "stopandshop.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "H-E-B",
+    "aliases": [
+      "h e b"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "heb.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Central Market",
+    "aliases": [
+      "central market",
+      "centralmarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "centralmarket.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Wegmans",
+    "aliases": [
+      "wegmans"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "wegmans.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Meijer",
+    "aliases": [
+      "meijer"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "meijer.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Hy-Vee",
+    "aliases": [
+      "hy vee",
+      "hyvee"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "hy-vee.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "WinCo Foods",
+    "aliases": [
+      "winco foods",
+      "wincofoods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "wincofoods.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Aldi",
+    "aliases": [
+      "aldi"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "aldi.us",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Lidl",
+    "aliases": [
+      "lidl"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "lidl.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Save Mart",
+    "aliases": [
+      "save mart",
+      "savemart"
+    ],
+    "semantic": "meals",
+    "logo_domain": "savemart.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lucky California",
+    "aliases": [
+      "lucky california",
+      "luckycalifornia"
+    ],
+    "semantic": "meals",
+    "logo_domain": "luckysupermarkets.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Raley's",
+    "aliases": [
+      "raley s",
+      "raleys"
+    ],
+    "semantic": "meals",
+    "logo_domain": "raleys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bel Air",
+    "aliases": [
+      "bel air",
+      "belair"
+    ],
+    "semantic": "meals",
+    "logo_domain": "raleys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nob Hill Foods",
+    "aliases": [
+      "nob hill foods",
+      "nobhillfoods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "raleys.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Stater Bros. Markets",
+    "aliases": [
+      "stater bros markets",
+      "staterbrosmarkets"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "staterbros.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Smart & Final",
+    "aliases": [
+      "smart and final",
+      "smartandfinal"
+    ],
+    "semantic": "meals",
+    "logo_domain": "smartandfinal.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Grocery Outlet",
+    "aliases": [
+      "grocery outlet",
+      "groceryoutlet"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "groceryoutlet.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Food 4 Less",
+    "aliases": [
+      "food 4 less",
+      "food4less"
+    ],
+    "semantic": "meals",
+    "logo_domain": "food4less.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ralphs",
+    "aliases": [
+      "ralphs"
+    ],
+    "semantic": "meals",
+    "logo_domain": "ralphs.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fry's Food Stores",
+    "aliases": [
+      "fry s food stores",
+      "frysfoodstores"
+    ],
+    "semantic": "meals",
+    "logo_domain": "frysfood.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Smith's Food and Drug",
+    "aliases": [
+      "smith s food and drug",
+      "smithsfoodanddrug"
+    ],
+    "semantic": "meals",
+    "logo_domain": "smithsfoodanddrug.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "King Soopers",
+    "aliases": [
+      "king soopers",
+      "kingsoopers"
+    ],
+    "semantic": "meals",
+    "logo_domain": "kingsoopers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "City Market",
+    "aliases": [
+      "city market",
+      "citymarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "citymarket.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Dillons",
+    "aliases": [
+      "dillons"
+    ],
+    "semantic": "meals",
+    "logo_domain": "dillons.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fred Meyer",
+    "aliases": [
+      "fred meyer",
+      "fredmeyer"
+    ],
+    "semantic": "meals",
+    "logo_domain": "fredmeyer.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "QFC",
+    "aliases": [
+      "qfc"
+    ],
+    "semantic": "meals",
+    "logo_domain": "qfc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mariano's",
+    "aliases": [
+      "mariano s",
+      "marianos"
+    ],
+    "semantic": "meals",
+    "logo_domain": "marianos.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pick 'n Save",
+    "aliases": [
+      "pick n save",
+      "picknsave"
+    ],
+    "semantic": "meals",
+    "logo_domain": "picknsave.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Metro Market",
+    "aliases": [
+      "metro market",
+      "metromarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "metromarket.net",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Gerbes",
+    "aliases": [
+      "gerbes"
+    ],
+    "semantic": "meals",
+    "logo_domain": "gerbes.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Baker's",
+    "aliases": [
+      "baker s",
+      "bakers"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bakersplus.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Jay C Food Stores",
+    "aliases": [
+      "jay c food stores",
+      "jaycfoodstores"
+    ],
+    "semantic": "meals",
+    "logo_domain": "jaycfoods.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pay Less Super Markets",
+    "aliases": [
+      "pay less super markets",
+      "paylesssupermarkets"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "pay-less.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Hannaford",
+    "aliases": [
+      "hannaford"
+    ],
+    "semantic": "meals",
+    "logo_domain": "hannaford.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Market Basket",
+    "aliases": [
+      "market basket",
+      "marketbasket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "shopmarketbasket.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Price Chopper",
+    "aliases": [
+      "price chopper",
+      "pricechopper"
+    ],
+    "semantic": "meals",
+    "logo_domain": "pricechopper.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Market 32",
+    "aliases": [
+      "market 32",
+      "market32"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "market32.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "ShopRite",
+    "aliases": [
+      "shoprite"
+    ],
+    "semantic": "meals",
+    "logo_domain": "shoprite.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Weis Markets",
+    "aliases": [
+      "weis markets",
+      "weismarkets"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "weismarkets.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Piggly Wiggly",
+    "aliases": [
+      "piggly wiggly",
+      "pigglywiggly"
+    ],
+    "semantic": "meals",
+    "logo_domain": "pigglywiggly.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ingles Markets",
+    "aliases": [
+      "ingles markets",
+      "inglesmarkets"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "ingles-markets.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Lowes Foods",
+    "aliases": [
+      "lowes foods",
+      "lowesfoods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "lowesfoods.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Winn-Dixie",
+    "aliases": [
+      "winn dixie",
+      "winndixie"
+    ],
+    "semantic": "meals",
+    "logo_domain": "winndixie.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Harveys Supermarket",
+    "aliases": [
+      "harveys supermarket",
+      "harveyssupermarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "harveyssupermarkets.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Fresco y Más",
+    "aliases": [
+      "fresco y ms",
+      "frescoyms"
+    ],
+    "semantic": "meals",
+    "logo_domain": "frescoymas.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Brookshire's",
+    "aliases": [
+      "brookshire s",
+      "brookshires"
+    ],
+    "semantic": "meals",
+    "logo_domain": "brookshires.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Super 1 Foods",
+    "aliases": [
+      "super 1 foods",
+      "super1foods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "super1foods.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "United Supermarkets",
+    "aliases": [
+      "united supermarkets",
+      "unitedsupermarkets"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "unitedsupermarkets.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Market Street",
+    "aliases": [
+      "market street",
+      "marketstreet"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "marketstreetunited.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Rouses Markets",
+    "aliases": [
+      "rouses markets",
+      "rousesmarkets"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "rouses.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Schnucks",
+    "aliases": [
+      "schnucks"
+    ],
+    "semantic": "meals",
+    "logo_domain": "schnucks.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dierbergs",
+    "aliases": [
+      "dierbergs"
+    ],
+    "semantic": "meals",
+    "logo_domain": "dierbergs.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fareway",
+    "aliases": [
+      "fareway"
+    ],
+    "semantic": "meals",
+    "logo_domain": "fareway.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Festival Foods",
+    "aliases": [
+      "festival foods",
+      "festivalfoods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "festfoods.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Woodman's Markets",
+    "aliases": [
+      "woodman s markets",
+      "woodmansmarkets"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "woodmans-food.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Fresh Thyme Market",
+    "aliases": [
+      "fresh thyme market",
+      "freshthymemarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "freshthyme.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Natural Grocers",
+    "aliases": [
+      "natural grocers",
+      "naturalgrocers"
+    ],
+    "semantic": "meals",
+    "logo_domain": "naturalgrocers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Erewhon",
+    "aliases": [
+      "erewhon"
+    ],
+    "semantic": "meals",
+    "logo_domain": "erewhon.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Gelson's",
+    "aliases": [
+      "gelson s",
+      "gelsons"
+    ],
+    "semantic": "meals",
+    "logo_domain": "gelsons.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bristol Farms",
+    "aliases": [
+      "bristol farms",
+      "bristolfarms"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bristolfarms.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "H Mart",
+    "aliases": [
+      "h mart",
+      "hmart"
+    ],
+    "semantic": "meals",
+    "logo_domain": "hmart.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "99 Ranch Market",
+    "aliases": [
+      "99 ranch market",
+      "99ranchmarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "99ranch.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Seafood City",
+    "aliases": [
+      "seafood city",
+      "seafoodcity"
+    ],
+    "semantic": "meals",
+    "logo_domain": "seafoodcity.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Vallarta Supermarkets",
+    "aliases": [
+      "vallarta supermarkets",
+      "vallartasupermarkets"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "vallartasupermarkets.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Northgate Market",
+    "aliases": [
+      "northgate market",
+      "northgatemarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "northgatemarket.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "El Super",
+    "aliases": [
+      "el super",
+      "elsuper"
+    ],
+    "semantic": "meals",
+    "logo_domain": "elsupermarkets.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cardenas Markets",
+    "aliases": [
+      "cardenas markets",
+      "cardenasmarkets"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "cardenasmarkets.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Superior Grocers",
+    "aliases": [
+      "superior grocers",
+      "superiorgrocers"
+    ],
+    "semantic": "meals",
+    "logo_domain": "superiorgrocers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Gristedes",
+    "aliases": [
+      "gristedes"
+    ],
+    "semantic": "meals",
+    "logo_domain": "gristedes.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Morton Williams",
+    "aliases": [
+      "morton williams",
+      "mortonwilliams"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mortonwilliams.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Key Food",
+    "aliases": [
+      "key food",
+      "keyfood"
+    ],
+    "semantic": "meals",
+    "logo_domain": "keyfood.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Foodtown",
+    "aliases": [
+      "foodtown"
+    ],
+    "semantic": "meals",
+    "logo_domain": "foodtown.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Gourmet Garage",
+    "aliases": [
+      "gourmet garage",
+      "gourmetgarage"
+    ],
+    "semantic": "meals",
+    "logo_domain": "gourmetgarage.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Citarella",
+    "aliases": [
+      "citarella"
+    ],
+    "semantic": "meals",
+    "logo_domain": "citarella.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Balducci's",
+    "aliases": [
+      "balducci s",
+      "balduccis"
+    ],
+    "semantic": "meals",
+    "logo_domain": "balduccis.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dean & DeLuca",
+    "aliases": [
+      "dean and deluca",
+      "deananddeluca"
+    ],
+    "semantic": "meals",
+    "logo_domain": "deandeluca.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Eataly",
+    "aliases": [
+      "eataly"
+    ],
+    "semantic": "meals",
+    "logo_domain": "eataly.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lunds & Byerlys",
+    "aliases": [
+      "lunds and byerlys",
+      "lundsandbyerlys"
+    ],
+    "semantic": "meals",
+    "logo_domain": "lundsandbyerlys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kowalski's Markets",
+    "aliases": [
+      "kowalski s markets",
+      "kowalskismarkets"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "kowalskis.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "PCC Community Markets",
+    "aliases": [
+      "pcc community markets",
+      "pcccommunitymarkets"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "pccmarkets.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "New Seasons Market",
+    "aliases": [
+      "new seasons market",
+      "newseasonsmarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "newseasonsmarket.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Metropolitan Market",
+    "aliases": [
+      "metropolitan market",
+      "metropolitanmarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "metropolitan-market.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Town & Country Markets",
+    "aliases": [
+      "town and country markets",
+      "townandcountrymarkets"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "townandcountrymarkets.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Haggen",
+    "aliases": [
+      "haggen"
+    ],
+    "semantic": "meals",
+    "logo_domain": "haggen.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bashas'",
+    "aliases": [
+      "bashas"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bashas.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Food City",
+    "aliases": [
+      "food city",
+      "foodcity"
+    ],
+    "semantic": "meals",
+    "logo_domain": "myfoodcity.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "AJ's Fine Foods",
+    "aliases": [
+      "aj s fine foods",
+      "ajsfinefoods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "ajsfinefoods.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Harmons Grocery",
+    "aliases": [
+      "harmons grocery",
+      "harmonsgrocery"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "harmonsgrocery.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Lee's Marketplace",
+    "aliases": [
+      "lee s marketplace",
+      "leesmarketplace"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "leesmarketplace.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Macey's",
+    "aliases": [
+      "macey s",
+      "maceys"
+    ],
+    "semantic": "meals",
+    "logo_domain": "maceys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Reasor's",
+    "aliases": [
+      "reasor s",
+      "reasors"
+    ],
+    "semantic": "meals",
+    "logo_domain": "reasors.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Homeland",
+    "aliases": [
+      "homeland"
+    ],
+    "semantic": "meals",
+    "logo_domain": "homelandstores.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Price Cutter",
+    "aliases": [
+      "price cutter",
+      "pricecutter"
+    ],
+    "semantic": "meals",
+    "logo_domain": "pricecutteronline.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Harps Food Stores",
+    "aliases": [
+      "harps food stores",
+      "harpsfoodstores"
+    ],
+    "semantic": "meals",
+    "logo_domain": "harpsfood.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cash Saver",
+    "aliases": [
+      "cash saver",
+      "cashsaver"
+    ],
+    "semantic": "meals",
+    "logo_domain": "cashsaver.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pyramid Foods",
+    "aliases": [
+      "pyramid foods",
+      "pyramidfoods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "pyramidfoods.net",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "County Market",
+    "aliases": [
+      "county market",
+      "countymarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "mycountymarket.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Coborn's",
+    "aliases": [
+      "coborn s",
+      "coborns"
+    ],
+    "semantic": "meals",
+    "logo_domain": "coborns.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cash Wise Foods",
+    "aliases": [
+      "cash wise foods",
+      "cashwisefoods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "cashwise.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Hornbacher's",
+    "aliases": [
+      "hornbacher s",
+      "hornbachers"
+    ],
+    "semantic": "meals",
+    "logo_domain": "hornbachers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SpartanNash",
+    "aliases": [
+      "spartannash"
+    ],
+    "semantic": "meals",
+    "logo_domain": "spartannash.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Family Fare",
+    "aliases": [
+      "family fare",
+      "familyfare"
+    ],
+    "semantic": "meals",
+    "logo_domain": "shopfamilyfare.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Martin's Super Markets",
+    "aliases": [
+      "martin s super markets",
+      "martinssupermarkets"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "martinssupermarkets.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Busch's Fresh Food Market",
+    "aliases": [
+      "busch s fresh food market",
+      "buschsfreshfoodmarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "buschs.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Plum Market",
+    "aliases": [
+      "plum market",
+      "plummarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "plummarket.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Heinen's",
+    "aliases": [
+      "heinen s",
+      "heinens"
+    ],
+    "semantic": "meals",
+    "logo_domain": "heinens.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Marc's",
+    "aliases": [
+      "marc s",
+      "marcs"
+    ],
+    "semantic": "meals",
+    "logo_domain": "marcs.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Giant Eagle",
+    "aliases": [
+      "giant eagle",
+      "gianteagle"
+    ],
+    "semantic": "meals",
+    "logo_domain": "gianteagle.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Market District",
+    "aliases": [
+      "market district",
+      "marketdistrict"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "marketdistrict.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Acme Fresh Market",
+    "aliases": [
+      "acme fresh market",
+      "acmefreshmarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "acmestores.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Dorothy Lane Market",
+    "aliases": [
+      "dorothy lane market",
+      "dorothylanemarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "dorothylane.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Jungle Jim's International Market",
+    "aliases": [
+      "jungle jim s international market",
+      "junglejimsinternationalmarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "junglejims.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Fresh Encounter",
+    "aliases": [
+      "fresh encounter",
+      "freshencounter"
+    ],
+    "semantic": "meals",
+    "logo_domain": "freshencounter.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Save A Lot",
+    "aliases": [
+      "save a lot",
+      "savealot"
+    ],
+    "semantic": "meals",
+    "logo_domain": "savealot.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Food Bazaar",
+    "aliases": [
+      "food bazaar",
+      "foodbazaar"
+    ],
+    "semantic": "meals",
+    "logo_domain": "foodbazaar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Western Beef",
+    "aliases": [
+      "western beef",
+      "westernbeef"
+    ],
+    "semantic": "meals",
+    "logo_domain": "westernbeef.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Associated Supermarkets",
+    "aliases": [
+      "associated supermarkets",
+      "associatedsupermarkets"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "associatedsupermarkets.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "C-Town Supermarkets",
+    "aliases": [
+      "c town supermarkets",
+      "ctownsupermarkets"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "ctownsupermarkets.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Bravo Supermarkets",
+    "aliases": [
+      "bravo supermarkets",
+      "bravosupermarkets"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "bravosupermarkets.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Fine Fare Supermarkets",
+    "aliases": [
+      "fine fare supermarkets",
+      "finefaresupermarkets"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "finefaresupermarkets.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Gala Foods",
+    "aliases": [
+      "gala foods",
+      "galafoods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "galafoods.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "DeCicco & Sons",
+    "aliases": [
+      "decicco and sons",
+      "deciccoandsons"
+    ],
+    "semantic": "meals",
+    "logo_domain": "deciccoandsons.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Stew Leonard's",
+    "aliases": [
+      "stew leonard s",
+      "stewleonards"
+    ],
+    "semantic": "meals",
+    "logo_domain": "stewleonards.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Big Y",
+    "aliases": [
+      "big y",
+      "bigy"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bigy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Roche Bros.",
+    "aliases": [
+      "roche bros",
+      "rochebros"
+    ],
+    "semantic": "meals",
+    "logo_domain": "rochebros.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Star Market",
+    "aliases": [
+      "star market",
+      "starmarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "starmarket.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Price Rite Marketplace",
+    "aliases": [
+      "price rite marketplace",
+      "priceritemarketplace"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "priceritemarketplace.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Dave's Fresh Marketplace",
+    "aliases": [
+      "dave s fresh marketplace",
+      "davesfreshmarketplace"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "davesmarketplace.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Wawa",
+    "aliases": [
+      "wawa"
+    ],
+    "semantic": "meals",
+    "logo_domain": "wawa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sheetz",
+    "aliases": [
+      "sheetz"
+    ],
+    "semantic": "meals",
+    "logo_domain": "sheetz.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "QuikTrip",
+    "aliases": [
+      "quiktrip"
+    ],
+    "semantic": "meals",
+    "logo_domain": "quiktrip.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "RaceTrac",
+    "aliases": [
+      "racetrac"
+    ],
+    "semantic": "meals",
+    "logo_domain": "racetrac.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Casey's",
+    "aliases": [
+      "casey s",
+      "caseys"
+    ],
+    "semantic": "meals",
+    "logo_domain": "caseys.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kwik Trip",
+    "aliases": [
+      "kwik trip",
+      "kwiktrip"
+    ],
+    "semantic": "meals",
+    "logo_domain": "kwiktrip.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kum & Go",
+    "aliases": [
+      "kum and go",
+      "kumandgo"
+    ],
+    "semantic": "meals",
+    "logo_domain": "kumandgo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Maverik",
+    "aliases": [
+      "maverik"
+    ],
+    "semantic": "meals",
+    "logo_domain": "maverik.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Love's Travel Stops",
+    "aliases": [
+      "love s travel stops",
+      "lovestravelstops"
+    ],
+    "semantic": "meals",
+    "logo_domain": "loves.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pilot Flying J",
+    "aliases": [
+      "pilot flying j",
+      "pilotflyingj"
+    ],
+    "semantic": "meals",
+    "logo_domain": "pilotflyingj.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "7-Eleven",
+    "aliases": [
+      "7 eleven",
+      "7eleven"
+    ],
+    "semantic": "meals",
+    "logo_domain": "7-eleven.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Circle K",
+    "aliases": [
+      "circle k",
+      "circlek"
+    ],
+    "semantic": "meals",
+    "logo_domain": "circlek.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Speedway",
+    "aliases": [
+      "speedway"
+    ],
+    "semantic": "meals",
+    "logo_domain": "speedway.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Thorntons",
+    "aliases": [
+      "thorntons"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mythorntons.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Royal Farms",
+    "aliases": [
+      "royal farms",
+      "royalfarms"
+    ],
+    "semantic": "meals",
+    "logo_domain": "royalfarms.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cumberland Farms",
+    "aliases": [
+      "cumberland farms",
+      "cumberlandfarms"
+    ],
+    "semantic": "meals",
+    "logo_domain": "cumberlandfarms.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Stewart's Shops",
+    "aliases": [
+      "stewart s shops",
+      "stewartsshops"
+    ],
+    "semantic": "meals",
+    "logo_domain": "stewartsshops.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Turkey Hill Minit Markets",
+    "aliases": [
+      "turkey hill minit markets",
+      "turkeyhillminitmarkets"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "turkeyhillstores.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "GetGo",
+    "aliases": [
+      "getgo"
+    ],
+    "semantic": "meals",
+    "logo_domain": "getgocafe.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Rutter's",
+    "aliases": [
+      "rutter s",
+      "rutters"
+    ],
+    "semantic": "meals",
+    "logo_domain": "rutters.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Parker's Kitchen",
+    "aliases": [
+      "parker s kitchen",
+      "parkerskitchen"
+    ],
+    "semantic": "meals",
+    "logo_domain": "parkerskitchen.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Buc-ee's",
+    "aliases": [
+      "buc ee s",
+      "bucees"
+    ],
+    "semantic": "meals",
+    "logo_domain": "buc-ees.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CEFCO",
+    "aliases": [
+      "cefco"
+    ],
+    "semantic": "meals",
+    "logo_domain": "cefcostores.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Murphy USA",
+    "aliases": [
+      "murphy usa",
+      "murphyusa"
+    ],
+    "semantic": "meals",
+    "logo_domain": "murphyusa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mapco",
+    "aliases": [
+      "mapco"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mapcorewards.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Weigel's",
+    "aliases": [
+      "weigel s",
+      "weigels"
+    ],
+    "semantic": "meals",
+    "logo_domain": "weigels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Spinx",
+    "aliases": [
+      "spinx"
+    ],
+    "semantic": "meals",
+    "logo_domain": "spinx.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "GATE",
+    "aliases": [
+      "gate"
+    ],
+    "semantic": "meals",
+    "logo_domain": "gatepetro.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Enmarket",
+    "aliases": [
+      "enmarket"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "enmarket.com",
+    "confidence": "medium",
+    "notes": "Non-restaurant SMBs may need to override grocery purchases based on business purpose."
+  },
+  {
+    "canonical_name": "Dash In",
+    "aliases": [
+      "dash in",
+      "dashin"
+    ],
+    "semantic": "meals",
+    "logo_domain": "dashin.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Foxtrot",
+    "aliases": [
+      "foxtrot"
+    ],
+    "semantic": "meals",
+    "logo_domain": "foxtrotco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Vitamin Shoppe",
+    "aliases": [
+      "the vitamin shoppe",
+      "thevitaminshoppe"
+    ],
+    "semantic": "meals",
+    "logo_domain": "vitaminshoppe.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "GNC",
+    "aliases": [
+      "gnc"
+    ],
+    "semantic": "meals",
+    "logo_domain": "gnc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nutrition Smart",
+    "aliases": [
+      "nutrition smart",
+      "nutritionsmart"
+    ],
+    "semantic": "meals",
+    "logo_domain": "nutritionsmart.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Better Health Store",
+    "aliases": [
+      "the better health store",
+      "thebetterhealthstore"
+    ],
+    "semantic": "meals",
+    "logo_domain": "thebetterhealthstore.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fresh Kitchen",
+    "aliases": [
+      "fresh kitchen",
+      "freshkitchen"
+    ],
+    "semantic": "meals",
+    "logo_domain": "eatfreshkitchen.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bolay",
+    "aliases": [
+      "bolay"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bolay.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Crisp & Green",
+    "aliases": [
+      "crisp and green",
+      "crispandgreen"
+    ],
+    "semantic": "meals",
+    "logo_domain": "crispandgreen.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sweetfin",
+    "aliases": [
+      "sweetfin"
+    ],
+    "semantic": "meals",
+    "logo_domain": "sweetfin.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lemonade",
+    "aliases": [
+      "lemonade"
+    ],
+    "semantic": "meals",
+    "logo_domain": "lemonadela.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MIXT",
+    "aliases": [
+      "mixt"
+    ],
+    "semantic": "meals",
+    "logo_domain": "mixt.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mad Greens",
+    "aliases": [
+      "mad greens",
+      "madgreens"
+    ],
+    "semantic": "meals",
+    "logo_domain": "madgreens.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Green District",
+    "aliases": [
+      "green district",
+      "greendistrict"
+    ],
+    "semantic": "meals",
+    "logo_domain": "gdsalads.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Roots Natural Kitchen",
+    "aliases": [
+      "roots natural kitchen",
+      "rootsnaturalkitchen"
+    ],
+    "semantic": "meals",
+    "logo_domain": "rootsnaturalkitchen.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cafe Zupas",
+    "aliases": [
+      "cafe zupas",
+      "cafezupas",
+      "cafe zupas store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "cafezupas.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Egg Harbor Cafe",
+    "aliases": [
+      "egg harbor cafe",
+      "eggharborcafe",
+      "egg harbor cafe store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "eggharborcafe.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Keke's Breakfast Cafe",
+    "aliases": [
+      "keke s breakfast cafe",
+      "kekesbreakfastcafe",
+      "keke s breakfast cafe store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "kekes.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Turning Point",
+    "aliases": [
+      "turning point",
+      "turningpoint"
+    ],
+    "semantic": "meals",
+    "logo_domain": "turningpointrestaurants.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Toast",
+    "aliases": [
+      "toast"
+    ],
+    "semantic": "meals",
+    "logo_domain": "toastrestaurantpoint.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Big Biscuit",
+    "aliases": [
+      "the big biscuit",
+      "thebigbiscuit"
+    ],
+    "semantic": "meals",
+    "logo_domain": "bigbiscuit.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Stacks Pancake House",
+    "aliases": [
+      "stacks pancake house",
+      "stackspancakehouse"
+    ],
+    "semantic": "meals",
+    "logo_domain": "stackspancakehouse.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Original Pancake House",
+    "aliases": [
+      "original pancake house",
+      "originalpancakehouse"
+    ],
+    "semantic": "meals",
+    "logo_domain": "originalpancakehouse.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ruby Slipper Cafe",
+    "aliases": [
+      "ruby slipper cafe",
+      "rubyslippercafe",
+      "ruby slipper cafe store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "rubybrunch.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Yolk",
+    "aliases": [
+      "yolk"
+    ],
+    "semantic": "meals",
+    "logo_domain": "eatyolk.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wild Eggs",
+    "aliases": [
+      "wild eggs",
+      "wildeggs"
+    ],
+    "semantic": "meals",
+    "logo_domain": "wildeggs.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Scramblers",
+    "aliases": [
+      "scramblers"
+    ],
+    "semantic": "meals",
+    "logo_domain": "scramblersrestaurants.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sunny Street Cafe",
+    "aliases": [
+      "sunny street cafe",
+      "sunnystreetcafe",
+      "sunny street cafe store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "sunnystreetcafe.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Toasted Yolk Cafe",
+    "aliases": [
+      "the toasted yolk cafe",
+      "thetoastedyolkcafe",
+      "the toasted yolk cafe store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "thetoastedyolk.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Broken Egg Cafe",
+    "aliases": [
+      "broken egg cafe",
+      "brokeneggcafe",
+      "broken egg cafe store"
+    ],
+    "semantic": "meals",
+    "logo_domain": "anotherbrokenegg.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Snooze",
+    "aliases": [
+      "snooze"
+    ],
+    "semantic": "meals",
+    "logo_domain": "snoozeeatery.com",
+    "confidence": "high",
+    "notes": ""
+  }
+]
