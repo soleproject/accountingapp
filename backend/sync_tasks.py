@@ -7,6 +7,8 @@ Every task manages its own status transitions via `job_queue.update_job`;
 the enqueue wrapper only catches un-caught exceptions as a safety net.
 """
 from __future__ import annotations
+import asyncio
+import logging
 import traceback
 
 from db import db, now_iso
@@ -416,6 +418,102 @@ async def _post_deferred_plaid_opening_balances(
 
 
 # ---------------------------------------------------------------------------
+# Task: delayed backfill poll — chases Plaid's async historical backfill
+# ---------------------------------------------------------------------------
+#
+# Why this exists (Feb 2026):
+# Plaid's `/transactions/sync` on a fresh Item only returns transactions
+# that have already been backfilled into Plaid's cache at the moment of
+# the call. Historical data (up to 730 days) is loaded asynchronously by
+# Plaid over the next 1–30 minutes AFTER Link completes.
+#
+# In the classic webhook flow Plaid fires an `INITIAL_UPDATE` (30 days) and
+# then a `HISTORICAL_UPDATE` (full history) that we catch via the webhook
+# route. But in the newer sync-mode (which some Plaid Sandbox institutions
+# and all newer production items use), only `SYNC_UPDATES_AVAILABLE` fires
+# — and it may fire only ONCE, leaving us stuck with ~30 days of history
+# when we asked for 730.
+#
+# This poller re-runs `_run_sync` at +30s, +2m, +5m, +15m, +30m after the
+# first connect. It stops early when a run adds zero txns AND we've either
+# reached the requested `import_start_date` floor OR the `historical_update_received`
+# marker is already stamped.
+
+_BACKFILL_POLL_DELAYS = [30, 120, 300, 900, 1800]  # seconds
+
+
+async def plaid_delayed_backfill_sync(
+    job_id: str, company_id: str, item_id: str, attempt: int = 0,
+) -> None:
+    """One-shot delayed sync + self-reschedule.
+
+    `item_id` — the `plaid_items.id` (uuid), NOT the Plaid-side
+    `item_id`. `attempt` starts at 0 and increments each iteration.
+    """
+    log = logging.getLogger("axiom.app")
+    await _mark_started(job_id)
+    try:
+        delay = _BACKFILL_POLL_DELAYS[min(attempt, len(_BACKFILL_POLL_DELAYS) - 1)]
+        await asyncio.sleep(delay)
+
+        item = await db.plaid_items.find_one({"id": item_id})
+        if not item:
+            await _mark_done(job_id, {"skipped": True, "reason": "item_gone"})
+            return
+
+        # Full-history marker already landed (real HISTORICAL_UPDATE beat us
+        # to it). Nothing to do.
+        if item.get("historical_update_received"):
+            await _mark_done(job_id, {"skipped": True, "reason": "historical_already_received"})
+            return
+
+        imported = await _run_sync(
+            company_id, item, reset_cursor=False, job_id=job_id,
+            # Trigger a manual HISTORICAL_UPDATE-equivalent on the final
+            # attempt so the opening balance JEs still land even when
+            # Plaid never sends its own webhook.
+            trigger="HISTORICAL_UPDATE" if attempt >= len(_BACKFILL_POLL_DELAYS) - 1 else "BACKFILL_POLL",
+        )
+
+        # Decide whether to keep polling. Reasons to STOP:
+        #   1. We've reached the max attempt (last delay fired).
+        #   2. This sync produced 0 new txns AND we already have history
+        #      going back to the requested import_start_date.
+        item = await db.plaid_items.find_one({"id": item_id}) or item
+        should_continue = attempt + 1 < len(_BACKFILL_POLL_DELAYS)
+        if should_continue and imported == 0:
+            # Look at the oldest imported txn for this company. If we've
+            # reached the requested start date, we're done.
+            floor = item.get("import_start_date")
+            if floor:
+                oldest = await db.transactions.find_one(
+                    {"company_id": company_id, "plaid_transaction_id": {"$ne": None}},
+                    sort=[("date", 1)],
+                    projection={"date": 1},
+                )
+                if oldest and (oldest.get("date") or "") <= floor:
+                    should_continue = False
+
+        await _mark_done(job_id, {
+            "attempt": attempt, "imported": imported,
+            "next_attempt_scheduled": should_continue,
+        })
+
+        if should_continue:
+            await job_queue.enqueue_job(
+                "plaid_delayed_backfill_sync", company_id,
+                user_id=None, item_id=item_id, attempt=attempt + 1,
+            )
+    except Exception:  # noqa: BLE001
+        log.warning(
+            "plaid_delayed_backfill_sync failed cid=%s attempt=%s: %s",
+            company_id, attempt, traceback.format_exc(),
+        )
+        await _mark_failed(job_id, traceback.format_exc())
+        raise
+
+
+# ---------------------------------------------------------------------------
 # Registration — called from FastAPI startup
 # ---------------------------------------------------------------------------
 
@@ -424,11 +522,13 @@ def register_all() -> None:
     job_queue.register_task("plaid_manual_sync", plaid_manual_sync)
     job_queue.register_task("plaid_reset_resync", plaid_reset_resync)
     job_queue.register_task("plaid_contact_backfill", plaid_contact_backfill)
+    job_queue.register_task("plaid_delayed_backfill_sync", plaid_delayed_backfill_sync)
 
 
 __all__ = [
     "plaid_manual_sync",
     "plaid_reset_resync",
     "plaid_contact_backfill",
+    "plaid_delayed_backfill_sync",
     "register_all",
 ]
