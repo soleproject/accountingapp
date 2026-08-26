@@ -1,0 +1,4142 @@
+[
+  {
+    "canonical_name": "123RF",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "1stDibs",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "office_supplies"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "7-Eleven",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "ADP",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "AWeber",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "ActiveCampaign",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Adobe Stock",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Adyen",
+    "winner": "payment_processing_fees",
+    "candidates": [
+      "payment_processing_fees",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payment_processing_fees": [
+        "07"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Ahrefs",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Alchemer",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Amazon SES",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Aon",
+    "winner": "insurance",
+    "candidates": [
+      "insurance",
+      "professional_fees"
+    ],
+    "sources": {
+      "insurance": [
+        "08"
+      ],
+      "professional_fees": [
+        "09"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Apollo.io",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Artlist",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Attentive",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Authorize.net",
+    "winner": "payment_processing_fees",
+    "candidates": [
+      "payment_processing_fees",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payment_processing_fees": [
+        "07"
+      ]
+    }
+  },
+  {
+    "canonical_name": "AutoZone",
+    "winner": "repairs_maintenance",
+    "candidates": [
+      "office_supplies",
+      "repairs_maintenance"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "repairs_maintenance": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "BambooHR Payroll",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Bandwidth",
+    "winner": "telecom",
+    "candidates": [
+      "software_saas",
+      "telecom"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "telecom": [
+        "06"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Bazaarvoice",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Benchmark Email",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "BentoBox",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03",
+        "13"
+      ],
+      "marketing": [
+        "15"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Beyond Menu",
+    "winner": "delivery_platform_fees",
+    "candidates": [
+      "delivery_platform_fees",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "delivery_platform_fees": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Bill.com",
+    "winner": "payment_processing_fees",
+    "candidates": [
+      "payment_processing_fees",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payment_processing_fees": [
+        "07"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Bird",
+    "winner": "transportation",
+    "candidates": [
+      "marketing",
+      "transportation"
+    ],
+    "sources": {
+      "transportation": [
+        "05"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Birdeye",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Braintree",
+    "winner": "payment_processing_fees",
+    "candidates": [
+      "payment_processing_fees",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payment_processing_fees": [
+        "07"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Branch",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "office_supplies",
+      "payroll_service_fee"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Braze",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Brevo",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Brex",
+    "winner": "credit_card_payment",
+    "candidates": [
+      "credit_card_payment",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "credit_card_payment": [
+        "07"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Buc-ee's",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Buffer",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "CEFCO",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Campaign Monitor",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Campaigner",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Camping World",
+    "winner": "repairs_maintenance",
+    "candidates": [
+      "office_supplies",
+      "repairs_maintenance"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "repairs_maintenance": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Casey's",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Chairish",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "office_supplies"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Checkout.com",
+    "winner": "payment_processing_fees",
+    "candidates": [
+      "payment_processing_fees",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payment_processing_fees": [
+        "07"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Chili Piper",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "ChowNow",
+    "winner": "delivery_platform_fees",
+    "candidates": [
+      "delivery_platform_fees",
+      "meals",
+      "software_saas"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "software_saas": [
+        "03",
+        "15"
+      ],
+      "delivery_platform_fees": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Circle K",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Clearscope",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "ClickSend",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Clover",
+    "winner": "payment_processing_fees",
+    "candidates": [
+      "payment_processing_fees",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03",
+        "13",
+        "15"
+      ],
+      "payment_processing_fees": [
+        "07"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Cognism",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Constant Contact",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "ConvertKit",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Crazy Egg",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Creative Market",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Cumberland Farms",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Customer.io",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Dash In",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Dayforce",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Deel",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Delighted",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Depositphotos",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Dialpad",
+    "winner": "telecom",
+    "candidates": [
+      "software_saas",
+      "telecom"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "telecom": [
+        "06"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Dotdigital",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Dreamstime",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Drift",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Drip",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "EZ Texting",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Easyship",
+    "winner": "shipping_cogs",
+    "candidates": [
+      "shipping_cogs",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "shipping_cogs": [
+        "11"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Edward Don & Company",
+    "winner": "supplies_cogs",
+    "candidates": [
+      "office_supplies",
+      "supplies_cogs"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "supplies_cogs": [
+        "15"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Emma",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Enmarket",
+    "winner": "fuel",
+    "candidates": [
+      "food_cogs",
+      "fuel"
+    ],
+    "sources": {
+      "food_cogs": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Envato Elements",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Epidemic Sound",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Etsy",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "office_supplies"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "FastSpring",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Firestone Complete Auto Care",
+    "winner": "repairs_maintenance",
+    "candidates": [
+      "office_supplies",
+      "repairs_maintenance"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "repairs_maintenance": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Frase",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Fred Meyer",
+    "winner": "meals",
+    "candidates": [
+      "meals",
+      "office_supplies"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "office_supplies": [
+        "02"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Freepik",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Fresha",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "GNC",
+    "winner": "meals",
+    "candidates": [
+      "meals",
+      "office_supplies"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "office_supplies": [
+        "02"
+      ]
+    }
+  },
+  {
+    "canonical_name": "GOAT",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "office_supplies"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "GetGo",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "GetResponse",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Getty Images",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Gong",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Grailed",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "office_supplies"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Gravity Forms",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Gumroad",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Gusto",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Hootsuite",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Hotjar",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Hunter",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Instapage",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Intelligentsia Coffee",
+    "winner": "beverage_cogs",
+    "candidates": [
+      "beverage_cogs",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "beverage_cogs": [
+        "15"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Iterable",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Jetro Cash & Carry",
+    "winner": "food_cogs",
+    "candidates": [
+      "food_cogs",
+      "office_supplies"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "food_cogs": [
+        "15"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Jotform",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Justworks",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Keap",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Kickbox",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Klaviyo",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Kwik Trip",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Later",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Leadpages",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Lemon Squeezy",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Lemonade",
+    "winner": "insurance",
+    "candidates": [
+      "insurance",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "insurance": [
+        "08"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Lookback",
+    "winner": "professional_fees",
+    "candidates": [
+      "professional_fees",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "professional_fees": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "LoopNet",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Love's Travel Stops",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Lusha",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Lyssna",
+    "winner": "professional_fees",
+    "candidates": [
+      "professional_fees",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "professional_fees": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Mailchimp",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "MailerLite",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "MailerSend",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Mailgun",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Majestic",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Mangools",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "MarketMuse",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Maropost",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Maverik",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Maze",
+    "winner": "professional_fees",
+    "candidates": [
+      "professional_fees",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "professional_fees": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Meijer",
+    "winner": "food_cogs",
+    "candidates": [
+      "food_cogs",
+      "office_supplies"
+    ],
+    "sources": {
+      "food_cogs": [
+        "01"
+      ],
+      "office_supplies": [
+        "02"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Melio",
+    "winner": "payment_processing_fees",
+    "candidates": [
+      "payment_processing_fees",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payment_processing_fees": [
+        "07"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Mercari",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "office_supplies"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Motion",
+    "winner": "office_supplies",
+    "candidates": [
+      "office_supplies",
+      "software_saas"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "software_saas": [
+        "03"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Motion Array",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Moz",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Multiplier",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Murphy USA",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "NTB",
+    "winner": "repairs_maintenance",
+    "candidates": [
+      "office_supplies",
+      "repairs_maintenance"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "repairs_maintenance": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "NeverBounce",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "NiceJob",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Omnisend",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "OnPay",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "OpenTable",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Optimal Workshop",
+    "winner": "professional_fees",
+    "candidates": [
+      "professional_fees",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "professional_fees": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Optimizely",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Ordoro",
+    "winner": "shipping_cogs",
+    "candidates": [
+      "shipping_cogs",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "shipping_cogs": [
+        "11"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Outreach",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Owner.com",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03",
+        "13"
+      ],
+      "marketing": [
+        "15"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Oyster",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Paddle",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Papaya Global",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Parker's Kitchen",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Patreon",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Patriot Payroll",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Paychex",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Paycom",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Paycor",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Paylocity",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Penske Truck Rental",
+    "winner": "repairs_maintenance",
+    "candidates": [
+      "repairs_maintenance",
+      "transportation"
+    ],
+    "sources": {
+      "repairs_maintenance": [
+        "02"
+      ],
+      "transportation": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Pep Boys",
+    "winner": "repairs_maintenance",
+    "candidates": [
+      "office_supplies",
+      "repairs_maintenance"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "repairs_maintenance": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "PicMonkey",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Pilot Flying J",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Pirate Ship",
+    "winner": "shipping_cogs",
+    "candidates": [
+      "shipping_cogs",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "shipping_cogs": [
+        "11"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Podium",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Pollfish",
+    "winner": "professional_fees",
+    "candidates": [
+      "professional_fees",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "professional_fees": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Pond5",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Popmenu",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03",
+        "13"
+      ],
+      "marketing": [
+        "15"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Poshmark",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "office_supplies"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Postmark",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Postscript",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Printful",
+    "winner": "supplies_cogs",
+    "candidates": [
+      "marketing",
+      "supplies_cogs"
+    ],
+    "sources": {
+      "marketing": [
+        "10"
+      ],
+      "supplies_cogs": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Printify",
+    "winner": "supplies_cogs",
+    "candidates": [
+      "marketing",
+      "supplies_cogs"
+    ],
+    "sources": {
+      "marketing": [
+        "10"
+      ],
+      "supplies_cogs": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Qualified",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Qualtrics",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "QuestionPro",
+    "winner": "professional_fees",
+    "candidates": [
+      "professional_fees",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "professional_fees": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "QuickBooks Payroll",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "QuikTrip",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "RaceTrac",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Ramp",
+    "winner": "credit_card_payment",
+    "candidates": [
+      "credit_card_payment",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "credit_card_payment": [
+        "07"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Remote",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Reputation",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Restaurant Depot",
+    "winner": "food_cogs",
+    "candidates": [
+      "food_cogs",
+      "supplies_cogs"
+    ],
+    "sources": {
+      "supplies_cogs": [
+        "02"
+      ],
+      "food_cogs": [
+        "15"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Reverb",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "office_supplies"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "RingCentral",
+    "winner": "telecom",
+    "candidates": [
+      "software_saas",
+      "telecom"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "telecom": [
+        "06"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Rippling",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Royal Farms",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Rutter's",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Ryder",
+    "winner": "transportation",
+    "candidates": [
+      "office_supplies",
+      "transportation"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "transportation": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "SE Ranking",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Salesloft",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Screaming Frog",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Seamless.AI",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Semrush",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Serpstat",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Sheetz",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "ShipBob",
+    "winner": "shipping_cogs",
+    "candidates": [
+      "shipping_cogs",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "shipping_cogs": [
+        "11"
+      ]
+    }
+  },
+  {
+    "canonical_name": "ShipHero",
+    "winner": "shipping_cogs",
+    "candidates": [
+      "shipping_cogs",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "shipping_cogs": [
+        "11"
+      ]
+    }
+  },
+  {
+    "canonical_name": "ShipMonk",
+    "winner": "shipping_cogs",
+    "candidates": [
+      "shipping_cogs",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "shipping_cogs": [
+        "11"
+      ]
+    }
+  },
+  {
+    "canonical_name": "ShipStation",
+    "winner": "shipping_cogs",
+    "candidates": [
+      "shipping_cogs",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "shipping_cogs": [
+        "11"
+      ]
+    }
+  },
+  {
+    "canonical_name": "ShipWorks",
+    "winner": "shipping_cogs",
+    "candidates": [
+      "shipping_cogs",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "shipping_cogs": [
+        "11"
+      ]
+    }
+  },
+  {
+    "canonical_name": "ShippingEasy",
+    "winner": "shipping_cogs",
+    "candidates": [
+      "shipping_cogs",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "shipping_cogs": [
+        "11"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Shippo",
+    "winner": "shipping_cogs",
+    "candidates": [
+      "shipping_cogs",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "shipping_cogs": [
+        "11"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Shutterstock",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Similarweb",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "SimpleTexting",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Sinch",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Singer Equipment Company",
+    "winner": "repairs_maintenance",
+    "candidates": [
+      "repairs_maintenance",
+      "supplies_cogs"
+    ],
+    "sources": {
+      "repairs_maintenance": [
+        "02"
+      ],
+      "supplies_cogs": [
+        "15"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Slice",
+    "winner": "delivery_platform_fees",
+    "candidates": [
+      "delivery_platform_fees",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "delivery_platform_fees": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "SlickText",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Smart & Final",
+    "winner": "meals",
+    "candidates": [
+      "meals",
+      "office_supplies"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "office_supplies": [
+        "02"
+      ]
+    }
+  },
+  {
+    "canonical_name": "SocialPilot",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Soundstripe",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "SpartanNash",
+    "winner": "food_cogs",
+    "candidates": [
+      "food_cogs",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "food_cogs": [
+        "15"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Speedway",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Spinx",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Sprout Social",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "SpyFu",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Square Payroll",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Stewart's Shops",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "StockX",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "office_supplies"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Storyblocks",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Stumptown Coffee Roasters",
+    "winner": "beverage_cogs",
+    "candidates": [
+      "beverage_cogs",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "beverage_cogs": [
+        "15"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Substack",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "marketplace_ads"
+    ],
+    "sources": {
+      "marketing": [
+        "10"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "SurePayroll",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Surfer",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "SurveyMonkey",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "SurveySparrow",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "TextMagic",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Textedly",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "The RealReal",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "office_supplies"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "The Vitamin Shoppe",
+    "winner": "meals",
+    "candidates": [
+      "meals",
+      "office_supplies"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "office_supplies": [
+        "02"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Thorntons",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "ThredUp",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "office_supplies"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Thryv",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Tidio",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Toast",
+    "winner": "meals",
+    "candidates": [
+      "meals",
+      "software_saas"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "software_saas": [
+        "03",
+        "13",
+        "15"
+      ]
+    }
+  },
+  {
+    "canonical_name": "TriNet",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Trustpilot",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Twilio",
+    "winner": "telecom",
+    "candidates": [
+      "software_saas",
+      "telecom"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "telecom": [
+        "06"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Twilio SendGrid",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Typeform",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "U-Haul",
+    "winner": "transportation",
+    "candidates": [
+      "office_supplies",
+      "transportation"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "transportation": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "UKG",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Ubersuggest",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Unbounce",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "UserTesting",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "UserZoom",
+    "winner": "professional_fees",
+    "candidates": [
+      "professional_fees",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "professional_fees": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "VWO",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Velocity Global",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "VerticalResponse",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Vidyard",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "VistaCreate",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Vonage",
+    "winner": "telecom",
+    "candidates": [
+      "software_saas",
+      "telecom"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "telecom": [
+        "06"
+      ]
+    }
+  },
+  {
+    "canonical_name": "WPForms",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Walmart Fulfillment Services",
+    "winner": "shipping_cogs",
+    "candidates": [
+      "marketplace_ads",
+      "shipping_cogs"
+    ],
+    "sources": {
+      "shipping_cogs": [
+        "11"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Wave Payroll",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Wawa",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Weigel's",
+    "winner": "fuel",
+    "candidates": [
+      "fuel",
+      "meals"
+    ],
+    "sources": {
+      "meals": [
+        "01"
+      ],
+      "fuel": [
+        "04"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Wistia",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Yotpo",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Zazzle",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "office_supplies"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "Zenefits Payroll",
+    "winner": "payroll_service_fee",
+    "candidates": [
+      "payroll_service_fee",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "payroll_service_fee": [
+        "12"
+      ]
+    }
+  },
+  {
+    "canonical_name": "ZeroBounce",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "ZoomInfo",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "beehiiv",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "marketing": [
+        "10"
+      ],
+      "software_saas": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "eBay",
+    "winner": "marketplace_ads",
+    "candidates": [
+      "marketplace_ads",
+      "office_supplies"
+    ],
+    "sources": {
+      "office_supplies": [
+        "02"
+      ],
+      "marketplace_ads": [
+        "13"
+      ]
+    }
+  },
+  {
+    "canonical_name": "iContact",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  },
+  {
+    "canonical_name": "iStock",
+    "winner": "marketing",
+    "candidates": [
+      "marketing",
+      "software_saas"
+    ],
+    "sources": {
+      "software_saas": [
+        "03"
+      ],
+      "marketing": [
+        "10"
+      ]
+    }
+  }
+]

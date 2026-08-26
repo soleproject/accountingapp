@@ -1,0 +1,4202 @@
+[
+  {
+    "canonical_name": "Sysco",
+    "aliases": [
+      "sysco",
+      "sysco corporation",
+      "sysco foods",
+      "sysco food services",
+      "sysco invoice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "sysco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "US Foods",
+    "aliases": [
+      "us foods",
+      "us foods inc",
+      "us foodservice",
+      "us foods invoice",
+      "usfoods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "usfoods.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Performance Foodservice",
+    "aliases": [
+      "performance foodservice",
+      "performance food group",
+      "pfg",
+      "pfg foodservice",
+      "performance foodservice invoice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "performancefoodservice.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Restaurant Depot",
+    "aliases": [
+      "restaurant depot",
+      "restaurant depot llc",
+      "restaurant depot purchase",
+      "restaurant depot store",
+      "rd restaurant depot"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "restaurantdepot.com",
+    "confidence": "medium",
+    "notes": "Purchases may include food, beverages, supplies, or equipment."
+  },
+  {
+    "canonical_name": "Jetro Cash & Carry",
+    "aliases": [
+      "jetro cash carry",
+      "jetro cash and carry",
+      "jetro holdings",
+      "jetro wholesale",
+      "jetro"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "jetro.com",
+    "confidence": "medium",
+    "notes": "Purchases may include food, beverages, supplies, or equipment."
+  },
+  {
+    "canonical_name": "Gordon Food Service",
+    "aliases": [
+      "gordon food service",
+      "gordon food service inc",
+      "gfs",
+      "gfs store",
+      "gordon foods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "gfs.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Shamrock Foods",
+    "aliases": [
+      "shamrock foods",
+      "shamrock foods company",
+      "shamrock foodservice",
+      "shamrock food service",
+      "shamrock foods invoice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "shamrockfoodservice.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ben E. Keith Foods",
+    "aliases": [
+      "ben e keith foods",
+      "ben e keith company",
+      "ben e keith",
+      "bek foods",
+      "ben e keith foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "benekeith.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cheney Brothers",
+    "aliases": [
+      "cheney brothers",
+      "cheney brothers inc",
+      "cbi foodservice",
+      "cheney foodservice",
+      "cheney brothers invoice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "cheneybrothers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Merchants Foodservice",
+    "aliases": [
+      "merchants foodservice",
+      "merchants foodservice inc",
+      "merchants food service",
+      "merchants foods",
+      "merchants invoice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "merchantsfoodservice.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nicholas and Company",
+    "aliases": [
+      "nicholas and company",
+      "nicholas company",
+      "nicholas foodservice",
+      "nicholas foods",
+      "nicholas co"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "nicholasandco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Feeser's Food Distributors",
+    "aliases": [
+      "feesers food distributors",
+      "feesers inc",
+      "feesers",
+      "feesers foodservice",
+      "feesers foods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "feesers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Labatt Food Service",
+    "aliases": [
+      "labatt food service",
+      "labatt food",
+      "labatt foodservice",
+      "labatt foods",
+      "labatt invoice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "labattfood.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "McLane Company",
+    "aliases": [
+      "mclane company",
+      "mclane company inc",
+      "mclane foodservice",
+      "mclane foods",
+      "mclane"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "mclaneco.com",
+    "confidence": "medium",
+    "notes": "Distributor purchases may include food, beverages, tobacco, and general merchandise."
+  },
+  {
+    "canonical_name": "Core-Mark",
+    "aliases": [
+      "core mark",
+      "core mark international",
+      "coremark",
+      "core mark foodservice",
+      "core mark distribution"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "core-mark.com",
+    "confidence": "medium",
+    "notes": "Distributor purchases may include food, beverages and convenience-store merchandise."
+  },
+  {
+    "canonical_name": "KeHE Distributors",
+    "aliases": [
+      "kehe distributors",
+      "kehe distributors llc",
+      "kehe",
+      "kehe foodservice",
+      "kehe distribution"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "kehe.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "UNFI",
+    "aliases": [
+      "unfi",
+      "united natural foods",
+      "united natural foods inc",
+      "unfi distribution",
+      "unfi foods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "unfi.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "C&S Wholesale Grocers",
+    "aliases": [
+      "c s wholesale grocers",
+      "cs wholesale grocers",
+      "c and s wholesale grocers",
+      "cswg",
+      "c s wholesale"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "cswg.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Associated Wholesale Grocers",
+    "aliases": [
+      "associated wholesale grocers",
+      "awg",
+      "awg inc",
+      "awg wholesale",
+      "associated wholesale"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "awginc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SpartanNash",
+    "aliases": [
+      "spartannash",
+      "spartan nash",
+      "spartannash company",
+      "spartannash distribution",
+      "spartan nash foods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "spartannash.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dot Foods",
+    "aliases": [
+      "dot foods",
+      "dot foods inc",
+      "dot foods distribution",
+      "dot foodservice",
+      "dot foods invoice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "dotfoods.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lipari Foods",
+    "aliases": [
+      "lipari foods",
+      "lipari foods llc",
+      "lipari foodservice",
+      "lipari distribution",
+      "lipari"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "liparifoods.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Four Seasons Produce",
+    "aliases": [
+      "four seasons produce",
+      "four seasons produce inc",
+      "fs produce",
+      "four seasons foodservice",
+      "four seasons produce invoice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "fsproduce.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Baldor Specialty Foods",
+    "aliases": [
+      "baldor specialty foods",
+      "baldor food",
+      "baldor foods",
+      "baldor specialty",
+      "baldor foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "baldorfood.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "FreshPoint",
+    "aliases": [
+      "freshpoint",
+      "freshpoint inc",
+      "freshpoint produce",
+      "fresh point",
+      "freshpoint foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "freshpoint.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Chefs' Warehouse",
+    "aliases": [
+      "the chefs warehouse",
+      "chefs warehouse",
+      "chefs warehouse inc",
+      "cw foodservice",
+      "chefs warehouse foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "chefswarehouse.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "D'Artagnan",
+    "aliases": [
+      "dartagnan",
+      "dartagnan inc",
+      "d artagnan",
+      "dartagnan foods",
+      "dartagnan foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "dartagnan.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pat LaFrieda Meat Purveyors",
+    "aliases": [
+      "pat lafrieda meat purveyors",
+      "pat lafrieda",
+      "lafrieda",
+      "lafrieda meats",
+      "pat lafrieda meats"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "lafrieda.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Buckhead Meat",
+    "aliases": [
+      "buckhead meat",
+      "buckhead meat company",
+      "buckhead meats",
+      "buckhead beef",
+      "buckhead meat foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "buckheadmeat.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Stock Yards",
+    "aliases": [
+      "stock yards",
+      "stockyards",
+      "stock yards meat",
+      "stock yards foodservice",
+      "stockyards meat"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "stockyards.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Allen Brothers",
+    "aliases": [
+      "allen brothers",
+      "allen brothers steaks",
+      "allen brothers meats",
+      "allen brothers foodservice",
+      "allen bros"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "allenbrothers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Halperns' Steak & Seafood",
+    "aliases": [
+      "halperns steak seafood",
+      "halperns",
+      "halperns steak and seafood",
+      "halperns meats",
+      "halperns foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "halperns.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fortune Fish & Gourmet",
+    "aliases": [
+      "fortune fish gourmet",
+      "fortune fish and gourmet",
+      "fortune fish",
+      "fortune fish company",
+      "fortune seafood"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "fortunefishco.net",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Santa Monica Seafood",
+    "aliases": [
+      "santa monica seafood",
+      "santa monica seafood company",
+      "sms seafood",
+      "santa monica fish",
+      "santa monica seafood invoice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "santamonicaseafood.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Inland Seafood",
+    "aliases": [
+      "inland seafood",
+      "inland seafood inc",
+      "inland seafood company",
+      "inland seafood foodservice",
+      "inland fish"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "inlandseafood.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Trident Seafoods",
+    "aliases": [
+      "trident seafoods",
+      "trident seafoods corp",
+      "trident seafood",
+      "trident fish",
+      "trident foods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "tridentseafoods.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pacific Seafood",
+    "aliases": [
+      "pacific seafood",
+      "pacific seafood group",
+      "pacific seafood company",
+      "pacific fish",
+      "pacific seafood invoice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "pacificseafood.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Santa Fe Springs Seafood",
+    "aliases": [
+      "santa fe springs seafood",
+      "sfs seafood",
+      "santa fe seafood",
+      "sfsseafood",
+      "santa fe springs fish"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "sfsseafood.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "What Chefs Want",
+    "aliases": [
+      "what chefs want",
+      "whatchefswant",
+      "wcw foodservice",
+      "what chefs want delivery",
+      "what chefs want foods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "whatchefswant.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hardie's Fresh Foods",
+    "aliases": [
+      "hardies fresh foods",
+      "hardies",
+      "hardies fruit vegetable",
+      "hardies produce",
+      "hardies foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "hardies.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Charlie’s Produce",
+    "aliases": [
+      "charlies produce",
+      "charlies produce inc",
+      "charlie produce",
+      "charlies foodservice",
+      "charlies produce invoice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "charliesproduce.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Coosemans",
+    "aliases": [
+      "coosemans",
+      "coosemans worldwide",
+      "coosemans produce",
+      "coosemans specialty produce",
+      "coosemans foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "coosemans.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Melissa's Produce",
+    "aliases": [
+      "melissas produce",
+      "melissas world variety produce",
+      "melissas",
+      "melissa produce",
+      "melissas foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "melissas.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dole Foodservice",
+    "aliases": [
+      "dole foodservice",
+      "dole food company",
+      "dole foods",
+      "dole produce",
+      "dole food service"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "dolefoodservice.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Del Monte Fresh Produce",
+    "aliases": [
+      "del monte fresh produce",
+      "fresh del monte",
+      "fresh del monte produce",
+      "del monte produce",
+      "fresh del monte north america"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "freshdelmonte.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Taylor Farms Foodservice",
+    "aliases": [
+      "taylor farms foodservice",
+      "taylor farms",
+      "taylor fresh foods",
+      "taylor farms food service",
+      "taylor farms produce"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "taylorfarms.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Calavo Growers",
+    "aliases": [
+      "calavo growers",
+      "calavo growers inc",
+      "calavo",
+      "calavo foods",
+      "calavo avocado"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "calavo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mission Produce",
+    "aliases": [
+      "mission produce",
+      "mission produce inc",
+      "mission avocados",
+      "mission produce foodservice",
+      "mission produce invoice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "missionproduce.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fresh Express",
+    "aliases": [
+      "fresh express",
+      "fresh express inc",
+      "fresh express salads",
+      "fresh express produce",
+      "fresh express foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "freshexpress.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mann Packing",
+    "aliases": [
+      "mann packing",
+      "mann packing company",
+      "manns",
+      "mann produce",
+      "mann packing vegetables"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "veggiesmadeeasy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Grimmway Farms",
+    "aliases": [
+      "grimmway farms",
+      "grimmway enterprises",
+      "grimmway",
+      "grimmway produce",
+      "grimmway carrots"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "grimmway.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Church Brothers Farms",
+    "aliases": [
+      "church brothers farms",
+      "church brothers",
+      "church bros farms",
+      "church brothers produce",
+      "church bros produce"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "churchbrothers.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Markon Cooperative",
+    "aliases": [
+      "markon cooperative",
+      "markon",
+      "markon first crop",
+      "markon produce",
+      "markon foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "markon.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pro*Act",
+    "aliases": [
+      "proact",
+      "pro act",
+      "proact usa",
+      "proact produce",
+      "proact foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "proactusa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Produce Alliance",
+    "aliases": [
+      "produce alliance",
+      "produce alliance llc",
+      "produce alliance foodservice",
+      "produce alliance network",
+      "produce alliance invoice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "producealliance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "General Mills Foodservice",
+    "aliases": [
+      "general mills foodservice",
+      "general mills",
+      "general mills convenience foodservice",
+      "general mills cf",
+      "general mills food service"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "generalmillscf.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kellogg's Away From Home",
+    "aliases": [
+      "kelloggs away from home",
+      "kellanova away from home",
+      "kellanova foodservice",
+      "kelloggs foodservice",
+      "kellanova"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "kellanovaawayfromhome.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kraft Heinz Away From Home",
+    "aliases": [
+      "kraft heinz away from home",
+      "kraft heinz foodservice",
+      "kraft heinz",
+      "heinz foodservice",
+      "kraft foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "kraftheinzawayfromhome.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Nestlé Professional",
+    "aliases": [
+      "nestle professional",
+      "nestle usa",
+      "nestle foodservice",
+      "nestle professional usa",
+      "nestle foods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "nestleprofessional.us",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Unilever Food Solutions",
+    "aliases": [
+      "unilever food solutions",
+      "ufs",
+      "unilever foodservice",
+      "unilever foods",
+      "unilever food solutions usa"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "unileverfoodsolutions.us",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Conagra Foodservice",
+    "aliases": [
+      "conagra foodservice",
+      "conagra brands",
+      "conagra foods",
+      "conagra food service",
+      "conagra"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "conagrafoodservice.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hormel Foodservice",
+    "aliases": [
+      "hormel foodservice",
+      "hormel foods",
+      "hormel foods corp",
+      "hormel food service",
+      "hormel"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "hormelfoodservice.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tyson Foodservice",
+    "aliases": [
+      "tyson foodservice",
+      "tyson foods",
+      "tyson foods inc",
+      "tyson food service",
+      "tyson"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "tysonfoodservice.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Smithfield Culinary",
+    "aliases": [
+      "smithfield culinary",
+      "smithfield foods",
+      "smithfield foodservice",
+      "smithfield",
+      "smithfield meats"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "smithfieldculinary.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "JBS USA Foodservice",
+    "aliases": [
+      "jbs usa foodservice",
+      "jbs usa",
+      "jbs foodservice",
+      "jbs foods",
+      "jbs meat"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "jbsfoodservice.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cargill Foodservice",
+    "aliases": [
+      "cargill foodservice",
+      "cargill",
+      "cargill meat solutions",
+      "cargill foods",
+      "cargill food service"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "cargill.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Butterball Foodservice",
+    "aliases": [
+      "butterball foodservice",
+      "butterball",
+      "butterball llc",
+      "butterball food service",
+      "butterball turkey"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "butterballfoodservice.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Perdue Foodservice",
+    "aliases": [
+      "perdue foodservice",
+      "perdue foods",
+      "perdue farms",
+      "perdue food service",
+      "perdue"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "perduefoodservice.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pilgrim's Foodservice",
+    "aliases": [
+      "pilgrims foodservice",
+      "pilgrims pride",
+      "pilgrims",
+      "pilgrims food service",
+      "pilgrims foods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "pilgrimsfoodservice.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wayne-Sanderson Farms",
+    "aliases": [
+      "wayne sanderson farms",
+      "wayne sanderson",
+      "sanderson farms",
+      "wayne farms",
+      "wayne sanderson foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "waynesandersonfarms.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Brakebush Brothers",
+    "aliases": [
+      "brakebush brothers",
+      "brakebush",
+      "brakebush chicken",
+      "brakebush foodservice",
+      "brakebush bros"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "brakebush.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mountaire Farms",
+    "aliases": [
+      "mountaire farms",
+      "mountaire",
+      "mountaire farms foodservice",
+      "mountaire chicken",
+      "mountaire foods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "mountaire.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "National Beef",
+    "aliases": [
+      "national beef",
+      "national beef packing",
+      "national beef packing company",
+      "national beef foodservice",
+      "national beef company"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "nationalbeef.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Greater Omaha Packing",
+    "aliases": [
+      "greater omaha packing",
+      "greater omaha",
+      "greater omaha beef",
+      "greater omaha packing co",
+      "greater omaha foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "greateromaha.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Creekstone Farms",
+    "aliases": [
+      "creekstone farms",
+      "creekstone farms premium beef",
+      "creekstone beef",
+      "creekstone",
+      "creekstone foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "creekstonefarms.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Certified Angus Beef",
+    "aliases": [
+      "certified angus beef",
+      "certified angus beef llc",
+      "cab beef",
+      "certified angus beef brand",
+      "cab foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "certifiedangusbeef.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Boar's Head",
+    "aliases": [
+      "boars head",
+      "boars head brand",
+      "boars head provisions",
+      "boars head foodservice",
+      "boarshead"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "boarshead.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dietz & Watson",
+    "aliases": [
+      "dietz watson",
+      "dietz and watson",
+      "dietz watson inc",
+      "dietz watson foodservice",
+      "dietz watson meats"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "dietzandwatson.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hormel Foods",
+    "aliases": [
+      "hormel foods",
+      "hormel foods corporation",
+      "hormel",
+      "hormel meats",
+      "hormel invoice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "hormel.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Johnsonville",
+    "aliases": [
+      "johnsonville",
+      "johnsonville llc",
+      "johnsonville sausage",
+      "johnsonville foodservice",
+      "johnsonville foods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "johnsonville.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Jones Dairy Farm",
+    "aliases": [
+      "jones dairy farm",
+      "jones dairy farm inc",
+      "jones sausage",
+      "jones dairy foodservice",
+      "jones dairy"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "jonesdairyfarm.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sahlen's",
+    "aliases": [
+      "sahlens",
+      "sahlens packing",
+      "sahlens hot dogs",
+      "sahlens foodservice",
+      "sahlen packing"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "sahlen.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Vienna Beef",
+    "aliases": [
+      "vienna beef",
+      "vienna beef ltd",
+      "vienna beef foodservice",
+      "vienna hot dogs",
+      "vienna beef invoice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "viennabeef.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Schaller & Weber",
+    "aliases": [
+      "schaller weber",
+      "schaller and weber",
+      "schaller weber foodservice",
+      "schaller weber meats",
+      "schallerweber"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "schallerweber.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tillamook Foodservice",
+    "aliases": [
+      "tillamook foodservice",
+      "tillamook county creamery",
+      "tillamook",
+      "tillamook cheese",
+      "tillamook food service"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "tillamook.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Saputo Foodservice",
+    "aliases": [
+      "saputo foodservice",
+      "saputo dairy foods",
+      "saputo cheese",
+      "saputo food service",
+      "saputo"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "saputofoodserviceusa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lactalis Culinary",
+    "aliases": [
+      "lactalis culinary",
+      "lactalis foodservice",
+      "lactalis american group",
+      "lactalis cheese",
+      "lactalis"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "lactalisculinary.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "BelGioioso Cheese",
+    "aliases": [
+      "belgioioso cheese",
+      "belgioioso",
+      "belgioioso cheese inc",
+      "belgioioso foodservice",
+      "bel gioioso"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "belgioioso.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Grande Cheese",
+    "aliases": [
+      "grande cheese",
+      "grande cheese company",
+      "grande foodservice",
+      "grande mozzarella",
+      "grande cheese invoice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "grandecheese.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Galbani Professionale",
+    "aliases": [
+      "galbani professionale",
+      "galbani foodservice",
+      "galbani cheese",
+      "lactalis galbani",
+      "galbani professional"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "galbaniprofessionale.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Leprino Foods",
+    "aliases": [
+      "leprino foods",
+      "leprino foods company",
+      "leprino cheese",
+      "leprino foodservice",
+      "leprino"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "leprinofoods.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Schreiber Foods",
+    "aliases": [
+      "schreiber foods",
+      "schreiber foods inc",
+      "schreiber cheese",
+      "schreiber foodservice",
+      "schreiber"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "schreiberfoods.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dairy Farmers of America",
+    "aliases": [
+      "dairy farmers of america",
+      "dfa milk",
+      "dfa dairy",
+      "dairy farmers america",
+      "dfa foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "dfamilk.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Darigold",
+    "aliases": [
+      "darigold",
+      "darigold inc",
+      "darigold dairy",
+      "darigold foodservice",
+      "darigold milk"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "darigold.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Prairie Farms Dairy",
+    "aliases": [
+      "prairie farms dairy",
+      "prairie farms",
+      "prairie farms dairy inc",
+      "prairie farms foodservice",
+      "prairie farms milk"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "prairiefarms.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hiland Dairy",
+    "aliases": [
+      "hiland dairy",
+      "hiland dairy foods",
+      "hiland",
+      "hiland foodservice",
+      "hiland milk"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "hilanddairy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Shamrock Farms",
+    "aliases": [
+      "shamrock farms",
+      "shamrock farms dairy",
+      "shamrock dairy",
+      "shamrock farms foodservice",
+      "shamrock milk"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "shamrockfarms.net",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Borden Dairy",
+    "aliases": [
+      "borden dairy",
+      "borden dairy company",
+      "borden milk",
+      "borden foodservice",
+      "borden dairy invoice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "bordendairy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Oak Farms Dairy",
+    "aliases": [
+      "oak farms dairy",
+      "oak farms",
+      "oak farms milk",
+      "oak farms foodservice",
+      "oakfarms"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "oakfarmsdairy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hood Foodservice",
+    "aliases": [
+      "hood foodservice",
+      "hp hood",
+      "hood dairy",
+      "hood milk",
+      "hp hood llc"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "hood.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Upstate Niagara Cooperative",
+    "aliases": [
+      "upstate niagara cooperative",
+      "upstate niagara",
+      "upstate farms",
+      "upstate dairy",
+      "upstate niagara foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "upstateniagara.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Crystal Creamery",
+    "aliases": [
+      "crystal creamery",
+      "crystal dairy",
+      "crystal creamery foodservice",
+      "crystal milk",
+      "crystal cream butter"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "crystalcreamery.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Straus Family Creamery",
+    "aliases": [
+      "straus family creamery",
+      "straus creamery",
+      "straus dairy",
+      "straus foodservice",
+      "straus milk"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "strausfamilycreamery.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Organic Valley",
+    "aliases": [
+      "organic valley",
+      "organic valley cooperative",
+      "cropp cooperative",
+      "organic valley dairy",
+      "organic valley foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "organicvalley.coop",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Land O'Lakes Foodservice",
+    "aliases": [
+      "land olakes foodservice",
+      "land olakes",
+      "land o lakes foodservice",
+      "land olakes dairy",
+      "land olakes food service"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "landolakesfoodservice.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kerry Foodservice",
+    "aliases": [
+      "kerry foodservice",
+      "kerry group",
+      "kerry ingredients",
+      "kerry foods",
+      "kerry food service"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "kerry.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Rich Products",
+    "aliases": [
+      "rich products",
+      "rich products corporation",
+      "richs",
+      "richs foodservice",
+      "rich products foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "richsusa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dawn Foods",
+    "aliases": [
+      "dawn foods",
+      "dawn food products",
+      "dawn foods global",
+      "dawn bakery",
+      "dawn foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "dawnfoods.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Puratos",
+    "aliases": [
+      "puratos",
+      "puratos corporation",
+      "puratos usa",
+      "puratos bakery",
+      "puratos foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "puratos.us",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "BakeMark",
+    "aliases": [
+      "bakemark",
+      "bakemark usa",
+      "bakemark ingredients",
+      "bakemark bakery",
+      "bakemark foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "bakemark.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Paris Gourmet",
+    "aliases": [
+      "paris gourmet",
+      "paris gourmet inc",
+      "paris gourmet foodservice",
+      "paris gourmet pastry",
+      "paris gourmet foods"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "parisgourmet.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "King Arthur Baking Company",
+    "aliases": [
+      "king arthur baking company",
+      "king arthur baking",
+      "king arthur flour",
+      "king arthur bakery",
+      "king arthur"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "kingarthurbaking.com",
+    "confidence": "medium",
+    "notes": "May be ingredient COGS or a retail/online purchase depending on buyer."
+  },
+  {
+    "canonical_name": "Bob's Red Mill",
+    "aliases": [
+      "bobs red mill",
+      "bobs red mill natural foods",
+      "bobs red mill foodservice",
+      "bobs red mill flour",
+      "bobsredmill"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "bobsredmill.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ardent Mills",
+    "aliases": [
+      "ardent mills",
+      "ardent mills llc",
+      "ardent flour",
+      "ardent mills foodservice",
+      "ardent milling"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "ardentmills.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bay State Milling",
+    "aliases": [
+      "bay state milling",
+      "bay state milling company",
+      "bay state flour",
+      "bay state foodservice",
+      "bay state mill"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "baystatemilling.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Grain Craft",
+    "aliases": [
+      "grain craft",
+      "grain craft inc",
+      "graincraft",
+      "grain craft flour",
+      "grain craft foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "graincraft.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Central Milling",
+    "aliases": [
+      "central milling",
+      "central milling company",
+      "central milling flour",
+      "central milling organic",
+      "central milling foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "centralmilling.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cargill Cocoa & Chocolate",
+    "aliases": [
+      "cargill cocoa chocolate",
+      "cargill cocoa and chocolate",
+      "cargill chocolate",
+      "cargill cocoa",
+      "cargill food ingredients"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "cargill.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Barry Callebaut",
+    "aliases": [
+      "barry callebaut",
+      "barry callebaut usa",
+      "callebaut chocolate",
+      "barry callebaut chocolate",
+      "callebaut foodservice"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "barry-callebaut.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Guittard Chocolate Company",
+    "aliases": [
+      "guittard chocolate company",
+      "guittard chocolate",
+      "guittard",
+      "guittard foodservice",
+      "guittard chocolate co"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "guittard.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ghirardelli Professional",
+    "aliases": [
+      "ghirardelli professional",
+      "ghirardelli chocolate",
+      "ghirardelli",
+      "ghirardelli foodservice",
+      "ghirardelli professional products"
+    ],
+    "semantic": "food_cogs",
+    "logo_domain": "ghirardelli.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Monin",
+    "aliases": [
+      "monin",
+      "monin inc",
+      "monin gourmet flavorings",
+      "monin syrups",
+      "monin usa"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "monin.us",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Torani",
+    "aliases": [
+      "torani",
+      "r torre company",
+      "torani syrups",
+      "torani foodservice",
+      "torani flavors"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "torani.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "DaVinci Gourmet",
+    "aliases": [
+      "davinci gourmet",
+      "da vinci gourmet",
+      "davinci syrups",
+      "davinci beverage",
+      "davinci gourmet foodservice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "davincigourmet.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "1883 Maison Routin",
+    "aliases": [
+      "1883 maison routin",
+      "1883 syrup",
+      "routin 1883",
+      "1883 syrups",
+      "maison routin"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "1883.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fabbri 1905",
+    "aliases": [
+      "fabbri 1905",
+      "fabbri",
+      "fabbri syrups",
+      "fabbri amarena",
+      "fabbri foodservice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "fabbri1905.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Finest Call",
+    "aliases": [
+      "finest call",
+      "finest call mixes",
+      "finest call premium",
+      "finest call cocktail mix",
+      "finest call beverage"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "finestcall.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Real Ingredients",
+    "aliases": [
+      "real ingredients",
+      "real cocktail ingredients",
+      "real puree",
+      "real infused exotics",
+      "real beverage ingredients"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "realingredients.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Island Oasis",
+    "aliases": [
+      "island oasis",
+      "island oasis mixes",
+      "island oasis beverage",
+      "island oasis smoothie",
+      "island oasis foodservice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "islandoasis.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dr. Smoothie",
+    "aliases": [
+      "dr smoothie",
+      "dr smoothie brands",
+      "dr smoothie mixes",
+      "dr smoothie beverage",
+      "drsmoothie"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "drsmoothie.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Oregon Fruit Products",
+    "aliases": [
+      "oregon fruit products",
+      "oregon fruit",
+      "oregon fruit puree",
+      "oregon fruit foodservice",
+      "oregonfruit"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "oregonfruit.com",
+    "confidence": "medium",
+    "notes": "Products may be used in beverages, bakery, or food preparation."
+  },
+  {
+    "canonical_name": "Red Bull Distribution Company",
+    "aliases": [
+      "red bull distribution company",
+      "red bull distribution",
+      "red bull",
+      "redbull distribution",
+      "red bull energy drink"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "redbull.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Coca-Cola Consolidated",
+    "aliases": [
+      "coca cola consolidated",
+      "coke consolidated",
+      "coca cola bottling",
+      "coke bottling",
+      "coca cola invoice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "cokeconsolidated.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Reyes Coca-Cola Bottling",
+    "aliases": [
+      "reyes coca cola bottling",
+      "reyes coca cola",
+      "reyes coke",
+      "coca cola reyes",
+      "reyes bottling"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "reyescocacola.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Swire Coca-Cola",
+    "aliases": [
+      "swire coca cola",
+      "swire coke",
+      "swire coca cola usa",
+      "swire bottling",
+      "swirecc"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "swirecc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Liberty Coca-Cola Beverages",
+    "aliases": [
+      "liberty coca cola beverages",
+      "liberty coke",
+      "liberty coca cola",
+      "liberty bottling",
+      "liberty coke invoice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "libertycoke.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PepsiCo Foodservice",
+    "aliases": [
+      "pepsico foodservice",
+      "pepsi foodservice",
+      "pepsico partners",
+      "pepsi cola",
+      "pepsi beverage"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "pepsicopartners.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pepsi Bottling Ventures",
+    "aliases": [
+      "pepsi bottling ventures",
+      "pbv",
+      "pepsi bottling",
+      "pepsi beverage invoice",
+      "pepsi ventures"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "pepsibottlingventures.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Keurig Dr Pepper",
+    "aliases": [
+      "keurig dr pepper",
+      "kdp",
+      "dr pepper distribution",
+      "keurig dr pepper inc",
+      "kdp beverage"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "keurigdrpepper.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Keurig Commercial",
+    "aliases": [
+      "keurig commercial",
+      "keurig business solutions",
+      "keurig coffee service",
+      "keurig commercial coffee",
+      "keurig business"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "keurigcommercial.com",
+    "confidence": "medium",
+    "notes": "Charges may include beverages, brewers, supplies, or service."
+  },
+  {
+    "canonical_name": "Royal Cup Coffee",
+    "aliases": [
+      "royal cup coffee",
+      "royal cup",
+      "royal cup inc",
+      "royal cup foodservice",
+      "royal cup coffee tea"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "royalcupcoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Farmer Brothers",
+    "aliases": [
+      "farmer brothers",
+      "farmer bros",
+      "farmer brothers coffee",
+      "farmer bros coffee",
+      "farmer brothers foodservice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "farmerbros.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Community Coffee",
+    "aliases": [
+      "community coffee",
+      "community coffee company",
+      "community coffee foodservice",
+      "community coffee service",
+      "community coffee invoice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "communitycoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "S&D Coffee & Tea",
+    "aliases": [
+      "s d coffee tea",
+      "s and d coffee tea",
+      "sd coffee",
+      "s d coffee",
+      "westrock coffee"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "westrockcoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Westrock Coffee",
+    "aliases": [
+      "westrock coffee",
+      "westrock coffee company",
+      "westrock beverage solutions",
+      "westrock coffee foodservice",
+      "westrock coffee invoice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "westrockcoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Boyd Coffee Company",
+    "aliases": [
+      "boyd coffee company",
+      "boyds coffee",
+      "boyd coffee",
+      "boyds foodservice",
+      "boyds coffee company"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "boyds.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ronnoco Coffee",
+    "aliases": [
+      "ronnoco coffee",
+      "ronnoco coffee llc",
+      "ronnoco",
+      "ronnoco beverage solutions",
+      "ronnoco foodservice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "ronnoco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dillanos Coffee Roasters",
+    "aliases": [
+      "dillanos coffee roasters",
+      "dillanos",
+      "dillanos coffee",
+      "dillanos wholesale",
+      "dillanos coffee invoice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "dillanos.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Intelligentsia Coffee",
+    "aliases": [
+      "intelligentsia coffee",
+      "intelligentsia coffee inc",
+      "intelligentsia wholesale",
+      "intelligentsia coffee roasters",
+      "intelligentsia"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "intelligentsia.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Stumptown Coffee Roasters",
+    "aliases": [
+      "stumptown coffee roasters",
+      "stumptown coffee",
+      "stumptown wholesale",
+      "stumptown",
+      "stumptown coffee invoice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "stumptowncoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Counter Culture Coffee",
+    "aliases": [
+      "counter culture coffee",
+      "counter culture",
+      "counter culture wholesale",
+      "counter culture coffee inc",
+      "counter culture coffee invoice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "counterculturecoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "La Colombe Coffee Roasters",
+    "aliases": [
+      "la colombe coffee roasters",
+      "la colombe coffee",
+      "la colombe",
+      "la colombe wholesale",
+      "la colombe coffee invoice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "lacolombe.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Verve Coffee Roasters",
+    "aliases": [
+      "verve coffee roasters",
+      "verve coffee",
+      "verve wholesale",
+      "verve coffee roasting",
+      "verve coffee invoice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "vervecoffee.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Peet's Coffee Wholesale",
+    "aliases": [
+      "peets coffee wholesale",
+      "peets coffee",
+      "peets coffee tea",
+      "peets wholesale",
+      "peets coffee inc"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "peets.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Starbucks Foodservice",
+    "aliases": [
+      "starbucks foodservice",
+      "starbucks coffee",
+      "starbucks coffee company",
+      "starbucks business",
+      "starbucks brewed solutions"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "starbucks.com",
+    "confidence": "medium",
+    "notes": "Could be wholesale beverage inputs or an ordinary retail Starbucks purchase."
+  },
+  {
+    "canonical_name": "Lavazza Professional",
+    "aliases": [
+      "lavazza professional",
+      "lavazza",
+      "lavazza coffee",
+      "lavazza pro",
+      "lavazza foodservice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "lavazzapro.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "illy Caffè North America",
+    "aliases": [
+      "illy caffe north america",
+      "illy caffe",
+      "illy coffee",
+      "illy",
+      "illy foodservice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "illy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "JDE Peet's Professional",
+    "aliases": [
+      "jde peets professional",
+      "jde professional",
+      "jacobs douwe egberts",
+      "jde coffee",
+      "jde foodservice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "jdeprofessional.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Caribou Coffee Wholesale",
+    "aliases": [
+      "caribou coffee wholesale",
+      "caribou coffee",
+      "caribou wholesale",
+      "caribou coffee company",
+      "caribou foodservice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "cariboucoffee.com",
+    "confidence": "medium",
+    "notes": "Could be wholesale coffee or an ordinary retail coffee-shop purchase."
+  },
+  {
+    "canonical_name": "Harney & Sons",
+    "aliases": [
+      "harney sons",
+      "harney and sons",
+      "harney sons tea",
+      "harney tea",
+      "harney wholesale"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "harney.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Rishi Tea & Botanicals",
+    "aliases": [
+      "rishi tea botanicals",
+      "rishi tea",
+      "rishi tea botanicals inc",
+      "rishi wholesale",
+      "rishi tea foodservice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "rishi-tea.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mighty Leaf Tea",
+    "aliases": [
+      "mighty leaf tea",
+      "mighty leaf",
+      "mighty leaf foodservice",
+      "mighty leaf wholesale",
+      "mighty leaf tea company"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "mightyleaf.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Numi Organic Tea",
+    "aliases": [
+      "numi organic tea",
+      "numi tea",
+      "numi",
+      "numi wholesale",
+      "numi foodservice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "numitea.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Republic of Tea",
+    "aliases": [
+      "republic of tea",
+      "the republic of tea",
+      "republic tea",
+      "republic of tea wholesale",
+      "republic of tea foodservice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "republicoftea.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Teatulia",
+    "aliases": [
+      "teatulia",
+      "teatulia organic teas",
+      "teatulia tea",
+      "teatulia wholesale",
+      "teatulia foodservice"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "teatulia.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Art of Tea",
+    "aliases": [
+      "art of tea",
+      "art of tea llc",
+      "art of tea wholesale",
+      "art of tea foodservice",
+      "artoftea"
+    ],
+    "semantic": "beverage_cogs",
+    "logo_domain": "artoftea.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SCA Tissue North America",
+    "aliases": [
+      "tork",
+      "tork usa",
+      "essity tork",
+      "tork foodservice",
+      "tork napkins"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "torkusa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Georgia-Pacific Professional",
+    "aliases": [
+      "georgia pacific professional",
+      "gp pro",
+      "gppro",
+      "georgia pacific foodservice",
+      "gp professional"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "gppro.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Pactiv Evergreen",
+    "aliases": [
+      "pactiv evergreen",
+      "pactiv",
+      "pactiv foodservice",
+      "pactiv packaging",
+      "pactiv evergreen inc"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "pactivevergreen.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dart Container",
+    "aliases": [
+      "dart container",
+      "dart container corporation",
+      "dart foodservice",
+      "dart cups",
+      "dart packaging"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "dartcontainer.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Genpak",
+    "aliases": [
+      "genpak",
+      "genpak llc",
+      "genpak foodservice",
+      "genpak packaging",
+      "genpak containers"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "genpak.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sabert",
+    "aliases": [
+      "sabert",
+      "sabert corporation",
+      "sabert foodservice",
+      "sabert packaging",
+      "sabert containers"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "sabert.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Anchor Packaging",
+    "aliases": [
+      "anchor packaging",
+      "anchor packaging llc",
+      "anchor foodservice",
+      "anchor packaging foodservice",
+      "anchor containers"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "anchorpackaging.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Novolex",
+    "aliases": [
+      "novolex",
+      "novolex holdings",
+      "novolex packaging",
+      "novolex foodservice",
+      "novolex bags"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "novolex.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Huhtamaki North America",
+    "aliases": [
+      "huhtamaki north america",
+      "huhtamaki",
+      "huhtamaki foodservice",
+      "huhtamaki packaging",
+      "huhtamaki cups"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "huhtamaki.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Graphic Packaging International",
+    "aliases": [
+      "graphic packaging international",
+      "graphic packaging",
+      "gpi packaging",
+      "graphicpkg",
+      "graphic packaging foodservice"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "graphicpkg.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Berry Global",
+    "aliases": [
+      "berry global",
+      "berry global inc",
+      "berry plastics",
+      "berry packaging",
+      "berry foodservice"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "berryglobal.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Eco-Products",
+    "aliases": [
+      "eco products",
+      "eco products pbc",
+      "ecoproducts",
+      "eco products foodservice",
+      "eco products packaging"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "ecoproducts.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "World Centric",
+    "aliases": [
+      "world centric",
+      "world centric products",
+      "worldcentric",
+      "world centric foodservice",
+      "world centric packaging"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "worldcentric.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Good Start Packaging",
+    "aliases": [
+      "good start packaging",
+      "goodstart packaging",
+      "good start packaging inc",
+      "good start foodservice",
+      "goodstartpackaging"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "goodstartpackaging.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Karat Packaging",
+    "aliases": [
+      "karat packaging",
+      "karat packaging inc",
+      "karat by lollicup",
+      "karat foodservice",
+      "karat cups"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "karatpackaging.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "LollicupStore",
+    "aliases": [
+      "lollicupstore",
+      "lollicup store",
+      "lollicup usa",
+      "lollicup",
+      "lollicup supplies"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "lollicupstore.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "WebstaurantStore",
+    "aliases": [
+      "webstaurantstore",
+      "webstaurant store",
+      "webstaurantstore com",
+      "webstaurant",
+      "webstaurant order"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "webstaurantstore.com",
+    "confidence": "medium",
+    "notes": "Purchases can include consumable supplies, equipment, ingredients, or office items."
+  },
+  {
+    "canonical_name": "KaTom Restaurant Supply",
+    "aliases": [
+      "katom restaurant supply",
+      "katom",
+      "katom restaurant supplies",
+      "katom com",
+      "katom order"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "katom.com",
+    "confidence": "medium",
+    "notes": "Purchases may be consumable supplies or capital equipment."
+  },
+  {
+    "canonical_name": "Central Restaurant Products",
+    "aliases": [
+      "central restaurant products",
+      "central restaurant supply",
+      "centralrestaurant",
+      "central restaurant",
+      "central products"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "centralrestaurant.com",
+    "confidence": "medium",
+    "notes": "Purchases may be consumable supplies or capital equipment."
+  },
+  {
+    "canonical_name": "RestaurantSupply.com",
+    "aliases": [
+      "restaurantsupply com",
+      "restaurant supply com",
+      "restaurant supply",
+      "restaurantsupply",
+      "restaurant supply order"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "restaurantsupply.com",
+    "confidence": "medium",
+    "notes": "Purchases may be consumable supplies or capital equipment."
+  },
+  {
+    "canonical_name": "Hubert",
+    "aliases": [
+      "hubert",
+      "hubert company",
+      "hubert restaurant supply",
+      "hubert foodservice",
+      "hubert supplies"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "hubert.com",
+    "confidence": "medium",
+    "notes": "Purchases may be consumable supplies or capital equipment."
+  },
+  {
+    "canonical_name": "Edward Don & Company",
+    "aliases": [
+      "edward don company",
+      "edward don",
+      "don com",
+      "don foodservice",
+      "edward don restaurant supply"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "don.com",
+    "confidence": "medium",
+    "notes": "Purchases may include disposables, smallwares, chemicals, or equipment."
+  },
+  {
+    "canonical_name": "TriMark USA",
+    "aliases": [
+      "trimark usa",
+      "trimark",
+      "trimark united east",
+      "trimark foodservice",
+      "trimark restaurant supply"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "trimarkusa.com",
+    "confidence": "medium",
+    "notes": "Purchases may include supplies, equipment, or installation services."
+  },
+  {
+    "canonical_name": "Singer Equipment Company",
+    "aliases": [
+      "singer equipment company",
+      "singer equipment",
+      "singer restaurant supply",
+      "singer foodservice",
+      "singer equipment co"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "singerequipment.com",
+    "confidence": "medium",
+    "notes": "Purchases may include supplies or capital equipment."
+  },
+  {
+    "canonical_name": "Wasserstrom",
+    "aliases": [
+      "wasserstrom",
+      "wasserstrom company",
+      "wasserstrom restaurant supply",
+      "wasserstrom foodservice",
+      "wasserstrom order"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "wasserstrom.com",
+    "confidence": "medium",
+    "notes": "Purchases may include supplies or capital equipment."
+  },
+  {
+    "canonical_name": "CFS Brands",
+    "aliases": [
+      "cfs brands",
+      "cfs brands llc",
+      "cfs foodservice",
+      "cfs restaurant supplies",
+      "cfsbrands"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "cfsbrands.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cambro Manufacturing",
+    "aliases": [
+      "cambro manufacturing",
+      "cambro",
+      "cambro foodservice",
+      "cambro products",
+      "cambro containers"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "cambro.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Carlisle FoodService Products",
+    "aliases": [
+      "carlisle foodservice products",
+      "carlisle fsp",
+      "carlisle foodservice",
+      "carlisle restaurant supplies",
+      "carlisle fsp products"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "carlislefsp.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "TableCraft Products",
+    "aliases": [
+      "tablecraft products",
+      "tablecraft",
+      "tablecraft foodservice",
+      "tablecraft restaurant supply",
+      "tablecraft products company"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "tablecraft.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Winco",
+    "aliases": [
+      "winco foodservice",
+      "winco usa",
+      "winco restaurant supplies",
+      "winco kitchenware",
+      "winco products"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "wincous.com",
+    "confidence": "medium",
+    "notes": "Do not confuse with WinCo Foods grocery stores."
+  },
+  {
+    "canonical_name": "Vollrath Company",
+    "aliases": [
+      "vollrath company",
+      "vollrath",
+      "vollrath foodservice",
+      "vollrath restaurant supply",
+      "vollrath products"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "vollrathfoodservice.com",
+    "confidence": "medium",
+    "notes": "Purchases may include smallwares or capital equipment."
+  },
+  {
+    "canonical_name": "American Metalcraft",
+    "aliases": [
+      "american metalcraft",
+      "american metalcraft inc",
+      "amnow",
+      "american metalcraft foodservice",
+      "american metalcraft supplies"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "amnow.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Update International",
+    "aliases": [
+      "update international",
+      "update international inc",
+      "update foodservice",
+      "update restaurant supply",
+      "update kitchenware"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "update-international.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dexter-Russell",
+    "aliases": [
+      "dexter russell",
+      "dexter russell inc",
+      "dexter cutlery",
+      "dexter russell cutlery",
+      "dexter foodservice"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "dexterrussellcutlery.com",
+    "confidence": "medium",
+    "notes": "Durable knives and tools may be expensed as supplies or equipment."
+  },
+  {
+    "canonical_name": "Mercer Culinary",
+    "aliases": [
+      "mercer culinary",
+      "mercer tool",
+      "mercer knives",
+      "mercer culinary foodservice",
+      "mercer cutlery"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "mercerculinary.com",
+    "confidence": "medium",
+    "notes": "Durable knives and tools may be expensed as supplies or equipment."
+  },
+  {
+    "canonical_name": "Chef Works",
+    "aliases": [
+      "chef works",
+      "chef works inc",
+      "chefworks",
+      "chef works uniforms",
+      "chef works apparel"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "chefworks.com",
+    "confidence": "medium",
+    "notes": "Uniform purchases may be treated as supplies or employee-related expense."
+  },
+  {
+    "canonical_name": "Cintas",
+    "aliases": [
+      "cintas",
+      "cintas corporation",
+      "cintas uniform service",
+      "cintas facility services",
+      "cintas restaurant"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "cintas.com",
+    "confidence": "medium",
+    "notes": "Charges may be uniforms, mats, restroom supplies, or facility services."
+  },
+  {
+    "canonical_name": "UniFirst",
+    "aliases": [
+      "unifirst",
+      "unifirst corporation",
+      "unifirst uniform",
+      "unifirst service",
+      "unifirst restaurant"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "unifirst.com",
+    "confidence": "medium",
+    "notes": "Charges may be uniforms, linens, or facility services."
+  },
+  {
+    "canonical_name": "Alsco Uniforms",
+    "aliases": [
+      "alsco uniforms",
+      "alsco",
+      "alsco inc",
+      "alsco linen service",
+      "alsco restaurant"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "alsco.com",
+    "confidence": "medium",
+    "notes": "Charges may be uniforms, linens, mats, or facility services."
+  },
+  {
+    "canonical_name": "Aramark Uniform Services",
+    "aliases": [
+      "aramark uniform services",
+      "vestis",
+      "vestis corporation",
+      "aramark uniforms",
+      "vestis uniform service"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "vestis.com",
+    "confidence": "medium",
+    "notes": "Legacy Aramark uniform-service descriptors may appear after the Vestis spin-off."
+  },
+  {
+    "canonical_name": "Ecolab",
+    "aliases": [
+      "ecolab",
+      "ecolab inc",
+      "ecolab food beverage",
+      "ecolab pest elimination",
+      "ecolab service"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "ecolab.com",
+    "confidence": "medium",
+    "notes": "Charges may include cleaning chemicals, sanitation programs, pest control, or equipment service."
+  },
+  {
+    "canonical_name": "Diversey",
+    "aliases": [
+      "diversey",
+      "diversey inc",
+      "diversey cleaning",
+      "diversey foodservice",
+      "diversey hygiene"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "diversey.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Zep",
+    "aliases": [
+      "zep",
+      "zep inc",
+      "zep cleaning",
+      "zep foodservice",
+      "zep chemicals"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "zep.com",
+    "confidence": "medium",
+    "notes": "Cleaning and sanitation products may be supplies rather than direct COGS."
+  },
+  {
+    "canonical_name": "Spartan Chemical",
+    "aliases": [
+      "spartan chemical",
+      "spartan chemical company",
+      "spartan cleaning",
+      "spartan sanitation",
+      "spartan chemical foodservice"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "spartanchemical.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Betco",
+    "aliases": [
+      "betco",
+      "betco corporation",
+      "betco cleaning",
+      "betco sanitation",
+      "betco foodservice"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "betco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Auto-Chlor System",
+    "aliases": [
+      "auto chlor system",
+      "auto chlor",
+      "autochlor",
+      "auto chlor service",
+      "auto chlor restaurant"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "autochlor.com",
+    "confidence": "medium",
+    "notes": "Charges may include chemicals, dishmachine rental, and service."
+  },
+  {
+    "canonical_name": "Hillyard",
+    "aliases": [
+      "hillyard",
+      "hillyard inc",
+      "hillyard cleaning",
+      "hillyard sanitation",
+      "hillyard supplies"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "hillyard.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Imperial Dade",
+    "aliases": [
+      "imperial dade",
+      "imperialdade",
+      "imperial dade foodservice",
+      "imperial dade janitorial",
+      "imperial dade supplies"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "imperialdade.com",
+    "confidence": "medium",
+    "notes": "Distributor sells foodservice disposables, janitorial supplies, and packaging."
+  },
+  {
+    "canonical_name": "BradyPLUS",
+    "aliases": [
+      "bradyplus",
+      "brady plus",
+      "brady industries",
+      "bradyifs",
+      "brady plus supplies"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "bradyplus.com",
+    "confidence": "medium",
+    "notes": "Distributor sells janitorial, foodservice, and facility supplies."
+  },
+  {
+    "canonical_name": "Veritiv",
+    "aliases": [
+      "veritiv",
+      "veritiv corporation",
+      "veritiv packaging",
+      "veritiv foodservice",
+      "veritiv supplies"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "veritiv.com",
+    "confidence": "medium",
+    "notes": "Purchases may be packaging, paper, facility supplies, or other materials."
+  },
+  {
+    "canonical_name": "Grainger",
+    "aliases": [
+      "grainger",
+      "ww grainger",
+      "w w grainger",
+      "grainger industrial supply",
+      "grainger order"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "grainger.com",
+    "confidence": "medium",
+    "notes": "Restaurant purchases can span repair parts, maintenance supplies, safety products, and equipment."
+  },
+  {
+    "canonical_name": "Ferguson",
+    "aliases": [
+      "ferguson",
+      "ferguson enterprises",
+      "ferguson plumbing",
+      "ferguson facilities supply",
+      "ferguson order"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "ferguson.com",
+    "confidence": "medium",
+    "notes": "Purchases may be repair parts, fixtures, plumbing supplies, or equipment."
+  },
+  {
+    "canonical_name": "Parts Town",
+    "aliases": [
+      "parts town",
+      "partstown",
+      "parts town llc",
+      "parts town restaurant equipment",
+      "parts town order"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "partstown.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Heritage Parts",
+    "aliases": [
+      "heritage parts",
+      "heritage foodservice group",
+      "heritageparts",
+      "heritage restaurant parts",
+      "heritage equipment parts"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "heritageparts.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "AllPoints Foodservice Parts & Supplies",
+    "aliases": [
+      "allpoints foodservice parts supplies",
+      "allpoints fps",
+      "allpoints foodservice",
+      "all points parts",
+      "allpoints restaurant parts"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "allpointsfps.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "General Parts Group",
+    "aliases": [
+      "general parts group",
+      "general parts",
+      "general parts foodservice",
+      "general parts restaurant equipment",
+      "general parts service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "generalparts.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Tech24",
+    "aliases": [
+      "tech24",
+      "tech 24",
+      "tech24 restaurant equipment",
+      "tech24 service",
+      "tech24 foodservice"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "tech24.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Smart Care Equipment Solutions",
+    "aliases": [
+      "smart care equipment solutions",
+      "smart care",
+      "smartcare solutions",
+      "smart care restaurant equipment",
+      "smart care service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "smartcaresolutions.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "EMR - Commercial Kitchen Service",
+    "aliases": [
+      "emr commercial kitchen service",
+      "emr co",
+      "emr kitchen service",
+      "emr restaurant equipment",
+      "emr service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "emrco.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hobart Service",
+    "aliases": [
+      "hobart service",
+      "hobart",
+      "hobart service repair",
+      "hobart food equipment",
+      "hobart restaurant equipment"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "hobartservice.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hobart",
+    "aliases": [
+      "hobart corporation",
+      "hobart corp",
+      "hobart equipment",
+      "hobart food equipment",
+      "hobart commercial"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "hobartcorp.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Vulcan",
+    "aliases": [
+      "vulcan equipment",
+      "vulcan food equipment",
+      "vulcan restaurant equipment",
+      "vulcan commercial",
+      "vulcan kitchen equipment"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "vulcanequipment.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Traulsen",
+    "aliases": [
+      "traulsen",
+      "traulsen refrigeration",
+      "traulsen equipment",
+      "traulsen foodservice",
+      "traulsen service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "traulsen.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "True Manufacturing",
+    "aliases": [
+      "true manufacturing",
+      "true refrigeration",
+      "true mfg",
+      "true foodservice equipment",
+      "true commercial refrigeration"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "truemfg.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Turbo Air",
+    "aliases": [
+      "turbo air",
+      "turbo air inc",
+      "turbo air refrigeration",
+      "turboair",
+      "turbo air equipment"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "turboairinc.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Manitowoc Ice",
+    "aliases": [
+      "manitowoc ice",
+      "manitowoc ice machine",
+      "manitowoc ice equipment",
+      "manitowoc foodservice",
+      "manitowoc ice service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "manitowocice.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Hoshizaki America",
+    "aliases": [
+      "hoshizaki america",
+      "hoshizaki",
+      "hoshizaki ice",
+      "hoshizaki refrigeration",
+      "hoshizaki service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "hoshizakiamerica.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Scotsman Ice Systems",
+    "aliases": [
+      "scotsman ice systems",
+      "scotsman ice",
+      "scotsman",
+      "scotsman ice machine",
+      "scotsman foodservice"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "scotsman-ice.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Middleby",
+    "aliases": [
+      "middleby",
+      "middleby corporation",
+      "middleby foodservice",
+      "middleby equipment",
+      "middleby commercial"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "middleby.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Welbilt",
+    "aliases": [
+      "welbilt",
+      "welbilt inc",
+      "welbilt foodservice",
+      "welbilt equipment",
+      "welbilt commercial"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "welbilt.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Rational USA",
+    "aliases": [
+      "rational usa",
+      "rational",
+      "rational oven",
+      "rational combi",
+      "rational service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "rational-online.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Alto-Shaam",
+    "aliases": [
+      "alto shaam",
+      "altoshaam",
+      "alto shaam inc",
+      "alto shaam equipment",
+      "alto shaam service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "alto-shaam.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Hatco",
+    "aliases": [
+      "hatco",
+      "hatco corporation",
+      "hatco equipment",
+      "hatco foodservice",
+      "hatco service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "hatcocorp.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Star Manufacturing",
+    "aliases": [
+      "star manufacturing",
+      "star mfg",
+      "star foodservice equipment",
+      "star manufacturing international",
+      "star equipment"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "star-mfg.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Pitco",
+    "aliases": [
+      "pitco",
+      "pitco frialator",
+      "pitco fryer",
+      "pitco foodservice",
+      "pitco equipment"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "pitco.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Frymaster",
+    "aliases": [
+      "frymaster",
+      "frymaster llc",
+      "frymaster fryer",
+      "frymaster foodservice",
+      "frymaster equipment"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "frymaster.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Taylor Company",
+    "aliases": [
+      "taylor company",
+      "taylor commercial foodservice",
+      "taylor equipment",
+      "taylor soft serve",
+      "taylor freezer"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "taylor-company.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases and service may need different accounting treatment."
+  },
+  {
+    "canonical_name": "Carpigiani",
+    "aliases": [
+      "carpigiani",
+      "carpigiani north america",
+      "carpigiani equipment",
+      "carpigiani gelato",
+      "carpigiani service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "carpigiani.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Bunn-O-Matic",
+    "aliases": [
+      "bunn o matic",
+      "bunn",
+      "bunn commercial",
+      "bunn coffee equipment",
+      "bunn service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "commercial.bunn.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Curtis",
+    "aliases": [
+      "wilbur curtis",
+      "curtis coffee equipment",
+      "wilbur curtis company",
+      "curtis commercial",
+      "curtis brewer"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "wilburcurtis.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Fetco",
+    "aliases": [
+      "fetco",
+      "food equipment technologies",
+      "fetco coffee equipment",
+      "fetco brewer",
+      "fetco commercial"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "fetco.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Nuova Simonelli",
+    "aliases": [
+      "nuova simonelli",
+      "simonelli usa",
+      "simonelli",
+      "nuova simonelli usa",
+      "simonelli espresso"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "simonelliusa.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "La Marzocco USA",
+    "aliases": [
+      "la marzocco usa",
+      "la marzocco",
+      "lamarzocco",
+      "la marzocco espresso",
+      "la marzocco service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "lamarzoccousa.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Eversys",
+    "aliases": [
+      "eversys",
+      "eversys inc",
+      "eversys coffee",
+      "eversys espresso",
+      "eversys service"
+    ],
+    "semantic": "repairs_maintenance",
+    "logo_domain": "eversys.com",
+    "confidence": "medium",
+    "notes": "Equipment purchases may need capitalization rather than repair expense."
+  },
+  {
+    "canonical_name": "Toast",
+    "aliases": [
+      "toast",
+      "toast inc",
+      "toasttab",
+      "toast pos",
+      "toast subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "toasttab.com",
+    "confidence": "medium",
+    "notes": "Toast charges may include SaaS, hardware, payment processing, financing, or restaurant services."
+  },
+  {
+    "canonical_name": "Square for Restaurants",
+    "aliases": [
+      "square for restaurants",
+      "square restaurants",
+      "squareup",
+      "square pos",
+      "sq square"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "squareup.com",
+    "confidence": "medium",
+    "notes": "Square charges can represent SaaS, hardware, processing fees, or transfers."
+  },
+  {
+    "canonical_name": "Clover",
+    "aliases": [
+      "clover",
+      "clover network",
+      "clover pos",
+      "clover app market",
+      "clover subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "clover.com",
+    "confidence": "medium",
+    "notes": "Clover charges can include software, hardware, and payment-processing services."
+  },
+  {
+    "canonical_name": "SpotOn",
+    "aliases": [
+      "spoton",
+      "spoton transact",
+      "spoton pos",
+      "spoton restaurant",
+      "spoton subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "spoton.com",
+    "confidence": "medium",
+    "notes": "SpotOn charges can include POS software, hardware, marketing, and processing."
+  },
+  {
+    "canonical_name": "TouchBistro",
+    "aliases": [
+      "touchbistro",
+      "touchbistro inc",
+      "touchbistro pos",
+      "touchbistro restaurant",
+      "touchbistro subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "touchbistro.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lightspeed Restaurant",
+    "aliases": [
+      "lightspeed restaurant",
+      "lightspeed commerce",
+      "lightspeed pos",
+      "lightspeedhq",
+      "lightspeed subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "lightspeedhq.com",
+    "confidence": "medium",
+    "notes": "Lightspeed serves multiple retail verticals in addition to restaurants."
+  },
+  {
+    "canonical_name": "Revel Systems",
+    "aliases": [
+      "revel systems",
+      "revel systems inc",
+      "revel pos",
+      "revel restaurant",
+      "revel subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "revelsystems.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lavu",
+    "aliases": [
+      "lavu",
+      "lavu inc",
+      "lavu pos",
+      "lavu restaurant",
+      "lavu subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "lavu.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "HungerRush",
+    "aliases": [
+      "hungerrush",
+      "hunger rush",
+      "hungerrush pos",
+      "hungerrush restaurant",
+      "hungerrush subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "hungerrush.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PAR Brink POS",
+    "aliases": [
+      "par brink pos",
+      "brink pos",
+      "par technology",
+      "par restaurant",
+      "brink software"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "partech.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Oracle MICROS",
+    "aliases": [
+      "oracle micros",
+      "micros",
+      "oracle food beverage",
+      "micros pos",
+      "oracle restaurant"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "oracle.com",
+    "confidence": "medium",
+    "notes": "Oracle descriptors can also relate to non-restaurant enterprise software."
+  },
+  {
+    "canonical_name": "NCR Aloha",
+    "aliases": [
+      "ncr aloha",
+      "aloha pos",
+      "ncr voyix",
+      "aloha restaurant",
+      "ncr restaurant"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "ncrvoyix.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Heartland Restaurant",
+    "aliases": [
+      "heartland restaurant",
+      "heartland pos",
+      "heartland payment systems",
+      "heartland restaurant pos",
+      "heartland commerce"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "heartland.us",
+    "confidence": "medium",
+    "notes": "Heartland charges may include POS software, payroll, hardware, or processing."
+  },
+  {
+    "canonical_name": "Shift4",
+    "aliases": [
+      "shift4",
+      "shift4 payments",
+      "shift4 payments llc",
+      "shift4 restaurant",
+      "shift4 processing"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "shift4.com",
+    "confidence": "medium",
+    "notes": "Shift4 may appear for payment processing, POS technology, or settlement activity."
+  },
+  {
+    "canonical_name": "SkyTab",
+    "aliases": [
+      "skytab",
+      "sky tab",
+      "skytab pos",
+      "skytab restaurant",
+      "skytab subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "skytab.com",
+    "confidence": "medium",
+    "notes": "SkyTab is a Shift4 restaurant technology product; processing and hardware charges may also appear."
+  },
+  {
+    "canonical_name": "Cake POS",
+    "aliases": [
+      "cake pos",
+      "cake restaurant pos",
+      "cake by mad mobile",
+      "cake point of sale",
+      "cake subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "cake.net",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "GoTab",
+    "aliases": [
+      "gotab",
+      "go tab",
+      "gotab pos",
+      "gotab restaurant",
+      "gotab subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "gotab.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Rezku",
+    "aliases": [
+      "rezku",
+      "rezku pos",
+      "rezku restaurant",
+      "rezku point of sale",
+      "rezku subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "rezku.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Arryved",
+    "aliases": [
+      "arryved",
+      "arryved inc",
+      "arryved pos",
+      "arryved restaurant",
+      "arryved subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "arryved.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Union POS",
+    "aliases": [
+      "union pos",
+      "union hospitality",
+      "getunion",
+      "union point of sale",
+      "union restaurant"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "getunion.com",
+    "confidence": "medium",
+    "notes": "Generic 'union' descriptors should not be matched without POS context."
+  },
+  {
+    "canonical_name": "Tabit",
+    "aliases": [
+      "tabit",
+      "tabit technologies",
+      "tabit pos",
+      "tabit restaurant",
+      "tabit cloud"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "tabit.cloud",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Restaurant365",
+    "aliases": [
+      "restaurant365",
+      "restaurant 365",
+      "r365",
+      "restaurant365 software",
+      "r365 subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "restaurant365.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MarginEdge",
+    "aliases": [
+      "marginedge",
+      "margin edge",
+      "marginedge inc",
+      "marginedge restaurant",
+      "marginedge subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "marginedge.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MarketMan",
+    "aliases": [
+      "marketman",
+      "market man",
+      "marketman restaurant",
+      "marketman inventory",
+      "marketman subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "marketman.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Craftable",
+    "aliases": [
+      "craftable",
+      "craftable software",
+      "craftable restaurant",
+      "craftable inventory",
+      "craftable subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "craftable.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "xtraCHEF",
+    "aliases": [
+      "xtrachef",
+      "xtra chef",
+      "xtrachef by toast",
+      "xtrachef restaurant",
+      "xtrachef subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "xtrachef.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Plate IQ",
+    "aliases": [
+      "plate iq",
+      "plateiq",
+      "plate iq inc",
+      "plateiq restaurant",
+      "plateiq subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "plateiq.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ottimate",
+    "aliases": [
+      "ottimate",
+      "ottimate inc",
+      "ottimate ap",
+      "ottimate restaurant",
+      "ottimate subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "ottimate.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Foodager",
+    "aliases": [
+      "foodager",
+      "foodager software",
+      "foodager restaurant",
+      "foodager inventory",
+      "foodager subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "foodager.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Jolt",
+    "aliases": [
+      "jolt",
+      "jolt software",
+      "jolt restaurant",
+      "jolt operations",
+      "jolt subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "jolt.com",
+    "confidence": "medium",
+    "notes": "Jolt also serves non-restaurant frontline businesses."
+  },
+  {
+    "canonical_name": "7shifts",
+    "aliases": [
+      "7shifts",
+      "7 shifts",
+      "7shifts inc",
+      "7shifts restaurant",
+      "7shifts subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "7shifts.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "HotSchedules",
+    "aliases": [
+      "hotschedules",
+      "hot schedules",
+      "fourth hotschedules",
+      "hotschedules restaurant",
+      "hotschedules subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "hotschedules.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fourth",
+    "aliases": [
+      "fourth",
+      "fourth enterprises",
+      "fourth hospitality",
+      "fourth restaurant software",
+      "fourth subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "fourth.com",
+    "confidence": "medium",
+    "notes": "Generic 'fourth' descriptors should only match with vendor context."
+  },
+  {
+    "canonical_name": "Homebase",
+    "aliases": [
+      "homebase",
+      "joinhomebase",
+      "homebase payroll",
+      "homebase scheduling",
+      "homebase subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "joinhomebase.com",
+    "confidence": "medium",
+    "notes": "Homebase is used across many hourly-workforce industries, not only restaurants."
+  },
+  {
+    "canonical_name": "When I Work",
+    "aliases": [
+      "when i work",
+      "wheniwork",
+      "when i work inc",
+      "when i work scheduling",
+      "when i work subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "wheniwork.com",
+    "confidence": "medium",
+    "notes": "Used across multiple industries."
+  },
+  {
+    "canonical_name": "Deputy",
+    "aliases": [
+      "deputy",
+      "deputy com",
+      "deputy scheduling",
+      "deputy workforce",
+      "deputy subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "deputy.com",
+    "confidence": "medium",
+    "notes": "Used across multiple industries."
+  },
+  {
+    "canonical_name": "Sling",
+    "aliases": [
+      "sling",
+      "getsling",
+      "sling scheduling",
+      "sling employee scheduling",
+      "sling subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "getsling.com",
+    "confidence": "medium",
+    "notes": "Generic 'sling' should only match with software context."
+  },
+  {
+    "canonical_name": "Meez",
+    "aliases": [
+      "meez",
+      "getmeez",
+      "meez culinary",
+      "meez recipe software",
+      "meez subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "getmeez.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Galley",
+    "aliases": [
+      "galley solutions",
+      "galley",
+      "galley foodservice",
+      "galley culinary software",
+      "galley subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "galleysolutions.com",
+    "confidence": "medium",
+    "notes": "Generic 'galley' should only match with software/vendor context."
+  },
+  {
+    "canonical_name": "BlueCart",
+    "aliases": [
+      "bluecart",
+      "blue cart",
+      "bluecart restaurant",
+      "bluecart ordering",
+      "bluecart subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "bluecart.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Choco",
+    "aliases": [
+      "choco",
+      "choco communications",
+      "choco foodservice",
+      "choco ordering",
+      "choco restaurant"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "choco.com",
+    "confidence": "medium",
+    "notes": "May represent ordering software or transactions tied to participating suppliers."
+  },
+  {
+    "canonical_name": "Peppr",
+    "aliases": [
+      "peppr",
+      "peppr restaurant",
+      "peppr ordering",
+      "peppr wholesale",
+      "peppr marketplace"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "peppr.com",
+    "confidence": "medium",
+    "notes": "May represent software or supplier-order marketplace activity."
+  },
+  {
+    "canonical_name": "Popmenu",
+    "aliases": [
+      "popmenu",
+      "popmenu inc",
+      "popmenu restaurant",
+      "popmenu marketing",
+      "popmenu subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "popmenu.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "BentoBox",
+    "aliases": [
+      "bentobox",
+      "bento box",
+      "getbento",
+      "bentobox restaurant",
+      "bentobox subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "getbento.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Owner.com",
+    "aliases": [
+      "owner com",
+      "owner.com",
+      "owner restaurant",
+      "owner online ordering",
+      "owner subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "owner.com",
+    "confidence": "medium",
+    "notes": "Charges may cover website, ordering, CRM, and marketing software."
+  },
+  {
+    "canonical_name": "Thanx",
+    "aliases": [
+      "thanx",
+      "thanx inc",
+      "thanx loyalty",
+      "thanx restaurant",
+      "thanx subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "thanx.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Punchh",
+    "aliases": [
+      "punchh",
+      "punchh inc",
+      "punchh loyalty",
+      "punchh restaurant",
+      "punchh subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "punchh.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Paytronix",
+    "aliases": [
+      "paytronix",
+      "paytronix systems",
+      "paytronix loyalty",
+      "paytronix restaurant",
+      "paytronix subscription"
+    ],
+    "semantic": "marketing",
+    "logo_domain": "paytronix.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Olo",
+    "aliases": [
+      "olo",
+      "olo inc",
+      "olo restaurant",
+      "olo ordering",
+      "olo subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "olo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ChowNow",
+    "aliases": [
+      "chownow",
+      "chow now",
+      "chownow inc",
+      "chownow restaurant",
+      "chownow subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "chownow.com",
+    "confidence": "high",
+    "notes": ""
+  }
+]

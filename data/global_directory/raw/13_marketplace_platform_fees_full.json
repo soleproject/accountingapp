@@ -1,0 +1,4213 @@
+[
+  {
+    "canonical_name": "Amazon Seller Central",
+    "aliases": [
+      "amazon seller central",
+      "amazon seller",
+      "amazon services seller",
+      "amazon seller fees",
+      "amzn seller services"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "amazon.com",
+    "confidence": "medium",
+    "notes": "Amazon charges can also be retail, AWS, ads, or fulfillment; require seller context."
+  },
+  {
+    "canonical_name": "Amazon Professional Selling Plan",
+    "aliases": [
+      "amazon professional selling plan",
+      "amazon selling plan",
+      "amazon seller subscription",
+      "amzn professional seller",
+      "amazon seller monthly fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "amazon.com",
+    "confidence": "medium",
+    "notes": "Amazon descriptors require seller-plan context."
+  },
+  {
+    "canonical_name": "Amazon Referral Fees",
+    "aliases": [
+      "amazon referral fees",
+      "amazon referral fee",
+      "amazon seller referral",
+      "amzn referral fee",
+      "amazon marketplace fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "amazon.com",
+    "confidence": "medium",
+    "notes": "Amazon charges can represent several different seller services."
+  },
+  {
+    "canonical_name": "Amazon FBA Fees",
+    "aliases": [
+      "amazon fba fees",
+      "amazon fba fee",
+      "fulfillment by amazon fee",
+      "amzn fba fees",
+      "amazon seller fba"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "amazon.com",
+    "confidence": "medium",
+    "notes": "FBA charges may include fulfillment, storage, and other seller fees."
+  },
+  {
+    "canonical_name": "Amazon Storage Fees",
+    "aliases": [
+      "amazon storage fees",
+      "amazon storage fee",
+      "amazon fba storage",
+      "amazon inventory storage fee",
+      "amzn storage fee",
+      "amazon seller storage"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "amazon.com",
+    "confidence": "medium",
+    "notes": "Seller inventory storage charge."
+  },
+  {
+    "canonical_name": "Amazon Vine",
+    "aliases": [
+      "amazon vine",
+      "amazon vine fee",
+      "amazon seller vine",
+      "amzn vine",
+      "amazon vine enrollment"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "amazon.com",
+    "confidence": "medium",
+    "notes": "Seller program fee; require Vine context."
+  },
+  {
+    "canonical_name": "Amazon Handmade",
+    "aliases": [
+      "amazon handmade",
+      "amazon handmade seller",
+      "amazon handmade fees",
+      "amzn handmade",
+      "amazon handmade marketplace"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "amazon.com",
+    "confidence": "medium",
+    "notes": "Seller marketplace charge."
+  },
+  {
+    "canonical_name": "Amazon Business Seller",
+    "aliases": [
+      "amazon business seller",
+      "amazon business marketplace seller",
+      "amazon seller business",
+      "amzn business seller",
+      "amazon business selling"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "amazon.com",
+    "confidence": "medium",
+    "notes": "Require seller context; Amazon Business purchases are retail."
+  },
+  {
+    "canonical_name": "eBay",
+    "aliases": [
+      "ebay",
+      "ebay inc",
+      "ebay seller fees",
+      "ebay selling fees",
+      "ebay *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "ebay.com",
+    "confidence": "medium",
+    "notes": "eBay charges may be seller fees, purchases, or promoted listings."
+  },
+  {
+    "canonical_name": "eBay Store",
+    "aliases": [
+      "ebay store",
+      "ebay stores",
+      "ebay store subscription",
+      "ebay *store",
+      "ebay seller store"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "ebay.com",
+    "confidence": "medium",
+    "notes": "Seller-store subscription."
+  },
+  {
+    "canonical_name": "eBay Final Value Fee",
+    "aliases": [
+      "ebay final value fee",
+      "ebay final value fees",
+      "ebay seller final value",
+      "ebay *final value",
+      "ebay selling fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "ebay.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "eBay Promoted Listings",
+    "aliases": [
+      "ebay promoted listings",
+      "ebay promoted listing",
+      "ebay advertising",
+      "ebay seller ads",
+      "ebay *promoted"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "ebay.com",
+    "confidence": "medium",
+    "notes": "Advertising charge inside the eBay marketplace."
+  },
+  {
+    "canonical_name": "Etsy",
+    "aliases": [
+      "etsy",
+      "etsy inc",
+      "etsy seller fees",
+      "etsy marketplace fee",
+      "etsy *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "etsy.com",
+    "confidence": "medium",
+    "notes": "Etsy charges may include listing, transaction, ad, or subscription fees."
+  },
+  {
+    "canonical_name": "Etsy Listing Fees",
+    "aliases": [
+      "etsy listing fees",
+      "etsy listing fee",
+      "etsy seller listing",
+      "etsy *listing",
+      "etsy marketplace listing"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "etsy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Etsy Transaction Fees",
+    "aliases": [
+      "etsy transaction fees",
+      "etsy transaction fee",
+      "etsy seller transaction",
+      "etsy *transaction fee",
+      "etsy marketplace fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "etsy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Etsy Plus",
+    "aliases": [
+      "etsy plus",
+      "etsy plus subscription",
+      "etsy seller plus",
+      "etsy *plus",
+      "etsy monthly subscription"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "etsy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Etsy Ads",
+    "aliases": [
+      "etsy ads",
+      "etsy advertising",
+      "etsy seller ads",
+      "etsy *ads",
+      "etsy promoted listings"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "etsy.com",
+    "confidence": "medium",
+    "notes": "Advertising charge inside the Etsy marketplace."
+  },
+  {
+    "canonical_name": "Walmart Marketplace",
+    "aliases": [
+      "walmart marketplace",
+      "walmart seller",
+      "walmart marketplace seller",
+      "walmart seller fees",
+      "walmart *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "walmart.com",
+    "confidence": "medium",
+    "notes": "Walmart descriptors without seller context may be retail purchases."
+  },
+  {
+    "canonical_name": "Walmart Marketplace Referral Fee",
+    "aliases": [
+      "walmart marketplace referral fee",
+      "walmart referral fee",
+      "walmart marketplace referral",
+      "walmart seller referral fee",
+      "walmart *referral",
+      "walmart marketplace fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "walmart.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Walmart Fulfillment Services",
+    "aliases": [
+      "walmart fulfillment services",
+      "walmart wfs",
+      "wfs seller fees",
+      "walmart fulfillment fee",
+      "walmart *wfs"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "walmart.com",
+    "confidence": "medium",
+    "notes": "Can include fulfillment and storage as well as marketplace fees."
+  },
+  {
+    "canonical_name": "Target Plus",
+    "aliases": [
+      "target plus",
+      "target plus marketplace",
+      "target marketplace seller",
+      "target plus seller",
+      "target *plus seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "target.com",
+    "confidence": "medium",
+    "notes": "Require marketplace seller context; Target charges are otherwise retail."
+  },
+  {
+    "canonical_name": "Macy's Marketplace",
+    "aliases": [
+      "macy's marketplace",
+      "macys marketplace",
+      "macys seller",
+      "macys marketplace seller",
+      "macys seller fees",
+      "macys *marketplace"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "macys.com",
+    "confidence": "medium",
+    "notes": "Require seller context."
+  },
+  {
+    "canonical_name": "Kroger Marketplace",
+    "aliases": [
+      "kroger marketplace",
+      "kroger seller",
+      "kroger marketplace seller",
+      "kroger seller fees",
+      "kroger *marketplace"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "kroger.com",
+    "confidence": "medium",
+    "notes": "Require seller context."
+  },
+  {
+    "canonical_name": "Newegg Marketplace",
+    "aliases": [
+      "newegg marketplace",
+      "newegg seller",
+      "newegg seller fees",
+      "newegg marketplace fee",
+      "newegg *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "newegg.com",
+    "confidence": "medium",
+    "notes": "Newegg charges can also be merchandise purchases."
+  },
+  {
+    "canonical_name": "Newegg Seller Portal",
+    "aliases": [
+      "newegg seller portal",
+      "newegg seller subscription",
+      "newegg seller service",
+      "newegg *seller portal",
+      "newegg marketplace seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "newegg.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wayfair Marketplace",
+    "aliases": [
+      "wayfair marketplace",
+      "wayfair supplier",
+      "wayfair partner",
+      "wayfair seller fees",
+      "wayfair *supplier"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "wayfair.com",
+    "confidence": "medium",
+    "notes": "Wayfair descriptors can also be retail purchases."
+  },
+  {
+    "canonical_name": "Houzz Pro Marketplace",
+    "aliases": [
+      "houzz pro marketplace",
+      "houzz marketplace",
+      "houzz seller",
+      "houzz shop seller",
+      "houzz marketplace fee",
+      "houzz *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "houzz.com",
+    "confidence": "medium",
+    "notes": "Houzz also bills for professional software and advertising."
+  },
+  {
+    "canonical_name": "Faire",
+    "aliases": [
+      "faire",
+      "faire wholesale",
+      "faire marketplace",
+      "faire seller fees",
+      "faire *marketplace"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "faire.com",
+    "confidence": "medium",
+    "notes": "May represent wholesale inventory purchases or marketplace fees."
+  },
+  {
+    "canonical_name": "Tundra",
+    "aliases": [
+      "tundra",
+      "tundra wholesale",
+      "tundra marketplace",
+      "tundra seller fee",
+      "tundra *marketplace"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "tundra.com",
+    "confidence": "medium",
+    "notes": "May represent wholesale purchases rather than platform fees."
+  },
+  {
+    "canonical_name": "Abound",
+    "aliases": [
+      "abound",
+      "hello abound",
+      "abound wholesale",
+      "abound marketplace",
+      "abound seller fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "helloabound.com",
+    "confidence": "medium",
+    "notes": "May represent wholesale purchases rather than platform fees."
+  },
+  {
+    "canonical_name": "Handshake Wholesale",
+    "aliases": [
+      "handshake wholesale",
+      "shopify handshake",
+      "handshake marketplace",
+      "handshake wholesale seller",
+      "handshake *wholesale"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "shopify.com",
+    "confidence": "medium",
+    "notes": "Legacy/embedded Shopify wholesale descriptors may appear."
+  },
+  {
+    "canonical_name": "Shopify",
+    "aliases": [
+      "shopify",
+      "shopify inc",
+      "shopify subscription",
+      "shopify monthly",
+      "shopify *subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "shopify.com",
+    "confidence": "medium",
+    "notes": "Shopify may also bill payment processing, apps, domains, or shipping."
+  },
+  {
+    "canonical_name": "Shopify Basic",
+    "aliases": [
+      "shopify basic",
+      "basic shopify",
+      "shopify basic plan",
+      "shopify *basic",
+      "shopify basic subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "shopify.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Shopify Grow",
+    "aliases": [
+      "shopify grow",
+      "shopify grow plan",
+      "grow shopify",
+      "shopify *grow",
+      "shopify grow subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "shopify.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Shopify Advanced",
+    "aliases": [
+      "shopify advanced",
+      "advanced shopify",
+      "shopify advanced plan",
+      "shopify *advanced",
+      "shopify advanced subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "shopify.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Shopify Plus",
+    "aliases": [
+      "shopify plus",
+      "shopifyplus",
+      "shopify plus plan",
+      "shopify *plus",
+      "shopify plus subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "shopify.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Shopify Payments",
+    "aliases": [
+      "shopify payments",
+      "shopify payment processing",
+      "shopify payments fee",
+      "shopify *payments",
+      "shopify transaction fee"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "shopify.com",
+    "confidence": "medium",
+    "notes": "Shopify charges can include SaaS and other merchant services."
+  },
+  {
+    "canonical_name": "Shopify App Store",
+    "aliases": [
+      "shopify app store",
+      "shopify app charge",
+      "shopify apps",
+      "shopify *app",
+      "shopify application charge"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "shopify.com",
+    "confidence": "medium",
+    "notes": "Underlying third-party app may be identifiable in the memo."
+  },
+  {
+    "canonical_name": "Shopify Marketplace Connect",
+    "aliases": [
+      "shopify marketplace connect",
+      "shopify marketplace connector",
+      "shopify connect",
+      "shopify *marketplace connect",
+      "marketplace connect shopify"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "shopify.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "BigCommerce",
+    "aliases": [
+      "bigcommerce",
+      "big commerce",
+      "bigcommerce inc",
+      "bigcommerce subscription",
+      "bigcommerce *subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "bigcommerce.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "BigCommerce Enterprise",
+    "aliases": [
+      "bigcommerce enterprise",
+      "big commerce enterprise",
+      "bigcommerce enterprise plan",
+      "bigcommerce *enterprise",
+      "bigcommerce enterprise subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "bigcommerce.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "WooCommerce",
+    "aliases": [
+      "woocommerce",
+      "woo commerce",
+      "woocommerce subscription",
+      "woocommerce extensions",
+      "woo *commerce"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "woocommerce.com",
+    "confidence": "medium",
+    "notes": "Core software is open source; charges often relate to paid extensions or services."
+  },
+  {
+    "canonical_name": "WooPayments",
+    "aliases": [
+      "woopayments",
+      "woo payments",
+      "woocommerce payments",
+      "woo *payments",
+      "woocommerce payment processing"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "woocommerce.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wix",
+    "aliases": [
+      "wix",
+      "wix com",
+      "wix premium",
+      "wix subscription",
+      "wix *premium"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "wix.com",
+    "confidence": "medium",
+    "notes": "Wix charges may be website, ecommerce, domain, or marketing services."
+  },
+  {
+    "canonical_name": "Wix Stores",
+    "aliases": [
+      "wix stores",
+      "wix ecommerce",
+      "wix business ecommerce",
+      "wix *stores",
+      "wix store subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "wix.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wix Payments",
+    "aliases": [
+      "wix payments",
+      "wix payment processing",
+      "wix payments fee",
+      "wix *payments",
+      "wix transaction fee"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "wix.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Squarespace Commerce",
+    "aliases": [
+      "squarespace commerce",
+      "squarespace ecommerce",
+      "squarespace business",
+      "squarespace *commerce",
+      "squarespace subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "squarespace.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Squarespace Payments",
+    "aliases": [
+      "squarespace payments",
+      "squarespace payment processing",
+      "squarespace payments fee",
+      "squarespace *payments",
+      "squarespace transaction fee"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "squarespace.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ecwid",
+    "aliases": [
+      "ecwid",
+      "ecwid by lightspeed",
+      "ecwid ecommerce",
+      "ecwid subscription",
+      "ecwid *subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "ecwid.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Square Online",
+    "aliases": [
+      "square online",
+      "square online store",
+      "square ecommerce",
+      "squareup online",
+      "square *online"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "squareup.com",
+    "confidence": "medium",
+    "notes": "Square may also be payment processing or POS."
+  },
+  {
+    "canonical_name": "Square Appointments",
+    "aliases": [
+      "square appointments",
+      "squareup appointments",
+      "square appointments subscription",
+      "square *appointments",
+      "sq appointments"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "squareup.com",
+    "confidence": "medium",
+    "notes": "Square may also be payment processing."
+  },
+  {
+    "canonical_name": "Square for Retail",
+    "aliases": [
+      "square for retail",
+      "square retail",
+      "squareup retail",
+      "square *retail",
+      "sq retail subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "squareup.com",
+    "confidence": "medium",
+    "notes": "Square may also be payment processing."
+  },
+  {
+    "canonical_name": "Square for Restaurants",
+    "aliases": [
+      "square for restaurants",
+      "square restaurants",
+      "squareup restaurants",
+      "square *restaurants",
+      "sq restaurants subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "squareup.com",
+    "confidence": "medium",
+    "notes": "Square may also be payment processing."
+  },
+  {
+    "canonical_name": "Lightspeed Retail",
+    "aliases": [
+      "lightspeed retail",
+      "lightspeedhq retail",
+      "lightspeed pos retail",
+      "lightspeed *retail",
+      "lightspeed retail subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "lightspeedhq.com",
+    "confidence": "medium",
+    "notes": "Lightspeed may also bill payment processing."
+  },
+  {
+    "canonical_name": "Lightspeed eCommerce",
+    "aliases": [
+      "lightspeed ecommerce",
+      "lightspeed e commerce",
+      "lightspeed online store",
+      "lightspeed *ecommerce",
+      "lightspeed ecommerce subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "lightspeedhq.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lightspeed Payments",
+    "aliases": [
+      "lightspeed payments",
+      "lightspeed payment processing",
+      "lightspeed payments fee",
+      "lightspeed *payments",
+      "lightspeed transaction fee"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "lightspeedhq.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Shift4Shop",
+    "aliases": [
+      "shift4shop",
+      "shift 4 shop",
+      "shift4 shop",
+      "shift4shop ecommerce",
+      "shift4shop subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "shift4shop.com",
+    "confidence": "medium",
+    "notes": "May be bundled with Shift4 payment processing."
+  },
+  {
+    "canonical_name": "Shift4",
+    "aliases": [
+      "shift4",
+      "shift 4",
+      "shift4 payments",
+      "shift4 processing",
+      "shift4 *payments"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "shift4.com",
+    "confidence": "medium",
+    "notes": "May also bill commerce/POS software."
+  },
+  {
+    "canonical_name": "Volusion",
+    "aliases": [
+      "volusion",
+      "volusion llc",
+      "volusion ecommerce",
+      "volusion subscription",
+      "volusion *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "volusion.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PrestaShop",
+    "aliases": [
+      "prestashop",
+      "presta shop",
+      "prestashop marketplace",
+      "prestashop addons",
+      "prestashop subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "prestashop.com",
+    "confidence": "medium",
+    "notes": "Core platform is open source; charges often relate to hosted services or add-ons."
+  },
+  {
+    "canonical_name": "OpenCart",
+    "aliases": [
+      "opencart",
+      "open cart",
+      "opencart marketplace",
+      "opencart extension",
+      "opencart cloud"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "opencart.com",
+    "confidence": "medium",
+    "notes": "Core platform is open source; paid services/extensions vary."
+  },
+  {
+    "canonical_name": "Sellfy",
+    "aliases": [
+      "sellfy",
+      "sell fy",
+      "sellfy ecommerce",
+      "sellfy subscription",
+      "sellfy *subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "sellfy.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sellbrite",
+    "aliases": [
+      "sellbrite",
+      "sell brite",
+      "sellbrite marketplace",
+      "sellbrite subscription",
+      "sellbrite *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "sellbrite.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ChannelAdvisor",
+    "aliases": [
+      "channeladvisor",
+      "channel advisor",
+      "channeladvisor commerce",
+      "channeladvisor marketplace",
+      "channeladvisor subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "channeladvisor.com",
+    "confidence": "medium",
+    "notes": "Marketplace management software."
+  },
+  {
+    "canonical_name": "Rithum",
+    "aliases": [
+      "rithum",
+      "rithum commerce",
+      "rithum marketplace",
+      "rithum subscription",
+      "commercehub rithum"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "rithum.com",
+    "confidence": "medium",
+    "notes": "May include legacy CommerceHub/ChannelAdvisor descriptors."
+  },
+  {
+    "canonical_name": "CommerceHub",
+    "aliases": [
+      "commercehub",
+      "commerce hub",
+      "commercehub marketplace",
+      "commercehub subscription",
+      "commercehub *service"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "commercehub.com",
+    "confidence": "medium",
+    "notes": "May appear under Rithum branding."
+  },
+  {
+    "canonical_name": "CedCommerce",
+    "aliases": [
+      "cedcommerce",
+      "ced commerce",
+      "cedcommerce marketplace integration",
+      "cedcommerce subscription",
+      "cedcommerce *app"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "cedcommerce.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "LitCommerce",
+    "aliases": [
+      "litcommerce",
+      "lit commerce",
+      "litcommerce marketplace",
+      "litcommerce subscription",
+      "litcommerce *app"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "litcommerce.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Linnworks",
+    "aliases": [
+      "linnworks",
+      "linn works",
+      "linnworks ecommerce",
+      "linnworks subscription",
+      "linnworks *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "linnworks.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sellercloud",
+    "aliases": [
+      "sellercloud",
+      "seller cloud",
+      "sellercloud ecommerce",
+      "sellercloud subscription",
+      "sellercloud *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "sellercloud.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sellware",
+    "aliases": [
+      "sellware",
+      "sell ware",
+      "sellware marketplace",
+      "sellware subscription",
+      "sellware *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "sellware.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Zentail",
+    "aliases": [
+      "zentail",
+      "zen tail",
+      "zentail marketplace",
+      "zentail subscription",
+      "zentail *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "zentail.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "GeekSeller",
+    "aliases": [
+      "geekseller",
+      "geek seller",
+      "geekseller marketplace",
+      "geekseller subscription",
+      "geekseller *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "geekseller.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Listing Mirror",
+    "aliases": [
+      "listing mirror",
+      "listingmirror",
+      "listing mirror marketplace",
+      "listing mirror subscription",
+      "listingmirror *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "listingmirror.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SellerActive",
+    "aliases": [
+      "selleractive",
+      "seller active",
+      "selleractive marketplace",
+      "selleractive subscription",
+      "selleractive *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "selleractive.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ecomdash",
+    "aliases": [
+      "ecomdash",
+      "ecom dash",
+      "ecomdash marketplace",
+      "ecomdash subscription",
+      "ecomdash *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "ecomdash.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Veeqo",
+    "aliases": [
+      "veeqo",
+      "veeqo amazon",
+      "veeqo shipping",
+      "veeqo inventory",
+      "veeqo subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "veeqo.com",
+    "confidence": "medium",
+    "notes": "Amazon-owned commerce/shipping software; some services may be free or shipping-related."
+  },
+  {
+    "canonical_name": "Sell on Sears",
+    "aliases": [
+      "sell on sears",
+      "sears marketplace",
+      "sears seller",
+      "sears marketplace fees",
+      "sears *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "sears.com",
+    "confidence": "medium",
+    "notes": "Marketplace seller context required."
+  },
+  {
+    "canonical_name": "Reverb",
+    "aliases": [
+      "reverb",
+      "reverb com",
+      "reverb seller fees",
+      "reverb selling fee",
+      "reverb *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "reverb.com",
+    "confidence": "medium",
+    "notes": "May also be a marketplace purchase."
+  },
+  {
+    "canonical_name": "Reverb Bump",
+    "aliases": [
+      "reverb bump",
+      "reverb advertising",
+      "reverb promoted listings",
+      "reverb *bump",
+      "reverb seller ads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "reverb.com",
+    "confidence": "medium",
+    "notes": "Marketplace advertising fee."
+  },
+  {
+    "canonical_name": "Discogs",
+    "aliases": [
+      "discogs",
+      "discogs marketplace",
+      "discogs seller fee",
+      "discogs selling fee",
+      "discogs *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "discogs.com",
+    "confidence": "medium",
+    "notes": "May also be a marketplace purchase."
+  },
+  {
+    "canonical_name": "StockX",
+    "aliases": [
+      "stockx",
+      "stock x",
+      "stockx seller fee",
+      "stockx selling fee",
+      "stockx *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "stockx.com",
+    "confidence": "medium",
+    "notes": "May also be inventory/merchandise purchase."
+  },
+  {
+    "canonical_name": "GOAT",
+    "aliases": [
+      "goat",
+      "goat marketplace",
+      "goat seller fee",
+      "goat selling fee",
+      "goat *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "goat.com",
+    "confidence": "medium",
+    "notes": "Generic brand; require marketplace/seller context."
+  },
+  {
+    "canonical_name": "Grailed",
+    "aliases": [
+      "grailed",
+      "grailed marketplace",
+      "grailed seller fee",
+      "grailed selling fee",
+      "grailed *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "grailed.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Poshmark",
+    "aliases": [
+      "poshmark",
+      "posh mark",
+      "poshmark seller fee",
+      "poshmark selling fee",
+      "poshmark *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "poshmark.com",
+    "confidence": "medium",
+    "notes": "May also be a marketplace purchase."
+  },
+  {
+    "canonical_name": "Mercari",
+    "aliases": [
+      "mercari",
+      "mercari us",
+      "mercari seller fee",
+      "mercari selling fee",
+      "mercari *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "mercari.com",
+    "confidence": "medium",
+    "notes": "May also be a marketplace purchase."
+  },
+  {
+    "canonical_name": "Depop",
+    "aliases": [
+      "depop",
+      "depop marketplace",
+      "depop seller fee",
+      "depop selling fee",
+      "depop *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "depop.com",
+    "confidence": "medium",
+    "notes": "May also be a marketplace purchase."
+  },
+  {
+    "canonical_name": "Whatnot",
+    "aliases": [
+      "whatnot",
+      "what not marketplace",
+      "whatnot seller fee",
+      "whatnot selling fee",
+      "whatnot *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "whatnot.com",
+    "confidence": "medium",
+    "notes": "May also be a marketplace purchase."
+  },
+  {
+    "canonical_name": "The RealReal",
+    "aliases": [
+      "the realreal",
+      "realreal",
+      "the real real consignment",
+      "realreal seller fee",
+      "therealreal *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "therealreal.com",
+    "confidence": "medium",
+    "notes": "Consignment payouts and purchases must be distinguished from fees."
+  },
+  {
+    "canonical_name": "Vestiaire Collective",
+    "aliases": [
+      "vestiaire collective",
+      "vestiaire",
+      "vestiaire seller fee",
+      "vestiaire selling fee",
+      "vestiaire *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "vestiairecollective.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ThredUp",
+    "aliases": [
+      "thredup",
+      "thred up",
+      "thredup seller",
+      "thredup consignment",
+      "thredup *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "thredup.com",
+    "confidence": "medium",
+    "notes": "Consignment payouts and purchases may also appear."
+  },
+  {
+    "canonical_name": "Chairish",
+    "aliases": [
+      "chairish",
+      "chairish marketplace",
+      "chairish seller fee",
+      "chairish commission",
+      "chairish *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "chairish.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "1stDibs",
+    "aliases": [
+      "1stdibs",
+      "1st dibs",
+      "1stdibs seller",
+      "1stdibs marketplace fee",
+      "1stdibs *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "1stdibs.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ruby Lane",
+    "aliases": [
+      "ruby lane",
+      "rubylane",
+      "ruby lane seller",
+      "ruby lane shop fee",
+      "rubylane *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "rubylane.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bonanza",
+    "aliases": [
+      "bonanza",
+      "bonanza marketplace",
+      "bonanza seller fee",
+      "bonanza selling fee",
+      "bonanza *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "bonanza.com",
+    "confidence": "medium",
+    "notes": "Generic brand; require marketplace context."
+  },
+  {
+    "canonical_name": "eCRATER",
+    "aliases": [
+      "ecrater",
+      "e crater",
+      "ecrater marketplace",
+      "ecrater seller fee",
+      "ecrater *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "ecrater.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Storenvy",
+    "aliases": [
+      "storenvy",
+      "store envy",
+      "storenvy marketplace",
+      "storenvy seller fee",
+      "storenvy *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "storenvy.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Facebook Marketplace",
+    "aliases": [
+      "facebook marketplace",
+      "fb marketplace",
+      "meta marketplace",
+      "facebook seller",
+      "facebook *marketplace"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "facebook.com",
+    "confidence": "medium",
+    "notes": "Meta charges can also be advertising; marketplace transactions vary."
+  },
+  {
+    "canonical_name": "Instagram Shopping",
+    "aliases": [
+      "instagram shopping",
+      "instagram shop",
+      "instagram seller",
+      "meta instagram shop",
+      "instagram *shop"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "instagram.com",
+    "confidence": "medium",
+    "notes": "Meta charges can also be advertising."
+  },
+  {
+    "canonical_name": "TikTok Shop",
+    "aliases": [
+      "tiktok shop",
+      "tik tok shop",
+      "tiktok seller",
+      "tiktok shop fee",
+      "tiktok *shop"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "tiktok.com",
+    "confidence": "medium",
+    "notes": "TikTok charges can also be advertising."
+  },
+  {
+    "canonical_name": "Pinterest Shopping",
+    "aliases": [
+      "pinterest shopping",
+      "pinterest shop",
+      "pinterest merchant",
+      "pinterest shopping fee",
+      "pinterest *shop"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "pinterest.com",
+    "confidence": "medium",
+    "notes": "Pinterest charges are more commonly advertising; require commerce context."
+  },
+  {
+    "canonical_name": "Google Merchant Center",
+    "aliases": [
+      "google merchant center",
+      "google shopping merchant",
+      "google merchant",
+      "google *merchant center",
+      "google shopping seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "google.com",
+    "confidence": "medium",
+    "notes": "Google charges without merchant context are highly ambiguous."
+  },
+  {
+    "canonical_name": "Google Shopping",
+    "aliases": [
+      "google shopping",
+      "google shopping seller",
+      "google shopping merchant",
+      "google *shopping",
+      "google merchant shopping"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "google.com",
+    "confidence": "medium",
+    "notes": "May overlap with Google Ads."
+  },
+  {
+    "canonical_name": "Temu Seller Center",
+    "aliases": [
+      "temu seller center",
+      "temu seller",
+      "temu marketplace seller",
+      "temu seller fees",
+      "temu *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "temu.com",
+    "confidence": "medium",
+    "notes": "Temu charges without seller context may be merchandise purchases."
+  },
+  {
+    "canonical_name": "SHEIN Marketplace",
+    "aliases": [
+      "shein marketplace",
+      "shein seller",
+      "shein marketplace seller",
+      "shein seller fees",
+      "shein *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "shein.com",
+    "confidence": "medium",
+    "notes": "SHEIN charges without seller context may be merchandise purchases."
+  },
+  {
+    "canonical_name": "AliExpress Seller",
+    "aliases": [
+      "aliexpress seller",
+      "ali express seller",
+      "aliexpress marketplace fee",
+      "aliexpress seller fee",
+      "aliexpress *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "aliexpress.com",
+    "confidence": "medium",
+    "notes": "May also represent inventory purchases."
+  },
+  {
+    "canonical_name": "Alibaba.com Seller",
+    "aliases": [
+      "alibaba.com seller",
+      "alibaba seller",
+      "alibaba com seller",
+      "alibaba supplier membership",
+      "alibaba seller fee",
+      "alibaba *supplier"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "alibaba.com",
+    "confidence": "medium",
+    "notes": "May also represent wholesale inventory purchases."
+  },
+  {
+    "canonical_name": "DHgate Seller",
+    "aliases": [
+      "dhgate seller",
+      "dh gate seller",
+      "dhgate marketplace fee",
+      "dhgate seller fee",
+      "dhgate *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "dhgate.com",
+    "confidence": "medium",
+    "notes": "May also represent inventory purchases."
+  },
+  {
+    "canonical_name": "Wish Merchant",
+    "aliases": [
+      "wish merchant",
+      "wish seller",
+      "wish marketplace fee",
+      "wish seller fee",
+      "wish *merchant"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "wish.com",
+    "confidence": "medium",
+    "notes": "Wish charges without seller context may be purchases."
+  },
+  {
+    "canonical_name": "Rakuten Marketplace",
+    "aliases": [
+      "rakuten marketplace",
+      "rakuten seller",
+      "rakuten marketplace fee",
+      "rakuten seller fee",
+      "rakuten *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "rakuten.com",
+    "confidence": "medium",
+    "notes": "Require marketplace seller context."
+  },
+  {
+    "canonical_name": "Fiverr",
+    "aliases": [
+      "fiverr",
+      "fiverr international",
+      "fiverr seller fee",
+      "fiverr service fee",
+      "fiverr *fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "fiverr.com",
+    "confidence": "medium",
+    "notes": "May represent purchased professional services rather than seller fees."
+  },
+  {
+    "canonical_name": "Upwork",
+    "aliases": [
+      "upwork",
+      "upwork global",
+      "upwork marketplace fee",
+      "upwork service fee",
+      "upwork *fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "upwork.com",
+    "confidence": "medium",
+    "notes": "May represent purchased freelance services or freelancer platform fees."
+  },
+  {
+    "canonical_name": "Freelancer.com",
+    "aliases": [
+      "freelancer.com",
+      "freelancer com",
+      "freelancer marketplace fee",
+      "freelancer service fee",
+      "freelancer *fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "freelancer.com",
+    "confidence": "medium",
+    "notes": "May represent purchased professional services."
+  },
+  {
+    "canonical_name": "Toptal",
+    "aliases": [
+      "toptal",
+      "toptal llc",
+      "toptal talent",
+      "toptal service fee",
+      "toptal *talent"
+    ],
+    "semantic": "professional_fees",
+    "logo_domain": "toptal.com",
+    "confidence": "medium",
+    "notes": "Primarily purchased professional talent rather than a seller marketplace fee."
+  },
+  {
+    "canonical_name": "Thumbtack",
+    "aliases": [
+      "thumbtack",
+      "thumbtack pro",
+      "thumbtack leads",
+      "thumbtack pro fee",
+      "thumbtack *lead"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "thumbtack.com",
+    "confidence": "medium",
+    "notes": "Charges are often lead/platform fees for service providers."
+  },
+  {
+    "canonical_name": "Angi",
+    "aliases": [
+      "angi",
+      "angi leads",
+      "angi services",
+      "angi pro",
+      "angi *leads"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "angi.com",
+    "confidence": "medium",
+    "notes": "Charges may be lead generation, advertising, or service marketplace fees."
+  },
+  {
+    "canonical_name": "HomeAdvisor",
+    "aliases": [
+      "homeadvisor",
+      "home advisor",
+      "homeadvisor leads",
+      "homeadvisor pro",
+      "homeadvisor *lead"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "homeadvisor.com",
+    "confidence": "medium",
+    "notes": "Lead-generation/platform fees."
+  },
+  {
+    "canonical_name": "Taskrabbit",
+    "aliases": [
+      "taskrabbit",
+      "task rabbit",
+      "taskrabbit service fee",
+      "taskrabbit platform fee",
+      "taskrabbit *fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "taskrabbit.com",
+    "confidence": "medium",
+    "notes": "May represent purchased services or tasker platform charges."
+  },
+  {
+    "canonical_name": "Rover",
+    "aliases": [
+      "rover",
+      "rover com",
+      "rover service fee",
+      "rover sitter fee",
+      "rover *fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "rover.com",
+    "confidence": "medium",
+    "notes": "May represent purchased pet-care services or provider fees."
+  },
+  {
+    "canonical_name": "Care.com",
+    "aliases": [
+      "care.com",
+      "care com",
+      "care membership",
+      "care marketplace",
+      "care *membership"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "care.com",
+    "confidence": "medium",
+    "notes": "May be membership or purchased care services."
+  },
+  {
+    "canonical_name": "Bark",
+    "aliases": [
+      "bark",
+      "bark com",
+      "bark leads",
+      "bark professional",
+      "bark *credits"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "bark.com",
+    "confidence": "medium",
+    "notes": "Lead-generation marketplace; generic brand requires context."
+  },
+  {
+    "canonical_name": "Houzz Pro",
+    "aliases": [
+      "houzz pro",
+      "houzzpro",
+      "houzz pro subscription",
+      "houzz *pro",
+      "houzz professional"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "houzz.com",
+    "confidence": "medium",
+    "notes": "May also include advertising or marketplace fees."
+  },
+  {
+    "canonical_name": "Porch",
+    "aliases": [
+      "porch",
+      "porch pro",
+      "porch leads",
+      "porch services",
+      "porch *lead"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "porch.com",
+    "confidence": "medium",
+    "notes": "Generic brand; require home-services context."
+  },
+  {
+    "canonical_name": "Yelp for Business",
+    "aliases": [
+      "yelp for business",
+      "yelp business",
+      "yelp leads",
+      "yelp business fee",
+      "yelp *business"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "yelp.com",
+    "confidence": "medium",
+    "notes": "Yelp charges may be advertising rather than marketplace fees."
+  },
+  {
+    "canonical_name": "OpenTable",
+    "aliases": [
+      "opentable",
+      "open table",
+      "opentable restaurant",
+      "opentable cover fee",
+      "opentable *restaurant"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "opentable.com",
+    "confidence": "medium",
+    "notes": "Restaurant platform charges may include subscriptions and per-cover fees."
+  },
+  {
+    "canonical_name": "Resy",
+    "aliases": [
+      "resy",
+      "resy os",
+      "resy restaurant",
+      "resy subscription",
+      "resy *restaurant"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "resy.com",
+    "confidence": "medium",
+    "notes": "Restaurant reservation/platform software."
+  },
+  {
+    "canonical_name": "Tock",
+    "aliases": [
+      "tock",
+      "explore tock",
+      "tock restaurant",
+      "tock subscription",
+      "tock *restaurant"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "exploretock.com",
+    "confidence": "medium",
+    "notes": "Reservation/event commerce platform."
+  },
+  {
+    "canonical_name": "DoorDash Merchant",
+    "aliases": [
+      "doordash merchant",
+      "door dash merchant",
+      "doordash merchant fees",
+      "doordash commission",
+      "doordash *merchant"
+    ],
+    "semantic": "delivery_platform_fees",
+    "logo_domain": "doordash.com",
+    "confidence": "medium",
+    "notes": "DoorDash charges may also be customer meal/delivery purchases."
+  },
+  {
+    "canonical_name": "Uber Eats Merchant",
+    "aliases": [
+      "uber eats merchant",
+      "ubereats merchant",
+      "uber eats merchant fee",
+      "uber eats commission",
+      "ubereats *merchant"
+    ],
+    "semantic": "delivery_platform_fees",
+    "logo_domain": "ubereats.com",
+    "confidence": "medium",
+    "notes": "Uber charges without Eats merchant context may be transportation."
+  },
+  {
+    "canonical_name": "Grubhub Merchant",
+    "aliases": [
+      "grubhub merchant",
+      "grub hub merchant",
+      "grubhub merchant fee",
+      "grubhub commission",
+      "grubhub *merchant"
+    ],
+    "semantic": "delivery_platform_fees",
+    "logo_domain": "grubhub.com",
+    "confidence": "medium",
+    "notes": "Grubhub charges may also be customer meal purchases."
+  },
+  {
+    "canonical_name": "Postmates Merchant",
+    "aliases": [
+      "postmates merchant",
+      "postmates merchant fee",
+      "postmates commission",
+      "uber postmates merchant",
+      "postmates *merchant"
+    ],
+    "semantic": "delivery_platform_fees",
+    "logo_domain": "postmates.com",
+    "confidence": "medium",
+    "notes": "May appear under Uber billing."
+  },
+  {
+    "canonical_name": "ChowNow",
+    "aliases": [
+      "chownow",
+      "chow now",
+      "chownow restaurant",
+      "chownow ordering",
+      "chownow *restaurant"
+    ],
+    "semantic": "delivery_platform_fees",
+    "logo_domain": "chownow.com",
+    "confidence": "medium",
+    "notes": "May include ordering software and delivery-related platform fees."
+  },
+  {
+    "canonical_name": "Toast Delivery Services",
+    "aliases": [
+      "toast delivery services",
+      "toast delivery",
+      "toasttab delivery",
+      "toast *delivery",
+      "toast delivery fee"
+    ],
+    "semantic": "delivery_platform_fees",
+    "logo_domain": "toasttab.com",
+    "confidence": "medium",
+    "notes": "Toast also bills POS, SaaS, payroll, and processing."
+  },
+  {
+    "canonical_name": "Slice",
+    "aliases": [
+      "slice",
+      "slice life",
+      "slice restaurant",
+      "slice ordering",
+      "slice *restaurant"
+    ],
+    "semantic": "delivery_platform_fees",
+    "logo_domain": "slice.com",
+    "confidence": "medium",
+    "notes": "Generic brand; require restaurant/order context."
+  },
+  {
+    "canonical_name": "Olo",
+    "aliases": [
+      "olo",
+      "olo inc",
+      "olo restaurant",
+      "olo ordering",
+      "olo *subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "olo.com",
+    "confidence": "medium",
+    "notes": "Restaurant ordering software/platform; some charges may be transaction-based."
+  },
+  {
+    "canonical_name": "ezCater",
+    "aliases": [
+      "ezcater",
+      "ez cater",
+      "ezcater restaurant",
+      "ezcater partner fee",
+      "ezcater *partner"
+    ],
+    "semantic": "delivery_platform_fees",
+    "logo_domain": "ezcater.com",
+    "confidence": "medium",
+    "notes": "May represent catering purchases or restaurant marketplace fees."
+  },
+  {
+    "canonical_name": "Caviar Merchant",
+    "aliases": [
+      "caviar merchant",
+      "caviar restaurant",
+      "caviar merchant fee",
+      "doordash caviar merchant",
+      "caviar *merchant"
+    ],
+    "semantic": "delivery_platform_fees",
+    "logo_domain": "doordash.com",
+    "confidence": "medium",
+    "notes": "Caviar is part of DoorDash."
+  },
+  {
+    "canonical_name": "Seamless Merchant",
+    "aliases": [
+      "seamless merchant",
+      "seamless restaurant",
+      "seamless merchant fee",
+      "grubhub seamless merchant",
+      "seamless *merchant"
+    ],
+    "semantic": "delivery_platform_fees",
+    "logo_domain": "grubhub.com",
+    "confidence": "medium",
+    "notes": "Seamless is part of Grubhub."
+  },
+  {
+    "canonical_name": "Delivery.com Merchant",
+    "aliases": [
+      "delivery.com merchant",
+      "delivery com merchant",
+      "delivery com restaurant",
+      "delivery com merchant fee",
+      "delivery *merchant"
+    ],
+    "semantic": "delivery_platform_fees",
+    "logo_domain": "delivery.com",
+    "confidence": "medium",
+    "notes": "Generic descriptor requires merchant/platform context."
+  },
+  {
+    "canonical_name": "Beyond Menu",
+    "aliases": [
+      "beyond menu",
+      "beyondmenu",
+      "beyond menu restaurant",
+      "beyond menu ordering",
+      "beyondmenu *restaurant"
+    ],
+    "semantic": "delivery_platform_fees",
+    "logo_domain": "beyondmenu.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Menufy",
+    "aliases": [
+      "menufy",
+      "menu fy",
+      "menufy restaurant",
+      "menufy ordering",
+      "menufy *restaurant"
+    ],
+    "semantic": "delivery_platform_fees",
+    "logo_domain": "menufy.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Owner.com",
+    "aliases": [
+      "owner.com",
+      "owner com",
+      "owner restaurant",
+      "owner online ordering",
+      "owner *restaurant"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "owner.com",
+    "confidence": "medium",
+    "notes": "Generic brand/domain requires restaurant software context."
+  },
+  {
+    "canonical_name": "Popmenu",
+    "aliases": [
+      "popmenu",
+      "pop menu",
+      "popmenu restaurant",
+      "popmenu ordering",
+      "popmenu subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "popmenu.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "BentoBox",
+    "aliases": [
+      "bentobox",
+      "bento box",
+      "getbento",
+      "bentobox restaurant",
+      "bentobox subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "getbento.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SpotOn",
+    "aliases": [
+      "spoton",
+      "spot on",
+      "spoton restaurant",
+      "spoton pos",
+      "spoton subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "spoton.com",
+    "confidence": "medium",
+    "notes": "May also include payment processing fees."
+  },
+  {
+    "canonical_name": "Clover",
+    "aliases": [
+      "clover",
+      "clover network",
+      "clover pos",
+      "clover app market",
+      "clover subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "clover.com",
+    "confidence": "medium",
+    "notes": "May also include payment processing."
+  },
+  {
+    "canonical_name": "Clover App Market",
+    "aliases": [
+      "clover app market",
+      "clover app marketplace",
+      "clover app charge",
+      "clover *app",
+      "clover marketplace"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "clover.com",
+    "confidence": "medium",
+    "notes": "Underlying app may be identifiable in the memo."
+  },
+  {
+    "canonical_name": "Toast",
+    "aliases": [
+      "toast",
+      "toasttab",
+      "toast pos",
+      "toast software",
+      "toast *subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "toasttab.com",
+    "confidence": "medium",
+    "notes": "Toast may also bill processing, payroll, hardware, or delivery."
+  },
+  {
+    "canonical_name": "Toast Marketplace",
+    "aliases": [
+      "toast marketplace",
+      "toast integrations",
+      "toast partner marketplace",
+      "toast *marketplace",
+      "toast app marketplace"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "toasttab.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mindbody",
+    "aliases": [
+      "mindbody",
+      "mind body",
+      "mindbodyonline",
+      "mindbody subscription",
+      "mindbody *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "mindbodyonline.com",
+    "confidence": "medium",
+    "notes": "Wellness marketplace plus business-management software."
+  },
+  {
+    "canonical_name": "ClassPass Partner",
+    "aliases": [
+      "classpass partner",
+      "class pass partner",
+      "classpass studio",
+      "classpass partner fee",
+      "classpass *partner"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "classpass.com",
+    "confidence": "medium",
+    "notes": "ClassPass charges without partner context may be employee wellness/personal expense."
+  },
+  {
+    "canonical_name": "Fresha",
+    "aliases": [
+      "fresha",
+      "fresha partner",
+      "fresha marketplace",
+      "fresha booking fee",
+      "fresha *partner"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "fresha.com",
+    "confidence": "medium",
+    "notes": "May include business software, payment processing, or marketplace fees."
+  },
+  {
+    "canonical_name": "Vagaro",
+    "aliases": [
+      "vagaro",
+      "vagaro inc",
+      "vagaro pro",
+      "vagaro subscription",
+      "vagaro *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "vagaro.com",
+    "confidence": "medium",
+    "notes": "May include payment processing or marketplace promotion."
+  },
+  {
+    "canonical_name": "Booksy Biz",
+    "aliases": [
+      "booksy biz",
+      "booksy business",
+      "booksy pro",
+      "booksy subscription",
+      "booksy *biz"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "booksy.com",
+    "confidence": "medium",
+    "notes": "May include marketplace/booking fees."
+  },
+  {
+    "canonical_name": "StyleSeat",
+    "aliases": [
+      "styleseat",
+      "style seat",
+      "styleseat professional",
+      "styleseat booking fee",
+      "styleseat *pro"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "styleseat.com",
+    "confidence": "medium",
+    "notes": "May include provider subscription and marketplace fees."
+  },
+  {
+    "canonical_name": "Splacer",
+    "aliases": [
+      "splacer",
+      "splacer marketplace",
+      "splacer host fee",
+      "splacer booking fee",
+      "splacer *host"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "splacer.co",
+    "confidence": "medium",
+    "notes": "Venue marketplace."
+  },
+  {
+    "canonical_name": "Peerspace",
+    "aliases": [
+      "peerspace",
+      "peer space",
+      "peerspace host",
+      "peerspace service fee",
+      "peerspace *host"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "peerspace.com",
+    "confidence": "medium",
+    "notes": "May represent venue rental purchases or host fees."
+  },
+  {
+    "canonical_name": "Airbnb Host",
+    "aliases": [
+      "airbnb host",
+      "airbnb host fee",
+      "airbnb service fee host",
+      "airbnb *host",
+      "airbnb hosting"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "airbnb.com",
+    "confidence": "medium",
+    "notes": "Airbnb charges without host context may be travel."
+  },
+  {
+    "canonical_name": "Vrbo Host",
+    "aliases": [
+      "vrbo host",
+      "vrbo host fee",
+      "vrbo subscription",
+      "vrbo *host",
+      "vrbo owner fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "vrbo.com",
+    "confidence": "medium",
+    "notes": "Vrbo charges without host context may be travel."
+  },
+  {
+    "canonical_name": "Booking.com Partner",
+    "aliases": [
+      "booking.com partner",
+      "booking com partner",
+      "booking com commission",
+      "booking partner fee",
+      "booking *partner"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "booking.com",
+    "confidence": "medium",
+    "notes": "Booking.com charges without partner context may be travel."
+  },
+  {
+    "canonical_name": "Expedia Partner Central",
+    "aliases": [
+      "expedia partner central",
+      "expedia partner",
+      "expedia commission",
+      "expedia *partner",
+      "expedia lodging partner"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "expediagroup.com",
+    "confidence": "medium",
+    "notes": "Expedia charges without partner context may be travel."
+  },
+  {
+    "canonical_name": "Hotels.com Partner",
+    "aliases": [
+      "hotels.com partner",
+      "hotels com partner",
+      "hotels com commission",
+      "hotels *partner",
+      "hotels partner fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "hotels.com",
+    "confidence": "medium",
+    "notes": "Require lodging-partner context."
+  },
+  {
+    "canonical_name": "Tripadvisor Management Center",
+    "aliases": [
+      "tripadvisor management center",
+      "tripadvisor business",
+      "tripadvisor listing",
+      "tripadvisor *business",
+      "tripadvisor subscription"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "tripadvisor.com",
+    "confidence": "medium",
+    "notes": "May include advertising or listing services."
+  },
+  {
+    "canonical_name": "Viator Supplier",
+    "aliases": [
+      "viator supplier",
+      "viator operator",
+      "viator commission",
+      "viator supplier fee",
+      "viator *supplier"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "viator.com",
+    "confidence": "medium",
+    "notes": "Viator purchases may otherwise be travel."
+  },
+  {
+    "canonical_name": "GetYourGuide Supplier",
+    "aliases": [
+      "getyourguide supplier",
+      "get your guide supplier",
+      "getyourguide partner",
+      "getyourguide commission",
+      "getyourguide *supplier"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "getyourguide.com",
+    "confidence": "medium",
+    "notes": "May otherwise be travel purchases."
+  },
+  {
+    "canonical_name": "Turo Host",
+    "aliases": [
+      "turo host",
+      "turo host fee",
+      "turo trip fee host",
+      "turo *host",
+      "turo hosting"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "turo.com",
+    "confidence": "medium",
+    "notes": "Turo charges without host context may be transportation/travel."
+  },
+  {
+    "canonical_name": "Getaround Host",
+    "aliases": [
+      "getaround host",
+      "get around host",
+      "getaround owner",
+      "getaround host fee",
+      "getaround *host"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "getaround.com",
+    "confidence": "medium",
+    "notes": "May otherwise be vehicle rental."
+  },
+  {
+    "canonical_name": "Outdoorsy Owner",
+    "aliases": [
+      "outdoorsy owner",
+      "outdoorsy host",
+      "outdoorsy owner fee",
+      "outdoorsy *owner",
+      "outdoorsy marketplace fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "outdoorsy.com",
+    "confidence": "medium",
+    "notes": "May otherwise be travel/rental."
+  },
+  {
+    "canonical_name": "RVshare Owner",
+    "aliases": [
+      "rvshare owner",
+      "rv share owner",
+      "rvshare host",
+      "rvshare owner fee",
+      "rvshare *owner"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "rvshare.com",
+    "confidence": "medium",
+    "notes": "May otherwise be travel/rental."
+  },
+  {
+    "canonical_name": "Hipcamp Host",
+    "aliases": [
+      "hipcamp host",
+      "hip camp host",
+      "hipcamp host fee",
+      "hipcamp *host",
+      "hipcamp property owner"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "hipcamp.com",
+    "confidence": "medium",
+    "notes": "May otherwise be travel."
+  },
+  {
+    "canonical_name": "Outschool",
+    "aliases": [
+      "outschool",
+      "out school",
+      "outschool teacher",
+      "outschool educator fee",
+      "outschool *teacher"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "outschool.com",
+    "confidence": "medium",
+    "notes": "May represent course purchases or educator marketplace fees."
+  },
+  {
+    "canonical_name": "Udemy Business Instructor",
+    "aliases": [
+      "udemy business instructor",
+      "udemy instructor",
+      "udemy marketplace instructor",
+      "udemy instructor fee",
+      "udemy *instructor",
+      "udemy revenue share"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "udemy.com",
+    "confidence": "medium",
+    "notes": "Udemy charges without instructor context may be training/software."
+  },
+  {
+    "canonical_name": "Teachable",
+    "aliases": [
+      "teachable",
+      "teachable inc",
+      "teachable subscription",
+      "teachable payments",
+      "teachable *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "teachable.com",
+    "confidence": "medium",
+    "notes": "May include creator platform subscription or payment processing."
+  },
+  {
+    "canonical_name": "Thinkific",
+    "aliases": [
+      "thinkific",
+      "thinkific labs",
+      "thinkific subscription",
+      "thinkific commerce",
+      "thinkific *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "thinkific.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kajabi",
+    "aliases": [
+      "kajabi",
+      "kajabi llc",
+      "kajabi subscription",
+      "kajabi payments",
+      "kajabi *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "kajabi.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Podia",
+    "aliases": [
+      "podia",
+      "podia labs",
+      "podia subscription",
+      "podia commerce",
+      "podia *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "podia.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Gumroad",
+    "aliases": [
+      "gumroad",
+      "gum road",
+      "gumroad fee",
+      "gumroad creator",
+      "gumroad *fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "gumroad.com",
+    "confidence": "medium",
+    "notes": "May include platform and payment-processing fees."
+  },
+  {
+    "canonical_name": "Lemon Squeezy",
+    "aliases": [
+      "lemon squeezy",
+      "lemonsqueezy",
+      "lemon squeezy fee",
+      "lemonsqueezy merchant",
+      "lemon squeezy *fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "lemonsqueezy.com",
+    "confidence": "medium",
+    "notes": "Merchant-of-record platform; fees may combine processing, tax, and platform services."
+  },
+  {
+    "canonical_name": "Paddle",
+    "aliases": [
+      "paddle",
+      "paddle com",
+      "paddle merchant of record",
+      "paddle fee",
+      "paddle *fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "paddle.com",
+    "confidence": "medium",
+    "notes": "Merchant-of-record platform; may appear as customer payment counterparty as well."
+  },
+  {
+    "canonical_name": "FastSpring",
+    "aliases": [
+      "fastspring",
+      "fast spring",
+      "fastspring merchant",
+      "fastspring fee",
+      "fastspring *fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "fastspring.com",
+    "confidence": "medium",
+    "notes": "Merchant-of-record platform."
+  },
+  {
+    "canonical_name": "2Checkout",
+    "aliases": [
+      "2checkout",
+      "2 checkout",
+      "verifone 2checkout",
+      "2checkout fee",
+      "2checkout *fee"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "2checkout.com",
+    "confidence": "medium",
+    "notes": "Payment/commerce platform; may appear under Verifone."
+  },
+  {
+    "canonical_name": "Payhip",
+    "aliases": [
+      "payhip",
+      "pay hip",
+      "payhip fee",
+      "payhip seller",
+      "payhip *fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "payhip.com",
+    "confidence": "medium",
+    "notes": "Creator commerce platform."
+  },
+  {
+    "canonical_name": "SellNow",
+    "aliases": [
+      "sellnow",
+      "sell now",
+      "sellnow ecommerce",
+      "sellnow subscription",
+      "sellnow *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "sellnow.com",
+    "confidence": "medium",
+    "notes": "Verify exact descriptor because generic wording can collide."
+  },
+  {
+    "canonical_name": "Fourthwall",
+    "aliases": [
+      "fourthwall",
+      "fourth wall",
+      "fourthwall creator",
+      "fourthwall shop",
+      "fourthwall *shop"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "fourthwall.com",
+    "confidence": "medium",
+    "notes": "Creator commerce/merch platform."
+  },
+  {
+    "canonical_name": "Spring",
+    "aliases": [
+      "spring",
+      "spring creator",
+      "spring merch",
+      "spring marketplace",
+      "spring seller fee",
+      "spring *creator"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "spring.com",
+    "confidence": "medium",
+    "notes": "Formerly Teespring; generic brand requires creator/merch context."
+  },
+  {
+    "canonical_name": "Redbubble",
+    "aliases": [
+      "redbubble",
+      "red bubble",
+      "redbubble artist",
+      "redbubble seller fee",
+      "redbubble *artist"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "redbubble.com",
+    "confidence": "medium",
+    "notes": "May also represent merchandise purchases."
+  },
+  {
+    "canonical_name": "Zazzle",
+    "aliases": [
+      "zazzle",
+      "zazzle marketplace",
+      "zazzle creator",
+      "zazzle seller fee",
+      "zazzle *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "zazzle.com",
+    "confidence": "medium",
+    "notes": "May also represent merchandise purchases."
+  },
+  {
+    "canonical_name": "Society6",
+    "aliases": [
+      "society6",
+      "society 6",
+      "society6 artist",
+      "society6 seller fee",
+      "society6 *artist"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "society6.com",
+    "confidence": "medium",
+    "notes": "May also represent merchandise purchases."
+  },
+  {
+    "canonical_name": "Threadless",
+    "aliases": [
+      "threadless",
+      "threadless artist shop",
+      "threadless seller",
+      "threadless shop fee",
+      "threadless *artist"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "threadless.com",
+    "confidence": "medium",
+    "notes": "May also represent merchandise purchases."
+  },
+  {
+    "canonical_name": "Printful",
+    "aliases": [
+      "printful",
+      "printful inc",
+      "printful fulfillment",
+      "printful order",
+      "printful *order"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "printful.com",
+    "confidence": "medium",
+    "notes": "Usually product/fulfillment COGS rather than marketplace fees."
+  },
+  {
+    "canonical_name": "Printify",
+    "aliases": [
+      "printify",
+      "printify inc",
+      "printify order",
+      "printify fulfillment",
+      "printify *order"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "printify.com",
+    "confidence": "medium",
+    "notes": "Usually product/fulfillment COGS rather than marketplace fees."
+  },
+  {
+    "canonical_name": "Gelato",
+    "aliases": [
+      "gelato",
+      "gelato print",
+      "gelato order",
+      "gelato fulfillment",
+      "gelato *order"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "gelato.com",
+    "confidence": "medium",
+    "notes": "Generic brand; require print/fulfillment context."
+  },
+  {
+    "canonical_name": "Gooten",
+    "aliases": [
+      "gooten",
+      "gooten print",
+      "gooten order",
+      "gooten fulfillment",
+      "gooten *order"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "gooten.com",
+    "confidence": "medium",
+    "notes": "Print-on-demand fulfillment."
+  },
+  {
+    "canonical_name": "SPOD",
+    "aliases": [
+      "spod",
+      "spreadshirt print on demand",
+      "spod order",
+      "spod fulfillment",
+      "spod *order"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "spod.com",
+    "confidence": "medium",
+    "notes": "Print-on-demand fulfillment."
+  },
+  {
+    "canonical_name": "Apliiq",
+    "aliases": [
+      "apliiq",
+      "apliiq print",
+      "apliiq apparel",
+      "apliiq fulfillment",
+      "apliiq *order"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "apliiq.com",
+    "confidence": "medium",
+    "notes": "Apparel production/fulfillment."
+  },
+  {
+    "canonical_name": "CustomCat",
+    "aliases": [
+      "customcat",
+      "custom cat",
+      "customcat print",
+      "customcat fulfillment",
+      "customcat *order"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "customcat.com",
+    "confidence": "medium",
+    "notes": "Print-on-demand fulfillment."
+  },
+  {
+    "canonical_name": "TeeLaunch",
+    "aliases": [
+      "teelaunch",
+      "tee launch",
+      "teelaunch print",
+      "teelaunch fulfillment",
+      "teelaunch *order"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "teelaunch.com",
+    "confidence": "medium",
+    "notes": "Print-on-demand fulfillment."
+  },
+  {
+    "canonical_name": "Amazon Merch on Demand",
+    "aliases": [
+      "amazon merch on demand",
+      "merch by amazon",
+      "amazon merch",
+      "amzn merch",
+      "amazon *merch"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "amazon.com",
+    "confidence": "medium",
+    "notes": "Amazon descriptors are ambiguous without Merch context."
+  },
+  {
+    "canonical_name": "KDP",
+    "aliases": [
+      "kdp",
+      "amazon kdp",
+      "kindle direct publishing",
+      "kdp fees",
+      "amazon *kdp"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "kdp.amazon.com",
+    "confidence": "medium",
+    "notes": "Amazon publishing marketplace; distinguish royalties/payouts from fees."
+  },
+  {
+    "canonical_name": "IngramSpark",
+    "aliases": [
+      "ingramspark",
+      "ingram spark",
+      "ingramspark print",
+      "ingramspark distribution",
+      "ingramspark *order"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "ingramspark.com",
+    "confidence": "medium",
+    "notes": "Publishing/printing/distribution charges."
+  },
+  {
+    "canonical_name": "Lulu",
+    "aliases": [
+      "lulu",
+      "lulu press",
+      "lulu publishing",
+      "lulu print",
+      "lulu *publishing"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "lulu.com",
+    "confidence": "medium",
+    "notes": "Generic brand; require publishing/print context."
+  },
+  {
+    "canonical_name": "Blurb",
+    "aliases": [
+      "blurb",
+      "blurb books",
+      "blurb printing",
+      "blurb publishing",
+      "blurb *book"
+    ],
+    "semantic": "supplies_cogs",
+    "logo_domain": "blurb.com",
+    "confidence": "medium",
+    "notes": "Book printing/publishing service."
+  },
+  {
+    "canonical_name": "Bandcamp",
+    "aliases": [
+      "bandcamp",
+      "band camp",
+      "bandcamp artist",
+      "bandcamp revenue share",
+      "bandcamp *artist"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "bandcamp.com",
+    "confidence": "medium",
+    "notes": "May also represent music/merch purchases."
+  },
+  {
+    "canonical_name": "SoundCloud for Artists",
+    "aliases": [
+      "soundcloud for artists",
+      "soundcloud artist",
+      "soundcloud next pro",
+      "soundcloud subscription",
+      "soundcloud *artist"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "soundcloud.com",
+    "confidence": "medium",
+    "notes": "Creator subscription rather than marketplace fee."
+  },
+  {
+    "canonical_name": "DistroKid",
+    "aliases": [
+      "distrokid",
+      "distro kid",
+      "distrokid musician",
+      "distrokid subscription",
+      "distrokid *music"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "distrokid.com",
+    "confidence": "medium",
+    "notes": "Music distribution subscription/services."
+  },
+  {
+    "canonical_name": "TuneCore",
+    "aliases": [
+      "tunecore",
+      "tune core",
+      "tunecore distribution",
+      "tunecore subscription",
+      "tunecore *music"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "tunecore.com",
+    "confidence": "medium",
+    "notes": "Music distribution service."
+  },
+  {
+    "canonical_name": "CD Baby",
+    "aliases": [
+      "cd baby",
+      "cdbaby",
+      "cd baby distribution",
+      "cdbaby fee",
+      "cd baby *music"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "cdbaby.com",
+    "confidence": "medium",
+    "notes": "Music distribution/platform fees."
+  },
+  {
+    "canonical_name": "Patreon",
+    "aliases": [
+      "patreon",
+      "patreon inc",
+      "patreon creator fee",
+      "patreon platform fee",
+      "patreon *creator"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "patreon.com",
+    "confidence": "medium",
+    "notes": "May also be a creator subscription expense."
+  },
+  {
+    "canonical_name": "Ko-fi",
+    "aliases": [
+      "ko-fi",
+      "ko fi",
+      "kofi creator",
+      "ko fi platform fee",
+      "ko fi *creator"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "ko-fi.com",
+    "confidence": "medium",
+    "notes": "Creator platform."
+  },
+  {
+    "canonical_name": "Buy Me a Coffee",
+    "aliases": [
+      "buy me a coffee",
+      "buymeacoffee",
+      "buy me a coffee creator",
+      "buymeacoffee fee",
+      "buy me a coffee *creator"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "buymeacoffee.com",
+    "confidence": "medium",
+    "notes": "Creator platform."
+  },
+  {
+    "canonical_name": "Substack",
+    "aliases": [
+      "substack",
+      "substack inc",
+      "substack writer",
+      "substack fee",
+      "substack *writer"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "substack.com",
+    "confidence": "medium",
+    "notes": "May also be a paid publication subscription."
+  },
+  {
+    "canonical_name": "beehiiv",
+    "aliases": [
+      "beehiiv",
+      "bee hiiv",
+      "beehiiv newsletter",
+      "beehiiv subscription",
+      "beehiiv *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "beehiiv.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ghost",
+    "aliases": [
+      "ghost",
+      "ghost pro",
+      "ghost org",
+      "ghost publishing",
+      "ghost *pro"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "ghost.org",
+    "confidence": "medium",
+    "notes": "Generic brand; require publishing/software context."
+  },
+  {
+    "canonical_name": "Memberful",
+    "aliases": [
+      "memberful",
+      "memberful subscription",
+      "memberful memberships",
+      "memberful stripe",
+      "memberful *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "memberful.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Circle",
+    "aliases": [
+      "circle",
+      "circle so",
+      "circle.so",
+      "circle community",
+      "circle subscription",
+      "circle *community"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "circle.so",
+    "confidence": "medium",
+    "notes": "Do not match generic 'circle' without community/software context."
+  },
+  {
+    "canonical_name": "Mighty Networks",
+    "aliases": [
+      "mighty networks",
+      "mightynetworks",
+      "mighty network",
+      "mighty networks subscription",
+      "mighty *networks"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "mightynetworks.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Skool",
+    "aliases": [
+      "skool",
+      "skool com",
+      "skool community",
+      "skool subscription",
+      "skool *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "skool.com",
+    "confidence": "medium",
+    "notes": "Community/course platform."
+  },
+  {
+    "canonical_name": "Whop",
+    "aliases": [
+      "whop",
+      "whop marketplace",
+      "whop seller",
+      "whop platform fee",
+      "whop *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "whop.com",
+    "confidence": "medium",
+    "notes": "May include creator marketplace and payment fees."
+  },
+  {
+    "canonical_name": "Stan",
+    "aliases": [
+      "stan",
+      "stan store",
+      "stan.store",
+      "stan creator",
+      "stan subscription",
+      "stan *store"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "stan.store",
+    "confidence": "medium",
+    "notes": "Generic brand; require creator-store context."
+  },
+  {
+    "canonical_name": "Linktree",
+    "aliases": [
+      "linktree",
+      "link tree",
+      "linktree pro",
+      "linktree commerce",
+      "linktree *pro"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "linktr.ee",
+    "confidence": "medium",
+    "notes": "May include creator commerce features."
+  },
+  {
+    "canonical_name": "Beacons",
+    "aliases": [
+      "beacons",
+      "beacons ai",
+      "beacons.ai",
+      "beacons creator",
+      "beacons pro",
+      "beacons *subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "beacons.ai",
+    "confidence": "medium",
+    "notes": "Creator platform; generic brand requires context."
+  },
+  {
+    "canonical_name": "Fourthwall Payments",
+    "aliases": [
+      "fourthwall payments",
+      "fourth wall payments",
+      "fourthwall processing",
+      "fourthwall transaction fee",
+      "fourthwall *payments"
+    ],
+    "semantic": "payment_processing_fees",
+    "logo_domain": "fourthwall.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Eventbrite Organizer",
+    "aliases": [
+      "eventbrite organizer",
+      "eventbrite organizer fee",
+      "eventbrite ticketing fee",
+      "eventbrite *organizer",
+      "eventbrite service fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "eventbrite.com",
+    "confidence": "medium",
+    "notes": "Eventbrite charges may also be ticket purchases."
+  },
+  {
+    "canonical_name": "Ticket Tailor",
+    "aliases": [
+      "ticket tailor",
+      "tickettailor",
+      "ticket tailor box office",
+      "ticket tailor subscription",
+      "ticket tailor *fee"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "tickettailor.com",
+    "confidence": "medium",
+    "notes": "Ticketing platform fees/software."
+  },
+  {
+    "canonical_name": "TicketSpice",
+    "aliases": [
+      "ticketspice",
+      "ticket spice",
+      "ticketspice ticketing",
+      "ticketspice service fee",
+      "ticketspice *fee"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "ticketspice.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Humanitix",
+    "aliases": [
+      "humanitix",
+      "humanitix organizer",
+      "humanitix ticketing",
+      "humanitix booking fee",
+      "humanitix *organizer"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "humanitix.com",
+    "confidence": "medium",
+    "notes": "Ticketing marketplace/platform."
+  },
+  {
+    "canonical_name": "Universe",
+    "aliases": [
+      "universe",
+      "universe tickets",
+      "universe ticketing",
+      "universe organizer",
+      "universe event fee",
+      "universe *tickets"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "universe.com",
+    "confidence": "medium",
+    "notes": "Generic brand; require ticketing context."
+  },
+  {
+    "canonical_name": "Dice Tickets",
+    "aliases": [
+      "dice tickets",
+      "dice fm",
+      "dice ticketing",
+      "dice event fee",
+      "dice *tickets"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "dice.fm",
+    "confidence": "medium",
+    "notes": "Do not confuse with Dice employment marketplace."
+  },
+  {
+    "canonical_name": "Tixr",
+    "aliases": [
+      "tixr",
+      "tixr tickets",
+      "tixr organizer",
+      "tixr service fee",
+      "tixr *tickets"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "tixr.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "See Tickets",
+    "aliases": [
+      "see tickets",
+      "see tickets us",
+      "seetickets",
+      "see tickets organizer",
+      "see tickets *fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "seetickets.us",
+    "confidence": "medium",
+    "notes": "May represent ticket purchases or organizer fees."
+  },
+  {
+    "canonical_name": "Brown Paper Tickets",
+    "aliases": [
+      "brown paper tickets",
+      "brownpapertickets",
+      "bpt tickets",
+      "brown paper tickets organizer",
+      "bpt *fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "brownpapertickets.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cvent",
+    "aliases": [
+      "cvent",
+      "cvent inc",
+      "cvent event management",
+      "cvent subscription",
+      "cvent *software"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "cvent.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bizzabo",
+    "aliases": [
+      "bizzabo",
+      "bizzabo inc",
+      "bizzabo events",
+      "bizzabo subscription",
+      "bizzabo *software"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "bizzabo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hopin",
+    "aliases": [
+      "hopin",
+      "hopin events",
+      "hopin platform",
+      "hopin subscription",
+      "hopin *event"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "hopin.com",
+    "confidence": "medium",
+    "notes": "Event platform; product portfolio/branding can evolve."
+  },
+  {
+    "canonical_name": "Eventzilla",
+    "aliases": [
+      "eventzilla",
+      "event zilla",
+      "eventzilla events",
+      "eventzilla subscription",
+      "eventzilla *fee"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "eventzilla.net",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "RegFox",
+    "aliases": [
+      "regfox",
+      "reg fox",
+      "regfox events",
+      "regfox registration",
+      "regfox *fee"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "regfox.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Givebutter",
+    "aliases": [
+      "givebutter",
+      "give butter",
+      "givebutter platform fee",
+      "givebutter fundraising",
+      "givebutter *fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "givebutter.com",
+    "confidence": "medium",
+    "notes": "Fundraising platform; donor transactions and platform fees should be distinguished."
+  },
+  {
+    "canonical_name": "GoFundMe",
+    "aliases": [
+      "gofundme",
+      "go fund me",
+      "gofundme platform",
+      "gofundme fundraiser",
+      "gofundme *fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "gofundme.com",
+    "confidence": "medium",
+    "notes": "May represent donations rather than business platform fees."
+  },
+  {
+    "canonical_name": "GoFundMe Pro",
+    "aliases": [
+      "gofundme pro",
+      "go fund me pro",
+      "classy gofundme",
+      "gofundme nonprofit",
+      "gofundme *pro"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "pro.gofundme.com",
+    "confidence": "medium",
+    "notes": "Nonprofit fundraising software; legacy Classy descriptors may appear."
+  },
+  {
+    "canonical_name": "Donorbox",
+    "aliases": [
+      "donorbox",
+      "donor box",
+      "donorbox nonprofit",
+      "donorbox platform fee",
+      "donorbox *fee"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "donorbox.org",
+    "confidence": "medium",
+    "notes": "May include payment/platform fees."
+  },
+  {
+    "canonical_name": "Bloomerang",
+    "aliases": [
+      "bloomerang",
+      "bloom erang",
+      "bloomerang donor management",
+      "bloomerang subscription",
+      "bloomerang *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "bloomerang.co",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Give Lively",
+    "aliases": [
+      "give lively",
+      "givelively",
+      "give lively nonprofit",
+      "give lively fundraising",
+      "give lively *fee"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "givelively.org",
+    "confidence": "medium",
+    "notes": "Some core fundraising technology is offered without platform fees."
+  },
+  {
+    "canonical_name": "Bonterra",
+    "aliases": [
+      "bonterra",
+      "bonterra tech",
+      "bonterra nonprofit",
+      "bonterra fundraising",
+      "bonterra subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "bonterratech.com",
+    "confidence": "medium",
+    "notes": "Portfolio includes multiple nonprofit software products."
+  },
+  {
+    "canonical_name": "Network for Good",
+    "aliases": [
+      "network for good",
+      "networkforgood",
+      "network for good fundraising",
+      "network for good fee",
+      "network for good *monthly"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "networkforgood.com",
+    "confidence": "medium",
+    "notes": "May appear under Bonterra-related branding."
+  },
+  {
+    "canonical_name": "Blackbaud",
+    "aliases": [
+      "blackbaud",
+      "blackbaud inc",
+      "blackbaud raisers edge",
+      "blackbaud subscription",
+      "blackbaud *software"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "blackbaud.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Donately",
+    "aliases": [
+      "donately",
+      "donately fundraising",
+      "donately nonprofit",
+      "donately platform fee",
+      "donately *fee"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "donately.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Zeffy",
+    "aliases": [
+      "zeffy",
+      "zeffy nonprofit",
+      "zeffy fundraising",
+      "zeffy platform",
+      "zeffy *donation"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "zeffy.com",
+    "confidence": "medium",
+    "notes": "Platform commonly uses optional donor contributions rather than mandatory platform fees."
+  },
+  {
+    "canonical_name": "Mightycause",
+    "aliases": [
+      "mightycause",
+      "mighty cause",
+      "mightycause nonprofit",
+      "mightycause platform fee",
+      "mightycause *fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "mightycause.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "GiveSmart",
+    "aliases": [
+      "givesmart",
+      "give smart",
+      "givesmart fundraising",
+      "givesmart subscription",
+      "givesmart *fee"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "givesmart.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "OneCause",
+    "aliases": [
+      "onecause",
+      "one cause",
+      "onecause fundraising",
+      "onecause subscription",
+      "onecause *software"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "onecause.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Qgiv",
+    "aliases": [
+      "qgiv",
+      "q giv",
+      "qgiv fundraising",
+      "qgiv subscription",
+      "qgiv *fee"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "qgiv.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Bonfire",
+    "aliases": [
+      "bonfire",
+      "bonfire fundraising",
+      "bonfire seller",
+      "bonfire merch",
+      "bonfire *campaign"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "bonfire.com",
+    "confidence": "medium",
+    "notes": "Generic brand; require fundraising/merch context."
+  },
+  {
+    "canonical_name": "GiveCampus",
+    "aliases": [
+      "givecampus",
+      "give campus",
+      "givecampus fundraising",
+      "givecampus subscription",
+      "givecampus *software"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "givecampus.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ShopGoodwill Seller",
+    "aliases": [
+      "shopgoodwill seller",
+      "shop goodwill seller",
+      "shopgoodwill marketplace",
+      "shopgoodwill seller fee",
+      "shopgoodwill *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "shopgoodwill.com",
+    "confidence": "medium",
+    "notes": "Marketplace context required."
+  },
+  {
+    "canonical_name": "LiveAuctioneers",
+    "aliases": [
+      "liveauctioneers",
+      "live auctioneers",
+      "liveauctioneers seller",
+      "liveauctioneers auction fee",
+      "liveauctioneers *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "liveauctioneers.com",
+    "confidence": "medium",
+    "notes": "May also represent auction purchases."
+  },
+  {
+    "canonical_name": "Invaluable",
+    "aliases": [
+      "invaluable",
+      "invaluable auctions",
+      "invaluable seller",
+      "invaluable auction fee",
+      "invaluable *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "invaluable.com",
+    "confidence": "medium",
+    "notes": "Generic word; require auction context."
+  },
+  {
+    "canonical_name": "HiBid",
+    "aliases": [
+      "hibid",
+      "hi bid",
+      "hibid auction",
+      "hibid seller",
+      "hibid *auction"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "hibid.com",
+    "confidence": "medium",
+    "notes": "May represent auction purchases or auctioneer platform fees."
+  },
+  {
+    "canonical_name": "AuctionZip",
+    "aliases": [
+      "auctionzip",
+      "auction zip",
+      "auctionzip auctioneer",
+      "auctionzip listing",
+      "auctionzip *auction"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "auctionzip.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Proxibid",
+    "aliases": [
+      "proxibid",
+      "proxi bid",
+      "proxibid seller",
+      "proxibid auction fee",
+      "proxibid *auction"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "proxibid.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Equipment Trader",
+    "aliases": [
+      "equipment trader",
+      "equipmenttrader",
+      "equipment trader dealer",
+      "equipment trader listing",
+      "equipmenttrader *listing"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "equipmenttrader.com",
+    "confidence": "medium",
+    "notes": "Dealer/listing marketplace fees."
+  },
+  {
+    "canonical_name": "Commercial Truck Trader",
+    "aliases": [
+      "commercial truck trader",
+      "commercialtrucktrader",
+      "truck trader dealer",
+      "commercial truck listing",
+      "trucktrader *listing"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "commercialtrucktrader.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MachineryTrader",
+    "aliases": [
+      "machinerytrader",
+      "machinery trader",
+      "machinery trader dealer",
+      "machinery trader listing",
+      "machinerytrader *listing"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "machinerytrader.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "TruckPaper",
+    "aliases": [
+      "truckpaper",
+      "truck paper",
+      "truckpaper dealer",
+      "truckpaper listing",
+      "truckpaper *listing"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "truckpaper.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "TractorHouse",
+    "aliases": [
+      "tractorhouse",
+      "tractor house",
+      "tractorhouse dealer",
+      "tractorhouse listing",
+      "tractorhouse *listing"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "tractorhouse.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cars.com Dealer",
+    "aliases": [
+      "cars.com dealer",
+      "cars com dealer",
+      "cars dealer marketplace",
+      "cars com listing",
+      "cars *dealer"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "cars.com",
+    "confidence": "medium",
+    "notes": "Cars.com charges without dealer context may be unrelated consumer services."
+  },
+  {
+    "canonical_name": "Autotrader Dealer",
+    "aliases": [
+      "autotrader dealer",
+      "auto trader dealer",
+      "autotrader listing",
+      "autotrader marketplace",
+      "autotrader *dealer"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "autotrader.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CarGurus Dealer",
+    "aliases": [
+      "cargurus dealer",
+      "car gurus dealer",
+      "cargurus listing",
+      "cargurus marketplace",
+      "cargurus *dealer"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "cargurus.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "TrueCar Dealer",
+    "aliases": [
+      "truecar dealer",
+      "true car dealer",
+      "truecar marketplace",
+      "truecar dealer fee",
+      "truecar *dealer"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "truecar.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Carfax for Dealers",
+    "aliases": [
+      "carfax for dealers",
+      "carfax dealer",
+      "carfax dealer subscription",
+      "carfax *dealer",
+      "carfax business"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "carfax.com",
+    "confidence": "medium",
+    "notes": "May include vehicle-history reports rather than marketplace fees."
+  },
+  {
+    "canonical_name": "Bring a Trailer",
+    "aliases": [
+      "bring a trailer",
+      "bringatrailer",
+      "bat auction",
+      "bring a trailer seller",
+      "bringatrailer *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "bringatrailer.com",
+    "confidence": "medium",
+    "notes": "May represent auction purchase or seller/listing fees."
+  },
+  {
+    "canonical_name": "Cars & Bids",
+    "aliases": [
+      "cars & bids",
+      "cars and bids",
+      "carsandbids",
+      "cars and bids seller",
+      "carsandbids *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "carsandbids.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "eBay Motors",
+    "aliases": [
+      "ebay motors",
+      "ebay motors seller",
+      "ebay vehicle seller",
+      "ebay *motors",
+      "ebay motors fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "ebay.com",
+    "confidence": "medium",
+    "notes": "May represent vehicle purchases or seller fees."
+  },
+  {
+    "canonical_name": "Copart Seller",
+    "aliases": [
+      "copart seller",
+      "copart auction seller",
+      "copart seller fee",
+      "copart *seller",
+      "copart marketplace fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "copart.com",
+    "confidence": "medium",
+    "notes": "Copart charges may also represent vehicle purchases/auction fees."
+  },
+  {
+    "canonical_name": "IAA Seller",
+    "aliases": [
+      "iaa seller",
+      "iaai seller",
+      "insurance auto auctions seller",
+      "iaa seller fee",
+      "iaa *seller"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "iaai.com",
+    "confidence": "medium",
+    "notes": "Auction charges may also relate to vehicle purchases."
+  },
+  {
+    "canonical_name": "ACV Auctions",
+    "aliases": [
+      "acv auctions",
+      "acvauctions",
+      "acv dealer",
+      "acv auction fee",
+      "acv *auction"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "acvauctions.com",
+    "confidence": "medium",
+    "notes": "Dealer vehicle marketplace."
+  },
+  {
+    "canonical_name": "OPENLANE",
+    "aliases": [
+      "openlane",
+      "open lane",
+      "openlane dealer",
+      "openlane auction fee",
+      "openlane *auction"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "openlane.com",
+    "confidence": "medium",
+    "notes": "Dealer vehicle marketplace."
+  },
+  {
+    "canonical_name": "Manheim",
+    "aliases": [
+      "manheim",
+      "manheim auctions",
+      "manheim dealer",
+      "manheim auction fee",
+      "manheim *auction"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "manheim.com",
+    "confidence": "medium",
+    "notes": "Dealer auction; charges may include purchased vehicles and services."
+  },
+  {
+    "canonical_name": "CarMax Auctions",
+    "aliases": [
+      "carmax auctions",
+      "carmax auction",
+      "carmax dealer auction",
+      "carmax *auction",
+      "carmax auction fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "carmaxauctions.com",
+    "confidence": "medium",
+    "notes": "CarMax charges without auction context may be vehicle purchases."
+  },
+  {
+    "canonical_name": "LoopNet",
+    "aliases": [
+      "loopnet",
+      "loop net",
+      "loopnet listing",
+      "loopnet commercial listing",
+      "loopnet *listing"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "loopnet.com",
+    "confidence": "medium",
+    "notes": "Commercial real-estate listing/advertising platform."
+  },
+  {
+    "canonical_name": "Crexi",
+    "aliases": [
+      "crexi",
+      "crexi pro",
+      "crexi listing",
+      "crexi marketplace",
+      "crexi *pro"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "crexi.com",
+    "confidence": "medium",
+    "notes": "Commercial real-estate marketplace/listing platform."
+  },
+  {
+    "canonical_name": "Zillow Rental Manager",
+    "aliases": [
+      "zillow rental manager",
+      "zillow rentals",
+      "zillow landlord",
+      "zillow listing fee",
+      "zillow *rental"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "zillow.com",
+    "confidence": "medium",
+    "notes": "Zillow charges may also be advertising/leads."
+  },
+  {
+    "canonical_name": "Apartments.com",
+    "aliases": [
+      "apartments.com",
+      "apartments com",
+      "apartments listing",
+      "apartments landlord",
+      "apartments *listing"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "apartments.com",
+    "confidence": "medium",
+    "notes": "Rental listing/advertising platform."
+  },
+  {
+    "canonical_name": "Avail",
+    "aliases": [
+      "avail",
+      "avail co",
+      "avail landlord",
+      "avail rental management",
+      "avail *subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "avail.co",
+    "confidence": "medium",
+    "notes": "Generic brand; require landlord/software context."
+  },
+  {
+    "canonical_name": "TurboTenant",
+    "aliases": [
+      "turbotenant",
+      "turbo tenant",
+      "turbotenant landlord",
+      "turbotenant rental",
+      "turbotenant *subscription"
+    ],
+    "semantic": "software_saas",
+    "logo_domain": "turbotenant.com",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Furnished Finder",
+    "aliases": [
+      "furnished finder",
+      "furnishedfinder",
+      "furnished finder landlord",
+      "furnished finder listing",
+      "furnishedfinder *listing"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "furnishedfinder.com",
+    "confidence": "medium",
+    "notes": "May represent lodging purchases or landlord listing fees."
+  },
+  {
+    "canonical_name": "Peerspace Host",
+    "aliases": [
+      "peerspace host",
+      "peerspace host fee",
+      "peerspace venue host",
+      "peerspace *host",
+      "peerspace payout fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "peerspace.com",
+    "confidence": "medium",
+    "notes": "May overlap with general Peerspace marketplace transactions."
+  },
+  {
+    "canonical_name": "Splacer Host",
+    "aliases": [
+      "splacer host",
+      "splacer host fee",
+      "splacer venue host",
+      "splacer *host",
+      "splacer payout fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "splacer.co",
+    "confidence": "medium",
+    "notes": ""
+  },
+  {
+    "canonical_name": "WeddingWire",
+    "aliases": [
+      "weddingwire",
+      "wedding wire",
+      "weddingwire vendor",
+      "weddingwire listing",
+      "weddingwire *vendor"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "weddingwire.com",
+    "confidence": "medium",
+    "notes": "Vendor advertising/listing marketplace."
+  },
+  {
+    "canonical_name": "The Knot Vendor",
+    "aliases": [
+      "the knot vendor",
+      "theknot vendor",
+      "the knot wedding pro",
+      "the knot listing",
+      "theknot *vendor"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "theknot.com",
+    "confidence": "medium",
+    "notes": "Vendor advertising/listing marketplace."
+  },
+  {
+    "canonical_name": "Zola Vendor",
+    "aliases": [
+      "zola vendor",
+      "zola wedding vendor",
+      "zola marketplace vendor",
+      "zola *vendor",
+      "zola vendor fee"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "zola.com",
+    "confidence": "medium",
+    "notes": "Zola charges without vendor context may be purchases."
+  },
+  {
+    "canonical_name": "GigSalad",
+    "aliases": [
+      "gigsalad",
+      "gig salad",
+      "gigsalad vendor",
+      "gigsalad booking fee",
+      "gigsalad *vendor"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "gigsalad.com",
+    "confidence": "medium",
+    "notes": "Entertainment-services marketplace."
+  },
+  {
+    "canonical_name": "The Bash",
+    "aliases": [
+      "the bash",
+      "thebash",
+      "the bash vendor",
+      "the bash booking fee",
+      "thebash *vendor"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "thebash.com",
+    "confidence": "medium",
+    "notes": "Entertainment-services marketplace."
+  },
+  {
+    "canonical_name": "GigSmart",
+    "aliases": [
+      "gigsmart",
+      "gig smart",
+      "gigsmart business",
+      "gigsmart staffing",
+      "gigsmart *business"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "gigsmart.com",
+    "confidence": "medium",
+    "notes": "Labor marketplace; may represent staffing expense rather than platform fees."
+  },
+  {
+    "canonical_name": "Wonolo",
+    "aliases": [
+      "wonolo",
+      "wonolo business",
+      "wonolo staffing",
+      "wonolo platform fee",
+      "wonolo *business"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "wonolo.com",
+    "confidence": "medium",
+    "notes": "Labor marketplace; charges may include worker labor costs."
+  },
+  {
+    "canonical_name": "Instawork",
+    "aliases": [
+      "instawork",
+      "insta work",
+      "instawork business",
+      "instawork staffing",
+      "instawork *business"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "instawork.com",
+    "confidence": "medium",
+    "notes": "Labor marketplace; charges may include worker labor costs."
+  },
+  {
+    "canonical_name": "Bluecrew",
+    "aliases": [
+      "bluecrew",
+      "blue crew",
+      "bluecrew staffing",
+      "bluecrew employer",
+      "bluecrew *business"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "bluecrewjobs.com",
+    "confidence": "medium",
+    "notes": "Labor marketplace/staffing; charges may include labor costs."
+  },
+  {
+    "canonical_name": "Shiftsmart",
+    "aliases": [
+      "shiftsmart",
+      "shift smart",
+      "shiftsmart business",
+      "shiftsmart staffing",
+      "shiftsmart *business"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "shiftsmart.com",
+    "confidence": "medium",
+    "notes": "Labor marketplace; charges may include labor costs."
+  },
+  {
+    "canonical_name": "Veryable",
+    "aliases": [
+      "veryable",
+      "veryable ops",
+      "veryable labor",
+      "veryable business",
+      "veryable *ops"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "veryableops.com",
+    "confidence": "medium",
+    "notes": "On-demand labor marketplace; charges may include labor costs."
+  },
+  {
+    "canonical_name": "WorkWhile",
+    "aliases": [
+      "workwhile",
+      "work while",
+      "workwhile staffing",
+      "workwhile business",
+      "workwhile *business"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "workwhilejobs.com",
+    "confidence": "medium",
+    "notes": "Labor marketplace; charges may include labor costs."
+  },
+  {
+    "canonical_name": "Qwick",
+    "aliases": [
+      "qwick",
+      "qwick staffing",
+      "qwick hospitality",
+      "qwick business",
+      "qwick *staffing"
+    ],
+    "semantic": "marketplace_ads",
+    "logo_domain": "qwick.com",
+    "confidence": "medium",
+    "notes": "Hospitality labor marketplace; charges may include labor costs."
+  }
+]
