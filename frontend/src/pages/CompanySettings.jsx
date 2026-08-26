@@ -4,6 +4,7 @@ import { useCompany } from "@/lib/company";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Settings2, Save, Trash2, AlertTriangle, Loader2, Play, Sparkles, Copy } from "lucide-react";
+import { IndustryTemplatePicker, CategorizationModeToggle } from "@/components/AIFirstControls";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
@@ -140,6 +141,33 @@ export default function CompanySettings() {
         <p className="text-slate-500 text-sm mt-1">
           Manage <span className="font-medium">{current?.name}</span>&apos;s profile and lifecycle.
         </p>
+      </div>
+
+      {/* --- Bookkeeping mode + industry template (AI-First Beta) --- */}
+      <div className="rounded-xl border bg-white p-5 space-y-4" data-testid="ai-first-settings-card">
+        <h3 className="font-heading font-semibold text-lg">Bookkeeping</h3>
+        <div>
+          <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">
+            Industry template
+          </div>
+          <p className="text-xs text-slate-500 mb-3">
+            Seeds a curated Chart of Accounts for this industry. Non-destructive —
+            only ADDS missing accounts.
+          </p>
+          <IndustryTemplatePicker
+            companyId={currentId}
+            value={current?.industry_template}
+          />
+        </div>
+        <div className="border-t pt-4">
+          <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">
+            Categorization mode
+          </div>
+          <CategorizationModeToggle
+            companyId={currentId}
+            initialMode={current?.categorization_mode || "standard"}
+          />
+        </div>
       </div>
 
       {/* --- Profile card --- */}

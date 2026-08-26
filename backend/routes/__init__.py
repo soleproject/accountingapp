@@ -19,6 +19,7 @@ from routes.onboarding import router as onboarding_router  # noqa: F401
 from routes.plaid import router as plaid_router  # noqa: F401
 from routes.statements_routes import router as statements_routes_router  # noqa: F401
 from routes.veryfi_webhooks import router as veryfi_webhooks_router  # noqa: F401
+from routes.ai_first_routes import router as ai_first_router  # noqa: F401
 from routes.reconciliation import router as reconciliation_router  # noqa: F401
 from routes.month_close import router as month_close_router  # noqa: F401
 from routes.inventory import router as inventory_router  # noqa: F401
@@ -65,6 +66,7 @@ ALL_ROUTERS = [
     plaid_router,
     statements_routes_router,
     veryfi_webhooks_router,
+    ai_first_router,
     reconciliation_router,
     month_close_router,
     inventory_router,
