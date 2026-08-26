@@ -2065,6 +2065,8 @@ function ContactRollup({ data, busy, currentId }) {
   // approval lives on the txn's human_reviewed field via bulk-approve.
   const [approved, setApproved] = useState({});    // key → true
   const [approvingBusy, setApprovingBusy] = useState({});  // key → true
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkDone, setBulkDone] = useState(false);
 
   if (busy && contacts.length === 0) {
     return <div className="p-8 text-center text-slate-500 text-sm">Grouping transactions…</div>;
@@ -2124,17 +2126,23 @@ function ContactRollup({ data, busy, currentId }) {
     const ck = contact.contact_id || `_nocontact_${contact.contact_name}`;
     const ak = category.category_account_id || "_uncat_";
     const key = `${ck}||${ak}`;
-    if (approved[key] || approvingBusy[key]) return;
+    if (approvingBusy[key]) return;
+    const isCurrentlyApproved = !!approved[key];
     setApprovingBusy(b => ({ ...b, [key]: true }));
     try {
       const ids = await idsForCell(contact, category, key);
       if (ids.length) {
-        await api.post(`/companies/${currentId}/transactions/bulk-approve`, ids);
+        const endpoint = isCurrentlyApproved ? "bulk-unapprove" : "bulk-approve";
+        await api.post(`/companies/${currentId}/transactions/${endpoint}`, ids);
       }
-      setApproved(a => ({ ...a, [key]: true }));
-      toast.success(`Approved ${ids.length} txns in "${category.category_name}"`);
+      setApproved(a => ({ ...a, [key]: !isCurrentlyApproved }));
+      toast.success(
+        isCurrentlyApproved
+          ? `Unapproved ${ids.length} txns in "${category.category_name}"`
+          : `Approved ${ids.length} txns in "${category.category_name}"`,
+      );
     } catch (err) {
-      toast.error(`Approve failed: ${err.response?.data?.detail || err.message}`);
+      toast.error(`Failed: ${err.response?.data?.detail || err.message}`);
     } finally {
       setApprovingBusy(b => ({ ...b, [key]: false }));
     }
@@ -2143,7 +2151,8 @@ function ContactRollup({ data, busy, currentId }) {
   const approveContact = async (contact, e) => {
     e?.stopPropagation();
     const ck = contact.contact_id || `_nocontact_${contact.contact_name}`;
-    if (approved[ck] || approvingBusy[ck]) return;
+    if (approvingBusy[ck]) return;
+    const isCurrentlyApproved = !!approved[ck];
     setApprovingBusy(b => ({ ...b, [ck]: true }));
     try {
       // Gather ids across every category on this contact in parallel.
@@ -2156,19 +2165,59 @@ function ContactRollup({ data, busy, currentId }) {
       );
       const allIds = perCat.flatMap(x => x.ids);
       if (allIds.length) {
-        await api.post(`/companies/${currentId}/transactions/bulk-approve`, allIds);
+        const endpoint = isCurrentlyApproved ? "bulk-unapprove" : "bulk-approve";
+        await api.post(`/companies/${currentId}/transactions/${endpoint}`, allIds);
       }
-      // Mark contact + every category under it as approved.
+      // Cascade the visual state across the contact + all categories.
       setApproved(a => {
-        const next = { ...a, [ck]: true };
-        for (const { key } of perCat) next[key] = true;
+        const next = { ...a, [ck]: !isCurrentlyApproved };
+        for (const { key } of perCat) next[key] = !isCurrentlyApproved;
         return next;
       });
-      toast.success(`Approved ${allIds.length} txns for ${contact.contact_name}`);
+      toast.success(
+        isCurrentlyApproved
+          ? `Unapproved ${allIds.length} txns for ${contact.contact_name}`
+          : `Approved ${allIds.length} txns for ${contact.contact_name}`,
+      );
     } catch (err) {
-      toast.error(`Approve failed: ${err.response?.data?.detail || err.message}`);
+      toast.error(`Failed: ${err.response?.data?.detail || err.message}`);
     } finally {
       setApprovingBusy(b => ({ ...b, [ck]: false }));
+    }
+  };
+
+  // One-click bulk approve of every AI-confident row on the company —
+  // reuses the existing `bulk-approve-ai-ready` endpoint which flips
+  // AI-categorized-unreviewed rows (needs_review=false, posted, categorized,
+  // not yet human_reviewed) into human_reviewed. Marks every visible
+  // rollup card as approved in one sweep.
+  const bulkApproveAiReady = async () => {
+    if (bulkBusy || bulkDone) return;
+    setBulkBusy(true);
+    try {
+      const r = await api.post(
+        `/companies/${currentId}/transactions/bulk-approve-ai-ready`, {},
+      );
+      const count = r.data?.approved || r.data?.count || 0;
+      toast.success(`Approved ${count} AI-confident transactions`, { duration: 6000 });
+      setBulkDone(true);
+      // Mark every contact + category currently on-screen as approved
+      // so the buttons visually reflect the bulk action. The next data
+      // refresh from the server will confirm.
+      const stamp = {};
+      for (const c of contacts) {
+        const ck = c.contact_id || `_nocontact_${c.contact_name}`;
+        stamp[ck] = true;
+        for (const cat of c.categories) {
+          const ak = cat.category_account_id || "_uncat_";
+          stamp[`${ck}||${ak}`] = true;
+        }
+      }
+      setApproved(a => ({ ...a, ...stamp }));
+    } catch (err) {
+      toast.error(`Bulk approve failed: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setBulkBusy(false);
     }
   };
 
@@ -2178,13 +2227,37 @@ function ContactRollup({ data, busy, currentId }) {
       ? "text-[11px] px-2 py-0.5"
       : "text-xs px-2.5 py-1";
     if (isApproved) {
-      return `${base} rounded-md border border-emerald-600 bg-white text-emerald-700 font-medium cursor-default`;
+      return `${base} rounded-md border border-emerald-600 bg-white text-emerald-700 font-medium hover:bg-emerald-50`;
     }
     return `${base} rounded-md bg-emerald-600 text-white font-medium hover:bg-emerald-700`;
   };
 
   return (
     <div data-testid="txn-rollup-grid" className="p-4 flex flex-col gap-4">
+      {/* Header bulk-action bar — one-tap approve every AI-confident row.
+          Kept above the cards so it's discoverable but doesn't fight for
+          screen with the toolbar. */}
+      <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border border-emerald-200 bg-emerald-50/40">
+        <div className="text-xs text-slate-700">
+          <span className="font-semibold text-slate-900">Bulk approve.</span>{" "}
+          Approve every transaction the AI got confident on across all contacts.
+          Skips rows still flagged for review, keeps your custom rules and manual overrides intact.
+        </div>
+        <button
+          type="button"
+          onClick={bulkApproveAiReady}
+          disabled={bulkBusy || bulkDone}
+          data-testid="rollup-bulk-approve-ai-ready"
+          className={`text-xs px-3 py-1.5 rounded-md font-medium shrink-0 ${
+            bulkDone
+              ? "border border-emerald-600 bg-white text-emerald-700 cursor-default"
+              : "bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-70"
+          }`}
+        >
+          {bulkBusy ? "Approving all…" : bulkDone ? "Approved all confident" : "Approve all AI-confident"}
+        </button>
+      </div>
+
       {contacts.map((c) => {
         const multi = c.categories.length > 1;
         const ck = c.contact_id || `_nocontact_${c.contact_name}`;
@@ -2208,11 +2281,12 @@ function ContactRollup({ data, busy, currentId }) {
                 <button
                   type="button"
                   onClick={(e) => approveContact(c, e)}
-                  disabled={contactApproved || contactBusy}
+                  disabled={contactBusy}
                   data-testid={`rollup-approve-contact-${ck}`}
                   className={approveBtnClasses(contactApproved, "md")}
+                  title={contactApproved ? "Click to unapprove" : "Approve all categories for this contact"}
                 >
-                  {contactBusy ? "Approving…" : contactApproved ? "Approved" : "Approve"}
+                  {contactBusy ? "Working…" : contactApproved ? "Approved" : "Approve"}
                 </button>
               </div>
             </div>
@@ -2251,9 +2325,10 @@ function ContactRollup({ data, busy, currentId }) {
                         <button
                           type="button"
                           onClick={(e) => approveCategory(c, cat, e)}
-                          disabled={cellApproved || cellBusy}
+                          disabled={cellBusy}
                           data-testid={`rollup-approve-cat-${key}`}
                           className={approveBtnClasses(cellApproved, "sm")}
+                          title={cellApproved ? "Click to unapprove" : "Approve this category"}
                         >
                           {cellBusy ? "…" : cellApproved ? "Approved" : "Approve"}
                         </button>

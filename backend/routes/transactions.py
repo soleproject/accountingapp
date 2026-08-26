@@ -2958,10 +2958,44 @@ async def apply_bulk_approve_rule(cid: str, inp: BulkApproveRuleIn, user: dict =
 
 @router.post("/companies/{cid}/transactions/bulk-approve")
 async def bulk_approve(cid: str, ids: List[str], user: dict = Depends(get_current_user)):
+    """Mark rows human-reviewed + audit-stamped with `approved_by` and
+    `approved_at`. Idempotent — safe to re-fire on already-approved rows."""
     await require_company(user, cid)
+    ts = now_iso()
+    approver = (user or {}).get("email") or (user or {}).get("id") or "unknown"
     await db.transactions.update_many(
         {"id": {"$in": ids}, "company_id": cid},
-        {"$set": {"human_reviewed": True, "needs_review": False, "posted": True, "updated_at": now_iso()}},
+        {"$set": {
+            "human_reviewed": True, "needs_review": False, "posted": True,
+            "approved_by": approver, "approved_at": ts, "updated_at": ts,
+        }},
+    )
+    await _invalidate_dash(cid)
+    return {"ok": True, "count": len(ids)}
+
+
+@router.post("/companies/{cid}/transactions/bulk-unapprove")
+async def bulk_unapprove(cid: str, ids: List[str], user: dict = Depends(get_current_user)):
+    """Revert a bulk-approve — flip rows back to needs_review + strip
+    the audit stamps. Never touches rows locked by a closed period.
+
+    Symmetric with `bulk_approve` so the UI's Approved → Approve toggle
+    fully reverses the effect. `posted` stays true because that reflects
+    the txn's GL state, not the review state.
+    """
+    await require_company(user, cid)
+    ts = now_iso()
+    # Only unflip if the closed-period QBO gate hasn't already claimed
+    # these rows (once QBO closed a period, we never let user un-approve
+    # inside it — same guard `bulk_approve_ai_ready` uses).
+    await db.transactions.update_many(
+        {"id": {"$in": ids}, "company_id": cid,
+         "qbo_closed_approved_at": {"$exists": False}},
+        {"$set": {
+            "human_reviewed": False, "needs_review": True,
+            "updated_at": ts,
+        },
+         "$unset": {"approved_by": "", "approved_at": ""}},
     )
     await _invalidate_dash(cid)
     return {"ok": True, "count": len(ids)}
