@@ -104,6 +104,36 @@ async def standard_plus_apply_rules(
     return {"ok": True, "stats": stats, "total_scanned": len(ids)}
 
 
+@router.post("/companies/{cid}/standard/apply-directory")
+async def standard_apply_directory(
+    cid: str, payload: dict = None, user: dict = Depends(get_current_user),
+) -> dict:
+    """Retroactively apply the Global Contact Directory to existing
+    transactions on the given company.
+
+    Runs on ANY company (Standard or Standard+ mode). Fills the gap
+    for rows ingested before the directory shipped — they carry no
+    `category_hint_semantic` yet, so this sweep looks each row up
+    against the 5,221-entry directory and applies the linked semantic
+    to rows the resolver can map to the company's CoA.
+
+    Priority guard mirrors the ingest cascade — never overrides
+    tenant-tier rows (custom rules, merchant memory, manual overrides,
+    Standard+ rule/directory results, PFC-primary).
+
+    Body accepts either:
+      {}                              → apply to every txn on the company
+      {"transaction_ids": [str, ...]} → apply to that specific set
+    Returns: {"ok": true, "stats": {...}}
+    """
+    await require_company(user, cid)
+    import standard_directory_retro
+    body = payload or {}
+    ids = body.get("transaction_ids") or None
+    stats = await standard_directory_retro.apply_directory_to_existing(cid, ids)
+    return {"ok": True, "stats": stats}
+
+
 @router.get("/global-vendor-rules/stats")
 async def global_vendor_rules_stats(user: dict = Depends(get_current_user)) -> dict:
     """Return summary metadata about the loaded Global Vendor Rules

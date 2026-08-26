@@ -112,6 +112,11 @@ export function CategorizationModeToggle({ companyId, initialMode }) {
         <StandardPlusApplyButton companyId={companyId} />
       )}
 
+      {/* Directory sweep is available for BOTH modes — the ingest-time
+          tier only helps new rows, so all tenants benefit from a
+          retroactive apply after this feature shipped. */}
+      <StandardDirectoryApplyButton companyId={companyId} />
+
       <ProvenanceBadgesToggle companyId={companyId} />
     </div>
   );
@@ -244,6 +249,87 @@ function StandardPlusApplyButton({ companyId }) {
                 onClick={run}
                 className="text-sm px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700"
                 data-testid="standard-plus-apply-confirm-btn"
+              >
+                Apply now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// Standard cascade — Global Contact Directory retroactive apply.
+// Runs the 5,221-entry curated directory against every existing txn
+// on the company. Fills the gap for rows ingested before the
+// directory shipped. Available in BOTH Standard and Standard+ mode
+// because the ingest-time tier only helps NEW rows.
+function StandardDirectoryApplyButton({ companyId }) {
+  const [running, setRunning] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const run = async () => {
+    setConfirmOpen(false);
+    setRunning(true);
+    try {
+      const r = await api.post(
+        `/companies/${companyId}/standard/apply-directory`,
+        {},
+      );
+      const s = r.data?.stats || {};
+      toast.success(
+        `Scanned ${s.scanned || 0} txns — ${s.overridden || 0} categories updated ` +
+        `via the Global Contact Directory (${s.skipped_tenant_priority || 0} preserved ` +
+        `from your own rules, ${s.skipped_no_hint || 0} unknown merchants left alone)`,
+        { duration: 9000 },
+      );
+    } catch (e) {
+      toast.error(`Failed: ${e.response?.data?.detail || e.message}`);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 pt-3 border-t border-slate-200">
+      <button
+        type="button"
+        onClick={() => setConfirmOpen(true)}
+        disabled={running}
+        data-testid="standard-directory-apply-btn"
+        className="text-sm px-3 py-1.5 rounded-md border border-violet-600 text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+      >
+        {running ? "Applying directory…" : "Apply Global Contact Directory to existing transactions"}
+      </button>
+      <div className="text-[11px] text-slate-500 mt-1">
+        Retroactively categorizes existing rows by matching each merchant against our curated 5,000+ well-known-companies directory. Skips anything already categorized by your custom rules, merchant memory, or manual overrides.
+      </div>
+
+      {confirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" data-testid="standard-directory-apply-confirm">
+          <div className="bg-white rounded-lg shadow-xl p-5 max-w-md w-full">
+            <div className="font-semibold text-slate-900 text-base mb-2">Apply Global Contact Directory to all transactions?</div>
+            <div className="text-sm text-slate-600 mb-4">
+              This scans every transaction on this company and re-categorizes any AI-decided or Uncategorized row where the merchant matches an entry in our curated 5,000+ directory. Your custom rules, learned rules, merchant memory, and manual overrides are never touched.
+              <br /><br />
+              Safe to run repeatedly — it's idempotent.
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setConfirmOpen(false)}
+                className="text-sm px-3 py-1.5 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
+                data-testid="standard-directory-apply-cancel"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={run}
+                className="text-sm px-3 py-1.5 rounded-md bg-violet-600 text-white hover:bg-violet-700"
+                data-testid="standard-directory-apply-confirm-btn"
               >
                 Apply now
               </button>
