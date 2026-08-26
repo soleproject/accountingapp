@@ -335,3 +335,75 @@ class TestPfcFallback:
         assert stats["matched_via_pfc"] == 0
         _, upd = updates[0]
         assert upd["$set"]["categorization_source"] == "standard_plus_rule"
+
+
+
+class TestAmountBucketRules:
+    """Amount-bucket rules let ambiguous merchants (Costco, Walmart,
+    Amazon, Home Depot, etc.) resolve to different categories based
+    on transaction size. Small Costco = food court → meals. Large
+    Costco = bulk supplies. Same merchant, different bucket, different
+    account. Deterministic — no LLM needed."""
+
+    def test_costco_small_amount_maps_to_meals(self):
+        """$8 Costco = food court → meals @ 0.75"""
+        import global_vendor_rules as r
+        m = r.match_and_resolve("COSTCO WHSE #4321", "generic", amount=-8)
+        assert m["semantic"] == "meals"
+        assert m["confidence"] == 0.75
+        assert m["bucket"] == "s"
+
+    def test_costco_large_amount_maps_to_supplies(self):
+        """$850 Costco = bulk supplies → supplies_cogs @ 0.75"""
+        import global_vendor_rules as r
+        m = r.match_and_resolve("COSTCO WHSE #4321", "generic", amount=-850)
+        assert m["semantic"] == "supplies_cogs"
+        assert m["confidence"] == 0.75
+        assert m["bucket"] == "l"
+
+    def test_home_depot_small_stays_repairs(self):
+        """$25 Home Depot = repairs & maintenance"""
+        import global_vendor_rules as r
+        m = r.match_and_resolve("HOME DEPOT #501", "generic", amount=-25)
+        assert m["semantic"] == "repairs_maintenance"
+        assert m["bucket"] == "s"
+
+    def test_home_depot_large_becomes_cogs(self):
+        """$3000 Home Depot = COGS (contractor materials)"""
+        import global_vendor_rules as r
+        m = r.match_and_resolve("HOME DEPOT #501", "construction", amount=-3000)
+        assert m["semantic"] == "supplies_cogs"
+        assert m["bucket"] == "l"
+
+    def test_walmart_income_amount_uses_absolute_value(self):
+        """A refund/credit at -$8 (income) buckets by absolute value."""
+        import global_vendor_rules as r
+        m = r.match_and_resolve("WALMART #123", "generic", amount=8)
+        assert m["bucket"] == "s"
+
+    def test_no_amount_falls_back_to_flat_semantic(self):
+        """When no amount is supplied, rules use their default flat semantic."""
+        import global_vendor_rules as r
+        m = r.match_and_resolve("COSTCO WHSE #4321", "generic")
+        assert m["semantic"] == "office_supplies"  # rule's default
+        assert m["bucket"] is None
+
+    def test_gas_station_amount_split(self):
+        """$4 at Wawa = meals/snacks; $50 at Wawa = fuel."""
+        import global_vendor_rules as r
+        small = r.match_and_resolve("WAWA STORE 402", "generic", amount=-4)
+        assert small["semantic"] == "meals"
+        big = r.match_and_resolve("WAWA STORE 402", "generic", amount=-55)
+        assert big["semantic"] == "fuel"
+
+    def test_amount_bucket_helper_matches_ai_first_cutoffs(self):
+        """The bucket cutoffs mirror ai_first_categorizer._AMOUNT_BUCKETS
+        so both pipelines split at the same thresholds."""
+        import global_vendor_rules as r
+        assert r.amount_bucket(0) == "s"
+        assert r.amount_bucket(49.99) == "s"
+        assert r.amount_bucket(50) == "m"
+        assert r.amount_bucket(499.99) == "m"
+        assert r.amount_bucket(500) == "l"
+        assert r.amount_bucket(4999.99) == "l"
+        assert r.amount_bucket(5000) == "xl"

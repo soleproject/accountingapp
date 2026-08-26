@@ -79,7 +79,11 @@ async def apply_global_rules_override(
         # as Standard's own PFC step.
         text = (t.get("merchant") or t.get("merchant_name")
                 or t.get("description") or "").strip()
-        match = global_vendor_rules.match_and_resolve(text, template)
+        # Pass amount so amount-bucket rules (Costco/Walmart/Amazon/
+        # Home Depot etc.) resolve to the right semantic per bucket.
+        match = global_vendor_rules.match_and_resolve(
+            text, template, amount=t.get("amount"),
+        )
         match_source = "rule"
 
         # Stage 2 — Plaid PFC fallback. Every Plaid txn carries a

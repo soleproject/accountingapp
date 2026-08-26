@@ -257,6 +257,29 @@ SEMANTIC_TO_CODE: dict[str, dict[str, str]] = {
 }
 
 
+# Amount bucket thresholds — mirrors the AI-First categorizer so
+# amount-aware rules split by the same cutoffs consistently. Applies
+# to `abs(amount)` so income/expense direction doesn't affect bucket.
+_AMOUNT_BUCKETS: list[tuple[float, str]] = [
+    (50.0, "s"),        # < $50
+    (500.0, "m"),       # $50 – $500
+    (5000.0, "l"),      # $500 – $5,000
+    (float("inf"), "xl"),  # $5,000+
+]
+
+
+def amount_bucket(amount) -> str:
+    """Return the bucket label ("s"/"m"/"l"/"xl") for an amount."""
+    try:
+        a = abs(float(amount or 0))
+    except (TypeError, ValueError):
+        a = 0.0
+    for cap, label in _AMOUNT_BUCKETS:
+        if a < cap:
+            return label
+    return _AMOUNT_BUCKETS[-1][1]
+
+
 def resolve_semantic(semantic: str, industry_template: str) -> Optional[str]:
     """Return the account code for a semantic key inside a template.
 
@@ -440,40 +463,219 @@ RULES: list[dict] = [
     {"pattern": "MARATHON PETROLEUM", "semantic": "fuel", "confidence": 0.90},
     {"pattern": "CITGO", "semantic": "fuel", "confidence": 0.90},
     {"pattern": "VALERO", "semantic": "fuel", "confidence": 0.90},
-    {"pattern": "CIRCLE K", "semantic": "fuel", "confidence": 0.80},
-    {"pattern": "7-ELEVEN", "semantic": "fuel", "confidence": 0.70, "notes": "convenience — could be fuel or snacks"},
     {"pattern": "SPEEDWAY", "semantic": "fuel", "confidence": 0.85},
-    {"pattern": "WAWA", "semantic": "fuel", "confidence": 0.70, "notes": "convenience/food/gas"},
-    {"pattern": "SHEETZ", "semantic": "fuel", "confidence": 0.70},
     {"pattern": "QUIKTRIP", "semantic": "fuel", "confidence": 0.75},
     {"pattern": "PILOT FLYING J", "semantic": "fuel", "confidence": 0.90},
     {"pattern": "LOVES TRAVEL", "semantic": "fuel", "confidence": 0.90},
 
-    # ===== BIG BOX / SUPERSTORES (ambiguous — flagged with review) =====
-    {"pattern": "WALMART", "semantic": "office_supplies", "confidence": 0.60, "notes": "highly ambiguous — could be meals, office, personal"},
-    {"pattern": "WAL-MART", "semantic": "office_supplies", "confidence": 0.60},
-    {"pattern": "COSTCO WHSE", "semantic": "office_supplies", "confidence": 0.60, "notes": "warehouse purchase — supplies/food/personal"},
-    {"pattern": "COSTCO WHOLESALE", "semantic": "office_supplies", "confidence": 0.60},
+    # ===== BIG BOX / SUPERSTORES (amount-bucket rules — small=meals/personal,
+    # medium=office/general, large=bulk supplies) =====
+    {"pattern": "WALMART", "semantic": "office_supplies", "confidence": 0.60,
+     "notes": "amount-aware: small=meals, medium=office, large=supplies",
+     "amount_buckets": {
+         "s":  {"semantic": "meals",           "confidence": 0.70},
+         "m":  {"semantic": "office_supplies", "confidence": 0.65},
+         "l":  {"semantic": "supplies_cogs",   "confidence": 0.70},
+         "xl": {"semantic": "supplies_cogs",   "confidence": 0.75},
+     }},
+    {"pattern": "WAL-MART", "semantic": "office_supplies", "confidence": 0.60,
+     "amount_buckets": {
+         "s":  {"semantic": "meals",           "confidence": 0.70},
+         "m":  {"semantic": "office_supplies", "confidence": 0.65},
+         "l":  {"semantic": "supplies_cogs",   "confidence": 0.70},
+         "xl": {"semantic": "supplies_cogs",   "confidence": 0.75},
+     }},
+    {"pattern": "COSTCO WHSE", "semantic": "office_supplies", "confidence": 0.60,
+     "notes": "small=food court, med=household mix, large=bulk supplies",
+     "amount_buckets": {
+         "s":  {"semantic": "meals",           "confidence": 0.75},
+         "m":  {"semantic": "office_supplies", "confidence": 0.65},
+         "l":  {"semantic": "supplies_cogs",   "confidence": 0.75},
+         "xl": {"semantic": "supplies_cogs",   "confidence": 0.80},
+     }},
+    {"pattern": "COSTCO WHOLESALE", "semantic": "office_supplies", "confidence": 0.60,
+     "amount_buckets": {
+         "s":  {"semantic": "meals",           "confidence": 0.75},
+         "m":  {"semantic": "office_supplies", "confidence": 0.65},
+         "l":  {"semantic": "supplies_cogs",   "confidence": 0.75},
+         "xl": {"semantic": "supplies_cogs",   "confidence": 0.80},
+     }},
     {"pattern": "COSTCO GAS", "semantic": "fuel", "confidence": 0.90},
-    {"pattern": "COSTCO", "semantic": "office_supplies", "confidence": 0.55},
-    {"pattern": "SAMS CLUB", "semantic": "office_supplies", "confidence": 0.60},
-    {"pattern": "SAM'S CLUB", "semantic": "office_supplies", "confidence": 0.60},
-    {"pattern": "BJS WHOLESALE", "semantic": "office_supplies", "confidence": 0.60},
-    {"pattern": "TARGET", "semantic": "office_supplies", "confidence": 0.60, "notes": "ambiguous — office/personal/meals"},
-    {"pattern": "AMAZON.COM", "semantic": "office_supplies", "confidence": 0.55, "notes": "the worst — anything goes"},
-    {"pattern": "AMAZON MARKETPLACE", "semantic": "office_supplies", "confidence": 0.55},
-    {"pattern": "AMZN MKTP", "semantic": "office_supplies", "confidence": 0.55},
+    {"pattern": "COSTCO", "semantic": "office_supplies", "confidence": 0.55,
+     "amount_buckets": {
+         "s":  {"semantic": "meals",           "confidence": 0.70},
+         "m":  {"semantic": "office_supplies", "confidence": 0.60},
+         "l":  {"semantic": "supplies_cogs",   "confidence": 0.70},
+         "xl": {"semantic": "supplies_cogs",   "confidence": 0.75},
+     }},
+    {"pattern": "SAMS CLUB", "semantic": "office_supplies", "confidence": 0.60,
+     "amount_buckets": {
+         "s":  {"semantic": "meals",           "confidence": 0.65},
+         "m":  {"semantic": "office_supplies", "confidence": 0.65},
+         "l":  {"semantic": "supplies_cogs",   "confidence": 0.75},
+         "xl": {"semantic": "supplies_cogs",   "confidence": 0.80},
+     }},
+    {"pattern": "SAM'S CLUB", "semantic": "office_supplies", "confidence": 0.60,
+     "amount_buckets": {
+         "s":  {"semantic": "meals",           "confidence": 0.65},
+         "m":  {"semantic": "office_supplies", "confidence": 0.65},
+         "l":  {"semantic": "supplies_cogs",   "confidence": 0.75},
+         "xl": {"semantic": "supplies_cogs",   "confidence": 0.80},
+     }},
+    {"pattern": "BJS WHOLESALE", "semantic": "office_supplies", "confidence": 0.60,
+     "amount_buckets": {
+         "s":  {"semantic": "meals",           "confidence": 0.65},
+         "m":  {"semantic": "office_supplies", "confidence": 0.65},
+         "l":  {"semantic": "supplies_cogs",   "confidence": 0.75},
+         "xl": {"semantic": "supplies_cogs",   "confidence": 0.80},
+     }},
+    {"pattern": "TARGET", "semantic": "office_supplies", "confidence": 0.60,
+     "notes": "ambiguous — office/personal/meals",
+     "amount_buckets": {
+         "s":  {"semantic": "meals",           "confidence": 0.65},
+         "m":  {"semantic": "office_supplies", "confidence": 0.65},
+         "l":  {"semantic": "supplies_cogs",   "confidence": 0.65},
+         "xl": {"semantic": "supplies_cogs",   "confidence": 0.70},
+     }},
+    {"pattern": "AMAZON.COM", "semantic": "office_supplies", "confidence": 0.55,
+     "notes": "amount-aware: small usually office supplies, large often equipment/fixed",
+     "amount_buckets": {
+         "s":  {"semantic": "office_supplies", "confidence": 0.65},
+         "m":  {"semantic": "office_supplies", "confidence": 0.65},
+         "l":  {"semantic": "office_supplies", "confidence": 0.55},
+         "xl": {"semantic": "office_supplies", "confidence": 0.50},
+     }},
+    {"pattern": "AMAZON MARKETPLACE", "semantic": "office_supplies", "confidence": 0.55,
+     "amount_buckets": {
+         "s":  {"semantic": "office_supplies", "confidence": 0.65},
+         "m":  {"semantic": "office_supplies", "confidence": 0.65},
+         "l":  {"semantic": "office_supplies", "confidence": 0.55},
+         "xl": {"semantic": "office_supplies", "confidence": 0.50},
+     }},
+    {"pattern": "AMZN MKTP", "semantic": "office_supplies", "confidence": 0.55,
+     "amount_buckets": {
+         "s":  {"semantic": "office_supplies", "confidence": 0.65},
+         "m":  {"semantic": "office_supplies", "confidence": 0.65},
+         "l":  {"semantic": "office_supplies", "confidence": 0.55},
+         "xl": {"semantic": "office_supplies", "confidence": 0.50},
+     }},
     {"pattern": "AMAZON PRIME", "semantic": "software_saas", "confidence": 0.85, "notes": "Prime membership"},
 
-    # ===== HOME IMPROVEMENT =====
-    {"pattern": "HOME DEPOT", "semantic": "repairs_maintenance", "confidence": 0.70, "notes": "R&M default; construction should override to COGS"},
-    {"pattern": "LOWES", "semantic": "repairs_maintenance", "confidence": 0.70},
-    {"pattern": "LOWE'S", "semantic": "repairs_maintenance", "confidence": 0.70},
+    # ===== HOME IMPROVEMENT (amount-aware — small=misc, med=R&M, large=COGS for construction) =====
+    {"pattern": "HOME DEPOT", "semantic": "repairs_maintenance", "confidence": 0.70,
+     "notes": "amount-aware R&M vs COGS split",
+     "amount_buckets": {
+         "s":  {"semantic": "repairs_maintenance", "confidence": 0.75},
+         "m":  {"semantic": "repairs_maintenance", "confidence": 0.75},
+         "l":  {"semantic": "supplies_cogs",       "confidence": 0.70},
+         "xl": {"semantic": "supplies_cogs",       "confidence": 0.75},
+     }},
+    {"pattern": "LOWES", "semantic": "repairs_maintenance", "confidence": 0.70,
+     "amount_buckets": {
+         "s":  {"semantic": "repairs_maintenance", "confidence": 0.75},
+         "m":  {"semantic": "repairs_maintenance", "confidence": 0.75},
+         "l":  {"semantic": "supplies_cogs",       "confidence": 0.70},
+         "xl": {"semantic": "supplies_cogs",       "confidence": 0.75},
+     }},
+    {"pattern": "LOWE'S", "semantic": "repairs_maintenance", "confidence": 0.70,
+     "amount_buckets": {
+         "s":  {"semantic": "repairs_maintenance", "confidence": 0.75},
+         "m":  {"semantic": "repairs_maintenance", "confidence": 0.75},
+         "l":  {"semantic": "supplies_cogs",       "confidence": 0.70},
+         "xl": {"semantic": "supplies_cogs",       "confidence": 0.75},
+     }},
     {"pattern": "ACE HARDWARE", "semantic": "repairs_maintenance", "confidence": 0.75},
     {"pattern": "MENARDS", "semantic": "repairs_maintenance", "confidence": 0.75},
     {"pattern": "TRUE VALUE", "semantic": "repairs_maintenance", "confidence": 0.75},
     {"pattern": "HARBOR FREIGHT", "semantic": "repairs_maintenance", "confidence": 0.75},
     {"pattern": "TRACTOR SUPPLY", "semantic": "repairs_maintenance", "confidence": 0.70},
+
+    # ===== ELECTRONICS/APPLE (small=supplies, large=fixed asset flag) =====
+    {"pattern": "BEST BUY", "semantic": "office_supplies", "confidence": 0.80,
+     "notes": "amount-aware — large purchases likely fixed assets",
+     "amount_buckets": {
+         "s":  {"semantic": "office_supplies", "confidence": 0.85},
+         "m":  {"semantic": "office_supplies", "confidence": 0.75},
+         "l":  {"semantic": "office_supplies", "confidence": 0.55},
+         "xl": {"semantic": "office_supplies", "confidence": 0.50},
+     }},
+    {"pattern": "APPLE STORE", "semantic": "office_supplies", "confidence": 0.75,
+     "amount_buckets": {
+         "s":  {"semantic": "software_saas",   "confidence": 0.65},
+         "m":  {"semantic": "office_supplies", "confidence": 0.75},
+         "l":  {"semantic": "office_supplies", "confidence": 0.55},
+         "xl": {"semantic": "office_supplies", "confidence": 0.50},
+     }},
+    {"pattern": "MICRO CENTER", "semantic": "office_supplies", "confidence": 0.85},
+    {"pattern": "MICROCENTER", "semantic": "office_supplies", "confidence": 0.85},
+
+    # ===== CONVENIENCE (small=snacks/meals, larger=fuel/misc) =====
+    {"pattern": "7-ELEVEN", "semantic": "fuel", "confidence": 0.70,
+     "amount_buckets": {
+         "s":  {"semantic": "meals",  "confidence": 0.70},
+         "m":  {"semantic": "fuel",   "confidence": 0.75},
+         "l":  {"semantic": "fuel",   "confidence": 0.85},
+         "xl": {"semantic": "fuel",   "confidence": 0.85},
+     }},
+    {"pattern": "WAWA", "semantic": "fuel", "confidence": 0.70,
+     "amount_buckets": {
+         "s":  {"semantic": "meals",  "confidence": 0.70},
+         "m":  {"semantic": "fuel",   "confidence": 0.80},
+         "l":  {"semantic": "fuel",   "confidence": 0.85},
+         "xl": {"semantic": "fuel",   "confidence": 0.85},
+     }},
+    {"pattern": "SHEETZ", "semantic": "fuel", "confidence": 0.70,
+     "amount_buckets": {
+         "s":  {"semantic": "meals",  "confidence": 0.70},
+         "m":  {"semantic": "fuel",   "confidence": 0.80},
+         "l":  {"semantic": "fuel",   "confidence": 0.85},
+         "xl": {"semantic": "fuel",   "confidence": 0.85},
+     }},
+    {"pattern": "CIRCLE K", "semantic": "fuel", "confidence": 0.80,
+     "amount_buckets": {
+         "s":  {"semantic": "meals",  "confidence": 0.65},
+         "m":  {"semantic": "fuel",   "confidence": 0.85},
+         "l":  {"semantic": "fuel",   "confidence": 0.90},
+         "xl": {"semantic": "fuel",   "confidence": 0.90},
+     }},
+
+    # ===== PHARMACY (small=personal items, larger=usually personal) =====
+    {"pattern": "CVS PHARMACY", "semantic": "office_supplies", "confidence": 0.55,
+     "notes": "small could be office snacks, larger usually personal",
+     "amount_buckets": {
+         "s":  {"semantic": "office_supplies", "confidence": 0.60},
+         "m":  {"semantic": "owner_draw",      "confidence": 0.65},
+         "l":  {"semantic": "owner_draw",      "confidence": 0.70},
+         "xl": {"semantic": "owner_draw",      "confidence": 0.75},
+     }},
+    {"pattern": "CVS/PHARMACY", "semantic": "office_supplies", "confidence": 0.55,
+     "amount_buckets": {
+         "s":  {"semantic": "office_supplies", "confidence": 0.60},
+         "m":  {"semantic": "owner_draw",      "confidence": 0.65},
+         "l":  {"semantic": "owner_draw",      "confidence": 0.70},
+         "xl": {"semantic": "owner_draw",      "confidence": 0.75},
+     }},
+    {"pattern": "WALGREENS", "semantic": "office_supplies", "confidence": 0.55,
+     "amount_buckets": {
+         "s":  {"semantic": "office_supplies", "confidence": 0.60},
+         "m":  {"semantic": "owner_draw",      "confidence": 0.65},
+         "l":  {"semantic": "owner_draw",      "confidence": 0.70},
+         "xl": {"semantic": "owner_draw",      "confidence": 0.75},
+     }},
+    {"pattern": "RITE AID", "semantic": "office_supplies", "confidence": 0.55,
+     "amount_buckets": {
+         "s":  {"semantic": "office_supplies", "confidence": 0.60},
+         "m":  {"semantic": "owner_draw",      "confidence": 0.65},
+         "l":  {"semantic": "owner_draw",      "confidence": 0.70},
+         "xl": {"semantic": "owner_draw",      "confidence": 0.75},
+     }},
+    {"pattern": "DUANE READE", "semantic": "office_supplies", "confidence": 0.55,
+     "amount_buckets": {
+         "s":  {"semantic": "office_supplies", "confidence": 0.60},
+         "m":  {"semantic": "owner_draw",      "confidence": 0.65},
+         "l":  {"semantic": "owner_draw",      "confidence": 0.70},
+         "xl": {"semantic": "owner_draw",      "confidence": 0.75},
+     }},
 
     # ===== GROCERY (mostly personal — flag for review) =====
     {"pattern": "KROGER", "semantic": "meals", "confidence": 0.55, "notes": "grocery — usually personal"},
@@ -495,21 +697,12 @@ RULES: list[dict] = [
     {"pattern": "WINCO", "semantic": "meals", "confidence": 0.55},
     {"pattern": "ALBERTSONS", "semantic": "meals", "confidence": 0.55},
 
-    # ===== PHARMACY / HEALTH =====
-    {"pattern": "CVS PHARMACY", "semantic": "office_supplies", "confidence": 0.55, "notes": "usually personal"},
-    {"pattern": "CVS/PHARMACY", "semantic": "office_supplies", "confidence": 0.55},
-    {"pattern": "WALGREENS", "semantic": "office_supplies", "confidence": 0.55},
-    {"pattern": "RITE AID", "semantic": "office_supplies", "confidence": 0.55},
-    {"pattern": "DUANE READE", "semantic": "office_supplies", "confidence": 0.55},
+    # ===== PHARMACY (small=personal items, larger=usually personal) ─ see amount-bucket versions above =====
 
     # ===== OFFICE / TECH RETAILERS =====
     {"pattern": "STAPLES", "semantic": "office_supplies", "confidence": 0.90},
     {"pattern": "OFFICE DEPOT", "semantic": "office_supplies", "confidence": 0.90},
     {"pattern": "OFFICEMAX", "semantic": "office_supplies", "confidence": 0.90},
-    {"pattern": "BEST BUY", "semantic": "office_supplies", "confidence": 0.80, "notes": "tech / could be fixed asset"},
-    {"pattern": "APPLE STORE", "semantic": "office_supplies", "confidence": 0.75, "notes": "could be fixed asset"},
-    {"pattern": "MICRO CENTER", "semantic": "office_supplies", "confidence": 0.85},
-    {"pattern": "MICROCENTER", "semantic": "office_supplies", "confidence": 0.85},
 
     # ===== BUSINESS SAAS =====
     {"pattern": "AWS", "semantic": "software_saas", "confidence": 0.95},
@@ -877,25 +1070,52 @@ def match(text: str) -> Optional[dict]:
     return None
 
 
-def match_and_resolve(text: str, industry_template: str) -> Optional[dict]:
+def match_and_resolve(
+    text: str, industry_template: str, amount: float | None = None,
+) -> Optional[dict]:
     """Match a rule and resolve its semantic to an actual account code.
 
+    If the matched rule carries an `amount_buckets` map AND `amount`
+    is supplied, the bucket-specific semantic + confidence replace
+    the rule's default. Falls back to the rule's flat `semantic` when
+    no bucket match applies. This is how we handle ambiguous
+    merchants like Costco/Walmart/Amazon where amount actually
+    signals the category (small=meals, large=supplies).
+
     Returns a dict with keys {pattern, semantic, account_code,
-    confidence, notes} or None if no match / semantic isn't in the
-    company's template.
+    confidence, notes, bucket?} or None if no match / semantic isn't
+    in the company's template.
     """
     rule = match(text)
     if not rule:
         return None
-    code = resolve_semantic(rule["semantic"], industry_template)
+
+    # Amount-bucket rules — if the rule declares per-bucket semantics
+    # and we know the amount, use the bucket-specific version.
+    semantic = rule.get("semantic")
+    confidence = rule.get("confidence", 0.5)
+    matched_bucket = None
+    if amount is not None and rule.get("amount_buckets"):
+        bucket = amount_bucket(amount)
+        bucket_rule = rule["amount_buckets"].get(bucket)
+        if bucket_rule:
+            semantic = bucket_rule.get("semantic", semantic)
+            confidence = bucket_rule.get("confidence", confidence)
+            matched_bucket = bucket
+
+    if not semantic:
+        return None
+
+    code = resolve_semantic(semantic, industry_template)
     if code is None:
         return None
     return {
         "pattern": rule["pattern"],
-        "semantic": rule["semantic"],
+        "semantic": semantic,
         "account_code": code,
-        "confidence": rule["confidence"],
+        "confidence": confidence,
         "notes": rule.get("notes", ""),
+        "bucket": matched_bucket,
     }
 
 
